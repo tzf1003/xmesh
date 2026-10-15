@@ -183,7 +183,7 @@ $env:XMESH_TEST_WINDOWS_USER_SERVICE = "1"
 go test ./cmd/xmesh -run WindowsUserTaskRuntime -v
 ```
 
-该用例创建临时任务并立即运行，核对用户 SID、会话 ID、工作目录与复杂参数，最后删除任务。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
+该用例创建临时任务并立即运行，核对用户 SID、会话 ID、非提升权限、工作目录与复杂参数，最后删除任务。Windows 原生 CI 记录 Runner 会话号；处于交互会话时运行此用例，Session 0 时标记环境条件未满足。登录事件触发仍需目标用户环境验收。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
 
 SCM 原生验收在管理员 PowerShell 中执行：
 

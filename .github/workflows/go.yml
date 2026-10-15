@@ -48,3 +48,14 @@ jobs:
           XMESH_TEST_WINDOWS_SYSTEM_SERVICE: "1"
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
         run: go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s
+      - name: Windows current-user scheduled task runtime
+        if: ${{ !cancelled() }}
+        run: |
+          $session = (Get-Process -Id $PID).SessionId
+          Write-Output "Runner Windows session: $session"
+          if ($session -eq 0) {
+            Write-Output '::notice::Current-user task acceptance requires an interactive Windows session.'
+            exit 0
+          }
+          $env:XMESH_TEST_WINDOWS_USER_SERVICE = '1'
+          go test -race ./cmd/xmesh -run WindowsUserTaskRuntime -v -timeout=90s

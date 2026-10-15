@@ -9,16 +9,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/kardianos/service"
 	"golang.org/x/sys/windows"
 )
 
 type taskRuntimeProof struct {
-	SID     string
-	Session uint32
-	CWD     string
-	Args    []string
+	SID      string
+	Session  uint32
+	CWD      string
+	Args     []string
+	Elevated bool
 }
 
 // This opt-in test creates, runs and deletes a disposable current-user task.
@@ -78,8 +80,8 @@ func Test_WindowsUserTaskRuntime(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if got.SID != user.User.Sid.String() || got.Session != session || !strings.EqualFold(got.CWD, workspace) || !reflect.DeepEqual(got.Args, wantArgs) {
-		t.Fatal("task identity, session, cwd or arguments changed", got)
+	if got.SID != user.User.Sid.String() || got.Session != session || got.Elevated || !strings.EqualFold(got.CWD, workspace) || !reflect.DeepEqual(got.Args, wantArgs) {
+		t.Fatal("task identity, session, privilege, cwd or arguments changed", got)
 	}
 }
 
@@ -109,7 +111,11 @@ func Test_WindowsUserTaskHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := json.Marshal(taskRuntimeProof{SID: user.User.Sid.String(), Session: session, CWD: workingDirectory, Args: os.Args[index+2:]})
+	var elevation, size uint32
+	if err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), windows.TokenElevation, (*byte)(unsafe.Pointer(&elevation)), uint32(unsafe.Sizeof(elevation)), &size); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := json.Marshal(taskRuntimeProof{SID: user.User.Sid.String(), Session: session, CWD: workingDirectory, Args: os.Args[index+2:], Elevated: elevation != 0})
 	if err != nil {
 		t.Fatal(err)
 	}
