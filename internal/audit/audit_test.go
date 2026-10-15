@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,95 @@ import (
 	"testing"
 	"time"
 )
+
+func records(t *testing.T, dir string) []map[string]any {
+	t.Helper()
+	files, e := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var result []map[string]any
+	for _, file := range files {
+		b, e := os.ReadFile(file)
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, line := range bytes.Split(bytes.TrimSpace(b), []byte{'\n'}) {
+			var row map[string]any
+			if e := json.Unmarshal(line, &row); e != nil {
+				t.Fatal(e)
+			}
+			result = append(result, row)
+		}
+	}
+	return result
+}
+
+func Test_CTRAUD01_PTYSummaryFlush(t *testing.T) {
+	for _, mode := range []string{"timer", "session-close", "shutdown"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			l, e := New(dir, time.Hour)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer l.Close()
+			args := json.RawMessage(`{"session_id":"terminal"}`)
+			for _, data := range []string{"one", "two"} {
+				if e = l.Record("gateway/session", "client", "device", "node/pty.read", args, map[string]any{"data": data}, false, 0); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if len(records(t, dir)) != 0 {
+				t.Fatal("read emitted before aggregation interval")
+			}
+			switch mode {
+			case "timer":
+				if e = l.flush(time.Now().Add(time.Minute), false, "", ""); e != nil {
+					t.Fatal(e)
+				}
+			case "session-close":
+				if e = l.Record("gateway/session", "client", "device", "node/pty.close", args, map[string]any{"closed": true}, false, 0); e != nil {
+					t.Fatal(e)
+				}
+			case "shutdown":
+				l.Close()
+			}
+			rows := records(t, dir)
+			if len(rows) == 0 {
+				t.Fatal("summary missing")
+			}
+			r := rows[0]
+			if r["event"] != "pty_io" || r["oauth_client"] != "client" || r["tool"] != "node/pty.read" {
+				t.Fatal(r)
+			}
+			digest := r["args_digest"].(map[string]any)
+			if digest["bytes"] != float64(6) || digest["session_id"] != "terminal" {
+				t.Fatal(digest)
+			}
+			l.Close()
+			if len(records(t, dir)) != len(rows) {
+				t.Fatal("duplicate flush")
+			}
+		})
+	}
+}
+
+func Test_CTRAUD01_PTYReadFailureRecorded(t *testing.T) {
+	dir := t.TempDir()
+	l, e := New(dir, time.Hour)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer l.Close()
+	if e = l.Record("node/session", "", "device", "pty.read", json.RawMessage(`{}`), map[string]any{"error": "unauthorized"}, true, 0); e != nil {
+		t.Fatal(e)
+	}
+	r := records(t, dir)
+	if len(r) != 1 || r[0]["event"] != "authz_deny" {
+		t.Fatal(r)
+	}
+}
 
 func Test_INV10_NoBodyInAudit(t *testing.T) {
 	dir := t.TempDir()

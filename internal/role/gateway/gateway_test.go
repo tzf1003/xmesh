@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/quota"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -162,3 +165,51 @@ func Test_INV09_OfflineRoutesRemoved(t *testing.T) {
 }
 
 var _ = mcpmux.Options{}
+
+func Test_CTRAUD01_RejectedCalls(t *testing.T) {
+	g, _ := fixture(t, true)
+	dir := t.TempDir()
+	logger, e := audit.New(dir, time.Hour)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer logger.Close()
+	g.opts.Audit = logger
+	g.quota = quota.New(2, 2, time.Minute)
+	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) {
+		return Principal{ClientID: "audited-client", Scopes: []string{"fs:read:*"}}, nil
+	}))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	for _, name := range []string{"test-node/fs.write", "offline/fs.read", "test-node/fs.read"} {
+		if o := call(t, client, name, map[string]any{"path": "a", "content": "fixture-body"}); !o.IsError {
+			t.Fatal(o)
+		}
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	var rows []map[string]any
+	for _, file := range files {
+		b, e := os.ReadFile(file)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if strings.Contains(string(b), "fixture-body") {
+			t.Fatal("body in audit")
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var r map[string]any
+			if e = json.Unmarshal([]byte(line), &r); e != nil {
+				t.Fatal(e)
+			}
+			rows = append(rows, r)
+		}
+	}
+	if len(rows) != 3 {
+		t.Fatal(rows)
+	}
+	for i, code := range []string{"unauthorized", "not_found", "policy_denied"} {
+		if rows[i]["error"] != code || rows[i]["oauth_client"] != "audited-client" {
+			t.Fatal(rows[i])
+		}
+	}
+}

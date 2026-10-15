@@ -247,19 +247,22 @@ func (a *Agent) server(p Principal) *mcp.Server {
 		})
 	}
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
-		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
-			result, e := next(ctx, method, req)
-			if method == "tools/call" && e == nil && a.Audit != nil {
-				if call, ok := req.(*mcp.CallToolRequest); ok {
-					if out, ok := result.(*mcp.CallToolResult); ok {
-						caller := a.bind(call.Session, p)
-						if err := a.Audit.Record(caller.ID, "", a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
-							return Result(nil, err), nil
-						}
+			if method == "tools/call" && a.Audit != nil {
+				defer func() {
+					call := req.(*mcp.CallToolRequest)
+					out, ok := result.(*mcp.CallToolResult)
+					if !ok {
+						out = Result(nil, toolerr.Internal("tools.call", e))
 					}
-				}
+					caller := a.bind(call.Session, p)
+					if err := a.Audit.Record(caller.ID, "", a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+						result, e = Result(nil, err), nil
+					}
+				}()
 			}
+			result, e = next(ctx, method, req)
 			if e == nil && method == "tools/list" {
 				caller := identity.Caller{Tags: p.Tags}
 				if session := req.GetSession(); session != nil {

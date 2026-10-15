@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -29,8 +28,10 @@ type Logger struct {
 	once      sync.Once
 }
 type ioSummary struct {
-	bytes int
-	last  time.Time
+	bytes   int
+	started time.Time
+	record  map[string]any
+	session string
 }
 
 func New(dir string, retention time.Duration) (*Logger, error) {
@@ -58,14 +59,19 @@ func New(dir string, retention time.Duration) (*Logger, error) {
 	}
 	go func() {
 		defer close(l.done)
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		lastPrune := time.Now()
 		for {
 			select {
 			case <-l.stop:
 				return
 			case now := <-ticker.C:
-				_ = l.Prune(now)
+				_ = l.flush(now, false, "", "")
+				if now.Sub(lastPrune) >= time.Minute {
+					_ = l.Prune(now)
+					lastPrune = now
+				}
 			}
 		}
 	}()
@@ -118,34 +124,13 @@ func (l *Logger) Record(caller, client, device, tool string, args json.RawMessag
 	var out map[string]any
 	_ = json.Unmarshal(b, &out)
 	resolved, _ := out["resolved_path"].(string)
+	localTool := tool[strings.LastIndex(tool, "/")+1:]
 	event := "tool_call"
-	if strings.HasPrefix(tool, "pty.") {
-		event = strings.Replace(tool, ".", "_", 1)
+	if strings.HasPrefix(localTool, "pty.") {
+		event = strings.Replace(localTool, ".", "_", 1)
 	}
-	if event == "pty_list" || event == "pty_resize" {
+	if event == "pty_list" || event == "pty_resize" || event == "pty_read" {
 		event = "tool_call"
-	}
-	if tool == "pty.read" {
-		data, _ := out["data"].(string)
-		if data == "" {
-			return nil
-		}
-		var params map[string]any
-		_ = json.Unmarshal(args, &params)
-		key := caller + ":" + fmt.Sprint(params["session_id"])
-		l.mu.Lock()
-		summary := l.io[key]
-		summary.bytes += len(data)
-		if !summary.last.IsZero() && time.Since(summary.last) < time.Minute {
-			l.io[key] = summary
-			l.mu.Unlock()
-			return nil
-		}
-		n := summary.bytes
-		l.io[key] = ioSummary{last: time.Now()}
-		l.mu.Unlock()
-		event = "pty_io"
-		args, _ = json.Marshal(map[string]any{"bytes": n})
 	}
 	var code any
 	if isError {
@@ -162,11 +147,64 @@ func (l *Logger) Record(caller, client, device, tool string, args json.RawMessag
 	if client != "" {
 		record["oauth_client"] = client
 	}
+	var params struct {
+		Session string `json:"session_id"`
+	}
+	_ = json.Unmarshal(args, &params)
+	if localTool == "pty.close" {
+		if e := l.flush(time.Now(), true, caller, params.Session); e != nil {
+			return e
+		}
+	}
+	if localTool == "pty.read" && !isError {
+		data, _ := out["data"].(string)
+		if data == "" {
+			return nil
+		}
+		key := caller + "\x00" + device + "\x00" + tool + "\x00" + params.Session
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		summary := l.io[key]
+		if summary.started.IsZero() {
+			summary.started = time.Now()
+		}
+		summary.bytes += len(data)
+		summary.session = params.Session
+		summary.record = record
+		l.io[key] = summary
+		return nil
+	}
 	return l.Write(record)
+}
+
+// flush retains a failed summary for the next timer tick or shutdown attempt.
+func (l *Logger) flush(now time.Time, all bool, caller, session string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, summary := range l.io {
+		if caller != "" && (summary.record["caller"] != caller || summary.session != session) {
+			continue
+		}
+		if !all && now.Sub(summary.started) < time.Minute {
+			continue
+		}
+		record := summary.record
+		record["event"] = "pty_io"
+		record["time"] = now.UTC().Format("2006-01-02T15:04:05.000Z")
+		record["args_digest"] = map[string]any{"session_id": summary.session, "bytes": summary.bytes}
+		if e := l.writeLocked(record); e != nil {
+			return e
+		}
+		delete(l.io, key)
+	}
+	return nil
 }
 func (l *Logger) Write(record map[string]any) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.writeLocked(record)
+}
+func (l *Logger) writeLocked(record map[string]any) error {
 	b, e := json.Marshal(record)
 	if e != nil {
 		return toolerr.Internal("audit.encode", e)
@@ -219,4 +257,10 @@ func (l *Logger) Prune(now time.Time) error {
 	}
 	return nil
 }
-func (l *Logger) Close() { l.once.Do(func() { close(l.stop); <-l.done }) }
+func (l *Logger) Close() {
+	l.once.Do(func() {
+		close(l.stop)
+		<-l.done
+		_ = l.flush(time.Now(), true, "", "")
+	})
+}

@@ -249,8 +249,20 @@ func (g *Gateway) newView(p Principal) *view {
 		})
 	}
 	v.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
-		return func(ctx context.Context, method string, r mcp.Request) (mcp.Result, error) {
+		return func(ctx context.Context, method string, r mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
+			if method == "tools/call" && g.opts.Audit != nil {
+				defer func() {
+					call := r.(*mcp.CallToolRequest)
+					out, ok := result.(*mcp.CallToolResult)
+					if !ok {
+						out = agent.Result(nil, toolerr.Internal("tools.call", e))
+					}
+					if err := g.opts.Audit.Record("gateway/"+call.Session.ID(), v.p.ClientID, g.opts.NodeName, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+						result, e = agent.Result(nil, err), nil
+					}
+				}()
+			}
 			if method == "tools/call" {
 				principal := v.p.ClientID
 				if principal == "" {
@@ -309,17 +321,7 @@ func (g *Gateway) newView(p Principal) *view {
 					}
 				}
 			}
-			result, e := next(ctx, method, r)
-			if method == "tools/call" && e == nil && g.opts.Audit != nil {
-				if call, ok := r.(*mcp.CallToolRequest); ok {
-					if out, ok := result.(*mcp.CallToolResult); ok {
-						caller := "gateway/" + call.Session.ID()
-						if err := g.opts.Audit.Record(caller, v.p.ClientID, g.opts.NodeName, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
-							return agent.Result(nil, err), nil
-						}
-					}
-				}
-			}
+			result, e = next(ctx, method, r)
 			if e == nil && method == "tools/list" {
 				if list, ok := result.(*mcp.ListToolsResult); ok {
 					visible := []*mcp.Tool{}
