@@ -153,7 +153,8 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 			continue
 		}
 		k = normalize(k)
-		if k == "PATH" {
+		modulePath := foldCase && k == "PSMODULEPATH"
+		if k == "PATH" || modulePath {
 			separator := ":"
 			if foldCase {
 				separator = ";"
@@ -171,7 +172,7 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 			v = strings.Join(allowed, separator)
 		}
 		windowsRuntime := foldCase && (k == "SYSTEMROOT" || k == "WINDIR" || k == "SYSTEMDRIVE" || k == "COMSPEC" || k == "PATHEXT" || k == "TEMP" || k == "TMP" || k == "APPDATA" || k == "LOCALAPPDATA")
-		if k == "PATH" || k == "HOME" || k == "USERPROFILE" || k == normalize("SystemRoot") || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") || windowsRuntime {
+		if k == "PATH" || modulePath || k == "HOME" || k == "USERPROFILE" || k == normalize("SystemRoot") || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") || windowsRuntime {
 			if !e.denyEnv(k, v) {
 				env[k] = v
 			}
@@ -192,7 +193,7 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 		seen[k] = true
 		env[k] = v
 	}
-	if foldCase && !seen["PSMODULEPATH"] {
+	if foldCase && !seen["PSMODULEPATH"] && env["PSMODULEPATH"] == "" {
 		if root := env["SYSTEMROOT"]; root != "" {
 			modules := strings.TrimRight(root, `\/`) + `\System32\WindowsPowerShell\v1.0\Modules`
 			if !e.denyEnv("PSMODULEPATH", modules) {

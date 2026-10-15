@@ -28,9 +28,9 @@
 - macOS 27.0.1 L2：原生测试验证目录外读取和写入拒绝、符号链接越界拒绝、网络拒绝、父进程信号与环境读取拒绝，以及含引号目录的参数传递。带 PAT 的真实 MCP L2 冒烟通过 exec 与 zsh PTY、审计及退出清理。
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 - Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；原生运行验收用例已加入并完成交叉编译。
-- Windows ConPTY：启动前 Job 分配、主 shell 退出后的后代清理、TERM/KILL 整组终止、Ctrl-C 输入和句柄关闭串行化已实现；原生回归用例覆盖这些路径，当前完成交叉编译，运行结果待 Windows 实机验证。
-- Windows exec：挂起创建后加入专属 Job，再恢复主线程；主进程退出时立即清理后代，释放子进程继承的 stdin 管道。原生用例覆盖准入前暂停、恢复执行、正常退出与超时后的进程树和阻塞 stdin 清理；已完成 amd64 测试交叉编译与 vet，运行结果待 Windows 实机验证。
-- Windows CI：runner 另以 opt-in 环境变量执行 exec 与 ConPTY 原生回归。该工作流已配置，运行结果以对应提交的 Actions 记录为准；用户登录任务与 SCM 安装仍需目标登录会话验收。
+- Windows Server 2025 ConPTY：生产环境过滤器下，窗口调整、Ctrl-C 后持续交互、TERM/KILL/shell 退出后的后代清理、输出排空、重复关闭和启动失败清理均通过原生 race 回归。
+- Windows Server 2025 exec：准入前挂起、加入 Job 后恢复、正常退出与超时后的进程树及阻塞 stdin 清理通过。PowerShell 7 标准与 Job 启动通过；Windows PowerShell 5.1 启动及对应 HTTP MCP 集成仍超时。
+- Windows Server 2025 文件：共享读取期间原子替换、锁定目标保留与临时文件清理、长路径读取和替换通过原生 race 测试。Windows vet 与构建通过；逐项证据见 [Windows 验收记录](validation/2026-10-15-windows.md)。用户登录任务与 SCM 安装仍需目标登录会话验收。
 - 入口 PTY 预算：两 Agent 集成测试覆盖跨设备并发准入、跨 MCP 会话主体计数、独立 client、入口重启后的孤儿计数与接管、关闭释放、向满额接收方转移拒绝、设备离线、结果不确定的持久化阻断与 Agent 重启恢复、状态写入失败的副作用阻断。控制资源授权与快照一致性测试通过。
 - Ubuntu 原生入口预算：上述两 Agent 集成场景在甲骨文主机连续两轮通过；使用独立临时工作目录与真实 Linux PTY。该验证使用主机内两个 Agent，跨物理主机的入口验收仍待执行。
 - 甲骨文 Ubuntu 的 bwrap 隔离环境：使用共享主机网络、独立 PID/文件系统与临时目录，连续两轮临时节点注册获得不同身份；每轮成功调用 macOS 和既有 Linux 节点，既有 Linux 节点反向调用成功。退出正常、节点离线、身份状态不落盘、临时工作目录清理均通过。此环境与既有 Linux 节点共用主机。
@@ -47,7 +47,7 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 | --- | --- |
 | 入口 PTY 总预算 | 单入口跨设备聚合已实现；多入口进程的统一准入协调待实现 |
 | Windows L2 | 当前请求 L2 会拒绝执行；受限 token 沙箱待实现 |
-| 原生 Windows | 用户任务登录触发与原生运行、ConPTY、进程清理、SCM 服务安装待实机验证 |
+| 原生 Windows | Server 2025 的 ConPTY、进程清理、文件与 PowerShell 7 已验证；PowerShell 5.1 启动待修复，用户登录任务及 SCM 安装待目标会话验收 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |
 | 公网入口 | 三种监听路径已装配；真实域名、Funnel/隧道及云客户端待验收 |

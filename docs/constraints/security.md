@@ -31,9 +31,9 @@ Agent 从 `LocalClient().WhoIs(remoteAddr)` 取对端节点与 tag。取不到�
 2. 应用 `agent.policy.env` 的拒绝规则。
 3. 叠加调用方 `env`，叠加时再次应用拒绝规则。
 
-Windows 的 `PSModulePath` 默认由 `SystemRoot` 构造为系统 `System32\WindowsPowerShell\v1.0\Modules` 目录，并经过同一拒绝规则；调用方可以显式覆盖该值。
+Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺少该值时由 `SystemRoot` 构造系统 `System32\WindowsPowerShell\v1.0\Modules` 目录。调用方可以显式覆盖该值。
 
-继承的 `PATH` 按平台的搜索路径分隔符逐项应用拒绝规则，保留其余目录。调用方显式传入的 `PATH` 含拒绝目录时，按被拒绝的环境变量处理。
+继承的 `PATH` 和 Windows `PSModulePath` 按平台的搜索路径分隔符逐项应用拒绝规则，保留其余目录。调用方显式传入的搜索路径含拒绝目录时，按被拒绝的环境变量处理。
 
 禁止把 Agent 进程里的 auth key、OAuth 客户端密钥、云凭证文件路径、`SSH_AUTH_SOCK` 继承给 `exec` 或 PTY。调用方显式传入被拒绝的键时，返回 `policy_denied`，规则名 `env.denied`，命令不启动。
 

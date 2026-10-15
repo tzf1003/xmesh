@@ -54,6 +54,12 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 		want      []string
 	}{
 		{
+			name:      "windows module search path entries",
+			inherited: []string{`PSModulePath=C:\Tools\Modules;C:\Users\tester\.AWS\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules;C:\gcloud\Modules`},
+			windows:   true,
+			want:      []string{`PSMODULEPATH=C:\Tools\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules`},
+		},
+		{
 			name:      "windows inheritance",
 			inherited: []string{`Path=C:\Windows`, `SystemRoot=C:\Windows`, `UserProfile=C:\Users\tester`, "lang=en", "PRIVATE=value", "=C:=C:\\", "malformed", "HOME=bad\x00value"},
 			windows:   true,
@@ -74,7 +80,7 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 			name:      "windows runtime directories",
 			inherited: []string{`windir=C:\Windows`, `SystemDrive=C:`, `ComSpec=C:\Windows\System32\cmd.exe`, `PATHEXT=.COM;.EXE;.BAT;.CMD`, `TEMP=C:\Temp`, `tmp=C:\Temp`, `AppData=C:\Users\tester\AppData\Roaming`, `LocalAppData=C:\Users\tester\AppData\Local`, `PRIVATE=value`, `PSModulePath=C:\Private`},
 			windows:   true,
-			want:      []string{`APPDATA=C:\Users\tester\AppData\Roaming`, `COMSPEC=C:\Windows\System32\cmd.exe`, `LOCALAPPDATA=C:\Users\tester\AppData\Local`, `PATHEXT=.COM;.EXE;.BAT;.CMD`, `SYSTEMDRIVE=C:`, `TEMP=C:\Temp`, `TMP=C:\Temp`, `WINDIR=C:\Windows`},
+			want:      []string{`APPDATA=C:\Users\tester\AppData\Roaming`, `COMSPEC=C:\Windows\System32\cmd.exe`, `LOCALAPPDATA=C:\Users\tester\AppData\Local`, `PATHEXT=.COM;.EXE;.BAT;.CMD`, `PSMODULEPATH=C:\Private`, `SYSTEMDRIVE=C:`, `TEMP=C:\Temp`, `TMP=C:\Temp`, `WINDIR=C:\Windows`},
 		},
 		{
 			name:      "unix runtime names filtered",
@@ -137,6 +143,15 @@ func TestEnvironmentWindowsModulePolicy(t *testing.T) {
 	got, err := e.environment([]string{`SystemRoot=C:\Windows`, `PSModulePath=C:\Private\Modules`}, map[string]string{"psmodulepath": `C:\Tools\Modules`}, true)
 	if err != nil || !reflect.DeepEqual(got, []string{`PSMODULEPATH=C:\Tools\Modules`, `SYSTEMROOT=C:\Windows`}) {
 		t.Fatal("explicit module path", got, err)
+	}
+	cfg.Env.DenyPathSubstrings = []string{"private-modules"}
+	e, _ = New(cfg)
+	got, err = e.environment([]string{`PSModulePath=C:\Tools\Modules;C:\private-modules;C:\Shared\Modules`}, nil, true)
+	if err != nil || !reflect.DeepEqual(got, []string{`PSMODULEPATH=C:\Tools\Modules;C:\Shared\Modules`}) {
+		t.Fatal("module path directory policy", got, err)
+	}
+	if _, err := e.environment(nil, map[string]string{"PSModulePath": `C:\Tools\Modules;C:\private-modules`}, true); err == nil {
+		t.Fatal("accepted an explicit module search path containing a denied directory")
 	}
 	cfg.Env.DenyNames = []string{"PSMODULEPATH"}
 	e, _ = New(cfg)
