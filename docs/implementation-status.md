@@ -37,6 +37,8 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 
 官方 Tailscale 上的 macOS 与 Ubuntu xmesh 节点使用独立 tsnet 状态，双向发现、节点身份、文件读写、exec、PTY owner 和资源清理均已通过。独占节点状态的网络探测确认使用区域 900 `oracle-jp` DERP，且远端 Agent 正常响应。已保存用户授权的 `tag:device → tag:device tcp:7433` 规则；私有 DERP 的系统节点通过定向 ICMP 规则获得 xmesh 节点可见性，客户端校验正常工作。
 
+Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立探测确认 DERP `7/tok` 路由；Ubuntu 隔离沙箱连续两轮完成对两端的调用及反向调用，重启获得新身份。临时控制面、转发、节点、凭据与 AppArmor profile 已清理。环境、观测值和物理设备边界见[Headscale 验收记录](validation/2026-10-15-headscale.md)。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |
@@ -44,7 +46,7 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 | 入口 PTY 总预算 | 单入口跨设备聚合已实现；多入口进程的统一准入协调待实现 |
 | Windows L2 | 当前请求 L2 会拒绝执行；受限 token 沙箱待实现 |
 | 原生 Windows | 用户任务登录触发与原生运行、ConPTY、进程清理、SCM 服务安装待实机验证 |
-| 三设备互联 | 官方 Tailscale、Headscale、DERP 连接状态、真实 LAN 多播待验收 |
+| 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |
 | 公网入口 | 三种监听路径已装配；真实域名、Funnel/隧道及云客户端待验收 |
 | 云沙箱入网 | 甲骨文 bwrap 环境已通过；Codex Cloud 与 Claude 云沙箱的实际出站策略仍待验收 |
