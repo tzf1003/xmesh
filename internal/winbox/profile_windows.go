@@ -29,12 +29,13 @@ type securityCapabilities struct {
 }
 
 // Profile owns a fresh AppContainer identity and its private data directory.
-// Callers must reap all launched processes before closing the profile.
+// Callers must reap launched processes and release object grants before closing.
 type Profile struct {
 	mu        sync.Mutex
 	name      *uint16
 	sid       *windows.SID
 	directory string
+	grants    int
 }
 
 func hresult(operation string, result uintptr) error {
@@ -112,6 +113,9 @@ func (p *Profile) Close() error {
 	defer p.mu.Unlock()
 	if p.sid == nil {
 		return nil
+	}
+	if p.grants != 0 {
+		return fmt.Errorf("AppContainer profile retains %d object grants", p.grants)
 	}
 	result, _, _ := deleteProfile.Call(uintptr(unsafe.Pointer(p.name)))
 	if err := hresult("DeleteAppContainerProfile", result); err != nil {
