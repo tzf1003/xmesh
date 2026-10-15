@@ -124,7 +124,25 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("workspace descriptor %s %s: control=%#x ACL=%x", stage, filepath.Base(path), control, readObjectACL(t, path))
+			name, err := windows.UTF16PtrFromString(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h, err := windows.CreateFile(name, windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+				nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := readObjectSecurity(h)
+			windows.CloseHandle(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rawControl, _, err := raw.Control()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("workspace descriptor %s %s: control=%#x kernel-control=%#x ACL=%x", stage, filepath.Base(path), control, rawControl, readObjectACL(t, path))
 		}
 	}
 	for _, path := range []string{root, child, file} {

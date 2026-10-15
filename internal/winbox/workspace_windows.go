@@ -131,7 +131,7 @@ func (p *Profile) removeInheritedGrant(object treeObject, created bool) error {
 	}
 	objectACLMutex.Lock()
 	defer objectACLMutex.Unlock()
-	current, err := windows.GetSecurityInfo(object.handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	current, err := readObjectSecurity(object.handle)
 	if err != nil {
 		return err
 	}

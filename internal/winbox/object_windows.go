@@ -17,8 +17,9 @@ import (
 var objectACLMutex sync.Mutex
 
 var (
-	reopenObject      = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
-	setObjectSecurity = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtSetSecurityObject")
+	reopenObject        = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
+	setObjectSecurity   = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtSetSecurityObject")
+	queryObjectSecurity = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtQuerySecurityObject")
 )
 
 // objectGrant retains one explicitly selected object until its ACE is removed.
@@ -171,7 +172,7 @@ func setObjectGrant(handle windows.Handle, ace []byte, add bool) error {
 	if err := setObjectSecurity.Find(); err != nil {
 		return err
 	}
-	current, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	current, err := readObjectSecurity(handle)
 	if err != nil {
 		return err
 	}
@@ -268,7 +269,7 @@ func reopenForACL(object windows.Handle) (windows.Handle, error) {
 }
 
 func objectDACL(handle windows.Handle) (*windows.ACL, error) {
-	sd, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	sd, err := readObjectSecurity(handle)
 	if err != nil {
 		return nil, err
 	}
@@ -280,6 +281,40 @@ func objectDACL(handle windows.Handle) (*windows.ACL, error) {
 		return nil, fmt.Errorf("AppContainer object grant requires a present, non-null DACL")
 	}
 	return dacl, nil
+}
+
+// Query the selected kernel descriptor directly. Win32 security APIs can
+// normalize legacy inheritance against a changed parent, converting inherited
+// entries to explicit entries and marking an existing child protected. ACL
+// admission and release must edit the actual descriptor with its original flags.
+func readObjectSecurity(handle windows.Handle) (*windows.SECURITY_DESCRIPTOR, error) {
+	if err := queryObjectSecurity.Find(); err != nil {
+		return nil, err
+	}
+	var size uint32
+	const bufferTooSmall = 0xc0000023
+	status, _, _ := queryObjectSecurity.Call(uintptr(handle), windows.DACL_SECURITY_INFORMATION, 0, 0, uintptr(unsafe.Pointer(&size)))
+	if uint32(status) != bufferTooSmall {
+		return nil, fmt.Errorf("size AppContainer object descriptor: %w", windows.NTStatus(status))
+	}
+	for range 3 {
+		if size < 20 || size > 1024*1024 {
+			return nil, fmt.Errorf("invalid AppContainer object descriptor size: %d", size)
+		}
+		storage := make([]uint64, (size+7)/8)
+		capacity := uint32(len(storage) * 8)
+		status, _, _ = queryObjectSecurity.Call(uintptr(handle), windows.DACL_SECURITY_INFORMATION,
+			uintptr(unsafe.Pointer(&storage[0])), uintptr(capacity), uintptr(unsafe.Pointer(&size)))
+		runtime.KeepAlive(storage)
+		if uint32(status) == bufferTooSmall {
+			continue
+		}
+		if status != 0 {
+			return nil, fmt.Errorf("query AppContainer object descriptor: %w", windows.NTStatus(status))
+		}
+		return (*windows.SECURITY_DESCRIPTOR)(unsafe.Pointer(&storage[0])), nil
+	}
+	return nil, fmt.Errorf("AppContainer object descriptor kept changing size")
 }
 
 // Preserve every unrelated ACE byte-for-byte, including object/callback ACEs.
