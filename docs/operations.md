@@ -209,7 +209,7 @@ go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s
 
 用例通过 CLI 安装带独立名称的临时 SCM 服务，读回安装参数与账户配置，再以显式本机模式启动实际二进制。验证 LocalSystem SID、Session 0、MCP 文件读写、正常停止与进程/监听退出，最后卸载服务并确认注册项删除。该用例验证本机服务生命周期；生产设备网络连接与用户登录任务仍按对应场景验收。
 
-Windows ConPTY 进程通过 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 在创建时加入专属 Job Object；shell 自行退出、TERM 宽限结束和 KILL 均清理其后代进程。INT 通过终端输入 Ctrl-C，应用的原始输入模式可能改变其行为。Windows 10 1809 或更新系统上的原生验收：
+Windows 普通命令与 ConPTY 进程通过 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 在创建时加入专属 Job Object；shell 自行退出、TERM 宽限结束和 KILL 均清理其后代进程。普通命令只继承显式标准输入、输出和错误句柄，主进程退出后先关闭 Job 再等待输入复制结束。创建期 Job 属性需要 Windows 10 / Server 2016 或更新系统。INT 通过终端输入 Ctrl-C，应用的原始输入模式可能改变其行为。Windows 10 1809 或更新系统上的原生验收：
 
 ```powershell
 $env:XMESH_TEST_WINDOWS_PTY = "1"

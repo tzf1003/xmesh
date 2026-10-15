@@ -29,7 +29,7 @@
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 - Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；新增权限检查通过 Windows amd64/arm64 vet 与 amd64 测试交叉编译，`63fd0e3` 的原生任务通过 XML 注册、身份、Session 2、目录、复杂参数和 token 类型检查；Runner 为内置 Administrator，非提升运行仍需标准或 UAC 分离 token 账户验收。
 - Windows Server 2025 ConPTY：生产环境过滤器下，窗口调整、Ctrl-C 后持续交互、TERM/KILL/shell 退出后的后代清理、输出排空、重复关闭和启动失败清理均通过原生 race 回归。
-- Windows Server 2025 exec：准入前挂起、加入 Job 后恢复、正常退出与超时后的进程树及阻塞 stdin 清理通过。命令启动已改用创建期 Job 属性与显式标准句柄继承，新增参数、目录、输入、环境、退出码及宿主崩溃原生回归待 CI。PowerShell 5.1/7 标准与 Job 启动通过，包括父进程未设置或清空模块路径的场景；HTTP MCP 集成通过。
+- Windows Server 2025 exec：准入前挂起、加入 Job 后恢复、正常退出与超时后的进程树及阻塞 stdin 清理通过。命令启动使用创建期 Job 属性与显式标准句柄继承；`d4e96c4` 的参数、目录对象身份、输入、环境、退出码及宿主崩溃原生回归通过。PowerShell 5.1/7 标准与 Job 启动通过，包括父进程未设置或清空模块路径的场景；HTTP MCP 集成通过。
 - Windows Server 2025 文件：共享读取期间原子替换、锁定目标保留与临时文件清理、长路径读取和替换通过原生 race 测试。Windows vet 与构建通过；逐项证据见 [Windows 验收记录](validation/2026-10-15-windows.md)。用户任务的登录触发与目标登录会话仍需验收。
 - 三平台 CI：`3fd6730` 的 push 与 PR 工作流均通过 macOS、Ubuntu、Windows 全量 race 测试、vet 和构建，Windows 独立原生回归通过。MCP 进度在响应完成前捕获并保留转发路由；慢转发与同后端查询回归连续 100 轮通过。
 - 入口 PTY 预算：两 Agent 集成测试覆盖跨设备并发准入、跨 MCP 会话主体计数、独立 client、入口重启后的孤儿计数与接管、关闭释放、向满额接收方转移拒绝、设备离线、结果不确定的持久化阻断与 Agent 重启恢复、状态写入失败的副作用阻断。控制资源授权与快照一致性测试通过。
@@ -47,6 +47,8 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立探测确认 DERP `7/tok` 路由；Ubuntu 隔离沙箱连续两轮完成对两端的调用及反向调用，重启获得新身份。临时控制面、转发、节点、凭据与 AppArmor profile 已清理。环境、观测值和物理设备边界见[Headscale 验收记录](validation/2026-10-15-headscale.md)。
 
 `874ea35` 的 push 与 PR 工作流均通过三平台全量 race、vet、构建及 Windows 独立原生任务。创建期 Job 绑定的挂起子进程在宿主被强制终止后退出，未绑定对照继续存活；AppContainer 准确 SID 的环回豁免策略、宿主可达对照和监听端读回组合通过。
+
+`d4e96c4` 的 push 与 PR 工作流均通过三平台全量 race、vet、构建及 Windows 独立原生任务。普通命令原生契约验证显式相对路径与扩展名、Unicode 和引号参数、含 NUL 的 stdin、业务环境传入和父进程凭证过滤、stderr 与非零退出码；启用 macOS L2 的 exec、PTY 和 policy 本地 race 回归通过。
 
 ## 待实现与待验收
 
