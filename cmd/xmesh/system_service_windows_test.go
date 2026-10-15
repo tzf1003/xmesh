@@ -38,18 +38,7 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	serviceName := "xmesh-" + name
 	configFile := filepath.Join(root, "config & 中文.json")
 	stateDir := filepath.Join(root, "state 中文")
-	body, err := json.Marshal(map[string]any{
-		"node": map[string]any{"name": name, "roles": []string{"agent"}},
-		"mesh": map[string]any{"mode": "lan", "lan": map[string]any{"mdns": true}},
-		"agent": map[string]any{
-			"default_cwd": root,
-			"cwd_policy":  map[string]any{"allow": []string{root}},
-			"authz":       map[string]any{"tag:peer": map[string]any{"tools": []string{"*"}}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := serviceFixture(t, name, root)
 	if err := os.WriteFile(configFile, body, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +53,7 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	}
 	var registered *mgr.Service
 	var ownedProcess windows.Handle
+	installedService := false
 	t.Cleanup(func() {
 		defer manager.Disconnect()
 		if registered != nil {
@@ -80,6 +70,9 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 				_, _ = windows.WaitForSingleObject(ownedProcess, 5000)
 			}
 			windows.CloseHandle(ownedProcess)
+		}
+		if !installedService {
+			return
 		}
 		if err := controller.Uninstall(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 			t.Error("service cleanup uninstall", err)
@@ -102,6 +95,7 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	if err := run([]string{"install", "--system", "--executable", binary, "--config", configFile, "--state-dir", stateDir}); err != nil {
 		t.Fatal("SCM installation", err)
 	}
+	installedService = true
 	registered, err = manager.OpenService(serviceName)
 	if err != nil {
 		t.Fatal(err)
