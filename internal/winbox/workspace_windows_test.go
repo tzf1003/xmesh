@@ -188,8 +188,10 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 		t.Fatal("repeat workspace release", err)
 	}
 	for path, acl := range before {
-		if !bytes.Equal(acl, readObjectACL(t, path)) || objectLabel(t, path) != labels[path] {
-			t.Fatal("existing object ACL or label changed after release", path)
+		actual := readObjectACL(t, path)
+		actualLabel := objectLabel(t, path)
+		if !bytes.Equal(acl, actual) || actualLabel != labels[path] {
+			t.Fatalf("existing object ACL or label changed after release %s: ACL before=%x after=%x label before=%s after=%s", path, acl, actual, labels[path], actualLabel)
 		}
 	}
 	if !bytes.Equal(outsideACL, readObjectACL(t, outside)) || objectLabel(t, created) != createdLabel {
