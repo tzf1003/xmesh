@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
 )
 
@@ -138,7 +139,11 @@ func Test_WindowsAppContainerExecutionJournalGate(t *testing.T) {
 			err = owner.reap(ctx, 83)
 			cancel()
 			owner.jobs[0].handle = job
-			if !errors.Is(err, windows.ERROR_INVALID_HANDLE) || !errors.Is(err, context.DeadlineExceeded) || len(j.records) != records || !j.state.executions[owner.intent] || p.processesConfirmed {
+			// A console host can join between the observer's accounting check
+			// and its borrowed-handle wait. Both incomplete membership and the
+			// deadline are valid retained failures while termination is denied.
+			censusFailure := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, winjob.ErrIncompleteProcessSet)
+			if !errors.Is(err, windows.ERROR_INVALID_HANDLE) || !censusFailure || len(j.records) != records || !j.state.executions[owner.intent] || p.processesConfirmed {
 				t.Fatal("failed reap acknowledged execution", err)
 			}
 			if result, err := windows.WaitForSingleObject(process.Process, 0); err != nil || result != uint32(windows.WAIT_TIMEOUT) {
