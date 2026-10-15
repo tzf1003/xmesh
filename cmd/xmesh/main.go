@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/winbox"
 	"io"
 	"net/http"
 	"net/url"
@@ -29,6 +30,8 @@ func run(args []string) error {
 		return fmt.Errorf("用法: xmesh serve|install|status|pair --config xmesh.yaml")
 	}
 	switch args[0] {
+	case "__sandbox-supervisor":
+		return winbox.RunProcessSupervisor(args[1:])
 	case "serve":
 		return serve(args[1:])
 	case "install":
