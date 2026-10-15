@@ -29,7 +29,7 @@
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 - Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；新增权限检查通过 Windows amd64/arm64 vet 与 amd64 测试交叉编译，`63fd0e3` 的原生任务通过 XML 注册、身份、Session 2、目录、复杂参数和 token 类型检查；Runner 为内置 Administrator，非提升运行仍需标准或 UAC 分离 token 账户验收。
 - Windows Server 2025 ConPTY：生产环境过滤器下，窗口调整、Ctrl-C 后持续交互、TERM/KILL/shell 退出后的后代清理、输出排空、重复关闭和启动失败清理均通过原生 race 回归。
-- Windows Server 2025 exec：准入前挂起、加入 Job 后恢复、正常退出与超时后的进程树及阻塞 stdin 清理通过。PowerShell 5.1/7 标准与 Job 启动通过，包括父进程未设置或清空模块路径的场景；HTTP MCP 集成通过。
+- Windows Server 2025 exec：准入前挂起、加入 Job 后恢复、正常退出与超时后的进程树及阻塞 stdin 清理通过。命令启动已改用创建期 Job 属性与显式标准句柄继承，新增参数、目录、输入、环境、退出码及宿主崩溃原生回归待 CI。PowerShell 5.1/7 标准与 Job 启动通过，包括父进程未设置或清空模块路径的场景；HTTP MCP 集成通过。
 - Windows Server 2025 文件：共享读取期间原子替换、锁定目标保留与临时文件清理、长路径读取和替换通过原生 race 测试。Windows vet 与构建通过；逐项证据见 [Windows 验收记录](validation/2026-10-15-windows.md)。用户任务的登录触发与目标登录会话仍需验收。
 - 三平台 CI：`3fd6730` 的 push 与 PR 工作流均通过 macOS、Ubuntu、Windows 全量 race 测试、vet 和构建，Windows 独立原生回归通过。MCP 进度在响应完成前捕获并保留转发路由；慢转发与同后端查询回归连续 100 轮通过。
 - 入口 PTY 预算：两 Agent 集成测试覆盖跨设备并发准入、跨 MCP 会话主体计数、独立 client、入口重启后的孤儿计数与接管、关闭释放、向满额接收方转移拒绝、设备离线、结果不确定的持久化阻断与 Agent 重启恢复、状态写入失败的副作用阻断。控制资源授权与快照一致性测试通过。
@@ -46,12 +46,14 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 
 Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立探测确认 DERP `7/tok` 路由；Ubuntu 隔离沙箱连续两轮完成对两端的调用及反向调用，重启获得新身份。临时控制面、转发、节点、凭据与 AppArmor profile 已清理。环境、观测值和物理设备边界见[Headscale 验收记录](validation/2026-10-15-headscale.md)。
 
+`874ea35` 的 push 与 PR 工作流均通过三平台全量 race、vet、构建及 Windows 独立原生任务。创建期 Job 绑定的挂起子进程在宿主被强制终止后退出，未绑定对照继续存活；AppContainer 准确 SID 的环回豁免策略、宿主可达对照和监听端读回组合通过。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |
 | --- | --- |
 | 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过，跨主机入口协调待实现 |
-| Windows L2 | 当前请求 L2 会拒绝执行；AppContainer profile 与启动属性原语已加入，通过 Windows amd64/arm64 vet 与 amd64 交叉编译，原生 token、文件、进程与环境隔离通过，网络拒绝证据补充后待 CI；工作目录绑定、exec/ConPTY 接入与异常退出回收待实现 |
+| Windows L2 | 当前请求 L2 会拒绝执行；AppContainer profile 与启动属性原语已加入，通过 Windows amd64/arm64 vet 与 amd64 交叉编译，`874ea35` 原生 token、文件、进程、环境、环回隔离与 profile 清理通过；工作目录绑定、exec/ConPTY 接入与异常退出回收待实现 |
 | 原生 Windows | Server 2025 的 ConPTY、进程清理、文件、PowerShell 5.1/7、HTTP MCP 及本机模式 SCM 生命周期已验证；用户任务的登录触发、目标会话与生产服务设备网络待验收，其他 Windows 版本待验证 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |

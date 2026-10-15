@@ -7,10 +7,15 @@ import (
 	"syscall"
 )
 
-func prepare(c *exec.Cmd)               { c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} }
-func track(c *exec.Cmd) (func(), error) { return func() {}, nil }
-func terminate(c *exec.Cmd)             { _ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM) }
-func kill(c *exec.Cmd)                  { _ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+func startCommand(c *exec.Cmd) (func() error, func(), error) {
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := c.Start(); err != nil {
+		return nil, nil, err
+	}
+	return c.Wait, func() {}, nil
+}
+func terminate(c *exec.Cmd) { _ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM) }
+func kill(c *exec.Cmd)      { _ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
 func exitCode(c *exec.Cmd, e error) int {
 	if e == nil {
 		return 0

@@ -3,9 +3,9 @@
 package exec
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -37,36 +37,125 @@ func helperArgs(mode string, paths ...string) []string {
 	return append([]string{"-test.run=^Test_WindowsExecHelper$", "--", "--xmesh-exec-helper", mode}, paths...)
 }
 
-func Test_WindowsExecSuspendedAdmission(t *testing.T) {
+func Test_WindowsExecLaunchContract(t *testing.T) {
 	exe := windowsExecRuntime(t)
-	marker := filepath.Join(t.TempDir(), "started")
-	cmd := osexec.Command(exe, helperArgs("marker", marker)...)
-	prepare(cmd)
-	if err := cmd.Start(); err != nil {
+	root := filepath.Join(t.TempDir(), "工作 目录")
+	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	time.Sleep(100 * time.Millisecond)
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("command ran before Job admission", err)
-	}
-	finish, err := track(cmd)
+	// An explicit relative executable without a suffix must resolve under cwd.
+	source, err := os.Open(exe)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
 		t.Fatal(err)
 	}
-	defer finish()
-	if err := cmd.Wait(); err != nil {
+	defer source.Close()
+	target, err := os.Create(filepath.Join(root, "helper.exe"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	finish()
-	finish()
-	if b, err := os.ReadFile(marker); err != nil || string(b) != "started" {
-		t.Fatal("admitted command did not execute", string(b), err)
+	_, copyErr := io.Copy(target, source)
+	closeErr := target.Close()
+	if copyErr != nil || closeErr != nil {
+		t.Fatal(copyErr, closeErr)
 	}
-	if err := resumeSuspendedProcess(^uint32(0)); err == nil {
-		t.Fatal("accepted missing process")
+	t.Setenv("XMESH_PARENT_PRIVATE", "parent-only")
+	r, err := cwd.New(root, nil, cwd.Policy{Allow: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.New(config.Policy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(config.Exec{MaxConcurrent: 1, ExclusiveSlots: 1, DefaultTimeout: "15s", IdempotencyCache: 10, InlineOutputBytes: "64KiB"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	arguments := []string{"", "空 格", `a"b`, `a\\`, `end space \\`}
+	input := "输入\x00data\n" + strings.Repeat("abc", 4096)
+	raw, _ := json.Marshal(Object{"cmd": `.\helper`, "args": helperArgs("proof", arguments...), "stdin": input, "env": map[string]string{"XMESH_PROOF": "子环境"}})
+	result, err := m.Run(context.Background(), "test", r, p, raw)
+	if err != nil || result["exit_code"] != 37 || result["stderr"] != "proof-stderr" {
+		t.Fatal(result, err)
+	}
+	var proof struct {
+		Arguments                              []string
+		Directory, Input, Environment, Private string
+	}
+	if err := json.Unmarshal([]byte(result["stdout"].(string)), &proof); err != nil {
+		t.Fatal(err, result)
+	}
+	want, _ := json.Marshal(arguments)
+	got, _ := json.Marshal(proof.Arguments)
+	if string(want) != string(got) || !strings.EqualFold(proof.Directory, root) || proof.Input != input || proof.Environment != "子环境" || proof.Private != "" {
+		t.Fatal("launch contract mismatch", proof)
+	}
+}
+
+func Test_WindowsExecCommandPath(t *testing.T) {
+	for _, test := range []struct{ path, directory, want string }{
+		{`helper.exe`, `C:\work`, `C:\work\helper.exe`},
+		{`.\helper.exe`, `C:\work`, `C:\work\helper.exe`},
+		{`\bin\helper.exe`, `C:\work`, `C:\bin\helper.exe`},
+		{`c:helper.exe`, `C:\work`, `C:\work\helper.exe`},
+		{`D:\bin\helper.exe`, `C:\work`, `D:\bin\helper.exe`},
+		{`\\server\share\helper.exe`, `C:\work`, `\\server\share\helper.exe`},
+	} {
+		got, err := commandPath(test.path, test.directory)
+		if err != nil || !strings.EqualFold(got, test.want) {
+			t.Fatal(test, got, err)
+		}
+	}
+	if _, err := commandPath("", `C:\work`); err == nil {
+		t.Fatal("accepted empty executable")
+	}
+	if _, err := commandPath("C:", `C:\work`); err == nil {
+		t.Fatal("accepted drive without executable")
+	}
+}
+
+func Test_WindowsExecAtomicJobHostCrash(t *testing.T) {
+	exe := windowsExecRuntime(t)
+	pidPath := filepath.Join(t.TempDir(), "command.pid")
+	host := osexec.Command(exe, helperArgs("host", pidPath)...)
+	if err := host.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waited := false
+	t.Cleanup(func() {
+		_ = host.Process.Kill()
+		if !waited {
+			_ = host.Wait()
+		}
+	})
+	var child windows.Handle
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		if data, err := os.ReadFile(pidPath); err == nil {
+			if pid, err := strconv.ParseUint(string(data), 10, 32); err == nil {
+				child, err = windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, uint32(pid))
+				if err != nil {
+					t.Fatal(err)
+				}
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if child == 0 {
+		t.Fatal("host did not publish command")
+	}
+	t.Cleanup(func() { _ = windows.TerminateProcess(child, 1); _ = windows.CloseHandle(child) })
+	if status, err := windows.WaitForSingleObject(child, 0); err != nil || status != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatal("command exited before host crash", status, err)
+	}
+	if err := host.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = host.Wait()
+	waited = true
+	if status, err := windows.WaitForSingleObject(child, 5000); err != nil || status != windows.WAIT_OBJECT_0 {
+		t.Fatal("command survived host crash", status, err)
 	}
 }
 
@@ -115,34 +204,38 @@ func windowsExecPowerShell(t *testing.T) {
 				cmd := osexec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", "Write-Output hello")
 				cmd.Dir, cmd.Env, cmd.Stdin = t.TempDir(), env, strings.NewReader("")
 
-				var output bytes.Buffer
-				cmd.Stdout, cmd.Stderr = &output, &output
-				if tracked {
-					prepare(cmd)
-				}
-				if err := cmd.Start(); err != nil {
+				output, err := os.CreateTemp(t.TempDir(), "powershell-*.txt")
+				if err != nil {
 					t.Fatal(err)
 				}
+				defer output.Close()
+				cmd.Stdout, cmd.Stderr = output, output
+				var wait func() error
 				if tracked {
-					finish, err := track(cmd)
+					var finish func()
+					wait, finish, err = startCommand(cmd)
 					if err != nil {
-						_ = cmd.Process.Kill()
-						_ = cmd.Wait()
 						t.Fatal(err)
 					}
 					defer finish()
+				} else {
+					if err := cmd.Start(); err != nil {
+						t.Fatal(err)
+					}
+					wait = cmd.Wait
 				}
 				done := make(chan error, 1)
-				go func() { done <- cmd.Wait() }()
+				go func() { done <- wait() }()
 				select {
 				case err = <-done:
 				case <-time.After(10 * time.Second):
 					_ = cmd.Process.Kill()
 					<-done
-					t.Fatalf("PowerShell launch did not complete; output: %q", output.String())
+					t.Fatal("PowerShell launch did not complete")
 				}
-				if err != nil || strings.TrimSpace(output.String()) != "hello" {
-					t.Fatal("PowerShell output", output.String(), err)
+				data, readErr := os.ReadFile(output.Name())
+				if err != nil || readErr != nil || strings.TrimSpace(string(data)) != "hello" {
+					t.Fatal("PowerShell output", string(data), err, readErr)
 				}
 			})
 		}
@@ -243,6 +336,42 @@ func Test_WindowsExecHelper(t *testing.T) {
 	}
 	args := os.Args[index+1:]
 	switch args[0] {
+	case "proof":
+		input, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			os.Exit(20)
+		}
+		directory, err := os.Getwd()
+		if err != nil {
+			os.Exit(21)
+		}
+		proof := struct {
+			Arguments                              []string
+			Directory, Input, Environment, Private string
+		}{args[1:], directory, string(input), os.Getenv("XMESH_PROOF"), os.Getenv("XMESH_PARENT_PRIVATE")}
+		if err := json.NewEncoder(os.Stdout).Encode(proof); err != nil {
+			os.Exit(22)
+		}
+		_, _ = os.Stderr.WriteString("proof-stderr")
+		os.Exit(37)
+	case "host":
+		exe, err := os.Executable()
+		if err != nil {
+			os.Exit(10)
+		}
+		output, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			os.Exit(11)
+		}
+		command := osexec.Command(exe, helperArgs("child")...)
+		command.Stdout, command.Stderr = output, output
+		if _, _, err := startCommand(command); err != nil {
+			os.Exit(12)
+		}
+		if err := os.WriteFile(args[1], []byte(strconv.Itoa(command.Process.Pid)), 0600); err != nil {
+			os.Exit(13)
+		}
+		time.Sleep(5 * time.Minute)
 	case "marker":
 		if err := os.WriteFile(args[1], []byte("started"), 0600); err != nil {
 			os.Exit(2)

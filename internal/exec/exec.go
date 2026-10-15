@@ -195,23 +195,17 @@ func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string,
 	cmd.Stdin = strings.NewReader(a.Stdin)
 	cmd.Stdout = out
 	cmd.Stderr = errout
-	prepare(cmd)
 	started := time.Now()
-	if e = cmd.Start(); e != nil {
+	waitCommand, finish, e := startCommand(cmd)
+	if e != nil {
 		if _, ok := e.(*osexec.Error); ok || os.IsNotExist(e) {
 			return nil, toolerr.Args("cmd")
 		}
 		return nil, toolerr.Internal("exec.start", e)
 	}
-	finish, e := track(cmd)
-	if e != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return nil, toolerr.Internal("exec.track", e)
-	}
 	defer finish()
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() { done <- waitCommand() }()
 	timedOut := false
 	select {
 	case e = <-done:
