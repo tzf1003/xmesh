@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/config"
@@ -10,6 +11,18 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"strings"
 )
+
+// Transport provides an in-process Agent connection with a distinct session.
+// The caller identity is supplied by the process-owned network boundary.
+func (a *Agent) Transport(ctx context.Context, p Principal) (mcp.Transport, error) {
+	serverSide, clientSide := mcp.NewInMemoryTransports()
+	id := rand.Text()
+	_, e := a.server(p).Connect(ctx, &mcpmux.SessionTransport{Base: serverSide, ID: id}, nil)
+	if e != nil {
+		return nil, e
+	}
+	return &mcpmux.SessionTransport{Base: clientSide, ID: id}, nil
+}
 
 func (a *Agent) upstream(caller string) *mcp.ServerSession {
 	a.mu.Lock()

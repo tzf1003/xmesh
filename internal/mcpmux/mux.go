@@ -79,6 +79,27 @@ type Transport struct {
 	Upstream string
 }
 
+// SessionTransport assigns a process-generated session to an in-memory link.
+type SessionTransport struct {
+	Base mcp.Transport
+	ID   string
+}
+
+func (t *SessionTransport) Connect(ctx context.Context) (mcp.Connection, error) {
+	c, e := t.Base.Connect(ctx)
+	if e != nil {
+		return nil, e
+	}
+	return &sessionConnection{Connection: c, id: t.ID}, nil
+}
+
+type sessionConnection struct {
+	mcp.Connection
+	id string
+}
+
+func (c *sessionConnection) SessionID() string { return c.id }
+
 func (t *Transport) Connect(ctx context.Context) (mcp.Connection, error) {
 	c, e := t.Base.Connect(ctx)
 	if e != nil {
