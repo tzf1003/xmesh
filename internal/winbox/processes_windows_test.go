@@ -14,6 +14,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type processOwnerProof struct {
+	PID   uint32
+	Stage string
+	Error string
+}
+
 func Test_WindowsAppContainerProcessOwner(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
@@ -94,18 +100,28 @@ func Test_WindowsAppContainerProcessOwner(t *testing.T) {
 	}
 	defer windows.CloseHandle(root.Process)
 	defer windows.CloseHandle(root.Thread)
-	var pid uint32
+	var observed processOwnerProof
 	for deadline := time.Now().Add(15 * time.Second); ; {
 		body, err := os.ReadFile(proof)
-		if err == nil && json.Unmarshal(body, &pid) == nil && pid != 0 {
-			break
+		if err == nil && json.Unmarshal(body, &observed) == nil {
+			if observed.Error != "" {
+				t.Fatal("AppContainer descendant setup", observed.Stage, observed.Error)
+			}
+			if observed.PID != 0 {
+				break
+			}
+		}
+		if result, err := windows.WaitForSingleObject(root.Process, 0); err != nil || result == windows.WAIT_OBJECT_0 {
+			var exit uint32
+			query := windows.GetExitCodeProcess(root.Process, &exit)
+			t.Fatal("AppContainer root exited before descendant proof", observed, result, err, exit, query)
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("AppContainer root did not publish its descendant")
+			t.Fatal("AppContainer root did not publish its descendant", observed)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	child, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	child, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, observed.PID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,19 +228,32 @@ func Test_WindowsAppContainerProcessOwnerHelper(t *testing.T) {
 	}
 	args := os.Args[len(os.Args)-2:]
 	if args[0] == "root" {
+		report := func(stage string, pid uint32, failure error) {
+			proof := processOwnerProof{PID: pid, Stage: stage}
+			if failure != nil {
+				proof.Error = failure.Error()
+			}
+			body, err := json.Marshal(proof)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(args[1], body, 0600); err != nil {
+				t.Fatal("publish process owner proof", err)
+			}
+		}
+		report("root-started", 0, nil)
 		executable, err := os.Executable()
 		if err != nil {
+			report("executable", 0, err)
 			t.Fatal(err)
 		}
 		child := exec.Command(executable, "-test.run=^Test_WindowsAppContainerProcessOwnerHelper$", "--", "member", "unused")
 		if err := child.Start(); err != nil {
+			report("child-start", 0, err)
 			t.Fatal(err)
 		}
 		defer child.Process.Release()
-		body, _ := json.Marshal(uint32(child.Process.Pid))
-		if err := os.WriteFile(args[1], body, 0600); err != nil {
-			t.Fatal(err)
-		}
+		report("child-started", uint32(child.Process.Pid), nil)
 		for deadline := time.Now().Add(15 * time.Second); ; {
 			if _, err := os.Stat(args[1] + ".captured"); err == nil {
 				return

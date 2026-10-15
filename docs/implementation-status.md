@@ -161,3 +161,5 @@ AppContainer helper 和存活后代用例已接入该追踪器，系统 console 
 回收先关闭所有启动准入，对全部 Job 发出终止请求，再逐项核对完整成员清单、活动归零及退出信号；等待含准入门竞争均支持取消和 30 秒总上限。取消前不改变准入或终止进程；部分终止或确认失败保留全部 Job/census 及 profile 引用供重试，profile 删除和所有者释放均拒绝。确认成功后所有者句柄释放与 profile 删除分别执行，ACL/journal/外部 writer guards 的寿命由调用方继续保持。该所有者属于当前宿主的进程寿命管理；跨宿主异常退出恢复仍待实现。
 
 AppContainer 工作区 helper 已通过该入口创建和回收。新增原生组合用例覆盖已退出根的存活后代、第二个启动 Job、限额、准入等待取消、终止前取消、一个真实无效 Job 句柄导致的部分失败与独立 Job 继续清理、保留 profile 后重试、准确退出码、独立存活对照、封闭后拒绝和重复释放；根身份用例覆盖外部成员拒绝、取消、重复通知/固定及来源句柄关闭后的独立身份寿命。本地全量 race/vet、Windows amd64/arm64 vet 和 amd64 测试编译通过，Windows 原生验收待 CI。生产执行协调器仍须实现异常宿主恢复、完整新对象持久追踪、外部 ACL/命名空间/reparse 写入协调和 exec/ConPTY 接入；生产 Windows L2 保持 `sandbox.unavailable`。
+
+`69718ff` 的 push `38816238636` 与 PR `38816245901` 均通过三平台常规 race/vet/build 和契约；两个 Windows 原生任务 `116701500718` / `116701526180` 的既有 AppContainer 工作区 helper 与恢复回归通过，新增所有者组合用例在根未发布后代身份的 15 秒期限失败。根身份固定的 Job guard 回归通过。新增结构化阶段/错误/PID 证明以及根进程即时退出检测，用于定位 AppContainer 内创建后代的实际失败边界；后代存活、部分失败保留与准确退出码断言继续作为验收条件。完整生产协调器、异常宿主恢复、对象持久追踪、外部 ACL/namespace/reparse writer 协调及 exec/ConPTY L2 接入仍待完成。
