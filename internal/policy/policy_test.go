@@ -63,7 +63,7 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 			name:      "windows inheritance",
 			inherited: []string{`Path=C:\Windows`, `SystemRoot=C:\Windows`, `UserProfile=C:\Users\tester`, "lang=en", "PRIVATE=value", "=C:=C:\\", "malformed", "HOME=bad\x00value"},
 			windows:   true,
-			want:      []string{"LANG=en", `PATH=C:\Windows`, `PSMODULEPATH=C:\Windows\System32\WindowsPowerShell\v1.0\Modules`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`},
+			want:      []string{"LANG=en", `PATH=C:\Windows`, `PSMODULEPATH=C:\Users\tester\Documents\WindowsPowerShell\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`},
 		},
 		{
 			name:      "windows search path entries",
@@ -143,6 +143,10 @@ func TestEnvironmentWindowsModulePolicy(t *testing.T) {
 	got, err := e.environment([]string{`SystemRoot=C:\Windows`, `PSModulePath=C:\Private\Modules`}, map[string]string{"psmodulepath": `C:\Tools\Modules`}, true)
 	if err != nil || !reflect.DeepEqual(got, []string{`PSMODULEPATH=C:\Tools\Modules`, `SYSTEMROOT=C:\Windows`}) {
 		t.Fatal("explicit module path", got, err)
+	}
+	got, err = e.environment([]string{`SystemRoot=C:\Windows`, `UserProfile=C:\Users\tester`, `ProgramFiles=C:\Program Files`, "PSModulePath="}, nil, true)
+	if err != nil || !reflect.DeepEqual(got, []string{`PROGRAMFILES=C:\Program Files`, `PSMODULEPATH=C:\Users\tester\Documents\WindowsPowerShell\Modules;C:\Program Files\WindowsPowerShell\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`}) {
+		t.Fatal("default module paths", got, err)
 	}
 	cfg.Env.DenyPathSubstrings = []string{"private-modules"}
 	e, _ = New(cfg)

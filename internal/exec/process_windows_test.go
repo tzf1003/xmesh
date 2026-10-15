@@ -71,6 +71,17 @@ func Test_WindowsExecSuspendedAdmission(t *testing.T) {
 }
 
 func Test_WindowsExecPowerShell(t *testing.T) {
+	windowsExecPowerShell(t)
+}
+
+func Test_WindowsExecPowerShellDefaultModules(t *testing.T) {
+	windowsExecRuntime(t)
+	t.Setenv("PSModulePath", "")
+	windowsExecPowerShell(t)
+}
+
+func windowsExecPowerShell(t *testing.T) {
+	t.Helper()
 	windowsExecRuntime(t)
 	p, err := policy.New(config.Policy{})
 	if err != nil {

@@ -171,7 +171,7 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 			}
 			v = strings.Join(allowed, separator)
 		}
-		windowsRuntime := foldCase && (k == "SYSTEMROOT" || k == "WINDIR" || k == "SYSTEMDRIVE" || k == "COMSPEC" || k == "PATHEXT" || k == "TEMP" || k == "TMP" || k == "APPDATA" || k == "LOCALAPPDATA")
+		windowsRuntime := foldCase && (k == "SYSTEMROOT" || k == "WINDIR" || k == "SYSTEMDRIVE" || k == "COMSPEC" || k == "PATHEXT" || k == "TEMP" || k == "TMP" || k == "APPDATA" || k == "LOCALAPPDATA" || k == "PROGRAMFILES")
 		if k == "PATH" || modulePath || k == "HOME" || k == "USERPROFILE" || k == normalize("SystemRoot") || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") || windowsRuntime {
 			if !e.denyEnv(k, v) {
 				env[k] = v
@@ -194,11 +194,21 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 		env[k] = v
 	}
 	if foldCase && !seen["PSMODULEPATH"] && env["PSMODULEPATH"] == "" {
-		if root := env["SYSTEMROOT"]; root != "" {
-			modules := strings.TrimRight(root, `\/`) + `\System32\WindowsPowerShell\v1.0\Modules`
-			if !e.denyEnv("PSMODULEPATH", modules) {
-				env["PSMODULEPATH"] = modules
+		modules := []string{}
+		for _, location := range [][2]string{
+			{"USERPROFILE", `\Documents\WindowsPowerShell\Modules`},
+			{"PROGRAMFILES", `\WindowsPowerShell\Modules`},
+			{"SYSTEMROOT", `\System32\WindowsPowerShell\v1.0\Modules`},
+		} {
+			if root := env[location[0]]; root != "" {
+				path := strings.TrimRight(root, `\/`) + location[1]
+				if !e.denyEnv("PSMODULEPATH", path) {
+					modules = append(modules, path)
+				}
 			}
+		}
+		if len(modules) > 0 {
+			env["PSMODULEPATH"] = strings.Join(modules, ";")
 		}
 	}
 	keys := []string{}
