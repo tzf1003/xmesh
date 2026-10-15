@@ -10,6 +10,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,6 +30,7 @@ type LAN struct {
 	listener      net.Listener
 	advertisement *zeroconf.Server
 	cancel        context.CancelFunc
+	done          chan struct{}
 }
 type lanPeer struct {
 	peer Peer
@@ -46,19 +48,51 @@ func OpenLAN(ctx context.Context, name, stateDir string) (*LAN, error) {
 		return nil, e
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, cancel: cancel}
-	resolver, e := zeroconf.NewResolver(nil)
-	if e != nil {
+	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, cancel: cancel, done: make(chan struct{})}
+	if e = l.startDiscovery(ctx, 10*time.Second, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
+		resolver, err := zeroconf.NewResolver(nil)
+		if err != nil {
+			return nil, err
+		}
+		entries := make(chan *zeroconf.ServiceEntry, 32)
+		if err = resolver.Browse(ctx, lanService, "local.", entries); err != nil {
+			return nil, err
+		}
+		return entries, nil
+	}); e != nil {
 		cancel()
 		return nil, e
 	}
-	entries := make(chan *zeroconf.ServiceEntry, 32)
-	if e = resolver.Browse(ctx, lanService, "local.", entries); e != nil {
-		cancel()
-		return nil, e
-	}
-	go l.discover(ctx, entries)
 	return l, nil
+}
+
+// zeroconf emits each service once per Browse. Fresh rounds renew liveness
+// from new replies instead of treating the resolver's cached entry as a heartbeat.
+func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse func(context.Context) (<-chan *zeroconf.ServiceEntry, error)) error {
+	round, cancel := context.WithTimeout(ctx, period)
+	entries, err := browse(round)
+	if err != nil {
+		cancel()
+		return err
+	}
+	go func() {
+		defer close(l.done)
+		for {
+			l.discover(round, entries)
+			<-round.Done()
+			cancel()
+			if entries != nil {
+				for range entries {
+				}
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			round, cancel = context.WithTimeout(ctx, period)
+			entries, _ = browse(round)
+		}
+	}()
+	return nil
 }
 func (l *LAN) discover(ctx context.Context, entries <-chan *zeroconf.ServiceEntry) {
 	for {
@@ -106,7 +140,7 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *zeroconf.ServiceEntr
 				continue
 			}
 			l.mu.Lock()
-			l.peers[trusted.Name] = lanPeer{Peer{ID: "lan-" + fp[:24], Name: trusted.Name, Address: "https://" + address + "/mcp", Tags: trusted.Tags, Online: true, Direct: true}, time.Now(), min(ttl, 30*time.Second)}
+			l.peers[trusted.Name] = lanPeer{Peer{ID: "lan-" + fp[:24], Name: trusted.Name, Address: "https://" + address + "/mcp", Tags: trusted.Tags, Online: true, Direct: true, Fingerprint: fp}, time.Now(), min(ttl, 30*time.Second)}
 			l.mu.Unlock()
 		}
 	}
@@ -180,11 +214,34 @@ func (l *LAN) Authenticate(r *http.Request) (identity.Principal, error) {
 func (l *LAN) Self(context.Context) (identity.Principal, error) {
 	return identity.Principal{Node: "lan-" + l.cert.Fingerprint[:24], Tags: []string{"tag:peer"}}, nil
 }
-func (l *LAN) HTTPClient() *http.Client {
-	return &http.Client{Transport: &http.Transport{TLSClientConfig: l.trust.TLS(l.cert, "", false)}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+func (l *LAN) HTTPClient(peer Peer) *http.Client {
+	endpoint, err := url.Parse(peer.Address)
+	trusted, ok := l.trust.Find(peer.Fingerprint)
+	valid := err == nil && endpoint.Scheme == "https" && ok && peer.Name == trusted.Name && peer.ID == "lan-"+peer.Fingerprint[:24]
+	transport := &http.Transport{TLSClientConfig: l.trust.TLS(l.cert, peer.Fingerprint, false), TLSHandshakeTimeout: 10 * time.Second, IdleConnTimeout: 30 * time.Second}
+	return &http.Client{Transport: lanTransport{base: transport, endpoint: endpoint, valid: valid}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+type lanTransport struct {
+	base     http.RoundTripper
+	endpoint *url.URL
+	valid    bool
+}
+
+func (t lanTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if !t.valid || r.URL.Scheme != "https" || r.URL.Host != t.endpoint.Host {
+		return nil, fmt.Errorf("LAN 请求与已配对的目标不一致")
+	}
+	return t.base.RoundTrip(r)
+}
+func (t lanTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 }
 func (l *LAN) Close() error {
 	l.cancel()
+	<-l.done
 	if l.advertisement != nil {
 		l.advertisement.Shutdown()
 	}

@@ -104,6 +104,16 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 	servers := []*http.Server{}
 	listeners := []net.Listener{}
 	gateways := []*gateway.Gateway{}
+	var gatewaysMu sync.Mutex
+	pendingDrain := map[string]bool{}
+	addGateway := func(g *gateway.Gateway) {
+		gatewaysMu.Lock()
+		defer gatewaysMu.Unlock()
+		for name := range pendingDrain {
+			g.Drain(name)
+		}
+		gateways = append(gateways, g)
+	}
 	errc := make(chan error, 8)
 	var wg sync.WaitGroup
 	defer func() {
@@ -167,7 +177,11 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 		mux.Handle("/mcp", a.HTTP(auth))
 		if !o.Local {
 			mux.Handle("/control/drain", a.Control(auth, func(name string) {
-				for _, g := range gateways {
+				gatewaysMu.Lock()
+				pendingDrain[name] = true
+				current := append([]*gateway.Gateway{}, gateways...)
+				gatewaysMu.Unlock()
+				for _, g := range current {
 					g.Drain(name)
 				}
 			}))
@@ -197,11 +211,11 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 		if network == nil {
 			return nil, fmt.Errorf("尚未连接设备网络")
 		}
-		return gateway.RemoteDial(network.HTTPClient())(ctx, peer, p, opts)
+		return gateway.RemoteDial(network.HTTPClient(peer))(ctx, peer, p, opts)
 	}
 	if c.HasRole("gateway") {
 		g := gateway.New(gateway.Options{NodeName: c.Node.Name, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
-		gateways = append(gateways, g)
+		addGateway(g)
 		listener, e := net.Listen("tcp", c.Gateway.Listen)
 		if e != nil {
 			return e
@@ -244,7 +258,7 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 			return e
 		}
 		g := gateway.New(gateway.Options{NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
-		gateways = append(gateways, g)
+		addGateway(g)
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
 			token, ok := oauth.FromContext(r.Context())
 			if !ok {

@@ -43,7 +43,7 @@ func (t *Tailnet) Listen(ctx context.Context) (net.Listener, error) {
 	return t.server.Listen("tcp", ":"+strconv.Itoa(AgentPort))
 }
 func (t *Tailnet) Funnel() (net.Listener, error) { return t.server.ListenFunnel("tcp", ":443") }
-func (t *Tailnet) HTTPClient() *http.Client {
+func (t *Tailnet) HTTPClient(_ Peer) *http.Client {
 	client := t.server.HTTPClient()
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return client

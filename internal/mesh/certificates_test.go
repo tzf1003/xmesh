@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/grandcat/zeroconf"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -67,6 +71,91 @@ func Test_CONNET09_PairedMTLS(t *testing.T) {
 	third, _ := LoadCertificate(t.TempDir(), "third")
 	two = third
 	handshake(false)
+}
+
+func Test_LANRouteRequiresExpectedCertificate(t *testing.T) {
+	clientCert, _ := LoadCertificate(t.TempDir(), "client")
+	expectedCert, _ := LoadCertificate(t.TempDir(), "expected")
+	otherCert, _ := LoadCertificate(t.TempDir(), "other")
+	clientTrust, _ := OpenTrust(t.TempDir())
+	serverTrust, _ := OpenTrust(t.TempDir())
+	add := func(s *TrustStore, c Certificate) {
+		if e := s.Add(Trusted{Name: c.Leaf.Subject.CommonName, Fingerprint: c.Fingerprint, CertificatePEM: string(c.PEM), Tags: []string{"tag:device"}}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	add(clientTrust, expectedCert)
+	add(clientTrust, otherCert)
+	add(serverTrust, clientCert)
+	var calls atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(204) }))
+	server.TLS = serverTrust.TLS(otherCert, "", true)
+	server.StartTLS()
+	defer server.Close()
+	l := &LAN{cert: clientCert, trust: clientTrust}
+	peer := Peer{ID: "lan-" + expectedCert.Fingerprint[:24], Name: "expected", Fingerprint: expectedCert.Fingerprint, Address: server.URL + "/mcp"}
+	client := l.HTTPClient(peer)
+	defer client.CloseIdleConnections()
+	if r, e := client.Get(peer.Address); e == nil {
+		r.Body.Close()
+		t.Fatal("different paired node accepted as route target")
+	}
+	if calls.Load() != 0 {
+		t.Fatal("request reached substituted node")
+	}
+	peer.ID, peer.Name, peer.Fingerprint = "lan-"+otherCert.Fingerprint[:24], "other", otherCert.Fingerprint
+	client = l.HTTPClient(peer)
+	defer client.CloseIdleConnections()
+	r, e := client.Get(peer.Address)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.Body.Close()
+	if r.StatusCode != 204 || calls.Load() != 1 {
+		t.Fatal("paired route failed")
+	}
+	if r, e = client.Get("http://" + server.Listener.Addr().String() + "/mcp"); e == nil {
+		r.Body.Close()
+		t.Fatal("plaintext LAN route accepted")
+	}
+}
+
+func Test_LANDiscoveryRenewsOneShotEntries(t *testing.T) {
+	cert, _ := LoadCertificate(t.TempDir(), "device")
+	trust, _ := OpenTrust(t.TempDir())
+	if e := trust.Add(Trusted{Name: "device", Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM), Tags: []string{"tag:device"}}); e != nil {
+		t.Fatal(e)
+	}
+	l := &LAN{name: "client", trust: trust, peers: map[string]lanPeer{}, done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); <-l.done }()
+	var rounds atomic.Int32
+	if e := l.startDiscovery(ctx, 20*time.Millisecond, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
+		entries := make(chan *zeroconf.ServiceEntry, 1)
+		ent := zeroconf.NewServiceEntry("device", lanService, "local.")
+		ent.Text, ent.TTL, ent.Port, ent.AddrIPv4 = []string{"fingerprint=" + cert.Fingerprint}, 120, AgentPort, []net.IP{net.ParseIP("192.168.1.2")}
+		entries <- ent
+		rounds.Add(1)
+		go func() { <-ctx.Done(); close(entries) }()
+		return entries, nil
+	}); e != nil {
+		t.Fatal(e)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		peers, e := l.Peers(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if rounds.Load() >= 3 && len(peers) == 1 {
+			if peers[0].Fingerprint != cert.Fingerprint {
+				t.Fatal(peers)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("discovery was not refreshed")
 }
 func Test_PairFingerprintAndPermissions(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
