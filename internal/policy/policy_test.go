@@ -60,6 +60,17 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 			want:      []string{"LANG=en", `PATH=C:\Windows`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`},
 		},
 		{
+			name:      "windows search path entries",
+			inherited: []string{`Path=C:\Windows\System32;C:\Users\tester\.AWS\bin;C:\Tools;C:\gcloud\bin`},
+			windows:   true,
+			want:      []string{`PATH=C:\Windows\System32;C:\Tools`},
+		},
+		{
+			name:      "unix search path entries",
+			inherited: []string{"PATH=/usr/bin:/home/test/.ssh/bin:/opt/gcloud/bin:/bin"},
+			want:      []string{"PATH=/usr/bin:/bin"},
+		},
+		{
 			name:      "windows runtime directories",
 			inherited: []string{`windir=C:\Windows`, `SystemDrive=C:`, `ComSpec=C:\Windows\System32\cmd.exe`, `PATHEXT=.COM;.EXE;.BAT;.CMD`, `TEMP=C:\Temp`, `tmp=C:\Temp`, `AppData=C:\Users\tester\AppData\Roaming`, `LocalAppData=C:\Users\tester\AppData\Local`, `PRIVATE=value`, `PSModulePath=C:\Private`},
 			windows:   true,
@@ -97,6 +108,26 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 				t.Fatalf("environment = %q, %v; want %q", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestEnvironmentSearchPathPolicy(t *testing.T) {
+	cfg := config.Policy{}
+	cfg.Env.DenyNames = []string{"PATH"}
+	e, _ := New(cfg)
+	got, err := e.environment([]string{"PATH=/usr/bin:/bin"}, nil, false)
+	if err != nil || len(got) != 0 {
+		t.Fatal("denied search path inherited", got, err)
+	}
+	cfg.Env.DenyNames = nil
+	cfg.Env.DenyPathSubstrings = []string{"private-tools"}
+	e, _ = New(cfg)
+	got, err = e.environment([]string{"PATH=/usr/bin:/opt/private-tools:/bin"}, nil, false)
+	if err != nil || !reflect.DeepEqual(got, []string{"PATH=/usr/bin:/bin"}) {
+		t.Fatal("custom search path filter", got, err)
+	}
+	if _, err := e.environment(nil, map[string]string{"PATH": "/usr/bin:/opt/private-tools"}, false); err == nil {
+		t.Fatal("accepted a caller search path containing a denied directory")
 	}
 }
 

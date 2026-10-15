@@ -78,12 +78,22 @@ func nativeTerminal(t *testing.T) (*windowsTerminal, *windowsOutput) {
 }
 
 func (o *windowsOutput) until(t *testing.T, pattern string) []string {
+	return o.untilAfter(t, 0, pattern)
+}
+
+func (o *windowsOutput) mark() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.text.Len()
+}
+
+func (o *windowsOutput) untilAfter(t *testing.T, offset int, pattern string) []string {
 	t.Helper()
 	re := regexp.MustCompile(pattern)
 	var text string
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
 		o.mu.Lock()
-		text = o.text.String()
+		text = o.text.String()[offset:]
 		o.mu.Unlock()
 		if match := re.FindStringSubmatch(text); match != nil {
 			return match
@@ -96,7 +106,7 @@ func (o *windowsOutput) until(t *testing.T, pattern string) []string {
 
 func windowsWrite(t *testing.T, term *windowsTerminal, command string) {
 	t.Helper()
-	if _, err := term.Write([]byte(command + "\r\n")); err != nil {
+	if _, err := term.Write([]byte(command + "\r")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,9 +120,11 @@ func Test_WindowsPTYInterruptAndResize(t *testing.T) {
 	output.until(t, `WINDOW_101x37`)
 	windowsWrite(t, term, "Write-Output ('SLEEP_'+'READY'); Start-Sleep 300; Write-Output ('SLEEP_'+'FINISHED')")
 	output.until(t, `SLEEP_READY`)
+	interrupted := output.mark()
 	if err := term.Signal("INT"); err != nil {
 		t.Fatal(err)
 	}
+	output.untilAfter(t, interrupted, `PS [^\r\n]*>`)
 	windowsWrite(t, term, "Write-Output ('INTERRUPT_'+'SURVIVED')")
 	output.until(t, `INTERRUPT_SURVIVED`)
 }
