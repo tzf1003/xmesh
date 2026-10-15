@@ -15,17 +15,35 @@ import (
 )
 
 type program struct {
-	store   *config.Store
-	options app.Options
-	cancel  context.CancelFunc
-	done    chan error
+	store     *config.Store
+	options   app.Options
+	cancel    context.CancelFunc
+	done      chan struct{}
+	err       error
+	run       func(context.Context, *config.Store, app.Options) error
+	onFailure func(error)
 }
 
 func (p *program) Start(service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	p.done = make(chan error, 1)
-	go func() { p.done <- app.Run(ctx, p.store, p.options) }()
+	p.done = make(chan struct{})
+	run := p.run
+	if run == nil {
+		run = app.Run
+	}
+	go func() {
+		err := run(ctx, p.store, p.options)
+		failed := ctx.Err() == nil
+		if failed && err == nil {
+			err = fmt.Errorf("服务运行意外结束")
+		}
+		p.err = err
+		close(p.done)
+		if failed && p.onFailure != nil {
+			p.onFailure(err)
+		}
+	}()
 	return nil
 }
 func (p *program) Stop(service.Service) error {
@@ -36,14 +54,17 @@ func (p *program) Stop(service.Service) error {
 		return nil
 	}
 	select {
-	case e := <-p.done:
-		return e
+	case <-p.done:
+		return p.err
 	case <-time.After(30 * time.Second):
 		return fmt.Errorf("等待服务停止超时")
 	}
 }
 func runService(store *config.Store, options app.Options) error {
-	p := &program{store: store, options: options}
+	p := &program{store: store, options: options, onFailure: func(e error) {
+		fmt.Fprintln(os.Stderr, "服务运行失败:", e)
+		os.Exit(1)
+	}}
 	s, e := service.New(p, &service.Config{Name: "xmesh-" + store.Get().Node.Name, DisplayName: "XmeSh", Option: service.KeyValue{"UserService": true}})
 	if e != nil {
 		return e
