@@ -10,6 +10,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -77,8 +78,12 @@ func install(args []string) error {
 	executable := flags.String("executable", "", "已构建的 xmesh 可执行文件")
 	state := flags.String("state-dir", "", "状态目录")
 	password := flags.String("oauth-password-file", "", "OAuth 口令文件")
+	system := flags.Bool("system", false, "Windows：安装为管理员 SCM 服务")
 	if e := flags.Parse(args); e != nil {
 		return e
+	}
+	if *system && runtime.GOOS != "windows" {
+		return fmt.Errorf("--system 仅适用于 Windows")
 	}
 	absolute, e := filepath.Abs(*path)
 	if e != nil {
@@ -106,7 +111,11 @@ func install(args []string) error {
 	if strings.Contains(filepath.ToSlash(exe), "/go-build") {
 		return fmt.Errorf("请先构建持久路径中的 xmesh 二进制，再执行 install")
 	}
-	arguments := []string{"serve", "--service", "--config", absolute}
+	arguments := []string{"serve"}
+	if runtime.GOOS != "windows" || *system {
+		arguments = append(arguments, "--service")
+	}
+	arguments = append(arguments, "--config", absolute)
 	if *state != "" {
 		p, e := filepath.Abs(*state)
 		if e != nil {
@@ -122,6 +131,9 @@ func install(args []string) error {
 		arguments = append(arguments, "--oauth-password-file", p)
 	}
 	serviceConfig := &service.Config{Name: "xmesh-" + cfg.Node.Name, DisplayName: "XmeSh " + cfg.Node.Name, Description: "XmeSh 设备 MCP 服务", Executable: exe, Arguments: arguments, WorkingDirectory: filepath.Dir(absolute), Option: service.KeyValue{"UserService": true, "RunAtLoad": true, "KeepAlive": true}}
+	if runtime.GOOS == "windows" && !*system {
+		return installUserService(serviceConfig)
+	}
 	s, e := service.New(&program{}, serviceConfig)
 	if e != nil {
 		return e

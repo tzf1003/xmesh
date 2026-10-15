@@ -151,4 +151,15 @@ Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 
 
 `/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使当前进程的 Agent 与 Gateway 进入 drain，控制器须向其他节点分别发送控制消息。重启重置内存 drain 状态。
 
-`install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务；Windows 当前使用需要管理员权限的 SCM。服务运行异常会记录错误并以非零状态退出，供管理器处理。各平台原生安装的验收状态见[实现记录](implementation-status.md)。
+`install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken`、普通权限运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
+
+Windows 可用 `install --system` 选择管理员 SCM 服务。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
+
+服务运行异常以非零状态退出，供管理器处理。Windows 原生验收从目标用户的登录会话执行：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_USER_SERVICE = "1"
+go test ./cmd/xmesh -run WindowsUserTaskRuntime -v
+```
+
+该用例创建临时任务并立即运行，核对用户 SID、会话 ID、工作目录与复杂参数，最后删除任务。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
