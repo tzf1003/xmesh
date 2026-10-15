@@ -14,6 +14,9 @@ func (e *Engine) Sandbox(cmd string, args []string, cwd string, env []string) (s
 	if e.config.Isolation != "L2" {
 		return cmd, args, env, nil
 	}
+	if runtime.GOOS == "darwin" {
+		return seatbelt(cmd, args, cwd, env)
+	}
 	if runtime.GOOS != "linux" {
 		return "", nil, nil, toolerr.New("policy_denied", "此平台尚未提供 L2 执行隔离", "rule", "sandbox.unavailable", "reason", "请使用支持 bubblewrap 的 Linux 节点")
 	}
@@ -44,11 +47,8 @@ func (e *Engine) Sandbox(cmd string, args []string, cwd string, env []string) (s
 		}
 	}
 	// Expose only this workspace. Home credential directories remain outside it.
-	home, _ := os.UserHomeDir()
-	for _, secret := range []string{filepath.Join(home, ".ssh"), filepath.Join(home, ".config/gcloud"), filepath.Join(home, ".azure")} {
-		if cwd == secret || strings.HasPrefix(cwd, secret+string(filepath.Separator)) || secret == cwd || strings.HasPrefix(secret, cwd+string(filepath.Separator)) {
-			return "", nil, nil, toolerr.New("policy_denied", "L2 工作目录包含凭证目录", "rule", "sandbox.credentials", "reason", "请选择独立工作目录")
-		}
+	if err := credentialWorkspace(cwd); err != nil {
+		return "", nil, nil, err
 	}
 	argv = append(argv, "--bind", cwd, cwd, "--chdir", cwd, "--setenv", "HOME", "/tmp", "--setenv", "USERPROFILE", "/tmp", "--", resolved)
 	argv = append(argv, args...)

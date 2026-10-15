@@ -129,7 +129,18 @@ XMESH_TEST_L2=1 go test ./internal/policy -run L2 -v
 python3 scripts/smoke_local.py --binary bin/xmesh --isolation L2
 ```
 
-macOS 与 Windows 的 L2 待实现，当前配置 L2 时拒绝命令和终端启动。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要操作系统沙箱进一步约束。
+## macOS L2
+
+设置 `agent.policy.isolation: L2` 后，exec 与 PTY 使用系统 `/usr/bin/sandbox-exec`。配置按本次工作目录生成：目录可读写，系统程序和运行库目录只读，网络、Mach 服务查询和其他进程信息默认受限。`HOME`、`USERPROFILE`、`TMPDIR` 均指向工作目录，目录参数独立传递给沙箱启动器。需要访问主目录配置或系统服务的程序可能无法在此级别运行。
+
+```bash
+XMESH_TEST_L2=1 go test -race ./internal/policy -run L2 -v
+python3 scripts/smoke_local.py --binary bin/xmesh --isolation L2 --pat --shell /bin/zsh
+```
+
+`sandbox-exec` 已被 Apple 标记为废弃，系统升级后应重新执行上述验收。系统缺少启动器时拒绝 L2 启动。当前实现允许读取 `/bin`、`/sbin`、`/usr`、`/System`、`/opt/homebrew`，以及必要的设备与目录元数据。
+
+Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检查 `.ssh`、`.config/gcloud`、`.azure` 和 `.aws`，包括已存在的符号链接目标。工作目录中的既有硬链接仍共享主机 inode；部署时应使用独立工作目录。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要额外的生命周期约束。Windows 当前配置 L2 时拒绝命令和终端启动。
 
 ## 治理与生命周期
 

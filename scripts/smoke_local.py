@@ -6,8 +6,10 @@ import http.client
 import json
 import pathlib
 import secrets
+import shlex
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -82,6 +84,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--isolation", choices=["L1", "L2"], default="L1")
+    parser.add_argument("--shell", default="/bin/sh", help="Agent PTY shell (or auto)")
     parser.add_argument("--pat", action="store_true", help="Require a temporary Gateway PAT")
     options = parser.parse_args()
     binary = options.binary.resolve()
@@ -89,12 +92,14 @@ def main():
         root = pathlib.Path(temporary).resolve()
         workspace = root / "workspace"
         workspace.mkdir()
+        outside = root / "host-only"
+        outside.write_text("host-only")
         direct, gateway = address(), address()
         cfg = {"node": {"name": "smoke-node", "roles": ["agent", "gateway"]},
                "mesh": {"mode": "lan", "lan": {"mdns": True}}, "gateway": {"listen": gateway},
                "agent": {"default_cwd": str(workspace), "cwd_policy": {"allow": [str(workspace)]},
                          "policy": {"isolation": options.isolation},
-                         "pty": {"default_shell": "/bin/sh"},
+                         "pty": {"default_shell": options.shell},
                          "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}}}}
         token = None
         if options.pat:
@@ -134,13 +139,19 @@ def main():
                 assert "SMOKE_PRIVATE_BODY" in client.call("local/fs.read", {"path": "roundtrip"})["content"]
                 script = 'printf SMOKE_EXEC_MARKER'
                 if options.isolation == "L2":
-                    script = 'test "$HOME" = /tmp && test ! -e /home/ubuntu/.ssh && ' + script
+                    home_check = 'test "$HOME" = "$PWD"' if sys.platform == "darwin" else 'test "$HOME" = /tmp'
+                    script = home_check + ' && test ! -r ' + shlex.quote(str(outside)) + ' && ' + script
                 executed = client.call("local/exec.run", {"cmd": "sh", "args": ["-c", script]})
                 assert executed["exit_code"] == 0 and executed["stdout"] == "SMOKE_EXEC_MARKER", executed
                 terminal = client.call("local/pty.open", {"cols": 80, "rows": 24})
                 sid, owner = terminal["session_id"], terminal["owner"]
                 assert owner.startswith("local/") and len(owner) > len("local/")
-                client.call("local/pty.write", {"session_id": sid, "data": "printf 'SMOKE_%s\\n' PTY_MARKER\n"})
+                terminal_command = "printf 'SMOKE_%s\\n' PTY_MARKER"
+                if options.isolation == "L2":
+                    terminal_command = ('if test ! -r ' + shlex.quote(str(outside)) +
+                        '; then (printf blocked > ' + shlex.quote(str(outside)) +
+                        ') 2>/dev/null; ' + terminal_command + '; fi')
+                client.call("local/pty.write", {"session_id": sid, "data": terminal_command + "\n"})
                 text, cursor = "", 0
                 deadline = time.monotonic() + 5
                 while "SMOKE_PTY_MARKER" not in text and time.monotonic() < deadline:
@@ -149,6 +160,7 @@ def main():
                     cursor = output["next_cursor"]
                 assert "SMOKE_PTY_MARKER" in text, text
                 assert client.call("local/pty.close", {"session_id": sid})["state"] == "closed"
+                assert outside.read_text() == "host-only", "sandbox changed host file"
                 client.close()
             finally:
                 process.terminate()
