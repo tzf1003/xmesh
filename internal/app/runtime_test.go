@@ -76,11 +76,16 @@ func Test_Runtime_AgentGatewaySharedState(t *testing.T) {
 	defer direct.Close()
 	call := func(s *mcp.ClientSession, name string, args any) map[string]any {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		timeout := 5 * time.Second
+		if os.PathSeparator == '\\' && name == "local/pty.open" {
+			// Allow first-launch Windows console and shell initialization on CI.
+			timeout = 30 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		o, e := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		if e != nil || o.IsError {
-			t.Fatalf("%s %v %v", name, o, e)
+			t.Fatalf("%s (deadline %s) %v %v", name, timeout, o, e)
 		}
 		b, _ := json.Marshal(o.StructuredContent)
 		var v map[string]any
