@@ -2,10 +2,12 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
+	"unicode/utf16"
 
 	"github.com/kardianos/service"
 )
@@ -71,7 +73,15 @@ func createUserTask(c *service.Config, sid, arguments string, register func(stri
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "task.xml")
-	if err := os.WriteFile(path, append([]byte(xml.Header), doc...), 0600); err != nil {
+	// schtasks reads task documents as UTF-16. Keep its declaration, BOM and
+	// actual code units consistent, including non-ASCII paths and arguments.
+	units := utf16.Encode([]rune("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" + string(doc)))
+	encoded := make([]byte, 2+2*len(units))
+	encoded[0], encoded[1] = 0xff, 0xfe
+	for i, unit := range units {
+		binary.LittleEndian.PutUint16(encoded[2+2*i:], unit)
+	}
+	if err := os.WriteFile(path, encoded, 0600); err != nil {
 		return "", err
 	}
 	// Task names are machine-wide; include a stable current-user suffix so

@@ -1,18 +1,21 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/xml"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/kardianos/service"
 )
 
 func Test_UserTaskRegistration(t *testing.T) {
-	cfg := &service.Config{Name: "xmesh-device", Description: "XmeSh 设备 & tools", Executable: `C:\Tools & apps\xmesh.exe`, WorkingDirectory: `C:\工作区\<node>`, Arguments: []string{"serve"}}
+	cfg := &service.Config{Name: "xmesh-device", Description: "XmeSh 设备 & tools", Executable: `C:\Tools & apps\xmesh.exe`, WorkingDirectory: `C:\工作区\<node>😀`, Arguments: []string{"serve"}}
 	arguments := `serve --config "C:\Work & apps\xmesh.yaml" --state-dir "C:\工作区\state"`
 	var temporary string
 	register := func(name, path string) error {
@@ -25,7 +28,26 @@ func Test_UserTaskRegistration(t *testing.T) {
 			t.Fatal(err)
 		}
 		var task userTask
-		if err := xml.Unmarshal(doc, &task); err != nil {
+		if len(doc) < 2 || doc[0] != 0xff || doc[1] != 0xfe || len(doc)%2 != 0 {
+			t.Fatal("task document must be UTF-16LE with a BOM")
+		}
+		units := make([]uint16, (len(doc)-2)/2)
+		for i := range units {
+			units[i] = binary.LittleEndian.Uint16(doc[2+2*i:])
+		}
+		text := string(utf16.Decode(units))
+		if !strings.HasPrefix(text, "<?xml version=\"1.0\" encoding=\"UTF-16\"?>") {
+			t.Fatal("task document encoding declaration does not match its bytes")
+		}
+		decoder := xml.NewDecoder(strings.NewReader(text))
+		decoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+			if charset != "UTF-16" {
+				return nil, errors.New("unexpected task XML encoding declaration")
+			}
+			// The wire bytes were decoded above; the XML parser receives UTF-8.
+			return input, nil
+		}
+		if err := decoder.Decode(&task); err != nil {
 			t.Fatal(err)
 		}
 		if task.XMLName.Space != taskNamespace || task.Trigger.UserID != "S-1-5-21-1000" || !task.Trigger.Enabled || task.Principal.UserID != task.Trigger.UserID || task.Principal.LogonType != "InteractiveToken" || task.Principal.RunLevel != "LeastPrivilege" {
