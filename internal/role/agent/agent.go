@@ -27,11 +27,7 @@ import (
 	"time"
 )
 
-type Principal struct {
-	Node        string
-	Tags        []string
-	OAuthClient string
-}
+type Principal = identity.Principal
 type Authenticate func(*http.Request) (Principal, error)
 type Agent struct {
 	store        *config.Store
