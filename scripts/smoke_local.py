@@ -159,6 +159,17 @@ def main():
                     text += output["data"]
                     cursor = output["next_cursor"]
                 assert "SMOKE_PTY_MARKER" in text, text
+                assert "job control turned off" not in text, text
+                client.call("local/pty.resize", {"session_id": sid, "cols": 101, "rows": 37})
+                client.call("local/pty.write", {"session_id": sid,
+                    "data": "printf 'SMOKE_SIZE='; stty size\n"})
+                resized = ""
+                deadline = time.monotonic() + 5
+                while "SMOKE_SIZE=37 101" not in resized and time.monotonic() < deadline:
+                    output = client.call("local/pty.read", {"session_id": sid, "cursor": cursor, "wait_ms": 100})
+                    resized += output["data"]
+                    cursor = output["next_cursor"]
+                assert "SMOKE_SIZE=37 101" in resized, resized
                 assert client.call("local/pty.close", {"session_id": sid})["state"] == "closed"
                 assert outside.read_text() == "host-only", "sandbox changed host file"
                 client.close()

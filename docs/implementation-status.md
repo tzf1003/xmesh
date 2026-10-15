@@ -26,6 +26,7 @@
 - Ubuntu 24.04 amd64 原生：PTY 6 项、exec 6 项、文件搜索 5 项及 policy 3 项通过。使用实际二进制的 L1、L2 MCP 冒烟均通过文件、exec、PTY、审计正文排除及正常退出检查。
 - macOS 与 Ubuntu 实际二进制：带 PAT 的 L1 MCP 冒烟通过；覆盖 CLI 凭据读取、文件、exec、PTY、审计及退出。Gateway 认证测试覆盖 scope 过滤、写入拒绝、凭据轮转和跨凭据会话隔离。脚本为 `scripts/smoke_local.py --pat`。
 - macOS 27.0.1 L2：原生测试验证目录外读取和写入拒绝、符号链接越界拒绝、网络拒绝、父进程信号与环境读取拒绝，以及含引号目录的参数传递。带 PAT 的真实 MCP L2 冒烟通过 exec 与 zsh PTY、审计及退出清理。
+- Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 
 Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该机 AppArmor 限制非特权 user namespace：普通用户 L2 验证使用只绑定测试目录中 bwrap 可执行文件、允许 `userns` 的临时 profile，测试结束已卸载。root 下的独立 L2 用例也通过。普通用户结果依赖该临时 profile，部署时须配置对应主机策略。
 
@@ -36,7 +37,6 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 | 项目 | 当前边界 |
 | --- | --- |
 | 入口 PTY 总预算 | Agent 内按 OAuth client/节点跨会话计数已实现；跨设备入口聚合待实现 |
-| Linux L2 PTY | 交互 shell 报告 job control 关闭，前台进程组控制待完善与实测 |
 | Windows L2 | 当前请求 L2 会拒绝执行；受限 token 沙箱待实现 |
 | Windows 用户服务 | 当前使用 SCM 服务，需要管理员权限；用户级启动待实现 |
 | 原生 Windows | ConPTY、进程清理、服务安装待实机验证 |

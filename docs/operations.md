@@ -122,10 +122,11 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-
 
 ## Linux L2
 
-安装发行版 `bubblewrap`，设置 `agent.policy.isolation: L2`。bwrap 隔离网络、提供临时 HOME，并绑定本次调用的工作目录。主机必须允许相应 user namespace。受 AppArmor 限制的主机可为实际 bwrap 路径配置仅允许 `userns` 的执行 profile；管理员应按主机策略审核并加载。环境不满足时工具返回隔离失败。
+安装发行版 `bubblewrap` 和提供 `setsid` 的 `util-linux`，设置 `agent.policy.isolation: L2`。bwrap 隔离网络、提供临时 HOME，并绑定本次调用的工作目录。PTY 在 PID 命名空间内建立会话和控制终端，支持前台作业中断与窗口调整；终止启动器会清理该命名空间中的进程。主机必须允许相应 user namespace。受 AppArmor 限制的主机可为实际 bwrap 路径配置仅允许 `userns` 的执行 profile；管理员应按主机策略审核并加载。环境不满足时工具返回隔离失败。
 
 ```bash
 XMESH_TEST_L2=1 go test ./internal/policy -run L2 -v
+XMESH_TEST_L2=1 go test ./internal/pty -run L2JobControl -v
 python3 scripts/smoke_local.py --binary bin/xmesh --isolation L2
 ```
 

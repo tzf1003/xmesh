@@ -21,7 +21,7 @@ type windowsTerminal struct {
 	consoleOnce   sync.Once
 }
 
-func start(shell string, args []string, cwd string, env []string, cols, rows int) (terminal, error) {
+func start(shell string, args []string, cwd string, env []string, cols, rows int, _ bool) (terminal, error) {
 	var inR, inW, outR, outW windows.Handle
 	if e := windows.CreatePipe(&inR, &inW, nil, 0); e != nil {
 		return nil, e
