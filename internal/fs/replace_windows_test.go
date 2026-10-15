@@ -3,13 +3,52 @@
 package fs
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
+
+func Test_WindowsAtomicReplaceExactFilename(t *testing.T) {
+	root := t.TempDir()
+	// Keep adjacent allocations busy while passing short rename buffers to
+	// Win32; the directory must contain only the requested destination names.
+	stop := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			var value map[string]any
+			_ = json.Unmarshal([]byte(`{"properties":{"cursor":{"type":"integer"},"session_id":{"type":"string"}},"required":["session_id"],"type":"object"}`), &value)
+		}
+	})
+	defer func() { close(stop); workers.Wait() }()
+	for i := range 100 {
+		name := fmt.Sprintf("a%d", i)
+		target := filepath.Join(root, name)
+		if err := atomicWrite(target, []byte("complete contents"), ""); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(target)
+		if err != nil || string(body) != "complete contents" {
+			entries, listErr := os.ReadDir(root)
+			t.Fatal("exact destination missing", name, string(body), err, entries, listErr)
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 100 {
+		t.Fatal("unexpected directory entries", entries, err)
+	}
+}
 
 func Test_WindowsAtomicReplaceOpenReader(t *testing.T) {
 	root := t.TempDir()

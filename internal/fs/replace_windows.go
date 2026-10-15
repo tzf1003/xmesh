@@ -39,13 +39,15 @@ func atomicReplace(source, target string) error {
 	if err != nil {
 		return err
 	}
-	encoded = encoded[:len(encoded)-1]
 	var header renameInfo
 	offset := unsafe.Offsetof(header.Name)
 	buffer := make([]byte, int(offset)+2*len(encoded))
 	info := (*renameInfo)(unsafe.Pointer(&buffer[0]))
 	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
-	info.NameLength = uint32(2 * len(encoded))
+	// Keep the UTF-16 terminator in the backing buffer. The Win32 rename path
+	// consumes a terminated name even though FileNameLength excludes that NUL.
+	// Otherwise adjacent heap data can become part of the destination filename.
+	info.NameLength = uint32(2 * (len(encoded) - 1))
 	copy(unsafe.Slice((*uint16)(unsafe.Pointer(&buffer[offset])), len(encoded)), encoded)
 	// POSIX replacement preserves existing readers' handles and makes new opens
 	// see the complete replacement. Unsupported filesystems fail the operation.
