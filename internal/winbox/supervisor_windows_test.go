@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tzf1003/xmesh/internal/winjob"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -460,4 +462,106 @@ func Test_WindowsAppContainerSupervisorHostHelper(t *testing.T) {
 	}
 	time.Sleep(60 * time.Second)
 	t.Fatal("controller did not terminate host")
+}
+
+// A borrowed assignment handle can outlive a failed pipe. Even a previously
+// empty Job must be confirmed again after the pinned host exits.
+func Test_WindowsAppContainerSupervisorPostExitRecheck(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	state := filepath.Join(t.TempDir(), "state")
+	privateJournalDirectory(t, state)
+	j, err := openBoundGrantJournal(context.Background(), filepath.Join(state, "recheck.journal"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	p, err := newProfile(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := p.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	intent, err := j.append(journalRecord{Kind: "execution", ExecutionID: "0123456789abcdef0123456789abcdef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := winjob.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	census, err := winjob.NewProcessCensus(job)
+	if err != nil {
+		windows.CloseHandle(job)
+		t.Fatal(err)
+	}
+	actor := &supervisorActor{journal: j.file, init: supervisorInit{Intent: intent, ExecutionID: j.records[intent-1].ExecutionID}, jobs: []executionJob{{handle: job, census: census}}}
+	defer actor.closeJobs()
+	if err := actor.reap(84); err != nil {
+		t.Fatal(err)
+	}
+	// Pin an actual exited host identity before admitting a new member through
+	// the already lent Job handle. This isolates the post-exit confirmation gate.
+	host := exec.Command(os.Args[0], "-test.run=^Test_NoSupervisorHost$")
+	if err := host.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var duplicateErr error
+	if err := host.Process.WithHandle(func(h uintptr) {
+		duplicateErr = windows.DuplicateHandle(windows.CurrentProcess(), windows.Handle(h), windows.CurrentProcess(), &actor.host, windows.SYNCHRONIZE, false, 0)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if duplicateErr != nil {
+		t.Fatal(duplicateErr)
+	}
+	defer windows.CloseHandle(actor.host)
+	if err := host.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	attrs, err := windows.NewProcThreadAttributeList(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer attrs.Delete()
+	if err := winjob.Apply(attrs, job); err != nil {
+		t.Fatal(err)
+	}
+	command, err := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{os.Args[0], "-test.run=^Test_WindowsAppContainerProcessOwnerHelper$", "--", "member", "unused"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
+	var member windows.ProcessInformation
+	if err := windows.CreateProcess(nil, command, nil, nil, false, windows.CREATE_SUSPENDED|windows.CREATE_NO_WINDOW|windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &member); err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(member.Process)
+	defer windows.CloseHandle(member.Thread)
+	defer windows.TerminateJobObject(job, 1)
+	if err := census.RetainProcess(context.Background(), member.Process); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := windows.WaitForSingleObject(member.Process, 0); err != nil || result != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatal("late member is not live", result, err)
+	}
+	if err := actor.disconnected(errors.New("test pipe EOF")); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := windows.WaitForSingleObject(member.Process, 0); err != nil || result != windows.WAIT_OBJECT_0 {
+		t.Fatal("cached reap allowed live-member receipt", result, err)
+	}
+	// Replay the shared file after the supervisor's independent durable append.
+	replayed, err := loadGrantJournal(j.file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.records, j.state, j.bytes = replayed.records, replayed.state, replayed.bytes
+	if len(j.state.executions) != 0 || j.records[len(j.records)-1].ExecutionSequence != intent {
+		t.Fatal("missing post-exit receipt")
+	}
 }
