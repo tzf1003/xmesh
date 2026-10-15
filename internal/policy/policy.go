@@ -128,7 +128,7 @@ func (e *Engine) denyEnv(k, v string) bool {
 			return true
 		}
 	}
-	for _, p := range append([]string{".ssh", "gcloud", ".azure"}, e.config.Env.DenyPathSubstrings...) {
+	for _, p := range append([]string{".ssh", "gcloud", ".azure", ".aws"}, e.config.Env.DenyPathSubstrings...) {
 		if strings.Contains(strings.ToLower(v), strings.ToLower(p)) {
 			return true
 		}
@@ -136,15 +136,30 @@ func (e *Engine) denyEnv(k, v string) bool {
 	return false
 }
 func (e *Engine) Environment(extra map[string]string) ([]string, error) {
+	return e.environment(os.Environ(), extra, runtime.GOOS == "windows")
+}
+
+func (e *Engine) environment(inherited []string, extra map[string]string, foldCase bool) ([]string, error) {
+	normalize := func(k string) string {
+		if foldCase {
+			return strings.ToUpper(k)
+		}
+		return k
+	}
 	env := map[string]string{}
-	for _, kv := range os.Environ() {
-		k, v, _ := strings.Cut(kv, "=")
-		if k == "PATH" || k == "HOME" || k == "USERPROFILE" || k == "SystemRoot" || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") {
+	for _, kv := range inherited {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" || strings.ContainsRune(kv, 0) {
+			continue
+		}
+		k = normalize(k)
+		if k == "PATH" || k == "HOME" || k == "USERPROFILE" || k == normalize("SystemRoot") || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") {
 			if !e.denyEnv(k, v) {
 				env[k] = v
 			}
 		}
 	}
+	seen := make(map[string]bool, len(extra))
 	for k, v := range extra {
 		if k == "" || strings.ContainsAny(k, "=\x00") || strings.ContainsRune(v, 0) {
 			return nil, toolerr.Args("env")
@@ -152,6 +167,11 @@ func (e *Engine) Environment(extra map[string]string) ([]string, error) {
 		if e.denyEnv(k, v) {
 			return nil, denied("env.denied")
 		}
+		k = normalize(k)
+		if seen[k] {
+			return nil, toolerr.Args("env")
+		}
+		seen[k] = true
 		env[k] = v
 	}
 	keys := []string{}
