@@ -43,6 +43,10 @@ func Test_WindowsAppContainerCredentialBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tree.Close()
+	if handles, err := pinCredentialBoundaries(context.Background(), tree, []string{filepath.Join(work, ".aws")}); err == nil {
+		closeCredentialHandles(handles)
+		t.Fatal("workspace containing a missing credential directory admitted")
+	}
 	// Case folding and alternate path spelling must resolve to object identity.
 	for _, spelling := range []string{secret, strings.ToUpper(secret)} {
 		handles, err := pinCredentialBoundaries(context.Background(), tree, []string{spelling})
@@ -115,6 +119,16 @@ func Test_WindowsAppContainerCredentialAliases(t *testing.T) {
 		if (err != nil) != candidate.deny {
 			t.Fatal("credential alias identity", candidate.deny, err)
 		}
+	}
+	treeWithCase, err := openWorkspaceTree(context.Background(), secret, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handles, caseErr := pinCredentialBoundaries(context.Background(), treeWithCase, []string{strings.ToUpper(secret)})
+	closeCredentialHandles(handles)
+	treeWithCase.Close()
+	if caseErr == nil {
+		t.Fatal("case-variant credential identity admitted")
 	}
 	// The OS may leave 8.3 spelling unchanged on a volume with short names
 	// disabled; otherwise the same identity must still be rejected.

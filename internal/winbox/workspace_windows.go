@@ -100,8 +100,13 @@ func (g *workspaceGrant) Close() error {
 		return fmt.Errorf("AppContainer workspace root identity changed during cleanup")
 	}
 	var result error
+	existing := make(map[fileIdentity]bool, len(g.tree.objects))
+	for _, object := range g.tree.objects {
+		existing[object.id] = true
+	}
 	for index := len(current.objects) - 1; index >= 0; index-- {
-		if err := g.profile.removeInheritedGrant(current.objects[index]); err != nil {
+		object := current.objects[index]
+		if err := g.profile.removeInheritedGrant(object, !existing[object.id]); err != nil {
 			result = errors.Join(result, fmt.Errorf("release inherited AppContainer object %d: %w", index, err))
 		}
 	}
@@ -118,7 +123,7 @@ func (g *workspaceGrant) Close() error {
 	return nil
 }
 
-func (p *Profile) removeInheritedGrant(object treeObject) error {
+func (p *Profile) removeInheritedGrant(object treeObject, created bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.sid == nil {
@@ -134,7 +139,7 @@ func (p *Profile) removeInheritedGrant(object treeObject) error {
 	if err != nil {
 		return err
 	}
-	merged, changed, err := editInheritedProfileACL(dacl, p.sid)
+	merged, changed, err := editInheritedProfileACL(dacl, p.sid, object.directory, created)
 	if err != nil || !changed {
 		return err
 	}
@@ -146,10 +151,12 @@ func (p *Profile) removeInheritedGrant(object treeObject) error {
 	return writeObjectDACL(handle, current, merged, defaulted)
 }
 
-// Only the known inherited allow ACE format is owned by this operation. Other
-// profiles and opaque ACEs retain their bytes and order. An unexpected allow ACE
-// for this exclusive profile keeps cleanup pending instead of guessing ownership.
-func editInheritedProfileACL(acl *windows.ACL, sid *windows.SID) (*windows.ACL, bool, error) {
+// Only the known workspace allow ACE format is owned by this operation. NTFS
+// can copy inheritance into newly created objects without marking INHERITED.
+// That form is accepted only for identities outside the admission snapshot.
+// Other profiles and opaque ACEs retain their bytes and order. Unexpected allow
+// ACEs for this exclusive profile keep cleanup pending for investigation.
+func editInheritedProfileACL(acl *windows.ACL, sid *windows.SID, directory, created bool) (*windows.ACL, bool, error) {
 	header, aces, err := aclParts(acl)
 	if err != nil {
 		return nil, false, err
@@ -161,8 +168,12 @@ func editInheritedProfileACL(acl *windows.ACL, sid *windows.SID) (*windows.ACL, 
 		owned := len(ace) == 8+len(sidBytes) && ace[0] == windows.ACCESS_ALLOWED_ACE_TYPE && bytes.Equal(ace[8:], sidBytes)
 		if owned {
 			const mask = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | 0x0040
-			const flags = windows.INHERITED_ACE | windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
-			if ace[1]&windows.INHERITED_ACE == 0 || ace[1]&^byte(flags) != 0 || binary.LittleEndian.Uint32(ace[4:8]) != mask {
+			flags := byte(0)
+			if directory {
+				flags = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+			}
+			validFlags := ace[1] == flags|windows.INHERITED_ACE || (created && ace[1] == flags)
+			if !validFlags || binary.LittleEndian.Uint32(ace[4:8]) != mask {
 				return nil, false, fmt.Errorf("AppContainer inherited ACE ownership changed: flags=%#x mask=%#x", ace[1], binary.LittleEndian.Uint32(ace[4:8]))
 			}
 			removed = true

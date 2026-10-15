@@ -3,14 +3,78 @@ package winbox
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+func Test_WindowsAppContainerWorkspaceACEForms(t *testing.T) {
+	sid, err := windows.StringToSid("S-1-15-2-123-456-789")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.KeepAlive(sid)
+	sidBytes := unsafe.Slice((*byte)(unsafe.Pointer(sid)), sid.Len())
+	const mask = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | 0x0040
+	for _, form := range []struct {
+		name                      string
+		flags                     byte
+		directory, created, allow bool
+		mask                      uint32
+	}{
+		{"inherited-file", 0x10, false, false, true, mask},
+		{"inherited-directory", 0x13, true, false, true, mask},
+		{"copied-file", 0, false, true, true, mask},
+		{"copied-directory", 3, true, true, true, mask},
+		{"existing-explicit-file", 0, false, false, false, mask},
+		{"existing-explicit-directory", 3, true, false, false, mask},
+		{"inherit-only", 0x1b, true, true, false, mask},
+		{"unexpected-propagation", 0x11, true, true, false, mask},
+		{"file-with-directory-flags", 0x13, false, true, false, mask},
+		{"unexpected-rights", 0x13, true, true, false, 0x1f01ff},
+	} {
+		t.Run(form.name, func(t *testing.T) {
+			ace := make([]byte, 8+len(sidBytes))
+			ace[1] = form.flags
+			binary.LittleEndian.PutUint16(ace[2:4], uint16(len(ace)))
+			binary.LittleEndian.PutUint32(ace[4:8], form.mask)
+			copy(ace[8:], sidBytes)
+			// Opaque callback and unrelated allow entries must retain order and
+			// bytes even when the current profile's copied ACE is removed.
+			opaque := []byte{9, 0, 8, 0, 1, 2, 3, 4}
+			other := bytes.Clone(ace)
+			other[len(other)-1] ^= 1
+			original := append([]byte{4, 0, 0, 0, 3, 0, 0, 0}, opaque...)
+			original = append(original, ace...)
+			original = append(original, other...)
+			binary.LittleEndian.PutUint16(original[2:4], uint16(len(original)))
+			acl := (*windows.ACL)(unsafe.Pointer(&original[0]))
+			merged, changed, err := editInheritedProfileACL(acl, sid, form.directory, form.created)
+			if !form.allow {
+				if err == nil || changed {
+					t.Fatal("unexpected workspace ACE accepted")
+				}
+				return
+			}
+			if err != nil || !changed {
+				t.Fatal("known workspace ACE rejected", err)
+			}
+			_, aces, err := aclParts(merged)
+			if err != nil || len(aces) != 2 || !bytes.Equal(aces[0], opaque) || !bytes.Equal(aces[1], other) {
+				t.Fatal("unrelated workspace ACL entries changed", err)
+			}
+			if _, changed, err := editInheritedProfileACL(merged, sid, form.directory, form.created); err != nil || changed {
+				t.Fatal("workspace ACE cleanup is not repeatable", err)
+			}
+		})
+	}
+}
 
 type workspaceProof struct {
 	AppContainer  bool
