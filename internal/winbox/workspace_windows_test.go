@@ -113,12 +113,27 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 	}
 	before := map[string][]byte{}
 	labels := map[string]string{}
+	traceState := func(stage string) {
+		t.Helper()
+		for _, path := range []string{root, child, file} {
+			sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+			if err != nil {
+				t.Fatal(err)
+			}
+			control, _, err := sd.Control()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("workspace descriptor %s %s: control=%#x ACL=%x", stage, filepath.Base(path), control, readObjectACL(t, path))
+		}
+	}
 	for _, path := range []string{root, child, file} {
 		setMediumLabel(t, path)
 		before[path] = readObjectACL(t, path)
 		labels[path] = objectLabel(t, path)
 	}
 	outsideACL := readObjectACL(t, outside)
+	traceState("before")
 	g, err := p.grantWorkspace(context.Background(), root, 64)
 	if g != nil {
 		t.Cleanup(func() {
@@ -130,6 +145,7 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	traceState("admitted")
 	if err := p.Close(); err == nil {
 		t.Fatal("profile deleted before inherited grants were recovered")
 	}
@@ -184,6 +200,7 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 	if err := g.Close(); err != nil {
 		t.Fatal("recover workspace inheritance", err)
 	}
+	traceState("released")
 	if err := g.Close(); err != nil {
 		t.Fatal("repeat workspace release", err)
 	}
