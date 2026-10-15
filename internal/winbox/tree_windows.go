@@ -142,7 +142,9 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 
 func (t *workspaceTree) Close() {
 	for index := len(t.objects) - 1; index >= 0; index-- {
-		windows.CloseHandle(t.objects[index].handle)
+		if t.objects[index].handle != 0 {
+			windows.CloseHandle(t.objects[index].handle)
+		}
 	}
 	t.objects = nil
 	for index := len(t.ancestors) - 1; index >= 0; index-- {

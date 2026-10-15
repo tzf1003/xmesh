@@ -10,6 +10,64 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func Test_WindowsAppContainerIdentityHandleDirectoryRename(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	root := filepath.Join(t.TempDir(), "workspace")
+	dir := filepath.Join(root, "directory")
+	file := filepath.Join(dir, "file.txt")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := openWorkspaceTree(context.Background(), root, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	var objects []treeObject
+	for _, selected := range tree.objects[1:] {
+		h, err := openIdentityObject(tree.ancestors[0], selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { windows.CloseHandle(h) })
+		selected.handle = h
+		objects = append(objects, selected)
+	}
+	// Keep identity/security handles open while dropping only the pathname
+	// descendant opens. The root and ancestor namespace guards remain held.
+	for index := 1; index < len(tree.objects); index++ {
+		windows.CloseHandle(tree.objects[index].handle)
+		tree.objects[index].handle = 0
+	}
+	moved := dir + ".moved"
+	if err := os.Rename(dir, moved); err != nil {
+		t.Fatal("populated directory rename with retained file-ID security handles", err)
+	}
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("replacement"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range objects {
+		actual, err := inspectTreeObject(expected.handle, "")
+		if err != nil || actual.id != expected.id || actual.directory != expected.directory {
+			t.Fatal("file-ID security handle changed after rename/path replacement", err)
+		}
+		if _, err := readObjectSecurity(expected.handle); err != nil {
+			t.Fatal("retained file-ID descriptor access", err)
+		}
+	}
+	if err := os.Rename(root, root+".moved"); err == nil {
+		t.Fatal("file-ID admission released the root binding")
+	}
+}
+
 func Test_WindowsAppContainerObjectIdentityReopen(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
