@@ -28,7 +28,7 @@
 
 Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该机 AppArmor 限制非特权 user namespace：普通用户 L2 验证使用只绑定测试目录中 bwrap 可执行文件、允许 `userns` 的临时 profile，测试结束已卸载。root 下的独立 L2 用例也通过。普通用户结果依赖该临时 profile，部署时须配置对应主机策略。
 
-官方 Tailscale 上的 macOS 与 Linux xmesh 节点均已注册，使用独立 tsnet 状态。当前策略未授予 `tag:device` 相互访问 Agent 端口，双向跨主机工具调用待授权后验证。
+官方 Tailscale 上的 macOS 与 Ubuntu xmesh 节点使用独立 tsnet 状态，双向发现、节点身份、文件读写、exec、PTY owner 和资源清理均已通过。独占节点状态的网络探测确认使用区域 900 `oracle-jp` DERP，且远端 Agent 正常响应。已保存用户授权的 `tag:device → tag:device tcp:7433` 规则；私有 DERP 的系统节点通过定向 ICMP 规则获得 xmesh 节点可见性，客户端校验正常工作。
 
 ## 待实现与待验收
 

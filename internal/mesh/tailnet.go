@@ -19,6 +19,10 @@ import (
 type Tailnet struct{ server *tsnet.Server }
 
 func OpenTailnet(ctx context.Context, c *config.Config, stateDir string) (*Tailnet, error) {
+	return openTailnet(ctx, c, stateDir, nil)
+}
+
+func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf func(string, ...any)) (*Tailnet, error) {
 	key, e := os.ReadFile(c.Mesh.AuthkeyFile)
 	if e != nil {
 		return nil, fmt.Errorf("无法读取 mesh.authkey_file")
@@ -32,7 +36,13 @@ func OpenTailnet(ctx context.Context, c *config.Config, stateDir string) (*Tailn
 	if e = os.Chmod(stateDir, 0700); e != nil {
 		return nil, e
 	}
-	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AuthKey: strings.TrimSpace(string(key)), UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
+	redactedLog := func(string, ...any) {}
+	if logf != nil {
+		redactedLog = func(format string, args ...any) {
+			logf("%s", strings.ReplaceAll(fmt.Sprintf(format, args...), strings.TrimSpace(string(key)), "[REDACTED_SECRET]"))
+		}
+	}
+	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AuthKey: strings.TrimSpace(string(key)), UserLogf: redactedLog, Logf: redactedLog}
 	if _, e = server.Up(ctx); e != nil {
 		_ = server.Close()
 		return nil, fmt.Errorf("tailnet 入网失败: %w", e)

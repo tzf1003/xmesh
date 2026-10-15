@@ -57,6 +57,26 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --json
 
 远端工具名为 `<node.name>/exec.run` 等；本机 Gateway 上为 `local/exec.run`。`sys.info` 返回实际网络身份、角色、重载失败及待重启提示。
 
+两端运行后，可在各自 Gateway 验证对端：
+
+```bash
+python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux
+```
+
+脚本检查发现、身份、文件、exec 和 PTY，最后关闭会话并清理测试文件。配置 PAT 的 Gateway 应使用具备对应 scope 的 MCP 客户端执行同等调用；此脚本面向默认本机访问。
+
+诊断 DERP 时，私有 derper 的客户端校验依赖其系统 tailscaled 能识别连接节点。若日志提示节点不存在，应检查该系统节点的控制面可见性和定向访问策略。网络集成测试会打开指定 tsnet 状态，运行前须停止使用同一状态的 xmesh 进程：
+
+```bash
+XMESH_TEST_TAILNET_CONFIG=/secure/xmesh.yaml \
+XMESH_TEST_TAILNET_STATE=/secure/xmesh-state/network \
+XMESH_TEST_TAILNET_PEER=linux-dev \
+XMESH_TEST_TAILNET_REQUIRE_DERP=1 \
+go test ./internal/mesh -run Test_TailnetPeerConnectivity -v -timeout=60s
+```
+
+测试输出目标设备和实际 disco 路由；`REQUIRE_DERP=1` 要求探测经 DERP，否则也接受直连。`XMESH_TEST_TAILNET_VERBOSE=1` 可开启供应商诊断日志。
+
 ## 本机 Gateway PAT
 
 在 `gateway.pats` 中按凭据名称配置文件和 scope：
