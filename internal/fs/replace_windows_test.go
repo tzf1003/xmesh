@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,31 @@ func Test_WindowsAtomicReplaceOpenReader(t *testing.T) {
 	}
 	if current, err := os.ReadFile(target); err != nil || string(current) != "new complete contents" {
 		t.Fatal("new reader did not see replacement", string(current), err)
+	}
+}
+
+func Test_WindowsAtomicReplaceLongPath(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 3; i++ {
+		root = filepath.Join(root, strings.Repeat("segment", 10))
+	}
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target.txt")
+	if err := atomicWrite(target, []byte("old"), ""); err != nil {
+		t.Fatal(err, errors.Unwrap(err))
+	}
+	reader, err := openRead(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if err := atomicWrite(target, []byte("new"), ""); err != nil {
+		t.Fatal(err, errors.Unwrap(err))
+	}
+	if current, err := readBounded(target, 1024); err != nil || string(current) != "new" {
+		t.Fatal("long path contents", string(current), err)
 	}
 }
 

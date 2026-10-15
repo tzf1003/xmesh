@@ -4,12 +4,18 @@ package fs
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
 
 func openRead(path string) (*os.File, error) {
-	name, err := windows.UTF16PtrFromString(path)
+	native, err := nativePath(path)
+	if err != nil {
+		return nil, err
+	}
+	name, err := windows.UTF16PtrFromString(native)
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}
@@ -20,4 +26,19 @@ func openRead(path string) (*os.File, error) {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}
 	return os.NewFile(uintptr(handle), path), nil
+}
+
+// Win32 calls need an extended absolute path beyond the legacy path limit.
+func nativePath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if len(absolute) < 248 || strings.HasPrefix(absolute, `\\?\`) || strings.HasPrefix(absolute, `\\.\`) {
+		return absolute, nil
+	}
+	if strings.HasPrefix(absolute, `\\`) {
+		return `\\?\UNC\` + absolute[2:], nil
+	}
+	return `\\?\` + absolute, nil
 }

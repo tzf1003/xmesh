@@ -57,7 +57,7 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 			name:      "windows inheritance",
 			inherited: []string{`Path=C:\Windows`, `SystemRoot=C:\Windows`, `UserProfile=C:\Users\tester`, "lang=en", "PRIVATE=value", "=C:=C:\\", "malformed", "HOME=bad\x00value"},
 			windows:   true,
-			want:      []string{"LANG=en", `PATH=C:\Windows`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`},
+			want:      []string{"LANG=en", `PATH=C:\Windows`, `PSMODULEPATH=C:\Windows\System32\WindowsPowerShell\v1.0\Modules`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`},
 		},
 		{
 			name:      "windows search path entries",
@@ -86,7 +86,7 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 			inherited: []string{"PATH=first", "Path=second", "SystemRoot=system"},
 			extra:     map[string]string{"path": "replacement", "systemroot": "override"},
 			windows:   true,
-			want:      []string{"PATH=replacement", "SYSTEMROOT=override"},
+			want:      []string{"PATH=replacement", `PSMODULEPATH=override\System32\WindowsPowerShell\v1.0\Modules`, "SYSTEMROOT=override"},
 		},
 		{
 			name:      "unix case sensitivity",
@@ -128,6 +128,24 @@ func TestEnvironmentSearchPathPolicy(t *testing.T) {
 	}
 	if _, err := e.environment(nil, map[string]string{"PATH": "/usr/bin:/opt/private-tools"}, false); err == nil {
 		t.Fatal("accepted a caller search path containing a denied directory")
+	}
+}
+
+func TestEnvironmentWindowsModulePolicy(t *testing.T) {
+	cfg := config.Policy{}
+	e, _ := New(cfg)
+	got, err := e.environment([]string{`SystemRoot=C:\Windows`, `PSModulePath=C:\Private\Modules`}, map[string]string{"psmodulepath": `C:\Tools\Modules`}, true)
+	if err != nil || !reflect.DeepEqual(got, []string{`PSMODULEPATH=C:\Tools\Modules`, `SYSTEMROOT=C:\Windows`}) {
+		t.Fatal("explicit module path", got, err)
+	}
+	cfg.Env.DenyNames = []string{"PSMODULEPATH"}
+	e, _ = New(cfg)
+	got, err = e.environment([]string{`SystemRoot=C:\Windows`, `PSModulePath=C:\Private\Modules`}, nil, true)
+	if err != nil || !reflect.DeepEqual(got, []string{`SYSTEMROOT=C:\Windows`}) {
+		t.Fatal("module path name policy", got, err)
+	}
+	if _, err := e.environment(nil, map[string]string{"PSModulePath": `C:\Tools\Modules`}, true); err == nil {
+		t.Fatal("accepted a denied explicit module path")
 	}
 }
 

@@ -192,6 +192,14 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 		seen[k] = true
 		env[k] = v
 	}
+	if foldCase && !seen["PSMODULEPATH"] {
+		if root := env["SYSTEMROOT"]; root != "" {
+			modules := strings.TrimRight(root, `\/`) + `\System32\WindowsPowerShell\v1.0\Modules`
+			if !e.denyEnv("PSMODULEPATH", modules) {
+				env["PSMODULEPATH"] = modules
+			}
+		}
+	}
 	keys := []string{}
 	for k := range env {
 		keys = append(keys, k)

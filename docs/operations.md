@@ -160,7 +160,7 @@ Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检
 
 ## 治理与生命周期
 
-exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。Windows 还保留运行时所需的 `WINDIR`、`SYSTEMDRIVE`、`COMSPEC`、`PATHEXT`、`TEMP`、`TMP`、`APPDATA` 和 `LOCALAPPDATA`，同样经过路径过滤。继承的 `PATH` 按平台分隔符逐项过滤，保留其余搜索目录；调用方显式传入的 `PATH` 包含拒绝目录时返回策略错误。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。
+exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。Windows 还保留运行时所需的 `WINDIR`、`SYSTEMDRIVE`、`COMSPEC`、`PATHEXT`、`TEMP`、`TMP`、`APPDATA` 和 `LOCALAPPDATA`，同样经过路径过滤。Windows 的 `PSModulePath` 默认指向 `SystemRoot` 下的 `System32\WindowsPowerShell\v1.0\Modules` 系统模块目录，并经过同一拒绝规则。继承的 `PATH` 按平台分隔符逐项过滤，保留其余搜索目录；调用方显式传入的 `PATH` 包含拒绝目录时返回策略错误。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。
 
 Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 64、单次最长 10 分钟。Agent 的 `sys.info` 免计数。Agent 主体优先采用可信 OAuth client，其余按节点 ID 计数，多个 MCP 会话共享预算。PTY 的设备与 caller 限额之外，同一主体还共享 `max_per_caller` 的 active/orphaned 额度；转移计入接收方额度。
 

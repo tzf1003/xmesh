@@ -4,7 +4,6 @@ package fs
 
 import (
 	"os"
-	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -19,7 +18,11 @@ type renameInfo struct {
 }
 
 func atomicReplace(source, target string) error {
-	name, err := windows.UTF16PtrFromString(source)
+	nativeSource, err := nativePath(source)
+	if err != nil {
+		return err
+	}
+	name, err := windows.UTF16PtrFromString(nativeSource)
 	if err != nil {
 		return err
 	}
@@ -28,7 +31,7 @@ func atomicReplace(source, target string) error {
 		return &os.LinkError{Op: "replace", Old: source, New: target, Err: err}
 	}
 	defer windows.CloseHandle(file)
-	absolute, err := filepath.Abs(target)
+	absolute, err := nativePath(target)
 	if err != nil {
 		return err
 	}

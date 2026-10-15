@@ -119,9 +119,6 @@ func Test_WindowsExecPowerShell(t *testing.T) {
 				case <-time.After(10 * time.Second):
 					_ = cmd.Process.Kill()
 					<-done
-					if !tracked {
-						diagnoseWindowsEnvironment(t, shell, env)
-					}
 					t.Fatalf("PowerShell launch did not complete; output: %q", output.String())
 				}
 				if err != nil || strings.TrimSpace(output.String()) != "hello" {
@@ -129,36 +126,6 @@ func Test_WindowsExecPowerShell(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// Log only candidate variable names and command status when a runtime cannot
-// start with the filtered environment. Values stay in the child environment.
-func diagnoseWindowsEnvironment(t *testing.T, shell string, env []string) {
-	t.Helper()
-	groups := [][]string{
-		{"PSModulePath"},
-		{"ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "CommonProgramFiles(x86)", "ProgramData", "ALLUSERSPROFILE"},
-		{"USERNAME", "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE", "COMPUTERNAME", "HOMEDRIVE", "HOMEPATH", "LOGONSERVER"},
-		{"OS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "NUMBER_OF_PROCESSORS"},
-		{"PATH"},
-	}
-	for _, names := range groups {
-		candidate := append([]string(nil), env...)
-		for _, name := range names {
-			if value, ok := os.LookupEnv(name); ok {
-				candidate = append(candidate, name+"="+value)
-			}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		cmd := osexec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", "Write-Output hello")
-		cmd.Env, cmd.Dir, cmd.Stdin = candidate, t.TempDir(), strings.NewReader("")
-		var output bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &output, &output
-		cmd.WaitDelay = time.Second
-		err := cmd.Run()
-		cancel()
-		t.Logf("runtime environment candidates %v: %v", names, err)
 	}
 }
 
