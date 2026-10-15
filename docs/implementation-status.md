@@ -8,7 +8,7 @@
 | --- | --- |
 | 文件与路径 | 允许目录、别名、软链检查、UTF-8/BOM、原子写入、哈希冲突、精确编辑、删除预检、glob/grep 双引擎及嵌套忽略规则 |
 | 命令 | 公平队列、shared/exclusive、幂等隔离、超时清理、输出分页、L1 策略、Linux bwrap 与 macOS Seatbelt L2 |
-| PTY | 四状态、游标读取、配额、owner、断线孤儿、OAuth client 接管约束、转移串行化、Unix 会话进程组清理、Windows Job Object 进程树清理 |
+| PTY | 四状态、游标读取、配额、owner、断线孤儿、OAuth client 接管约束、转移串行化、Unix 会话进程组清理、Windows Job Object 进程树清理与创建期归属 |
 | 后端 | stdio/HTTP MCP、actor 串行、exclusive fencing lease、空闲回收、故障失效、策略重载保留有效租约 |
 | MCP 多路复用 | 上下游请求映射、通知、进度、sampling 路由、断线取消 |
 | 设备网络 | tsnet 注册与 WhoIs、tag 授权、临时节点内存身份与退出注销、LAN 证书配对与续期、mTLS、mDNS 发现 |

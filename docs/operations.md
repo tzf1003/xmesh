@@ -167,7 +167,7 @@ $env:XMESH_TEST_WINDOWS_SANDBOX = "1"
 go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
 ```
 
-AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。网络拒绝须有 Windows 访问拒绝或网络隔离 API 的缺少 capability 诊断，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
+AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。环回网络拒绝核对 helper 的准确 AppContainer SID，通过 Windows 网络隔离 API 确认该 SID 在探测前后均没有环回豁免，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
 
 ## 治理与生命周期
 
@@ -183,7 +183,7 @@ Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 
 
 `/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使当前进程的 Agent 与 Gateway 进入 drain，控制器须向其他节点分别发送控制消息。重启重置内存 drain 状态。
 
-`install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken`、普通权限运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
+`install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken` 和 `LeastPrivilege` 配置运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
 
 Windows 可用 `install --system` 选择管理员 SCM 服务，默认以 LocalSystem 身份运行于 Session 0；配置、状态和工作目录须允许该账户访问。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
 
@@ -209,7 +209,7 @@ go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s
 
 用例通过 CLI 安装带独立名称的临时 SCM 服务，读回安装参数与账户配置，再以显式本机模式启动实际二进制。验证 LocalSystem SID、Session 0、MCP 文件读写、正常停止与进程/监听退出，最后卸载服务并确认注册项删除。该用例验证本机服务生命周期；生产设备网络连接与用户登录任务仍按对应场景验收。
 
-Windows ConPTY 进程在执行前加入专属 Job Object；shell 自行退出、TERM 宽限结束和 KILL 均清理其后代进程。INT 通过终端输入 Ctrl-C，应用的原始输入模式可能改变其行为。Windows 10 1809 或更新系统上的原生验收：
+Windows ConPTY 进程通过 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 在创建时加入专属 Job Object；shell 自行退出、TERM 宽限结束和 KILL 均清理其后代进程。INT 通过终端输入 Ctrl-C，应用的原始输入模式可能改变其行为。Windows 10 1809 或更新系统上的原生验收：
 
 ```powershell
 $env:XMESH_TEST_WINDOWS_PTY = "1"
@@ -217,6 +217,15 @@ go test ./internal/pty -run WindowsPTY -v -timeout=120s
 ```
 
 该用例检查 Ctrl-C 后继续交互、窗口调整、TERM/KILL/shell 退出后的后台进程清理，以及退出输出读取和重复关闭。
+
+Windows Job 创建期归属的原生回归：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_EXEC = "1"
+go test -race ./internal/winjob -run WindowsJobAtomicAdmission -v -timeout=60s
+```
+
+用例在宿主 `CreateProcess` 返回、子进程仍挂起时直接终止宿主，检查已绑定 Job 的子进程退出；独立对照保留未绑定的挂起子进程，随后按精确进程句柄清理。机制和最低系统版本见 [Windows 进程属性说明](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)。原生结果见 Windows 验收记录。
 
 同机多入口 PTY 原生验收可使用同一 `XMESH_TEST_WINDOWS_PTY` 环境运行 `go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s`。用例覆盖两个入口子进程对两个 Agent 的并发准入、共享状态、转移、孤儿恢复和持久化阻断。
 

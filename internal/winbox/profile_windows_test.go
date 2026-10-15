@@ -15,21 +15,21 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
 )
 
 type isolationProof struct {
-	AppContainer          bool
-	OutsideRead           bool
-	OutsideWrite          bool
-	ParentRead            bool
-	Network               bool
-	NetworkError          string
-	NetworkReason         uint32
-	NetworkDiagnosisError string
-	TokenError            string
-	Capabilities          uint32
-	ParentSecret          bool
+	AppContainer bool
+	SID          string
+	OutsideRead  bool
+	OutsideWrite bool
+	ParentRead   bool
+	Network      bool
+	NetworkError string
+	TokenError   string
+	Capabilities uint32
+	ParentSecret bool
 }
 
 // This opt-in test exercises the Windows kernel boundary using a fresh profile.
@@ -106,14 +106,22 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	accepted.Close()
-	if reason, err := networkIsolationReason("127.0.0.1"); err != nil || reason != 0 {
-		t.Fatal("uncontained network capability control", reason, err)
+	if exempt, err := loopbackExempt(p.sid); err != nil || exempt {
+		t.Fatal("AppContainer loopback policy before connection", exempt, err)
 	}
-	attrs, err := windows.NewProcThreadAttributeList(1)
+	job, err := winjob.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(job)
+	attrs, err := windows.NewProcThreadAttributeList(2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer attrs.Delete()
+	if err := winjob.Apply(attrs, job); err != nil {
+		t.Fatal(err)
+	}
 	if err := p.Apply(attrs); err != nil {
 		t.Fatal(err)
 	}
@@ -147,14 +155,14 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 	if err := json.Unmarshal(body, &proof); err != nil {
 		t.Fatal(err)
 	}
-	if !proof.AppContainer || proof.Capabilities != 0 || proof.TokenError != "" || proof.OutsideRead || proof.OutsideWrite || proof.ParentRead || proof.Network || proof.ParentSecret {
+	if !proof.AppContainer || proof.SID != p.sid.String() || proof.Capabilities != 0 || proof.TokenError != "" || proof.OutsideRead || proof.OutsideWrite || proof.ParentRead || proof.Network || proof.ParentSecret {
 		t.Fatal("AppContainer isolation", proof)
 	}
-	// WFP can silently drop an AppContainer connection. A transport timeout is
-	// accepted only with Windows' explicit missing-capability diagnosis, a live
-	// listener control on both sides, and no accepted sandbox connection.
-	if proof.NetworkDiagnosisError != "" || (proof.NetworkError != "access_denied" && (proof.NetworkReason < 1 || proof.NetworkReason > 3)) {
-		t.Fatal("network failure has no Windows access-control evidence", proof)
+	// Loopback has its own Windows exemption policy, separate from network
+	// capabilities. Require its exact SID policy before and after the connection,
+	// live host controls, and a listener that accepted no sandbox connection.
+	if exempt, err := loopbackExempt(p.sid); err != nil || exempt {
+		t.Fatal("AppContainer loopback policy after connection", exempt, err)
 	}
 	tcp := listener.(*net.TCPListener)
 	if err := tcp.SetDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
@@ -174,7 +182,7 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 		t.Fatal("listener unavailable after sandbox probe", err)
 	}
 	connection.Close()
-	t.Logf("AppContainer network: connection=%s missing_capability=%d; host controls succeeded and listener accepted no sandbox connection", proof.NetworkError, proof.NetworkReason)
+	t.Logf("AppContainer loopback: connection=%s; exact SID has no exemption before/after, host controls succeeded, and listener accepted no sandbox connection", proof.NetworkError)
 	if body, err := os.ReadFile(outside); err != nil || string(body) != "private" {
 		t.Fatal("outside file modified", string(body), err)
 	}
@@ -190,12 +198,18 @@ func Test_WindowsAppContainerHelper(t *testing.T) {
 	var isContainer, size uint32
 	// TOKEN_INFORMATION_CLASS values introduced after TokenLogonSid are not
 	// currently exported by x/sys/windows.
-	const tokenIsAppContainer, tokenCapabilities = 29, 30
+	const tokenIsAppContainer, tokenCapabilities, tokenAppContainerSID = 29, 30, 31
 	err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), tokenIsAppContainer, (*byte)(unsafe.Pointer(&isContainer)), uint32(unsafe.Sizeof(isContainer)), &size)
 	if err != nil {
 		proof.TokenError = err.Error()
 	}
 	proof.AppContainer = isContainer != 0
+	var container [128]uintptr
+	if err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), tokenAppContainerSID, (*byte)(unsafe.Pointer(&container[0])), uint32(unsafe.Sizeof(container)), &size); err != nil {
+		proof.TokenError = err.Error()
+	} else if sid := *(**windows.SID)(unsafe.Pointer(&container[0])); sid != nil {
+		proof.SID = sid.String()
+	}
 	var capabilities struct {
 		Count   uint32
 		Entries [4]windows.SIDAndAttributes
@@ -222,13 +236,6 @@ func Test_WindowsAppContainerHelper(t *testing.T) {
 	} else {
 		proof.NetworkError = err.Error()
 	}
-	host, _, err := net.SplitHostPort(args[1])
-	if err == nil {
-		proof.NetworkReason, err = networkIsolationReason(host)
-	}
-	if err != nil {
-		proof.NetworkDiagnosisError = err.Error()
-	}
 	body, err := json.Marshal(proof)
 	if err != nil {
 		t.Fatal(err)
@@ -238,19 +245,44 @@ func Test_WindowsAppContainerHelper(t *testing.T) {
 	}
 }
 
-func networkIsolationReason(host string) (uint32, error) {
-	diagnose := windows.NewLazySystemDLL("Firewallapi.dll").NewProc("NetworkIsolationDiagnoseConnectFailureAndGetInfo")
-	if err := diagnose.Find(); err != nil {
-		return 0, err
+func loopbackExempt(sid *windows.SID) (bool, error) {
+	config := windows.NewLazySystemDLL("Firewallapi.dll").NewProc("NetworkIsolationGetAppContainerConfig")
+	if err := config.Find(); err != nil {
+		return false, err
 	}
-	server, err := windows.UTF16PtrFromString(host)
-	if err != nil {
-		return 0, err
+	kernel := windows.NewLazySystemDLL("kernel32.dll")
+	heap, _, callErr := kernel.NewProc("GetProcessHeap").Call()
+	if heap == 0 {
+		return false, callErr
 	}
-	var reason uint32
-	result, _, _ := diagnose.Call(uintptr(unsafe.Pointer(server)), uintptr(unsafe.Pointer(&reason)))
+	var count uint32
+	var entries *windows.SIDAndAttributes
+	result, _, _ := config.Call(uintptr(unsafe.Pointer(&count)), uintptr(unsafe.Pointer(&entries)))
+	// The API allocates each SID and the array separately on the process heap.
+	defer func() {
+		if entries == nil {
+			return
+		}
+		free := kernel.NewProc("HeapFree")
+		for _, entry := range unsafe.Slice(entries, count) {
+			if entry.Sid != nil {
+				free.Call(heap, 0, uintptr(unsafe.Pointer(entry.Sid)))
+			}
+		}
+		if entries != nil {
+			free.Call(heap, 0, uintptr(unsafe.Pointer(entries)))
+		}
+	}()
 	if result != 0 {
-		return 0, syscall.Errno(result)
+		return false, syscall.Errno(result)
 	}
-	return reason, nil
+	if count != 0 && entries == nil {
+		return false, errors.New("loopback exemption list missing")
+	}
+	for _, entry := range unsafe.Slice(entries, count) {
+		if entry.Sid != nil && entry.Sid.Equals(sid) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

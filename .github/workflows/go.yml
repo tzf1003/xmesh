@@ -37,7 +37,7 @@ jobs:
         env:
           XMESH_TEST_WINDOWS_EXEC: "1"
           XMESH_TEST_WINDOWS_PTY: "1"
-        run: go test -race ./internal/exec ./internal/pty ./internal/fs -run Windows -v -timeout=180s
+        run: go test -race ./internal/exec ./internal/pty ./internal/fs ./internal/winjob -run Windows -v -timeout=180s
       - name: Windows gateway file visibility regression
         run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=50 -v -timeout=120s
       - name: Windows ingress PTY budget and cross-process admission
