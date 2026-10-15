@@ -198,7 +198,7 @@ func openRelativeObject(parent windows.Handle, name string, shareDelete, caseIns
 	var status windows.IO_STATUS_BLOCK
 	err = windows.NtCreateFile(&handle, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
 		&attributes, &status, nil, 0, share, windows.FILE_OPEN,
-		windows.FILE_OPEN_REPARSE_POINT, 0, 0)
+		windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0)
 	if err != nil {
 		return 0, fmt.Errorf("open AppContainer workspace component: %w", err)
 	}
