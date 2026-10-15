@@ -5,16 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
-	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
-
-// Serialize ACL read/merge/write operations performed by this package. Each
-// release reads the current ACL so changes made between acquire and release
-// survive. External ACL writers must coordinate with the workspace owner.
-var objectACLMutex sync.Mutex
 
 var (
 	reopenObject        = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
@@ -32,6 +26,7 @@ type objectGrant struct {
 	handle    windows.Handle
 	aclHandle windows.Handle
 	ace       []byte
+	id        fileIdentity
 }
 
 func (p *Profile) grantObject(path string) (*objectGrant, error) {
@@ -135,14 +130,17 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 		return nil, fmt.Errorf("AppContainer grant ACE: %v", err)
 	}
 	ace := bytes.Clone(aces[0])
-	objectACLMutex.Lock()
-	defer objectACLMutex.Unlock()
+	lock, err := acquireObjectACL(actual.id, 30000)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
 	if err := setObjectGrant(aclHandle, ace, true); err != nil {
 		return nil, err
 	}
 	p.grants++
 	retained = true
-	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace}, nil
+	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace, id: actual.id}, nil
 }
 
 // Close removes exactly the acquired ACE from the current ACL. Failed releases
@@ -153,8 +151,11 @@ func (g *objectGrant) Close() error {
 	if g.handle == 0 {
 		return nil
 	}
-	objectACLMutex.Lock()
-	defer objectACLMutex.Unlock()
+	lock, err := acquireObjectACL(g.id, 30000)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	if err := setObjectGrant(g.aclHandle, g.ace, false); err != nil {
 		return err
 	}

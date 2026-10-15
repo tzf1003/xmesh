@@ -180,8 +180,11 @@ func (p *Profile) removeInheritedGrant(object treeObject, created bool) error {
 	if p.sid == nil {
 		return fmt.Errorf("AppContainer profile unavailable")
 	}
-	objectACLMutex.Lock()
-	defer objectACLMutex.Unlock()
+	lock, err := acquireObjectACL(object.id, 30000)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	current, err := readObjectSecurity(object.handle)
 	if err != nil {
 		return err
