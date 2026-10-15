@@ -260,12 +260,16 @@ func enumerateDirectory(ctx context.Context, object windows.Handle, visit func(d
 		&attributes, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open directory enumeration handle: %w", err)
 	}
 	defer windows.CloseHandle(handle)
 	// FILE_ID_EXTD_DIR_INFO entries are 8-byte aligned and carry a 128-bit ID.
 	// Each child is opened relative to this exact parent and compared with it.
-	buffer := make([]byte, 64*1024)
+	// Directory-information buffers require 8-byte alignment. A byte array can
+	// be stack allocated at byte alignment, so give the backing store uint64
+	// alignment explicitly on both supported Windows architectures.
+	storage := make([]uint64, 64*1024/8)
+	buffer := unsafe.Slice((*byte)(unsafe.Pointer(&storage[0])), len(storage)*8)
 	class := uint32(windows.FileIdExtdDirectoryRestartInfo)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -276,7 +280,7 @@ func enumerateDirectory(ctx context.Context, object windows.Handle, visit func(d
 			return nil
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("query directory information class %d: %w", class, err)
 		}
 		if err := parseDirectoryEntries(buffer, func(entry directoryEntry) error {
 			if err := ctx.Err(); err != nil {
