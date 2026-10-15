@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/backend"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	runexec "github.com/tzf1003/xmesh/internal/exec"
 	toolsfs "github.com/tzf1003/xmesh/internal/fs"
 	"github.com/tzf1003/xmesh/internal/identity"
+	"github.com/tzf1003/xmesh/internal/lease"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/pty"
 	"github.com/tzf1003/xmesh/internal/toolerr"
@@ -32,15 +34,20 @@ type Principal struct {
 }
 type Authenticate func(*http.Request) (Principal, error)
 type Agent struct {
-	store     *config.Store
-	PTY       *pty.Manager
-	Exec      *runexec.Manager
-	Callers   *identity.Registry
-	mu        sync.Mutex
-	sessions  map[string]identity.Caller
-	servers   map[*mcp.ServerSession]bool
-	fileMu    sync.Mutex
-	closeOnce sync.Once
+	store        *config.Store
+	PTY          *pty.Manager
+	Exec         *runexec.Manager
+	Callers      *identity.Registry
+	Backends     *backend.Manager
+	Leases       *lease.Manager
+	mu           sync.Mutex
+	sessions     map[string]identity.Caller
+	servers      map[*mcp.ServerSession]bool
+	fileMu       sync.Mutex
+	closeOnce    sync.Once
+	views        map[string]*mcp.Server
+	viewMu       sync.Mutex
+	backendNames map[*mcp.Server][]string
 }
 
 func New(store *config.Store) (*Agent, error) {
@@ -56,7 +63,12 @@ func New(store *config.Store) (*Agent, error) {
 		return nil, e
 	}
 	reg := identity.NewRegistry()
-	return &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), Exec: ex, Callers: reg, sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}}, nil
+	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
+	a.Backends = backend.New(c, a.Leases, a.upstream, func() { go a.refreshBackends() })
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	a.Backends.WaitReady(ctx)
+	return a, nil
 }
 func Local(r *http.Request) (Principal, error) {
 	host, _, e := net.SplitHostPort(r.RemoteAddr)
@@ -118,6 +130,7 @@ func (a *Agent) bind(session *mcp.ServerSession, p Principal) identity.Caller {
 			delete(a.sessions, session.ID())
 			delete(a.servers, session)
 			a.mu.Unlock()
+			a.Backends.Disconnect(id)
 		}()
 	}
 	return c
@@ -157,6 +170,13 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 	})
 }
 func (a *Agent) server(p Principal) *mcp.Server {
+	a.viewMu.Lock()
+	defer a.viewMu.Unlock()
+	keyBytes, _ := json.Marshal(p)
+	key := string(keyBytes)
+	if view := a.views[key]; view != nil {
+		return view
+	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "xmesh-agent", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, req *mcp.InitializedRequest) { a.bind(req.Session, p) }})
 	for name, spec := range builtinSpecs() {
 		name, spec := name, spec
@@ -169,6 +189,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 			if !Allowed(cfg, caller, name, "") {
 				return Result(nil, toolerr.New("unauthorized", "调用方的 tag 不允许此工具", "tag", strings.Join(caller.Tags, ","), "tool", name)), nil
 			}
+			a.Backends.Configure(cfg)
 			raw := req.Params.Arguments
 			if len(raw) == 0 {
 				raw = json.RawMessage(`{}`)
@@ -202,6 +223,18 @@ func (a *Agent) server(p Principal) *mcp.Server {
 				out, e = a.Exec.Output(caller.ID, raw)
 			case strings.HasPrefix(name, "pty."):
 				out, e = a.PTY.Call(ctx, caller, resolver, engine, name, raw)
+			case strings.HasPrefix(name, "backend."):
+				var args struct {
+					Name string `json:"name"`
+				}
+				_ = json.Unmarshal(raw, &args)
+				if !Allowed(cfg, caller, args.Name+".*", args.Name) || !backendToolAllowed(cfg, caller, args.Name) {
+					return Result(nil, toolerr.New("unauthorized", "调用方不允许访问此后端", "tag", strings.Join(caller.Tags, ","), "tool", name)), nil
+				}
+				if strings.HasSuffix(caller.ID, "/init") {
+					return Result(nil, toolerr.New("unauthenticated", "租约需要已建立的 MCP 会话")), nil
+				}
+				out, e = a.Backends.Control(ctx, caller.ID, name, raw)
 			}
 			return Result(out, e), nil
 		})
@@ -215,7 +248,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 					cfg := a.store.Get()
 					visible := []*mcp.Tool{}
 					for _, tool := range result.Tools {
-						if Allowed(cfg, caller, tool.Name, "") {
+						if a.toolAllowed(cfg, caller, tool.Name) {
 							visible = append(visible, tool)
 						}
 					}
@@ -225,6 +258,8 @@ func (a *Agent) server(p Principal) *mcp.Server {
 			return result, e
 		}
 	})
+	a.views[key] = server
+	a.installBackends(server, p)
 	return server
 }
 func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) map[string]any {
@@ -246,9 +281,10 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 		workspaces = append(workspaces, row)
 	}
 	backends := []map[string]any{}
+	states := a.Backends.States()
 	for name, b := range c.Agent.Backends {
 		if Allowed(c, caller, "", name) {
-			backends = append(backends, map[string]any{"name": name, "policy": b.Policy, "favorite": b.Favorite, "state": "stopped"})
+			backends = append(backends, map[string]any{"name": name, "policy": b.Policy, "favorite": b.Favorite, "state": states[name]})
 		}
 	}
 	shell, _ := pty.DefaultShell(c.Agent.PTY.DefaultShell)
@@ -272,5 +308,7 @@ func (a *Agent) Close() {
 		}
 		a.PTY.Shutdown()
 		a.Exec.Close()
+		a.Backends.Close()
+		a.Leases.Close()
 	})
 }

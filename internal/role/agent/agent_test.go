@@ -77,7 +77,7 @@ func Test_Gate1_MCPRealHTTP(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(list.Tools) != 22 {
+	if len(list.Tools) != 25 {
 		t.Fatal("tools", len(list.Tools))
 	}
 	for _, name := range []string{"fs.write", "fs.read", "sys.info", "exec.run"} {
