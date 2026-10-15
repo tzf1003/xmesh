@@ -139,9 +139,6 @@ func windowsExecPowerShell(t *testing.T) {
 				case <-time.After(10 * time.Second):
 					_ = cmd.Process.Kill()
 					<-done
-					if !tracked {
-						diagnoseWindowsModuleEnvironment(t, shell, env)
-					}
 					t.Fatalf("PowerShell launch did not complete; output: %q", output.String())
 				}
 				if err != nil || strings.TrimSpace(output.String()) != "hello" {
@@ -149,42 +146,6 @@ func windowsExecPowerShell(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// Compare module paths and variable casing using the same filtered environment.
-// Diagnostics report labels and status; environment values stay in the child.
-func diagnoseWindowsModuleEnvironment(t *testing.T, shell string, env []string) {
-	t.Helper()
-	base := make([]string, 0, len(env))
-	var system string
-	for _, entry := range env {
-		key, value, _ := strings.Cut(entry, "=")
-		if strings.EqualFold(key, "PSModulePath") {
-			system = value
-		} else {
-			base = append(base, entry)
-		}
-	}
-	type candidate struct{ label, key, value string }
-	candidates := []candidate{
-		{"system-canonical-name", "PSModulePath", system},
-		{"inherited-uppercase-name", "PSMODULEPATH", os.Getenv("PSModulePath")},
-		{"inherited-canonical-name", "PSModulePath", os.Getenv("PSModulePath")},
-	}
-	for index, entry := range filepath.SplitList(os.Getenv("PSModulePath")) {
-		candidates = append(candidates, candidate{"inherited-entry-" + strconv.Itoa(index), "PSModulePath", entry})
-	}
-	for _, candidate := range candidates {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		cmd := osexec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-Command", "Write-Output hello")
-		cmd.Env = append(append([]string(nil), base...), candidate.key+"="+candidate.value)
-		cmd.Dir, cmd.Stdin, cmd.WaitDelay = t.TempDir(), strings.NewReader(""), time.Second
-		var output bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &output, &output
-		err := cmd.Run()
-		cancel()
-		t.Logf("module environment %s: status=%v hello=%t", candidate.label, err, strings.TrimSpace(output.String()) == "hello")
 	}
 }
 

@@ -29,7 +29,7 @@
 
 Claude Code 连上本机 URL，完成一次 `fs.read`、一次 `fs.write`、一次 `pty.open` + `pty.write` + `pty.read`。这是门 1 的人工观察，不代替上表的单元测试。
 
-Windows Server 2025 的原生进程、ConPTY 与文件测试结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。Windows PowerShell 5.1 启动和对应 HTTP MCP 集成仍待修复，门 1 的 Windows 全量验收尚未通过。
+Windows Server 2025 的原生进程、ConPTY、文件及 HTTP MCP 测试已通过，证据见 [Windows 验收记录](validation/2026-10-15-windows.md)。Claude Code 连接与目标用户登录会话仍按各自场景验收。
 
 ## 门 2 · 阶段 2 后端与并发
 
