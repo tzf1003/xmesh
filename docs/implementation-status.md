@@ -147,3 +147,9 @@ AppContainer helper 和存活后代用例已接入该追踪器，系统 console 
 
 
 `d15b8e6` 的 push `38811272065` 与 PR `38811278114` 通过三平台常规与契约，但原生 job `116684808965` / `116684831396` 的完整清单检查发现额外累计成员：根与后代为 `assigned=3 retained=2`，单 AppContainer helper 为 `assigned=2 retained=1`。挂起成员的退出信号、取消和查询拒绝用例已通过。新增原生诊断在启动前绑定 Job completion port，记录成员创建/退出事件与可查询的映像文件名，并对运行及挂起后恢复的单进程读取 Job 清单和计数；用于核实额外成员来源，当前完整进程清单与生产协调器仍继续实现，L2 门禁保持。
+
+## Job 成员追踪原生验收通过
+
+`c39e012` 的 [push 工作流 38813706311](https://github.com/tzf1003/xmesh/actions/runs/38813706311) 与 [PR 工作流 38813712623](https://github.com/tzf1003/xmesh/actions/runs/38813712623) 均通过三平台全量 race、vet、构建和完整 Windows 原生回归；契约工作流 `38813706361` / `38813712792` 通过。原生 job `116692997828` / `116693021271` 的完整日志各确认 107 个独立 Job/AppContainer PASS 标记。Job 退出确认三子例、成员观察 guard 三子例、运行及挂起后恢复的成员诊断均通过；漏通知用例同时保留期限与清单不完整错误，挂起成员保持存活。AppContainer 真实隔离、工作树新对象、目录改名、准确 DACL/控制位/标签恢复、其他 profile 保持及三种工作区强退恢复均通过。
+
+本阶段完成单 Job 成员身份追踪与退出确认原语的原生验收。生产执行协调器仍须跨宿主异常退出确认全部 profile Job、持续控制准入，并保持完整新对象持久追踪及外部 ACL/namespace/reparse 写入协调；exec/ConPTY L2 接入继续实现，生产 Windows L2 保持 `sandbox.unavailable`。
