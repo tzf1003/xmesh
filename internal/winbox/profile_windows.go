@@ -33,13 +33,15 @@ type securityCapabilities struct {
 // Profile owns a fresh AppContainer identity and its private data directory.
 // Callers must reap launched processes and release object grants before closing.
 type Profile struct {
-	mu        sync.Mutex
-	name      *uint16
-	sid       *windows.SID
-	directory string
-	grants    int
-	journal   *grantJournal
-	deleted   bool
+	mu                          sync.Mutex
+	name                        *uint16
+	sid                         *windows.SID
+	directory                   string
+	grants                      int
+	journal                     *grantJournal
+	deleted                     bool
+	processes                   *executionProcesses
+	standaloneProcessAttributes bool
 }
 
 func hresult(operation string, result uintptr) error {
@@ -128,8 +130,15 @@ func (p *Profile) Directory() string { return p.directory }
 // launch. The attribute list retains the structure until CreateProcess returns.
 // Keep the profile alive until all processes using its identity have exited.
 func (p *Profile) Apply(attributes *windows.ProcThreadAttributeListContainer) error {
+	return p.applyProcess(attributes, nil)
+}
+
+func (p *Profile) applyProcess(attributes *windows.ProcThreadAttributeListContainer, owner *executionProcesses) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.processes != owner {
+		return fmt.Errorf("AppContainer process launch belongs to another execution owner")
+	}
 	if p.sid == nil || p.deleted || attributes == nil {
 		return fmt.Errorf("AppContainer profile or attribute list unavailable")
 	}
@@ -137,7 +146,13 @@ func (p *Profile) Apply(attributes *windows.ProcThreadAttributeListContainer) er
 		return fmt.Errorf("AppContainer journal is unavailable for process launch")
 	}
 	capabilities := &securityCapabilities{AppContainerSID: p.sid}
-	return attributes.Update(securityCapabilitiesAttribute, unsafe.Pointer(capabilities), unsafe.Sizeof(*capabilities))
+	err := attributes.Update(securityCapabilitiesAttribute, unsafe.Pointer(capabilities), unsafe.Sizeof(*capabilities))
+	if err == nil && owner == nil {
+		// Standalone attributes can outlive this call and create untracked
+		// processes. Such a profile cannot later adopt a managed owner.
+		p.standaloneProcessAttributes = true
+	}
+	return err
 }
 
 // Close deletes the owned profile and its data. A deletion failure can be
@@ -147,6 +162,9 @@ func (p *Profile) Close() error {
 	defer p.mu.Unlock()
 	if p.sid == nil {
 		return nil
+	}
+	if p.processes != nil {
+		return fmt.Errorf("AppContainer profile retains an execution process owner")
 	}
 	if p.grants != 0 {
 		return fmt.Errorf("AppContainer profile retains %d object grants", p.grants)

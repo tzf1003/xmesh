@@ -153,3 +153,11 @@ AppContainer helper 和存活后代用例已接入该追踪器，系统 console 
 `c39e012` 的 [push 工作流 38813706311](https://github.com/tzf1003/xmesh/actions/runs/38813706311) 与 [PR 工作流 38813712623](https://github.com/tzf1003/xmesh/actions/runs/38813712623) 均通过三平台全量 race、vet、构建和完整 Windows 原生回归；契约工作流 `38813706361` / `38813712792` 通过。原生 job `116692997828` / `116693021271` 的完整日志各确认 107 个独立 Job/AppContainer PASS 标记。Job 退出确认三子例、成员观察 guard 三子例、运行及挂起后恢复的成员诊断均通过；漏通知用例同时保留期限与清单不完整错误，挂起成员保持存活。AppContainer 真实隔离、工作树新对象、目录改名、准确 DACL/控制位/标签恢复、其他 profile 保持及三种工作区强退恢复均通过。
 
 本阶段完成单 Job 成员身份追踪与退出确认原语的原生验收。生产执行协调器仍须跨宿主异常退出确认全部 profile Job、持续控制准入，并保持完整新对象持久追踪及外部 ACL/namespace/reparse 写入协调；exec/ConPTY L2 接入继续实现，生产 Windows L2 保持 `sandbox.unavailable`。
+
+## 活动 profile 的统一进程寿命
+
+新增内部 `executionProcesses` 活动 profile 进程所有者：单 profile 同时仅允许一个受管所有者，最多保留 256 个启动 Job；独立属性入口使用过的 profile 不能再采用受管模式，活动所有者期间也拒绝独立属性入口。每次启动在独占准入门内创建专属 kill-on-close Job 与成员观察器，创建期绑定 AppContainer/Job，根进程先挂起，由 `RetainProcess` 核实归属并复制非继承同步/查询句柄后恢复。参数、环境与取消检查先于实际创建，调用方持有返回的根进程/线程句柄。
+
+回收先关闭所有启动准入，对全部 Job 发出终止请求，再逐项核对完整成员清单、活动归零及退出信号；等待含准入门竞争均支持取消和 30 秒总上限。取消前不改变准入或终止进程；部分终止或确认失败保留全部 Job/census 及 profile 引用供重试，profile 删除和所有者释放均拒绝。确认成功后所有者句柄释放与 profile 删除分别执行，ACL/journal/外部 writer guards 的寿命由调用方继续保持。该所有者属于当前宿主的进程寿命管理；跨宿主异常退出恢复仍待实现。
+
+AppContainer 工作区 helper 已通过该入口创建和回收。新增原生组合用例覆盖已退出根的存活后代、第二个启动 Job、限额、准入等待取消、终止前取消、一个真实无效 Job 句柄导致的部分失败与独立 Job 继续清理、保留 profile 后重试、准确退出码、独立存活对照、封闭后拒绝和重复释放；根身份用例覆盖外部成员拒绝、取消、重复通知/固定及来源句柄关闭后的独立身份寿命。本地全量 race/vet、Windows amd64/arm64 vet 和 amd64 测试编译通过，Windows 原生验收待 CI。生产执行协调器仍须实现异常宿主恢复、完整新对象持久追踪、外部 ACL/命名空间/reparse 写入协调和 exec/ConPTY 接入；生产 Windows L2 保持 `sandbox.unavailable`。

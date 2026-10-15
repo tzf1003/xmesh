@@ -45,6 +45,35 @@ func Test_WindowsJobCensusGuards(t *testing.T) {
 		}
 		assertDrainProcessAlive(t, process.Process)
 	})
+	t.Run("retain-root", func(t *testing.T) {
+		job, census := newDrainCensus(t)
+		foreign := startDrainProcess(t, 0, "member", "unused", true)
+		if err := census.RetainProcess(context.Background(), foreign.Process); !errors.Is(err, ErrIncompleteProcessSet) {
+			t.Fatal("foreign root accepted", err)
+		}
+		process := startDrainProcess(t, job, "member", "unused", true)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := census.RetainProcess(ctx, process.Process); !errors.Is(err, context.Canceled) {
+			t.Fatal("cancelled root retention", err)
+		}
+		var source windows.Handle
+		if err := windows.DuplicateHandle(windows.CurrentProcess(), process.Process, windows.CurrentProcess(), &source, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
+			t.Fatal(err)
+		}
+		err := census.RetainProcess(context.Background(), source)
+		closeErr := windows.CloseHandle(source)
+		if err != nil || closeErr != nil {
+			t.Fatal(err, closeErr)
+		}
+		if err := census.RetainProcess(context.Background(), process.Process); err != nil {
+			t.Fatal("duplicate root notification/retention", err)
+		}
+		if err := census.TerminateAndWait(context.Background(), 79); err != nil {
+			t.Fatal("source handle release invalidated retained root", err)
+		}
+		assertDrainProcessAlive(t, foreign.Process)
+	})
 	t.Run("missing-notification", func(t *testing.T) {
 		job, census := newDrainCensus(t)
 		// Remove the association before admission to emulate a notification

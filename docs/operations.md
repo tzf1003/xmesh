@@ -270,3 +270,7 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 
 内部 `NewProcessCensus` 在空私有 Job 准入前收集并保留真实成员句柄，包含系统自动加入的 console host；通知 PID 按 Job 归属核实，句柄保留至确认及资源回收结束。普通通知可能丢失，累计分配数与保留身份清单不一致时，确认返回错误并保持恢复义务。调用方须停止所有新准入；Close 仅释放观察器资源，不能代替退出确认或 ACL/profile 回收，且其独立 Job 句柄参与最后句柄关闭时的终止策略。生产协调器接入继续验收。
+
+### Windows 活动执行进程所有者
+
+内部 `executionProcesses` 为一个活动 profile 管理有界启动 Job 集合，串行化创建与准入封闭。根进程创建时绑定 Job/AppContainer，并在恢复前固定身份句柄；回收先向全部 Job 请求终止，再确认完整清单与所有退出信号。部分失败继续保留所有者及 profile 引用，须重试成功后释放句柄；`Profile.Close` 会拒绝尚有进程所有者的 profile。使用过独立启动属性的 profile 不能转入该受管模式。ACL/journal 与外部 writer guards 须由调用方保持到回收完成。该入口已用于 AppContainer 工作区 helper；异常宿主恢复、完整新对象追踪、外部 ACL/命名空间/reparse 写入协调及 exec/ConPTY 接入仍待完成，生产 Windows L2 继续返回 `sandbox.unavailable`。

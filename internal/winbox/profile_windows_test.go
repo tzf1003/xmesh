@@ -125,6 +125,9 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 	if err := p.Apply(attrs); err != nil {
 		t.Fatal(err)
 	}
+	if owner, err := newExecutionProcesses(p, 1); owner != nil || err == nil {
+		t.Fatal("standalone process attributes adopted by a managed owner", err)
+	}
 	startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
 	command, err := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{helper, "-test.run=^Test_WindowsAppContainerHelper$", "--", outside, listener.Addr().String(), strconv.Itoa(os.Getpid())}))
 	if err != nil {

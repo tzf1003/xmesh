@@ -144,6 +144,55 @@ func (c *ProcessCensus) capture(pid uint32) {
 	c.processes[pid] = process
 }
 
+// RetainProcess pins a newly created, still-suspended root before it can run.
+// The caller keeps its source handle live through this call. The observer owns
+// an independent non-inheritable duplicate; notification delivery may overlap.
+func (c *ProcessCensus) RetainProcess(ctx context.Context, process windows.Handle) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	select {
+	case c.operation <- struct{}{}:
+		defer func() { <-c.operation }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return windows.ERROR_INVALID_HANDLE
+	}
+	if c.err != nil {
+		return c.err
+	}
+	pid, err := windows.GetProcessId(process)
+	if err != nil {
+		return err
+	}
+	var member int32
+	ok, _, callErr := isProcessInJob.Call(uintptr(process), uintptr(c.job), uintptr(unsafe.Pointer(&member)))
+	if ok == 0 {
+		return callErr
+	}
+	if member == 0 {
+		return fmt.Errorf("%w: supplied process is outside observed job", ErrIncompleteProcessSet)
+	}
+	if _, exists := c.processes[pid]; exists {
+		return nil
+	}
+	if len(c.processes) >= 10000 {
+		return ErrIncompleteProcessSet
+	}
+	var owned windows.Handle
+	if err := windows.DuplicateHandle(windows.CurrentProcess(), process, windows.CurrentProcess(), &owned, windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, 0); err != nil {
+		return err
+	}
+	c.processes[pid] = owned
+	return nil
+}
+
 // WaitEmpty applies the same admission/quiescence conditions as the package
 // function, using the observer's owned identity handles. Only this Job is proven.
 func (c *ProcessCensus) WaitEmpty(ctx context.Context) error { return c.confirm(ctx, false, 0) }

@@ -7,13 +7,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
-	"unicode/utf16"
 	"unsafe"
 
-	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
 )
 
@@ -230,67 +227,26 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	t.Helper()
 	output := filepath.Join(p.Directory(), "object-proof.json")
 	_ = os.Remove(output)
-	job, err := winjob.New()
+	owner, err := newExecutionProcesses(p, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	census, err := winjob.NewProcessCensus(job)
-	if err != nil {
-		_ = windows.CloseHandle(job)
-		t.Fatal(err)
-	}
-	var process windows.ProcessInformation
 	defer func() {
-		defer func() {
-			if err := census.Close(); err != nil {
-				t.Error("AppContainer helper census close", err)
-			}
-		}()
-		if process.Process == 0 {
-			_ = windows.CloseHandle(job)
-			return
-		}
-		defer windows.CloseHandle(process.Process)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		defer windows.CloseHandle(job)
-		// No further process admission occurs in this fixture. Confirm every
-		// member has exited before callers reclaim workspace grants/profile.
-		if err := census.TerminateAndWait(ctx, 1); err != nil {
-			t.Fatal("AppContainer helper process tree cleanup", err)
+		if err := owner.reap(ctx, 1); err != nil {
+			t.Fatal("AppContainer helper process owner reaping", err)
+		}
+		if err := owner.Close(); err != nil {
+			t.Fatal("AppContainer helper process owner close", err)
 		}
 	}()
-	attrs, err := windows.NewProcThreadAttributeList(2)
+	process, err := owner.start(context.Background(), []string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer attrs.Delete()
-	if err := winjob.Apply(attrs, job); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.Apply(attrs); err != nil {
-		t.Fatal(err)
-	}
-	startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
-	command, err := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir, _ := windows.UTF16PtrFromString(p.Directory())
-	env, err := Environment([]string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
-	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
-	if err := windows.CreateProcess(nil, command, nil, nil, false, flags, &block[0], dir, &startup.StartupInfo, &process); err != nil {
-		t.Fatal(err)
-	}
+	defer windows.CloseHandle(process.Process)
 	defer windows.CloseHandle(process.Thread)
-	defer func() {
-		windows.TerminateProcess(process.Process, 1)
-		windows.WaitForSingleObject(process.Process, 10000)
-	}()
 	if result, err := windows.WaitForSingleObject(process.Process, 30000); err != nil || result != windows.WAIT_OBJECT_0 {
 		t.Fatal("object helper wait", result, err)
 	}
