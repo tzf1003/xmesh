@@ -74,9 +74,12 @@ func Test_WindowsExecLaunchContract(t *testing.T) {
 	defer m.Close()
 	arguments := []string{"", "空 格", `a"b`, `a\\`, `end space \\`}
 	input := "输入\x00data\n" + strings.Repeat("abc", 4096)
-	raw, _ := json.Marshal(Object{"cmd": `.\helper`, "args": helperArgs("proof", arguments...), "stdin": input, "env": map[string]string{"XMESH_PROOF": "子环境"}})
+	raw, _ := json.Marshal(Object{"cmd": `.\helper`, "args": helperArgs("proof", arguments...), "stdin": input, "env": map[string]string{"PROOF_VALUE": "子环境"}})
 	result, err := m.Run(context.Background(), "test", r, p, raw)
 	if err != nil || result["exit_code"] != 37 || result["stderr"] != "proof-stderr" {
+		if failure, ok := err.(*toolerr.Error); ok {
+			t.Fatal(result, failure.Object())
+		}
 		t.Fatal(result, err)
 	}
 	var proof struct {
@@ -348,7 +351,7 @@ func Test_WindowsExecHelper(t *testing.T) {
 		proof := struct {
 			Arguments                              []string
 			Directory, Input, Environment, Private string
-		}{args[1:], directory, string(input), os.Getenv("XMESH_PROOF"), os.Getenv("XMESH_PARENT_PRIVATE")}
+		}{args[1:], directory, string(input), os.Getenv("PROOF_VALUE"), os.Getenv("XMESH_PARENT_PRIVATE")}
 		if err := json.NewEncoder(os.Stdout).Encode(proof); err != nil {
 			os.Exit(22)
 		}
