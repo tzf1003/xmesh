@@ -158,6 +158,17 @@ python3 scripts/smoke_local.py --binary bin/xmesh --isolation L2 --pat --shell /
 
 Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检查 `.ssh`、`.config/gcloud`、`.azure` 和 `.aws`，包括已存在的符号链接目标。工作目录中的既有硬链接仍共享主机 inode；部署时应使用独立工作目录。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要额外的生命周期约束。Windows 当前配置 L2 时拒绝命令和终端启动。
 
+## Windows L2
+
+当前 Windows exec 与 PTY 的 L2 请求返回 `sandbox.unavailable`。`internal/winbox` 提供独立 AppContainer profile、能力为空的启动属性和 profile 删除原语；真实工作目录绑定、exec/ConPTY 接入及异常退出回收仍在实现。其原生核验使用临时 profile，在 Windows 会话中执行：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_SANDBOX = "1"
+go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
+```
+
+该用例验证 profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。网络拒绝必须由 Windows 返回访问拒绝，连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
+
 ## 治理与生命周期
 
 exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。Windows 还保留运行时所需的 `WINDIR`、`SYSTEMDRIVE`、`COMSPEC`、`PATHEXT`、`TEMP`、`TMP`、`APPDATA`、`LOCALAPPDATA` 和 `ProgramFiles`，同样经过路径过滤。Windows 保留 `PSModulePath` 中经过拒绝规则的模块目录；缺少该值且 SystemRoot 可用时传入空值，由所启动的 PowerShell 运行时初始化模块目录；拒绝变量名的策略仍然生效。继承的 `PATH` 和 Windows `PSModulePath` 按平台分隔符逐项过滤，保留其余搜索目录；调用方显式传入的搜索路径包含拒绝目录时返回策略错误。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。

@@ -30,6 +30,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/go.yml
       - name: Windows native process, terminal, and file regression
         env:
           XMESH_TEST_WINDOWS_EXEC: "1"
@@ -59,3 +62,8 @@ jobs:
           }
           $env:XMESH_TEST_WINDOWS_USER_SERVICE = '1'
           go test -race ./cmd/xmesh -run WindowsUserTaskRuntime -v -timeout=90s
+      - name: Windows AppContainer isolation primitive
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s

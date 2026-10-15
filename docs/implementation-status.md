@@ -51,7 +51,7 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 | 项目 | 当前边界 |
 | --- | --- |
 | 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过，跨主机入口协调待实现 |
-| Windows L2 | 当前请求 L2 会拒绝执行；受限 token 沙箱待实现 |
+| Windows L2 | 当前请求 L2 会拒绝执行；AppContainer profile 与启动属性原语已加入，通过 Windows amd64/arm64 vet 与 amd64 交叉编译，原生隔离待 CI；工作目录绑定、exec/ConPTY 接入与异常退出回收待实现 |
 | 原生 Windows | Server 2025 的 ConPTY、进程清理、文件、PowerShell 5.1/7、HTTP MCP 及本机模式 SCM 生命周期已验证；用户任务的登录触发、目标会话与生产服务设备网络待验收，其他 Windows 版本待验证 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |
