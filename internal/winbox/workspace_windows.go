@@ -30,8 +30,8 @@ type workspaceGrant struct {
 // directory. A result accompanying an error owns incomplete cleanup and must be
 // retained for Close retry. No sandbox may run until admission succeeds.
 func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects int) (*workspaceGrant, error) {
-	if p.journal != nil {
-		return nil, fmt.Errorf("AppContainer journaled workspace requires inherited recovery integration")
+	if p.journal != nil && maxObjects > 10000 {
+		return nil, fmt.Errorf("AppContainer journaled workspace object limit exceeds 10000")
 	}
 	tree, err := openWorkspaceTree(ctx, path, maxObjects)
 	if err != nil {
@@ -48,11 +48,25 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 		return nil, err
 	}
 	p.mu.Lock()
-	if p.sid == nil || p.grants != 0 {
+	if p.sid == nil || p.deleted || p.grants != 0 {
 		p.mu.Unlock()
 		tree.Close()
 		closeCredentialHandles(credentials)
 		return nil, fmt.Errorf("AppContainer workspace requires an available exclusive profile")
+	}
+	if p.journal != nil {
+		snapshot := &journalWorkspace{Path: path}
+		for _, object := range tree.objects {
+			snapshot.Objects = append(snapshot.Objects, journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory})
+		}
+		snapshot.Root = snapshot.Objects[0]
+		_, err = p.journal.append(journalRecord{Kind: "workspace", Workspace: snapshot})
+		if err != nil {
+			p.mu.Unlock()
+			tree.Close()
+			closeCredentialHandles(credentials)
+			return nil, err
+		}
 	}
 	// This reference also covers future inherited ACEs, independently of the
 	// selected grants. It is released only after complete tree cleanup.
@@ -142,6 +156,40 @@ func (g *workspaceGrant) Close() error {
 	if g.tree == nil {
 		return nil
 	}
+	if g.profile.journal != nil {
+		g.profile.mu.Lock()
+		// Recovery owns the complete snapshot, including a write-ahead intent
+		// whose kernel edit failed before an objectGrant could be returned.
+		if err := releaseJournalWorkspace(g.profile.journal, g.profile.sid, g.maxObjects); err != nil {
+			g.profile.mu.Unlock()
+			return err
+		}
+		// Descriptors and durable acknowledgements are already committed. Close
+		// each live reference without issuing a second release record.
+		for _, grant := range g.selected.grants {
+			if grant.handle == 0 {
+				continue
+			}
+			windows.CloseHandle(grant.aclHandle)
+			windows.CloseHandle(grant.handle)
+			grant.aclHandle, grant.handle = 0, 0
+			g.profile.grants--
+		}
+		g.profile.mu.Unlock()
+	} else if err := g.closeUnjournaled(); err != nil {
+		return err
+	}
+	g.tree.Close()
+	g.tree = nil
+	closeCredentialHandles(g.credentials)
+	g.credentials = nil
+	g.profile.mu.Lock()
+	g.profile.grants--
+	g.profile.mu.Unlock()
+	return nil
+}
+
+func (g *workspaceGrant) closeUnjournaled() error {
 	if err := g.selected.Close(); err != nil {
 		return err
 	}
@@ -167,13 +215,6 @@ func (g *workspaceGrant) Close() error {
 	if result != nil {
 		return result
 	}
-	g.tree.Close()
-	g.tree = nil
-	closeCredentialHandles(g.credentials)
-	g.credentials = nil
-	g.profile.mu.Lock()
-	g.profile.grants--
-	g.profile.mu.Unlock()
 	return nil
 }
 

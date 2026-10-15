@@ -189,3 +189,89 @@ func TestGrantJournalFailedWritePoisonsOwner(t *testing.T) {
 		t.Fatal("failed journal write did not poison the owner", err)
 	}
 }
+
+func TestGrantJournalWorkspaceReleaseObligation(t *testing.T) {
+	j, path := journalFixture(t)
+	if _, err := j.append(journalProfile()); err != nil {
+		t.Fatal(err)
+	}
+	root := journalObject{Volume: 17, ID: [16]byte{1}, Directory: true}
+	file := journalTestGrant().Grant.Object
+	w := &journalWorkspace{Path: `C:\workspace`, Root: root, Objects: []journalObject{root, file}}
+	if _, err := j.append(journalRecord{Kind: "workspace-released"}); err == nil {
+		t.Fatal("workspace release accepted before snapshot")
+	}
+	if _, err := j.append(journalRecord{Kind: "workspace", Workspace: w}); err != nil {
+		t.Fatal(err)
+	}
+	w.Objects[1].ID[0]++
+	if j.records[1].Workspace.Objects[1] != file {
+		t.Fatal("caller mutated durable workspace snapshot")
+	}
+	if _, err := j.append(journalRecord{Kind: "complete"}); err == nil {
+		t.Fatal("workspace completed before inheritance cleanup")
+	}
+	invalid := journalTestGrant()
+	invalid.Grant.Object.ID[0]++
+	if _, err := j.append(invalid); err == nil {
+		t.Fatal("grant outside snapshot accepted")
+	}
+	sequence, err := j.append(journalTestGrant())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.append(journalTestGrant()); err == nil {
+		t.Fatal("duplicate snapshot grant accepted")
+	}
+	if _, err := j.append(journalRecord{Kind: "workspace-released"}); err == nil {
+		t.Fatal("inheritance cleanup accepted with pending explicit grants")
+	}
+	if _, err := j.append(journalRecord{Kind: "released", GrantSequence: sequence}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.append(journalRecord{Kind: "complete"}); err == nil {
+		t.Fatal("explicit cleanup discarded inheritance obligation")
+	}
+	if _, err := j.append(journalRecord{Kind: "workspace-released"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.append(journalRecord{Kind: "workspace-released"}); err == nil {
+		t.Fatal("duplicate workspace acknowledgement accepted")
+	}
+	if _, err := j.append(journalTestGrant()); err == nil {
+		t.Fatal("grant accepted after workspace cleanup")
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	recovered, err := loadGrantJournal(f)
+	if err != nil || !recovered.state.workspaceReleased || recovered.state.complete {
+		t.Fatal("workspace acknowledgement not durably restored", err)
+	}
+	if _, err := recovered.append(journalRecord{Kind: "complete"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGrantJournalWorkspaceMustPrecedeGrants(t *testing.T) {
+	j, _ := journalFixture(t)
+	if _, err := j.append(journalProfile()); err != nil {
+		t.Fatal(err)
+	}
+	sequence, err := j.append(journalTestGrant())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.append(journalRecord{Kind: "released", GrantSequence: sequence}); err != nil {
+		t.Fatal(err)
+	}
+	root := journalObject{Volume: 17, ID: [16]byte{1}, Directory: true}
+	if _, err := j.append(journalRecord{Kind: "workspace", Workspace: &journalWorkspace{Path: `C:\workspace`, Root: root, Objects: []journalObject{root}}}); err == nil {
+		t.Fatal("workspace snapshot accepted after an explicit grant lifetime")
+	}
+}

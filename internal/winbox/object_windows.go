@@ -66,8 +66,22 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	if p.sid == nil || p.deleted {
 		return nil, fmt.Errorf("AppContainer profile unavailable")
 	}
-	if p.journal != nil && inheritChildren {
-		return nil, fmt.Errorf("AppContainer journaled inheritance requires workspace recovery integration")
+	if p.journal != nil {
+		if p.journal.state.workspaceReleased {
+			return nil, fmt.Errorf("AppContainer journaled workspace already released")
+		}
+		if p.journal.state.workspace {
+			selected := journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory}
+			found := false
+			for _, admitted := range p.journal.records[1].Workspace.Objects {
+				found = found || selected == admitted
+			}
+			if !found || inheritChildren != object.directory {
+				return nil, fmt.Errorf("AppContainer grant does not match journal workspace snapshot")
+			}
+		} else if inheritChildren {
+			return nil, fmt.Errorf("AppContainer journaled inheritance requires workspace snapshot")
+		}
 	}
 	if err := reopenObject.Find(); err != nil {
 		return nil, err

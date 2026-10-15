@@ -61,10 +61,13 @@ type journalRecord struct {
 }
 
 type journalState struct {
-	profile   bool
-	workspace bool
-	complete  bool
-	pending   map[uint64]bool
+	profile           bool
+	workspace         bool
+	workspaceReleased bool
+	complete          bool
+	pending           map[uint64]bool
+	objects           map[journalObject]bool
+	granted           map[journalObject]bool
 }
 
 // Check transitions before writing and during replay. Recovery integration must
@@ -83,7 +86,7 @@ func (s *journalState) accept(r journalRecord) error {
 		s.profile = true
 		s.pending = make(map[uint64]bool)
 	case "workspace":
-		if !s.profile || s.workspace || len(s.pending) != 0 || profileFields || r.Grant != nil || r.GrantSequence != 0 || r.Workspace == nil {
+		if !s.profile || s.workspace || r.Sequence != 2 || len(s.pending) != 0 || profileFields || r.Grant != nil || r.GrantSequence != 0 || r.Workspace == nil {
 			return fmt.Errorf("invalid journal workspace intent")
 		}
 		w := r.Workspace
@@ -98,13 +101,24 @@ func (s *journalState) accept(r journalRecord) error {
 			seen[object.ID] = true
 		}
 		s.workspace = true
+		s.objects = make(map[journalObject]bool, len(w.Objects))
+		s.granted = make(map[journalObject]bool)
+		for _, object := range w.Objects {
+			s.objects[object] = true
+		}
 	case "grant":
-		if !s.profile || profileFields || r.Workspace != nil || r.GrantSequence != 0 || r.Grant == nil || !validJournalObject(r.Grant.Object) {
+		if !s.profile || s.workspaceReleased || profileFields || r.Workspace != nil || r.GrantSequence != 0 || r.Grant == nil || !validJournalObject(r.Grant.Object) {
 			return fmt.Errorf("invalid journal grant intent")
 		}
 		ace := r.Grant.ACE
 		if len(ace) < 16 || len(ace) > 65535 || len(ace)%4 != 0 || ace[0] != 0 || int(binary.LittleEndian.Uint16(ace[2:4])) != len(ace) {
 			return fmt.Errorf("invalid journal grant ACE")
+		}
+		if s.workspace {
+			if !s.objects[r.Grant.Object] || s.granted[r.Grant.Object] {
+				return fmt.Errorf("invalid or repeated journal workspace grant")
+			}
+			s.granted[r.Grant.Object] = true
 		}
 		s.pending[r.Sequence] = true
 	case "released":
@@ -112,8 +126,13 @@ func (s *journalState) accept(r journalRecord) error {
 			return fmt.Errorf("invalid journal grant release")
 		}
 		delete(s.pending, r.GrantSequence)
+	case "workspace-released":
+		if !s.workspace || s.workspaceReleased || len(s.pending) != 0 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace release")
+		}
+		s.workspaceReleased = true
 	case "complete":
-		if !s.profile || len(s.pending) != 0 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
+		if !s.profile || (s.workspace && !s.workspaceReleased) || len(s.pending) != 0 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
 			return fmt.Errorf("invalid journal completion")
 		}
 		s.complete = true
@@ -220,6 +239,10 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.pending = make(map[uint64]bool, len(j.state.pending))
 	for sequence := range j.state.pending {
 		next.pending[sequence] = true
+	}
+	next.granted = make(map[journalObject]bool, len(j.state.granted))
+	for object := range j.state.granted {
+		next.granted[object] = true
 	}
 	if err := next.accept(record); err != nil {
 		return 0, err

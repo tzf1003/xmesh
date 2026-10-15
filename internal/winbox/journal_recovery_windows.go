@@ -17,31 +17,13 @@ import (
 // against every intent before any descriptor edit. The exclusive journal prevents
 // a live journal owner from sharing this recovery operation.
 func recoverSelectedJournal(j *grantJournal, volume windows.Handle) error {
-	if j == nil || j.file == nil || j.blocked != nil || len(j.records) == 0 {
-		return fmt.Errorf("AppContainer recovery requires a complete owned journal")
-	}
-	if j.state.workspace {
-		return fmt.Errorf("AppContainer workspace journal recovery is not yet available")
-	}
-	if err := deriveSID.Find(); err != nil {
-		return err
-	}
-	if err := deleteProfile.Find(); err != nil {
-		return err
-	}
-	profile := j.records[0]
-	name, err := windows.UTF16PtrFromString(profile.Profile)
+	sid, name, err := journalRecoveryIdentity(j)
 	if err != nil {
 		return err
 	}
-	var sid *windows.SID
-	result, _, _ := deriveSID.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(&sid)))
-	if err := hresult("derive recovered AppContainer identity", result); err != nil {
-		return err
-	}
 	defer windows.FreeSid(sid)
-	if sid.String() != profile.SID {
-		return fmt.Errorf("AppContainer journal profile/SID binding mismatch")
+	if j.state.workspace {
+		return fmt.Errorf("AppContainer selected recovery requires a journal without workspace inheritance")
 	}
 	var anchor fileIdentity
 	if err := windows.GetFileInformationByHandleEx(volume, windows.FileIdInfo, (*byte)(unsafe.Pointer(&anchor)), uint32(unsafe.Sizeof(anchor))); err != nil {
@@ -82,7 +64,38 @@ func recoverSelectedJournal(j *grantJournal, volume windows.Handle) error {
 			return err
 		}
 	}
-	result, _, _ = deleteProfile.Call(uintptr(unsafe.Pointer(name)))
+	return finishJournalProfile(j, name)
+}
+
+func journalRecoveryIdentity(j *grantJournal) (*windows.SID, *uint16, error) {
+	if j == nil || j.file == nil || j.blocked != nil || len(j.records) == 0 {
+		return nil, nil, fmt.Errorf("AppContainer recovery requires a complete owned journal")
+	}
+	if err := deriveSID.Find(); err != nil {
+		return nil, nil, err
+	}
+	if err := deleteProfile.Find(); err != nil {
+		return nil, nil, err
+	}
+	profile := j.records[0]
+	name, err := windows.UTF16PtrFromString(profile.Profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	var sid *windows.SID
+	result, _, _ := deriveSID.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(&sid)))
+	if err := hresult("derive recovered AppContainer identity", result); err != nil {
+		return nil, nil, err
+	}
+	if sid.String() != profile.SID {
+		windows.FreeSid(sid)
+		return nil, nil, fmt.Errorf("AppContainer journal profile/SID binding mismatch")
+	}
+	return sid, name, nil
+}
+
+func finishJournalProfile(j *grantJournal, name *uint16) error {
+	result, _, _ := deleteProfile.Call(uintptr(unsafe.Pointer(name)))
 	runtime.KeepAlive(name)
 	// A prior recovery may have deleted the profile before its completion record
 	// was flushed. The name/SID binding was independently rederived above.
@@ -93,7 +106,7 @@ func recoverSelectedJournal(j *grantJournal, volume windows.Handle) error {
 			return err
 		}
 	}
-	_, err = j.append(journalRecord{Kind: "complete"})
+	_, err := j.append(journalRecord{Kind: "complete"})
 	return err
 }
 

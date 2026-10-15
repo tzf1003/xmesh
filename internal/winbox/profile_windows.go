@@ -133,6 +133,9 @@ func (p *Profile) Apply(attributes *windows.ProcThreadAttributeListContainer) er
 	if p.sid == nil || p.deleted || attributes == nil {
 		return fmt.Errorf("AppContainer profile or attribute list unavailable")
 	}
+	if p.journal != nil && (p.journal.file == nil || p.journal.blocked != nil || p.journal.state.workspaceReleased || p.journal.state.complete) {
+		return fmt.Errorf("AppContainer journal is unavailable for process launch")
+	}
 	capabilities := &securityCapabilities{AppContainerSID: p.sid}
 	return attributes.Update(securityCapabilitiesAttribute, unsafe.Pointer(capabilities), unsafe.Sizeof(*capabilities))
 }
@@ -148,7 +151,7 @@ func (p *Profile) Close() error {
 	if p.grants != 0 {
 		return fmt.Errorf("AppContainer profile retains %d object grants", p.grants)
 	}
-	if p.journal != nil && (len(p.journal.state.pending) != 0 || p.journal.state.workspace) {
+	if p.journal != nil && (len(p.journal.state.pending) != 0 || (p.journal.state.workspace && !p.journal.state.workspaceReleased)) {
 		return fmt.Errorf("AppContainer journal retains recovery obligations")
 	}
 	if !p.deleted {
