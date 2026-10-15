@@ -449,9 +449,13 @@ func Test_WindowsAppContainerGrantReleaseDeletedObject(t *testing.T) {
 			if standard.deletePending == 0 {
 				t.Fatal("selected object is not delete-pending")
 			}
-			if reopened, err := reopenForACL(grant.handle); err == nil {
-				windows.CloseHandle(reopened)
-				t.Fatal("delete-pending object unexpectedly reopened")
+			// The name is unavailable while the observer retains the pending
+			// object. Windows may still permit reopening an existing handle.
+			if named, err := windows.CreateFile(name, windows.READ_CONTROL|windows.WRITE_DAC,
+				windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
+				windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0); err == nil {
+				windows.CloseHandle(named)
+				t.Fatal("delete-pending object still opens by name")
 			}
 			if err := p.Close(); err == nil {
 				t.Fatal("profile deleted with delete-pending grant")
