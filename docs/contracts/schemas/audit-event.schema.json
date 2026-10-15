@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:audit-event:1",
+  "title": "xmesh 审计事件",
+  "description": "CTR-AUD-01。禁止包含文件正文、命令输出和环境变量值。args_digest 只允许摘要字段。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["time", "event", "caller", "device", "tool", "status", "duration_ms"],
+  "properties": {
+    "time": { "type": "string", "format": "date-time" },
+    "event": {
+      "enum": [
+        "tool_call",
+        "pty_open",
+        "pty_close",
+        "pty_transfer",
+        "pty_signal",
+        "pty_write",
+        "pty_io",
+        "authz_deny",
+        "policy_reload_failed",
+        "audit_dropped"
+      ]
+    },
+    "caller": { "type": "string", "minLength": 1 },
+    "oauth_client": { "type": "string" },
+    "oauth_session": { "type": "string" },
+    "device": { "type": "string", "minLength": 1 },
+    "tool": { "type": "string", "minLength": 1 },
+    "args_digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keys": { "type": "array", "items": { "type": "string" } },
+        "resolved_path": { "type": "string" },
+        "cmd": { "type": "string", "description": "可执行文件基名，不是完整参数行。" },
+        "args_len": { "type": "integer", "minimum": 0 },
+        "stdin_sha256": { "type": ["string", "null"] },
+        "session_id": { "type": "string" },
+        "signal": { "enum": ["INT", "TERM", "KILL"] },
+        "mode": { "enum": ["shared", "exclusive"] },
+        "backend": { "type": "string" },
+        "token": { "type": "integer", "minimum": 1 },
+        "value_len": { "type": "integer", "minimum": 0 },
+        "value_sha256": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "status": { "enum": ["ok", "error"] },
+    "error": { "type": ["string", "null"] },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "output_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "error" } },
+        "required": ["status"]
+      },
+      "then": { "required": ["error"] }
+    }
+  ]
+}

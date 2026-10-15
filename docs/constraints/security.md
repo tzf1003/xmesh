@@ -1,0 +1,81 @@
+# 安全约束
+
+## CON-SEC-01
+
+一次工具调用在产生副作用之前要经过两层允许：
+
+1. 入口或 Gateway：OAuth scope，或 tailnet 模式下的节点身份 / PAT。
+2. Agent：`WhoIs` 得到的 tag 命中 `agent.authz`，且工具名与后端名都在允许列表内。
+
+本机 Gateway 把请求转到本机 Agent 时，第二层仍然执行。禁止因为「来自 localhost」跳过 Agent 授权。localhost 在 `lan`/`tailnet` 建成之前的阶段 1，使用显式的开发 tag `tag:peer`，并且该例外只允许绑定在 `127.0.0.1`。
+
+任一层拒绝：返回 [CTR-AUTHZ-01](../contracts/oauth-authz.md#ctr-authz-01) 规定的错误，且满足 [INV-05](invariants.md#inv-05)。
+
+## CON-SEC-02
+
+公网入口没有「关闭认证」的配置。每个已注册 client 的 scope 列表是它的全部权限，空 scope 表示只能完成 OAuth，不能调用工具。
+
+`tailnet` 模式下的本机 Gateway 可以用 PAT 或对端节点身份代替 OAuth。PAT 绑定的 scope 语法与 OAuth scope 相同。
+
+## CON-SEC-03
+
+Agent 从 `LocalClient().WhoIs(remoteAddr)` 取对端节点与 tag。取不到身份时拒绝，错误码 `unauthenticated`。禁止信任客户端在工具参数里自报的 tag 或节点名。
+
+`agent.authz` 的键是 tag。未列出的 tag 默认拒绝。`backends` 与 `tools` 都是允许列表，`*` 只在该字段显式写出时才表示全部。
+
+## CON-SEC-04
+
+子进程环境按下面的顺序构造：
+
+1. 从一份最小环境开始（`PATH`、`HOME`、`USERPROFILE`、`SystemRoot`、语言类变量）。
+2. 应用 `agent.policy.env` 的拒绝规则。
+3. 叠加调用方 `env`，叠加时再次应用拒绝规则。
+
+禁止把 Agent 进程里的 auth key、OAuth 客户端密钥、云凭证文件路径、`SSH_AUTH_SOCK` 继承给 `exec` 或 PTY。调用方显式传入被拒绝的键时，返回 `policy_denied`，规则名 `env.denied`，命令不启动。
+
+## CON-SEC-05
+
+`cwd_policy` 只在解析工具参数里的路径时执行。PTY 会话启动时的 `cwd` 要检查；会话启动之后，用户或模型在 shell 里执行的 `cd` 不再次经过策略引擎。这是已知边界：交互式终端的后续路径由命令策略和隔离级别约束，不由 cwd 前缀约束。
+
+文档和 `sys.info` 不把 cwd 策略描述成「终端内的沙箱」。
+
+## CON-SEC-06
+
+`agent.policy` 的变更在下一次工具调用生效，不要求重启进程，也不丢弃已有 PTY 或租约。热加载解析失败时继续使用上一份成功的策略，向日志写入 `policy_reload_failed`，并拒绝「没有上一份策略」的启动。进程第一次启动时策略非法则拒绝启动。
+
+## CON-SEC-07
+
+禁止把 PTY 环形缓冲、`pty.read` 的返回或 `pty.write` 的 data 写入审计日志、追踪系统或崩溃转储中的业务日志。崩溃转储若可能含终端内容，默认关闭。
+
+允许记录的 PTY 事件：`open`、`close`、`transfer`、`signal`、`write` 的发生时间与 caller、字节长度。不记录字节本身。
+
+## CON-SEC-08
+
+审计记录的参数摘要是键名、标量长度、路径的 `resolved_path`、以及正文的 SHA-256。禁止记录正文。`idempotency_key` 可以记录，它不是输出。保留期由 `audit.retention` 配置，过期必须删除，而不是只在查询时隐藏。
+
+## CON-SEC-09
+
+只要角色包含 `ingress`，下列端点必须可用，且 MCP 端点在没有合法 access token 时返回 401 与资源元数据提示：
+
+- `/.well-known/oauth-protected-resource`
+- `/.well-known/oauth-authorization-server`
+- `POST /oauth/register`
+- `GET /oauth/authorize`
+- `POST /oauth/token`
+
+授权码流程必须要求 PKCE（`S256`）。禁止接受没有 `code_challenge` 的授权请求。动态客户端注册必须实现，否则 claude.ai 与 Codex 无法完成连接器安装。
+
+## CON-SEC-10
+
+默认策略在用户没有写任何 `deny_patterns` 时仍然拒绝：
+
+| 规则名 | 行为 |
+| --- | --- |
+| `fs.delete.recursive_default_deny` | 目录删除缺少 `recursive: true` |
+| `fs.write.outside_allow` | 写入或移动的目标不在 allow，或命中 deny |
+| `exec.deny.rm_rf_root` | 命令序列匹配删除根或盘符根 |
+| `exec.deny.curl_pipe_sh` | 命令序列把下载内容送进 shell |
+| `exec.deny.format` | 命令基名为磁盘格式化工具 |
+| `quota.exceeded` | 超过入口或设备配额 |
+
+用户配置可以加严，不可以删除上表中的格式化与 `curl \| sh` 两类规则。若部署确实要关掉它们，必须在配置里显式 `allow_dangerous: true`，并且 `status` 输出警告。默认 `allow_dangerous` 为 false。

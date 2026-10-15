@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:lease:1",
+  "title": "xmesh 排他租约",
+  "description": "CTR-LEASE-01。token 在单个 Agent 进程、单个 resource 上只增不减。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resource", "owner", "token", "expires"],
+  "properties": {
+    "resource": {
+      "type": "string",
+      "pattern": "^backend:[A-Za-z0-9-]{1,63}$"
+    },
+    "owner": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}/[A-Za-z0-9._:-]{1,128}$",
+      "description": "caller_id，见 CTR-ID-01。"
+    },
+    "token": { "type": "integer", "minimum": 1 },
+    "expires": { "type": "string", "format": "date-time" }
+  }
+}
