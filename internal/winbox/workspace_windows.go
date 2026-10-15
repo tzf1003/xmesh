@@ -37,6 +37,10 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	if err != nil {
 		return nil, err
 	}
+	if err := checkJournalBoundary(p.journal, tree); err != nil {
+		tree.Close()
+		return nil, err
+	}
 	paths, err := credentialDirectories()
 	if err != nil {
 		tree.Close()

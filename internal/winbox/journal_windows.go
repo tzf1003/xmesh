@@ -46,6 +46,12 @@ func openGrantJournal(path string, create bool) (*grantJournal, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open AppContainer grant journal: %w", err)
 	}
+	return loadPrivateGrantJournal(h, path, user.User.Sid)
+}
+
+// Take ownership of the newly opened handle, including validated prefixes that
+// accompany a replay error. Validation failures close it before returning.
+func loadPrivateGrantJournal(h windows.Handle, path string, user *windows.SID) (*grantJournal, error) {
 	f := os.NewFile(uintptr(h), path)
 	retained := false
 	defer func() {
@@ -68,7 +74,7 @@ func openGrantJournal(path string, create bool) (*grantJournal, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateJournalSecurity(security, user.User.Sid); err != nil {
+	if err := validateJournalSecurity(security, user); err != nil {
 		return nil, err
 	}
 	j, err := loadGrantJournal(f)
@@ -79,6 +85,10 @@ func openGrantJournal(path string, create bool) (*grantJournal, error) {
 }
 
 func validateJournalSecurity(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID) error {
+	return validateRecoverySecurity(sd, user, 0)
+}
+
+func validateRecoverySecurity(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID, flags byte) error {
 	owner, _, err := sd.Owner()
 	if err != nil || owner == nil || !windows.EqualSid(owner, user) {
 		return fmt.Errorf("AppContainer journal owner mismatch")
@@ -104,7 +114,7 @@ func validateJournalSecurity(sd *windows.SECURITY_DESCRIPTOR, user *windows.SID)
 	hasUser, hasSystem := false, false
 	for _, ace := range aces {
 		const fileAllAccess = 0x001f01ff
-		if len(ace) < 8 || ace[0] != windows.ACCESS_ALLOWED_ACE_TYPE || ace[1] != 0 || binary.LittleEndian.Uint32(ace[4:8]) != fileAllAccess {
+		if len(ace) < 8 || ace[0] != windows.ACCESS_ALLOWED_ACE_TYPE || ace[1] != flags || binary.LittleEndian.Uint32(ace[4:8]) != fileAllAccess {
 			return fmt.Errorf("AppContainer journal has an unexpected access entry")
 		}
 		isUser, isSystem := bytes.Equal(ace[8:], userBytes), bytes.Equal(ace[8:], systemBytes)

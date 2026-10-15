@@ -104,6 +104,9 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	if actual.id != object.id || actual.directory != object.directory {
 		return nil, fmt.Errorf("AppContainer selected object identity changed")
 	}
+	if err := checkJournalSelectedBoundary(p.journal, actual); err != nil {
+		return nil, err
+	}
 	// Acquire security access before admission and retain it through release.
 	// Release keeps the admitted security access and object identity independent
 	// of subsequent namespace and disposition changes after sandbox execution.

@@ -49,6 +49,13 @@ type journalWorkspace struct {
 	Objects []journalObject `json:"objects"`
 }
 
+// A bound journal keeps its directory and ancestor identities alive separately
+// from its recovery records. Opening the file again reconstructs this boundary.
+type journalBoundary struct {
+	Root      journalObject
+	Ancestors []journalObject
+}
+
 type journalRecord struct {
 	Version       int               `json:"version"`
 	Sequence      uint64            `json:"sequence"`
@@ -160,11 +167,13 @@ func validJournalSID(sid string) bool {
 // serialize goroutines. A failed write or Sync poisons further appends: even a
 // failed Sync can have written a complete intent that recovery must inspect.
 type grantJournal struct {
-	file    *os.File
-	records []journalRecord
-	bytes   int64
-	blocked error
-	state   journalState
+	file      *os.File
+	records   []journalRecord
+	bytes     int64
+	blocked   error
+	state     journalState
+	namespace io.Closer
+	boundary  *journalBoundary
 }
 
 func loadGrantJournal(file *os.File) (*grantJournal, error) {
@@ -280,10 +289,14 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 }
 
 func (j *grantJournal) Close() error {
-	if j.file == nil {
-		return nil
+	var result error
+	if j.file != nil {
+		result = j.file.Close()
+		j.file = nil
 	}
-	err := j.file.Close()
-	j.file = nil
-	return err
+	if j.namespace != nil {
+		result = errors.Join(result, j.namespace.Close())
+		j.namespace = nil
+	}
+	return result
 }

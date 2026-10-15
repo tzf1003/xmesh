@@ -73,7 +73,9 @@ func Test_WindowsAppContainerSelectedJournalCrashRecovery(t *testing.T) {
 				setMediumLabel(t, path)
 				before, control := kernelJournalState(t, path)
 				label := objectLabel(t, path)
-				journalPath := filepath.Join(filepath.Dir(root), "recovery.journal")
+				state := filepath.Join(filepath.Dir(root), "recovery-state")
+				privateJournalDirectory(t, state)
+				journalPath := filepath.Join(state, "recovery.journal")
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
 				cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^Test_WindowsAppContainerSelectedJournalCrashHelper$")
@@ -108,7 +110,7 @@ func Test_WindowsAppContainerSelectedJournalCrashRecovery(t *testing.T) {
 				}
 				_ = cmd.Wait()
 				waited = true
-				j, err := openGrantJournal(journalPath, false)
+				j, err := openBoundGrantJournal(context.Background(), journalPath, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -243,7 +245,7 @@ func Test_WindowsAppContainerSelectedJournalCrashHelper(t *testing.T) {
 	if journalPath == "" {
 		t.Skip("journaled grant forced-exit helper")
 	}
-	j, err := openGrantJournal(journalPath, true)
+	j, err := openBoundGrantJournal(context.Background(), journalPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}

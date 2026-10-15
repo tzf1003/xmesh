@@ -107,6 +107,9 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 	if current.objects[0].id != (fileIdentity{Volume: w.Root.Volume, ID: w.Root.ID}) {
 		return fmt.Errorf("AppContainer journal workspace root identity changed")
 	}
+	if err := checkJournalBoundary(j, current); err != nil {
+		return err
+	}
 	initial := make(map[fileIdentity]bool, len(w.Objects))
 	objects := make([]treeObject, 0, len(w.Objects)+len(current.objects))
 	seen := make(map[fileIdentity]bool)

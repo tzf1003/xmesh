@@ -37,14 +37,20 @@ type workspaceTree struct {
 	objects   []treeObject
 }
 
-func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *workspaceTree, resultErr error) {
-	if maxObjects < 1 {
-		return nil, fmt.Errorf("AppContainer workspace object limit must be positive")
-	}
+func openWorkspaceRoot(ctx context.Context, path string) (_ *workspaceTree, resultErr error) {
+	return openNamespaceRoot(ctx, path, false)
+}
+
+// A volume root may anchor creation of a private child directory. Workspace
+// selection itself continues to require a directory below that volume root.
+func openNamespaceRoot(ctx context.Context, path string, allowVolume bool) (_ *workspaceTree, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	volume, components, err := workspaceComponents(path)
+	if allowVolume && len(path) == 3 && path[1:] == `:\` && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) {
+		volume, components, err = path[:2], nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +84,7 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 		return nil, fmt.Errorf("AppContainer workspace volume requires persistent ACLs")
 	}
 	parent := anchor
-	var root treeObject
+	root := anchorInfo
 	for _, name := range components {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -100,7 +106,23 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 	// The last ancestor is also objects[0]; keep one owner of its handle.
 	tree.ancestors = tree.ancestors[:len(tree.ancestors)-1]
 	tree.objects = append(tree.objects, root)
-	seen := map[fileIdentity]bool{root.id: true}
+	return tree, nil
+}
+
+func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *workspaceTree, resultErr error) {
+	if maxObjects < 1 {
+		return nil, fmt.Errorf("AppContainer workspace object limit must be positive")
+	}
+	tree, err := openWorkspaceRoot(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if resultErr != nil {
+			tree.Close()
+		}
+	}()
+	seen := map[fileIdentity]bool{tree.objects[0].id: true}
 	for index := 0; index < len(tree.objects); index++ {
 		current := tree.objects[index]
 		if !current.directory {

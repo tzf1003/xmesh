@@ -45,7 +45,13 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				acl, control := kernelJournalState(t, path)
 				before[path] = state{acl, control, objectLabel(t, path)}
 			}
-			journalPath := filepath.Join(filepath.Dir(root), "workspace.journal")
+			statePath := filepath.Join(filepath.Dir(root), "recovery-state")
+			stateDirectory, err := openJournalDirectory(context.Background(), statePath, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stateDirectory.Close()
+			journalPath := filepath.Join(statePath, "workspace.journal")
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^Test_WindowsAppContainerWorkspaceJournalCrashHelper$")
@@ -80,7 +86,7 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 			}
 			_ = cmd.Wait()
 			waited = true
-			j, err := openGrantJournal(journalPath, false)
+			j, err := openBoundGrantJournal(context.Background(), journalPath, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -220,7 +226,7 @@ func Test_WindowsAppContainerWorkspaceJournalCrashHelper(t *testing.T) {
 	if journalPath == "" {
 		t.Skip("journal workspace forced-exit helper")
 	}
-	j, err := openGrantJournal(journalPath, true)
+	j, err := openBoundGrantJournal(context.Background(), journalPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
