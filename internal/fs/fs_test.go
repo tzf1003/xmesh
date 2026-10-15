@@ -176,3 +176,40 @@ func Test_CTRFS05_SearchEngineParity(t *testing.T) {
 		t.Fatal(o)
 	}
 }
+
+func Test_SearchLimitsAndNestedNegation(t *testing.T) {
+	s, root := fixture(t)
+	if e := os.Mkdir(filepath.Join(root, "child"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	for path, content := range map[string]string{"one.go": "needle\n", ".gitignore": "*.log\n", "child/.gitignore": "!keep.log\n", "child/keep.log": "needle\n", "child/drop.log": "needle\n"} {
+		if e := os.WriteFile(filepath.Join(root, path), []byte(content), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if o := call(t, s, "fs.glob", Object{"pattern": "*.go", "limit": 1}); o["truncated"] != false {
+		t.Fatal("exact glob limit", o)
+	}
+	for _, mode := range []string{"content", "files", "count"} {
+		for _, pure := range []bool{true, false} {
+			a := Args{Pattern: "needle", Type: "go", OutputMode: mode, HeadLimit: 1}
+			if o, e := s.grepEngine(context.Background(), root, a, pure); e != nil || o["truncated"] != false {
+				t.Fatal("exact grep limit", mode, pure, o, e)
+			}
+			a.Type = ""
+			if o, e := s.grepEngine(context.Background(), root, a, pure); e != nil || o["truncated"] != true {
+				t.Fatal("overflow grep limit", mode, pure, o, e)
+			}
+		}
+	}
+	o := call(t, s, "fs.glob", Object{"pattern": "**/*.log", "limit": 100})
+	got := o["matches"].([]Object)
+	if len(got) != 1 || got[0]["path"] != filepath.Join(root, "child", "keep.log") {
+		t.Fatal("child negation", o)
+	}
+	for _, name := range []string{".env", ".bashrc", ".zshenv", "profile", "setup.ksh", "setup.sh"} {
+		if !filterFile(root, filepath.Join(root, name), Args{Type: "sh"}) {
+			t.Fatal("shell type omitted", name)
+		}
+	}
+}

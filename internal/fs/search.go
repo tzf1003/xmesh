@@ -21,7 +21,26 @@ import (
 
 type ignoreRule struct {
 	base  string
-	rules *ignore.GitIgnore
+	rules []ignoreLine
+}
+type ignoreLine struct {
+	matcher *ignore.GitIgnore
+	negate  bool
+}
+
+func compileIgnore(base string, data []byte) ignoreRule {
+	rule := ignoreRule{base: base}
+	for _, line := range strings.Split(string(data), "\n") {
+		negate := strings.HasPrefix(line, "!")
+		if negate {
+			line = line[1:]
+			if strings.HasPrefix(line, "!") {
+				line = "\\" + line
+			}
+		}
+		rule.rules = append(rule.rules, ignoreLine{ignore.CompileIgnoreLines(line), negate})
+	}
+	return rule
 }
 
 var stop = errors.New("search limit reached")
@@ -33,7 +52,7 @@ func (s *Service) walkFiles(ctx context.Context, root string, include bool, fn f
 	for p := root; ; p = filepath.Dir(p) {
 		b, e := os.ReadFile(filepath.Join(p, ".gitignore"))
 		if e == nil {
-			rules = append([]ignoreRule{{p, ignore.CompileIgnoreLines(strings.Split(string(b), "\n")...)}}, rules...)
+			rules = append([]ignoreRule{compileIgnore(p, b)}, rules...)
 		}
 		if filepath.Dir(p) == p {
 			break
@@ -54,16 +73,22 @@ func (s *Service) walkFiles(ctx context.Context, root string, include bool, fn f
 				return nil
 			}
 			if !include {
+				ignored := false
 				for _, r := range rules {
 					if cwd.Within(path, r.base) {
 						rel, _ := filepath.Rel(r.base, path)
-						if r.rules.MatchesPath(filepath.ToSlash(rel)) {
-							if d.IsDir() {
-								return filepath.SkipDir
+						for _, line := range r.rules {
+							if line.matcher.MatchesPath(filepath.ToSlash(rel)) {
+								ignored = !line.negate
 							}
-							return nil
 						}
 					}
+				}
+				if ignored {
+					if d.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
 				}
 			}
 		}
@@ -77,7 +102,7 @@ func (s *Service) walkFiles(ctx context.Context, root string, include bool, fn f
 			if path != root {
 				b, e := os.ReadFile(filepath.Join(path, ".gitignore"))
 				if e == nil {
-					rules = append(rules, ignoreRule{path, ignore.CompileIgnoreLines(strings.Split(string(b), "\n")...)})
+					rules = append(rules, compileIgnore(path, b))
 				}
 			}
 			return nil
@@ -120,10 +145,8 @@ func (s *Service) glob(ctx context.Context, root string, a Args) (Object, error)
 			return nil
 		}
 		found = append(found, item{p, st})
-		if len(found) >= a.Limit {
-			truncated = true
-		}
 		if len(found) > a.Limit {
+			truncated = true
 			sort.Slice(found, less)
 			found = found[:a.Limit]
 		}
@@ -143,7 +166,7 @@ func (s *Service) glob(ctx context.Context, root string, a Args) (Object, error)
 // A conservative supported type set is shared by both engines. Unsupported
 // types return invalid_args as required by CTR-FS-05 rather than guessing.
 var types = map[string][]string{
-	"go": {"*.go"}, "rust": {"*.rs"}, "py": {"*.py", "*.pyi"}, "python": {"*.py", "*.pyi"}, "js": {"*.js", "*.jsx", "*.cjs", "*.mjs", "*.vue"}, "ts": {"*.ts", "*.tsx", "*.cts", "*.mts"}, "typescript": {"*.ts", "*.tsx", "*.cts", "*.mts"}, "json": {"*.json", "*.sarif", "composer.lock"}, "yaml": {"*.yaml", "*.yml"}, "toml": {"*.toml", "Cargo.lock"}, "md": {"*.md", "*.markdown", "*.mdown", "*.mdwn", "*.mdx", "*.mkd", "*.mkdn"}, "markdown": {"*.md", "*.markdown", "*.mdown", "*.mdwn", "*.mdx", "*.mkd", "*.mkdn"}, "txt": {"*.txt"}, "html": {"*.html", "*.htm", "*.ejs"}, "css": {"*.css", "*.scss"}, "java": {"*.java", "*.jsp", "*.jspx", "*.properties"}, "swift": {"*.swift"}, "c": {"*.[chH]", "*.[chH].in", "*.cats"}, "sh": {"*.sh", "*.bash", "*.zsh"},
+	"go": {"*.go"}, "rust": {"*.rs"}, "py": {"*.py", "*.pyi"}, "python": {"*.py", "*.pyi"}, "js": {"*.js", "*.jsx", "*.cjs", "*.mjs", "*.vue"}, "ts": {"*.ts", "*.tsx", "*.cts", "*.mts"}, "typescript": {"*.ts", "*.tsx", "*.cts", "*.mts"}, "json": {"*.json", "*.sarif", "composer.lock"}, "yaml": {"*.yaml", "*.yml"}, "toml": {"*.toml", "Cargo.lock"}, "md": {"*.md", "*.markdown", "*.mdown", "*.mdwn", "*.mdx", "*.mkd", "*.mkdn"}, "markdown": {"*.md", "*.markdown", "*.mdown", "*.mdwn", "*.mdx", "*.mkd", "*.mkdn"}, "txt": {"*.txt"}, "html": {"*.html", "*.htm", "*.ejs"}, "css": {"*.css", "*.scss"}, "java": {"*.java", "*.jsp", "*.jspx", "*.properties"}, "swift": {"*.swift"}, "c": {"*.[chH]", "*.[chH].in", "*.cats"}, "sh": {"*.bash", "*.bashrc", "*.csh", "*.cshrc", "*.env", "*.ksh", "*.kshrc", "*.sh", "*.tcsh", "*.zsh", ".bash_login", ".bash_logout", ".bash_profile", ".bashrc", ".cshrc", ".env", ".kshrc", ".login", ".logout", ".profile", ".tcshrc", ".zlogin", ".zlogout", ".zprofile", ".zshenv", ".zshrc", "bash_login", "bash_logout", "bash_profile", "bashrc", "profile", "zlogin", "zlogout", "zprofile", "zshenv", "zshrc"},
 }
 
 func filterFile(root, p string, a Args) bool {
@@ -237,6 +260,10 @@ func (s *Service) grepEngine(ctx context.Context, root string, a Args, pure bool
 		if len(hits) == 0 {
 			return nil
 		}
+		if total >= a.HeadLimit {
+			truncated = true
+			return stop
+		}
 		switch a.OutputMode {
 		case "files":
 			files = append(files, p)
@@ -244,6 +271,10 @@ func (s *Service) grepEngine(ctx context.Context, root string, a Args, pure bool
 		case "count":
 			n := 0
 			for _, h := range hits {
+				if total >= a.HeadLimit {
+					truncated = true
+					return stop
+				}
 				n += h.count
 			}
 			counts = append(counts, Object{"path": p, "count": n})
@@ -260,14 +291,7 @@ func (s *Service) grepEngine(ctx context.Context, root string, a Args, pure bool
 				}
 				matches = append(matches, m)
 				total++
-				if total >= a.HeadLimit {
-					break
-				}
 			}
-		}
-		if total >= a.HeadLimit {
-			truncated = true
-			return stop
 		}
 		return nil
 	})
