@@ -40,6 +40,7 @@ func Test_WindowsJobDrain(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer windows.CloseHandle(child)
+		logJobCensus(t, job)
 		// The root retains its child handle until this acknowledgement. The
 		// controller now owns an overlapping lifetime handle before root exit.
 		if err := os.WriteFile(proof+".captured", []byte("ready"), 0600); err != nil {
@@ -145,6 +146,7 @@ func newDrainJob(t *testing.T) windows.Handle {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = windows.CloseHandle(job) })
+	observeJobTestMembers(t, job)
 	return job
 }
 
