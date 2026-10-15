@@ -12,6 +12,7 @@
 | `roles` 含 `ingress` | `ingress` 对象必须存在，且 OAuth issuer 为 https |
 | `roles` 含 `agent` | `agent.cwd_policy.allow` 至少一条 |
 | `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
+| `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
 | `mesh.mode = lan` | `mesh.lan.mdns` 为 true，且不读取 auth key |
 | `ingress.listen = funnel` | `control_url` 必须是官方 Tailscale。Headscale 的主机名拒绝启动。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
 | `ingress.listen = public:443` | 必须有 `domain` 和 `tls`。`tls: file` 时还必须有 `cert_file` 与 `key_file`。`tls: autocert` 只在这种监听下使用 |

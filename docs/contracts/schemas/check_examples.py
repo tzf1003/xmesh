@@ -33,6 +33,7 @@ if "date-time" not in FormatChecker.checkers:
 正例 = {
     "xmesh.config.json": "config.schema.json",
     "xmesh.gateway-pat.json": "config.schema.json",
+    "xmesh.ephemeral.json": "config.schema.json",
     "error-resource-busy.json": "error.schema.json",
     "error-pty-limit.json": "error.schema.json",
     "error-invalid-cwd.json": "error.schema.json",
@@ -48,6 +49,7 @@ if "date-time" not in FormatChecker.checkers:
 反例 = {
     "invalid/error-busy-missing-holder.json": "error.schema.json",
     "invalid/config-relay.json": "config.schema.json",
+    "invalid/config-lan-ephemeral.json": "config.schema.json",
     "invalid/config-pat-empty-scopes.json": "config.schema.json",
     "invalid/audit-with-stdout.json": "audit-event.schema.json",
     "invalid/config-funnel-with-domain.json": "config.schema.json",

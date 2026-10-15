@@ -79,6 +79,21 @@ go test ./internal/mesh -run Test_TailnetPeerConnectivity -v -timeout=60s
 
 测试输出目标设备和实际 disco 路由；`REQUIRE_DERP=1` 要求探测经 DERP，否则也接受直连。`XMESH_TEST_TAILNET_VERBOSE=1` 可开启供应商诊断日志。
 
+## 临时沙箱节点
+
+短生命周期环境可设置 `mesh.ephemeral: true`，示例见[临时节点配置](contracts/schemas/examples/xmesh.ephemeral.json)。控制面注册 key 应配置 ephemeral 与所需 tag；重复启动的验收需要可复用 key。节点身份仅存内存，复用同一状态目录也会重新注册。正常退出会在最多 5 秒内尝试注销并关闭 tsnet；注销失败返回运行错误。异常退出后的临时节点回收由控制面负责。
+
+在待验收的沙箱内执行：
+
+```bash
+python3 scripts/smoke_sandbox.py --binary /opt/xmesh \
+  --auth-key-file /run/secrets/xmesh-authkey \
+  --peer mac-dev:darwin --peer linux-dev:linux \
+  --observer-gateway 127.0.0.1:8080
+```
+
+`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
+
 ## 本机 Gateway PAT
 
 在 `gateway.pats` 中按凭据名称配置文件和 scope：

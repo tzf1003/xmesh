@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
@@ -36,7 +37,7 @@ func StateDir(name string) (string, error) {
 	}
 	return filepath.Join(root, "xmesh", name), nil
 }
-func Run(ctx context.Context, store *config.Store, o Options) error {
+func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	c := store.Get()
 	if o.Ingress && !c.HasRole("ingress") {
 		copy := *c
@@ -86,7 +87,7 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 		if e != nil {
 			return e
 		}
-		defer network.Close()
+		defer func() { runErr = errors.Join(runErr, network.Close()) }()
 		self, e = network.Self(ctx)
 		if e != nil {
 			return e

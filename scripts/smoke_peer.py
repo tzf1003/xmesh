@@ -15,24 +15,28 @@ def main():
     parser.add_argument("--device", required=True)
     parser.add_argument("--expected-os", required=True, choices=["darwin", "linux"])
     options = parser.parse_args()
-    assert options.gateway.startswith("127.0.0.1:"), "Gateway must use loopback"
-    assert options.device != "local", "Choose the peer node name"
-    client = MCP(options.gateway)
+    print(json.dumps(verify_peer(options.gateway, options.device, options.expected_os)))
+
+
+def verify_peer(gateway, device, expected_os):
+    assert gateway.startswith("127.0.0.1:"), "Gateway must use loopback"
+    assert device != "local", "Choose the peer node name"
+    client = MCP(gateway)
     terminal = None
     created = False
     filename = "xmesh-peer-smoke-" + uuid.uuid4().hex
-    call = lambda name, args=None: client.call(options.device + "/" + name, args)
+    call = lambda name, args=None: client.call(device + "/" + name, args)
     try:
         deadline = time.monotonic() + 20
         while True:
             devices = client.call("devices.list")["devices"]
-            if any(row["id"] == options.device and row["online"] for row in devices):
+            if any(row["id"] == device and row["online"] for row in devices):
                 break
             assert time.monotonic() < deadline, devices
             time.sleep(0.25)
         local = client.call("local/sys.info")
         peer = call("sys.info")
-        assert peer["hostname"] == options.device and peer["os"] == options.expected_os, peer
+        assert peer["hostname"] == device and peer["os"] == expected_os, peer
         assert peer["network"]["mode"] == "tailnet", peer["network"]
         assert not call("fs.stat", {"path": filename})["exists"]
         call("fs.write", {"path": filename, "content": "XMESH_PEER_FILE"})
@@ -57,9 +61,9 @@ def main():
         created = False
         assert not call("fs.stat", {"path": filename})["exists"]
         client.close()
-        print(json.dumps({"result": "PASS", "from": local["hostname"], "to": peer["hostname"],
-                          "os": peer["os"], "caller_node": local["network"]["node_id"],
-                          "checks": ["discovery", "identity", "file", "exec", "pty", "cleanup"]}))
+        return {"result": "PASS", "from": local["hostname"], "to": peer["hostname"],
+                "os": peer["os"], "caller_node": local["network"]["node_id"],
+                "checks": ["discovery", "identity", "file", "exec", "pty", "cleanup"]}
     finally:
         try:
             if terminal:

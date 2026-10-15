@@ -1,0 +1,15 @@
+{
+  "node": {"name": "cloud-sandbox", "roles": ["agent", "gateway"]},
+  "mesh": {
+    "mode": "tailnet",
+    "control_url": "https://controlplane.tailscale.com",
+    "authkey_file": "/run/secrets/xmesh-authkey",
+    "ephemeral": true
+  },
+  "gateway": {"listen": "127.0.0.1:8080"},
+  "agent": {
+    "default_cwd": "/workspace",
+    "cwd_policy": {"allow": ["/workspace"]},
+    "authz": {"tag:device": {"tools": ["*"], "backends": ["*"]}}
+  }
+}

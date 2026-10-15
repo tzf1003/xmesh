@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/identity"
@@ -12,11 +13,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"tailscale.com/ipn/store/mem"
 	"tailscale.com/tsnet"
 	"time"
 )
 
-type Tailnet struct{ server *tsnet.Server }
+type Tailnet struct {
+	server    *tsnet.Server
+	ephemeral bool
+}
 
 func OpenTailnet(ctx context.Context, c *config.Config, stateDir string) (*Tailnet, error) {
 	return openTailnet(ctx, c, stateDir, nil)
@@ -43,11 +48,15 @@ func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf fu
 		}
 	}
 	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AuthKey: strings.TrimSpace(string(key)), UserLogf: redactedLog, Logf: redactedLog}
+	if c.Mesh.Ephemeral {
+		server.Ephemeral = true
+		server.Store = new(mem.Store)
+	}
 	if _, e = server.Up(ctx); e != nil {
 		_ = server.Close()
 		return nil, fmt.Errorf("tailnet 入网失败: %w", e)
 	}
-	return &Tailnet{server}, nil
+	return &Tailnet{server: server, ephemeral: c.Mesh.Ephemeral}, nil
 }
 func (t *Tailnet) Listen(ctx context.Context) (net.Listener, error) {
 	return t.server.Listen("tcp", ":"+strconv.Itoa(AgentPort))
@@ -121,4 +130,18 @@ func (t *Tailnet) Peers(ctx context.Context) ([]Peer, error) {
 	}
 	return out, nil
 }
-func (t *Tailnet) Close() error { return t.server.Close() }
+func (t *Tailnet) Close() error {
+	var logoutErr error
+	if t.ephemeral {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		lc, err := t.server.LocalClient()
+		if err == nil {
+			err = lc.Logout(ctx)
+		}
+		if err != nil {
+			logoutErr = fmt.Errorf("临时节点注销失败: %w", err)
+		}
+	}
+	return errors.Join(logoutErr, t.server.Close())
+}

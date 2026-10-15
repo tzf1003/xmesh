@@ -11,7 +11,7 @@
 | PTY | 四状态、游标读取、配额、owner、断线孤儿、OAuth client 接管约束、转移串行化、Unix 会话进程组清理 |
 | 后端 | stdio/HTTP MCP、actor 串行、exclusive fencing lease、空闲回收、故障失效、策略重载保留有效租约 |
 | MCP 多路复用 | 上下游请求映射、通知、进度、sampling 路由、断线取消 |
-| 设备网络 | tsnet 注册与 WhoIs、tag 授权、LAN 证书配对与续期、mTLS、mDNS 发现 |
+| 设备网络 | tsnet 注册与 WhoIs、tag 授权、临时节点内存身份与退出注销、LAN 证书配对与续期、mTLS、mDNS 发现 |
 | Gateway | 设备前缀、每设备独立能力刷新与重试退避、搜索、连接默认值、断线停路由、持续 drain 状态、本机 PAT 文件认证与 scope、凭据轮转和会话绑定 |
 | OAuth 与入口 | 元数据、动态注册、PKCE S256、单主体口令、CSRF、scope、令牌轮转、客户端注册及回调 URI 持久化、Funnel/隧道/HTTPS 入口装配 |
 | 治理与运行 | 元数据审计、热加载失败记录、重启提示、调用预算、Agent 客户端 PTY 预算、keep/kill drain、CLI 与服务失败退出、Windows 用户登录任务与可选 SCM 安装 |
@@ -28,6 +28,7 @@
 - macOS 27.0.1 L2：原生测试验证目录外读取和写入拒绝、符号链接越界拒绝、网络拒绝、父进程信号与环境读取拒绝，以及含引号目录的参数传递。带 PAT 的真实 MCP L2 冒烟通过 exec 与 zsh PTY、审计及退出清理。
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 - Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；原生运行验收用例已加入并完成交叉编译。
+- 甲骨文 Ubuntu 的 bwrap 隔离环境：使用共享主机网络、独立 PID/文件系统与临时目录，连续两轮临时节点注册获得不同身份；每轮成功调用 macOS 和既有 Linux 节点，既有 Linux 节点反向调用成功。退出正常、节点离线、身份状态不落盘、临时工作目录清理均通过。此环境与既有 Linux 节点共用主机。
 
 Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该机 AppArmor 限制非特权 user namespace：普通用户 L2 验证使用只绑定测试目录中 bwrap 可执行文件、允许 `userns` 的临时 profile，测试结束已卸载。root 下的独立 L2 用例也通过。普通用户结果依赖该临时 profile，部署时须配置对应主机策略。
 
@@ -43,7 +44,7 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 | 三设备互联 | 官方 Tailscale、Headscale、DERP 连接状态、真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |
 | 公网入口 | 三种监听路径已装配；真实域名、Funnel/隧道及云客户端待验收 |
-| 云沙箱入网 | ephemeral key 入网及调用待实验 |
+| 云沙箱入网 | 甲骨文 bwrap 环境已通过；Codex Cloud 与 Claude 云沙箱的实际出站策略仍待验收 |
 | 本机客户端 | Claude Code 人工连接观察待执行 |
 
 以上自动测试覆盖已实现行为；各门的外部验收仍按[符合性矩阵](conformance.md)逐项执行。

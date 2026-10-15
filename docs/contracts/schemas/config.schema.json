@@ -54,6 +54,7 @@
         },
         "control_url": { "type": "string", "format": "uri" },
         "authkey_file": { "type": "string", "minLength": 1 },
+        "ephemeral": { "type": "boolean", "default": false, "description": "短生命周期 tailnet 节点；节点凭据只存内存，退出时尝试注销。" },
         "lan": {
           "type": "object",
           "additionalProperties": false,
@@ -78,6 +79,7 @@
           "then": {
             "required": ["lan"],
             "properties": {
+              "ephemeral": { "const": false },
               "lan": { "required": ["mdns"], "properties": { "mdns": { "const": true } } }
             }
           }
