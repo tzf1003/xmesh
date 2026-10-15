@@ -565,3 +565,123 @@ func Test_WindowsAppContainerSupervisorPostExitRecheck(t *testing.T) {
 		t.Fatal("missing post-exit receipt")
 	}
 }
+
+func Test_WindowsAppContainerSupervisorLiveReap(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	command := supervisorTestCommand(t, true)
+	base := t.TempDir()
+	state := filepath.Join(base, "state")
+	privateJournalDirectory(t, state)
+	path := filepath.Join(state, "live.journal")
+	file := filepath.Join(base, "file.txt")
+	if err := os.WriteFile(file, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	setMediumLabel(t, file)
+	original, control := kernelJournalState(t, file)
+	label := objectLabel(t, file)
+	j, err := openBoundGrantJournal(context.Background(), path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	p, err := newProfile(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := p.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	grant, err := p.grantObject(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := grant.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	owner, err := newSupervisedExecutionProcesses(context.Background(), p, 1, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if !owner.closed {
+			if err := owner.reap(context.Background(), 85); err != nil {
+				t.Error(err)
+			}
+			if err := owner.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	body, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(p.Directory(), "supervised-live.exe")
+	if err := os.WriteFile(helper, body, 0700); err != nil {
+		t.Fatal(err)
+	}
+	member, err := owner.start(context.Background(), []string{helper, "-test.run=^Test_WindowsAppContainerProcessOwnerHelper$", "--", "member", "unused"}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_PROCESS_OWNER_HELPER=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(member.Process)
+	defer windows.CloseHandle(member.Thread)
+	records := len(j.records)
+	if err := grant.Close(); !errors.Is(err, errJournalProcessesPending) {
+		t.Fatal("live supervised member allowed ACL cleanup", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := owner.reap(ctx, 85); !errors.Is(err, context.Canceled) || len(j.records) != records || owner.sealed {
+		t.Fatal("cancelled supervised reap changed obligation", err)
+	}
+	if result, err := windows.WaitForSingleObject(member.Process, 0); err != nil || result != uint32(windows.WAIT_TIMEOUT) {
+		t.Fatal("cancelled reap killed root", result, err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := owner.reap(context.Background(), 85); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if result, err := windows.WaitForSingleObject(member.Process, 0); err != nil || result != windows.WAIT_OBJECT_0 {
+		t.Fatal("supervised receipt preceded root exit", result, err)
+	}
+	var code uint32
+	if err := windows.GetExitCodeProcess(member.Process, &code); err != nil || code != 85 {
+		t.Fatal("supervised termination code", code, err)
+	}
+	if len(j.records) != records+1 || j.records[records].ExecutionSequence != owner.intent || len(j.state.executions) != 0 {
+		t.Fatal("supervised normal receipt missing or duplicated")
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := grant.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after, afterControl := kernelJournalState(t, file)
+	if !bytes.Equal(after, original) || afterControl != control || objectLabel(t, file) != label {
+		t.Fatal("supervised normal recovery changed security")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openBoundGrantJournal(context.Background(), path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if !reopened.state.complete || len(reopened.state.executions) != 0 {
+		t.Fatal("supervised normal completion did not persist")
+	}
+}
