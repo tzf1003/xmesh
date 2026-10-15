@@ -106,33 +106,51 @@ func openBoundGrantJournal(ctx context.Context, path string, create bool) (*gran
 	if err != nil {
 		return nil, err
 	}
+	j, err := openDirectoryGrantJournal(ctx, directory, filepath.Base(path), create)
+	if j == nil {
+		directory.Close()
+		return nil, err
+	}
+	j.namespace = directory
+	return j, err
+}
+
+// The caller retains directory until every returned journal (including a
+// damaged prefix) has closed. This permits a recovery sweep to share one pinned
+// parent chain while opening each file relative to the same verified directory.
+func openDirectoryGrantJournal(ctx context.Context, directory *journalDirectory, name string, create bool) (*grantJournal, error) {
+	if directory == nil || directory.tree == nil {
+		return nil, fmt.Errorf("AppContainer journal directory is closed")
+	}
 	root := directory.tree.objects[0]
+	if create {
+		lock, err := acquireJournalDirectory(ctx, root.id)
+		if err != nil {
+			return nil, err
+		}
+		defer lock.Close()
+	}
 	boundary := &journalBoundary{Root: journalObject{Volume: root.id.Volume, ID: root.id.ID, Directory: true}}
 	for _, h := range directory.tree.ancestors {
 		object, inspectErr := inspectTreeObject(h, "")
 		if inspectErr != nil {
-			directory.Close()
 			return nil, inspectErr
 		}
 		boundary.Ancestors = append(boundary.Ancestors, journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: true})
 	}
-	h, err := openRelativeJournal(ctx, root.handle, filepath.Base(path), create)
+	h, err := openRelativeJournal(ctx, root.handle, name, create)
 	if err != nil {
-		directory.Close()
 		return nil, err
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		windows.CloseHandle(h)
-		directory.Close()
 		return nil, err
 	}
-	j, err := loadPrivateGrantJournal(h, path, user.User.Sid)
-	if j == nil {
-		directory.Close()
-		return nil, err
+	j, err := loadPrivateGrantJournal(h, name, user.User.Sid)
+	if j != nil {
+		j.boundary = boundary
 	}
-	j.namespace, j.boundary = directory, boundary
 	return j, err
 }
 

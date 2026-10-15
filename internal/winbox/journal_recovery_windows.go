@@ -17,28 +17,41 @@ import (
 // against every intent before any descriptor edit. The exclusive journal prevents
 // a live journal owner from sharing this recovery operation.
 func recoverSelectedJournal(j *grantJournal, volume windows.Handle) error {
+	var anchor fileIdentity
+	if err := windows.GetFileInformationByHandleEx(volume, windows.FileIdInfo, (*byte)(unsafe.Pointer(&anchor)), uint32(unsafe.Sizeof(anchor))); err != nil {
+		return err
+	}
+	return recoverSelectedJournalVolumes(j, map[uint64]windows.Handle{anchor.Volume: volume})
+}
+
+// All volume bindings and ACE ownership are validated before the first edit.
+// The caller keeps each supplied volume handle and recovery guard alive through
+// profile deletion and its durable completion acknowledgement.
+func recoverSelectedJournalVolumes(j *grantJournal, volumes map[uint64]windows.Handle) error {
 	sid, name, err := journalRecoveryIdentity(j)
 	if err != nil {
 		return err
 	}
 	defer windows.FreeSid(sid)
-	if j.state.workspace {
-		return fmt.Errorf("AppContainer selected recovery requires a journal without workspace inheritance")
-	}
-	var anchor fileIdentity
-	if err := windows.GetFileInformationByHandleEx(volume, windows.FileIdInfo, (*byte)(unsafe.Pointer(&anchor)), uint32(unsafe.Sizeof(anchor))); err != nil {
+	if err := validateSelectedJournal(j, sid); err != nil {
 		return err
 	}
+	checked := make(map[uint64]bool)
 	// Validate the entire ownership manifest before the first external mutation.
 	for _, record := range j.records {
 		if record.Grant == nil {
 			continue
 		}
-		if record.Grant.Object.Volume != anchor.Volume {
-			return fmt.Errorf("AppContainer journal recovery volume mismatch")
-		}
-		if err := validateSelectedRecoveryACE(*record.Grant, sid); err != nil {
-			return err
+		volume := record.Grant.Object.Volume
+		if !checked[volume] {
+			var anchor fileIdentity
+			if err := windows.GetFileInformationByHandleEx(volumes[volume], windows.FileIdInfo, (*byte)(unsafe.Pointer(&anchor)), uint32(unsafe.Sizeof(anchor))); err != nil {
+				return fmt.Errorf("AppContainer recovery volume unavailable: %w", err)
+			}
+			if anchor.Volume != volume {
+				return fmt.Errorf("AppContainer journal recovery volume mismatch")
+			}
+			checked[volume] = true
 		}
 	}
 	if j.state.complete {
@@ -51,7 +64,7 @@ func recoverSelectedJournal(j *grantJournal, volume windows.Handle) error {
 		}
 		g := record.Grant
 		expected := treeObject{id: fileIdentity{Volume: g.Object.Volume, ID: g.Object.ID}, directory: g.Object.Directory}
-		h, err := openIdentityObject(volume, expected)
+		h, err := openIdentityObject(volumes[g.Object.Volume], expected)
 		if err != nil {
 			return err
 		}
@@ -65,6 +78,20 @@ func recoverSelectedJournal(j *grantJournal, volume windows.Handle) error {
 		}
 	}
 	return finishJournalProfile(j, name)
+}
+
+func validateSelectedJournal(j *grantJournal, sid *windows.SID) error {
+	if j == nil || j.file == nil || j.blocked != nil || len(j.records) == 0 || j.state.workspace || sid == nil || sid.String() != j.records[0].SID {
+		return fmt.Errorf("AppContainer selected recovery requires an owned journal without workspace inheritance")
+	}
+	for _, record := range j.records {
+		if record.Grant != nil {
+			if err := validateSelectedRecoveryACE(*record.Grant, sid); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func journalRecoveryIdentity(j *grantJournal) (*windows.SID, *uint16, error) {

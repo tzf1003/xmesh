@@ -123,9 +123,18 @@ func Test_WindowsAppContainerSelectedJournalCrashRecovery(t *testing.T) {
 				// The child launched no sandbox processes. After Kill/Wait the
 				// recovery caller has satisfied the process-reaping precondition.
 				defer func() {
+					if j == nil || j.file == nil {
+						var err error
+						j, err = openBoundGrantJournal(context.Background(), journalPath, false)
+						if err != nil {
+							t.Error("reopen recovery cleanup", err)
+							return
+						}
+					}
 					if err := recoverSelectedJournal(j, guard.ancestors[0]); err != nil {
 						t.Error("recovery cleanup", err)
 					}
+					j.Close()
 				}()
 				replacement, replacementControl := kernelJournalState(t, path)
 				if stage == "applied" {
@@ -155,7 +164,23 @@ func Test_WindowsAppContainerSelectedJournalCrashRecovery(t *testing.T) {
 						}
 					}
 				}
-				if err := recoverSelectedJournal(j, guard.ancestors[0]); err != nil {
+				profile := j.records[0]
+				if err := j.Close(); err != nil {
+					t.Fatal(err)
+				}
+				prepared, closed := 0, 0
+				report, err := recoverJournalDirectory(context.Background(), state, 8, 16, func(_ context.Context, info journalRecoveryInfo) (*journalRecoveryLease, error) {
+					prepared++
+					if info.Profile != profile.Profile || info.SID != profile.SID || info.Workspace != nil || len(info.Objects) != 1 || len(info.Volumes) != 1 || info.Volumes[0] != guard.objects[0].id.Volume {
+						t.Fatal("selected sweep manifest", info)
+					}
+					return &journalRecoveryLease{Guard: recoveryTestGuard(func() error { closed++; return nil }), Volumes: map[uint64]windows.Handle{guard.objects[0].id.Volume: guard.ancestors[0]}}, nil
+				})
+				if err != nil || prepared != 1 || closed != 1 || len(report) != 1 || report[0].State != "recovered" {
+					t.Fatal("selected recovery dispatch", report, err)
+				}
+				j, err = openBoundGrantJournal(context.Background(), journalPath, false)
+				if err != nil {
 					t.Fatal(err)
 				}
 				if err := recoverSelectedJournal(j, guard.ancestors[0]); err != nil {

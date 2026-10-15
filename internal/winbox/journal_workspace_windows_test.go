@@ -95,9 +95,18 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 			// namespace moves only initial IDs outside the root; all new objects
 			// remain within the recovery census.
 			defer func() {
+				if j == nil || j.file == nil {
+					var err error
+					j, err = openBoundGrantJournal(context.Background(), journalPath, false)
+					if err != nil {
+						t.Error("reopen workspace recovery cleanup", err)
+						return
+					}
+				}
 				if err := recoverWorkspaceJournal(j, 64); err != nil {
 					t.Error("workspace recovery cleanup", err)
 				}
+				j.Close()
 			}()
 			created := filepath.Join(root, "new-tree", "level-1", "level-2", "created.txt")
 			createdLabel := objectLabel(t, created)
@@ -175,7 +184,28 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer otherGrant.Close()
-			if err := recoverWorkspaceJournal(j, 64); err != nil {
+			profile := j.records[0]
+			if err := j.Close(); err != nil {
+				t.Fatal(err)
+			}
+			prepared, closed := 0, 0
+			report, err := recoverJournalDirectory(context.Background(), statePath, 8, 64, func(_ context.Context, info journalRecoveryInfo) (*journalRecoveryLease, error) {
+				prepared++
+				if info.Profile != profile.Profile || info.SID != profile.SID || info.Workspace == nil || info.Workspace.Path != root || len(info.Workspace.Objects) != 3 || len(info.Volumes) != 1 {
+					t.Fatal("workspace sweep manifest", info)
+				}
+				// Coordinator snapshots are detached from the owned journal.
+				info.Workspace.Path = ""
+				info.Workspace.Objects[0].ID[0] ^= 1
+				info.Objects[0].ID[0] ^= 1
+				info.Volumes[0]++
+				return &journalRecoveryLease{Guard: recoveryTestGuard(func() error { closed++; return nil })}, nil
+			})
+			if err != nil || prepared != 1 || closed != 1 || len(report) != 1 || report[0].State != "recovered" {
+				t.Fatal("workspace recovery dispatch", report, err)
+			}
+			j, err = openBoundGrantJournal(context.Background(), journalPath, false)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if err := recoverWorkspaceJournal(j, 64); err != nil {
