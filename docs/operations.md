@@ -167,7 +167,7 @@ $env:XMESH_TEST_WINDOWS_SANDBOX = "1"
 go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
 ```
 
-AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。网络拒绝必须由 Windows 返回访问拒绝，连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
+AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。网络拒绝须有 Windows 访问拒绝或网络隔离 API 的缺少 capability 诊断，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
 
 ## 治理与生命周期
 

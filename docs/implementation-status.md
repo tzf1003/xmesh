@@ -27,7 +27,7 @@
 - macOS 与 Ubuntu 实际二进制：带 PAT 的 L1 MCP 冒烟通过；覆盖 CLI 凭据读取、文件、exec、PTY、审计及退出。Gateway 认证测试覆盖 scope 过滤、写入拒绝、凭据轮转和跨凭据会话隔离。脚本为 `scripts/smoke_local.py --pat`。
 - macOS 27.0.1 L2：原生测试验证目录外读取和写入拒绝、符号链接越界拒绝、网络拒绝、父进程信号与环境读取拒绝，以及含引号目录的参数传递。带 PAT 的真实 MCP L2 冒烟通过 exec 与 zsh PTY、审计及退出清理。
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
-- Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；新增权限检查通过 Windows amd64/arm64 vet 与 amd64 测试交叉编译，`692e56e` 的原生任务已完成 XML 注册和运行；Runner 为内置 Administrator，非提升运行仍需标准或 UAC 分离 token 账户验收。
+- Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；新增权限检查通过 Windows amd64/arm64 vet 与 amd64 测试交叉编译，`63fd0e3` 的原生任务通过 XML 注册、身份、Session 2、目录、复杂参数和 token 类型检查；Runner 为内置 Administrator，非提升运行仍需标准或 UAC 分离 token 账户验收。
 - Windows Server 2025 ConPTY：生产环境过滤器下，窗口调整、Ctrl-C 后持续交互、TERM/KILL/shell 退出后的后代清理、输出排空、重复关闭和启动失败清理均通过原生 race 回归。
 - Windows Server 2025 exec：准入前挂起、加入 Job 后恢复、正常退出与超时后的进程树及阻塞 stdin 清理通过。PowerShell 5.1/7 标准与 Job 启动通过，包括父进程未设置或清空模块路径的场景；HTTP MCP 集成通过。
 - Windows Server 2025 文件：共享读取期间原子替换、锁定目标保留与临时文件清理、长路径读取和替换通过原生 race 测试。Windows vet 与构建通过；逐项证据见 [Windows 验收记录](validation/2026-10-15-windows.md)。用户任务的登录触发与目标登录会话仍需验收。
@@ -51,7 +51,7 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 | 项目 | 当前边界 |
 | --- | --- |
 | 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过，跨主机入口协调待实现 |
-| Windows L2 | 当前请求 L2 会拒绝执行；AppContainer profile 与启动属性原语已加入，通过 Windows amd64/arm64 vet 与 amd64 交叉编译，原生隔离待 CI；工作目录绑定、exec/ConPTY 接入与异常退出回收待实现 |
+| Windows L2 | 当前请求 L2 会拒绝执行；AppContainer profile 与启动属性原语已加入，通过 Windows amd64/arm64 vet 与 amd64 交叉编译，原生 token、文件、进程与环境隔离通过，网络拒绝证据补充后待 CI；工作目录绑定、exec/ConPTY 接入与异常退出回收待实现 |
 | 原生 Windows | Server 2025 的 ConPTY、进程清理、文件、PowerShell 5.1/7、HTTP MCP 及本机模式 SCM 生命周期已验证；用户任务的登录触发、目标会话与生产服务设备网络待验收，其他 Windows 版本待验证 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |
