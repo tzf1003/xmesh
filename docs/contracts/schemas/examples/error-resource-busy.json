@@ -1,0 +1,8 @@
+{
+  "error": "resource_busy",
+  "message": "后端 ida 正被其他会话占用",
+  "resource": "backend:ida",
+  "held_by": "node-abc/s7f",
+  "expires_in_s": 180,
+  "reason": "held"
+}

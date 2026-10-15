@@ -1,0 +1,7 @@
+{
+  "error": "conflict",
+  "message": "文件在读取后被修改",
+  "path": "src/main.rs",
+  "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "mtime": "2026-10-15T05:30:00Z"
+}

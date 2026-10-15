@@ -1,0 +1,7 @@
+{
+  "error": "resource_busy",
+  "message": "缺少持有者",
+  "resource": "backend:ida",
+  "expires_in_s": 10,
+  "reason": "held"
+}

@@ -1,0 +1,6 @@
+{
+  "error": "policy_denied",
+  "message": "命令命中拒绝规则",
+  "rule": "exec.deny.curl_pipe_sh",
+  "reason": "不允许把下载内容直接送进 shell"
+}

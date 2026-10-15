@@ -1,0 +1,9 @@
+{
+  "error": "pty_limit",
+  "message": "用了和状态同名的计数字段",
+  "scope": "device",
+  "limit": 20,
+  "in_use": 20,
+  "active": 20,
+  "oldest_idle": { "id": "p-3a9f00ab", "idle_s": 1 }
+}

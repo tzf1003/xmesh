@@ -1,0 +1,5 @@
+{
+  "node": { "name": "win-dev-01", "roles": ["agent"] },
+  "mesh": { "mode": "relay" },
+  "agent": { "cwd_policy": { "allow": ["/tmp"] } }
+}

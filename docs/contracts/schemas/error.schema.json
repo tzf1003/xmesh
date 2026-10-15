@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:error:1",
+  "title": "xmesh 工具错误",
+  "description": "CTR-ERR-01。工具失败时 structuredContent 必须符合本模式。message 给模型阅读，分支只依赖 error 与各错误码的字段。",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["error", "message"],
+  "properties": {
+    "error": {
+      "type": "string",
+      "enum": [
+        "invalid_args",
+        "invalid_cwd",
+        "policy_denied",
+        "conflict",
+        "edit_not_found",
+        "edit_ambiguous",
+        "binary_rejected",
+        "too_large",
+        "pty_limit",
+        "not_owner",
+        "session_not_found",
+        "exec_saturated",
+        "lease_required",
+        "resource_busy",
+        "backend_unavailable",
+        "unauthenticated",
+        "unauthorized",
+        "not_found",
+        "timeout",
+        "internal"
+      ]
+    },
+    "message": { "type": "string", "minLength": 1 },
+    "retry_after_ms": { "type": "integer", "minimum": 0 },
+    "field": { "type": "string", "minLength": 1 },
+    "path": { "type": "string" },
+    "reason": { "type": "string" },
+    "rule": { "type": "string", "minLength": 1 },
+    "current_sha256": { "type": "string" },
+    "mtime": { "type": "string", "format": "date-time" },
+    "lines": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "minItems": 2
+    },
+    "hint": { "type": "string" },
+    "size": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 1 },
+    "scope": { "enum": ["device", "caller"] },
+    "in_use": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "计入本次配额的会话数。device 范围是 active 与 orphaned 之和，不含 closed。不是状态名 active 的条数。"
+    },
+    "oldest_idle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "idle_s"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^p-[0-9a-z]{8,}$" },
+        "idle_s": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "session_id": { "type": "string" },
+    "owner": { "type": "string" },
+    "queue_position": { "type": "integer", "minimum": 1 },
+    "mode": { "enum": ["shared", "exclusive"] },
+    "resource": { "type": "string", "pattern": "^backend:[A-Za-z0-9-]{1,63}$" },
+    "held_by": { "type": "string" },
+    "expires_in_s": { "type": "integer", "minimum": 0 },
+    "attempts": { "type": "integer", "minimum": 1 },
+    "tag": { "type": "string" },
+    "tool": { "type": "string" },
+    "name": { "type": "string" },
+    "timeout_ms": { "type": "integer", "minimum": 0 },
+    "op": { "type": "string" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "output_ref": { "type": "string" },
+    "removed": { "type": "integer", "minimum": 0 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "error": { "const": "invalid_args" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["field"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "invalid_cwd" } },
+        "required": ["error"]
+      },
+      "then": {
+        "required": ["path", "reason"],
+        "properties": {
+          "reason": { "enum": ["not_found", "parent_missing", "symlink_escape", "denied", "not_directory"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "policy_denied" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["rule", "reason"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "conflict" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["path", "current_sha256", "mtime"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "edit_not_found" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["path"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "edit_ambiguous" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["path", "lines"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "binary_rejected" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["path", "hint"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "too_large" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["path", "size", "limit"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "pty_limit" } },
+        "required": ["error"]
+      },
+      "then": {
+        "required": ["scope", "limit", "in_use", "oldest_idle"],
+        "not": { "required": ["active"] }
+      }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "not_owner" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["session_id", "owner"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "session_not_found" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["session_id"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "exec_saturated" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["queue_position", "mode", "retry_after_ms"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "lease_required" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["resource"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "resource_busy" } },
+        "required": ["error"]
+      },
+      "then": {
+        "required": ["resource", "expires_in_s", "reason"],
+        "properties": {
+          "reason": { "enum": ["held", "token_mismatch", "token_stale"] }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "reason": { "enum": ["held", "token_mismatch"] } },
+              "required": ["reason"]
+            },
+            "then": { "required": ["held_by"] }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "backend_unavailable" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["resource", "attempts"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "unauthorized" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["tool"], "anyOf": [{ "required": ["scope"] }, { "required": ["tag"] }] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "not_found" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["name"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "timeout" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["timeout_ms"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "internal" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["op"] }
+    }
+  ]
+}

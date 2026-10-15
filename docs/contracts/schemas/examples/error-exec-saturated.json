@@ -1,0 +1,7 @@
+{
+  "error": "exec_saturated",
+  "message": "命令槽已满，本次超时内排不上",
+  "queue_position": 4,
+  "mode": "shared",
+  "retry_after_ms": 1000
+}

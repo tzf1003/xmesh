@@ -1,0 +1,10 @@
+{
+  "time": "2026-10-15T05:30:00Z",
+  "event": "tool_call",
+  "caller": "node-abc/s7f",
+  "device": "win-dev-01",
+  "tool": "exec.run",
+  "args_digest": { "stdout": "密钥泄漏" },
+  "status": "ok",
+  "duration_ms": 1
+}

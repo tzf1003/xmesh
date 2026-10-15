@@ -1,0 +1,15 @@
+{
+  "node": { "name": "win-dev-01", "roles": ["agent", "ingress"] },
+  "mesh": {
+    "mode": "tailnet",
+    "control_url": "https://controlplane.tailscale.com",
+    "authkey_file": "/etc/xmesh/authkey"
+  },
+  "ingress": {
+    "listen": "funnel",
+    "domain": "mcp.example.com",
+    "tls": "autocert",
+    "oauth": { "issuer": "https://mcp.example.com" }
+  },
+  "agent": { "cwd_policy": { "allow": ["/tmp"] } }
+}

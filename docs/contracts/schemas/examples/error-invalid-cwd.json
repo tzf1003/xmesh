@@ -1,0 +1,6 @@
+{
+  "error": "invalid_cwd",
+  "message": "工作目录不存在",
+  "path": "/home/x/nope",
+  "reason": "not_found"
+}
