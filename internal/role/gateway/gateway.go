@@ -44,16 +44,17 @@ type device struct {
 	lastSeen time.Time
 }
 type Gateway struct {
-	mu         sync.Mutex
-	opts       Options
-	devices    map[string]device
-	views      map[*view]bool
-	ctx        context.Context
-	cancel     context.CancelFunc
-	done       chan struct{}
-	generation uint64
-	draining   map[string]bool
-	quota      *quota.Limiter
+	mu           sync.Mutex
+	opts         Options
+	devices      map[string]device
+	views        map[*view]bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+	done         chan struct{}
+	generation   uint64
+	draining     map[string]bool
+	meshDraining bool
+	quota        *quota.Limiter
 }
 type downstream struct {
 	bridge      *mcpmux.Bridge
@@ -189,7 +190,7 @@ func (g *Gateway) snapshot() (map[string]device, uint64) {
 	defer g.mu.Unlock()
 	out := map[string]device{}
 	for name, d := range g.devices {
-		if g.draining[name] {
+		if g.meshDraining || g.draining[name] {
 			d.online = false
 		}
 		out[name] = d
@@ -610,9 +611,7 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 func (g *Gateway) Drain(name string) {
 	g.mu.Lock()
 	if name == "" {
-		for device := range g.devices {
-			g.draining[device] = true
-		}
+		g.meshDraining = true
 	} else {
 		g.draining[name] = true
 	}

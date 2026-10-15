@@ -42,6 +42,20 @@ func fixture(t *testing.T, ingress bool) (*Gateway, string) {
 	t.Cleanup(g.Close)
 	return g, root
 }
+
+func Test_MeshDrainIncludesFutureDiscovery(t *testing.T) {
+	g, _ := fixture(t, false)
+	g.Drain("")
+	g.mu.Lock()
+	g.devices["later"] = device{peer: mesh.Peer{ID: "later", Name: "later", Online: true}, online: true}
+	g.mu.Unlock()
+	devices, _ := g.snapshot()
+	for name, device := range devices {
+		if device.online {
+			t.Fatal("drained mesh exposed discovered peer", name)
+		}
+	}
+}
 func connect(t *testing.T, url string) *mcp.ClientSession {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
