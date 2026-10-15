@@ -10,7 +10,10 @@ type Error struct {
 	Code    string
 	Message string
 	Fields  map[string]any
+	Cause   error
 }
+
+func (e *Error) Unwrap() error { return e.Cause }
 
 func (e *Error) Error() string { return e.Message }
 func (e *Error) Object() map[string]any {
@@ -39,5 +42,7 @@ func Internal(op string, err error) *Error {
 	if errors.As(err, &e) {
 		return e
 	}
-	return New("internal", "本机操作失败", "op", op)
+	v := New("internal", "本机操作失败", "op", op)
+	v.Cause = err
+	return v
 }
