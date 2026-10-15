@@ -116,6 +116,12 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 本地全量 race/vet、Windows amd64/arm64 vet 和 amd64 测试编译通过。新增原生用例覆盖混合状态、重复 profile、扫描形状/限额、guard 失败/取消/释放错误，以及跨进程创建阻塞与恢复后继续；六种显式对象和三种真实工作区强制退出场景改用调度入口，保留准确 ACL、控制位、标签及其他 profile 断言。`60bb9a3` 的 push `38808986565` 与 PR `38808991746` 均通过三平台 race/vet/build 和完整 Windows 原生回归，契约工作流 `38808986560` / `38808991737` 同样通过。原生 job `116677107893` / `116677124889` 的日志各确认 23 项必要 PASS：混合 sweep、11 种预检/guard 子例、跨进程创建协调、六种显式对象与三种真实工作区强制退出恢复。该调度器为内部恢复基础设施；实际执行协调器、完整运行期新对象追踪和 exec/ConPTY 接入继续实现，生产 Windows L2 保持 `sandbox.unavailable`。
 
+## Job 进程树退出确认
+
+内部 `winjob.WaitEmpty` 通过 `JobObjectBasicAccountingInformation` 查询活动成员，支持取消、调用方期限及 30 秒总上限；查询错误与异常返回长度均保留失败。`TerminateAndWait` 在请求终止后确认 Job 清空，取消前不发出终止请求，确认失败保留句柄供重试。调用方必须持有有效句柄并阻止后续准入，在资源回收完成前维持该条件；单个 Job 清空仅证明该 Job 的成员退出，profile 的其他 Job 和异常宿主退出仍须由实际执行协调器统一确认。
+
+新增 Windows 原生回归覆盖主进程结束后存活的后代、挂起成员、等待超时、取消终止、查询权限失败、准确退出码、重复确认与独立进程保持；AppContainer 工作区 helper 在返回前也终止并确认整个专属 Job 清空，使恢复夹具的进程退出前提覆盖全部 Job 成员。本地全量 race/vet、Windows 双架构 vet 和 amd64 编译通过，新增行为待 Windows 原生 CI。实际生产执行协调器和 exec/ConPTY 接入继续推进，生产 Windows L2 门禁保持。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |

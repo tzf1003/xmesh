@@ -235,6 +235,8 @@ go test -race ./internal/winjob -run WindowsJobAtomicAdmission -v -timeout=60s
 
 用例在宿主 `CreateProcess` 返回、子进程仍挂起时直接终止宿主，检查已绑定 Job 的子进程退出；独立对照保留未绑定的挂起子进程，随后按精确进程句柄清理。机制和最低系统版本见 [Windows 进程属性说明](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)。原生结果见 Windows 验收记录。
 
+内部 Job 退出确认原语可用 `$env:XMESH_TEST_WINDOWS_EXEC = "1"; go test -race ./internal/winjob -run WindowsJobDrain -v -timeout=60s` 验收。`WaitEmpty` 查询内核活动进程数，`TerminateAndWait` 请求终止后等待空 Job；等待支持取消并最多 30 秒。调用方保持句柄、禁止新进程加入，并在回收关联资源前持续保持准入静止。终止请求已发出后取消等待仍保留恢复义务，调用方可使用原句柄重试；单 Job 的空状态不能证明同一 profile 在其他 Job 中的进程已退出。AppContainer 测试 helper 已采用整棵 Job 退出确认；生产执行协调器接入与新增用例的原生结果继续验收。
+
 同机多入口 PTY 原生验收可使用同一 `XMESH_TEST_WINDOWS_PTY` 环境运行 `go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s`。用例覆盖两个入口子进程对两个 Agent 的并发准入、共享状态、转移、孤儿恢复和持久化阻断。
 
 向 Windows 交互终端输入命令时，以 `\r` 表示 Enter。发送 INT 后等待 shell 输出新的提示符，再发送后续命令。

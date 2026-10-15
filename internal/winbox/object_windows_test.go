@@ -2,12 +2,14 @@ package winbox
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -232,7 +234,16 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer windows.CloseHandle(job)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		defer windows.CloseHandle(job)
+		// No further process admission occurs in this fixture. Confirm every
+		// member has exited before callers reclaim workspace grants/profile.
+		if err := winjob.TerminateAndWait(ctx, job, 1); err != nil {
+			t.Fatal("AppContainer helper process tree cleanup", err)
+		}
+	}()
 	attrs, err := windows.NewProcThreadAttributeList(2)
 	if err != nil {
 		t.Fatal(err)
