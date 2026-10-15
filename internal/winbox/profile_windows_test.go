@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf16"
@@ -25,6 +26,7 @@ type isolationProof struct {
 	NetworkError string
 	TokenError   string
 	Capabilities uint32
+	ParentSecret bool
 }
 
 // This opt-in test exercises the Windows kernel boundary using a fresh profile.
@@ -37,6 +39,7 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("XMESH_WINBOX_PARENT_SECRET", "sentinel")
 	var process windows.ProcessInformation
 	t.Cleanup(func() {
 		if process.Process != 0 {
@@ -109,7 +112,11 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir, _ := windows.UTF16PtrFromString(workspace)
-	environment := utf16.Encode([]rune("SystemRoot=" + os.Getenv("SystemRoot") + "\x00XMESH_WINBOX_HELPER=1\x00\x00"))
+	env, err := Environment([]string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_WINBOX_HELPER=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
 	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
 	if err := windows.CreateProcess(nil, command, nil, nil, false, flags, &environment[0], dir, &startup.StartupInfo, &process); err != nil {
 		t.Fatal("AppContainer process creation", err)
@@ -129,7 +136,7 @@ func Test_WindowsAppContainerIsolation(t *testing.T) {
 	if err := json.Unmarshal(body, &proof); err != nil {
 		t.Fatal(err)
 	}
-	if !proof.AppContainer || proof.Capabilities != 0 || proof.TokenError != "" || proof.OutsideRead || proof.OutsideWrite || proof.ParentRead || proof.Network {
+	if !proof.AppContainer || proof.Capabilities != 0 || proof.TokenError != "" || proof.OutsideRead || proof.OutsideWrite || proof.ParentRead || proof.Network || proof.ParentSecret {
 		t.Fatal("AppContainer isolation", proof)
 	}
 	if proof.NetworkError != "access_denied" {
@@ -146,6 +153,7 @@ func Test_WindowsAppContainerHelper(t *testing.T) {
 	}
 	args := os.Args[len(os.Args)-3:]
 	proof := isolationProof{}
+	proof.ParentSecret = os.Getenv("XMESH_WINBOX_PARENT_SECRET") != ""
 	var isContainer, size uint32
 	// TOKEN_INFORMATION_CLASS values introduced after TokenLogonSid are not
 	// currently exported by x/sys/windows.

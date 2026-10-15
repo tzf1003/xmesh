@@ -16,11 +16,12 @@ import (
 )
 
 type taskRuntimeProof struct {
-	SID      string
-	Session  uint32
-	CWD      string
-	Args     []string
-	Elevated bool
+	SID           string
+	Session       uint32
+	CWD           string
+	Args          []string
+	Elevated      bool
+	ElevationType uint32
 }
 
 // This opt-in test creates, runs and deletes a disposable current-user task.
@@ -36,6 +37,20 @@ func Test_WindowsUserTaskRuntime(t *testing.T) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
+	}
+	parentElevated, parentType, err := taskTokenElevation(windows.GetCurrentProcessToken())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows ignores RunLevel for built-in Administrator and when UAC is
+	// disabled. A token with no linked token cannot be lowered by the task.
+	const elevationDefault, elevationLimited = 1, 3
+	wantElevated, wantType := false, uint32(elevationLimited)
+	if parentType == elevationDefault {
+		wantElevated, wantType = parentElevated, elevationDefault
+	}
+	if wantElevated {
+		t.Log("account has an elevated token with no linked limited token; non-elevated task acceptance requires a standard or UAC-filtered account")
 	}
 	directory, err := windows.GetSystemDirectory()
 	if err != nil {
@@ -80,9 +95,10 @@ func Test_WindowsUserTaskRuntime(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if got.SID != user.User.Sid.String() || got.Session != session || got.Elevated || !strings.EqualFold(got.CWD, workspace) || !reflect.DeepEqual(got.Args, wantArgs) {
+	if got.SID != user.User.Sid.String() || got.Session != session || got.Elevated != wantElevated || got.ElevationType != wantType || !strings.EqualFold(got.CWD, workspace) || !reflect.DeepEqual(got.Args, wantArgs) {
 		t.Fatal("task identity, session, privilege, cwd or arguments changed", got)
 	}
+	t.Logf("task runtime verified: session=%d elevated=%t elevation_type=%d", got.Session, got.Elevated, got.ElevationType)
 }
 
 func Test_WindowsUserTaskHelper(t *testing.T) {
@@ -111,15 +127,29 @@ func Test_WindowsUserTaskHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var elevation, size uint32
-	if err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), windows.TokenElevation, (*byte)(unsafe.Pointer(&elevation)), uint32(unsafe.Sizeof(elevation)), &size); err != nil {
+	elevated, elevationType, err := taskTokenElevation(windows.GetCurrentProcessToken())
+	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := json.Marshal(taskRuntimeProof{SID: user.User.Sid.String(), Session: session, CWD: workingDirectory, Args: os.Args[index+2:], Elevated: elevation != 0})
+	doc, err := json.Marshal(taskRuntimeProof{SID: user.User.Sid.String(), Session: session, CWD: workingDirectory, Args: os.Args[index+2:], Elevated: elevated, ElevationType: elevationType})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(os.Args[index+1], doc, 0600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func taskTokenElevation(token windows.Token) (bool, uint32, error) {
+	var elevated, kind, size uint32
+	if err := windows.GetTokenInformation(token, windows.TokenElevation, (*byte)(unsafe.Pointer(&elevated)), uint32(unsafe.Sizeof(elevated)), &size); err != nil {
+		return false, 0, err
+	}
+	if err := windows.GetTokenInformation(token, windows.TokenElevationType, (*byte)(unsafe.Pointer(&kind)), uint32(unsafe.Sizeof(kind)), &size); err != nil {
+		return false, 0, err
+	}
+	if kind < 1 || kind > 3 {
+		return false, 0, fmt.Errorf("unknown token elevation type %d", kind)
+	}
+	return elevated != 0, kind, nil
 }

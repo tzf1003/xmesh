@@ -167,7 +167,7 @@ $env:XMESH_TEST_WINDOWS_SANDBOX = "1"
 go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
 ```
 
-该用例验证 profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。网络拒绝必须由 Windows 返回访问拒绝，连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
+AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。网络拒绝必须由 Windows 返回访问拒绝，连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
 
 ## 治理与生命周期
 
@@ -187,6 +187,8 @@ Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 
 
 Windows 可用 `install --system` 选择管理员 SCM 服务，默认以 LocalSystem 身份运行于 Session 0；配置、状态和工作目录须允许该账户访问。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
 
+用户任务设置 `LeastPrivilege`；[Windows 的 RunLevel 规则](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-runlevel-principaltype-element)规定内置 Administrator、LocalSystem、LocalService 或关闭 UAC 时忽略该设置。需要普通权限时使用标准账户或启用 UAC 的普通管理员账户。
+
 服务运行异常以非零状态退出，供管理器处理。Windows 原生验收从目标用户的登录会话执行：
 
 ```powershell
@@ -194,7 +196,7 @@ $env:XMESH_TEST_WINDOWS_USER_SERVICE = "1"
 go test ./cmd/xmesh -run WindowsUserTaskRuntime -v
 ```
 
-该用例创建临时任务并立即运行，核对用户 SID、会话 ID、非提升权限、工作目录与复杂参数，最后删除任务。Windows 原生 CI 记录 Runner 会话号；处于交互会话时运行此用例，Session 0 时标记环境条件未满足。登录事件触发仍需目标用户环境验收。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
+该用例创建临时任务并立即运行，核对用户 SID、会话 ID、token 提升类型、工作目录与复杂参数，最后删除任务。有 UAC 分离 token 时要求非提升运行；无分离 token 时核对账户原有提升状态并记录环境边界。Windows 原生 CI 记录 Runner 会话号；处于交互会话时运行此用例，Session 0 时标记环境条件未满足。登录事件触发仍需目标用户环境验收。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
 
 SCM 原生验收在管理员 PowerShell 中执行：
 
