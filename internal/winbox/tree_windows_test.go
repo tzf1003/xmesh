@@ -125,6 +125,15 @@ func Test_WindowsAppContainerWorkspaceTreeAdmission(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := readObjectACL(t, secret)
+			control, err := openWorkspaceTree(context.Background(), root, 100)
+			if err != nil {
+				t.Fatal("ordinary workspace control", err)
+			}
+			if len(control.objects) != 2 {
+				control.Close()
+				t.Fatal("ordinary workspace control count")
+			}
+			control.Close()
 			candidate := root
 			limit := 100
 			ctx := context.Background()

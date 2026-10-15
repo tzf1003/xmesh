@@ -67,9 +67,10 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 	if err != nil || !anchorInfo.directory {
 		return nil, fmt.Errorf("AppContainer volume anchor: %w", errors.Join(err, requireDirectory(anchorInfo)))
 	}
-	var flags uint32
-	if err := windows.GetVolumeInformationByHandle(anchor, nil, 0, nil, nil, &flags, nil, 0); err != nil {
-		return nil, err
+	var flags, serial, componentLength uint32
+	var volumeName, filesystemName [261]uint16
+	if err := windows.GetVolumeInformationByHandle(anchor, &volumeName[0], uint32(len(volumeName)), &serial, &componentLength, &flags, &filesystemName[0], uint32(len(filesystemName))); err != nil {
+		return nil, fmt.Errorf("query AppContainer workspace volume: %w", err)
 	}
 	if flags&windows.FILE_PERSISTENT_ACLS == 0 {
 		return nil, fmt.Errorf("AppContainer workspace volume requires persistent ACLs")
@@ -131,7 +132,7 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("enumerate AppContainer workspace directory %q: %w", current.relative, err)
 		}
 	}
 	return tree, nil
