@@ -310,6 +310,173 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 	}
 }
 
+func Test_WindowsAppContainerWorkspaceDirectoryRename(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	root := filepath.Join(t.TempDir(), "workspace")
+	dir := filepath.Join(root, "directory")
+	file := filepath.Join(dir, "file.txt")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	type descriptorState struct {
+		acl     []byte
+		control windows.SECURITY_DESCRIPTOR_CONTROL
+		label   string
+	}
+	readState := func(path string) descriptorState {
+		t.Helper()
+		name, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := windows.CreateFile(name, windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+			nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer windows.CloseHandle(h)
+		sd, err := readObjectSecurity(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		control, _, err := sd.Control()
+		if err != nil {
+			t.Fatal(err)
+		}
+		acl, _, err := sd.DACL()
+		if err != nil {
+			t.Fatal(err)
+		}
+		header, aces, err := aclParts(acl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := bytes.Clone(header)
+		for _, ace := range aces {
+			body = append(body, ace...)
+		}
+		return descriptorState{body, control, objectLabel(t, path)}
+	}
+	before := map[string]descriptorState{}
+	for _, path := range []string{root, dir, file} {
+		setMediumLabel(t, path)
+		before[path] = readState(path)
+	}
+	p, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := p.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	g, err := p.grantWorkspace(context.Background(), root, 64)
+	if g != nil {
+		t.Cleanup(func() {
+			if err := g.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(p.Directory(), "rename-helper.exe")
+	source, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(helper, body, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The actual AppContainer performs the rename, path replacement and writes
+	// before any grant is released. Helper failures propagate through its exit.
+	runAppContainerHelper(t, p, helper, "Test_WindowsAppContainerWorkspaceRenameHelper", "XMESH_WINBOX_RENAME_HELPER", root, "")
+	if err := os.Rename(root, root+".moved"); err == nil {
+		t.Fatal("directory rename released the workspace root guard")
+	}
+	if err := g.Close(); err != nil {
+		t.Fatal("release renamed workspace grants", err)
+	}
+	for old, expected := range before {
+		path := old
+		if old == dir {
+			path = dir + ".moved"
+		} else if old == file {
+			path = filepath.Join(dir+".moved", "file.txt")
+		}
+		actual := readState(path)
+		if !bytes.Equal(actual.acl, expected.acl) || actual.control != expected.control || actual.label != expected.label {
+			t.Fatal("renamed original descriptor not restored", path)
+		}
+	}
+	// Both renamed originals and replacement/new identities must be recovered.
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		state := readState(path)
+		_, aces, err := aclParts((*windows.ACL)(unsafe.Pointer(&state.acl[0])))
+		if err != nil {
+			return err
+		}
+		sid := unsafe.Slice((*byte)(unsafe.Pointer(p.sid)), p.sid.Len())
+		for _, ace := range aces {
+			if len(ace) >= 8 && ace[0] == windows.ACCESS_ALLOWED_ACE_TYPE && bytes.Equal(ace[8:], sid) {
+				t.Fatal("released profile retained on renamed/replacement tree", path)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(root, root+".moved"); err != nil {
+		t.Fatal("root guard retained after renamed workspace release", err)
+	}
+}
+
+func Test_WindowsAppContainerWorkspaceRenameHelper(t *testing.T) {
+	if os.Getenv("XMESH_WINBOX_RENAME_HELPER") != "1" {
+		t.Skip("AppContainer workspace rename helper")
+	}
+	args := os.Args[len(os.Args)-3:]
+	dir := filepath.Join(args[0], "directory")
+	if err := os.Rename(dir, dir+".moved"); err != nil {
+		t.Fatal("AppContainer populated-directory rename", err)
+	}
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
+		filepath.Join(dir+".moved", "file.txt"): "edited original",
+		filepath.Join(dir, "file.txt"):          "replacement",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nested := filepath.Join(dir+".moved", "new", "nested")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "created.txt"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(args[2], []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func Test_WindowsAppContainerWorkspaceCleanupRetry(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")

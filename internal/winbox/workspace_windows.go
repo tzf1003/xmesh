@@ -14,8 +14,8 @@ import (
 
 // workspaceGrant owns existing grants, inherited grants and the root namespace
 // binding. The caller coordinates external namespace/ACL writers and reaps every
-// sandbox process before Close. Retained child handles still constrain directory
-// renames; execution integration must resolve that compatibility boundary.
+// sandbox process before Close. Descendant security handles use volume/file-ID
+// opens so populated directories can be renamed while grants remain bound.
 type workspaceGrant struct {
 	mu          sync.Mutex
 	profile     *Profile
@@ -71,12 +71,63 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 		err = ctx.Err()
 	}
 	if err == nil {
+		err = g.retainIdentityHandles(ctx)
+	}
+	if err == nil {
 		return g, nil
 	}
 	if cleanupErr := g.Close(); cleanupErr != nil {
 		return g, errors.Join(err, fmt.Errorf("rollback AppContainer workspace: %w", cleanupErr))
 	}
 	return nil, err
+}
+
+// Prepare every replacement before releasing any pathname descendant handle.
+// A failed prepare leaves the original grants and snapshot available for rollback.
+// Admission is private until this completes; external namespace/ACL writers are
+// coordinated by the caller throughout preparation and execution.
+func (g *workspaceGrant) retainIdentityHandles(ctx context.Context) error {
+	type retainedHandles struct{ identity, security windows.Handle }
+	retained := make([]retainedHandles, len(g.tree.objects))
+	defer func() {
+		for _, pair := range retained {
+			if pair.identity != 0 {
+				windows.CloseHandle(pair.identity)
+			}
+			if pair.security != 0 {
+				windows.CloseHandle(pair.security)
+			}
+		}
+	}()
+	for index, object := range g.tree.objects[1:] {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h, err := openIdentityObject(g.tree.ancestors[0], object)
+		if err != nil {
+			return err
+		}
+		pair := &retained[index+1]
+		pair.security = h
+		process := windows.CurrentProcess()
+		if err := windows.DuplicateHandle(process, h, process, &pair.identity,
+			windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES, false, 0); err != nil {
+			return fmt.Errorf("retain AppContainer file-ID identity handle: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for index := 1; index < len(retained); index++ {
+		grant := g.selected.grants[index]
+		windows.CloseHandle(grant.handle)
+		windows.CloseHandle(grant.aclHandle)
+		grant.handle, grant.aclHandle = retained[index].identity, retained[index].security
+		retained[index] = retainedHandles{}
+		windows.CloseHandle(g.tree.objects[index].handle)
+		g.tree.objects[index].handle = 0
+	}
+	return nil
 }
 
 // Close first removes explicit inheritance sources, then scans the still-bound
