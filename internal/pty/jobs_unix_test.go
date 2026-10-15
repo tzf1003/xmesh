@@ -24,7 +24,10 @@ func Test_JobControlInterruptAndClose(t *testing.T) {
 		t.Fatal(e)
 	}
 	id := out["session_id"].(string)
-	command := "set +H\n" + `set -m; sh -c 'trap "" TERM HUP; exec sleep 300' & printf 'BG_PID=%s\n' "$!"; sleep 300` + "\n"
+	// A foreground process group can appear before the child installs its
+	// interrupt disposition. Announce readiness after a foreground handler is
+	// installed; exec then changes that caught handler to the default disposition.
+	command := "set +H\n" + `set -m; sh -c 'trap "" TERM HUP; exec sleep 300' & printf 'BG_PID=%s\n' "$!"; sh -c 'trap "exit 130" INT; printf "FG_%s\n" READY; exec sleep 300'` + "\n"
 	_, e = invoke(m, r, p, c, "pty.write", Object{"session_id": id, "data": command})
 	if e != nil {
 		t.Fatal(e)
@@ -48,7 +51,7 @@ func Test_JobControlInterruptAndClose(t *testing.T) {
 		t.Fatalf("terminal output deadline: %q", output.String())
 		return ""
 	}
-	marker := regexp.MustCompile(`BG_PID=([0-9]+)`)
+	marker := regexp.MustCompile(`BG_PID=([0-9]+)[\s\S]*FG_READY`)
 	output := readUntil(marker)
 	background, _ := strconv.Atoi(marker.FindStringSubmatch(output)[1])
 	t.Cleanup(func() { _ = syscall.Kill(background, syscall.SIGKILL) })
