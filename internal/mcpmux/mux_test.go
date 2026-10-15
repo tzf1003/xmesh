@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 )
 
 func Test_CTRMUX01_SameUpstreamIDs(t *testing.T) {
@@ -113,5 +114,75 @@ func Test_CTRMUX02_ProgressIsolationAndReverseDeny(t *testing.T) {
 	_, e = ss.CreateMessage(ctx, &mcp.CreateMessageParams{MaxTokens: 10, Messages: []*mcp.SamplingMessage{}})
 	if e == nil {
 		t.Fatal("ownerless sampling accepted")
+	}
+}
+
+func Test_CTRMUX02_ResponseWaitsForProgressForwarding(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	left, right := net.Pipe()
+	server := mcp.NewServer(&mcp.Implementation{Name: "progress-order", Version: "1"}, nil)
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseForwarding := sync.OnceFunc(func() { close(release) })
+	server.AddTool(&mcp.Tool{Name: "progress", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if err := r.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: r.Params.GetProgressToken(), Progress: 1}); err != nil {
+			return nil, err
+		}
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+	})
+	ss, err := server.Connect(ctx, &mcp.IOTransport{Reader: left, Writer: left}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ss.Close()
+	b, err := Connect(ctx, &mcp.IOTransport{Reader: right, Writer: right}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	defer releaseForwarding()
+	// A callback can query the same backend while forwarding a notification.
+	// Its completion remains part of the original call's lifetime.
+	queried := make(chan error, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := b.Call(ctx, "progress", map[string]any{}, Progress{Original: "owner", Send: func(ctx context.Context, _ *mcp.ProgressNotificationParams) error {
+			close(entered)
+			_, err := b.Tools(ctx)
+			queried <- err
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return err
+		}})
+		done <- err
+	}()
+	select {
+	case err := <-queried:
+		if err != nil {
+			t.Fatal("backend reader blocked by progress forwarding", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("progress callback could not query backend", ctx.Err())
+	}
+	select {
+	case err := <-done:
+		t.Fatal("call completed before progress forwarding", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseForwarding()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("call did not complete after progress forwarding", ctx.Err())
 	}
 }

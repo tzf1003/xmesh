@@ -77,6 +77,7 @@ type Transport struct {
 	Base     mcp.Transport
 	Mapper   *Mapper
 	Upstream string
+	progress func(context.Context, *mcp.ProgressNotificationParams)
 }
 
 // SessionTransport assigns a process-generated session to an in-memory link.
@@ -105,13 +106,14 @@ func (t *Transport) Connect(ctx context.Context) (mcp.Connection, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &connection{Connection: c, mapper: t.Mapper, upstream: t.Upstream}, nil
+	return &connection{Connection: c, mapper: t.Mapper, upstream: t.Upstream, progress: t.progress}, nil
 }
 
 type connection struct {
 	mcp.Connection
 	mapper   *Mapper
 	upstream string
+	progress func(context.Context, *mcp.ProgressNotificationParams)
 }
 
 func (c *connection) Write(ctx context.Context, msg jsonrpc.Message) error {
@@ -155,6 +157,17 @@ func (c *connection) Read(ctx context.Context) (jsonrpc.Message, error) {
 			copy.ID = id
 			return &copy, nil
 		}
+		if req, ok := msg.(*jsonrpc.Request); ok && !req.IsCall() && req.Method == "notifications/progress" && c.progress != nil {
+			var params mcp.ProgressNotificationParams
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				slog.Debug("progress_invalid")
+				continue
+			}
+			// Consume progress before reading the response that retires its route.
+			// SDK notification handlers may run after the response is delivered.
+			c.progress(ctx, &params)
+			continue
+		}
 		return msg, nil
 	}
 }
@@ -164,10 +177,15 @@ type Progress struct {
 	Original any
 	Send     func(context.Context, *mcp.ProgressNotificationParams) error
 }
+type progressRoute struct {
+	Progress
+	ctx     context.Context
+	pending sync.WaitGroup
+}
 type Bridge struct {
 	Session  *mcp.ClientSession
 	mu       sync.Mutex
-	progress map[string]Progress
+	progress map[string]*progressRoute
 	sequence atomic.Uint64
 }
 type Options struct {
@@ -176,28 +194,12 @@ type Options struct {
 }
 
 func Connect(ctx context.Context, t mcp.Transport, opts Options) (*Bridge, error) {
-	b := &Bridge{progress: map[string]Progress{}}
+	b := &Bridge{progress: map[string]*progressRoute{}}
 	client := mcp.NewClient(&mcp.Implementation{Name: "xmesh-mux", Version: "0.1.0"}, &mcp.ClientOptions{
 		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
 			if opts.Changed != nil {
 				go opts.Changed()
 			}
-		},
-		ProgressNotificationHandler: func(ctx context.Context, r *mcp.ProgressNotificationClientRequest) {
-			token, ok := r.Params.ProgressToken.(string)
-			if !ok {
-				return
-			}
-			b.mu.Lock()
-			route, ok := b.progress[token]
-			b.mu.Unlock()
-			if !ok {
-				slog.Debug("progress_unrouted")
-				return
-			}
-			p := *r.Params
-			p.ProgressToken = route.Original
-			_ = route.Send(ctx, &p)
 		},
 		CreateMessageHandler: func(ctx context.Context, r *mcp.CreateMessageRequest) (*mcp.CreateMessageResult, error) {
 			if opts.Reverse != nil {
@@ -216,21 +218,51 @@ func Connect(ctx context.Context, t mcp.Transport, opts Options) (*Bridge, error
 			return nil, &jsonrpc.Error{Code: jsonrpc.CodeMethodNotFound, Message: "此后端没有可路由的租约持有者"}
 		},
 	})
-	session, e := client.Connect(ctx, &Transport{Base: t, Mapper: NewMapper(), Upstream: "client"}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	session, e := client.Connect(ctx, &Transport{Base: t, Mapper: NewMapper(), Upstream: "client", progress: b.notifyProgress}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 	if e != nil {
 		return nil, e
 	}
 	b.Session = session
 	return b, nil
 }
+
+func (b *Bridge) notifyProgress(ctx context.Context, params *mcp.ProgressNotificationParams) {
+	token, ok := params.ProgressToken.(string)
+	if !ok {
+		return
+	}
+	b.mu.Lock()
+	route, ok := b.progress[token]
+	if ok {
+		route.pending.Add(1)
+	}
+	b.mu.Unlock()
+	if !ok {
+		slog.Debug("progress_unrouted")
+		return
+	}
+	p := *params
+	p.ProgressToken = route.Original
+	go func() {
+		defer route.pending.Done()
+		_ = route.Send(route.ctx, &p)
+	}()
+}
+
 func (b *Bridge) Call(ctx context.Context, name string, args any, progress Progress) (*mcp.CallToolResult, error) {
 	params := &mcp.CallToolParams{Name: name, Arguments: args}
 	if progress.Send != nil && progress.Original != nil {
 		token := fmt.Sprintf("p-%d", b.sequence.Add(1))
+		route := &progressRoute{Progress: progress, ctx: ctx}
 		b.mu.Lock()
-		b.progress[token] = progress
+		b.progress[token] = route
 		b.mu.Unlock()
-		defer func() { b.mu.Lock(); delete(b.progress, token); b.mu.Unlock() }()
+		defer func() {
+			b.mu.Lock()
+			delete(b.progress, token)
+			b.mu.Unlock()
+			route.pending.Wait()
+		}()
 		params.SetProgressToken(token)
 	}
 	return b.Session.CallTool(ctx, params)
