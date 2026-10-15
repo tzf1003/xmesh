@@ -68,6 +68,7 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 		if !exists || !peer.online {
 			return agent.Result(nil, toolerr.New("not_found", "设备不存在", "name", device))
 		}
+		v.waitReady(ctx, device)
 		v.mu.Lock()
 		d := v.down[device]
 		rows := []map[string]any{}

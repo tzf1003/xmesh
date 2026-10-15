@@ -57,6 +57,8 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --json
 
 远端工具名为 `<node.name>/exec.run` 等；本机 Gateway 上为 `local/exec.run`。`sys.info` 返回实际网络身份、角色、重载失败及待重启提示。
 
+设备能力表独立后台刷新，已连接设备通过缓存提供工具。远端首次就绪后会通知客户端更新工具列表；不可达设备的连接尝试具有独立超时和重试间隔。`devices.list` 中的 `stale` 表示元数据仍待刷新，针对某设备的首次工具调用会等待该设备的能力查询。
+
 两端运行后，可在各自 Gateway 验证对端：
 
 ```bash

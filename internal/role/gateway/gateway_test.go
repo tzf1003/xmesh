@@ -186,6 +186,10 @@ func Test_INV09_OfflineRoutesRemoved(t *testing.T) {
 	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
 	t.Cleanup(server.Close)
 	client := connect(t, server.URL+"/mcp")
+	// A target call waits for that peer's initial asynchronous catalogue.
+	if out := call(t, client, "remote/sys.info", map[string]any{}); out.IsError {
+		t.Fatal(out)
+	}
 	list, e := client.ListTools(context.Background(), nil)
 	if e != nil {
 		t.Fatal(e)

@@ -12,7 +12,7 @@
 | 后端 | stdio/HTTP MCP、actor 串行、exclusive fencing lease、空闲回收、故障失效、策略重载保留有效租约 |
 | MCP 多路复用 | 上下游请求映射、通知、进度、sampling 路由、断线取消 |
 | 设备网络 | tsnet 注册与 WhoIs、tag 授权、LAN 证书配对与续期、mTLS、mDNS 发现 |
-| Gateway | 设备前缀、能力缓存、搜索、连接默认值、断线停路由、持续 drain 状态、本机 PAT 文件认证与 scope、凭据轮转和会话绑定 |
+| Gateway | 设备前缀、每设备独立能力刷新与重试退避、搜索、连接默认值、断线停路由、持续 drain 状态、本机 PAT 文件认证与 scope、凭据轮转和会话绑定 |
 | OAuth 与入口 | 元数据、动态注册、PKCE S256、单主体口令、CSRF、scope、令牌轮转、客户端注册及回调 URI 持久化、Funnel/隧道/HTTPS 入口装配 |
 | 治理与运行 | 元数据审计、热加载失败记录、重启提示、调用预算、Agent 客户端 PTY 预算、keep/kill drain、CLI 与服务失败退出 |
 
@@ -20,7 +20,7 @@
 
 ## 已执行验证
 
-- macOS：`go test -race ./... -timeout=60s`，20 个包共 84 项通过；`go vet ./...` 通过。HTTP 集成覆盖文件、exec、PTY、后端及 OAuth→Gateway→Agent 所有权隔离。
+- macOS：`go test -race ./... -timeout=60s`，20 个包共 86 项通过；`go vet ./...` 通过。HTTP 集成覆盖文件、exec、PTY、后端及 OAuth→Gateway→Agent 所有权隔离。
 - Windows amd64 与 Linux amd64：`go build ./...` 交叉编译通过。
 - 配置、错误、租约、审计的正反例及文档链接：`check_examples.py` 通过。
 - Ubuntu 24.04 amd64 原生：PTY 6 项、exec 6 项、文件搜索 5 项及 policy 3 项通过。使用实际二进制的 L1、L2 MCP 冒烟均通过文件、exec、PTY、审计正文排除及正常退出检查。

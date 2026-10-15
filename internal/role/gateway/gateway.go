@@ -67,9 +67,22 @@ type downstream struct {
 	peerID      string
 	peerAddress string
 }
+type refreshJob struct {
+	peer    mesh.Peer
+	done    chan struct{}
+	cancel  context.CancelFunc
+	running bool
+	retryAt time.Time
+}
+
 type view struct {
 	mu         sync.Mutex
 	refreshMu  sync.Mutex
+	workers    sync.WaitGroup
+	closedDone chan struct{}
+	jobs       map[string]*refreshJob
+	ctx        context.Context
+	cancel     context.CancelFunc
 	g          *Gateway
 	p          Principal
 	server     *mcp.Server
@@ -258,7 +271,8 @@ func scopeKey(scopes []string) string {
 	return strings.Join(expanded, " ")
 }
 func (g *Gateway) newView(p Principal) *view {
-	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, down: map[string]*downstream{}}
+	ctx, cancel := context.WithCancel(g.ctx)
+	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
 	v.server = mcp.NewServer(&mcp.Implementation{Name: "xmesh-gateway", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, r *mcp.InitializedRequest) { v.bind(r.Session) }})
 	for _, name := range []string{"devices.list", "tools.search", "session.set_defaults"} {
 		name := name
@@ -302,6 +316,9 @@ func (g *Gateway) newView(p Principal) *view {
 					v.bind(session)
 				}
 				v.refresh()
+				if method == "tools/list" {
+					v.waitReady(ctx, g.opts.LocalPeer.Name)
+				}
 			}
 			if method == "tools/call" {
 				req := r.(*mcp.CallToolRequest)
@@ -340,6 +357,14 @@ func (g *Gateway) newView(p Principal) *view {
 					d, exists := devices[deviceName]
 					if !exists || !d.online {
 						return agent.Result(nil, toolerr.New("not_found", "设备不在线", "name", deviceName)), nil
+					}
+					v.waitReady(ctx, deviceName)
+					v.mu.Lock()
+					connection := v.down[deviceName]
+					ready := connection != nil && !connection.dead && connection.tools != nil
+					v.mu.Unlock()
+					if !ready {
+						return agent.Result(nil, toolerr.New("not_found", "设备能力尚未就绪", "name", deviceName)), nil
 					}
 				}
 			}
@@ -383,6 +408,7 @@ func (v *view) bind(s *mcp.ServerSession) {
 	v.g.mu.Lock()
 	v.g.views[v] = true
 	v.g.mu.Unlock()
+	go v.refresh()
 	go func() { _ = s.Wait(); v.close() }()
 }
 func (v *view) close() {
@@ -391,9 +417,15 @@ func (v *view) close() {
 	if v.closed {
 		v.mu.Unlock()
 		v.refreshMu.Unlock()
+		<-v.closedDone
 		return
 	}
+	defer close(v.closedDone)
 	v.closed = true
+	v.cancel()
+	for _, job := range v.jobs {
+		job.cancel()
+	}
 	connections := []*mcpmux.Bridge{}
 	for _, d := range v.down {
 		connections = append(connections, d.bridge)
@@ -407,92 +439,134 @@ func (v *view) close() {
 	for _, b := range connections {
 		_ = b.Close()
 	}
+	v.workers.Wait()
 }
+
+// refresh reconciles discovery and schedules independent per-device I/O.
+// The catalogue lock is never held while connecting to or querying an Agent.
 func (v *view) refresh() {
 	v.refreshMu.Lock()
 	defer v.refreshMu.Unlock()
+	devices, generation := v.g.snapshot()
 	v.mu.Lock()
 	if v.closed {
 		v.mu.Unlock()
 		return
 	}
-	v.mu.Unlock()
-	devices, generation := v.g.snapshot()
-	ctx, cancel := context.WithTimeout(v.g.ctx, 10*time.Second)
-	defer cancel()
-	v.mu.Lock()
-	remove := []*mcpmux.Bridge{}
+	var removed []*mcpmux.Bridge
 	for name, d := range v.down {
 		peer, exists := devices[name]
 		if !exists || !peer.online || d.dead || d.peerID != peer.peer.ID || d.peerAddress != peer.peer.Address {
-			remove = append(remove, d.bridge)
+			removed = append(removed, d.bridge)
 			delete(v.down, name)
 		}
 	}
-	v.mu.Unlock()
-	for _, b := range remove {
-		_ = b.Close()
+	for name, job := range v.jobs {
+		peer, exists := devices[name]
+		if !exists || !peer.online || job.peer.ID != peer.peer.ID || job.peer.Address != peer.peer.Address {
+			job.cancel()
+			delete(v.jobs, name)
+		}
 	}
 	for name, device := range devices {
 		if !device.online {
 			continue
 		}
-		v.mu.Lock()
-		d := v.down[name]
-		v.mu.Unlock()
-		if d == nil {
-			name := name
-			bridge, e := v.g.opts.Dial(ctx, device.peer, v.p, mcpmux.Options{Changed: func() {
-				v.mu.Lock()
-				if d := v.down[name]; d != nil {
-					d.updated = time.Time{}
-				}
-				v.mu.Unlock()
-				go v.refresh()
-			}, Reverse: func() *mcp.ServerSession { v.mu.Lock(); defer v.mu.Unlock(); return v.session }})
-			if e != nil {
-				continue
-			}
-			d = &downstream{bridge: bridge, peerID: device.peer.ID, peerAddress: device.peer.Address}
-			v.mu.Lock()
-			v.down[name] = d
-			v.mu.Unlock()
-			go func() {
-				_ = bridge.Session.Wait()
-				v.mu.Lock()
-				if v.down[name] == d {
-					d.dead = true
-				}
-				v.mu.Unlock()
-				go v.refresh()
-			}()
+		if job := v.jobs[name]; job != nil && (job.running || time.Now().Before(job.retryAt)) {
+			continue
 		}
-		v.mu.Lock()
-		needs := time.Since(d.updated) >= 25*time.Second
-		v.mu.Unlock()
-		if needs {
-			tools, e := d.bridge.Tools(ctx)
-			var info map[string]any
-			if e == nil {
-				out, err := d.bridge.Call(ctx, "sys.info", map[string]any{}, mcpmux.Progress{})
-				if err == nil && !out.IsError {
-					b, _ := json.Marshal(out.StructuredContent)
-					e = json.Unmarshal(b, &info)
-					if e == nil && info == nil {
-						e = fmt.Errorf("sys.info 返回为空")
-					}
-				} else {
-					e = fmt.Errorf("sys.info 暂不可用")
-				}
-			}
+		d := v.down[name]
+		if d != nil && time.Since(d.updated) < 25*time.Second {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(v.ctx, 10*time.Second)
+		job := &refreshJob{peer: device.peer, done: make(chan struct{}), cancel: cancel, running: true}
+		v.jobs[name] = job
+		v.workers.Add(1)
+		go v.refreshPeer(ctx, name, job, d)
+	}
+	v.mu.Unlock()
+	v.publish(generation)
+	for _, bridge := range removed {
+		v.workers.Add(1)
+		go func() { defer v.workers.Done(); _ = bridge.Close() }()
+	}
+}
+
+// waitReady only waits for the requested device's first catalogue. Cached calls
+// proceed while an independent background refresh updates that device.
+func (v *view) waitReady(ctx context.Context, name string) {
+	v.refreshMu.Lock()
+	v.mu.Lock()
+	d, job := v.down[name], v.jobs[name]
+	ready := d != nil && !d.dead && d.tools != nil
+	v.mu.Unlock()
+	v.refreshMu.Unlock()
+	if ready || job == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+	case <-job.done:
+	}
+}
+
+func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d *downstream) {
+	defer v.workers.Done()
+	defer close(job.done)
+	defer job.cancel()
+	created := false
+	var err error
+	if d == nil {
+		var bridge *mcpmux.Bridge
+		bridge, err = v.g.opts.Dial(ctx, job.peer, v.p, mcpmux.Options{Changed: func() {
 			v.mu.Lock()
-			if e == nil {
-				d.tools = tools
-				if info != nil {
-					d.info = info
+			if current := v.down[name]; current != nil {
+				current.updated = time.Time{}
+			}
+			v.mu.Unlock()
+			go v.refresh()
+		}, Reverse: func() *mcp.ServerSession { v.mu.Lock(); defer v.mu.Unlock(); return v.session }})
+		if err == nil {
+			d = &downstream{bridge: bridge, peerID: job.peer.ID, peerAddress: job.peer.Address}
+			created = true
+		}
+	}
+	var tools []*mcp.Tool
+	var info map[string]any
+	if err == nil {
+		tools, err = d.bridge.Tools(ctx)
+		if err == nil {
+			var out *mcp.CallToolResult
+			out, err = d.bridge.Call(ctx, "sys.info", map[string]any{}, mcpmux.Progress{})
+			if err == nil && out != nil && !out.IsError {
+				var b []byte
+				b, err = json.Marshal(out.StructuredContent)
+				if err == nil {
+					err = json.Unmarshal(b, &info)
 				}
-				d.updated = time.Now()
-				d.failedSince = time.Time{}
+				if err == nil && info == nil {
+					err = fmt.Errorf("sys.info 返回为空")
+				}
+			} else if err == nil {
+				err = fmt.Errorf("sys.info 暂不可用")
+			}
+		}
+	}
+	v.refreshMu.Lock()
+	devices, generation := v.g.snapshot()
+	current, exists := devices[name]
+	v.mu.Lock()
+	valid := !v.closed && v.jobs[name] == job && exists && current.online && current.peer.ID == job.peer.ID && current.peer.Address == job.peer.Address
+	if valid {
+		job.running = false
+		if err != nil {
+			job.retryAt = time.Now().Add(5 * time.Second)
+		}
+		if d != nil {
+			v.down[name] = d
+			if err == nil {
+				d.tools, d.info, d.updated, d.failedSince = tools, info, time.Now(), time.Time{}
 			} else {
 				if d.failedSince.IsZero() {
 					d.failedSince = time.Now()
@@ -501,9 +575,31 @@ func (v *view) refresh() {
 					d.tools = nil
 				}
 			}
-			v.mu.Unlock()
 		}
 	}
+	v.mu.Unlock()
+	if valid {
+		v.publish(generation)
+	}
+	v.refreshMu.Unlock()
+	if !valid && created {
+		_ = d.bridge.Close()
+	}
+	if valid && created {
+		go func() {
+			_ = d.bridge.Session.Wait()
+			v.mu.Lock()
+			if v.down[name] == d {
+				d.dead = true
+			}
+			v.mu.Unlock()
+			go v.refresh()
+		}()
+	}
+}
+
+// publish runs with refreshMu held, using only cached device data.
+func (v *view) publish(generation uint64) {
 	v.mu.Lock()
 	old := append([]string{}, v.names...)
 	entries := map[string]*mcp.Tool{}
