@@ -287,8 +287,21 @@ func setMediumLabel(t *testing.T, path string) {
 	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.LABEL_SECURITY_INFORMATION, nil, nil, nil, sacl); err != nil {
 		t.Fatal(err)
 	}
-	if label := objectLabel(t, path); label != "S:(ML;;NW;;;ME)" {
-		t.Fatal("Medium integrity fixture label", label)
+	actual, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.LABEL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualSACL, _, err := actual.SACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, expectedACEs, err := aclParts(sacl)
+	if err != nil || len(expectedACEs) != 1 {
+		t.Fatal("Medium integrity fixture expected ACE", err)
+	}
+	_, actualACEs, err := aclParts(actualSACL)
+	if err != nil || len(actualACEs) != 1 || !bytes.Equal(expectedACEs[0], actualACEs[0]) {
+		t.Fatal("Medium integrity fixture label", actual.String(), err)
 	}
 }
 
