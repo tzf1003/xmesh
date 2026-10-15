@@ -194,21 +194,10 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 		env[k] = v
 	}
 	if foldCase && !seen["PSMODULEPATH"] && env["PSMODULEPATH"] == "" {
-		modules := []string{}
-		for _, location := range [][2]string{
-			{"USERPROFILE", `\Documents\WindowsPowerShell\Modules`},
-			{"PROGRAMFILES", `\WindowsPowerShell\Modules`},
-			{"SYSTEMROOT", `\System32\WindowsPowerShell\v1.0\Modules`},
-		} {
-			if root := env[location[0]]; root != "" {
-				path := strings.TrimRight(root, `\/`) + location[1]
-				if !e.denyEnv("PSMODULEPATH", path) {
-					modules = append(modules, path)
-				}
-			}
-		}
-		if len(modules) > 0 {
-			env["PSMODULEPATH"] = strings.Join(modules, ";")
+		// A present empty value lets each PowerShell runtime initialize its own
+		// module defaults, including when the Agent was launched outside a shell.
+		if env["SYSTEMROOT"] != "" && !e.denyEnv("PSMODULEPATH", "") {
+			env["PSMODULEPATH"] = ""
 		}
 	}
 	keys := []string{}

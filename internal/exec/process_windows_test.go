@@ -76,8 +76,17 @@ func Test_WindowsExecPowerShell(t *testing.T) {
 
 func Test_WindowsExecPowerShellDefaultModules(t *testing.T) {
 	windowsExecRuntime(t)
-	t.Setenv("PSModulePath", "")
-	windowsExecPowerShell(t)
+	for _, mode := range []string{"empty", "unset"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("PSModulePath", "")
+			if mode == "unset" {
+				if err := os.Unsetenv("PSModulePath"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			windowsExecPowerShell(t)
+		})
+	}
 }
 
 func windowsExecPowerShell(t *testing.T) {

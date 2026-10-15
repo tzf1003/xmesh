@@ -13,6 +13,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/go.yml
       - run: go test -race ./... -timeout=120s
         if: ${{ !cancelled() }}
       - run: go vet ./...

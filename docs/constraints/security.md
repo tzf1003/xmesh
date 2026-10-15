@@ -31,7 +31,7 @@ Agent 从 `LocalClient().WhoIs(remoteAddr)` 取对端节点与 tag。取不到�
 2. 应用 `agent.policy.env` 的拒绝规则。
 3. 叠加调用方 `env`，叠加时再次应用拒绝规则。
 
-Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺少该值时，依次使用 `USERPROFILE\Documents\WindowsPowerShell\Modules`、`ProgramFiles\WindowsPowerShell\Modules`、`SystemRoot\System32\WindowsPowerShell\v1.0\Modules`，跳过缺少根目录或命中拒绝规则的条目。调用方可以显式覆盖该值。
+Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺少该值且 `SystemRoot` 可用时，传入空值，由所启动的 PowerShell 运行时初始化默认模块目录。调用方可以显式覆盖该值，拒绝变量名的策略仍然生效。
 
 继承的 `PATH` 和 Windows `PSModulePath` 按平台的搜索路径分隔符逐项应用拒绝规则，保留其余目录。调用方显式传入的搜索路径含拒绝目录时，按被拒绝的环境变量处理。
 
