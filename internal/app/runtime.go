@@ -98,7 +98,12 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 		if e != nil {
 			return e
 		}
-		a.Audit = log
+		a.SetAudit(log)
+		mode := c.Mesh.Mode
+		if o.Local {
+			mode = "local"
+		}
+		a.SetNetwork(mode, self)
 		defer a.Close()
 	}
 	servers := []*http.Server{}

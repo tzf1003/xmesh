@@ -46,11 +46,17 @@ type Agent struct {
 	views          map[string]*mcp.Server
 	viewMu         sync.Mutex
 	backendNames   map[*mcp.Server][]string
-	Audit          *audit.Logger
+	auditLog       atomic.Pointer[audit.Logger]
+	networkInfo    atomic.Pointer[NetworkInfo]
 	draining       atomic.Bool
 	backendChanged chan struct{}
 	stop           chan struct{}
 	done           chan struct{}
+}
+type NetworkInfo struct {
+	Mode string   `json:"mode"`
+	Node string   `json:"node_id"`
+	Tags []string `json:"tags"`
 }
 
 func New(store *config.Store) (*Agent, error) {
@@ -85,6 +91,7 @@ func (a *Agent) supervise(previous *config.Config) {
 	defer close(a.done)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	var recordedFailures uint64
 	for {
 		select {
 		case <-a.stop:
@@ -93,6 +100,14 @@ func (a *Agent) supervise(previous *config.Config) {
 			a.refreshBackends()
 		case <-ticker.C:
 			cfg := a.store.Get()
+			_, failures := a.store.State()
+			if failures > recordedFailures {
+				if log := a.auditLog.Load(); log != nil {
+					if err := log.Write(map[string]any{"time": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "event": "policy_reload_failed", "caller": "config/internal", "device": cfg.Node.Name, "tool": "config.reload", "status": "error", "error": "internal", "duration_ms": 0}); err == nil {
+						recordedFailures = failures
+					}
+				}
+			}
 			if cfg != previous {
 				a.Backends.Configure(cfg)
 				a.refreshBackends()
@@ -101,6 +116,11 @@ func (a *Agent) supervise(previous *config.Config) {
 		}
 	}
 }
+func (a *Agent) SetAudit(log *audit.Logger) { a.auditLog.Store(log) }
+func (a *Agent) SetNetwork(mode string, p Principal) {
+	a.networkInfo.Store(&NetworkInfo{Mode: mode, Node: p.Node, Tags: append([]string{}, p.Tags...)})
+}
+
 func Local(r *http.Request) (Principal, error) {
 	host, _, e := net.SplitHostPort(r.RemoteAddr)
 	if e != nil || host != "127.0.0.1" {
@@ -280,7 +300,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
-			if method == "tools/call" && a.Audit != nil {
+			if log := a.auditLog.Load(); method == "tools/call" && log != nil {
 				defer func() {
 					call := req.(*mcp.CallToolRequest)
 					out, ok := result.(*mcp.CallToolResult)
@@ -288,7 +308,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 						out = Result(nil, toolerr.Internal("tools.call", e))
 					}
 					caller := a.bind(call.Session, p)
-					if err := a.Audit.Record(caller.ID, "", a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+					if err := log.Record(caller.ID, "", a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
 						result, e = Result(nil, err), nil
 					}
 				}()
@@ -352,6 +372,13 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	inUse, active, closed := a.PTY.Counts()
 	execShared, execExclusive := a.Exec.Counts()
 	warnings := []string{}
+	restart, failures := a.store.State()
+	if restart {
+		warnings = append(warnings, "节点、网络或监听配置已变更，需要重启")
+	}
+	if failures > 0 {
+		warnings = append(warnings, "配置热加载曾失败，继续使用最近有效配置")
+	}
 	if c.Agent.Policy.AllowDangerous {
 		warnings = append(warnings, "allow_dangerous 已启用")
 	}
@@ -362,7 +389,11 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 			_ = f.Close()
 		}
 	}
-	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "authkey_readable": readable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "exec_shared_in_use": execShared, "exec_exclusive_in_use": execExclusive, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
+	network := a.networkInfo.Load()
+	if network == nil {
+		network = &NetworkInfo{Mode: "local", Node: "local", Tags: []string{"tag:peer"}}
+	}
+	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "network": network, "restart_required": restart, "policy_reload_failures": failures, "authkey_readable": readable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "exec_shared_in_use": execShared, "exec_exclusive_in_use": execExclusive, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
 }
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {

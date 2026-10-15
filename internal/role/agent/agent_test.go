@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,45 @@ import (
 	"testing"
 	"time"
 )
+
+func Test_CTRCFG02_ReloadFailureAuditAndStatus(t *testing.T) {
+	path, store := configuration(t)
+	a, e := New(store)
+	if e != nil {
+		t.Fatal(e)
+	}
+	dir := t.TempDir()
+	logger, e := audit.New(dir, time.Hour)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(logger.Close)
+	t.Cleanup(a.Close)
+	a.SetAudit(logger)
+	a.SetNetwork("tailnet", Principal{Node: "stable-self", Tags: []string{"tag:device"}})
+	server := httptest.NewServer(a.HTTP(Local))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	if e = os.WriteFile(path, []byte("invalid: ["), 0600); e != nil {
+		t.Fatal(e)
+	}
+	info := object(t, tool(t, client, "sys.info", map[string]any{}))
+	if info["policy_reload_failures"] != float64(1) || info["network"].(map[string]any)["node_id"] != "stable-self" {
+		t.Fatal(info)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+		for _, file := range files {
+			b, _ := os.ReadFile(file)
+			if strings.Contains(string(b), `"event":"policy_reload_failed"`) {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("policy reload failure audit missing")
+}
 
 func configuration(t *testing.T) (string, *config.Store) {
 	t.Helper()

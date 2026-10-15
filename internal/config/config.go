@@ -172,6 +172,7 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.Policy.Isolation = "L1"
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
+	c.Gateway.Listen = "127.0.0.1:8080"
 	c.Audit.Retention = "720h"
 	if e = json.Unmarshal(raw, c); e != nil {
 		return nil, e

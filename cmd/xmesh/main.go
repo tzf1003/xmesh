@@ -94,6 +94,11 @@ func status(args []string) error {
 	b, _ := json.Marshal(o.StructuredContent)
 	var info map[string]any
 	_ = json.Unmarshal(b, &info)
-	fmt.Printf("节点: %v\n平台: %v/%v\n后端: %v\n配额: %v\n", info["hostname"], info["os"], info["arch"], info["backends"], info["limits"])
+	fmt.Printf("节点: %v\n平台: %v/%v\n角色: %v\n网络身份: %v\n后端: %v\n配额: %v\n", info["hostname"], info["os"], info["arch"], info["roles"], info["network"], info["backends"], info["limits"])
+	if warnings, ok := info["warnings"].([]any); ok {
+		for _, warning := range warnings {
+			fmt.Printf("警告: %v\n", warning)
+		}
+	}
 	return nil
 }

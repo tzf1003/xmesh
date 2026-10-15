@@ -4,17 +4,21 @@ import (
 	"crypto/sha256"
 	"log/slog"
 	"os"
+	"reflect"
 	"sync"
 )
 
 // Store reloads validated configuration at the next call, retaining the last
 // successful generation on failure (CON-SEC-06).
 type Store struct {
-	mu      sync.Mutex
-	path    string
-	current *Config
-	digest  [32]byte
-	failed  [32]byte
+	mu         sync.Mutex
+	path       string
+	current    *Config
+	digest     [32]byte
+	failed     [32]byte
+	readFailed bool
+	restart    bool
+	failures   uint64
 }
 
 func NewStore(path string) (*Store, error) {
@@ -37,9 +41,14 @@ func (s *Store) Get() *Config {
 	}
 	b, e := os.ReadFile(s.path)
 	if e != nil {
-		slog.Warn("policy_reload_failed")
+		if !s.readFailed {
+			s.failures++
+			slog.Warn("policy_reload_failed")
+		}
+		s.readFailed = true
 		return s.current
 	}
+	s.readFailed = false
 	digest := sha256.Sum256(b)
 	if digest == s.digest || digest == s.failed {
 		return s.current
@@ -47,10 +56,12 @@ func (s *Store) Get() *Config {
 	c, e := Parse(b)
 	if e != nil {
 		s.failed = digest
+		s.failures++
 		slog.Warn("policy_reload_failed")
 		return s.current
 	}
 	// Node, network and listeners use the startup generation until restart.
+	s.restart = !reflect.DeepEqual(c.Node, s.current.Node) || !reflect.DeepEqual(c.Mesh, s.current.Mesh) || c.Gateway.Listen != s.current.Gateway.Listen || !reflect.DeepEqual(c.Ingress, s.current.Ingress)
 	c.Node = s.current.Node
 	c.Mesh = s.current.Mesh
 	c.Gateway.Listen = s.current.Gateway.Listen
@@ -58,4 +69,10 @@ func (s *Store) Get() *Config {
 	s.current = c
 	s.digest = digest
 	return c
+}
+
+func (s *Store) State() (restart bool, failures uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restart, s.failures
 }
