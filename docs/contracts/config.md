@@ -15,7 +15,7 @@
 | `mesh.mode = lan` | `mesh.lan.mdns` 为 true，且不读取 auth key |
 | `ingress.listen = funnel` | `control_url` 必须是官方 Tailscale。Headscale 的主机名拒绝启动。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
 | `ingress.listen = public:443` | 必须有 `domain` 和 `tls`。`tls: file` 时还必须有 `cert_file` 与 `key_file`。`tls: autocert` 只在这种监听下使用 |
-| `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。证书由隧道终止处提供 |
+| `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供 |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
 
 ### 时长与尺寸

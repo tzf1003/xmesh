@@ -73,7 +73,7 @@ idle 的定义：`lastIO` 距今超过 `idle_timeout`。`open`、`write`、`read
 
 参数：`session_id`、`to_caller`。
 
-- `active`：调用方必须是 owner。owner 改为 `to_caller`，双方的每调用方计数相应减增。若接收方已达 `max_per_caller`，返回 `pty_limit`，`scope: caller`，owner 不变。
+- `active`：调用方必须是 owner。owner 改为 `to_caller`，双方的每调用方计数相应减增。若接收方已达 `max_per_caller`，返回 `pty_limit`，`scope: caller`，owner 不变。这一步是 owner 自愿交接，不要求同一个 `oauth_client`，见 [RUL-13](rulings.md#rul-13)。
 - `orphaned`：调用方的 `node_id` 必须等于 `to_caller` 的 `node_id`，且 `to_caller` 必须是当前仍连接着的会话。会话若在 open 时记下了 `oauth_client`，新 owner 的会话必须是同一个 `oauth_client`，见 [RUL-13](rulings.md#rul-13)。成功后状态回到 `active`。
 
 `to_caller` 的校验见 [CTR-ID-01](identity.md#ctr-id-01)。成功返回 `owner` 与 `state`。

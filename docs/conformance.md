@@ -66,7 +66,7 @@ Claude Code 连上本机 URL，完成一次 `fs.read`、一次 `fs.write`、一�
 | INV-03 INV-08 | Gateway 无设备状态；云端工具名没有 `local/` |
 | CTR-GW-01 CTR-GW-02 CTR-GW-03 | 前缀、搜索、会话默认值只活在当前连接 |
 | CTR-OAUTH-01 CTR-OAUTH-02 | 发现文档、授权码、scope 展开与 `tools/list` 过滤 |
-| RUL-02 RUL-09 RUL-13 | 入网后本机环回用本节点 ID；入口会话带 oauth client 头；`fs:*` 展开；orphaned 接管要求同一个 oauth client |
+| RUL-02 RUL-09 RUL-13 | 入网后本机环回用本节点 ID；入口会话带 oauth client 头；`fs:*` 展开；orphaned 接管要求同一个 oauth client；active 的 transfer 是 owner 自愿交接 |
 
 claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-dev-01/exec.run` 并成功调用一次。连接器只显示已连接、对话里没有工具，视为门 4 失败。
 

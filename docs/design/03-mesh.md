@@ -29,16 +29,13 @@ xmesh 用 tsnet 以用户态加入 tailnet，不需要安装 Tailscale，不需�
 
 云端 Codex / Claude 没有 tailnet，只能访问一个 URL。任意 xmesh 节点加上 `--ingress` 就成为公网 MCP 端点：它仍是普通对等节点，多开一个公网监听器和 OAuth 服务，按前缀把请求路由到 tailnet 内的目标节点。云端完全不知道 tailnet 存在。
 
-两种入口都要兼容：
+`ingress.listen` 三种取值都要实现，和下面的暴露方式一一对应。官方控制面走 Funnel，Headscale 走 VPS 入口；两者都要能跑。没有 VPS、也不用官方 Tailscale 时，用反向隧道。
 
-- 官方控制面下用 Funnel，让本机直接对外。零 VPS，但流量始终经过 Tailscale 中继服务器，吞吐和延迟一般。
-- Headscale 或已有 VPS 时用 VPS 入口节点。公网直达，性能最好。
-
-| 暴露方式 | 地址 | 条件 | 适用 |
-| --- | --- | --- | --- |
-| VPS 入口节点 | `https://mcp.example.com/mcp` | 公网 VPS，Let's Encrypt 证书 | 性能最好；Headscale 下的唯一入口 |
-| Tailscale Funnel（`tsnet.ListenFunnel`） | `https://mac-m3.<tailnet>.ts.net/mcp` | 仅官方控制面。流量始终经 Tailscale 中继服务器，带宽与延迟一般 | 零基础设施、低流量 |
-| 反向隧道（Cloudflare Tunnel / frp） | 自定义域名 | 任意节点出站即可 | 没有 VPS，也不用官方 Tailscale。多一个依赖 |
+| 暴露方式 | `ingress.listen` | 地址 | 条件 | 适用 |
+| --- | --- | --- | --- | --- |
+| VPS 入口节点 | `public:443` | `https://mcp.example.com/mcp` | 公网 VPS。`domain` 与 `tls` 只在这个取值下配置，证书用 Let's Encrypt 或指定文件 | 性能最好；Headscale 下不依赖 Funnel 的入口 |
+| Tailscale Funnel（`tsnet.ListenFunnel`） | `funnel` | `https://mac-m3.<tailnet>.ts.net/mcp` | 仅官方控制面。域名和证书由 Tailscale 提供，配置里不写 `domain` / `tls`。流量始终经 Tailscale 中继服务器，带宽与延迟一般 | 零基础设施、低流量 |
+| 反向隧道（Cloudflare Tunnel / frp） | `tunnel` | 自定义域名 | 任意节点出站即可。xmesh 只监听本机，域名和证书在隧道侧，配置里同样不写 `domain` / `tls` | 没有 VPS，也不用官方 Tailscale。多一个依赖 |
 
 入口节点必须实现 OAuth 2.1 + 动态客户端注册。claude.ai 自定义连接器默认走 OAuth 并尝试动态客户端注册，没有无认证选项；Codex 同样走 OAuth。契约见 [CTR-OAUTH-01](../contracts/oauth-authz.md#ctr-oauth-01)。
 

@@ -41,7 +41,7 @@ gateway:
   expose_backends: all       # all | favorite
 
 ingress:                     # 仅入口节点配置；roles 不含 ingress 时忽略
-  listen: funnel             # Funnel 的域名和证书由 Tailscale 提供，这里不写 domain / tls
+  listen: funnel             # funnel | public:443 | tunnel，见第 3 节。funnel 与 tunnel 不写 domain / tls
   oauth:
     issuer: https://win-dev-01.tailnet.ts.net
     clients:
@@ -112,6 +112,15 @@ ingress:
   listen: public:443
   domain: mcp.example.com
   tls: autocert
+  oauth:
+    issuer: https://mcp.example.com
+```
+
+反向隧道不在 xmesh 里终止 TLS。`listen: tunnel` 时本进程只监听本机，`domain` 与 `tls` 留空，issuer 写成隧道对外的那个源。
+
+```yaml
+ingress:
+  listen: tunnel
   oauth:
     issuer: https://mcp.example.com
 ```

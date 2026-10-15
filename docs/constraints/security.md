@@ -78,7 +78,7 @@ Agent 从 `LocalClient().WhoIs(remoteAddr)` 取对端节点与 tag。取不到�
 | `exec.deny.format` | 命令基名为磁盘格式化工具 |
 | `quota.exceeded` | 超过入口或设备配额 |
 
-上表里的 exec 规则和 `agent.policy.exec.deny_patterns` 使用同一种匹配，见 [RUL-11](../contracts/rulings.md#rul-11)：对规范化命令行做 RE2 搜索，不对每个 `args[i]` 单独匹配。因此 `["rm", "-rf", "/"]` 会变成 `rm -rf /` 并命中 `rm\s+-rf\s+/`。`sh -c` 的脚本字符串会再搜一次，所以写在脚本里的 `curl | sh` 也能命中。
+上表里的 exec 规则和 `agent.policy.exec.deny_patterns` 使用同一种匹配，见 [RUL-11](../contracts/rulings.md#rul-11)：对规范化命令行做 RE2 搜索，不对每个 `args[i]` 单独匹配。因此 `["rm", "-rf", "/"]` 会变成 `rm -rf /` 并命中 `rm\s+-rf\s+/`。`sh -c`、`pwsh -Command` 和 `cmd /c` 的脚本字符串会再搜一次，所以写在这些脚本里的 `curl | sh` 也能命中。`python -c` 与 `node -e` 不在这次搜索里。
 
 用户配置可以加严，不可以删除上表中的格式化与 `curl \| sh` 两类规则。若部署确实要关掉它们，必须在配置里显式 `allow_dangerous: true`，并且 `status` 输出警告。默认 `allow_dangerous` 为 false。
 

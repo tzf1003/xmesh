@@ -12,14 +12,15 @@
 
 契约层另外补了若干原文未写死的行为，编号 `RUL-*`，集中在 [契约裁定](../contracts/rulings.md)。那些裁定是为了让测试有唯一期望，不是新的产品方向。若要推翻某条裁定，改裁定文档和受影响的契约，并在本文件留一条记录。
 
-后续修订：
+后续修订（每条带日期和拉取请求编号，便于追溯）：
 
-- [RUL-02](../contracts/rulings.md#rul-02)：本机环回在节点已入网后使用本节点的 tailnet ID，`local` 只用于还没有该身份的时候。
-- [RUL-06](../contracts/rulings.md#rul-06)：renew / release 的请求参数也叫 `_lease_token`。租约结果里的字段仍叫 `token`。
-- [RUL-11](../contracts/rulings.md#rul-11)：命令黑名单匹配规范化命令行，并额外匹配 `sh -c` 的脚本原文。
-- [RUL-12](../contracts/rulings.md#rul-12)：`closed` 不占 `max_sessions`，另有 `closed_retain_max`。`pty_limit` 的计数字段是 `in_use`。
-- [RUL-13](../contracts/rulings.md#rul-13)：带 `oauth_client` 的 orphaned 会话只能由同一个 OAuth client 接管。
-- [CON-SEC-11](../constraints/security.md#con-sec-11)：入口的注册和登录必须限速。
+- 2026-10-15，#1。[RUL-02](../contracts/rulings.md#rul-02)：本机环回在节点已入网后使用本节点的 tailnet ID，`local` 只用于还没有该身份的时候。
+- 2026-10-15，#1。[RUL-06](../contracts/rulings.md#rul-06)：renew / release 的请求参数也叫 `_lease_token`。租约结果里的字段仍叫 `token`。
+- 2026-10-15，#1。[RUL-11](../contracts/rulings.md#rul-11)：命令黑名单匹配规范化命令行，并额外匹配 `sh -c`、`pwsh -Command`、`cmd /c` 的脚本原文。`python -c` 与 `node -e` 不在此列。
+- 2026-10-15，#1。[RUL-12](../contracts/rulings.md#rul-12)：`closed` 不占 `max_sessions`，另有 `closed_retain_max`。`pty_limit` 的计数字段是 `in_use`。
+- 2026-10-15，#1。[RUL-13](../contracts/rulings.md#rul-13)：带 `oauth_client` 的 orphaned 会话只能由同一个 OAuth client 接管。`active` 会话由 owner 主动 `transfer` 时允许交给另一个 client。
+- 2026-10-15，#1。[CON-SEC-11](../constraints/security.md#con-sec-11)：入口的注册和登录必须限速。
+- 2026-10-15，#1。`ingress.listen` 的 `tunnel` 与 [入口方式](03-mesh.md) 里的反向隧道是同一种暴露方式，配置注释与模式取值一致。
 
 ## 风险
 

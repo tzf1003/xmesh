@@ -17,7 +17,7 @@
 | `mode` | 字符串 | 可以。`shared`（默认）或 `exclusive` |
 | `idempotency_key` | 字符串 | 可以。长度 1 到 200。匹配 `[A-Za-z0-9._:-]+` |
 
-`cmd` 禁止包含空字节。实现不得把 `cmd` 和 `args` 拼成一条字符串交给 `sh -c` 或 `cmd /C`。需要 shell 语法时，调用方显式把 `cmd` 设为 shell，把脚本作为 `args` 的一项。进程按 argv 直接启动。命令黑名单不按单个参数分别匹配，而对 [RUL-11](rulings.md#rul-11) 的规范化命令行做正则搜索；`sh -c` 的脚本参数再单独搜一次。
+`cmd` 禁止包含空字节。实现不得把 `cmd` 和 `args` 拼成一条字符串交给 `sh -c` 或 `cmd /C`。需要 shell 语法时，调用方显式把 `cmd` 设为 shell，把脚本作为 `args` 的一项。进程按 argv 直接启动。命令黑名单不按单个参数分别匹配，而对 [RUL-11](rulings.md#rul-11) 的规范化命令行做正则搜索。`sh -c`、`pwsh -Command` 和 `cmd /c` 的脚本参数会再搜一次；`python -c`、`node -e` 不会。
 
 ### 执行顺序
 
