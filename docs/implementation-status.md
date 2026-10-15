@@ -165,3 +165,9 @@ AppContainer 工作区 helper 已通过该入口创建和回收。新增原生�
 `69718ff` 的 push `38816238636` 与 PR `38816245901` 均通过三平台常规 race/vet/build 和契约；两个 Windows 原生任务 `116701500718` / `116701526180` 的既有 AppContainer 工作区 helper 与恢复回归通过，新增所有者组合用例在根未发布后代身份的 15 秒期限失败。根身份固定的 Job guard 回归通过。新增结构化阶段/错误/PID 证明以及根进程即时退出检测，用于定位 AppContainer 内创建后代的实际失败边界；后代存活、部分失败保留与准确退出码断言继续作为验收条件。完整生产协调器、异常宿主恢复、对象持久追踪、外部 ACL/namespace/reparse writer 协调及 exec/ConPTY L2 接入仍待完成。
 
 `e25ab92` 的 push `38816982550` / PR `38816986177` 均通过三平台常规与契约；原生 job `116704020181` / `116704032544` 的结构化证明一致报告 `child-start open NUL: Access is denied.`。根进程已运行并写入证明，失败发生在 Go `exec.Cmd` 为缺省标准流打开 `NUL` 时。后代夹具现显式创建 profile 目录内的普通标准流文件，向子进程传递该文件句柄，继续要求继承的 AppContainer/Job 后代存活、两个 Job 的部分失败与准确回收。该修订的原生结果待 CI；生产 L2 仍等待异常宿主恢复、完整对象追踪、外部 ACL/namespace/reparse writer 协调与 exec/ConPTY 标准句柄集成。
+
+## 活动进程所有者原生验收通过
+
+`f4ece7d` 的 [push 工作流 38817610430](https://github.com/tzf1003/xmesh/actions/runs/38817610430) 与 [PR 工作流 38817613274](https://github.com/tzf1003/xmesh/actions/runs/38817613274) 均通过三平台全量 race、vet、构建和完整 Windows 原生回归；契约工作流 `38817610428` / `38817613349` 通过。原生 job `116706103394` / `116706110551` 的完整日志各确认 109 个独立 Job/AppContainer PASS 标记。活动 profile 所有者组合用例通过真实 AppContainer 内的后代创建、根退出后后代存活、第二个专属 Job、限额、取消等待/回收、一个 Job 句柄失败时其他 Job 继续终止、保留 profile/句柄后重试、准确退出码和独立存活对照；根身份固定、工作区 helper、准确 DACL/控制位/标签/其他 profile 保持及三种工作区强退恢复也均通过。
+
+本阶段完成当前宿主内有界进程所有者的原生验收。异常宿主退出后的全部 Job 识别与退出确认、完整新对象持久追踪、外部 ACL/命名空间/reparse writer 协调及 exec/ConPTY 集成仍须由生产执行协调器完成，Windows L2 保持 `sandbox.unavailable`。
