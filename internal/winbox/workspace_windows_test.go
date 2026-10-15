@@ -113,6 +113,8 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 	}
 	before := map[string][]byte{}
 	labels := map[string]string{}
+	kernelACLs := map[string][]byte{}
+	kernelControls := map[string]windows.SECURITY_DESCRIPTOR_CONTROL{}
 	traceState := func(stage string) {
 		t.Helper()
 		for _, path := range []string{root, child, file} {
@@ -141,6 +143,23 @@ func Test_WindowsAppContainerWorkspaceGrant(t *testing.T) {
 			rawControl, _, err := raw.Control()
 			if err != nil {
 				t.Fatal(err)
+			}
+			rawACL, _, err := raw.DACL()
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, aces, err := aclParts(rawACL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := bytes.Clone(header)
+			for _, ace := range aces {
+				body = append(body, ace...)
+			}
+			if stage == "before" {
+				kernelACLs[path], kernelControls[path] = body, rawControl
+			} else if stage == "released" && (!bytes.Equal(kernelACLs[path], body) || kernelControls[path] != rawControl) {
+				t.Fatalf("kernel descriptor not restored %s: control before=%#x after=%#x ACL before=%x after=%x", path, kernelControls[path], rawControl, kernelACLs[path], body)
 			}
 			t.Logf("workspace descriptor %s %s: control=%#x kernel-control=%#x ACL=%x", stage, filepath.Base(path), control, rawControl, readObjectACL(t, path))
 		}
