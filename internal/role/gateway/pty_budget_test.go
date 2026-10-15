@@ -1,5 +1,3 @@
-//go:build !windows
-
 package gateway
 
 import (
@@ -9,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +34,9 @@ type budgetFixture struct {
 
 func newBudgetFixture(t *testing.T, limit int) *budgetFixture {
 	t.Helper()
+	if runtime.GOOS == "windows" && os.Getenv("XMESH_TEST_WINDOWS_PTY") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_PTY=1 on Windows with ConPTY and PowerShell")
+	}
 	f := &budgetFixture{t: t, agents: map[string]*agent.Agent{}, configs: map[string]*config.Config{}, path: filepath.Join(t.TempDir(), "ingress-pty.json"), limit: limit}
 	for _, name := range []string{"device-a", "device-b"} {
 		root, _ := filepath.EvalSymlinks(t.TempDir())
@@ -43,7 +45,11 @@ func newBudgetFixture(t *testing.T, limit int) *budgetFixture {
 		c.Agent.DefaultCWD = root
 		c.Agent.CWDPolicy = cwd.Policy{Allow: []string{root}}
 		c.Agent.Authz = map[string]config.Grant{"tag:ingress": {Tools: []string{"*"}}}
-		c.Agent.PTY = config.PTY{MaxSessions: 30, MaxPerCaller: 20, IdleTimeout: "30m", OrphanGrace: "10m", DefaultShell: "/bin/sh", ScrollbackBytes: "1MiB", ClosedRetain: "5m", ClosedRetainMax: 20}
+		shell := "/bin/sh"
+		if runtime.GOOS == "windows" {
+			shell = "auto"
+		}
+		c.Agent.PTY = config.PTY{MaxSessions: 30, MaxPerCaller: 20, IdleTimeout: "30m", OrphanGrace: "10m", DefaultShell: shell, ScrollbackBytes: "1MiB", ClosedRetain: "5m", ClosedRetainMax: 20}
 		a, err := agent.New(config.Static(c))
 		if err != nil {
 			t.Fatal(err)

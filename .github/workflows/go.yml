@@ -37,3 +37,14 @@ jobs:
         run: go test -race ./internal/exec ./internal/pty ./internal/fs -run Windows -v -timeout=180s
       - name: Windows gateway file visibility regression
         run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=50 -v -timeout=120s
+      - name: Windows ingress PTY budget and cross-process admission
+        env:
+          XMESH_TEST_WINDOWS_PTY: "1"
+        run: go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s
+      - name: Build Windows service acceptance binary
+        run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
+      - name: Windows SCM install, runtime, and cleanup
+        env:
+          XMESH_TEST_WINDOWS_SYSTEM_SERVICE: "1"
+          XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
+        run: go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s

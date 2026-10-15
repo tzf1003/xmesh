@@ -174,7 +174,7 @@ Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 
 
 `install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken`、普通权限运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
 
-Windows 可用 `install --system` 选择管理员 SCM 服务。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
+Windows 可用 `install --system` 选择管理员 SCM 服务，默认以 LocalSystem 身份运行于 Session 0；配置、状态和工作目录须允许该账户访问。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
 
 服务运行异常以非零状态退出，供管理器处理。Windows 原生验收从目标用户的登录会话执行：
 
@@ -185,6 +185,17 @@ go test ./cmd/xmesh -run WindowsUserTaskRuntime -v
 
 该用例创建临时任务并立即运行，核对用户 SID、会话 ID、工作目录与复杂参数，最后删除任务。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
 
+SCM 原生验收在管理员 PowerShell 中执行：
+
+```powershell
+go build -o .\bin\xmesh-scm-test.exe ./cmd/xmesh
+$env:XMESH_TEST_WINDOWS_BINARY = (Resolve-Path .\bin\xmesh-scm-test.exe).Path
+$env:XMESH_TEST_WINDOWS_SYSTEM_SERVICE = "1"
+go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s
+```
+
+用例通过 CLI 安装带独立名称的临时 SCM 服务，读回安装参数与账户配置，再以显式本机模式启动实际二进制。验证 LocalSystem SID、Session 0、MCP 文件读写、正常停止与进程/监听退出，最后卸载服务并确认注册项删除。该用例验证本机服务生命周期；生产设备网络连接与用户登录任务仍按对应场景验收。
+
 Windows ConPTY 进程在执行前加入专属 Job Object；shell 自行退出、TERM 宽限结束和 KILL 均清理其后代进程。INT 通过终端输入 Ctrl-C，应用的原始输入模式可能改变其行为。Windows 10 1809 或更新系统上的原生验收：
 
 ```powershell
@@ -193,6 +204,8 @@ go test ./internal/pty -run WindowsPTY -v -timeout=120s
 ```
 
 该用例检查 Ctrl-C 后继续交互、窗口调整、TERM/KILL/shell 退出后的后台进程清理，以及退出输出读取和重复关闭。
+
+同机多入口 PTY 原生验收可使用同一 `XMESH_TEST_WINDOWS_PTY` 环境运行 `go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s`。用例覆盖两个入口子进程对两个 Agent 的并发准入、共享状态、转移、孤儿恢复和持久化阻断。
 
 向 Windows 交互终端输入命令时，以 `\r` 表示 Enter。发送 INT 后等待 shell 输出新的提示符，再发送后续命令。
 
