@@ -60,7 +60,7 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 `5d41040` 的 PR 三平台全量检查和 push/PR Windows 原生任务通过；普通继承与受保护根 DACL 的控制位、标签、子对象保持和真实 helper 隔离均通过。对象授权现保留独立窄权限安全句柄，覆盖 delete-pending 回收并检查两类句柄均不可继承；本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过；新原生用例已由 `0f0536a` 的 push 与 PR 工作流验收通过。
 
-`0f0536a` 的 PR 原生任务通过 delete-pending 文件与空目录的准确 ACL 回收及完整回归。现有快照对象的组合授权已实现按序准入、取消与失败回滚、独立项继续释放及失败项保留重试；Windows 双架构 vet 与 amd64 交叉编译通过，新组合用例待原生验收。
+`0f0536a` 的 PR 原生任务通过 delete-pending 文件与空目录的准确 ACL 回收及完整回归。现有快照对象的组合授权已实现按序准入、取消与失败回滚、独立项继续释放及失败项保留重试；Windows 双架构 vet 与 amd64 交叉编译通过，四个组合原生子例由 `6071bc3` 验收通过。
 
 ## 待实现与待验收
 
@@ -82,3 +82,5 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 `f4a1f6e` 的 push 与 PR 三平台全量检查通过。原生复验将受保护根的控制位差异定位为 `SE_DACL_AUTO_INHERITED`；直接更新现为已有自动继承状态提供请求标志，保留全部控制位与子对象断言，Windows 双架构 vet 与 amd64 交叉编译通过，原生复验待 CI。
 
 `79ec614` 的 PR 三平台全量检查通过。delete-pending 原生用例确认既有句柄仍可重开，用例改为检查原路径不可打开后准确回收 ACL、重复释放与 profile 生命周期，`0f0536a` 的 push 与 PR 工作流已全部通过。
+
+`6071bc3` 的 push Windows 原生任务全部通过，PR 原生中的组合授权与 AppContainer 步骤通过；PR 原生 PowerShell 标准启动和 push Windows HTTP MCP 命令调用分别达到既有 10 秒期限。功能验收现为这两类 Windows 启动提供 30 秒，并补充超时输出；本地受影响包 race 与 Windows 双架构 vet 通过，原生复验待 CI。

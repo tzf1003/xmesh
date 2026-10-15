@@ -139,11 +139,16 @@ func connect(t *testing.T, url string) *mcp.ClientSession {
 }
 func tool(t *testing.T, s *mcp.ClientSession, name string, args any) *mcp.CallToolResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	timeout := 10 * time.Second
+	if os.PathSeparator == '\\' && name == "exec.run" {
+		// Allow first-launch PowerShell runtime initialization on Windows CI.
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	o, e := s.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 	if e != nil {
-		t.Fatal(e)
+		t.Fatalf("%s call failed (deadline %s): %v", name, timeout, e)
 	}
 	return o
 }

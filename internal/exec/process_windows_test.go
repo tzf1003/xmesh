@@ -242,12 +242,15 @@ func windowsExecPowerShell(t *testing.T) {
 				}
 				done := make(chan error, 1)
 				go func() { done <- wait() }()
+				// A fresh Windows runner may initialize PowerShell's .NET
+				// runtime on this first launch; this is functional acceptance.
 				select {
 				case err = <-done:
-				case <-time.After(10 * time.Second):
+				case <-time.After(30 * time.Second):
 					_ = cmd.Process.Kill()
 					<-done
-					t.Fatal("PowerShell launch did not complete")
+					data, readErr := os.ReadFile(output.Name())
+					t.Fatalf("PowerShell launch did not complete in 30s: output=%q read=%v", data, readErr)
 				}
 				data, readErr := os.ReadFile(output.Name())
 				if err != nil || readErr != nil || strings.TrimSpace(string(data)) != "hello" {
