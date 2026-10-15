@@ -191,3 +191,12 @@ go test ./internal/pty -run WindowsPTY -v -timeout=120s
 ```
 
 该用例检查 Ctrl-C 后继续交互、窗口调整、TERM/KILL/shell 退出后的后台进程清理，以及退出输出读取和重复关闭。
+
+Windows exec 同样挂起创建主进程，加入专属 Job 后恢复主线程。主进程退出会立即清理后代，包括继承 stdin 管道的后台进程。若系统无法唯一识别挂起主线程、校验其所属进程或加入 Job，命令启动失败并回收进程。原生验收：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_EXEC = "1"
+go test ./internal/exec -run WindowsExec -v -timeout=120s
+```
+
+用例检查准入前暂停、恢复后执行、正常退出和超时清理，以及大输入被后代持有时执行调用的结束。
