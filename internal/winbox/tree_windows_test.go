@@ -407,6 +407,145 @@ func Test_WindowsAppContainerSelectedGrant(t *testing.T) {
 	}
 }
 
+func Test_WindowsAppContainerGuardedRootGrant(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	for _, protected := range []bool{false, true} {
+		name := "inherited"
+		if protected {
+			name = "protected"
+		}
+		t.Run(name, func(t *testing.T) {
+			p, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := p.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			root := filepath.Join(t.TempDir(), "workspace")
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if protected {
+				sd, err := windows.GetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+				if err != nil {
+					t.Fatal(err)
+				}
+				acl, _, err := sd.DACL()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := windows.SetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			child := filepath.Join(root, "ungranted")
+			if err := os.Mkdir(child, 0700); err != nil {
+				t.Fatal(err)
+			}
+			secret := filepath.Join(child, "secret.txt")
+			file := filepath.Join(root, "existing.txt")
+			outside := filepath.Join(filepath.Dir(root), "outside.txt")
+			for _, path := range []string{secret, file, outside} {
+				if err := os.WriteFile(path, []byte("private"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setMediumLabel(t, root)
+			label := objectLabel(t, root)
+			before := map[string][]byte{}
+			for _, path := range []string{root, child, secret, file, outside} {
+				before[path] = readObjectACL(t, path)
+			}
+			securityState := func() string {
+				t.Helper()
+				sd, err := windows.GetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+				if err != nil {
+					t.Fatal(err)
+				}
+				control, _, err := sd.Control()
+				if err != nil {
+					t.Fatal(err)
+				}
+				owner, _, err := sd.Owner()
+				if err != nil {
+					t.Fatal(err)
+				}
+				group, _, err := sd.Group()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return fmt.Sprintf("%x/%s/%s", control, owner.String(), group.String())
+			}
+			state := securityState()
+			tree, err := openWorkspaceTree(context.Background(), root, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(tree.Close)
+			grant, err := p.grantSelectedObject(tree.objects[0])
+			if err != nil {
+				t.Fatal("grant root while namespace guard retained", err)
+			}
+			t.Cleanup(func() {
+				if err := grant.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			assertState := func() {
+				t.Helper()
+				if securityState() != state || objectLabel(t, root) != label {
+					t.Fatal("root owner, group, control or integrity label changed")
+				}
+				for _, path := range []string{child, secret, file, outside} {
+					if !bytes.Equal(before[path], readObjectACL(t, path)) {
+						t.Fatal("root DACL edit changed an unselected object")
+					}
+				}
+				if err := os.Rename(root, root+".moved"); err == nil {
+					t.Fatal("root namespace guard released during ACL edit")
+				}
+			}
+			assertState()
+			helper := filepath.Join(p.Directory(), "root-helper.exe")
+			source, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(helper, body, 0700); err != nil {
+				t.Fatal(err)
+			}
+			proof := runObjectHelper(t, p, helper, root, outside)
+			if !proof.AppContainer || !proof.Create || proof.Read || proof.Write || proof.ChildRead || proof.ChildWrite || proof.OutsideRead || proof.OutsideWrite {
+				t.Fatalf("guarded root grant proof: %+v", proof)
+			}
+			if err := grant.Close(); err != nil {
+				t.Fatal("release root while namespace guard retained", err)
+			}
+			assertState()
+			if !bytes.Equal(before[root], readObjectACL(t, root)) {
+				t.Fatal("root DACL not restored")
+			}
+			proof = runObjectHelper(t, p, helper, root, outside)
+			if proof.Create || proof.Read || proof.Write || proof.ChildRead || proof.ChildWrite || proof.OutsideRead || proof.OutsideWrite {
+				t.Fatalf("released guarded root proof: %+v", proof)
+			}
+			tree.Close()
+			if err := os.Rename(root, root+".moved"); err != nil {
+				t.Fatal("root guard not released", err)
+			}
+		})
+	}
+}
+
 func Test_WindowsAppContainerWorkspaceComponents(t *testing.T) {
 	for _, path := range []string{`C:\work\project`, `c:/work/project`} {
 		_, parts, err := workspaceComponents(path)

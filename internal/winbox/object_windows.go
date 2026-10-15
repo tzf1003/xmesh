@@ -16,7 +16,10 @@ import (
 // survive. External ACL writers must coordinate with the workspace owner.
 var objectACLMutex sync.Mutex
 
-var reopenObject = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
+var (
+	reopenObject      = windows.NewLazySystemDLL("kernel32.dll").NewProc("ReOpenFile")
+	setObjectSecurity = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtSetSecurityObject")
+)
 
 // objectGrant retains one explicitly selected object until its ACE is removed.
 // This is a building block for workspace admission, not a recursive workspace
@@ -136,25 +139,52 @@ func (g *objectGrant) Close() error {
 	return nil
 }
 
-// ReOpenFile retains object identity across rename/replacement. Acquire broad
-// access only during the ACL edit, after sandbox processes have exited.
+// Reopen only with the permissions required to read and update the DACL. This
+// remains compatible with the snapshot's root/ancestor delete-sharing guard.
 func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
+	if err := setObjectSecurity.Find(); err != nil {
+		return err
+	}
 	handle, err := reopenForACL(object)
 	if err != nil {
 		return err
 	}
 	defer windows.CloseHandle(handle)
-	dacl, err := objectDACL(handle)
+	current, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
+	}
+	dacl, defaulted, err := current.DACL()
+	if err != nil {
+		return err
+	}
+	if dacl == nil {
+		return fmt.Errorf("AppContainer object grant requires a present, non-null DACL")
 	}
 	merged, err := editObjectACL(dacl, ace, add)
 	if err != nil {
 		return err
 	}
-	// MAXIMUM_ALLOWED suppresses propagation of existing inheritable ACEs to
-	// children: https://learn.microsoft.com/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo
-	return windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION, nil, nil, merged, nil)
+	absolute, err := current.ToAbsolute()
+	if err != nil {
+		return err
+	}
+	if err := absolute.SetDACL(merged, true, defaulted); err != nil {
+		return err
+	}
+	relative, err := absolute.ToSelfRelative()
+	if err != nil {
+		return err
+	}
+	// Set the selected kernel object's descriptor directly. SetSecurityInfo's
+	// recursive inheritance propagation would touch unselected child objects.
+	// Preserve the current descriptor's control bits and update only its DACL.
+	status, _, _ := setObjectSecurity.Call(uintptr(handle), windows.DACL_SECURITY_INFORMATION, uintptr(unsafe.Pointer(relative)))
+	runtime.KeepAlive(relative)
+	if status != 0 {
+		return fmt.Errorf("set AppContainer object DACL: %w", windows.NTStatus(status))
+	}
+	return nil
 }
 
 func reopenForACL(object windows.Handle) (windows.Handle, error) {
@@ -163,7 +193,7 @@ func reopenForACL(object windows.Handle) (windows.Handle, error) {
 		return 0, err
 	}
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
-		h, _, err := reopenObject.Call(uintptr(object), windows.MAXIMUM_ALLOWED,
+		h, _, err := reopenObject.Call(uintptr(object), windows.READ_CONTROL|windows.WRITE_DAC,
 			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 			windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
 		if windows.Handle(h) == windows.InvalidHandle {
@@ -184,7 +214,7 @@ func reopenForACL(object windows.Handle) (windows.Handle, error) {
 	}
 	var handle windows.Handle
 	var status windows.IO_STATUS_BLOCK
-	err = windows.NtCreateFile(&handle, windows.MAXIMUM_ALLOWED, &attributes, &status, nil, 0,
+	err = windows.NtCreateFile(&handle, windows.READ_CONTROL|windows.WRITE_DAC, &attributes, &status, nil, 0,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN,
 		windows.FILE_DIRECTORY_FILE|windows.FILE_OPEN_FOR_BACKUP_INTENT|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
 	if err != nil {
