@@ -16,7 +16,7 @@ func Test_WindowsAtomicReplaceOpenReader(t *testing.T) {
 	if err := atomicWrite(target, []byte("old"), ""); err != nil {
 		t.Fatal(err)
 	}
-	reader, err := os.Open(target)
+	reader, err := openRead(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,5 +29,28 @@ func Test_WindowsAtomicReplaceOpenReader(t *testing.T) {
 	}
 	if current, err := os.ReadFile(target); err != nil || string(current) != "new complete contents" {
 		t.Fatal("new reader did not see replacement", string(current), err)
+	}
+}
+
+func Test_WindowsAtomicReplaceLockedTarget(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.txt")
+	if err := atomicWrite(target, []byte("old"), ""); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := os.Open(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if err := atomicWrite(target, []byte("new"), ""); err == nil {
+		t.Fatal("replaced a target locked against deletion")
+	}
+	if current, err := os.ReadFile(target); err != nil || string(current) != "old" {
+		t.Fatal("locked target changed", string(current), err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 1 {
+		t.Fatal("temporary file cleanup", entries, err)
 	}
 }

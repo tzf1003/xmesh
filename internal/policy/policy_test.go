@@ -60,6 +60,17 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 			want:      []string{"LANG=en", `PATH=C:\Windows`, `SYSTEMROOT=C:\Windows`, `USERPROFILE=C:\Users\tester`},
 		},
 		{
+			name:      "windows runtime directories",
+			inherited: []string{`windir=C:\Windows`, `SystemDrive=C:`, `ComSpec=C:\Windows\System32\cmd.exe`, `PATHEXT=.COM;.EXE;.BAT;.CMD`, `TEMP=C:\Temp`, `tmp=C:\Temp`, `AppData=C:\Users\tester\AppData\Roaming`, `LocalAppData=C:\Users\tester\AppData\Local`, `PRIVATE=value`, `PSModulePath=C:\Private`},
+			windows:   true,
+			want:      []string{`APPDATA=C:\Users\tester\AppData\Roaming`, `COMSPEC=C:\Windows\System32\cmd.exe`, `LOCALAPPDATA=C:\Users\tester\AppData\Local`, `PATHEXT=.COM;.EXE;.BAT;.CMD`, `SYSTEMDRIVE=C:`, `TEMP=C:\Temp`, `TMP=C:\Temp`, `WINDIR=C:\Windows`},
+		},
+		{
+			name:      "unix runtime names filtered",
+			inherited: []string{"WINDIR=system", "TEMP=/tmp", "TMP=/tmp", "APPDATA=app", "LOCALAPPDATA=local"},
+			want:      []string{},
+		},
+		{
 			name:      "windows overlay",
 			inherited: []string{"PATH=first", "Path=second", "SystemRoot=system"},
 			extra:     map[string]string{"path": "replacement", "systemroot": "override"},
@@ -74,7 +85,7 @@ func TestEnvironmentPlatformNames(t *testing.T) {
 		},
 		{
 			name:      "credential paths filtered",
-			inherited: []string{`Path=C:\Users\tester\.AWS\bin`, "HOME=/home/test/.ssh"},
+			inherited: []string{`Path=C:\Users\tester\.AWS\bin`, "HOME=/home/test/.ssh", `TEMP=C:\Users\tester\.aws`, `APPDATA=C:\Users\tester\.azure`},
 			windows:   true,
 			want:      []string{},
 		},

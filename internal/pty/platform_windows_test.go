@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/policy"
 	"golang.org/x/sys/windows"
 )
 
@@ -28,7 +30,15 @@ func nativeTerminal(t *testing.T) (*windowsTerminal, *windowsOutput) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := start(shell, []string{"-NoLogo", "-NoProfile", "-NoExit", "-Command", "Write-Output ('TERMINAL_'+'READY')"}, t.TempDir(), os.Environ(), 80, 24, false)
+	engine, err := policy.New(config.Policy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := engine.Environment(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := start(shell, []string{"-NoLogo", "-NoProfile", "-NoExit", "-Command", "Write-Output ('TERMINAL_'+'READY')"}, t.TempDir(), env, 80, 24, false)
 	if err != nil {
 		t.Fatal(err)
 	}

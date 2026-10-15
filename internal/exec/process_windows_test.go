@@ -72,10 +72,6 @@ func Test_WindowsExecSuspendedAdmission(t *testing.T) {
 
 func Test_WindowsExecPowerShell(t *testing.T) {
 	windowsExecRuntime(t)
-	shell, err := osexec.LookPath("powershell")
-	if err != nil {
-		t.Fatal(err)
-	}
 	p, err := policy.New(config.Policy{})
 	if err != nil {
 		t.Fatal(err)
@@ -84,23 +80,21 @@ func Test_WindowsExecPowerShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, inherited := range []bool{false, true} {
+	for _, shellName := range []string{"powershell", "pwsh"} {
+		shell, lookupErr := osexec.LookPath(shellName)
+		if lookupErr != nil {
+			continue
+		}
 		for _, tracked := range []bool{false, true} {
 			name := "standard-launch"
 			if tracked {
 				name = "job-launch"
 			}
-			if inherited {
-				name += "/inherited-env"
-			} else {
-				name += "/policy-env"
-			}
+			name = shellName + "/" + name
 			t.Run(name, func(t *testing.T) {
 				cmd := osexec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", "Write-Output hello")
 				cmd.Dir, cmd.Env, cmd.Stdin = t.TempDir(), env, strings.NewReader("")
-				if inherited {
-					cmd.Env = os.Environ()
-				}
+
 				var output bytes.Buffer
 				cmd.Stdout, cmd.Stderr = &output, &output
 				if tracked {

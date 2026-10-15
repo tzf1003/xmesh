@@ -153,7 +153,8 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 			continue
 		}
 		k = normalize(k)
-		if k == "PATH" || k == "HOME" || k == "USERPROFILE" || k == normalize("SystemRoot") || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") {
+		windowsRuntime := foldCase && (k == "SYSTEMROOT" || k == "WINDIR" || k == "SYSTEMDRIVE" || k == "COMSPEC" || k == "PATHEXT" || k == "TEMP" || k == "TMP" || k == "APPDATA" || k == "LOCALAPPDATA")
+		if k == "PATH" || k == "HOME" || k == "USERPROFILE" || k == normalize("SystemRoot") || k == "LANG" || k == "LANGUAGE" || strings.HasPrefix(k, "LC_") || windowsRuntime {
 			if !e.denyEnv(k, v) {
 				env[k] = v
 			}

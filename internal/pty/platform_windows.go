@@ -76,7 +76,9 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 	if ok, _, callErr := updateConsoleAttribute.Call(uintptr(unsafe.Pointer(attrs.List())), 0, windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, uintptr(t.console), unsafe.Sizeof(t.console), 0, 0); ok == 0 {
 		return nil, callErr
 	}
-	si := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
+	// Explicit standard handles prevent the child from using the hosting
+	// process's redirected handles; ConPTY supplies the attached console.
+	si := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})), Flags: windows.STARTF_USESTDHANDLES}, ProcThreadAttributeList: attrs.List()}
 	command, e := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{shell}, args...)))
 	if e != nil {
 		return nil, e

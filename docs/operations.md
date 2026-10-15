@@ -160,7 +160,7 @@ Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检
 
 ## 治理与生命周期
 
-exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。
+exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。Windows 还保留运行时所需的 `WINDIR`、`SYSTEMDRIVE`、`COMSPEC`、`PATHEXT`、`TEMP`、`TMP`、`APPDATA` 和 `LOCALAPPDATA`，同样经过路径过滤。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。
 
 Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 64、单次最长 10 分钟。Agent 的 `sys.info` 免计数。Agent 主体优先采用可信 OAuth client，其余按节点 ID 计数，多个 MCP 会话共享预算。PTY 的设备与 caller 限额之外，同一主体还共享 `max_per_caller` 的 active/orphaned 额度；转移计入接收方额度。
 
@@ -201,4 +201,4 @@ go test ./internal/exec -run WindowsExec -v -timeout=120s
 
 用例检查准入前暂停、恢复后执行、正常退出和超时清理，以及大输入被后代持有时执行调用的结束。
 
-Windows 的 `fs.write` 和 `fs.edit` 使用 `FileRenameInfoEx` 的 POSIX 替换语义：已有读取句柄继续读取旧内容，之后打开的句柄读取完整新内容。文件系统或系统版本不支持该操作时返回写入错误，并清理临时文件。
+Windows 的 `fs.write` 和 `fs.edit` 使用 `FileRenameInfoEx` 的 POSIX 替换语义。Agent 文件读取句柄允许删除共享：已有读取句柄继续读取旧内容，之后打开的句柄读取完整新内容。其他应用以禁止删除共享的句柄占用目标、文件系统或系统版本不支持该操作时，写入返回错误，保留目标并清理临时文件。

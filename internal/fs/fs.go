@@ -350,7 +350,7 @@ func kind(st fs.FileInfo) string {
 	}
 }
 func readBounded(path string, limit int64) ([]byte, error) {
-	f, e := os.Open(path)
+	f, e := openRead(path)
 	if e != nil {
 		if os.IsNotExist(e) {
 			return nil, toolerr.Path(path, "not_found")

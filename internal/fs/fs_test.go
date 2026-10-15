@@ -95,7 +95,7 @@ func Test_CTRFS02_03_OptimisticAtomicEdit(t *testing.T) {
 				return
 			default:
 			}
-			b, e := os.ReadFile(filepath.Join(root, "a"))
+			b, e := readBounded(filepath.Join(root, "a"), 1<<20)
 			if e != nil || (string(b) != first && string(b) != second) {
 				t.Errorf("partial atomic read: %d %v", len(b), e)
 				return
