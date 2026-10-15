@@ -30,6 +30,9 @@ type workspaceGrant struct {
 // directory. A result accompanying an error owns incomplete cleanup and must be
 // retained for Close retry. No sandbox may run until admission succeeds.
 func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects int) (*workspaceGrant, error) {
+	if p.journal != nil {
+		return nil, fmt.Errorf("AppContainer journaled workspace requires inherited recovery integration")
+	}
 	tree, err := openWorkspaceTree(ctx, path, maxObjects)
 	if err != nil {
 		return nil, err

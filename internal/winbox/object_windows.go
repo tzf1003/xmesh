@@ -27,6 +27,8 @@ type objectGrant struct {
 	aclHandle windows.Handle
 	ace       []byte
 	id        fileIdentity
+	intent    uint64
+	removed   bool
 }
 
 func (p *Profile) grantObject(path string) (*objectGrant, error) {
@@ -61,8 +63,11 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren bool) (*objectGrant, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil {
+	if p.sid == nil || p.deleted {
 		return nil, fmt.Errorf("AppContainer profile unavailable")
+	}
+	if p.journal != nil && inheritChildren {
+		return nil, fmt.Errorf("AppContainer journaled inheritance requires workspace recovery integration")
 	}
 	if err := reopenObject.Find(); err != nil {
 		return nil, err
@@ -135,12 +140,21 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 		return nil, err
 	}
 	defer lock.Close()
+	var intent uint64
+	if p.journal != nil {
+		intent, err = p.journal.append(journalRecord{Kind: "grant", Grant: &journalGrant{
+			Object: journalObject{Volume: actual.id.Volume, ID: actual.id.ID, Directory: actual.directory}, ACE: ace,
+		}})
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := setObjectGrant(aclHandle, ace, true); err != nil {
 		return nil, err
 	}
 	p.grants++
 	retained = true
-	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace, id: actual.id}, nil
+	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace, id: actual.id, intent: intent}, nil
 }
 
 // Close removes exactly the acquired ACE from the current ACL. Failed releases
@@ -156,8 +170,16 @@ func (g *objectGrant) Close() error {
 		return err
 	}
 	defer lock.Close()
-	if err := setObjectGrant(g.aclHandle, g.ace, false); err != nil {
-		return err
+	if !g.removed {
+		if err := setObjectGrant(g.aclHandle, g.ace, false); err != nil {
+			return err
+		}
+		g.removed = true
+	}
+	if g.profile.journal != nil {
+		if _, err := g.profile.journal.append(journalRecord{Kind: "released", GrantSequence: g.intent}); err != nil {
+			return err
+		}
 	}
 	windows.CloseHandle(g.aclHandle)
 	g.aclHandle = 0

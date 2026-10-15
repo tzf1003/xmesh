@@ -4,6 +4,7 @@ package winbox
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -17,6 +18,7 @@ var (
 	createProfile = userenv.NewProc("CreateAppContainerProfile")
 	deleteProfile = userenv.NewProc("DeleteAppContainerProfile")
 	folderPath    = userenv.NewProc("GetAppContainerFolderPath")
+	deriveSID     = userenv.NewProc("DeriveAppContainerSidFromAppContainerName")
 )
 
 const securityCapabilitiesAttribute = 0x00020009
@@ -36,6 +38,8 @@ type Profile struct {
 	sid       *windows.SID
 	directory string
 	grants    int
+	journal   *grantJournal
+	deleted   bool
 }
 
 func hresult(operation string, result uintptr) error {
@@ -48,6 +52,12 @@ func hresult(operation string, result uintptr) error {
 // New creates an exclusive random identity. It grants no optional capabilities,
 // including network access. Existing identities are never reused.
 func New() (*Profile, error) {
+	return newProfile(nil)
+}
+
+// A journal owner remains private until profile and ACL recovery integration is
+// complete. Callers retain and close the journal independently of Profile.Close.
+func newProfile(journal *grantJournal) (*Profile, error) {
 	for _, procedure := range []*windows.LazyProc{createProfile, deleteProfile, folderPath} {
 		if err := procedure.Find(); err != nil {
 			return nil, err
@@ -61,10 +71,31 @@ func New() (*Profile, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Profile{name: name}
+	if journal != nil {
+		if len(journal.records) != 0 {
+			return nil, fmt.Errorf("AppContainer profile requires an empty owned journal")
+		}
+		if err := deriveSID.Find(); err != nil {
+			return nil, err
+		}
+		var expected *windows.SID
+		result, _, _ := deriveSID.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(&expected)))
+		if err := hresult("DeriveAppContainerSidFromAppContainerName", result); err != nil {
+			return nil, err
+		}
+		sid := expected.String()
+		windows.FreeSid(expected)
+		if _, err := journal.append(journalRecord{Kind: "profile", Profile: windows.UTF16PtrToString(name), SID: sid}); err != nil {
+			return nil, err
+		}
+	}
+	p := &Profile{name: name, journal: journal}
 	result, _, _ := createProfile.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(name)), 0, 0, uintptr(unsafe.Pointer(&p.sid)))
 	if err := hresult("CreateAppContainerProfile", result); err != nil {
 		return nil, err
+	}
+	if journal != nil && p.sid.String() != journal.records[0].SID {
+		return nil, errors.Join(fmt.Errorf("created AppContainer profile does not match journal intent"), p.Close())
 	}
 	var path *uint16
 	sid, err := windows.UTF16PtrFromString(p.sid.String())
@@ -99,7 +130,7 @@ func (p *Profile) Directory() string { return p.directory }
 func (p *Profile) Apply(attributes *windows.ProcThreadAttributeListContainer) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil || attributes == nil {
+	if p.sid == nil || p.deleted || attributes == nil {
 		return fmt.Errorf("AppContainer profile or attribute list unavailable")
 	}
 	capabilities := &securityCapabilities{AppContainerSID: p.sid}
@@ -117,9 +148,20 @@ func (p *Profile) Close() error {
 	if p.grants != 0 {
 		return fmt.Errorf("AppContainer profile retains %d object grants", p.grants)
 	}
-	result, _, _ := deleteProfile.Call(uintptr(unsafe.Pointer(p.name)))
-	if err := hresult("DeleteAppContainerProfile", result); err != nil {
-		return err
+	if p.journal != nil && (len(p.journal.state.pending) != 0 || p.journal.state.workspace) {
+		return fmt.Errorf("AppContainer journal retains recovery obligations")
+	}
+	if !p.deleted {
+		result, _, _ := deleteProfile.Call(uintptr(unsafe.Pointer(p.name)))
+		if err := hresult("DeleteAppContainerProfile", result); err != nil {
+			return err
+		}
+		p.deleted = true
+	}
+	if p.journal != nil && !p.journal.state.complete {
+		if _, err := p.journal.append(journalRecord{Kind: "complete"}); err != nil {
+			return err
+		}
 	}
 	err := windows.FreeSid(p.sid)
 	p.sid = nil
