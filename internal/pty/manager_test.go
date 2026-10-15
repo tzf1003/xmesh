@@ -11,6 +11,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -28,6 +29,64 @@ func fixture(t *testing.T) (*Manager, *cwd.Resolver, *policy.Engine, *identity.R
 	m := New(config.PTY{MaxSessions: 20, MaxPerCaller: 30, IdleTimeout: "30m", OrphanGrace: "10m", ScrollbackBytes: "1MiB", DefaultShell: "/bin/sh", ClosedRetain: "5m", ClosedRetainMax: 20}, reg)
 	t.Cleanup(m.Shutdown)
 	return m, r, p, reg
+}
+
+type blockingTerminal struct {
+	entered, release chan struct{}
+}
+
+func (b *blockingTerminal) Read([]byte) (int, error) { return 0, io.EOF }
+func (b *blockingTerminal) Write(p []byte) (int, error) {
+	close(b.entered)
+	<-b.release
+	return len(p), nil
+}
+func (*blockingTerminal) Close() error          { return nil }
+func (*blockingTerminal) Resize(int, int) error { return nil }
+func (*blockingTerminal) Signal(string) error   { return nil }
+func (*blockingTerminal) Wait() error           { return nil }
+func (*blockingTerminal) PID() int              { return 1 }
+
+func Test_OwnerOperationsOrderedWithTransfer(t *testing.T) {
+	m, r, p, reg := fixture(t)
+	a, b := identity.Caller{ID: "node/a"}, identity.Caller{ID: "node/b"}
+	_ = reg.Add(a)
+	_ = reg.Add(b)
+	term := &blockingTerminal{entered: make(chan struct{}), release: make(chan struct{})}
+	s := &Session{ID: "p-testowner", Owner: a.ID, Node: "node", State: "active", term: term}
+	m.mu.Lock()
+	m.sessions[s.ID] = s
+	m.byCaller[a.ID] = 1
+	m.mu.Unlock()
+	// This synthetic terminal has no pump; remove it before Manager shutdown.
+	t.Cleanup(func() { m.mu.Lock(); delete(m.sessions, s.ID); m.mu.Unlock() })
+	written := make(chan error, 1)
+	go func() {
+		_, e := invoke(m, r, p, a, "pty.write", Object{"session_id": s.ID, "data": "first"})
+		written <- e
+	}()
+	<-term.entered
+	transferred := make(chan error, 1)
+	go func() {
+		_, e := invoke(m, r, p, a, "pty.transfer", Object{"session_id": s.ID, "to_caller": b.ID})
+		transferred <- e
+	}()
+	select {
+	case e := <-transferred:
+		close(term.release)
+		t.Fatal("ownership changed during pending write", e)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(term.release)
+	if e := <-written; e != nil {
+		t.Fatal(e)
+	}
+	if e := <-transferred; e != nil {
+		t.Fatal(e)
+	}
+	if _, e := invoke(m, r, p, a, "pty.write", Object{"session_id": s.ID, "data": "late"}); e == nil || e.(*toolerr.Error).Code != "not_owner" {
+		t.Fatal("previous owner write", e)
+	}
 }
 func invoke(m *Manager, r *cwd.Resolver, p *policy.Engine, c identity.Caller, name string, a Object) (Object, error) {
 	b, _ := json.Marshal(a)
@@ -148,6 +207,9 @@ func Test_RUL13_OrphanOwnership(t *testing.T) {
 	m.Orphan(a.ID)
 	if _, e = invoke(m, r, p, b, "pty.transfer", Object{"session_id": id, "to_caller": b.ID}); e == nil {
 		t.Fatal("cross-client orphan accepted")
+	}
+	if _, e = invoke(m, r, p, b, "pty.transfer", Object{"session_id": id, "to_caller": c.ID}); e == nil {
+		t.Fatal("cross-client requester reassigned orphan to an authorized target")
 	}
 	if _, e = invoke(m, r, p, c, "pty.transfer", Object{"session_id": id, "to_caller": c.ID}); e != nil {
 		t.Fatal(e)

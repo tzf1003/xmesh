@@ -35,6 +35,7 @@ type Session struct {
 	started                                        chan struct{}
 	closedAt, orphanAt                             time.Time
 	lastIO                                         atomic.Int64
+	opMu                                           sync.Mutex // Orders owner operations and ownership changes.
 	mu                                             sync.Mutex // Session-local ring lock (CON-IMPL-03).
 	ring                                           []byte
 	capacity                                       int
@@ -97,6 +98,14 @@ func (m *Manager) Call(ctx context.Context, c identity.Caller, r *cwd.Resolver, 
 		m.mu.Unlock()
 		return s.read(ctx, a.Cursor, a.MaxBytes, time.Duration(a.WaitMS)*time.Millisecond)
 	}
+	m.mu.Unlock()
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	m.mu.Lock()
+	if m.sessions[a.SessionID] != s {
+		m.mu.Unlock()
+		return nil, toolerr.New("session_not_found", "终端会话不存在", "session_id", a.SessionID)
+	}
 	if name == "pty.transfer" {
 		out, e := m.transferLocked(s, c, a.ToCaller)
 		m.mu.Unlock()
@@ -104,8 +113,9 @@ func (m *Manager) Call(ctx context.Context, c identity.Caller, r *cwd.Resolver, 
 	}
 	if name == "pty.close" && s.State == "closed" {
 		if c.ID != s.Owner {
+			e := notOwner(s)
 			m.mu.Unlock()
-			return nil, notOwner(s)
+			return nil, e
 		}
 		m.mu.Unlock()
 		return Object{"state": "closed"}, nil
@@ -373,7 +383,7 @@ func (m *Manager) transferLocked(s *Session, c identity.Caller, to string) (Obje
 			return nil, notOwner(s)
 		}
 	} else if s.State == "orphaned" {
-		if identity.Node(c.ID) != s.Node || identity.Node(to) != s.Node || (s.OAuthClient != "" && target.OAuthClient != s.OAuthClient) {
+		if identity.Node(c.ID) != s.Node || identity.Node(to) != s.Node || (s.OAuthClient != "" && (c.OAuthClient != s.OAuthClient || target.OAuthClient != s.OAuthClient)) {
 			return nil, notOwner(s)
 		}
 	} else {
@@ -396,14 +406,24 @@ func (m *Manager) transferLocked(s *Session, c identity.Caller, to string) (Obje
 }
 func (m *Manager) Orphan(caller string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	sessions := []*Session{}
 	for _, s := range m.sessions {
+		if s.Owner == caller && s.State == "active" {
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.Unlock()
+	for _, s := range sessions {
+		s.opMu.Lock()
+		m.mu.Lock()
 		if s.Owner == caller && s.State == "active" {
 			m.byCaller[caller]--
 			s.Owner = ""
 			s.State = "orphaned"
 			s.orphanAt = time.Now()
 		}
+		m.mu.Unlock()
+		s.opMu.Unlock()
 	}
 }
 func (m *Manager) List() []Object {
@@ -453,16 +473,22 @@ func (m *Manager) retainLocked(now time.Time) {
 }
 func (m *Manager) Reap(now time.Time) {
 	m.mu.Lock()
-	terms := []terminal{}
+	sessions := []*Session{}
 	for _, s := range m.sessions {
-		if s.term != nil && ((s.State == "active" && now.Sub(time.Unix(0, s.lastIO.Load())) >= config.Duration(m.cfg.IdleTimeout)) || (s.State == "orphaned" && now.Sub(s.orphanAt) >= config.Duration(m.cfg.OrphanGrace))) {
-			terms = append(terms, s.term)
-		}
+		sessions = append(sessions, s)
 	}
 	m.retainLocked(now)
 	m.mu.Unlock()
-	for _, t := range terms {
-		_ = t.Signal("KILL")
+	for _, s := range sessions {
+		s.opMu.Lock()
+		m.mu.Lock()
+		term := s.term
+		expired := term != nil && ((s.State == "active" && now.Sub(time.Unix(0, s.lastIO.Load())) >= config.Duration(m.cfg.IdleTimeout)) || (s.State == "orphaned" && now.Sub(s.orphanAt) >= config.Duration(m.cfg.OrphanGrace)))
+		m.mu.Unlock()
+		if expired {
+			_ = term.Signal("KILL")
+		}
+		s.opMu.Unlock()
 	}
 }
 func (m *Manager) reaper() {
