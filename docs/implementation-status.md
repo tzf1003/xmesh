@@ -60,6 +60,11 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 工作树授权新增内部 `grantWorkspace`：既有目录的准确 profile ACE 可向后续子目录与文件继承；回收先撤下显式授权源，再从仍固定的根重扫，按已选对象清理当前 profile 的已知继承 ACE。回收完成前独立持有 profile 引用和根 guard，失败可重试。调用方须独占 profile、协调外部命名空间及 ACL 写入，并在回收前结束全部沙箱进程。新增真实 AppContainer 用例覆盖多层新对象创建读写、回收后拒绝、其他 profile ACE 与标签保持，以及扫描超限后的 profile/guard 保留与重试。本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过，原生结果待 CI。运行期目录改名、跨进程协调、持久恢复和启动接入仍待完成。
 
+
+`914d912` 的 push 与 PR 三平台 race、vet、构建和契约均通过；两个 Windows 原生任务在新工作树用例失败。PR job `116608439513` 的清理报告未知继承 ACE，扫描超限用例随后发现空根目录可改名。根与祖先现在请求 `FILE_LIST_DIRECTORY` 参与共享访问检查，配合省略 delete sharing 固定空目录绑定；新增独立空工作树用例。继承 ACE 错误增加 flags/mask 诊断，格式归属仍严格检查，本地 Windows 双架构 vet 与 amd64 编译通过，原生复验待执行。
+
+凭证目录准入使用进程 token 的 profile 与 RoamingAppData，覆盖 `.ssh`、`.config/gcloud`、`.azure`、`.aws` 和 Windows RoamingAppData 下的 `gcloud`。逐组件打开并按卷号和 128 位 ID 比较根、祖先与工作树对象；检查大小写、短路径和重定向目录的实际身份，已存在前缀的目录句柄保留至回收结束。缺失目录的祖先仍参与检查；非目录、无法检查和取消均停止准入。调用方继续协调外部命名空间写入，包括 reparse 数据修改和缺失组件创建。新增原生用例验证重叠拒绝、独立兄弟目录允许、别名身份、句柄释放及 token 目录选择；原生结果待 CI。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |

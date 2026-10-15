@@ -138,6 +138,34 @@ func Test_WindowsAppContainerWorkspaceTree(t *testing.T) {
 	t.Log("703 objects, multiple enumeration buffers, Unicode, stable root/ancestors, file editing and empty-directory rename/replacement identity passed")
 }
 
+func Test_WindowsAppContainerEmptyWorkspaceGuard(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	parent := filepath.Join(t.TempDir(), "ancestor")
+	root := filepath.Join(parent, "empty-workspace")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := openWorkspaceTree(context.Background(), root, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	for _, path := range []string{root, parent} {
+		if err := os.Rename(path, path+".moved"); err == nil {
+			t.Fatal("empty workspace binding moved", path)
+		}
+	}
+	tree.Close()
+	if err := os.Rename(root, root+".moved"); err != nil {
+		t.Fatal("empty workspace guard retained after close", err)
+	}
+	if err := os.Rename(parent, parent+".moved"); err != nil {
+		t.Fatal("ancestor guard retained after close", err)
+	}
+}
+
 func Test_WindowsAppContainerWorkspaceTreeAdmission(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")

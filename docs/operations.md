@@ -175,6 +175,8 @@ AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder �
 
 已选对象的单对象授权通过非继承句柄复制保留实际对象，授权前重新核对卷号、对象 ID、类型与链接属性。快照关闭与授权释放各自管理所持句柄；调用方应串行完成选择、授权和快照关闭。整棵工作树的授权、未来新对象的继承与恢复、根绑定和执行接入仍需完成。
 
+工作树内部准入会以当前进程 token 的 profile 与 RoamingAppData 定位默认凭证目录，按实际卷号和对象 ID 排除相互包含及目录别名。已存在前缀以目录数据访问和禁止 delete sharing 的句柄固定，保留至完整回收。调用方须协调外部命名空间、reparse 数据及缺失凭证组件创建；Windows L2 生产启动仍等待继承回收、寿命、跨进程协调及恢复验收。
+
 ## 治理与生命周期
 
 exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。Windows 还保留运行时所需的 `WINDIR`、`SYSTEMDRIVE`、`COMSPEC`、`PATHEXT`、`TEMP`、`TMP`、`APPDATA`、`LOCALAPPDATA` 和 `ProgramFiles`，同样经过路径过滤。Windows 保留 `PSModulePath` 中经过拒绝规则的模块目录；缺少该值且 SystemRoot 可用时传入空值，由所启动的 PowerShell 运行时初始化模块目录；拒绝变量名的策略仍然生效。继承的 `PATH` 和 Windows `PSModulePath` 按平台分隔符逐项过滤，保留其余搜索目录；调用方显式传入的搜索路径包含拒绝目录时返回策略错误。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。

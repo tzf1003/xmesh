@@ -58,7 +58,7 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 	if err != nil {
 		return nil, err
 	}
-	anchor, err := windows.CreateFile(rootName, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
+	anchor, err := windows.CreateFile(rootName, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES|windows.FILE_LIST_DIRECTORY,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING,
 		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
@@ -193,14 +193,22 @@ func openRelativeObject(parent windows.Handle, name string, shareDelete, caseIns
 		attributes.Attributes |= windows.OBJ_CASE_INSENSITIVE
 	}
 	share := uint32(windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE)
+	access := uint32(windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
+	options := uint32(windows.FILE_OPEN_REPARSE_POINT | windows.FILE_OPEN_FOR_BACKUP_INTENT)
 	if shareDelete {
 		share |= windows.FILE_SHARE_DELETE
+	} else {
+		// Metadata-only opens do not participate in NTFS share-access checks.
+		// Directory data access makes the omitted delete-sharing bit protect
+		// the binding even when no descendant handles remain open.
+		access |= windows.FILE_LIST_DIRECTORY
+		options |= windows.FILE_DIRECTORY_FILE
 	}
 	var handle windows.Handle
 	var status windows.IO_STATUS_BLOCK
-	err = windows.NtCreateFile(&handle, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
+	err = windows.NtCreateFile(&handle, access,
 		&attributes, &status, nil, 0, share, windows.FILE_OPEN,
-		windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0)
+		options, 0, 0)
 	if err != nil {
 		return 0, fmt.Errorf("open AppContainer workspace component: %w", err)
 	}

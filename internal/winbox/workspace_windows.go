@@ -17,12 +17,13 @@ import (
 // sandbox process before Close. Retained child handles still constrain directory
 // renames; execution integration must resolve that compatibility boundary.
 type workspaceGrant struct {
-	mu         sync.Mutex
-	profile    *Profile
-	tree       *workspaceTree
-	selected   *selectedObjectGrants
-	path       string
-	maxObjects int
+	mu          sync.Mutex
+	profile     *Profile
+	tree        *workspaceTree
+	selected    *selectedObjectGrants
+	path        string
+	maxObjects  int
+	credentials []windows.Handle
 }
 
 // grantWorkspace authorizes selected existing objects and inheritance from each
@@ -33,17 +34,28 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	if err != nil {
 		return nil, err
 	}
+	paths, err := credentialDirectories()
+	if err != nil {
+		tree.Close()
+		return nil, err
+	}
+	credentials, err := pinCredentialBoundaries(ctx, tree, paths)
+	if err != nil {
+		tree.Close()
+		return nil, err
+	}
 	p.mu.Lock()
 	if p.sid == nil || p.grants != 0 {
 		p.mu.Unlock()
 		tree.Close()
+		closeCredentialHandles(credentials)
 		return nil, fmt.Errorf("AppContainer workspace requires an available exclusive profile")
 	}
 	// This reference also covers future inherited ACEs, independently of the
 	// selected grants. It is released only after complete tree cleanup.
 	p.grants++
 	p.mu.Unlock()
-	g := &workspaceGrant{profile: p, tree: tree, selected: &selectedObjectGrants{}, path: path, maxObjects: maxObjects}
+	g := &workspaceGrant{profile: p, tree: tree, selected: &selectedObjectGrants{}, path: path, maxObjects: maxObjects, credentials: credentials}
 	for _, object := range tree.objects {
 		if err = ctx.Err(); err != nil {
 			break
@@ -98,6 +110,8 @@ func (g *workspaceGrant) Close() error {
 	}
 	g.tree.Close()
 	g.tree = nil
+	closeCredentialHandles(g.credentials)
+	g.credentials = nil
 	g.profile.mu.Lock()
 	g.profile.grants--
 	g.profile.mu.Unlock()
@@ -149,7 +163,7 @@ func editInheritedProfileACL(acl *windows.ACL, sid *windows.SID) (*windows.ACL, 
 			const mask = windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | 0x0040
 			const flags = windows.INHERITED_ACE | windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
 			if ace[1]&windows.INHERITED_ACE == 0 || ace[1]&^byte(flags) != 0 || binary.LittleEndian.Uint32(ace[4:8]) != mask {
-				return nil, false, fmt.Errorf("AppContainer inherited ACE ownership changed")
+				return nil, false, fmt.Errorf("AppContainer inherited ACE ownership changed: flags=%#x mask=%#x", ace[1], binary.LittleEndian.Uint32(ace[4:8]))
 			}
 			removed = true
 			continue
