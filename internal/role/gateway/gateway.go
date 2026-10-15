@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
+	"github.com/tzf1003/xmesh/internal/quota"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net/http"
@@ -31,6 +33,7 @@ type Options struct {
 	LocalPeer mesh.Peer
 	Dial      Dial
 	Discover  Discover
+	Audit     *audit.Logger
 }
 type device struct {
 	peer     mesh.Peer
@@ -47,6 +50,7 @@ type Gateway struct {
 	done       chan struct{}
 	generation uint64
 	draining   map[string]bool
+	quota      *quota.Limiter
 }
 type downstream struct {
 	bridge      *mcpmux.Bridge
@@ -73,7 +77,7 @@ type view struct {
 
 func New(o Options) *Gateway {
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}}
+	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, quota: quota.New(10000, 64, 10*time.Minute)}
 	if o.LocalPeer.Name != "" {
 		g.devices[o.LocalPeer.Name] = device{o.LocalPeer, true, time.Now()}
 	}
@@ -218,13 +222,21 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 				}
 			}
 			g.mu.Unlock()
-			if existing != nil && (existing.p.ClientID != p.ClientID || existing.p.Local != p.Local) {
+			if existing != nil && (existing.p.ClientID != p.ClientID || existing.p.Local != p.Local || scopeKey(existing.p.Scopes) != scopeKey(p.Scopes)) {
 				http.Error(w, "会话身份不匹配", 403)
 				return
 			}
 		}
 		protected.ServeHTTP(w, r)
 	})
+}
+func scopeKey(scopes []string) string {
+	expanded, e := oauth.Expand(scopes)
+	if e != nil {
+		return "invalid"
+	}
+	sort.Strings(expanded)
+	return strings.Join(expanded, " ")
 }
 func (g *Gateway) newView(p Principal) *view {
 	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, down: map[string]*downstream{}}
@@ -238,6 +250,19 @@ func (g *Gateway) newView(p Principal) *view {
 	}
 	v.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, r mcp.Request) (mcp.Result, error) {
+			started := time.Now()
+			if method == "tools/call" {
+				principal := v.p.ClientID
+				if principal == "" {
+					principal = "local"
+				}
+				limited, release, e := g.quota.Acquire(ctx, principal)
+				if e != nil {
+					return agent.Result(nil, e), nil
+				}
+				defer release()
+				ctx = limited
+			}
 			if method == "tools/list" || method == "tools/call" {
 				if session, ok := r.GetSession().(*mcp.ServerSession); ok {
 					v.bind(session)
@@ -285,6 +310,16 @@ func (g *Gateway) newView(p Principal) *view {
 				}
 			}
 			result, e := next(ctx, method, r)
+			if method == "tools/call" && e == nil && g.opts.Audit != nil {
+				if call, ok := r.(*mcp.CallToolRequest); ok {
+					if out, ok := result.(*mcp.CallToolResult); ok {
+						caller := "gateway/" + call.Session.ID()
+						if err := g.opts.Audit.Record(caller, v.p.ClientID, g.opts.NodeName, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+							return agent.Result(nil, err), nil
+						}
+					}
+				}
+			}
 			if e == nil && method == "tools/list" {
 				if list, ok := result.(*mcp.ListToolsResult); ok {
 					visible := []*mcp.Tool{}
@@ -545,7 +580,13 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 }
 func (g *Gateway) Drain(name string) {
 	g.mu.Lock()
-	g.draining[name] = true
+	if name == "" {
+		for device := range g.devices {
+			g.draining[device] = true
+		}
+	} else {
+		g.draining[name] = true
+	}
 	g.generation++
 	views := []*view{}
 	for v := range g.views {

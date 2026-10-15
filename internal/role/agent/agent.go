@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backend"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
@@ -24,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,6 +46,8 @@ type Agent struct {
 	views        map[string]*mcp.Server
 	viewMu       sync.Mutex
 	backendNames map[*mcp.Server][]string
+	Audit        *audit.Logger
+	draining     atomic.Bool
 }
 
 func New(store *config.Store) (*Agent, error) {
@@ -162,6 +166,10 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 			http.Error(w, "会话身份不匹配", 403)
 			return
 		}
+		if exists {
+			c.Tags = append([]string{}, p.Tags...)
+			_ = a.Callers.Add(c)
+		}
 		protected.ServeHTTP(w, r)
 	})
 }
@@ -182,6 +190,9 @@ func (a *Agent) server(p Principal) *mcp.Server {
 				caller = c
 			}
 			cfg := a.store.Get()
+			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire") {
+				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
+			}
 			if !Allowed(cfg, caller, name, "") {
 				return Result(nil, toolerr.New("unauthorized", "调用方的 tag 不允许此工具", "tag", strings.Join(caller.Tags, ","), "tool", name)), nil
 			}
@@ -237,9 +248,25 @@ func (a *Agent) server(p Principal) *mcp.Server {
 	}
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			started := time.Now()
 			result, e := next(ctx, method, req)
+			if method == "tools/call" && e == nil && a.Audit != nil {
+				if call, ok := req.(*mcp.CallToolRequest); ok {
+					if out, ok := result.(*mcp.CallToolResult); ok {
+						caller := a.bind(call.Session, p)
+						if err := a.Audit.Record(caller.ID, "", a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+							return Result(nil, err), nil
+						}
+					}
+				}
+			}
 			if e == nil && method == "tools/list" {
 				caller := identity.Caller{Tags: p.Tags}
+				if session := req.GetSession(); session != nil {
+					if current, ok := a.Callers.Get(p.Node + "/" + session.ID()); ok {
+						caller = current
+					}
+				}
 				if result, ok := result.(*mcp.ListToolsResult); ok {
 					cfg := a.store.Get()
 					visible := []*mcp.Tool{}
@@ -289,7 +316,18 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 		shells = append(shells, shell)
 	}
 	inUse, active, closed := a.PTY.Counts()
-	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
+	warnings := []string{}
+	if c.Agent.Policy.AllowDangerous {
+		warnings = append(warnings, "allow_dangerous 已启用")
+	}
+	readable := false
+	if c.Mesh.Mode == "tailnet" {
+		if f, e := os.Open(c.Mesh.AuthkeyFile); e == nil {
+			readable = true
+			_ = f.Close()
+		}
+	}
+	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "authkey_readable": readable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
 }
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {

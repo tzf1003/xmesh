@@ -68,7 +68,13 @@ func (a *Agent) installBackends(server *mcp.Server, p Principal) {
 		name := tool.Name
 		names = append(names, name)
 		server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if a.draining.Load() {
+				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的后端调用")), nil
+			}
 			caller := a.bind(req.Session, p)
+			if current, ok := a.Callers.Get(caller.ID); ok {
+				caller = current
+			}
 			cfg := a.store.Get()
 			a.Backends.Configure(cfg)
 			if !a.toolAllowed(cfg, caller, name) {

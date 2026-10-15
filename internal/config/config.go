@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/netip"
@@ -136,7 +137,7 @@ func Parse(b []byte) (*Config, error) {
 		return nil, e
 	}
 	var extra any
-	if e := d.Decode(&extra); e == nil {
+	if e := d.Decode(&extra); e != io.EOF {
 		return nil, fmt.Errorf("配置只能包含一个 YAML 文档")
 	}
 	schemaBytes, _ := schemas.Files.ReadFile("config.schema.json")

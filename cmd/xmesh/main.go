@@ -3,14 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
-	"github.com/tzf1003/xmesh/internal/role/agent"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,11 +22,15 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: xmesh serve|status --config xmesh.yaml")
+		return fmt.Errorf("用法: xmesh serve|install|status|pair --config xmesh.yaml")
 	}
 	switch args[0] {
 	case "serve":
 		return serve(args[1:])
+	case "install":
+		return install(args[1:])
+	case "pair":
+		return pair(args[1:])
 	case "status":
 		return status(args[1:])
 	case "version", "--version":
@@ -42,8 +43,13 @@ func run(args []string) error {
 func serve(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	path := flags.String("config", "xmesh.yaml", "配置路径")
-	local := flags.Bool("local", false, "显式启用阶段 1 的 127.0.0.1 开发监听")
-	listen := flags.String("listen", "127.0.0.1:7433", "本机开发 MCP 地址")
+	local := flags.Bool("local", false, "显式启用本机开发模式")
+	listen := flags.String("listen", "127.0.0.1:7433", "本机开发 Agent 地址")
+	state := flags.String("state-dir", "", "节点状态目录")
+	password := flags.String("oauth-password-file", "", "OAuth 单主体口令文件")
+	ingress := flags.Bool("ingress", false, "启用已配置的公网入口")
+	tunnel := flags.String("tunnel-listen", "127.0.0.1:8443", "反向隧道入口地址")
+	asService := flags.Bool("service", false, "由系统服务管理器启动")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
@@ -51,49 +57,19 @@ func serve(args []string) error {
 	if e != nil {
 		return e
 	}
-	if !*local {
-		return fmt.Errorf("请使用 --local 运行本机工具验收；互联监听将在 mesh 阶段接入")
+	options := app.Options{Local: *local, Listen: *listen, StateDir: *state, PasswordFile: *password, Ingress: *ingress, TunnelListen: *tunnel}
+	if *asService {
+		return runService(store, options)
 	}
-	host, _, e := net.SplitHostPort(*listen)
-	if e != nil || host != "127.0.0.1" {
-		return fmt.Errorf("--local 必须监听 127.0.0.1")
-	}
-	if !store.Get().HasRole("agent") {
-		return fmt.Errorf("本机模式要求 agent 角色")
-	}
-	a, e := agent.New(store)
-	if e != nil {
-		return e
-	}
-	defer a.Close()
-	listener, e := net.Listen("tcp", *listen)
-	if e != nil {
-		return e
-	}
-	defer listener.Close()
-	server := &http.Server{Handler: a.HTTP(agent.Local), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	errc := make(chan error, 1)
-	go func() { errc <- server.Serve(listener) }()
-	fmt.Fprintln(os.Stderr, "本机 Agent MCP: http://"+listener.Addr().String()+"/mcp")
-	select {
-	case e = <-errc:
-		if !errors.Is(e, http.ErrServerClosed) {
-			return e
-		}
-	case <-ctx.Done():
-		a.Close()
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdown)
-	}
-	return nil
+	return app.Run(ctx, store, options)
 }
 func status(args []string) error {
 	flags := flag.NewFlagSet("status", flag.ContinueOnError)
 	endpoint := flags.String("endpoint", "http://127.0.0.1:7433/mcp", "运行中的 MCP 地址")
 	machine := flags.Bool("json", false, "输出 JSON")
+	tool := flags.String("tool", "sys.info", "状态工具名；Gateway 使用 local/sys.info")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
@@ -105,7 +81,7 @@ func status(args []string) error {
 		return e
 	}
 	defer s.Close()
-	o, e := s.CallTool(ctx, &mcp.CallToolParams{Name: "sys.info", Arguments: map[string]any{}})
+	o, e := s.CallTool(ctx, &mcp.CallToolParams{Name: *tool, Arguments: map[string]any{}})
 	if e != nil {
 		return e
 	}
