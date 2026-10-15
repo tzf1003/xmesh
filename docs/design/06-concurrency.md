@@ -19,7 +19,7 @@ caller_id = tailnet 节点 ID + MCP session id
 
 ## PTY 会话池
 
-- 设备硬上限 `max_sessions: 20`，单调用方 `max_per_caller: 8`。`Open` 内原子检查并递增，防止并发 open 穿透到 21。见 [INV-02](../constraints/invariants.md#inv-02)。
+- 设备硬上限 `max_sessions: 20` 只数 `active` 与 `orphaned`。`closed` 不占这个名额，另有 `closed_retain_max`。单调用方 `max_per_caller: 8`。`Open` 内原子检查并递增，防止并发 open 穿透到 21。见 [INV-02](../constraints/invariants.md#inv-02) 与 [RUL-12](../contracts/rulings.md#rul-12)。
 - 每会话一个环形缓冲（1 MiB）+ 单调递增 cursor。写入 goroutine 追加后 `Broadcast`。多个读者各持自己的 cursor。cursor 落入被覆盖区域时返回 `truncated: true`。
 - `pty.read` 为 long-poll：无新输出时最多等 `wait_ms`，避免模型空转轮询。
 - 后台 reaper 每 30 秒扫描 idle / orphan / closed 超时。上层 MCP 连接关闭时调 `Orphan(caller)`，把该调用方全部会话转为 orphaned。
@@ -45,7 +45,7 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- |
 | `active` | 有 | 仅 owner | 任何调用方 | 正常会话 |
 | `orphaned` | 无 | 否 | 任何调用方，直到进程被 Kill | 宽限期内保留，供 `transfer` 接回 |
-| `closed` | 原 owner 仍记录在列表里 | 否 | 任何调用方，`eof: true` 之后只有缓冲 | 缓冲保留，`pty.list` 仍可见 |
+| `closed` | 原 owner 仍记录在列表里 | 否 | 任何调用方，`eof: true` 之后只有缓冲 | 缓冲保留，不占 `max_sessions`。`pty.list` 仍可见 |
 | `released` | — | — | — | id 失效，再读返回 `session_not_found` |
 
 idle 超时作用在 `active`：`idle_timeout` 内没有读写则由 reaper 关闭。`orphaned` 使用单独的 `orphan_grace`，不套用 idle。

@@ -66,7 +66,7 @@
 
 ```json
 {"error":"resource_busy","resource":"backend:ida","held_by":"gw-cloud/s7f","expires_in_s":180}
-{"error":"pty_limit","scope":"device","limit":20,"active":20,"oldest_idle":{"id":"p-3a9f00ab","idle_s":1100}}
+{"error":"pty_limit","scope":"device","limit":20,"in_use":20,"oldest_idle":{"id":"p-3a9f00ab","idle_s":1100}}
 {"error":"invalid_cwd","path":"/home/x/nope","reason":"not_found"}
 {"error":"conflict","path":"src/main.rs","current_sha256":"…","mtime":"2026-10-15T05:30:00Z"}
 ```

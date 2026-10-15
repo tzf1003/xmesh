@@ -1,0 +1,28 @@
+{
+  "node": {
+    "name": "vps-mcp",
+    "roles": ["agent", "gateway", "ingress"]
+  },
+  "mesh": {
+    "mode": "tailnet",
+    "control_url": "https://hs.example.com",
+    "authkey_file": "/etc/xmesh/authkey"
+  },
+  "gateway": {
+    "listen": "127.0.0.1:8080"
+  },
+  "ingress": {
+    "listen": "public:443",
+    "domain": "mcp.example.com",
+    "tls": "autocert",
+    "oauth": {
+      "issuer": "https://mcp.example.com",
+      "clients": {
+        "codex": { "scopes": ["devices:read", "exec:*"] }
+      }
+    }
+  },
+  "agent": {
+    "cwd_policy": { "allow": ["/tmp"] }
+  }
+}

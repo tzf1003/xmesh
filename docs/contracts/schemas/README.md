@@ -7,13 +7,14 @@
 | [`error.schema.json`](error.schema.json) | [CTR-ERR-01](../errors.md#ctr-err-01) | `examples/error-*.json` |
 | [`lease.schema.json`](lease.schema.json) | [CTR-LEASE-01](../backend-lease.md#ctr-lease-01) | `examples/lease.json` |
 | [`audit-event.schema.json`](audit-event.schema.json) | [CTR-AUD-01](../audit.md#ctr-aud-01) | `examples/audit-event.json` |
-| [`config.schema.json`](config.schema.json) | [CTR-CFG-01](../config.md#ctr-cfg-01) | `examples/xmesh.config.json` |
+| [`config.schema.json`](config.schema.json) | [CTR-CFG-01](../config.md#ctr-cfg-01) | `examples/xmesh.config.json`、`examples/xmesh.ingress-public.json` |
 
-`examples/invalid/` 里的文件必须校验失败。它们防止模式被放宽到能接受「占用中却没有持有者」、`relay` 模式，或在审计摘要里写入命令输出。
+`examples/invalid/` 里的文件必须校验失败。它们防止模式被放宽到能接受「占用中却没有持有者」、`relay` 模式、Funnel 上再写自定义域名、`pty_limit` 使用字段 `active`，或在审计摘要里写入命令输出。
 
-校验：
+依赖写在 [`requirements.txt`](requirements.txt)。GitHub Actions 工作流 `.github/workflows/contracts.yml` 在推送和拉取请求上跑同一条命令。
 
 ```bash
+python3 -m pip install -r docs/contracts/schemas/requirements.txt
 python3 docs/contracts/schemas/check_examples.py
 ```
 

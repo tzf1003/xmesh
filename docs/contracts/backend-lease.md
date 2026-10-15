@@ -42,20 +42,20 @@ stdio 进程退出或 HTTP 连续失败时：
 
 ### backend.renew
 
-参数：`name`、`token`、`ttl`。token 必须等于当前 token 且 owner 匹配，否则 `resource_busy`（`token_mismatch` 或 `token_stale`）。成功则延长 `Expires`，token 不变。
+参数：`name`、`_lease_token`、`ttl`。`_lease_token` 必须等于当前租约的 `token` 且 owner 匹配，否则 `resource_busy`（`token_mismatch` 或 `token_stale`）。成功则延长 `Expires`，`token` 不变。参数名见 [RUL-06](rulings.md#rul-06)。
 
 ### backend.release
 
-参数：`name`、`token`。owner 与 token 都匹配时删除租约。token 计数器不减小。重复 release 同一 token 返回成功，`released: true`，便于重试。不匹配返回 `resource_busy`。
+参数：`name`、`_lease_token`。owner 与 `_lease_token` 都匹配时删除租约。token 计数器不减小。重复 release 同一个 `_lease_token` 返回成功，`released: true`，便于重试。不匹配返回 `resource_busy`。
 
 业务工具校验：
 
 | 情况 | 错误 |
 | --- | --- |
-| 未带 token | `lease_required` |
-| 没有有效租约，或 token 不等于当前值 | `resource_busy` / `token_stale` |
-| token 等于当前值但 owner 不是调用方 | `resource_busy` / `token_mismatch` |
-| token 匹配且 owner 匹配，但已过期 | `resource_busy` / `token_stale`，并删除租约 |
+| 未带 `_lease_token` | `lease_required` |
+| 没有有效租约，或 `_lease_token` 不等于当前 `token` | `resource_busy` / `token_stale` |
+| `_lease_token` 等于当前 `token` 但 owner 不是调用方 | `resource_busy` / `token_mismatch` |
+| `_lease_token` 与 owner 都匹配，但已过期 | `resource_busy` / `token_stale`，并删除租约 |
 
 ## CTR-LEASE-01
 

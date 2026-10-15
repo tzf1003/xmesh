@@ -13,7 +13,10 @@ from pathlib import Path
 try:
     from jsonschema import Draft202012Validator, FormatChecker
 except ImportError:
-    print("缺少 jsonschema。请先执行: python3 -m pip install 'jsonschema>=4.22' rfc3339-validator", file=sys.stderr)
+    print(
+        "缺少 jsonschema。请先执行: python3 -m pip install -r docs/contracts/schemas/requirements.txt",
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 if "date-time" not in FormatChecker.checkers:
@@ -34,8 +37,10 @@ if "date-time" not in FormatChecker.checkers:
     "error-invalid-cwd.json": "error.schema.json",
     "error-conflict.json": "error.schema.json",
     "error-policy-denied.json": "error.schema.json",
+    "error-exec-saturated.json": "error.schema.json",
     "lease.json": "lease.schema.json",
     "audit-event.json": "audit-event.schema.json",
+    "xmesh.ingress-public.json": "config.schema.json",
 }
 
 # 反例同样按文件名选择模式。这些文件必须无法通过校验。
@@ -43,6 +48,8 @@ if "date-time" not in FormatChecker.checkers:
     "invalid/error-busy-missing-holder.json": "error.schema.json",
     "invalid/config-relay.json": "config.schema.json",
     "invalid/audit-with-stdout.json": "audit-event.schema.json",
+    "invalid/config-funnel-with-domain.json": "config.schema.json",
+    "invalid/error-pty-limit-named-active.json": "error.schema.json",
 }
 
 

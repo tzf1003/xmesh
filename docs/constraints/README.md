@@ -92,7 +92,8 @@
 | [CON-SEC-07](security.md#con-sec-07) | 禁止 | 录制 PTY 字节流 |
 | [CON-SEC-08](security.md#con-sec-08) | 禁止 | 审计日志记录文件内容或命令输出正文 |
 | [CON-SEC-09](security.md#con-sec-09) | 必须 | 入口实现 OAuth 2.1、动态客户端注册和 PKCE |
-| [CON-SEC-10](security.md#con-sec-10) | 必须 | 默认拦截递归删除、越界写、命令黑名单和超配额 |
+| [CON-SEC-10](security.md#con-sec-10) | 必须 | 默认拦截递归删除、越界写、命令黑名单和超配额。黑名单匹配规范化命令行 |
+| [CON-SEC-11](security.md#con-sec-11) | 必须 | 入口的动态注册和登录口令必须限速 |
 
 ## 实现
 

@@ -14,8 +14,9 @@ caller_id = node_id "/" mcp_session_id
 
 Agent 只从传输层推导 `caller_id`：
 
-- `node_id` 来自 `WhoIs`，阶段 1 的环回来自「对端地址是 127.0.0.1」这一事实。
+- `node_id` 来自 `WhoIs`。本机 Gateway 到本机 Agent 的环回，在已有 tailnet 身份时用本节点 ID；还没有 tailnet 身份时才用 `local`。见 [RUL-02](rulings.md#rul-02)。
 - `mcp_session_id` 来自该 MCP 连接的会话标识。
+- 经入口进来的会话另外记下 `oauth_client`，来源是请求头 `X-Xmesh-Oauth-Client`，不是工具参数。
 
 工具参数里如果出现 `caller_id`、`owner` 或 `node_id`，一律忽略，不得覆盖传输层身份。唯一的例外是 `pty.transfer` 的 `to_caller`：那是目标身份，不是调用方身份，而且目标必须是 Agent 已经见过的、尚未过期的 `caller_id`，或者与调用方具有相同 `node_id` 的会话。禁止把会话转给任意字符串，以免成为伪造 owner 的入口。
 

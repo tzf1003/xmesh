@@ -25,7 +25,10 @@
     "exec_exclusive": 1,
     "pty_max_sessions": 20,
     "pty_max_per_caller": 8,
-    "pty_active": 1
+    "pty_in_use": 1,
+    "pty_active": 0,
+    "pty_closed": 1,
+    "pty_closed_retain_max": 20
   }
 }
 ```
@@ -40,7 +43,10 @@
 | `shells` | 该平台实际会选用的 shell 列表，第一项是 `auto` 的解析结果 |
 | `workspaces` | 与配置别名一一对应，`path` 已解析为绝对路径。解析失败的别名仍然列出，并带 `error` |
 | `backends[].state` | `stopped`、`running`、`crashed` 之一 |
-| `limits` | 来自当前配置与当前计数，不是历史最大值 |
+| `limits.pty_in_use` | `active` 与 `orphaned` 之和，即占用 `max_sessions` 的数量 |
+| `limits.pty_active` | 仅 `state` 为 `active` 的会话数。它和 `pty_limit.in_use` 不是同一个数 |
+| `limits.pty_closed` | 仍保留缓冲的 `closed` 会话数 |
+| `limits` 其余字段 | 来自当前配置与当前计数，不是历史最大值 |
 
 ### 错误
 

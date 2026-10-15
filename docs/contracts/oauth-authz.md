@@ -37,6 +37,18 @@ issuer 的来源必须与客户端实际访问的 HTTPS 源一致。禁止返回
 
 已在配置里写好的 `clients.codex` 与 `clients.claude` 是预注册客户端，与动态注册并存。
 
+### 限速
+
+单口令加上开放的动态注册，公网入口会被拿来爆破。下列限额是契约的一部分，见 [CON-SEC-11](../constraints/security.md#con-sec-11)。计数在入口进程内存中，按来源 IP，重启后清零。超限的响应是 HTTP 429，并且必须带 `Retry-After`（秒）。
+
+| 动作 | 限额 | 锁定如何结束 |
+| --- | --- | --- |
+| `POST /oauth/register` | 每个 IP 每小时最多 5 次，不论成功失败 | 窗口滑动，满一小时的旧请求不再计数 |
+| 登录口令校验失败 | 每个 IP 连续失败 5 次 | 锁定 15 分钟。一次成功把该 IP 的失败计数清零 |
+| `GET /oauth/authorize` | 每个 IP 每分钟最多 60 次 | 窗口滑动 |
+
+口令比对必须消耗大致固定的时间，避免用响应快慢判断口令前缀。锁定期间登录提交直接 429，不再做口令比对。
+
 ### 授权码与 PKCE
 
 `GET /oauth/authorize` 要求 `response_type=code`、`client_id`、`redirect_uri`、`code_challenge`、`code_challenge_method=S256`、`state`。缺 `code_challenge` 返回 400，不发码。

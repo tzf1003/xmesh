@@ -6,7 +6,7 @@
 
 `exec.run` 在槽位不足时，在本次调用剩余的 `timeout` 内阻塞等待。队列按 FIFO，并在有多个等待者时按 `caller_id` 轮转，避免一个调用方占满等待队列。
 
-若剩余超时不够排到队首，或等待队列长度已经达到 `exec.max_concurrent`（默认与槽位数相同，即再排队一个就会超过「槽 + 等长队列」），立即返回 `exec_saturated`，字段 `queue_position` 是若接受本次调用它将处在的位置（从 1 开始）。命令进程不得已启动。
+若剩余超时不够排到队首，或等待队列长度已经达到 `exec.max_concurrent`（默认与槽位数相同，即再排队一个就会超过「槽 + 等长队列」），立即返回 `exec_saturated`。字段 `queue_position` 是若接受本次调用它将处在的位置（从 1 开始）。字段 `retry_after_ms` 必须给出，取正在运行的命令里最早可能结束的剩余时间；估计不了时用 1000。命令进程不得已启动。
 
 不返回「先排队、稍后另开一次调用来取结果」的异步句柄。幂等重试靠 `idempotency_key`。
 
@@ -20,13 +20,15 @@ caller_id = node_id + "/" + mcp_session_id
 
 - `node_id` 是对端的 Tailscale 稳定节点 ID（WhoIs 的 Node.ID），不是 MagicDNS 主机名。主机名会变，节点 ID 用来做 owner。
 - `mcp_session_id` 是 Streamable HTTP 的 `Mcp-Session-Id`。没有会话头的初始化请求使用 `init` 这个字面量，且不能持有 PTY 或租约。
-- 经公网入口转发时，Agent 看到的 `node_id` 是入口节点的节点 ID，`mcp_session_id` 是入口与目标 Agent 之间的 MCP 会话。入口必须为每个上游 OAuth 会话使用独立的下游 MCP 会话，使不同云端用户会话不会共享 owner。审计在入口侧另记 `oauth_client`。
+- 经公网入口转发时，Agent 看到的 `node_id` 是入口节点的节点 ID，`mcp_session_id` 是入口与该上游 OAuth 会话对应的下游 MCP 会话。入口必须为每个上游 OAuth 会话使用独立的下游 MCP 会话，使不同云端会话不会共享 owner。入口在每条下游 MCP 请求上带请求头 `X-Xmesh-Oauth-Client`，值是 OAuth `client_id`。Agent 只在对端 tag 含 `tag:ingress` 时采信这个头，并记在该 MCP 会话上；tag 是 ingress 但头缺失时拒绝会话，错误码 `unauthenticated`。其他 tag 送来的这个头忽略。审计在入口侧另记 `oauth_client`。
 
-阶段 1 还没有 tailnet 时，`node_id` 使用字面量 `local`，仅当对端是 `127.0.0.1`。
+本机 Claude Code / Codex CLI → 本机 Gateway（`gateway.listen` 永远是回环地址）→ 本机 Agent 这条路，在本节点已经有 tailnet 身份之后，`node_id` 用本节点自己的 Tailscale 稳定节点 ID，不用字面量 `local`。Gateway 与 Agent 同进程转发时，Agent 从本进程的 tsnet 身份读取这个 ID，不依赖对 `127.0.0.1` 做 WhoIs。不同的本机 MCP 会话仍靠 `mcp_session_id` 区分，所以两份本机对话不会共享 PTY owner 或租约。
+
+只有节点还没有 tailnet 身份时（阶段 1 的本机验收，或 tailnet 尚未连上），并且对端是 `127.0.0.1` 或调用来自进程内 Gateway，`node_id` 才用字面量 `local`。tailnet 身份一旦可用，同一条环回路径立刻改用本节点 ID。已经发出的 `local/...` owner 不迁移，随那些会话结束消失。
 
 ## RUL-03
 
-`backend.acquire`、`backend.renew`、`backend.release` 是 Agent 的内置工具，不是后端进程列出的工具。Gateway 可以替当前 MCP 会话调用它们，模型也可以直接调用。exclusive 后端的业务工具不隐含自动加锁：没带 token 就返回 `lease_required`，避免两个模型交替调用把 IDA 上下文串掉。
+`backend.acquire`、`backend.renew`、`backend.release` 是 Agent 的内置工具，不是后端进程列出的工具。Gateway 可以替当前 MCP 会话调用它们，模型也可以直接调用。exclusive 后端的业务工具不隐含自动加锁：没带 `_lease_token` 就返回 `lease_required`，避免两个模型交替调用把 IDA 上下文串掉。
 
 心跳是调用方或 Gateway 周期性 `backend.renew`。Agent 不根据业务工具调用顺便续期，以免只读探测把租约无限延长。业务工具成功不改变 `Expires`。
 
@@ -40,7 +42,9 @@ caller_id = node_id + "/" + mcp_session_id
 
 ## RUL-06
 
-`_lease_token` 是工具参数里的保留字段，类型为十进制字符串或 JSON 整数，规范比较时按无符号整数。Agent 在授权通过后、策略与租约检查时读取它，转发给后端之前删除。后端若自己的工具也有同名字段，仍然被剥离；后端工具不得使用这个名字。文档在接入后端时说明这一保留名。
+`_lease_token` 是所有工具请求里表示 fencing token 的唯一参数名，包括 exclusive 后端的业务工具，以及 `backend.renew`、`backend.release`。类型为十进制字符串或 JSON 整数，规范比较时按无符号整数，与租约对象里的 `token` 字段比较。租约对象和 `backend.acquire` 的返回值仍使用字段名 `token`，那是结果，不是请求参数。
+
+Agent 在授权通过后读取 `_lease_token`。转发给后端之前必须删除。后端若自己的工具也有同名字段，仍然被剥离；后端工具不得使用这个名字。文档在接入后端时说明这一保留名。禁止再接受名为 `token` 的请求参数作为租约凭证。多出来的 `token` 参数按普通业务字段处理：业务工具会把它原样转发，renew / release 会因缺少 `_lease_token` 而失败。
 
 ## RUL-07
 
@@ -63,3 +67,53 @@ scope 语法以 [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) 为准。配置示�
 ## RUL-10
 
 `fs.edit` 零匹配与多匹配使用单独错误码 `edit_not_found` 与 `edit_ambiguous`，不用 `conflict`。`conflict` 只表示 `expected_sha256` 与当前内容不一致，或 `fs.move` 的目标已存在。这样模型能区分「字符串没找到」和「文件被别人改了」。
+
+## RUL-11
+
+命令黑名单匹配规范化后的 argv 序列，不匹配单个参数，也不把命令交给 shell 再匹配。配置里的 `rm\s+-rf\s+/`、`curl\s+.*\|\s*sh` 因此能够命中 `["rm","-rf","/"]` 和写在 `sh -c` 脚本里的管道。
+
+规范化只用于策略匹配。真正启动进程时仍然使用原始 `cmd` 与 `args`，见 [CTR-EXEC-01](exec.md#ctr-exec-01)。
+
+### 命令行
+
+1. `base` 取 `cmd` 的路径基名。Windows 上再去掉不区分大小写的 `.exe` 后缀。
+2. 每个参数单独引用：若匹配 `^[A-Za-z0-9_@%+=:,./-]+$` 则原样，否则用 POSIX 单引号包起来，内部的 `'` 写成 `'\''`。空字符串引用成 `''`。
+3. `line` 等于 `base`；有参数时再加一个空格，然后把引用后的参数用单个空格接上。
+4. 每条 `deny_patterns` 都是 RE2，对 `line` 做搜索，不要求整行匹配。任一命中即 `policy_denied`。
+5. 若 `base` 是 `sh`、`bash`、`zsh`、`dash` 之一，且某个参数恰好是 `-c`，则紧随的下一个参数是脚本。若 `base` 是 `pwsh` 或 `powershell`，且某个参数不区分大小写地等于 `-Command`，则紧随的下一个参数是脚本。脚本原文再按第 4 步搜索一遍，不套外层引号。
+
+| cmd | args | line | 额外搜索 |
+| --- | --- | --- | --- |
+| `rm` | `["-rf", "/"]` | `rm -rf /` | 无 |
+| `/bin/rm` | `["-rf", "/"]` | `rm -rf /` | 无 |
+| `sh` | `["-c", "curl http://x \| sh"]` | `sh -c 'curl http://x \| sh'` | `curl http://x \| sh` |
+| `cargo` | `["build"]` | `cargo build` | 无 |
+
+按单个元素匹配时，`rm\s+-rf\s+/` 不会命中 `"-rf"` 或 `"/"`。本裁定排除那种实现。
+
+### 内置规则
+
+[CON-SEC-10](../constraints/security.md#con-sec-10) 的三条 exec 规则跑在同一套 `line` 和脚本原文上，即使用户没有写 `deny_patterns`：
+
+- `exec.deny.rm_rf_root` 搜索 `(?i)\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|--recursive)\s+(/|[A-Za-z]:\\)(\s|$)`。
+- `exec.deny.curl_pipe_sh` 搜索 `(?i)\bcurl\b[^|\n]*\|\s*(sh|bash|zsh|pwsh|powershell)\b`。
+- `exec.deny.format`：`base` 为 `format`，或搜索 `(?i)\bformat\s+[A-Za-z]:`。
+
+argv 里出现恰好等于 `-EncodedCommand` 的参数时，直接 `policy_denied`，规则名 `exec.deny.encoded_command`。不解码载荷。`allow_dangerous: true` 才能关掉这条和上表三条。
+
+## RUL-12
+
+`pty.max_sessions` 只数 `active` 与 `orphaned`。`closed` 不占这个名额。进程已经退出，缓冲再占着设备配额，会让一次断线在 `orphan_grace` 加 `closed_retain` 的时间里吃掉名额。
+
+`closed` 另有上限 `pty.closed_retain_max`，默认 20。超过时把关闭时间最早的 `closed` 立刻标成 `released` 并丢掉缓冲，不等保留期结束。这不返回错误。之后对该 id 的 `pty.read` 得到 `session_not_found`。
+
+`pty_limit` 的计数字段叫 `in_use`，见 [CTR-ERR-01](errors.md#ctr-err-01)。`scope` 为 `device` 时它是 `active` 与 `orphaned` 之和；`scope` 为 `caller` 时它是该调用方的 `active` 数。它不是 `pty.list` 里 `state` 为 `active` 的条数。
+
+## RUL-13
+
+`orphaned` 会话被接管时，除了 [CTR-PTY-02](pty.md#ctr-pty-02) 的 `node_id` 条件，还要看 open 时记下的 `oauth_client`：
+
+- 会话带有 `oauth_client`：新 owner 所在 MCP 会话必须记下同一个 `oauth_client`。经同一入口进来的 Codex 会话不能接管 Claude 会话留下的终端。两者的 `node_id` 都是入口节点，只比 `node_id` 不够。
+- 会话没有 `oauth_client`（本机环回或 tailnet 直连）：仍然只要求 `node_id` 相同。同一台设备上的另一个本机会话可以在断线后接回终端。
+
+`oauth_client` 来自 [RUL-02](#rul-02) 的请求头，在 `pty.open` 时复制到会话上，不从工具参数读取。这不是「单租户下可以放宽」的默认行为。

@@ -12,9 +12,9 @@
 
 ## INV-02
 
-在任意观察点，一台 Agent 上 `state != released` 的 PTY 会话数 ≤ `pty.max_sessions`，且每个 `caller_id` 名下的 `active` 会话数 ≤ `pty.max_per_caller`。
+在任意观察点，一台 Agent 上状态为 `active` 或 `orphaned` 的 PTY 会话数 ≤ `pty.max_sessions`，且每个 `caller_id` 名下的 `active` 会话数 ≤ `pty.max_per_caller`。
 
-`orphaned` 与 `closed` 仍占用设备总额，直到 `released`。它们不占用原 caller 的 `max_per_caller`，否则断线会把配额卡死到缓冲过期。关联：[CON-CONC-03](concurrency.md#con-conc-03)、[CTR-PTY-01](../contracts/pty.md#ctr-pty-01)。
+`closed` 不占用 `max_sessions`，也不占用 `max_per_caller`。进程已经退出，留下的只是环形缓冲。`closed` 的数量 ≤ `pty.closed_retain_max`，超出时立刻释放最老的 `closed`，见 [RUL-12](../contracts/rulings.md#rul-12)。`orphaned` 占用设备总额，但不占用原 caller 的 `max_per_caller`，否则断线会把个人配额卡死到宽限结束。关联：[CON-CONC-03](concurrency.md#con-conc-03)、[CTR-PTY-01](../contracts/pty.md#ctr-pty-01)。
 
 ## INV-03
 

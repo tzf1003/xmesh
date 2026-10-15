@@ -1,0 +1,25 @@
+# 校验契约夹具。
+# 正例必须通过 JSON Schema，反例必须失败，文档里的相对链接必须能落到文件。
+name: 契约夹具
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装校验依赖
+        run: python3 -m pip install -r docs/contracts/schemas/requirements.txt
+
+      - name: 校验正例、反例和文档链接
+        run: python3 docs/contracts/schemas/check_examples.py

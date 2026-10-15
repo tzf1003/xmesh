@@ -28,10 +28,10 @@
 | `edit_ambiguous` | `old_string` 多匹配且未 `replace_all` | `path`、`lines`（行号数组） |
 | `binary_rejected` | `fs.read` 遇到二进制 | `path`、`hint` |
 | `too_large` | 超过 10 MiB | `path`、`size`、`limit` |
-| `pty_limit` | 设备或调用方 PTY 配额 | `scope`：`device` 或 `caller`；`limit`、`active`、`oldest_idle` |
+| `pty_limit` | 设备或调用方 PTY 配额 | `scope`：`device` 或 `caller`；`limit`、`in_use`、`oldest_idle` |
 | `not_owner` | 非 owner 做写操作 | `session_id`、`owner` |
 | `session_not_found` | PTY id 不存在或已 `released` | `session_id` |
-| `exec_saturated` | 超时内拿不到 exec 槽 | `queue_position`、`mode` |
+| `exec_saturated` | 超时内拿不到 exec 槽 | `queue_position`、`mode`、`retry_after_ms` |
 | `lease_required` | exclusive 工具缺少 token | `resource` |
 | `resource_busy` | 租约被占用、token 过期或不匹配 | `resource`、`held_by`、`expires_in_s`、`reason`：`held` / `token_mismatch` / `token_stale` |
 | `backend_unavailable` | 后端进程拉起失败或 HTTP 后端不可达 | `resource`、`attempts` |
@@ -42,6 +42,10 @@
 | `internal` | 未分类的本机故障 | `op` |
 
 `invalid_cwd.reason = denied` 与 `policy_denied` 的分工：路径根本不在 allow/deny 规则允许的范围内，用 `invalid_cwd`。路径合法，但某条命名规则拒绝这次操作（递归删除、命令黑名单、环境变量），用 `policy_denied`。
+
+`pty_limit.in_use` 是这次比较所用的占用数，不是状态名 `active` 的计数。`scope` 为 `device` 时它等于 `active` 与 `orphaned` 之和，不含 `closed`。`scope` 为 `caller` 时它等于该调用方名下 `state` 为 `active` 的会话数。模型要看每个会话的状态时调用 `pty.list`。禁止再使用字段名 `active` 表示这个计数。
+
+`exec_saturated.retry_after_ms` 是建议的最早重试间隔，算法见 [RUL-01](rulings.md#rul-01)。
 
 ### 示例
 
@@ -59,10 +63,10 @@
 ```json
 {
   "error": "pty_limit",
-  "message": "这台设备的终端会话已满",
+  "message": "这台设备上计入配额的终端已满",
   "scope": "device",
   "limit": 20,
-  "active": 20,
+  "in_use": 20,
   "oldest_idle": { "id": "p-3a", "idle_s": 1100 }
 }
 ```

@@ -8,12 +8,12 @@
 | --- | --- | --- | --- | --- |
 | `active` | `open` 成功，或从 `orphaned` 被 `transfer` | `close`、进程退出、idle 超时、所属会话 `Orphan` | 是 | 是 |
 | `orphaned` | `Orphan` | `transfer` 成功、`orphan_grace` 到期被 Kill、进程自行退出 | 是 | 否 |
-| `closed` | 进程已退出且缓冲仍保留 | 保留期结束，默认 `closed_retain: 5m` | 是 | 否 |
+| `closed` | 进程已退出且缓冲仍保留 | 保留期结束，默认 `closed_retain: 5m`；或 `closed` 数量超过 `closed_retain_max` 时被提前释放 | 否 | 否 |
 | `released` | 保留期结束 | 终态，表项删除 | 否 | 否 |
 
 关闭顺序必须是：请求终止 → 等待 PTY 读循环遇到 EOF → 进入 `closed` → 广播，使阻塞中的 `read` 返回 `eof: true` → 定时进入 `released`。禁止在读循环仍可能写缓冲时删除会话。
 
-reaper 至少每 30 秒运行一次，也允许在状态变更时提早运行。扫描对象是 idle 的 `active`（`idle_timeout`）、超过 `orphan_grace` 的 `orphaned`、超过保留期的 `closed`。
+reaper 至少每 30 秒运行一次，也允许在状态变更时提早运行。扫描对象是 idle 的 `active`（`idle_timeout`）、超过 `orphan_grace` 的 `orphaned`、超过保留期的 `closed`，以及使 `closed` 数量回到 `closed_retain_max` 以内。配额语义见 [RUL-12](rulings.md#rul-12)。
 
 idle 的定义：`lastIO` 距今超过 `idle_timeout`。`open`、`write`、`read` 返回非空数据、`resize`、`signal` 都刷新 `lastIO`。单纯的空读超时不刷新，否则轮询会把会话永远保住。
 
@@ -74,7 +74,7 @@ idle 的定义：`lastIO` 距今超过 `idle_timeout`。`open`、`write`、`read
 参数：`session_id`、`to_caller`。
 
 - `active`：调用方必须是 owner。owner 改为 `to_caller`，双方的每调用方计数相应减增。若接收方已达 `max_per_caller`，返回 `pty_limit`，`scope: caller`，owner 不变。
-- `orphaned`：调用方的 `node_id` 必须等于 `to_caller` 的 `node_id`，且 `to_caller` 必须是当前仍连接着的会话。成功后状态回到 `active`。
+- `orphaned`：调用方的 `node_id` 必须等于 `to_caller` 的 `node_id`，且 `to_caller` 必须是当前仍连接着的会话。会话若在 open 时记下了 `oauth_client`，新 owner 的会话必须是同一个 `oauth_client`，见 [RUL-13](rulings.md#rul-13)。成功后状态回到 `active`。
 
 `to_caller` 的校验见 [CTR-ID-01](identity.md#ctr-id-01)。成功返回 `owner` 与 `state`。
 

@@ -1,8 +1,8 @@
 {
   "error": "pty_limit",
-  "message": "这台设备的终端会话已满",
+  "message": "这台设备上计入配额的终端已满",
   "scope": "device",
   "limit": 20,
-  "active": 20,
+  "in_use": 20,
   "oldest_idle": { "id": "p-3a9f00ab", "idle_s": 1100 }
 }

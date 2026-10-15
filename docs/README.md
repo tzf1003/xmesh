@@ -2,7 +2,7 @@
 
 本文档库是 XmeSh 的方案说明，以及实现与测试必须遵守的约束和契约。方案正文按主题拆开；约束回答「什么必须始终成立」；契约回答「跨边界的请求、响应、错误和副作用长什么样」。
 
-日期：2026-10-15。来源：XmeSh 方案（@junsong）。原文里用嵌入图表达的三张图，在本库中改写成图示：架构见 [整体架构](design/02-architecture.md)，PTY 状态机见 [并发](design/06-concurrency.md)，路线图见 [落地路线](design/10-roadmap.md)。
+日期：2026-10-15。原文里用嵌入图表达的三张图，在本库中改写成图示：架构见 [整体架构](design/02-architecture.md)，PTY 状态机见 [并发](design/06-concurrency.md)，路线图见 [落地路线](design/10-roadmap.md)。这些图是 Mermaid 源码，GitHub 会渲染；其他 Markdown 阅读器可能只显示代码块。
 
 ## 规范用语
 

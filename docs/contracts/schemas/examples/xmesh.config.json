@@ -15,10 +15,8 @@
   },
   "ingress": {
     "listen": "funnel",
-    "domain": "mcp.example.com",
-    "tls": "autocert",
     "oauth": {
-      "issuer": "https://mcp.example.com",
+      "issuer": "https://win-dev-01.tailnet.ts.net",
       "clients": {
         "codex": {
           "scopes": ["devices:read", "exec:*", "pty:*", "fs:*"]
@@ -53,7 +51,8 @@
       "orphan_grace": "10m",
       "scrollback_bytes": "1MiB",
       "default_shell": "auto",
-      "closed_retain": "5m"
+      "closed_retain": "5m",
+      "closed_retain_max": 20
     },
     "backends": {
       "ida": {

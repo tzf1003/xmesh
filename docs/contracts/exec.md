@@ -17,14 +17,14 @@
 | `mode` | 字符串 | 可以。`shared`（默认）或 `exclusive` |
 | `idempotency_key` | 字符串 | 可以。长度 1 到 200。匹配 `[A-Za-z0-9._:-]+` |
 
-`cmd` 禁止包含空字节。实现不得把 `cmd` 和 `args` 拼成一条字符串交给 `sh -c` 或 `cmd /C`。需要 shell 语法时，调用方显式把 `cmd` 设为 shell，把脚本作为 `args`。这样命令黑名单匹配的是参数数组，而不是二次展开后的字符串。
+`cmd` 禁止包含空字节。实现不得把 `cmd` 和 `args` 拼成一条字符串交给 `sh -c` 或 `cmd /C`。需要 shell 语法时，调用方显式把 `cmd` 设为 shell，把脚本作为 `args` 的一项。进程按 argv 直接启动。命令黑名单不按单个参数分别匹配，而对 [RUL-11](rulings.md#rul-11) 的规范化命令行做正则搜索；`sh -c` 的脚本参数再单独搜一次。
 
 ### 执行顺序
 
 1. 校验参数。
 2. 解析 `cwd`。失败则返回，进程未创建。
 3. 构造环境。被拒绝则 `policy_denied`，进程未创建。
-4. 用当前策略匹配 `cmd` 与 `args`。命中拒绝则 `policy_denied`，进程未创建。
+4. 用当前策略匹配 [RUL-11](rulings.md#rul-11) 的规范化命令行，以及其中识别出的 shell 脚本原文。命中拒绝则 `policy_denied`，进程未创建。
 5. 若带 `idempotency_key` 且 `(caller_id, key)` 命中缓存：在授权与策略仍通过的前提下返回缓存，见 [RUL-04](rulings.md#rul-04)。
 6. 按 [RUL-01](rulings.md#rul-01) 获取槽位。`exclusive` 还要满足 [CON-CONC-10](../constraints/concurrency.md#con-conc-10)。
 7. 启动进程。启动失败返回 `internal` 或 `invalid_args`（找不到可执行文件时用 `invalid_args`，`field` 为 `cmd`），并释放槽位。

@@ -6,7 +6,7 @@
 
 ## 门 1 · 阶段 1 工具基础
 
-本机 MCP，不依赖 tailnet。`caller_id` 使用 `local/<session>`。
+本机 MCP，不依赖 tailnet。节点还没有 tailnet 身份时，`caller_id` 使用 `local/<session>`。已有身份后的环回改用本节点 ID，见 RUL-02。
 
 | 编号 | 观察点 |
 | --- | --- |
@@ -16,16 +16,16 @@
 | CON-TOOL-04 CON-TOOL-05 CON-TOOL-06 CON-TOOL-07 CON-TOOL-08 CON-TOOL-09 | 换行与 BOM、上限、递归删除、原子写、唯一编辑 |
 | CON-CONC-01 CON-CONC-03 CON-CONC-04 CON-CONC-05 | 20 路并发 open；第 21 路 `pty_limit`；非 owner 不能写 |
 | CON-CONC-09 CON-CONC-10 | 幂等缓存按 caller 隔离；exclusive 等 shared 排空 |
-| CON-SEC-04 CON-SEC-05 CON-SEC-10 | 凭证不进 env；不拦 PTY 内的 cd；默认危险命令被拒 |
+| CON-SEC-04 CON-SEC-05 CON-SEC-10 | 凭证不进 env；不拦 PTY 内的 cd；`["rm","-rf","/"]` 命中删除根的规则 |
 | CON-IMPL-01 CON-IMPL-03 CON-IMPL-04 CON-IMPL-05 | 包顺序可在本机测；锁分离；Windows shell；grep 两路同构 |
-| INV-02 INV-05 INV-06 INV-07 | 配额、拒绝无副作用、原子写、cursor 覆写 |
+| INV-02 INV-05 INV-06 INV-07 | `closed` 不占名额；`pty_limit.in_use` 不含 closed；拒绝无副作用；原子写；cursor 覆写 |
 | CTR-ERR-01 CTR-ID-01 CTR-CWD-01 | 错误模式、身份、路径 |
 | CTR-SYS-01 | `sys.info` 字段与配置一致 |
 | CTR-EXEC-01 CTR-EXEC-02 | 不经 shell、截断与分页、超时不留下失控进程 |
 | CTR-PTY-01 CTR-PTY-02 | 四状态、long-poll、关闭顺序、列表不含缓冲文本 |
 | CTR-FS-01 CTR-FS-02 CTR-FS-03 CTR-FS-04 CTR-FS-05 CTR-FS-06 CTR-FS-07 | 各文件工具的错误码与成功字段 |
-| CTR-CFG-01 | `examples/xmesh.config.json` 通过模式；非法配置拒绝启动 |
-| RUL-01 RUL-04 RUL-05 RUL-07 RUL-08 RUL-10 | 排队、缓存、内联阈值、状态名、MCP 承载、编辑错误码 |
+| CTR-CFG-01 | `examples/xmesh.config.json` 通过模式；Funnel 配了 domain 的反例失败；非法配置拒绝启动 |
+| RUL-01 RUL-04 RUL-05 RUL-07 RUL-08 RUL-10 RUL-11 RUL-12 | 排队含 `retry_after_ms`；缓存；内联阈值；状态名；MCP 承载；编辑错误码；规范化命令行；closed 配额 |
 
 Claude Code 连上本机 URL，完成一次 `fs.read`、一次 `fs.write`、一次 `pty.open` + `pty.write` + `pty.read`。这是门 1 的人工观察，不代替上表的单元测试。
 
@@ -39,7 +39,7 @@ Claude Code 连上本机 URL，完成一次 `fs.read`、一次 `fs.write`、一�
 | INV-01 INV-04 | 一个持有者；剥离 token |
 | CTR-BE-01 CTR-BE-02 CTR-LEASE-01 | 两个客户端同时调 exclusive 工具，无租约方得到 `resource_busy` |
 | CTR-MUX-01 CTR-MUX-02 CTR-MUX-03 CTR-MUX-04 | 相同上游 id 不串线；进度不广播；无持有者拒绝 sampling；崩溃后旧 token 失效且两端都收到 `backend_unavailable` |
-| RUL-03 RUL-06 | acquire 不自动续期；保留字段名 |
+| RUL-03 RUL-06 | acquire 不自动续期；renew 与 release 的参数名也是 `_lease_token` |
 
 门 2 的场景固定为：后端用一个脚本模拟 IDA，记录收到的参数里没有 `_lease_token`。杀掉脚本后，旧 token 的下一次调用失败，新 acquire 得到更大的 token。
 
@@ -62,11 +62,11 @@ Claude Code 连上本机 URL，完成一次 `fs.read`、一次 `fs.write`、一�
 | 编号 | 观察点 |
 | --- | --- |
 | CON-ARCH-01 CON-ARCH-04 CON-ARCH-07 | 云端只有 MCP + OAuth；Gateway 重启不丢 Agent 上的租约；单主体登录 |
-| CON-SEC-02 CON-SEC-09 | 入口不能关认证；PKCE 与动态注册可用 |
+| CON-SEC-02 CON-SEC-09 CON-SEC-11 | 入口不能关认证；PKCE 与动态注册可用；注册和登录口令超限返回 429 |
 | INV-03 INV-08 | Gateway 无设备状态；云端工具名没有 `local/` |
 | CTR-GW-01 CTR-GW-02 CTR-GW-03 | 前缀、搜索、会话默认值只活在当前连接 |
 | CTR-OAUTH-01 CTR-OAUTH-02 | 发现文档、授权码、scope 展开与 `tools/list` 过滤 |
-| RUL-02 RUL-09 | 入口为每个上游会话使用独立下游会话；`fs:*` 展开 |
+| RUL-02 RUL-09 RUL-13 | 入网后本机环回用本节点 ID；入口会话带 oauth client 头；`fs:*` 展开；orphaned 接管要求同一个 oauth client |
 
 claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-dev-01/exec.run` 并成功调用一次。连接器只显示已连接、对话里没有工具，视为门 4 失败。
 

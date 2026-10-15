@@ -103,7 +103,11 @@
       "required": ["listen", "oauth"],
       "properties": {
         "listen": { "enum": ["funnel", "public:443", "tunnel"] },
-        "domain": { "type": "string", "minLength": 1 },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "只允许 listen 为 public:443。Funnel 的域名由 Tailscale 分配。"
+        },
         "tls": { "enum": ["autocert", "file"] },
         "cert_file": { "type": "string" },
         "key_file": { "type": "string" },
@@ -130,7 +134,41 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "listen": { "const": "public:443" } },
+            "required": ["listen"]
+          },
+          "then": { "required": ["domain", "tls"] }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": { "listen": { "const": "public:443" } },
+              "required": ["listen"]
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["domain"] },
+                { "required": ["tls"] },
+                { "required": ["cert_file"] },
+                { "required": ["key_file"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "tls": { "const": "file" } },
+            "required": ["tls"]
+          },
+          "then": { "required": ["cert_file", "key_file"] }
+        }
+      ]
     },
     "agent": {
       "type": "object",
@@ -180,7 +218,8 @@
             "orphan_grace": { "$ref": "#/$defs/duration" },
             "scrollback_bytes": { "$ref": "#/$defs/size" },
             "default_shell": { "type": "string" },
-            "closed_retain": { "$ref": "#/$defs/duration" }
+            "closed_retain": { "$ref": "#/$defs/duration" },
+            "closed_retain_max": { "type": "integer", "minimum": 0, "default": 20 }
           }
         },
         "backends": {

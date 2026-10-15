@@ -49,7 +49,11 @@
     "size": { "type": "integer", "minimum": 0 },
     "limit": { "type": "integer", "minimum": 1 },
     "scope": { "enum": ["device", "caller"] },
-    "active": { "type": "integer", "minimum": 0 },
+    "in_use": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "计入本次配额的会话数。device 范围是 active 与 orphaned 之和，不含 closed。不是状态名 active 的条数。"
+    },
     "oldest_idle": {
       "type": "object",
       "additionalProperties": false,
@@ -143,7 +147,10 @@
         "properties": { "error": { "const": "pty_limit" } },
         "required": ["error"]
       },
-      "then": { "required": ["scope", "limit", "active", "oldest_idle"] }
+      "then": {
+        "required": ["scope", "limit", "in_use", "oldest_idle"],
+        "not": { "required": ["active"] }
+      }
     },
     {
       "if": {
@@ -164,7 +171,7 @@
         "properties": { "error": { "const": "exec_saturated" } },
         "required": ["error"]
       },
-      "then": { "required": ["queue_position", "mode"] }
+      "then": { "required": ["queue_position", "mode", "retry_after_ms"] }
     },
     {
       "if": {

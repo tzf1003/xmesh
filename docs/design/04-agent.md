@@ -41,11 +41,9 @@ gateway:
   expose_backends: all       # all | favorite
 
 ingress:                     # 仅入口节点配置；roles 不含 ingress 时忽略
-  listen: funnel             # funnel | public:443
-  domain: mcp.example.com
-  tls: autocert
+  listen: funnel             # Funnel 的域名和证书由 Tailscale 提供，这里不写 domain / tls
   oauth:
-    issuer: https://mcp.example.com
+    issuer: https://win-dev-01.tailnet.ts.net
     clients:
       codex:  { scopes: ["devices:read", "exec:*", "pty:*", "fs:*"] }
       claude: { scopes: ["devices:read", "exec:*", "pty:*", "fs:*", "backend:win-dev-01:ida"] }
@@ -72,6 +70,7 @@ agent:
     scrollback_bytes: 1MiB
     default_shell: auto
     closed_retain: 5m
+    closed_retain_max: 20     # closed 不占 max_sessions，见 RUL-12
   backends:
     ida:
       transport: stdio
@@ -93,6 +92,8 @@ agent:
   policy:                    # 改这个文件后热加载，无需重启进程
     isolation: L1            # L0 | L1 | L2
     exec:
+      # 这些正则匹配 RUL-11 的规范化命令行，不是逐个参数。
+      # ["rm","-rf","/"] 会变成 "rm -rf /" 从而命中第一条。
       deny_patterns:
         - 'rm\s+-rf\s+/'
         - 'curl\s+.*\|\s*sh'
@@ -102,7 +103,18 @@ agent:
       deny_path_substrings: [".ssh", "gcloud", ".azure"]
 ```
 
-`exclusive_slots`、`inline_output_bytes`、`closed_retain` 和 `agent.policy` 的字段形状是契约补全，分别对应 [RUL-01](../contracts/rulings.md#rul-01)、[RUL-05](../contracts/rulings.md#rul-05)、正文里的「退出后缓冲保留 5 分钟」，以及安全一节的 `agent.policy`。未出现在上例中的行为，仍以契约为准。
+`exclusive_slots`、`inline_output_bytes`、`closed_retain`、`closed_retain_max` 和 `agent.policy` 的字段形状是契约补全。命令黑名单的匹配对象见 [RUL-11](../contracts/rulings.md#rul-11)。`closed` 不占 `max_sessions`，见 [RUL-12](../contracts/rulings.md#rul-12)。
+
+公网 VPS 入口才写域名和证书。Funnel 示例里没有这两项：
+
+```yaml
+ingress:
+  listen: public:443
+  domain: mcp.example.com
+  tls: autocert
+  oauth:
+    issuer: https://mcp.example.com
+```
 
 ## 常驻方式
 

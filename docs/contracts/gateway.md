@@ -42,7 +42,7 @@ Gateway 与入口不保存设备资源，见 [INV-03](../constraints/invariants.
       "online": true,
       "tags": ["tag:device"],
       "backends": ["ida", "frida"],
-      "load": {"pty_active": 2, "pty_max": 20, "exec_shared_in_use": 1}
+      "load": {"pty_in_use": 2, "pty_max": 20, "exec_shared_in_use": 1}
     }
   ]
 }

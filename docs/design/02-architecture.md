@@ -8,6 +8,8 @@
 
 节点之间直接互调：Mac 上的 Claude Code 连本机 xmesh 就能调 `win-dev-01/ida.decompile_function`，Windows 上的 Codex 连它自己的 xmesh 就能调 `mac-m3/exec.run`，不经过入口节点。
 
+下面的图是 Mermaid。GitHub 会渲染成流程图；纯文本阅读器看到的是源码。
+
 ```mermaid
 flowchart TB
   subgraph cloudClients [云端客户端]
