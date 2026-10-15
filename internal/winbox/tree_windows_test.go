@@ -498,8 +498,11 @@ func Test_WindowsAppContainerGuardedRootGrant(t *testing.T) {
 			})
 			assertState := func() {
 				t.Helper()
-				if securityState() != state || objectLabel(t, root) != label {
-					t.Fatal("root owner, group, control or integrity label changed")
+				if actual := securityState(); actual != state {
+					t.Fatalf("root security state changed: before=%s after=%s", state, actual)
+				}
+				if actual := objectLabel(t, root); actual != label {
+					t.Fatalf("root integrity label changed: before=%s after=%s", label, actual)
 				}
 				for _, path := range []string{child, secret, file, outside} {
 					if !bytes.Equal(before[path], readObjectACL(t, path)) {

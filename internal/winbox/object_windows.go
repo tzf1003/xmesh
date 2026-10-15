@@ -176,10 +176,22 @@ func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
 	if err != nil {
 		return err
 	}
+	control, _, err := current.Control()
+	if err != nil {
+		return err
+	}
+	information := uint32(windows.DACL_SECURITY_INFORMATION)
+	if control&windows.SE_DACL_PROTECTED != 0 {
+		information |= windows.PROTECTED_DACL_SECURITY_INFORMATION
+	} else {
+		information |= windows.UNPROTECTED_DACL_SECURITY_INFORMATION
+	}
 	// Set the selected kernel object's descriptor directly. SetSecurityInfo's
 	// recursive inheritance propagation would touch unselected child objects.
 	// Preserve the current descriptor's control bits and update only its DACL.
-	status, _, _ := setObjectSecurity.Call(uintptr(handle), windows.DACL_SECURITY_INFORMATION, uintptr(unsafe.Pointer(relative)))
+	// Protection is selected by SECURITY_INFORMATION as well as descriptor
+	// control: DACL_SECURITY_INFORMATION alone clears SE_DACL_PROTECTED.
+	status, _, _ := setObjectSecurity.Call(uintptr(handle), uintptr(information), uintptr(unsafe.Pointer(relative)))
 	runtime.KeepAlive(relative)
 	if status != 0 {
 		return fmt.Errorf("set AppContainer object DACL: %w", windows.NTStatus(status))
