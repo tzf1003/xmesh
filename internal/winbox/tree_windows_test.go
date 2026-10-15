@@ -376,11 +376,13 @@ func Test_WindowsAppContainerSelectedGrant(t *testing.T) {
 			if err != nil || actual.id != selected.id {
 				t.Fatal("grant did not retain selected identity", err)
 			}
-			var flags uint32
 			getHandleInformation := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetHandleInformation")
-			result, _, queryErr := getHandleInformation.Call(uintptr(grant.handle), uintptr(unsafe.Pointer(&flags)))
-			if result == 0 || flags&windows.HANDLE_FLAG_INHERIT != 0 {
-				t.Fatal("grant handle inheritance", flags, queryErr)
+			for _, handle := range []windows.Handle{grant.handle, grant.aclHandle} {
+				var flags uint32
+				result, _, queryErr := getHandleInformation.Call(uintptr(handle), uintptr(unsafe.Pointer(&flags)))
+				if result == 0 || flags&windows.HANDLE_FLAG_INHERIT != 0 {
+					t.Fatal("grant handle inheritance", flags, queryErr)
+				}
 			}
 			if bytes.Equal(before, readObjectACL(t, moved)) || !bytes.Equal(replacementACL, readObjectACL(t, path)) {
 				t.Fatal("grant did not affect exactly the selected object")

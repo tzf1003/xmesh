@@ -381,6 +381,109 @@ func Test_WindowsAppContainerGrantReleaseIdentity(t *testing.T) {
 	}
 }
 
+func Test_WindowsAppContainerGrantReleaseDeletedObject(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	for _, kind := range []string{"file", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			p, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := p.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			path := filepath.Join(t.TempDir(), "selected")
+			if kind == "directory" {
+				err = os.Mkdir(path, 0700)
+			} else {
+				err = os.WriteFile(path, []byte("content"), 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := readObjectACL(t, path)
+			name, err := windows.UTF16PtrFromString(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Keep an independent observer of the object after deletion. Its
+			// DELETE right also lets cleanup cancel the pending disposition.
+			observer, err := windows.CreateFile(name, windows.DELETE|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
+				windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING,
+				windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				clear := [4]byte{}
+				windows.SetFileInformationByHandle(observer, windows.FileDispositionInfo, &clear[0], uint32(len(clear)))
+				windows.CloseHandle(observer)
+			})
+			grant, err := p.grantObject(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := grant.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			remove := [4]byte{1}
+			if err := windows.SetFileInformationByHandle(observer, windows.FileDispositionInfo, &remove[0], uint32(len(remove))); err != nil {
+				t.Fatal("mark selected object delete-pending", err)
+			}
+			var standard struct {
+				allocationSize int64
+				endOfFile      int64
+				links          uint32
+				deletePending  byte
+				directory      byte
+			}
+			if err := windows.GetFileInformationByHandleEx(observer, windows.FileStandardInfo, (*byte)(unsafe.Pointer(&standard)), uint32(unsafe.Sizeof(standard))); err != nil {
+				t.Fatal(err)
+			}
+			if standard.deletePending == 0 {
+				t.Fatal("selected object is not delete-pending")
+			}
+			if reopened, err := reopenForACL(grant.handle); err == nil {
+				windows.CloseHandle(reopened)
+				t.Fatal("delete-pending object unexpectedly reopened")
+			}
+			if err := p.Close(); err == nil {
+				t.Fatal("profile deleted with delete-pending grant")
+			}
+			if err := grant.Close(); err != nil {
+				t.Fatal("release delete-pending object", err)
+			}
+			if err := grant.Close(); err != nil {
+				t.Fatal("repeat delete-pending release", err)
+			}
+			acl, err := objectDACL(observer)
+			if err != nil {
+				t.Fatal("observe released delete-pending ACL", err)
+			}
+			header, aces, err := aclParts(acl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after := bytes.Clone(header)
+			for _, ace := range aces {
+				after = append(after, ace...)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("delete-pending object ACL not restored")
+			}
+			if err := p.Close(); err != nil {
+				t.Fatal("profile retained after delete-pending release", err)
+			}
+		})
+	}
+}
+
 func testGrantReleaseIdentity(t *testing.T, directory bool) {
 	p, err := New()
 	if err != nil {

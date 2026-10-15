@@ -58,6 +58,8 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 `beae5de` 的 push 与 PR 工作流全部通过，按已选句柄授权的 file/directory 原生用例通过。ACL 更新现按对象身份临时取得 `READ_CONTROL|WRITE_DAC`，直接设置所选对象的 DACL；保留根目录绑定的授权与回收、描述符控制与标签保持、已有子对象 ACL 保持的新原生用例待 CI。Windows 双架构 vet 和 amd64 测试交叉编译通过。
 
+`5d41040` 的 PR 三平台全量检查和 push/PR Windows 原生任务通过；普通继承与受保护根 DACL 的控制位、标签、子对象保持和真实 helper 隔离均通过。对象授权现保留独立窄权限安全句柄，覆盖 delete-pending 回收并检查两类句柄均不可继承；本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过，新原生用例待 CI。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |

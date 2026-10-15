@@ -27,9 +27,10 @@ var (
 // Rename/delete sharing preserves editor semantics; release follows the same
 // object even if another file later occupies its original path.
 type objectGrant struct {
-	profile *Profile
-	handle  windows.Handle
-	ace     []byte
+	profile   *Profile
+	handle    windows.Handle
+	aclHandle windows.Handle
+	ace       []byte
 }
 
 func (p *Profile) grantObject(path string) (*objectGrant, error) {
@@ -37,8 +38,8 @@ func (p *Profile) grantObject(path string) (*objectGrant, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Keep only metadata access between ACL edits: a retained DELETE access
-	// would conflict with ordinary readers that omit FILE_SHARE_DELETE.
+	// Retain metadata and security access: DELETE access would conflict with
+	// ordinary readers that omit FILE_SHARE_DELETE.
 	// OPEN_REPARSE_POINT lets us reject the final object itself.
 	h, err := windows.CreateFile(name, windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
@@ -84,6 +85,18 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 	if actual.id != object.id || actual.directory != object.directory {
 		return nil, fmt.Errorf("AppContainer selected object identity changed")
 	}
+	// Acquire security access before admission and retain it through release.
+	// A delete-pending object cannot be reopened, but its existing security
+	// handle can still remove the grant after the sandbox has been reaped.
+	aclHandle, err := reopenForACL(h)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if !retained {
+			windows.CloseHandle(aclHandle)
+		}
+	}()
 	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE)
 	if actual.directory {
 		const fileDeleteChild = 0x0040
@@ -112,12 +125,12 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 	ace := bytes.Clone(aces[0])
 	objectACLMutex.Lock()
 	defer objectACLMutex.Unlock()
-	if err := setObjectGrant(h, ace, true); err != nil {
+	if err := setObjectGrant(aclHandle, ace, true); err != nil {
 		return nil, err
 	}
 	p.grants++
 	retained = true
-	return &objectGrant{profile: p, handle: h, ace: ace}, nil
+	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace}, nil
 }
 
 // Close removes exactly the acquired ACE from the current ACL. Failed releases
@@ -130,26 +143,23 @@ func (g *objectGrant) Close() error {
 	}
 	objectACLMutex.Lock()
 	defer objectACLMutex.Unlock()
-	if err := setObjectGrant(g.handle, g.ace, false); err != nil {
+	if err := setObjectGrant(g.aclHandle, g.ace, false); err != nil {
 		return err
 	}
+	windows.CloseHandle(g.aclHandle)
+	g.aclHandle = 0
 	windows.CloseHandle(g.handle)
 	g.handle = 0
 	g.profile.grants--
 	return nil
 }
 
-// Reopen only with the permissions required to read and update the DACL. This
-// remains compatible with the snapshot's root/ancestor delete-sharing guard.
-func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
+// Edit through an already admitted READ_CONTROL|WRITE_DAC handle, including
+// objects that have since entered the delete-pending state.
+func setObjectGrant(handle windows.Handle, ace []byte, add bool) error {
 	if err := setObjectSecurity.Find(); err != nil {
 		return err
 	}
-	handle, err := reopenForACL(object)
-	if err != nil {
-		return err
-	}
-	defer windows.CloseHandle(handle)
 	current, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
