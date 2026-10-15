@@ -114,7 +114,7 @@ func object(t *testing.T, o *mcp.CallToolResult) map[string]any {
 	return v
 }
 func Test_CTRGW01_03_SessionDefaults(t *testing.T) {
-	g, _ := fixture(t, false)
+	g, root := fixture(t, false)
 	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
 	t.Cleanup(server.Close)
 	one := connect(t, server.URL+"/mcp")
@@ -135,12 +135,18 @@ func Test_CTRGW01_03_SessionDefaults(t *testing.T) {
 	if o := call(t, one, "session.set_defaults", map[string]any{"device": "local", "cwd": "."}); o.IsError {
 		t.Fatal(o)
 	}
-	if o := call(t, one, "fs.write", map[string]any{"path": "a", "content": "hello"}); o.IsError {
-		t.Fatal(o)
+	written := call(t, one, "fs.write", map[string]any{"path": "a", "content": "hello"})
+	if written.IsError {
+		t.Fatal(written)
+	}
+	if body, err := os.ReadFile(filepath.Join(root, "a")); err != nil || string(body) != "hello" {
+		entries, listErr := os.ReadDir(root)
+		t.Fatal("write result and disk differ", object(t, written), string(body), err, entries, listErr)
 	}
 	o := call(t, two, "local/fs.read", map[string]any{"path": "a"})
 	if o.IsError || !strings.Contains(object(t, o)["content"].(string), "hello") {
-		t.Fatal(o)
+		entries, listErr := os.ReadDir(root)
+		t.Fatal(o, "write", object(t, written), "entries", entries, listErr)
 	}
 	// Default device is confined to the first connection.
 	o = call(t, two, "fs.read", map[string]any{"path": "a"})
