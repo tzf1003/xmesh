@@ -89,12 +89,15 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 生产 Windows L2 继续等待可编辑目录的执行期句柄寿命、跨进程 ACL/命名空间协调、持久 journal 与异常退出恢复、exec/ConPTY 接入。按 ID 重开原语尚未替换当前保留子句柄的生命周期；调用方仍须独占 profile、协调外部 ACL/命名空间/reparse 和缺失凭证组件写入，并在回收前结束全部沙箱进程。
 
+
+`c827749` 的 [push 工作流 38793872886](https://github.com/tzf1003/xmesh/actions/runs/38793872886) 与 [PR 工作流 38793883865](https://github.com/tzf1003/xmesh/actions/runs/38793883865) 全部通过三平台 race、vet、构建、契约和完整 Windows 原生回归，原生 job 为 `116625088924` 与 `116625127249`。增强断言通过：根、既有子目录及文件的直接内核 DACL 字节与全部控制位在回收后逐项等于授权前；Win32 视图、完整性标签、其他 profile、新对象回收和再次访问拒绝同时通过。上述直接内核恢复增强验收在此关闭。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |
 | --- | --- |
 | 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过，跨主机入口协调待实现 |
-| Windows L2 | 当前请求 L2 会拒绝执行；profile、启动属性与准确对象 ACL 授权/回收原语已实现，通过 Windows amd64/arm64 vet、amd64 交叉编译与 `4a00a00` 原生验收；完整工作目录绑定、exec/ConPTY 接入、profile/ACL 异常退出恢复待实现 |
+| Windows L2 | 当前请求 L2 会拒绝执行；profile、启动属性、工作树继承授权与准确回收、凭证目录身份准入、按卷/ID 重开已实现，`c827749` 三平台与完整 Windows 原生验收通过；可编辑目录执行期句柄寿命、跨进程协调、持久异常退出恢复及 exec/ConPTY 接入待实现 |
 | 原生 Windows | Server 2025 的 ConPTY、进程清理、文件、PowerShell 5.1/7、HTTP MCP 及本机模式 SCM 生命周期已验证；用户任务的登录触发、目标会话与生产服务设备网络待验收，其他 Windows 版本待验证 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |
