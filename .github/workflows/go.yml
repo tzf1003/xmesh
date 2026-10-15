@@ -13,15 +13,22 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Windows native process and terminal regression
-        if: runner.os == 'Windows'
-        env:
-          XMESH_TEST_WINDOWS_EXEC: "1"
-          XMESH_TEST_WINDOWS_PTY: "1"
-        run: go test -race ./internal/exec ./internal/pty -run Windows -v -timeout=180s
       - run: go test -race ./... -timeout=120s
         if: ${{ !cancelled() }}
       - run: go vet ./...
         if: ${{ !cancelled() }}
       - run: go build ./cmd/xmesh
         if: ${{ !cancelled() }}
+  windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Windows native process, terminal, and file regression
+        env:
+          XMESH_TEST_WINDOWS_EXEC: "1"
+          XMESH_TEST_WINDOWS_PTY: "1"
+        run: go test -race ./internal/exec ./internal/pty ./internal/fs -run Windows -v -timeout=180s
