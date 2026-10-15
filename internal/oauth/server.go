@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -217,6 +218,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sweep()
 	if s.limited(w, r, "register", 5, time.Hour) {
 		return
 	}
@@ -227,7 +229,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		Method    string   `json:"token_endpoint_auth_method"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	if decoder.Decode(&req) != nil || req.Name == "" || len(req.Name) > 200 || len(req.Redirects) == 0 || len(req.Redirects) > 20 {
+	if decoder.Decode(&req) != nil || decoder.Decode(new(any)) != io.EOF || req.Name == "" || len(req.Name) > 200 || len(req.Redirects) == 0 || len(req.Redirects) > 20 {
 		oauthError(w, 400, "invalid_client_metadata")
 		return
 	}
@@ -280,6 +282,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sweep()
 	if r.Method == "GET" && s.limited(w, r, "authorize", 60, time.Minute) {
 		return
 	}
@@ -364,9 +367,11 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	// Configuration provides scopes before a CLI has chosen its loopback port.
 	// Bind the first redirect only after the subject's authenticated consent.
 	if len(c.Redirects) == 0 {
+		previous := c
 		c.Redirects = []string{redirect}
 		s.clients[c.ID] = c
 		if e := s.saveClients(); e != nil {
+			s.clients[c.ID] = previous
 			oauthError(w, 500, "server_error")
 			return
 		}
@@ -418,9 +423,14 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sweep()
 	id := r.PostForm.Get("client_id")
 	basicID, secret, basic := r.BasicAuth()
 	if basic {
+		if id != "" && id != basicID {
+			oauthError(w, 401, "invalid_client")
+			return
+		}
 		id = basicID
 	}
 	c, ok := s.clients[id]
@@ -448,7 +458,6 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 			oauthError(w, 400, "invalid_grant")
 			return
 		}
-		delete(s.refresh, key)
 		scopes = g.Scopes
 		family = g.Family
 		if r.PostForm.Has("scope") {
@@ -459,6 +468,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		delete(s.refresh, key)
 	default:
 		oauthError(w, 400, "unsupported_grant_type")
 		return
@@ -502,6 +512,28 @@ func (s *Server) sweep() {
 	for k, v := range s.csrf {
 		if !v.After(now) {
 			delete(s.csrf, k)
+		}
+	}
+	for key, values := range s.windows {
+		window := time.Minute
+		if strings.HasPrefix(key, "register:") {
+			window = time.Hour
+		}
+		kept := values[:0]
+		for _, value := range values {
+			if now.Sub(value) < window {
+				kept = append(kept, value)
+			}
+		}
+		if len(kept) == 0 {
+			delete(s.windows, key)
+		} else {
+			s.windows[key] = kept
+		}
+	}
+	for key, limit := range s.login {
+		if !limit.LockedUntil.IsZero() && !limit.LockedUntil.After(now) {
+			delete(s.login, key)
 		}
 	}
 }
