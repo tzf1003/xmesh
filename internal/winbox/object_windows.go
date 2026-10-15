@@ -269,7 +269,7 @@ func reopenForACL(object windows.Handle) (windows.Handle, error) {
 }
 
 func objectDACL(handle windows.Handle) (*windows.ACL, error) {
-	sd, err := readObjectSecurity(handle)
+	sd, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,11 @@ func readObjectSecurity(handle windows.Handle) (*windows.SECURITY_DESCRIPTOR, er
 		if size < 20 || size > 1024*1024 {
 			return nil, fmt.Errorf("invalid AppContainer object descriptor size: %d", size)
 		}
-		storage := make([]uint64, (size+7)/8)
+		// The self-relative header may be only 20 bytes (for example a null
+		// DACL). The typed Go view also needs space for the absolute-layout
+		// SECURITY_DESCRIPTOR so checkptr can safely pass it to Windows APIs.
+		allocation := max(size, uint32(unsafe.Sizeof(windows.SECURITY_DESCRIPTOR{})))
+		storage := make([]uint64, (allocation+7)/8)
 		capacity := uint32(len(storage) * 8)
 		status, _, _ = queryObjectSecurity.Call(uintptr(handle), windows.DACL_SECURITY_INFORMATION,
 			uintptr(unsafe.Pointer(&storage[0])), uintptr(capacity), uintptr(unsafe.Pointer(&size)))
