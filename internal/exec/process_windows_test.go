@@ -91,8 +91,21 @@ func Test_WindowsExecLaunchContract(t *testing.T) {
 	}
 	want, _ := json.Marshal(arguments)
 	got, _ := json.Marshal(proof.Arguments)
-	if string(want) != string(got) || !strings.EqualFold(proof.Directory, root) || proof.Input != input || proof.Environment != "子环境" || proof.Private != "" {
-		t.Fatal("launch contract mismatch", proof)
+	if string(want) != string(got) {
+		t.Fatalf("arguments: got %s, want %s", got, want)
+	}
+	// The resolver expands Windows short names and junctions. Compare the
+	// directory identity so both the supplied and canonical spelling are valid.
+	wantDirectory, wantErr := os.Stat(root)
+	gotDirectory, gotErr := os.Stat(proof.Directory)
+	if wantErr != nil || gotErr != nil || !os.SameFile(wantDirectory, gotDirectory) {
+		t.Fatalf("directory: got %q (%v), want %q (%v)", proof.Directory, gotErr, root, wantErr)
+	}
+	if proof.Input != input {
+		t.Fatalf("stdin mismatch: got %d bytes, want %d bytes", len(proof.Input), len(input))
+	}
+	if proof.Environment != "子环境" || proof.Private != "" {
+		t.Fatalf("environment: business value %q, inherited private value present %t", proof.Environment, proof.Private != "")
 	}
 }
 
