@@ -32,22 +32,25 @@ import (
 type Principal = identity.Principal
 type Authenticate func(*http.Request) (Principal, error)
 type Agent struct {
-	store        *config.Store
-	PTY          *pty.Manager
-	Exec         *runexec.Manager
-	Callers      *identity.Registry
-	Backends     *backend.Manager
-	Leases       *lease.Manager
-	mu           sync.Mutex
-	sessions     map[string]identity.Caller
-	servers      map[*mcp.ServerSession]bool
-	fileMu       sync.Mutex
-	closeOnce    sync.Once
-	views        map[string]*mcp.Server
-	viewMu       sync.Mutex
-	backendNames map[*mcp.Server][]string
-	Audit        *audit.Logger
-	draining     atomic.Bool
+	store          *config.Store
+	PTY            *pty.Manager
+	Exec           *runexec.Manager
+	Callers        *identity.Registry
+	Backends       *backend.Manager
+	Leases         *lease.Manager
+	mu             sync.Mutex
+	sessions       map[string]identity.Caller
+	servers        map[*mcp.ServerSession]bool
+	fileMu         sync.Mutex
+	closeOnce      sync.Once
+	views          map[string]*mcp.Server
+	viewMu         sync.Mutex
+	backendNames   map[*mcp.Server][]string
+	Audit          *audit.Logger
+	draining       atomic.Bool
+	backendChanged chan struct{}
+	stop           chan struct{}
+	done           chan struct{}
 }
 
 func New(store *config.Store) (*Agent, error) {
@@ -64,11 +67,39 @@ func New(store *config.Store) (*Agent, error) {
 	}
 	reg := identity.NewRegistry()
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
-	a.Backends = backend.New(c, a.Leases, a.upstream, func() { go a.refreshBackends() })
+	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	a.Backends = backend.New(c, a.Leases, a.upstream, func() {
+		select {
+		case a.backendChanged <- struct{}{}:
+		default:
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	a.Backends.WaitReady(ctx)
+	go a.supervise(c)
 	return a, nil
+}
+
+func (a *Agent) supervise(previous *config.Config) {
+	defer close(a.done)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.stop:
+			return
+		case <-a.backendChanged:
+			a.refreshBackends()
+		case <-ticker.C:
+			cfg := a.store.Get()
+			if cfg != previous {
+				a.Backends.Configure(cfg)
+				a.refreshBackends()
+				previous = cfg
+			}
+		}
+	}
 }
 func Local(r *http.Request) (Principal, error) {
 	host, _, e := net.SplitHostPort(r.RemoteAddr)
@@ -319,6 +350,7 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 		shells = append(shells, shell)
 	}
 	inUse, active, closed := a.PTY.Counts()
+	execShared, execExclusive := a.Exec.Counts()
 	warnings := []string{}
 	if c.Agent.Policy.AllowDangerous {
 		warnings = append(warnings, "allow_dangerous 已启用")
@@ -330,10 +362,12 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 			_ = f.Close()
 		}
 	}
-	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "authkey_readable": readable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
+	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "authkey_readable": readable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "exec_shared_in_use": execShared, "exec_exclusive_in_use": execExclusive, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
 }
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {
+		close(a.stop)
+		<-a.done
 		a.mu.Lock()
 		sessions := []*mcp.ServerSession{}
 		for s := range a.servers {

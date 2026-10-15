@@ -164,3 +164,44 @@ func Test_CTRBE01_SharedAndPerCaller(t *testing.T) {
 		})
 	}
 }
+
+func Test_PerCallerIdleRecycle(t *testing.T) {
+	m, _ := fixture(t, "per-caller")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, e := m.Call(ctx, "n/a", "ida.echo", raw(map[string]any{}), mcpmux.Progress{}); e != nil {
+		t.Fatal(e)
+	}
+	m.mu.Lock()
+	a := m.instances["ida/n/a"]
+	m.mu.Unlock()
+	a.mu.Lock()
+	a.lastUse = time.Now().Add(-time.Hour)
+	a.mu.Unlock()
+	a.gate <- struct{}{}
+	m.reap(time.Now())
+	m.mu.Lock()
+	retained := m.instances["ida/n/a"] == a
+	m.mu.Unlock()
+	if !retained {
+		t.Fatal("in-flight actor recycled")
+	}
+	<-a.gate
+	m.reap(time.Now())
+	m.mu.Lock()
+	_, retained = m.instances["ida/n/a"]
+	_, discovery := m.instances["ida/discovery"]
+	m.mu.Unlock()
+	if retained || !discovery {
+		t.Fatal("idle/discovery lifecycle")
+	}
+	if _, e := m.Call(ctx, "n/a", "ida.echo", raw(map[string]any{}), mcpmux.Progress{}); e != nil {
+		t.Fatal(e)
+	}
+	m.mu.Lock()
+	fresh := m.instances["ida/n/a"] != a
+	m.mu.Unlock()
+	if !fresh {
+		t.Fatal("actor not recreated")
+	}
+}

@@ -33,10 +33,21 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 		defer v.mu.Unlock()
 		for _, name := range keys {
 			device := devices[name]
-			row := map[string]any{"id": name, "online": device.online, "os": device.peer.OS, "tags": device.peer.Tags, "backends": []any{}, "load": map[string]any{}, "stale": true}
+			row := map[string]any{"id": name, "online": device.online, "os": device.peer.OS, "tags": device.peer.Tags, "backends": []string{}, "load": map[string]any{}, "stale": true}
 			if d := v.down[name]; d != nil && d.info != nil {
 				row["os"] = d.info["os"]
-				row["backends"] = d.info["backends"]
+				backends := []string{}
+				if list, ok := d.info["backends"].([]any); ok {
+					for _, item := range list {
+						if b, ok := item.(map[string]any); ok {
+							if name, ok := b["name"].(string); ok {
+								backends = append(backends, name)
+							}
+						}
+					}
+				}
+				sort.Strings(backends)
+				row["backends"] = backends
 				row["stale"] = !d.failedSince.IsZero()
 				if limits, ok := d.info["limits"].(map[string]any); ok {
 					row["load"] = map[string]any{"pty_in_use": limits["pty_in_use"], "pty_max": limits["pty_max_sessions"], "exec_shared_in_use": limits["exec_shared_in_use"]}
@@ -69,7 +80,8 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 				full := v.g.prefix(device) + "/" + tool.Name
 				if strings.Contains(strings.ToLower(full+" "+tool.Description), strings.ToLower(pattern)) {
 					rows = append(rows, map[string]any{"name": full, "description": tool.Description})
-					if len(rows) >= 100 {
+					if len(rows) > 100 {
+						rows = rows[:100]
 						truncated = true
 						break
 					}

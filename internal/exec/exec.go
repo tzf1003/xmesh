@@ -346,6 +346,12 @@ func (m *Manager) evictLocked(rec *record) {
 		_ = os.Remove(rec.stderr)
 	}
 }
+func (m *Manager) Counts() (shared, exclusive int) {
+	m.scheduler.mu.Lock()
+	defer m.scheduler.mu.Unlock()
+	return m.scheduler.shared, m.scheduler.exclusive
+}
+
 func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closing = true

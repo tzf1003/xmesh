@@ -114,3 +114,58 @@ func Test_Gate2_TwoMCPClients(t *testing.T) {
 		t.Fatal("restarted tools absent")
 	}
 }
+
+func Test_CTRCFG02_BackendSupervisionReload(t *testing.T) {
+	path, store := configuration(t)
+	a, e := New(store)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(a.Close)
+	server := httptest.NewServer(a.HTTP(Local))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	b, _ := os.ReadFile(path)
+	var doc map[string]any
+	_ = json.Unmarshal(b, &doc)
+	bin, _ := os.Executable()
+	doc["agent"].(map[string]any)["backends"] = map[string]any{"ida": map[string]any{"transport": "stdio", "policy": "exclusive", "command": []string{bin, "-test.run=TestAgentBackendProcess", "--", "--xmesh-agent-backend-helper"}}}
+	write := func() {
+		b, _ := json.Marshal(doc)
+		if e := os.WriteFile(path, b, 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	wait := func(want bool) {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			list, e := client.ListTools(context.Background(), nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			found := false
+			for _, tool := range list.Tools {
+				if tool.Name == "ida.echo" {
+					found = true
+				}
+			}
+			if found == want {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("tool catalog did not reflect backend generation", want)
+	}
+	write()
+	wait(true)
+	grant := tool(t, client, "backend.acquire", map[string]any{"name": "ida", "ttl": "1m"})
+	if grant.IsError {
+		t.Fatal(grant)
+	}
+	delete(doc["agent"].(map[string]any), "backends")
+	write()
+	wait(false)
+	if a.Leases.Owner("backend:ida") != "" {
+		t.Fatal("deleted backend retained lease")
+	}
+}

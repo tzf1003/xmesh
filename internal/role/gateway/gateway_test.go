@@ -164,8 +164,6 @@ func Test_INV09_OfflineRoutesRemoved(t *testing.T) {
 	}
 }
 
-var _ = mcpmux.Options{}
-
 func Test_CTRAUD01_RejectedCalls(t *testing.T) {
 	g, _ := fixture(t, true)
 	dir := t.TempDir()
@@ -212,4 +210,82 @@ func Test_CTRAUD01_RejectedCalls(t *testing.T) {
 			t.Fatal(rows[i])
 		}
 	}
+}
+
+func Test_CTRGW02_CatalogRefreshAndFavorite(t *testing.T) {
+	backend := mcp.NewServer(&mcp.Implementation{Name: "device", Version: "1"}, nil)
+	backend.AddTool(&mcp.Tool{Name: "sys.info", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return agent.Result(map[string]any{"os": "linux", "backends": []map[string]any{{"name": "ida", "favorite": false}}, "limits": map[string]any{"pty_in_use": 2, "pty_max_sessions": 20, "exec_shared_in_use": 1}}, nil), nil
+	})
+	install := func(description string) {
+		for _, name := range []string{"ida.echo", "sys.echo"} {
+			backend.AddTool(&mcp.Tool{Name: name, Description: description, InputSchema: map[string]any{"type": "object", "properties": map[string]any{description: map[string]any{"type": "string"}}}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return agent.Result(map[string]any{"ok": true}, nil), nil
+			})
+		}
+	}
+	install("first")
+	g := New(Options{NodeName: "test-node", Favorite: true, LocalPeer: mesh.Peer{Name: "test-node", ID: "device"}, Dial: func(ctx context.Context, _ mesh.Peer, _ Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+		one, two := mcp.NewInMemoryTransports()
+		if _, e := backend.Connect(ctx, one, nil); e != nil {
+			return nil, e
+		}
+		return mcpmux.Connect(ctx, two, opts)
+	}})
+	t.Cleanup(g.Close)
+	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	list, e := client.ListTools(context.Background(), nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, tool := range list.Tools {
+		if tool.Name == "local/ida.echo" {
+			t.Fatal("non-favorite exposed")
+		}
+	}
+	search := func() map[string]any {
+		o := call(t, client, "tools.search", map[string]any{"device": "local", "pattern": "ida.echo"})
+		if o.IsError {
+			t.Fatal(o)
+		}
+		rows := object(t, o)["tools"].([]any)
+		if len(rows) != 1 {
+			t.Fatal(rows)
+		}
+		return rows[0].(map[string]any)
+	}
+	if search()["description"] != "first" {
+		t.Fatal("initial description")
+	}
+	if o := call(t, client, "local/ida.echo", map[string]any{}); o.IsError {
+		t.Fatal(o)
+	}
+	devices := object(t, call(t, client, "devices.list", map[string]any{}))["devices"].([]any)
+	row := devices[0].(map[string]any)
+	if row["backends"].([]any)[0] != "ida" || row["load"].(map[string]any)["exec_shared_in_use"] != float64(1) {
+		t.Fatal(row)
+	}
+	install("updated")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if search()["description"] == "updated" {
+			list, e := client.ListTools(context.Background(), nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, tool := range list.Tools {
+				if tool.Name == "local/sys.echo" && tool.Description == "updated" {
+					b, _ := json.Marshal(tool.InputSchema)
+					if !strings.Contains(string(b), `"updated"`) {
+						t.Fatal("upstream schema remained stale", string(b))
+					}
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("tool metadata remained stale")
 }

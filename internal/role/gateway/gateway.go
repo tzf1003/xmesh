@@ -3,7 +3,9 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
@@ -13,6 +15,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -60,6 +63,7 @@ type downstream struct {
 	failedSince time.Time
 	dead        bool
 	peerID      string
+	peerAddress string
 }
 type view struct {
 	mu         sync.Mutex
@@ -72,6 +76,7 @@ type view struct {
 	down       map[string]*downstream
 	names      []string
 	generation uint64
+	catalog    [32]byte
 	closed     bool
 }
 
@@ -95,6 +100,7 @@ func (g *Gateway) discover() {
 			return
 		case <-ticker.C:
 			g.poll()
+			g.refreshViews()
 		}
 	}
 }
@@ -123,7 +129,7 @@ func (g *Gateway) Update(peers []mesh.Peer) {
 		}
 		seen[p.Name] = true
 		old, exists := g.devices[p.Name]
-		if !exists || !old.online || old.peer.ID != p.ID || old.peer.Address != p.Address {
+		if !exists || !old.online || !reflect.DeepEqual(old.peer, p) {
 			changed = true
 		}
 		g.devices[p.Name] = device{p, true, time.Now()}
@@ -154,6 +160,17 @@ func (g *Gateway) Update(peers []mesh.Peer) {
 		for _, v := range views {
 			go v.refresh()
 		}
+	}
+}
+func (g *Gateway) refreshViews() {
+	g.mu.Lock()
+	views := make([]*view, 0, len(g.views))
+	for v := range g.views {
+		views = append(views, v)
+	}
+	g.mu.Unlock()
+	for _, v := range views {
+		go v.refresh()
 	}
 }
 func validName(name string) bool {
@@ -402,7 +419,7 @@ func (v *view) refresh() {
 	remove := []*mcpmux.Bridge{}
 	for name, d := range v.down {
 		peer, exists := devices[name]
-		if !exists || !peer.online || d.dead || d.peerID != peer.peer.ID {
+		if !exists || !peer.online || d.dead || d.peerID != peer.peer.ID || d.peerAddress != peer.peer.Address {
 			remove = append(remove, d.bridge)
 			delete(v.down, name)
 		}
@@ -431,7 +448,7 @@ func (v *view) refresh() {
 			if e != nil {
 				continue
 			}
-			d = &downstream{bridge: bridge, peerID: device.peer.ID}
+			d = &downstream{bridge: bridge, peerID: device.peer.ID, peerAddress: device.peer.Address}
 			v.mu.Lock()
 			v.down[name] = d
 			v.mu.Unlock()
@@ -455,7 +472,12 @@ func (v *view) refresh() {
 				out, err := d.bridge.Call(ctx, "sys.info", map[string]any{}, mcpmux.Progress{})
 				if err == nil && !out.IsError {
 					b, _ := json.Marshal(out.StructuredContent)
-					_ = json.Unmarshal(b, &info)
+					e = json.Unmarshal(b, &info)
+					if e == nil && info == nil {
+						e = fmt.Errorf("sys.info 返回为空")
+					}
+				} else {
+					e = fmt.Errorf("sys.info 暂不可用")
 				}
 			}
 			v.mu.Lock()
@@ -480,6 +502,7 @@ func (v *view) refresh() {
 	v.mu.Lock()
 	old := append([]string{}, v.names...)
 	entries := map[string]*mcp.Tool{}
+	visibility := map[string]bool{}
 	for name, d := range v.down {
 		if d.dead {
 			continue
@@ -491,6 +514,7 @@ func (v *view) refresh() {
 				continue
 			}
 			entries[full] = tool
+			visibility[full] = !v.g.opts.Favorite || builtin(tool.Name) || favorite(d.info, tool.Name)
 		}
 	}
 	v.names = nil
@@ -498,7 +522,10 @@ func (v *view) refresh() {
 		v.names = append(v.names, full)
 	}
 	sort.Strings(v.names)
-	same := strings.Join(old, "\x00") == strings.Join(v.names, "\x00") && v.generation == generation
+	encoded, _ := json.Marshal([]any{entries, visibility})
+	catalog := sha256.Sum256(encoded)
+	same := v.catalog == catalog && v.generation == generation
+	v.catalog = catalog
 	v.generation = generation
 	v.mu.Unlock()
 	if !same {

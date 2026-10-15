@@ -50,7 +50,47 @@ func New(c *config.Config, leases *lease.Manager, upstream func(string) *mcp.Ser
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{instances: map[string]*actor{}, leases: leases, upstream: upstream, changed: changed, ctx: ctx, cancel: cancel}
 	m.Configure(c)
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				m.reap(now)
+			}
+		}
+	}()
 	return m
+}
+
+func (m *Manager) reap(now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, a := range m.instances {
+		if a.cfg.Policy != "per-caller" || a.caller == "" {
+			continue
+		}
+		idle := config.Duration(a.cfg.IdleTimeout)
+		if idle <= 0 {
+			idle = 30 * time.Minute
+		}
+		select {
+		case a.gate <- struct{}{}:
+			a.mu.Lock()
+			expired := now.Sub(a.lastUse) >= idle
+			a.mu.Unlock()
+			if expired {
+				a.cancel()
+				delete(m.instances, key)
+			}
+			<-a.gate
+		default: // An in-flight call retains its process until completion.
+		}
+	}
 }
 func (m *Manager) Configure(c *config.Config) {
 	m.mu.Lock()
@@ -202,6 +242,7 @@ func (a *actor) supervise(ctx context.Context) {
 			first = false
 		}
 		a.notify()
+		started := time.Now()
 		disconnected := make(chan struct{})
 		go func() { _ = bridge.Session.Wait(); close(disconnected) }()
 		select {
@@ -210,6 +251,9 @@ func (a *actor) supervise(ctx context.Context) {
 			<-disconnected
 			return
 		case <-disconnected:
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		// Invalidate fencing before waking queued calls or announcing the crash.
 		if a.cfg.Policy == "exclusive" {
@@ -220,8 +264,11 @@ func (a *actor) supervise(ctx context.Context) {
 		a.state = "crashed"
 		a.mu.Unlock()
 		a.notify()
-		attempt = 0
-		if !delay(ctx, 100*time.Millisecond) {
+		// A stable run starts a new sequence of consecutive restart attempts.
+		if time.Since(started) >= 30*time.Second {
+			attempt = 0
+		}
+		if !delay(ctx, time.Duration(1<<uint(max(0, attempt-1)))*100*time.Millisecond) {
 			return
 		}
 	}
@@ -278,6 +325,9 @@ func (m *Manager) instance(name, caller string) (*actor, error) {
 	if a == nil {
 		a = m.spawnLocked(key, name, caller, cfg, m.cfg)
 	}
+	a.mu.Lock()
+	a.lastUse = time.Now()
+	a.mu.Unlock()
 	return a, nil
 }
 func (m *Manager) Call(ctx context.Context, caller, name string, raw json.RawMessage, progress mcpmux.Progress) (*mcp.CallToolResult, error) {
@@ -332,6 +382,9 @@ func (m *Manager) Call(ctx context.Context, caller, name string, raw json.RawMes
 		return nil, a.unavailable()
 	}
 	result, e := b.Call(ctx, tool, args, progress)
+	a.mu.Lock()
+	a.lastUse = time.Now()
+	a.mu.Unlock()
 	if e != nil {
 		if ctx.Err() != nil {
 			return nil, toolerr.New("timeout", "后端调用超时", "timeout_ms", 0)
