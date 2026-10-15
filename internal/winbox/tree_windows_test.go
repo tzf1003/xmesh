@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 	"unicode/utf16"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -274,6 +275,135 @@ func Test_WindowsAppContainerWorkspaceReplacement(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal("directory enumeration cancellation", err)
+	}
+}
+
+func Test_WindowsAppContainerSelectedGrant(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	for _, directory := range []bool{false, true} {
+		name := "file"
+		if directory {
+			name = "directory"
+		}
+		t.Run(name, func(t *testing.T) {
+			p, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := p.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			root := filepath.Join(t.TempDir(), "workspace")
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			create := func(path string) error {
+				if directory {
+					return os.Mkdir(path, 0700)
+				}
+				return os.WriteFile(path, []byte("original"), 0600)
+			}
+			path := filepath.Join(root, "selected")
+			if err := create(path); err != nil {
+				t.Fatal(err)
+			}
+			before := readObjectACL(t, path)
+			tree, err := openWorkspaceTree(context.Background(), root, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(tree.Close)
+			selected := tree.objects[1]
+			moved := path + ".moved"
+			if err := os.Rename(path, moved); err != nil {
+				t.Fatal(err)
+			}
+			if err := create(path); err != nil {
+				t.Fatal(err)
+			}
+			replacementACL := readObjectACL(t, path)
+			for _, field := range []string{"volume", "id", "kind"} {
+				invalid := selected
+				switch field {
+				case "volume":
+					invalid.id.Volume ^= 1
+				case "id":
+					invalid.id.ID[0] ^= 1
+				case "kind":
+					invalid.directory = !invalid.directory
+				}
+				if grant, err := p.grantSelectedObject(invalid); err == nil {
+					_ = grant.Close()
+					t.Fatal("changed selection admitted", field)
+				}
+				if !bytes.Equal(before, readObjectACL(t, moved)) || !bytes.Equal(replacementACL, readObjectACL(t, path)) {
+					t.Fatal("rejected selection changed ACL", field)
+				}
+			}
+			if !directory {
+				link := moved + ".hardlink"
+				if err := os.Link(moved, link); err != nil {
+					t.Fatal(err)
+				}
+				if rejected, err := p.grantSelectedObject(selected); err == nil {
+					_ = rejected.Close()
+					t.Fatal("hard link added after selection was admitted")
+				}
+				if !bytes.Equal(before, readObjectACL(t, moved)) {
+					t.Fatal("rejected linked selection changed ACL")
+				}
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+			}
+			grant, err := p.grantSelectedObject(selected)
+			if err != nil {
+				t.Fatal("grant selected object after path replacement", err)
+			}
+			t.Cleanup(func() {
+				if err := grant.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			// The duplicate belongs to the grant, so closing the snapshot must
+			// release the namespace guard while leaving this grant recoverable.
+			tree.Close()
+			actual, err := inspectTreeObject(grant.handle, "")
+			if err != nil || actual.id != selected.id {
+				t.Fatal("grant did not retain selected identity", err)
+			}
+			var flags uint32
+			getHandleInformation := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetHandleInformation")
+			result, _, queryErr := getHandleInformation.Call(uintptr(grant.handle), uintptr(unsafe.Pointer(&flags)))
+			if result == 0 || flags&windows.HANDLE_FLAG_INHERIT != 0 {
+				t.Fatal("grant handle inheritance", flags, queryErr)
+			}
+			if bytes.Equal(before, readObjectACL(t, moved)) || !bytes.Equal(replacementACL, readObjectACL(t, path)) {
+				t.Fatal("grant did not affect exactly the selected object")
+			}
+			if err := p.Close(); err == nil {
+				t.Fatal("profile deleted while selected grant retained")
+			}
+			if err := os.Rename(moved, moved+".again"); err != nil {
+				t.Fatal("rename with independent grant", err)
+			}
+			if err := grant.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, readObjectACL(t, moved+".again")) || !bytes.Equal(replacementACL, readObjectACL(t, path)) {
+				t.Fatal("selected grant release changed another object")
+			}
+			if err := p.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.grantSelectedObject(selected); err == nil {
+				t.Fatal("closed profile admitted selected grant")
+			}
+		})
 	}
 }
 

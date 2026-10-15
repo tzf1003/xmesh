@@ -30,14 +30,6 @@ type objectGrant struct {
 }
 
 func (p *Profile) grantObject(path string) (*objectGrant, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.sid == nil {
-		return nil, fmt.Errorf("AppContainer profile unavailable")
-	}
-	if err := reopenObject.Find(); err != nil {
-		return nil, err
-	}
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
@@ -49,24 +41,48 @@ func (p *Profile) grantObject(path string) (*objectGrant, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer windows.CloseHandle(h)
+	object, err := inspectTreeObject(h, "")
+	if err != nil {
+		return nil, err
+	}
+	return p.grantSelectedObject(object)
+}
+
+// grantSelectedObject grants the object selected by workspace inspection.
+// DuplicateHandle retains that file object and its sharing mode without another
+// path lookup. The grant owns the duplicate independently of the snapshot.
+// Callers serialize snapshot closure with this operation and protect the allowed
+// namespace for the complete execution lifetime.
+func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sid == nil {
+		return nil, fmt.Errorf("AppContainer profile unavailable")
+	}
+	if err := reopenObject.Find(); err != nil {
+		return nil, err
+	}
+	var h windows.Handle
+	process := windows.CurrentProcess()
+	if err := windows.DuplicateHandle(process, object.handle, process, &h, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
+		return nil, fmt.Errorf("retain selected AppContainer object: %w", err)
+	}
 	retained := false
 	defer func() {
 		if !retained {
 			windows.CloseHandle(h)
 		}
 	}()
-	var info windows.ByHandleFileInformation
-	if kind, err := windows.GetFileType(h); err != nil || kind != windows.FILE_TYPE_DISK {
-		return nil, fmt.Errorf("AppContainer grant requires a disk object: type=%d, error=%v", kind, err)
-	}
-	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+	actual, err := inspectTreeObject(h, object.relative)
+	if err != nil {
 		return nil, err
 	}
-	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.NumberOfLinks > 1 {
-		return nil, fmt.Errorf("AppContainer object grant requires an ordinary object with one link")
+	if actual.id != object.id || actual.directory != object.directory {
+		return nil, fmt.Errorf("AppContainer selected object identity changed")
 	}
 	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE)
-	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+	if actual.directory {
 		const fileDeleteChild = 0x0040
 		mask |= fileDeleteChild
 	}
