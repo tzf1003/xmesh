@@ -50,12 +50,14 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 `d4e96c4` 的 push 与 PR 工作流均通过三平台全量 race、vet、构建及 Windows 独立原生任务。普通命令原生契约验证显式相对路径与扩展名、Unicode 和引号参数、含 NUL 的 stdin、业务环境传入和父进程凭证过滤、stderr 与非零退出码；启用 macOS L2 的 exec、PTY 和 policy 本地 race 回归通过。
 
+`4a00a00` 的 push 工作流通过三平台全量 race、vet、构建和 Windows 独立原生任务；PR 的 Windows 原生与 Windows/Ubuntu 全量检查通过。单对象 AppContainer 授权验证 Medium 文件读写与目录创建、完整性标签保持、已有子目录及目录外拒绝、另一 profile 的 ACE 保留、文件与目录改名和路径替换后的准确回收，以及硬链接、重解析点和 null DACL 拒绝。PR macOS 审计测试跨分钟轮转时只读取首个日志分片；断言改为读取全部分片、检查正文排除及两类事件各一条，本地连续 200 轮与全量 race、vet 通过。
+
 ## 待实现与待验收
 
 | 项目 | 当前边界 |
 | --- | --- |
 | 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过，跨主机入口协调待实现 |
-| Windows L2 | 当前请求 L2 会拒绝执行；AppContainer profile 与启动属性原语已加入，通过 Windows amd64/arm64 vet 与 amd64 交叉编译，`874ea35` 原生 token、文件、进程、环境、环回隔离与 profile 清理通过；工作目录绑定、exec/ConPTY 接入与异常退出回收待实现 |
+| Windows L2 | 当前请求 L2 会拒绝执行；profile、启动属性与准确对象 ACL 授权/回收原语已实现，通过 Windows amd64/arm64 vet、amd64 交叉编译与 `4a00a00` 原生验收；完整工作目录绑定、exec/ConPTY 接入、profile/ACL 异常退出恢复待实现 |
 | 原生 Windows | Server 2025 的 ConPTY、进程清理、文件、PowerShell 5.1/7、HTTP MCP 及本机模式 SCM 生命周期已验证；用户任务的登录触发、目标会话与生产服务设备网络待验收，其他 Windows 版本待验证 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
 | 云端连接器 | claude.ai 与 Codex 的 OAuth、实际工具可见性及调用待验收 |

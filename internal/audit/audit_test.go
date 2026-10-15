@@ -122,9 +122,27 @@ func Test_INV10_NoBodyInAudit(t *testing.T) {
 	if e = l.Write(record); e == nil {
 		t.Fatal("encoder accepted stdout")
 	}
-	b, _ = os.ReadFile(files[0])
-	if strings.Contains(string(b), secret) || !strings.Contains(string(b), "audit_dropped") {
-		t.Fatal(string(b))
+	// The rejected write may cross a minute boundary into the next log file.
+	files, e = filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, file := range files {
+		b, e = os.ReadFile(file)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if strings.Contains(string(b), secret) {
+			t.Fatal("body reached audit")
+		}
+	}
+	rows := records(t, dir)
+	events := map[any]int{}
+	for _, row := range rows {
+		events[row["event"]]++
+	}
+	if len(rows) != 2 || events["tool_call"] != 1 || events["audit_dropped"] != 1 {
+		t.Fatal("audit event counts", events)
 	}
 	if e = l.Prune(time.Now().Add(2 * time.Hour)); e != nil {
 		t.Fatal(e)

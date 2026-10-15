@@ -169,6 +169,8 @@ go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
 
 AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。环回网络拒绝核对 helper 的准确 AppContainer SID，通过 Windows 网络隔离 API 确认该 SID 在探测前后均没有环回豁免，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
 
+内部单对象授权原语为准确 profile SID 添加显式、无继承的读写执行 ACE，并通过保留的元数据句柄跟踪对象；回收重读当前 DACL，只删除本次 ACE。原生用例验证普通 Medium 完整性文件与目录的授权写入、标签保持、未授权子目录与目录外拒绝，以及文件和目录改名、原路径替换后的对象回收。最终重解析点、硬链接和 null DACL 会拒绝授权。该原语尚需完整工作树的祖先路径与命名空间约束、可编辑目录生命周期及异常退出恢复；同进程 ACL 更新串行，其他 ACL 写入方需与工作目录所有者协调。进程退出并释放授权后才能删除 profile。
+
 ## 治理与生命周期
 
 exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。Windows 还保留运行时所需的 `WINDIR`、`SYSTEMDRIVE`、`COMSPEC`、`PATHEXT`、`TEMP`、`TMP`、`APPDATA`、`LOCALAPPDATA` 和 `ProgramFiles`，同样经过路径过滤。Windows 保留 `PSModulePath` 中经过拒绝规则的模块目录；缺少该值且 SystemRoot 可用时传入空值，由所启动的 PowerShell 运行时初始化模块目录；拒绝变量名的策略仍然生效。继承的 `PATH` 和 Windows `PSModulePath` 按平台分隔符逐项过滤，保留其余搜索目录；调用方显式传入的搜索路径包含拒绝目录时返回策略错误。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。
