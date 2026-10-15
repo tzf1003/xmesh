@@ -14,6 +14,7 @@ XmeSh（X mesh，也是 X me sh：我的 sh）让 Codex Cloud、Claude Cloud 等
 | 实现时哪些规则不能破 | [约束](docs/constraints/README.md) |
 | 工具、错误、租约、OAuth 的精确行为 | [契约](docs/contracts/README.md) |
 | 某一条规则落到哪一阶段的测试 | [符合性矩阵](docs/conformance.md) |
+| 如何构建、配对、入网和运行 | [运行手册](docs/operations.md) · [实现记录](docs/implementation-status.md) |
 
 阅读规范用语、编号和裁定方式见文档库首页。
 
