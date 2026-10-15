@@ -171,3 +171,11 @@ AppContainer 工作区 helper 已通过该入口创建和回收。新增原生�
 `f4ece7d` 的 [push 工作流 38817610430](https://github.com/tzf1003/xmesh/actions/runs/38817610430) 与 [PR 工作流 38817613274](https://github.com/tzf1003/xmesh/actions/runs/38817613274) 均通过三平台全量 race、vet、构建和完整 Windows 原生回归；契约工作流 `38817610428` / `38817613349` 通过。原生 job `116706103394` / `116706110551` 的完整日志各确认 109 个独立 Job/AppContainer PASS 标记。活动 profile 所有者组合用例通过真实 AppContainer 内的后代创建、根退出后后代存活、第二个专属 Job、限额、取消等待/回收、一个 Job 句柄失败时其他 Job 继续终止、保留 profile/句柄后重试、准确退出码和独立存活对照；根身份固定、工作区 helper、准确 DACL/控制位/标签/其他 profile 保持及三种工作区强退恢复也均通过。
 
 本阶段完成当前宿主内有界进程所有者的原生验收。异常宿主退出后的全部 Job 识别与退出确认、完整新对象持久追踪、外部 ACL/命名空间/reparse writer 协调及 exec/ConPTY 集成仍须由生产执行协调器完成，Windows L2 保持 `sandbox.unavailable`。
+
+## 持久执行意图与退出回执
+
+journal-backed profile 的受管所有者在任何进程准入前刷盘唯一 `execution` 意图；同一 journal 同时只保留一个未确认执行，历史有 256 个所有者上限。全部专属 Job 的生命周期清单、活动归零和退出信号确认后，才刷盘引用意图序号的 `execution-reaped` 回执。取消、部分终止失败和日志不可写保留进程义务；重复确认保持单个回执。带 journal 的独立启动属性入口要求受管所有者。
+
+显式 ACL、工作树、profile 删除及恢复 sweep 均检查退出回执门；未确认意图在恢复协调回调前保留 journal 和描述符。工作树释放在显式及继承回收各阶段持续关闭新所有者和启动属性准入。本地全量 race/vet、Windows amd64/arm64 vet、amd64 测试编译及契约检查通过。新增原生测试覆盖真实存活进程的回收拒绝、取消/失败回收与重试、准确描述符/标签恢复、回执持久回放及宿主在意图后、首次进程准入前强退的恢复拒绝；原生结果待 CI。
+
+该阶段建立持久回收门。异常宿主退出后，未确认意图继续等待独立存活监督组件提供完整进程身份退出证据；当前恢复 sweep 保留此类记录。完整新对象持久追踪、外部写入协调和 exec/ConPTY 集成继续推进，生产 Windows L2 保持 `sandbox.unavailable`。

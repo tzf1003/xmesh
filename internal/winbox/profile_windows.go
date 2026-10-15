@@ -42,6 +42,8 @@ type Profile struct {
 	deleted                     bool
 	processes                   *executionProcesses
 	standaloneProcessAttributes bool
+	processesConfirmed          bool // Protected by mu; includes durable exit confirmation.
+	reclaiming                  bool // Blocks launch admission throughout workspace reclamation.
 }
 
 func hresult(operation string, result uintptr) error {
@@ -139,11 +141,14 @@ func (p *Profile) applyProcess(attributes *windows.ProcThreadAttributeListContai
 	if p.processes != owner {
 		return fmt.Errorf("AppContainer process launch belongs to another execution owner")
 	}
-	if p.sid == nil || p.deleted || attributes == nil {
+	if p.sid == nil || p.deleted || p.reclaiming || attributes == nil {
 		return fmt.Errorf("AppContainer profile or attribute list unavailable")
 	}
 	if p.journal != nil && (p.journal.file == nil || p.journal.blocked != nil || p.journal.state.workspaceReleased || p.journal.state.complete) {
 		return fmt.Errorf("AppContainer journal is unavailable for process launch")
+	}
+	if p.journal != nil && owner == nil {
+		return fmt.Errorf("AppContainer journaled launch requires an execution process owner")
 	}
 	capabilities := &securityCapabilities{AppContainerSID: p.sid}
 	err := attributes.Update(securityCapabilitiesAttribute, unsafe.Pointer(capabilities), unsafe.Sizeof(*capabilities))
@@ -165,6 +170,11 @@ func (p *Profile) Close() error {
 	}
 	if p.processes != nil {
 		return fmt.Errorf("AppContainer profile retains an execution process owner")
+	}
+	if p.journal != nil {
+		if err := requireJournalProcessesReaped(p.journal); err != nil {
+			return err
+		}
 	}
 	if p.grants != 0 {
 		return fmt.Errorf("AppContainer profile retains %d object grants", p.grants)

@@ -84,6 +84,9 @@ func validateSelectedJournal(j *grantJournal, sid *windows.SID) error {
 	if j == nil || j.file == nil || j.blocked != nil || len(j.records) == 0 || j.state.workspace || sid == nil || sid.String() != j.records[0].SID {
 		return fmt.Errorf("AppContainer selected recovery requires an owned journal without workspace inheritance")
 	}
+	if err := requireJournalProcessesReaped(j); err != nil {
+		return err
+	}
 	for _, record := range j.records {
 		if record.Grant != nil {
 			if err := validateSelectedRecoveryACE(*record.Grant, sid); err != nil {
@@ -122,6 +125,9 @@ func journalRecoveryIdentity(j *grantJournal) (*windows.SID, *uint16, error) {
 }
 
 func finishJournalProfile(j *grantJournal, name *uint16) error {
+	if err := requireJournalProcessesReaped(j); err != nil {
+		return err
+	}
 	result, _, _ := deleteProfile.Call(uintptr(unsafe.Pointer(name)))
 	runtime.KeepAlive(name)
 	// A prior recovery may have deleted the profile before its completion record
@@ -135,6 +141,19 @@ func finishJournalProfile(j *grantJournal, name *uint16) error {
 	}
 	_, err := j.append(journalRecord{Kind: "complete"})
 	return err
+}
+
+// A durable intent can outlive its creating host. PID/name absence and an
+// external prepare callback do not acknowledge it. Only verified process reaping
+// followed by a flushed execution-reaped record releases this recovery gate.
+func requireJournalProcessesReaped(j *grantJournal) error {
+	if j == nil || j.file == nil || j.blocked != nil {
+		return fmt.Errorf("AppContainer process confirmation requires an owned writable journal")
+	}
+	if len(j.state.executions) != 0 {
+		return errJournalProcessesPending
+	}
+	return nil
 }
 
 func validateSelectedRecoveryACE(g journalGrant, sid *windows.SID) error {

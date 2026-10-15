@@ -63,7 +63,7 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren bool) (*objectGrant, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil || p.deleted {
+	if p.sid == nil || p.deleted || p.reclaiming {
 		return nil, fmt.Errorf("AppContainer profile unavailable")
 	}
 	if p.journal != nil {
@@ -181,6 +181,14 @@ func (g *objectGrant) Close() error {
 	defer g.profile.mu.Unlock()
 	if g.handle == 0 {
 		return nil
+	}
+	if g.profile.processes != nil && !g.profile.processesConfirmed {
+		return errJournalProcessesPending
+	}
+	if g.profile.journal != nil {
+		if err := requireJournalProcessesReaped(g.profile.journal); err != nil {
+			return err
+		}
 	}
 	lock, err := acquireObjectACL(g.id, 30000)
 	if err != nil {

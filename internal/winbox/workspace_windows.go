@@ -52,7 +52,7 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 		return nil, err
 	}
 	p.mu.Lock()
-	if p.sid == nil || p.deleted || p.grants != 0 {
+	if p.sid == nil || p.deleted || p.reclaiming || p.processes != nil || p.grants != 0 {
 		p.mu.Unlock()
 		tree.Close()
 		closeCredentialHandles(credentials)
@@ -160,6 +160,20 @@ func (g *workspaceGrant) Close() error {
 	if g.tree == nil {
 		return nil
 	}
+	g.profile.mu.Lock()
+	if g.profile.reclaiming || (g.profile.processes != nil && !g.profile.processesConfirmed) {
+		g.profile.mu.Unlock()
+		return errJournalProcessesPending
+	}
+	// Keep launch admission closed across the selected-grant and inherited-tree
+	// phases, including operations that temporarily release the profile mutex.
+	g.profile.reclaiming = true
+	g.profile.mu.Unlock()
+	defer func() {
+		g.profile.mu.Lock()
+		g.profile.reclaiming = false
+		g.profile.mu.Unlock()
+	}()
 	if g.profile.journal != nil {
 		g.profile.mu.Lock()
 		// Recovery owns the complete snapshot, including a write-ahead intent

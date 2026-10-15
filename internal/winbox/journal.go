@@ -22,10 +22,12 @@ const (
 )
 
 var (
-	errJournalIncomplete = errors.New("AppContainer journal has an incomplete tail")
-	errJournalCorrupt    = errors.New("AppContainer journal is corrupt")
-	journalProfileName   = regexp.MustCompile(`^xmesh-l2-[0-9a-f]{32}$`)
-	journalProfileSID    = regexp.MustCompile(`^S-1-15-2(?:-[0-9]{1,10}){7}$`)
+	errJournalIncomplete       = errors.New("AppContainer journal has an incomplete tail")
+	errJournalCorrupt          = errors.New("AppContainer journal is corrupt")
+	journalProfileName         = regexp.MustCompile(`^xmesh-l2-[0-9a-f]{32}$`)
+	journalProfileSID          = regexp.MustCompile(`^S-1-15-2(?:-[0-9]{1,10}){7}$`)
+	journalExecutionID         = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	errJournalProcessesPending = errors.New("AppContainer journal retains unconfirmed execution processes")
 )
 
 // Records describe recovery ownership, never file contents or command output.
@@ -57,14 +59,16 @@ type journalBoundary struct {
 }
 
 type journalRecord struct {
-	Version       int               `json:"version"`
-	Sequence      uint64            `json:"sequence"`
-	Kind          string            `json:"kind"`
-	Profile       string            `json:"profile,omitempty"`
-	SID           string            `json:"sid,omitempty"`
-	Workspace     *journalWorkspace `json:"workspace,omitempty"`
-	Grant         *journalGrant     `json:"grant,omitempty"`
-	GrantSequence uint64            `json:"grant_sequence,omitempty"`
+	Version           int               `json:"version"`
+	Sequence          uint64            `json:"sequence"`
+	Kind              string            `json:"kind"`
+	Profile           string            `json:"profile,omitempty"`
+	SID               string            `json:"sid,omitempty"`
+	Workspace         *journalWorkspace `json:"workspace,omitempty"`
+	Grant             *journalGrant     `json:"grant,omitempty"`
+	GrantSequence     uint64            `json:"grant_sequence,omitempty"`
+	ExecutionID       string            `json:"execution_id,omitempty"`
+	ExecutionSequence uint64            `json:"execution_sequence,omitempty"`
 }
 
 type journalState struct {
@@ -75,6 +79,8 @@ type journalState struct {
 	pending           map[uint64]bool
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
+	executions        map[uint64]bool
+	executionIDs      map[string]bool
 }
 
 // Check transitions before writing and during replay. Recovery integration must
@@ -85,6 +91,10 @@ func (s *journalState) accept(r journalRecord) error {
 		return fmt.Errorf("invalid journal version or completed state")
 	}
 	profileFields := r.Profile != "" || r.SID != ""
+	executionFields := r.ExecutionID != "" || r.ExecutionSequence != 0
+	if executionFields && r.Kind != "execution" && r.Kind != "execution-reaped" {
+		return fmt.Errorf("unexpected journal execution fields")
+	}
 	switch r.Kind {
 	case "profile":
 		if s.profile || r.Sequence != 1 || !journalProfileName.MatchString(r.Profile) || !validJournalSID(r.SID) || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
@@ -92,6 +102,19 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 		s.profile = true
 		s.pending = make(map[uint64]bool)
+		s.executions = make(map[uint64]bool)
+		s.executionIDs = make(map[string]bool)
+	case "execution":
+		if !s.profile || s.workspaceReleased || len(s.executions) != 0 || len(s.executionIDs) >= 256 || !journalExecutionID.MatchString(r.ExecutionID) || s.executionIDs[r.ExecutionID] || r.ExecutionSequence != 0 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal execution intent")
+		}
+		s.executions[r.Sequence] = true
+		s.executionIDs[r.ExecutionID] = true
+	case "execution-reaped":
+		if !s.profile || r.ExecutionID != "" || !s.executions[r.ExecutionSequence] || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal execution exit confirmation")
+		}
+		delete(s.executions, r.ExecutionSequence)
 	case "workspace":
 		if !s.profile || s.workspace || r.Sequence != 2 || len(s.pending) != 0 || profileFields || r.Grant != nil || r.GrantSequence != 0 || r.Workspace == nil {
 			return fmt.Errorf("invalid journal workspace intent")
@@ -129,16 +152,25 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 		s.pending[r.Sequence] = true
 	case "released":
+		if len(s.executions) != 0 {
+			return errJournalProcessesPending
+		}
 		if !s.profile || profileFields || r.Workspace != nil || r.Grant != nil || !s.pending[r.GrantSequence] {
 			return fmt.Errorf("invalid journal grant release")
 		}
 		delete(s.pending, r.GrantSequence)
 	case "workspace-released":
+		if len(s.executions) != 0 {
+			return errJournalProcessesPending
+		}
 		if !s.workspace || s.workspaceReleased || len(s.pending) != 0 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
 			return fmt.Errorf("invalid journal workspace release")
 		}
 		s.workspaceReleased = true
 	case "complete":
+		if len(s.executions) != 0 {
+			return errJournalProcessesPending
+		}
 		if !s.profile || (s.workspace && !s.workspaceReleased) || len(s.pending) != 0 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
 			return fmt.Errorf("invalid journal completion")
 		}
@@ -252,6 +284,14 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.granted = make(map[journalObject]bool, len(j.state.granted))
 	for object := range j.state.granted {
 		next.granted[object] = true
+	}
+	next.executions = make(map[uint64]bool, len(j.state.executions))
+	for sequence := range j.state.executions {
+		next.executions[sequence] = true
+	}
+	next.executionIDs = make(map[string]bool, len(j.state.executionIDs))
+	for id := range j.state.executionIDs {
+		next.executionIDs[id] = true
 	}
 	if err := next.accept(record); err != nil {
 		return 0, err

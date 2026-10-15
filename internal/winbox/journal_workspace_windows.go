@@ -36,6 +36,9 @@ func validateWorkspaceJournal(j *grantJournal, sid *windows.SID) error {
 	if j == nil || j.file == nil || j.blocked != nil || !j.state.workspace || len(j.records) < 2 || j.records[1].Workspace == nil || sid == nil || sid.String() != j.records[0].SID {
 		return fmt.Errorf("AppContainer recovery requires an owned workspace journal")
 	}
+	if err := requireJournalProcessesReaped(j); err != nil {
+		return err
+	}
 	w := j.records[1].Workspace
 	if _, _, err := workspaceComponents(w.Path); err != nil {
 		return err

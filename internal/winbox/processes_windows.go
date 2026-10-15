@@ -2,6 +2,8 @@ package winbox
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -26,13 +28,15 @@ type executionJob struct {
 // handle and the profile reference for retry. This in-process owner does not
 // establish abnormal-host recovery or filesystem writer/census coordination.
 type executionProcesses struct {
-	operation chan struct{}
-	profile   *Profile
-	jobs      []executionJob
-	limit     int
-	sealed    bool
-	reaped    bool
-	closed    bool
+	operation    chan struct{}
+	profile      *Profile
+	jobs         []executionJob
+	limit        int
+	sealed       bool
+	reaped       bool
+	closed       bool
+	intent       uint64
+	acknowledged bool
 }
 
 func newExecutionProcesses(p *Profile, maxJobs int) (*executionProcesses, error) {
@@ -41,11 +45,26 @@ func newExecutionProcesses(p *Profile, maxJobs int) (*executionProcesses, error)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil || p.deleted || p.processes != nil || p.standaloneProcessAttributes {
+	if p.sid == nil || p.deleted || p.reclaiming || p.processes != nil || p.standaloneProcessAttributes {
 		return nil, fmt.Errorf("AppContainer execution profile is unavailable or already owned")
 	}
 	owner := &executionProcesses{operation: make(chan struct{}, 1), profile: p, limit: maxJobs}
+	if p.journal != nil {
+		if err := requireJournalProcessesReaped(p.journal); err != nil {
+			return nil, err
+		}
+		var random [16]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, err
+		}
+		sequence, err := p.journal.append(journalRecord{Kind: "execution", ExecutionID: hex.EncodeToString(random[:])})
+		if err != nil {
+			return nil, err
+		}
+		owner.intent = sequence
+	}
 	p.processes = owner
+	p.processesConfirmed = false
 	return owner, nil
 }
 
@@ -176,7 +195,26 @@ func (e *executionProcesses) reap(ctx context.Context, exitCode uint32) error {
 	}
 	result = errors.Join(result, ctx.Err())
 	if result == nil {
-		e.reaped = true
+		e.profile.mu.Lock()
+		if e.profile.processes != e {
+			result = fmt.Errorf("AppContainer execution profile owner changed")
+		} else if j := e.profile.journal; j != nil {
+			if j.file == nil || j.blocked != nil {
+				result = fmt.Errorf("AppContainer execution confirmation requires a writable journal")
+			} else if !e.acknowledged {
+				_, result = j.append(journalRecord{Kind: "execution-reaped", ExecutionSequence: e.intent})
+				e.acknowledged = result == nil
+			}
+			if result == nil {
+				result = requireJournalProcessesReaped(j)
+			}
+		}
+		result = errors.Join(result, ctx.Err())
+		if result == nil {
+			e.reaped = true
+			e.profile.processesConfirmed = true
+		}
+		e.profile.mu.Unlock()
 	}
 	return result
 }
