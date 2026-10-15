@@ -56,6 +56,34 @@ func Test_MeshDrainIncludesFutureDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func Test_AuditUnknownToolResult(t *testing.T) {
+	g, _ := fixture(t, false)
+	dir := t.TempDir()
+	logger, err := audit.New(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(logger.Close)
+	g.opts.Audit = logger
+	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
+	t.Cleanup(server.Close)
+	s := connect(t, server.URL+"/mcp")
+	if _, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: "local/sys.missing", Arguments: map[string]any{}}); err == nil {
+		t.Fatal("unknown tool accepted")
+	}
+	if out := call(t, s, "local/sys.info", map[string]any{}); out.IsError {
+		t.Fatal(out)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	for _, path := range files {
+		body, _ := os.ReadFile(path)
+		if strings.Contains(string(body), `"tool":"local/sys.missing"`) && strings.Contains(string(body), `"error":"internal"`) {
+			return
+		}
+	}
+	t.Fatal("failed tool audit missing")
+}
 func connect(t *testing.T, url string) *mcp.ClientSession {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

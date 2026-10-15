@@ -273,7 +273,7 @@ func (g *Gateway) newView(p Principal) *view {
 				defer func() {
 					call := r.(*mcp.CallToolRequest)
 					out, ok := result.(*mcp.CallToolResult)
-					if !ok {
+					if !ok || out == nil {
 						out = agent.Result(nil, toolerr.Internal("tools.call", e))
 					}
 					if err := g.opts.Audit.Record("gateway/"+call.Session.ID(), v.p.ClientID, g.opts.NodeName, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {

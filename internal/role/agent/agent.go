@@ -307,7 +307,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 				defer func() {
 					call := req.(*mcp.CallToolRequest)
 					out, ok := result.(*mcp.CallToolResult)
-					if !ok {
+					if !ok || out == nil {
 						out = Result(nil, toolerr.Internal("tools.call", e))
 					}
 					caller := a.bind(call.Session, p)

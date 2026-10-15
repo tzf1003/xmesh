@@ -92,6 +92,39 @@ func Test_NodeCallBudgetAcrossMCPSessions(t *testing.T) {
 		t.Fatal("status unavailable after quota exhaustion", out)
 	}
 }
+
+func Test_AuditUnknownToolResult(t *testing.T) {
+	_, store := configuration(t)
+	a, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Close)
+	dir := t.TempDir()
+	logger, err := audit.New(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(logger.Close)
+	a.SetAudit(logger)
+	server := httptest.NewServer(a.HTTP(Local))
+	t.Cleanup(server.Close)
+	s := connect(t, server.URL+"/mcp")
+	if _, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: "sys.missing", Arguments: map[string]any{}}); err == nil {
+		t.Fatal("unknown tool accepted")
+	}
+	if out := tool(t, s, "sys.info", map[string]any{}); out.IsError {
+		t.Fatal(out)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	for _, path := range files {
+		body, _ := os.ReadFile(path)
+		if strings.Contains(string(body), `"tool":"sys.missing"`) && strings.Contains(string(body), `"error":"internal"`) {
+			return
+		}
+	}
+	t.Fatal("failed tool audit missing")
+}
 func connect(t *testing.T, url string) *mcp.ClientSession {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
