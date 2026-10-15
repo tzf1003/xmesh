@@ -23,6 +23,28 @@ func Test_WindowsJobDrain(t *testing.T) {
 		job := newDrainJob(t)
 		proof := filepath.Join(t.TempDir(), "descendant.json")
 		root := startDrainProcess(t, job, "root", proof, false)
+		var pid uint32
+		for deadline := time.Now().Add(15 * time.Second); ; {
+			body, err := os.ReadFile(proof)
+			if err == nil && json.Unmarshal(body, &pid) == nil && pid != 0 {
+				break
+			}
+			assertDrainProcessAlive(t, root.Process)
+			if time.Now().After(deadline) {
+				t.Fatal("root did not publish retained descendant")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		child, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer windows.CloseHandle(child)
+		// The root retains its child handle until this acknowledgement. The
+		// controller now owns an overlapping lifetime handle before root exit.
+		if err := os.WriteFile(proof+".captured", []byte("ready"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		if result, err := windows.WaitForSingleObject(root.Process, 15000); err != nil || result != windows.WAIT_OBJECT_0 {
 			t.Fatal("root did not exit", result, err)
 		}
@@ -30,27 +52,14 @@ func Test_WindowsJobDrain(t *testing.T) {
 		if err := windows.GetExitCodeProcess(root.Process, &exit); err != nil || exit != 0 {
 			t.Fatal("root helper failed", exit, err)
 		}
-		body, err := os.ReadFile(proof)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var pid uint32
-		if err := json.Unmarshal(body, &pid); err != nil || pid == 0 {
-			t.Fatal("missing descendant identity", pid, err)
-		}
-		child, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer windows.CloseHandle(child)
 		control := startDrainProcess(t, 0, "member", "unused", false)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		if err := WaitEmpty(ctx, job); !errors.Is(err, context.DeadlineExceeded) {
+		if err := WaitEmpty(ctx, job, root.Process, child); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("live descendant was not retained", err)
 		}
 		assertDrainProcessAlive(t, child)
-		if err := TerminateAndWait(context.Background(), job, 73); err != nil {
+		if err := TerminateAndWait(context.Background(), job, 73, root.Process, child); err != nil {
 			t.Fatal(err)
 		}
 		if result, err := windows.WaitForSingleObject(child, 0); err != nil || result != windows.WAIT_OBJECT_0 {
@@ -60,10 +69,13 @@ func Test_WindowsJobDrain(t *testing.T) {
 			t.Fatal("descendant termination code", exit, err)
 		}
 		assertDrainProcessAlive(t, control.Process)
-		if err := WaitEmpty(context.Background(), job); err != nil {
+		if err := WaitEmpty(context.Background(), job, child); !errors.Is(err, ErrIncompleteProcessSet) {
+			t.Fatal("omitted exited root accepted", err)
+		}
+		if err := WaitEmpty(context.Background(), job, root.Process, child); err != nil {
 			t.Fatal("empty observation retry", err)
 		}
-		if err := TerminateAndWait(context.Background(), job, 73); err != nil {
+		if err := TerminateAndWait(context.Background(), job, 73, root.Process, child); err != nil {
 			t.Fatal("termination retry", err)
 		}
 	})
@@ -72,17 +84,24 @@ func Test_WindowsJobDrain(t *testing.T) {
 		process := startDrainProcess(t, job, "member", "unused", true)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if err := TerminateAndWait(ctx, job, 74); !errors.Is(err, context.Canceled) {
+		if err := TerminateAndWait(ctx, job, 74, process.Process); !errors.Is(err, context.Canceled) {
 			t.Fatal("cancelled termination", err)
 		}
 		assertDrainProcessAlive(t, process.Process)
+		if err := TerminateAndWait(context.Background(), job, 74); !errors.Is(err, ErrIncompleteProcessSet) {
+			t.Fatal("missing lifetime member accepted", err)
+		}
+		assertDrainProcessAlive(t, process.Process)
+		if err := WaitEmpty(context.Background(), job, process.Process, process.Process); !errors.Is(err, ErrIncompleteProcessSet) {
+			t.Fatal("duplicate lifetime member accepted", err)
+		}
 		ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		if err := WaitEmpty(ctx, job); !errors.Is(err, context.DeadlineExceeded) {
+		if err := WaitEmpty(ctx, job, process.Process); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("suspended member was not counted", err)
 		}
 		assertDrainProcessAlive(t, process.Process)
-		if err := TerminateAndWait(context.Background(), job, 74); err != nil {
+		if err := TerminateAndWait(context.Background(), job, 74, process.Process); err != nil {
 			t.Fatal(err)
 		}
 		if result, err := windows.WaitForSingleObject(process.Process, 0); err != nil || result != windows.WAIT_OBJECT_0 {
@@ -194,6 +213,15 @@ func Test_WindowsJobDrainHelper(t *testing.T) {
 		}
 		if err := os.WriteFile(args[1], body, 0600); err != nil {
 			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(15 * time.Second); ; {
+			if _, err := os.Stat(args[1] + ".captured"); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("controller did not capture descendant")
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
 		_ = child.Process.Release()
 		return

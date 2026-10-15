@@ -234,13 +234,19 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	if err != nil {
 		t.Fatal(err)
 	}
+	var process windows.ProcessInformation
 	defer func() {
+		if process.Process == 0 {
+			_ = windows.CloseHandle(job)
+			return
+		}
+		defer windows.CloseHandle(process.Process)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		defer windows.CloseHandle(job)
 		// No further process admission occurs in this fixture. Confirm every
 		// member has exited before callers reclaim workspace grants/profile.
-		if err := winjob.TerminateAndWait(ctx, job, 1); err != nil {
+		if err := winjob.TerminateAndWait(ctx, job, 1, process.Process); err != nil {
 			t.Fatal("AppContainer helper process tree cleanup", err)
 		}
 	}()
@@ -266,13 +272,11 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 		t.Fatal(err)
 	}
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
-	var process windows.ProcessInformation
 	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
 	if err := windows.CreateProcess(nil, command, nil, nil, false, flags, &block[0], dir, &startup.StartupInfo, &process); err != nil {
 		t.Fatal(err)
 	}
 	defer windows.CloseHandle(process.Thread)
-	defer windows.CloseHandle(process.Process)
 	defer func() {
 		windows.TerminateProcess(process.Process, 1)
 		windows.WaitForSingleObject(process.Process, 10000)
