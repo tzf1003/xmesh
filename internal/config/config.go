@@ -1,0 +1,261 @@
+package config
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"math"
+	"net"
+	"net/netip"
+	"net/url"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/tzf1003/xmesh/docs/contracts/schemas"
+	"github.com/tzf1003/xmesh/internal/cwd"
+	"go.yaml.in/yaml/v3"
+)
+
+type Config struct {
+	Node    Node    `json:"node"`
+	Mesh    Mesh    `json:"mesh"`
+	Gateway Gateway `json:"gateway"`
+	Ingress Ingress `json:"ingress"`
+	Agent   Agent   `json:"agent"`
+	Audit   Audit   `json:"audit"`
+}
+type Node struct {
+	Name  string   `json:"name"`
+	Roles []string `json:"roles"`
+}
+type Mesh struct {
+	Mode        string `json:"mode"`
+	ControlURL  string `json:"control_url"`
+	AuthkeyFile string `json:"authkey_file"`
+	LAN         struct {
+		MDNS bool `json:"mdns"`
+	} `json:"lan"`
+}
+type Gateway struct {
+	Listen         string `json:"listen"`
+	ExposeBackends string `json:"expose_backends"`
+}
+type Ingress struct {
+	Listen   string `json:"listen"`
+	Domain   string `json:"domain"`
+	TLS      string `json:"tls"`
+	CertFile string `json:"cert_file"`
+	KeyFile  string `json:"key_file"`
+	OAuth    struct {
+		Issuer  string `json:"issuer"`
+		Clients map[string]struct {
+			Scopes []string `json:"scopes"`
+		} `json:"clients"`
+	} `json:"oauth"`
+}
+type Agent struct {
+	DefaultCWD string                   `json:"default_cwd"`
+	Workspaces map[string]cwd.Workspace `json:"workspaces"`
+	CWDPolicy  cwd.Policy               `json:"cwd_policy"`
+	Exec       Exec                     `json:"exec"`
+	PTY        PTY                      `json:"pty"`
+	Backends   map[string]Backend       `json:"backends"`
+	Authz      map[string]Grant         `json:"authz"`
+	Policy     Policy                   `json:"policy"`
+}
+type Exec struct {
+	MaxConcurrent     int    `json:"max_concurrent"`
+	ExclusiveSlots    int    `json:"exclusive_slots"`
+	DefaultTimeout    string `json:"default_timeout"`
+	IdempotencyCache  int    `json:"idempotency_cache"`
+	InlineOutputBytes string `json:"inline_output_bytes"`
+}
+type PTY struct {
+	MaxSessions     int    `json:"max_sessions"`
+	MaxPerCaller    int    `json:"max_per_caller"`
+	IdleTimeout     string `json:"idle_timeout"`
+	OrphanGrace     string `json:"orphan_grace"`
+	ScrollbackBytes string `json:"scrollback_bytes"`
+	DefaultShell    string `json:"default_shell"`
+	ClosedRetain    string `json:"closed_retain"`
+	ClosedRetainMax int    `json:"closed_retain_max"`
+}
+type Backend struct {
+	Transport   string   `json:"transport"`
+	Command     []string `json:"command"`
+	URL         string   `json:"url"`
+	CWD         string   `json:"cwd"`
+	Policy      string   `json:"policy"`
+	IdleTimeout string   `json:"idle_timeout"`
+	Favorite    bool     `json:"favorite"`
+}
+type Grant struct {
+	Backends []string `json:"backends"`
+	Tools    []string `json:"tools"`
+}
+type Policy struct {
+	Isolation      string `json:"isolation"`
+	AllowDangerous bool   `json:"allow_dangerous"`
+	Exec           struct {
+		AllowCmd     []string `json:"allow_cmd"`
+		DenyPatterns []string `json:"deny_patterns"`
+	} `json:"exec"`
+	Env struct {
+		DenyNames          []string `json:"deny_names"`
+		DenyPathSubstrings []string `json:"deny_path_substrings"`
+	} `json:"env"`
+}
+type Audit struct {
+	Retention string `json:"retention"`
+	Dir       string `json:"dir"`
+}
+
+func (c *Config) HasRole(role string) bool {
+	for _, r := range c.Node.Roles {
+		if role == r {
+			return true
+		}
+	}
+	return false
+}
+func Load(path string) (*Config, error) {
+	b, e := os.ReadFile(path)
+	if e != nil {
+		return nil, e
+	}
+	return Parse(b)
+}
+func Parse(b []byte) (*Config, error) {
+	var doc map[string]any
+	d := yaml.NewDecoder(bytes.NewReader(b))
+	if e := d.Decode(&doc); e != nil {
+		return nil, e
+	}
+	var extra any
+	if e := d.Decode(&extra); e == nil {
+		return nil, fmt.Errorf("配置只能包含一个 YAML 文档")
+	}
+	schemaBytes, _ := schemas.Files.ReadFile("config.schema.json")
+	var schema any
+	if e := json.Unmarshal(schemaBytes, &schema); e != nil {
+		return nil, e
+	}
+	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
+	if e := compiler.AddResource("urn:xmesh:config", schema); e != nil {
+		return nil, e
+	}
+	compiled, e := compiler.Compile("urn:xmesh:config")
+	if e != nil {
+		return nil, e
+	}
+	// JSON conversion normalizes the YAML decoder's numeric representation.
+	raw, e := json.Marshal(doc)
+	if e != nil {
+		return nil, e
+	}
+	var normalized any
+	if e = json.Unmarshal(raw, &normalized); e != nil {
+		return nil, e
+	}
+	if e = compiled.Validate(normalized); e != nil {
+		return nil, e
+	}
+	c := &Config{}
+	c.Agent.Exec = Exec{4, 1, "120s", 200, "256KiB"}
+	c.Agent.PTY = PTY{20, 8, "30m", "10m", "1MiB", "auto", "5m", 20}
+	c.Agent.Policy.Isolation = "L1"
+	c.Agent.DefaultCWD = "~"
+	c.Gateway.ExposeBackends = "all"
+	c.Audit.Retention = "720h"
+	if e = json.Unmarshal(raw, c); e != nil {
+		return nil, e
+	}
+	if e = c.Validate(); e != nil {
+		return nil, e
+	}
+	return c, nil
+}
+func (c *Config) Validate() error {
+	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
+	if c.Gateway.Listen != "" {
+		host, _, e := net.SplitHostPort(c.Gateway.Listen)
+		if e != nil || host != "127.0.0.1" {
+			return fail("/gateway/listen")
+		}
+	}
+	if c.HasRole("ingress") {
+		if c.Mesh.Mode == "lan" {
+			return fail("/ingress: lan 模式不提供 OAuth 或 Funnel")
+		}
+		if c.Ingress.Listen == "funnel" {
+			u, e := url.Parse(c.Mesh.ControlURL)
+			if e != nil || u.Host != "controlplane.tailscale.com" {
+				return fail("/mesh/control_url: Funnel 要求官方控制面")
+			}
+		}
+	}
+	for name, b := range c.Agent.Backends {
+		if b.Transport == "http" {
+			u, e := url.Parse(b.URL)
+			if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+				return fail("/agent/backends/" + name + "/url")
+			}
+			host := u.Hostname()
+			ip, e := netip.ParseAddr(host)
+			tailnet := netip.MustParsePrefix("100.64.0.0/10")
+			v6 := netip.MustParsePrefix("fd7a:115c:a1e0::/48")
+			if host != "localhost" && (e != nil || (!ip.IsLoopback() && !tailnet.Contains(ip) && !v6.Contains(ip))) {
+				return fail("/agent/backends/" + name + "/url")
+			}
+		}
+	}
+	durations := map[string]string{"/agent/exec/default_timeout": c.Agent.Exec.DefaultTimeout, "/agent/pty/idle_timeout": c.Agent.PTY.IdleTimeout, "/agent/pty/orphan_grace": c.Agent.PTY.OrphanGrace, "/agent/pty/closed_retain": c.Agent.PTY.ClosedRetain, "/audit/retention": c.Audit.Retention}
+	for name, b := range c.Agent.Backends {
+		if b.IdleTimeout != "" {
+			durations["/agent/backends/"+name+"/idle_timeout"] = b.IdleTimeout
+		}
+	}
+	for p, s := range durations {
+		v, e := time.ParseDuration(s)
+		if e != nil || v < 0 {
+			return fail(p)
+		}
+	}
+	for p, s := range map[string]string{"/agent/exec/inline_output_bytes": c.Agent.Exec.InlineOutputBytes, "/agent/pty/scrollback_bytes": c.Agent.PTY.ScrollbackBytes} {
+		n, e := Size(s)
+		if e != nil || n < 1 {
+			return fail(p)
+		}
+	}
+	for _, p := range c.Agent.Policy.Exec.DenyPatterns {
+		if _, e := regexp.Compile(p); e != nil {
+			return fail("/agent/policy/exec/deny_patterns")
+		}
+	}
+	return nil
+}
+func Duration(s string) time.Duration { v, _ := time.ParseDuration(s); return v }
+func Size(s string) (int, error) {
+	re := regexp.MustCompile(`^([0-9]+)([KMGT]iB|B)?$`)
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return 0, fmt.Errorf("尺寸无效")
+	}
+	n, e := strconv.ParseUint(m[1], 10, 64)
+	if e != nil {
+		return 0, e
+	}
+	shift := uint(0)
+	if m[2] != "" && m[2] != "B" {
+		shift = uint(strings.Index("KMGT", m[2][:1])+1) * 10
+	}
+	if n > uint64(math.MaxInt)>>shift {
+		return 0, fmt.Errorf("尺寸溢出")
+	}
+	return int(n << shift), nil
+}
