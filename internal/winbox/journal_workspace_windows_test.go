@@ -95,16 +95,6 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 			}()
 			created := filepath.Join(root, "new-tree", "level-1", "level-2", "created.txt")
 			createdLabel := objectLabel(t, created)
-			other, err := New()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer other.Close()
-			otherGrant, err := other.grantObject(created)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer otherGrant.Close()
 			if stage == "admitted" {
 				admitted, control := kernelJournalState(t, root)
 				count := len(j.records)
@@ -167,6 +157,18 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 					t.Fatal("rejected namespace census changed root descriptor or journal")
 				}
 			}
+			// The root-replacement preflight above needs a movable namespace.
+			// This profile retains ordinary pathname handles on its selected file.
+			other, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer other.Close()
+			otherGrant, err := other.grantObject(created)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer otherGrant.Close()
 			if err := recoverWorkspaceJournal(j, 64); err != nil {
 				t.Fatal(err)
 			}
