@@ -1,0 +1,35 @@
+{
+  "node": {
+    "name": "pat-demo",
+    "roles": [
+      "agent",
+      "gateway"
+    ]
+  },
+  "mesh": {
+    "mode": "lan",
+    "lan": {
+      "mdns": true
+    }
+  },
+  "gateway": {
+    "listen": "127.0.0.1:8080",
+    "pats": {
+      "reader": {
+        "token_file": "/secure/xmesh-reader.pat",
+        "scopes": [
+          "devices:read",
+          "fs:read:pat-demo"
+        ]
+      }
+    }
+  },
+  "agent": {
+    "default_cwd": "/srv/workspace",
+    "cwd_policy": {
+      "allow": [
+        "/srv/workspace"
+      ]
+    }
+  }
+}

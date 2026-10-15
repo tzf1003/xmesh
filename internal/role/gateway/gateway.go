@@ -23,9 +23,10 @@ import (
 )
 
 type Principal struct {
-	ClientID string
-	Scopes   []string
-	Local    bool
+	ClientID     string
+	CredentialID string
+	Scopes       []string
+	Local        bool
 }
 type Dial func(context.Context, mesh.Peer, Principal, mcpmux.Options) (*mcpmux.Bridge, error)
 type Discover func(context.Context) ([]mesh.Peer, error)
@@ -240,7 +241,7 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 				}
 			}
 			g.mu.Unlock()
-			if existing != nil && (existing.p.ClientID != p.ClientID || existing.p.Local != p.Local || scopeKey(existing.p.Scopes) != scopeKey(p.Scopes)) {
+			if existing != nil && (existing.p.ClientID != p.ClientID || existing.p.CredentialID != p.CredentialID || existing.p.Local != p.Local || scopeKey(existing.p.Scopes) != scopeKey(p.Scopes)) {
 				http.Error(w, "会话身份不匹配", 403)
 				return
 			}
@@ -283,6 +284,9 @@ func (g *Gateway) newView(p Principal) *view {
 			}
 			if method == "tools/call" {
 				principal := v.p.ClientID
+				if v.p.CredentialID != "" {
+					principal = v.p.CredentialID
+				}
 				if principal == "" {
 					principal = "local"
 				}

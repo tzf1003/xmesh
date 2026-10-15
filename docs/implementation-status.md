@@ -12,7 +12,7 @@
 | 后端 | stdio/HTTP MCP、actor 串行、exclusive fencing lease、空闲回收、故障失效、策略重载保留有效租约 |
 | MCP 多路复用 | 上下游请求映射、通知、进度、sampling 路由、断线取消 |
 | 设备网络 | tsnet 注册与 WhoIs、tag 授权、LAN 证书配对与续期、mTLS、mDNS 发现 |
-| Gateway | 设备前缀、能力缓存、搜索、连接默认值、断线停路由、持续 drain 状态 |
+| Gateway | 设备前缀、能力缓存、搜索、连接默认值、断线停路由、持续 drain 状态、本机 PAT 文件认证与 scope、凭据轮转和会话绑定 |
 | OAuth 与入口 | 元数据、动态注册、PKCE S256、单主体口令、CSRF、scope、令牌轮转、客户端注册及回调 URI 持久化、Funnel/隧道/HTTPS 入口装配 |
 | 治理与运行 | 元数据审计、热加载失败记录、重启提示、调用预算、Agent 客户端 PTY 预算、keep/kill drain、CLI 与服务失败退出 |
 
@@ -20,11 +20,11 @@
 
 ## 已执行验证
 
-- macOS：`go test -race ./... -timeout=60s`，20 个包共 79 项通过；`go vet ./...` 通过。HTTP 集成覆盖文件、exec、PTY、后端及 OAuth→Gateway→Agent 所有权隔离。
+- macOS：`go test -race ./... -timeout=60s`，20 个包共 84 项通过；`go vet ./...` 通过。HTTP 集成覆盖文件、exec、PTY、后端及 OAuth→Gateway→Agent 所有权隔离。
 - Windows amd64 与 Linux amd64：`go build ./...` 交叉编译通过。
 - 配置、错误、租约、审计的正反例及文档链接：`check_examples.py` 通过。
 - Ubuntu 24.04 amd64 原生：PTY 6 项、exec 6 项、文件搜索 5 项及 policy 3 项通过。使用实际二进制的 L1、L2 MCP 冒烟均通过文件、exec、PTY、审计正文排除及正常退出检查。
-- macOS 实际二进制：L1 MCP 冒烟通过，同一脚本可用 `scripts/smoke_local.py` 复跑。
+- macOS 与 Ubuntu 实际二进制：带 PAT 的 L1 MCP 冒烟通过；覆盖 CLI 凭据读取、文件、exec、PTY、审计及退出。Gateway 认证测试覆盖 scope 过滤、写入拒绝、凭据轮转和跨凭据会话隔离。脚本为 `scripts/smoke_local.py --pat`。
 
 Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该机 AppArmor 限制非特权 user namespace：普通用户 L2 验证使用只绑定测试目录中 bwrap 可执行文件、允许 `userns` 的临时 profile，测试结束已卸载。root 下的独立 L2 用例也通过。普通用户结果依赖该临时 profile，部署时须配置对应主机策略。
 
@@ -34,7 +34,6 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 
 | 项目 | 当前边界 |
 | --- | --- |
-| PAT | 契约已定义；本机 Gateway 的 PAT 配置、存储及 scope 认证待实现 |
 | 入口 PTY 总预算 | Agent 内按 OAuth client/节点跨会话计数已实现；跨设备入口聚合待实现 |
 | macOS/Windows L2 | 当前请求 L2 会拒绝执行；平台沙箱待实现 |
 | Windows 用户服务 | 当前使用 SCM 服务，需要管理员权限；用户级启动待实现 |

@@ -30,11 +30,14 @@
 | `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载 |
 | `agent.exec` 的配额数字、`agent.pty` 的上限 | 热加载。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
+| `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
 | `node`、`mesh`、`ingress.listen` | 不热加载。`status` 提示需要重启 |
 
 ### 密钥
 
 `authkey_file` 指向的文件内容不写入日志、审计或 `status` 的默认输出。`status --json` 只报告该文件是否可读。OAuth 客户端密钥若由动态注册生成，只在注册响应里出现一次，落盘时权限为仅所有者可读。
+
+`gateway.pats` 是名称到 `{token_file, scopes}` 的映射，scope 使用 OAuth 相同语法。配置非空时，本机 Gateway 的所有请求均须携带有效 Bearer。凭据文件为普通文件、最多 4096 字节，token 至少 32 字符且无内部空白；Unix 文件禁止 group/other 权限。凭据轮转和撤销逐请求生效，凭据名称参与 MCP 会话绑定。操作示例见[运行手册](../operations.md#本机-gateway-pat)。
 
 ### 示例
 

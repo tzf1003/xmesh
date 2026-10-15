@@ -8,8 +8,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -70,13 +74,32 @@ func status(args []string) error {
 	endpoint := flags.String("endpoint", "http://127.0.0.1:7433/mcp", "运行中的 MCP 地址")
 	machine := flags.Bool("json", false, "输出 JSON")
 	tool := flags.String("tool", "sys.info", "状态工具名；Gateway 使用 local/sys.info")
+	patFile := flags.String("pat-file", "", "本机 Gateway 的 PAT 文件")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := mcp.NewClient(&mcp.Implementation{Name: "xmesh-status", Version: "0.1.0"}, nil)
-	s, e := c.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: *endpoint}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	transport := &mcp.StreamableClientTransport{Endpoint: *endpoint}
+	if *patFile != "" {
+		u, err := url.Parse(*endpoint)
+		if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil {
+			return fmt.Errorf("PAT 仅用于本机 Gateway")
+		}
+		f, err := os.Open(*patFile)
+		if err != nil {
+			return fmt.Errorf("无法读取 PAT 文件")
+		}
+		b, err := io.ReadAll(io.LimitReader(f, 4097))
+		f.Close()
+		token := strings.TrimSpace(string(b))
+		if err != nil || len(b) > 4096 || len(token) < 32 || strings.ContainsAny(token, " \t\r\n") {
+			return fmt.Errorf("PAT 文件无效")
+		}
+		transport.HTTPClient = &http.Client{Transport: patTransport{token: token}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
+	s, e := c.Connect(ctx, transport, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 	if e != nil {
 		return e
 	}
@@ -101,4 +124,12 @@ func status(args []string) error {
 		}
 	}
 	return nil
+}
+
+type patTransport struct{ token string }
+
+func (p patTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	copy := r.Clone(r.Context())
+	copy.Header.Set("Authorization", "Bearer "+p.token)
+	return http.DefaultTransport.RoundTrip(copy)
 }

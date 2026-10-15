@@ -225,13 +225,7 @@ func Run(ctx context.Context, store *config.Store, o Options) error {
 		if e != nil {
 			return e
 		}
-		launch(listener, g.HTTP(func(r *http.Request) (gateway.Principal, error) {
-			host, _, e := net.SplitHostPort(r.RemoteAddr)
-			if e != nil || host != "127.0.0.1" {
-				return gateway.Principal{}, fmt.Errorf("Gateway 仅接受本机连接")
-			}
-			return gateway.Principal{Local: true}, nil
-		}), "Gateway MCP", nil)
+		launch(listener, g.HTTP(gateway.LocalAuthentication(store)), "Gateway MCP", nil)
 	}
 	if c.HasRole("ingress") {
 		if o.Local {

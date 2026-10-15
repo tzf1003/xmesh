@@ -57,6 +57,28 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --json
 
 远端工具名为 `<node.name>/exec.run` 等；本机 Gateway 上为 `local/exec.run`。`sys.info` 返回实际网络身份、角色、重载失败及待重启提示。
 
+## 本机 Gateway PAT
+
+在 `gateway.pats` 中按凭据名称配置文件和 scope：
+
+```yaml
+gateway:
+  listen: 127.0.0.1:8080
+  pats:
+    reader:
+      token_file: /secure/xmesh-reader.pat
+      scopes: [devices:read, 'fs:read:linux-dev', 'sys:linux-dev']
+```
+
+使用密码学随机源生成至少 32 字符的 token，文件最多 4096 字节，仅包含 token 和可选首尾空白。Unix 文件权限须为 `0600` 或更严格；Windows 部署须通过文件 ACL 限制读取者。客户端向本机 Gateway 发送 `Authorization: Bearer <token>`。配置任意 PAT 后，每个请求均须认证；空 PAT 配置保留本机完整访问。携带无效 Bearer 的请求会被拒绝。
+
+```bash
+bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --pat-file /secure/xmesh-reader.pat --json
+python3 scripts/smoke_local.py --binary bin/xmesh --pat
+```
+
+认证逐请求读取当前配置与凭据文件，替换文件即可轮转 token，删除配置项即可撤销该凭据。任一已配置文件无效或同一 token 对应多个名称时，认证失败。scope 变更后应创建新 MCP 会话；每个 PAT 名称具有独立会话身份与调用预算。PAT 的 scope 在 Gateway 检查，Agent 按 Gateway 的可信节点身份和 tag 再检查授权。
+
 ## LAN 配对
 
 LAN 模式通过 mDNS 发现，配对记录中的公钥用于 mTLS 验证。双方交换公开导出文件，并通过独立可信渠道核对指纹：

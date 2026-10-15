@@ -5,6 +5,7 @@ import argparse
 import http.client
 import json
 import pathlib
+import secrets
 import socket
 import subprocess
 import tempfile
@@ -18,8 +19,9 @@ def address():
 
 
 class MCP:
-    def __init__(self, addr):
+    def __init__(self, addr, token=None):
         self.addr, self.session, self.counter = addr, None, 0
+        self.token = token
         self.request("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                     "clientInfo": {"name": "xmesh-smoke", "version": "1"}})
         self.request("notifications/initialized", {}, notification=True)
@@ -33,6 +35,8 @@ class MCP:
                    "MCP-Protocol-Version": "2025-11-25"}
         if self.session:
             headers["Mcp-Session-Id"] = self.session
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
         connection = http.client.HTTPConnection(self.addr, timeout=15)
         try:
             connection.request("POST", "/mcp", json.dumps(body), headers)
@@ -62,8 +66,10 @@ class MCP:
             return
         connection = http.client.HTTPConnection(self.addr, timeout=15)
         try:
-            connection.request("DELETE", "/mcp", headers={"Mcp-Session-Id": self.session,
-                               "MCP-Protocol-Version": "2025-11-25"})
+            headers = {"Mcp-Session-Id": self.session, "MCP-Protocol-Version": "2025-11-25"}
+            if self.token:
+                headers["Authorization"] = "Bearer " + self.token
+            connection.request("DELETE", "/mcp", headers=headers)
             response = connection.getresponse()
             response.read()
             assert response.status in (200, 204), response.status
@@ -76,6 +82,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--isolation", choices=["L1", "L2"], default="L1")
+    parser.add_argument("--pat", action="store_true", help="Require a temporary Gateway PAT")
     options = parser.parse_args()
     binary = options.binary.resolve()
     with tempfile.TemporaryDirectory(prefix="xmesh-smoke-") as temporary:
@@ -89,6 +96,14 @@ def main():
                          "policy": {"isolation": options.isolation},
                          "pty": {"default_shell": "/bin/sh"},
                          "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}}}}
+        token = None
+        if options.pat:
+            token = secrets.token_urlsafe(32)
+            pat_file = root / "gateway-pat"
+            pat_file.touch(mode=0o600)
+            pat_file.write_text(token)
+            cfg["gateway"]["pats"] = {"smoke": {"token_file": str(pat_file),
+                "scopes": ["devices:read", "sys:*", "fs:*", "exec:*", "pty:*"]}}
         config = root / "config.json"
         config.write_text(json.dumps(cfg))
         state = root / "state"
@@ -99,7 +114,7 @@ def main():
                 deadline = time.monotonic() + 15
                 while True:
                     try:
-                        client = MCP(gateway)
+                        client = MCP(gateway, token)
                         break
                     except (OSError, http.client.HTTPException):
                         if process.poll() is not None or time.monotonic() >= deadline:
@@ -109,6 +124,10 @@ def main():
                 status = subprocess.check_output([str(binary), "status", "--endpoint", f"http://{direct}/mcp", "--json"])
                 info = json.loads(status)
                 assert info["roles"] == ["agent", "gateway"] and info["network"]["mode"] == "local", info
+                if options.pat:
+                    status = subprocess.check_output([str(binary), "status", "--endpoint", f"http://{gateway}/mcp",
+                        "--tool", "local/sys.info", "--pat-file", str(pat_file), "--json"])
+                    assert json.loads(status)["hostname"] == "smoke-node"
                 tools = client.request("tools/list", {})["tools"]
                 assert any(tool["name"] == "local/exec.run" for tool in tools)
                 client.call("local/fs.write", {"path": "roundtrip", "content": "SMOKE_PRIVATE_BODY"})
@@ -142,7 +161,7 @@ def main():
                 assert process.returncode == 0, process.returncode
             audit = "".join(path.read_text() for path in (state / "audit").glob("*.jsonl"))
             assert audit and all(marker not in audit for marker in ["SMOKE_PRIVATE_BODY", "SMOKE_EXEC_MARKER", "SMOKE_PTY_MARKER"])
-            print(json.dumps({"result": "PASS", "isolation": options.isolation, "tools": len(tools),
+            print(json.dumps({"result": "PASS", "isolation": options.isolation, "pat": options.pat, "tools": len(tools),
                               "checks": ["status", "gateway", "file-roundtrip", "exec", "pty", "shutdown", "audit"]}))
 
 

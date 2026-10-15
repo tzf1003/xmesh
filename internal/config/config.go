@@ -42,8 +42,13 @@ type Mesh struct {
 	} `json:"lan"`
 }
 type Gateway struct {
-	Listen         string `json:"listen"`
-	ExposeBackends string `json:"expose_backends"`
+	Listen         string         `json:"listen"`
+	ExposeBackends string         `json:"expose_backends"`
+	PATs           map[string]PAT `json:"pats"`
+}
+type PAT struct {
+	TokenFile string   `json:"token_file"`
+	Scopes    []string `json:"scopes"`
 }
 type Ingress struct {
 	Listen   string `json:"listen"`
