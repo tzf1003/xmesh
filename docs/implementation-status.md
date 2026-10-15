@@ -52,15 +52,11 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 `4a00a00` 的 push 工作流通过三平台全量 race、vet、构建和 Windows 独立原生任务；PR 的 Windows 原生与 Windows/Ubuntu 全量检查通过。单对象 AppContainer 授权验证 Medium 文件读写与目录创建、完整性标签保持、已有子目录及目录外拒绝、另一 profile 的 ACE 保留、文件与目录改名和路径替换后的准确回收，以及硬链接、重解析点和 null DACL 拒绝。PR macOS 审计测试跨分钟轮转时只读取首个日志分片；断言改为读取全部分片、检查正文排除及两类事件各一条，本地连续 200 轮与全量 race、vet 通过。
 
-`c7bf24e` 的 push 与 PR 工作流均通过三平台全量检查和 Windows 独立原生任务。工作树检查原语已实现句柄相对扫描、根与祖先绑定、128 位对象身份核对及失败释放。`8bb5f11` 的三平台全量检查通过；原生扫描、拒绝条件的正常目录对照和路径替换检测通过，包含保留子文件句柄的目录改名返回拒绝。原生用例继续验收文件编辑、空目录改名与替换后的句柄身份，以及关闭后恢复目录改名；完整执行期授权生命周期待实现。逐项证据见 [Windows 验收记录](validation/2026-10-15-windows.md)。
+`a7d8d00` 的 [push 工作流 38787143686](https://github.com/tzf1003/xmesh/actions/runs/38787143686) 与 [PR 工作流 38787146967](https://github.com/tzf1003/xmesh/actions/runs/38787146967) 全部通过三平台全量 race、vet、构建及 Windows 独立原生任务；契约夹具与文档链接也通过。Windows 原生 job 为 `116601950766` 和 `116601961820`。
 
-`81adb07` 的 push 与 PR 工作流全部通过三平台全量检查、契约夹具和 Windows 独立原生任务；工作树扫描的 703 对象、多批枚举、根与祖先绑定、文件编辑、空目录改名/路径替换身份及关闭后目录改名通过。已选对象授权实现非继承句柄复制与再次核对对象身份，Windows 双架构 vet 和 amd64 测试交叉编译通过；原路径替换后授权、快照独立关闭与准确回收的新原生用例待 CI。完整工作树授权与生产执行接入继续推进。
+工作树选择已通过 703 对象、多批枚举、Unicode、根与祖先绑定、文件编辑、空目录改名/路径替换及关闭后的目录改名验收。所选对象按卷号、128 位 ID 和类型重新核对后授权；独立且不可继承的身份与窄权限安全句柄保持对象绑定。原生验收覆盖路径替换、改名、delete-pending 文件与空目录的准确回收，以及其他 profile ACE 和 Medium 标签保持。根授权保持普通继承与受保护 DACL 的全部控制位、所有者、组和已有子对象 ACL。
 
-`beae5de` 的 push 与 PR 工作流全部通过，按已选句柄授权的 file/directory 原生用例通过。ACL 更新现按对象身份临时取得 `READ_CONTROL|WRITE_DAC`，直接设置所选对象的 DACL；保留根目录绑定的授权与回收、描述符控制与标签保持、已有子对象 ACL 保持的新原生用例待 CI。Windows 双架构 vet 和 amd64 测试交叉编译通过。
-
-`5d41040` 的 PR 三平台全量检查和 push/PR Windows 原生任务通过；普通继承与受保护根 DACL 的控制位、标签、子对象保持和真实 helper 隔离均通过。对象授权现保留独立窄权限安全句柄，覆盖 delete-pending 回收并检查两类句柄均不可继承；本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过；新原生用例已由 `0f0536a` 的 push 与 PR 工作流验收通过。
-
-`0f0536a` 的 PR 原生任务通过 delete-pending 文件与空目录的准确 ACL 回收及完整回归。现有快照对象的组合授权已实现按序准入、取消与失败回滚、独立项继续释放及失败项保留重试；Windows 双架构 vet 与 amd64 交叉编译通过，四个组合原生子例由 `6071bc3` 验收通过。
+现有对象的组合授权按序准入，取消或中途身份变化时逆序回滚；释放继续清理独立项，失败项保留句柄与 profile 引用供重试。release、rollback、cancel、retry 四个子例全部通过原生验收。Windows 功能测试为 PowerShell 首次启动和 HTTP MCP `exec.run` 保留 30 秒期限，实际超时与清理用例继续通过。完整工作树的新对象继承、目录改名兼容、跨进程 ACL 协调、持久恢复和 exec/ConPTY 接入继续推进。
 
 ## 待实现与待验收
 
@@ -76,11 +72,3 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 | 本机客户端 | Claude Code 人工连接观察待执行 |
 
 以上自动测试覆盖已实现行为；各门的外部验收仍按[符合性矩阵](conformance.md)逐项执行。
-
-`0df20f1` 的 PR 三平台全量检查通过，根 ACL 原生测试中普通继承 DACL 用例通过，受保护 DACL 的描述符状态保持断言失败。ACL 更新现显式传入当前 DACL 保护状态，Windows 双架构 vet 与 amd64 交叉编译通过，原生复验待 CI。
-
-`f4a1f6e` 的 push 与 PR 三平台全量检查通过。原生复验将受保护根的控制位差异定位为 `SE_DACL_AUTO_INHERITED`；直接更新现为已有自动继承状态提供请求标志，保留全部控制位与子对象断言，Windows 双架构 vet 与 amd64 交叉编译通过，原生复验待 CI。
-
-`79ec614` 的 PR 三平台全量检查通过。delete-pending 原生用例确认既有句柄仍可重开，用例改为检查原路径不可打开后准确回收 ACL、重复释放与 profile 生命周期，`0f0536a` 的 push 与 PR 工作流已全部通过。
-
-`6071bc3` 的 push Windows 原生任务全部通过，PR 原生中的组合授权与 AppContainer 步骤通过；PR 原生 PowerShell 标准启动和 push Windows HTTP MCP 命令调用分别达到既有 10 秒期限。功能验收现为这两类 Windows 启动提供 30 秒，并补充超时输出；本地受影响包 race 与 Windows 双架构 vet 通过，原生复验待 CI。
