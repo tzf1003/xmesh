@@ -21,7 +21,7 @@ type windowsTerminal struct {
 	consoleOnce   sync.Once
 }
 
-func start(shell, cwd string, env []string, cols, rows int) (terminal, error) {
+func start(shell string, args []string, cwd string, env []string, cols, rows int) (terminal, error) {
 	var inR, inW, outR, outW windows.Handle
 	if e := windows.CreatePipe(&inR, &inW, nil, 0); e != nil {
 		return nil, e
@@ -49,7 +49,7 @@ func start(shell, cwd string, env []string, cols, rows int) (terminal, error) {
 		return nil, e
 	}
 	si := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
-	command, e := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{shell}))
+	command, e := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{shell}, args...)))
 	if e != nil {
 		t.Close()
 		return nil, e

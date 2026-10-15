@@ -239,6 +239,10 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	if e = p.Command(shell, nil); e != nil {
 		return nil, e
 	}
+	launch, argv, env, e := p.Sandbox(shell, nil, resolved.Path, env)
+	if e != nil {
+		return nil, e
+	}
 	random := make([]byte, 12)
 	if _, e = rand.Read(random); e != nil {
 		return nil, e
@@ -258,7 +262,7 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	m.sessions[s.ID] = s
 	m.byCaller[c.ID]++
 	m.mu.Unlock()
-	term, e := start(shell, resolved.Path, env, a.Cols, a.Rows)
+	term, e := start(launch, argv, resolved.Path, env, a.Cols, a.Rows)
 	m.mu.Lock()
 	if e != nil {
 		if s.State == "active" {

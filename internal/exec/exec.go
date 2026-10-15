@@ -140,7 +140,7 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	m.wg.Add(1)
 	m.mu.Unlock()
 	defer m.wg.Done()
-	result, err := m.execute(ctx, caller, resolved.Path, env, a, cfg, rec, timeout)
+	result, err := m.execute(ctx, caller, resolved.Path, env, a, cfg, rec, timeout, p)
 	m.mu.Lock()
 	rec.result = clone(result)
 	rec.err = err
@@ -158,7 +158,7 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	m.mu.Unlock()
 	return result, err
 }
-func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration) (Object, error) {
+func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration, p *policy.Engine) (Object, error) {
 	release, wait, e := m.scheduler.acquire(ctx, caller, a.Mode)
 	if e != nil {
 		return nil, e
@@ -185,7 +185,11 @@ func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string,
 			os.Remove(errout.Name())
 		}
 	}()
-	cmd := osexec.Command(a.Cmd, a.Args...)
+	launch, argv, env, e := p.Sandbox(a.Cmd, a.Args, cwd, env)
+	if e != nil {
+		return nil, e
+	}
+	cmd := osexec.Command(launch, argv...)
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = strings.NewReader(a.Stdin)

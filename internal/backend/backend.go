@@ -135,7 +135,11 @@ func (a *actor) connect(ctx context.Context) (*mcpmux.Bridge, error) {
 		if e = engine.Command(command[0], command[1:]); e != nil {
 			return nil, e
 		}
-		cmd := exec.Command(command[0], command[1:]...)
+		launch, argv, env, e := engine.Sandbox(command[0], command[1:], resolved.Path, env)
+		if e != nil {
+			return nil, e
+		}
+		cmd := exec.Command(launch, argv...)
 		cmd.Dir = resolved.Path
 		cmd.Env = env
 		transport = &mcp.CommandTransport{Command: cmd, TerminateDuration: 250 * time.Millisecond}

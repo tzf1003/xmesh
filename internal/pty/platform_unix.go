@@ -14,8 +14,8 @@ type unixTerminal struct {
 	cmd  *exec.Cmd
 }
 
-func start(shell, cwd string, env []string, cols, rows int) (terminal, error) {
-	cmd := exec.Command(shell)
+func start(shell string, args []string, cwd string, env []string, cols, rows int) (terminal, error) {
+	cmd := exec.Command(shell, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(env, "TERM=xterm-256color")
 	f, e := unixpty.StartWithSize(cmd, &unixpty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
