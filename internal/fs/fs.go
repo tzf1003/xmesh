@@ -418,7 +418,7 @@ func atomicWrite(path string, b []byte, expected string) error {
 			return conflict(path, current)
 		}
 	}
-	if e = os.Rename(tmp, path); e != nil {
+	if e = atomicReplace(tmp, path); e != nil {
 		return toolerr.Internal("fs.rename", e)
 	}
 	return nil

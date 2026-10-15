@@ -200,3 +200,5 @@ go test ./internal/exec -run WindowsExec -v -timeout=120s
 ```
 
 用例检查准入前暂停、恢复后执行、正常退出和超时清理，以及大输入被后代持有时执行调用的结束。
+
+Windows 的 `fs.write` 和 `fs.edit` 使用 `FileRenameInfoEx` 的 POSIX 替换语义：已有读取句柄继续读取旧内容，之后打开的句柄读取完整新内容。文件系统或系统版本不支持该操作时返回写入错误，并清理临时文件。

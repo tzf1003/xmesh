@@ -3,6 +3,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -66,6 +67,61 @@ func Test_WindowsExecSuspendedAdmission(t *testing.T) {
 	}
 	if err := resumeSuspendedProcess(^uint32(0)); err == nil {
 		t.Fatal("accepted missing process")
+	}
+}
+
+func Test_WindowsExecPowerShell(t *testing.T) {
+	windowsExecRuntime(t)
+	shell, err := osexec.LookPath("powershell")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.New(config.Policy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := p.Environment(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tracked := range []bool{false, true} {
+		name := "standard-launch"
+		if tracked {
+			name = "job-launch"
+		}
+		t.Run(name, func(t *testing.T) {
+			cmd := osexec.Command(shell, "-NoProfile", "-Command", "Write-Output hello")
+			cmd.Dir, cmd.Env, cmd.Stdin = t.TempDir(), env, strings.NewReader("")
+			var output bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &output, &output
+			if tracked {
+				prepare(cmd)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			if tracked {
+				finish, err := track(cmd)
+				if err != nil {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+					t.Fatal(err)
+				}
+				defer finish()
+			}
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case err = <-done:
+			case <-time.After(20 * time.Second):
+				_ = cmd.Process.Kill()
+				<-done
+				t.Fatal("PowerShell launch did not complete")
+			}
+			if err != nil || strings.TrimSpace(output.String()) != "hello" {
+				t.Fatal("PowerShell output", output.String(), err)
+			}
+		})
 	}
 }
 
