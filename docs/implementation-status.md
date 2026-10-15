@@ -56,7 +56,9 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 工作树选择已通过 703 对象、多批枚举、Unicode、根与祖先绑定、文件编辑、空目录改名/路径替换及关闭后的目录改名验收。所选对象按卷号、128 位 ID 和类型重新核对后授权；独立且不可继承的身份与窄权限安全句柄保持对象绑定。原生验收覆盖路径替换、改名、delete-pending 文件与空目录的准确回收，以及其他 profile ACE 和 Medium 标签保持。根授权保持普通继承与受保护 DACL 的全部控制位、所有者、组和已有子对象 ACL。
 
-现有对象的组合授权按序准入，取消或中途身份变化时逆序回滚；释放继续清理独立项，失败项保留句柄与 profile 引用供重试。release、rollback、cancel、retry 四个子例全部通过原生验收。Windows 功能测试为 PowerShell 首次启动和 HTTP MCP `exec.run` 保留 30 秒期限，实际超时与清理用例继续通过。完整工作树的新对象继承、目录改名兼容、跨进程 ACL 协调、持久恢复和 exec/ConPTY 接入继续推进。
+现有对象的组合授权按序准入，取消或中途身份变化时逆序回滚；释放继续清理独立项，失败项保留句柄与 profile 引用供重试。release、rollback、cancel、retry 四个子例全部通过原生验收。Windows 功能测试为 PowerShell 首次启动和 HTTP MCP `exec.run` 保留 30 秒期限，实际超时与清理用例继续通过。完整工作树的新对象继承、目录改名兼容、跨进程 ACL 协调、Windows 凭证目录的大小写/卷/祖先与别名准入、持久恢复和 exec/ConPTY 接入继续推进。
+
+工作树授权新增内部 `grantWorkspace`：既有目录的准确 profile ACE 可向后续子目录与文件继承；回收先撤下显式授权源，再从仍固定的根重扫，按已选对象清理当前 profile 的已知继承 ACE。回收完成前独立持有 profile 引用和根 guard，失败可重试。调用方须独占 profile、协调外部命名空间及 ACL 写入，并在回收前结束全部沙箱进程。新增真实 AppContainer 用例覆盖多层新对象创建读写、回收后拒绝、其他 profile ACE 与标签保持，以及扫描超限后的 profile/guard 保留与重试。本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过，原生结果待 CI。运行期目录改名、跨进程协调、持久恢复和启动接入仍待完成。
 
 ## 待实现与待验收
 

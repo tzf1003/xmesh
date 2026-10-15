@@ -216,6 +216,16 @@ func Test_WindowsAppContainerObjectHelper(t *testing.T) {
 
 func runObjectHelper(t *testing.T, p *Profile, helper, workspace, outside string) objectProof {
 	t.Helper()
+	body := runAppContainerHelper(t, p, helper, "Test_WindowsAppContainerObjectHelper", "XMESH_WINBOX_OBJECT_HELPER", workspace, outside)
+	var proof objectProof
+	if err := json.Unmarshal(body, &proof); err != nil {
+		t.Fatal(err)
+	}
+	return proof
+}
+
+func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, workspace, outside string) []byte {
+	t.Helper()
 	output := filepath.Join(p.Directory(), "object-proof.json")
 	_ = os.Remove(output)
 	job, err := winjob.New()
@@ -235,12 +245,12 @@ func runObjectHelper(t *testing.T, p *Profile, helper, workspace, outside string
 		t.Fatal(err)
 	}
 	startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
-	command, err := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{helper, "-test.run=^Test_WindowsAppContainerObjectHelper$", "--", workspace, outside, output}))
+	command, err := windows.UTF16PtrFromString(windows.ComposeCommandLine([]string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir, _ := windows.UTF16PtrFromString(p.Directory())
-	env, err := Environment([]string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_WINBOX_OBJECT_HELPER=1"})
+	env, err := Environment([]string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,11 +277,7 @@ func runObjectHelper(t *testing.T, p *Profile, helper, workspace, outside string
 	if err != nil {
 		t.Fatal(err)
 	}
-	var proof objectProof
-	if err := json.Unmarshal(body, &proof); err != nil {
-		t.Fatal(err)
-	}
-	return proof
+	return body
 }
 
 func setMediumLabel(t *testing.T, path string) {

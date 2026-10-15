@@ -59,6 +59,10 @@ func (p *Profile) grantObject(path string) (*objectGrant, error) {
 // Callers serialize snapshot closure with this operation and protect the allowed
 // namespace for the complete execution lifetime.
 func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
+	return p.grantSelectedObjectMode(object, false)
+}
+
+func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren bool) (*objectGrant, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.sid == nil {
@@ -102,13 +106,20 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 		const fileDeleteChild = 0x0040
 		mask |= fileDeleteChild
 	}
+	inheritance := uint32(windows.NO_INHERITANCE)
+	if inheritChildren {
+		if !actual.directory {
+			return nil, fmt.Errorf("AppContainer inheritance requires a directory")
+		}
+		inheritance = windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT
+	}
 	var pin runtime.Pinner
 	pin.Pin(p.sid)
 	defer pin.Unpin()
 	entry, err := windows.ACLFromEntries([]windows.EXPLICIT_ACCESS{{
 		AccessPermissions: mask,
 		AccessMode:        windows.GRANT_ACCESS,
-		Inheritance:       windows.NO_INHERITANCE,
+		Inheritance:       inheritance,
 		Trustee: windows.TRUSTEE{
 			TrusteeForm:  windows.TRUSTEE_IS_SID,
 			TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
@@ -175,6 +186,10 @@ func setObjectGrant(handle windows.Handle, ace []byte, add bool) error {
 	if err != nil {
 		return err
 	}
+	return writeObjectDACL(handle, current, merged, defaulted)
+}
+
+func writeObjectDACL(handle windows.Handle, current *windows.SECURITY_DESCRIPTOR, merged *windows.ACL, defaulted bool) error {
 	absolute, err := current.ToAbsolute()
 	if err != nil {
 		return err
@@ -268,7 +283,7 @@ func objectDACL(handle windows.Handle) (*windows.ACL, error) {
 }
 
 // Preserve every unrelated ACE byte-for-byte, including object/callback ACEs.
-// Explicit grants precede inherited ACEs. No inheritance flags are introduced.
+// Explicit grants precede inherited ACEs; target flags are retained exactly.
 func editObjectACL(acl *windows.ACL, target []byte, add bool) (*windows.ACL, error) {
 	header, aces, err := aclParts(acl)
 	if err != nil {
