@@ -205,3 +205,36 @@ func Test_PerCallerIdleRecycle(t *testing.T) {
 		t.Fatal("actor not recreated")
 	}
 }
+
+func Test_CONSEC06_PolicyReloadRetainsProcessAndLease(t *testing.T) {
+	m, leases := fixture(t, "exclusive")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	v, e := m.Control(ctx, "n/a", "backend.acquire", raw(map[string]any{"name": "ida", "ttl": "1m"}))
+	if e != nil {
+		t.Fatal(e)
+	}
+	token := v.(lease.Lease).Token
+	m.mu.Lock()
+	original := m.instances["ida"]
+	next := *m.cfg
+	m.mu.Unlock()
+	next.Agent.Policy.Exec.AllowCmd = []string{"a-command-that-is-not-the-backend"}
+	m.Configure(&next)
+	m.mu.Lock()
+	retained := m.instances["ida"] == original
+	m.mu.Unlock()
+	if !retained || leases.Validate("backend:ida", "n/a", token) != nil {
+		t.Fatal("policy reload discarded active context or lease")
+	}
+	if _, e = m.Call(ctx, "n/a", "ida.echo", raw(map[string]any{"_lease_token": token}), mcpmux.Progress{}); e != nil {
+		t.Fatal("existing process", e)
+	}
+	// A later process start uses the updated policy, including restart paths.
+	if bridge, e := original.connect(ctx); e == nil {
+		_ = bridge.Close()
+		t.Fatal("new process bypassed updated policy")
+	} else if e.(*toolerr.Error).Code != "policy_denied" {
+		t.Fatal(e)
+	}
+}

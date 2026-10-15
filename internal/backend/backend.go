@@ -95,14 +95,19 @@ func (m *Manager) reap(now time.Time) {
 func (m *Manager) Configure(c *config.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	old := m.cfg
 	m.cfg = c
 	for key, a := range m.instances {
 		cfg, ok := c.Agent.Backends[a.name]
-		if !ok || !reflect.DeepEqual(cfg, a.cfg) || (old != nil && (old.Agent.DefaultCWD != c.Agent.DefaultCWD || !reflect.DeepEqual(old.Agent.Policy, c.Agent.Policy) || !reflect.DeepEqual(old.Agent.CWDPolicy, c.Agent.CWDPolicy))) {
+		if !ok || !reflect.DeepEqual(cfg, a.cfg) {
 			a.cancel()
 			delete(m.instances, key)
 			_ = m.leases.Invalidate("backend:" + a.name)
+		} else {
+			// Existing processes retain their context and fencing token. The next
+			// process start resolves paths and policy from the current generation.
+			a.mu.Lock()
+			a.root = c
+			a.mu.Unlock()
 		}
 	}
 	for name, cfg := range c.Agent.Backends {
@@ -150,11 +155,14 @@ func (a *actor) unavailable() error {
 	return toolerr.New("backend_unavailable", "后端暂时不可用", "resource", "backend:"+a.name, "attempts", max(1, attempts))
 }
 func (a *actor) connect(ctx context.Context) (*mcpmux.Bridge, error) {
-	resolver, e := cwd.New(a.root.Agent.DefaultCWD, a.root.Agent.Workspaces, a.root.Agent.CWDPolicy)
+	a.mu.Lock()
+	root := a.root
+	a.mu.Unlock()
+	resolver, e := cwd.New(root.Agent.DefaultCWD, root.Agent.Workspaces, root.Agent.CWDPolicy)
 	if e != nil {
 		return nil, e
 	}
-	engine, e := policy.New(a.root.Agent.Policy)
+	engine, e := policy.New(root.Agent.Policy)
 	if e != nil {
 		return nil, e
 	}
