@@ -30,3 +30,18 @@ func Test_CONSEC10_QuotaIsolation(t *testing.T) {
 		t.Fatal("hourly accepted")
 	}
 }
+
+func Test_ExpiredBucketsPrunedWhileRunningRetained(t *testing.T) {
+	l := New(2, 2, time.Minute)
+	old := time.Now().Add(-2 * time.Hour)
+	l.buckets["idle"] = &bucket{calls: []time.Time{old}}
+	l.buckets["running"] = &bucket{calls: []time.Time{old}, running: 1}
+	_, done, e := l.Acquire(context.Background(), "new")
+	if e != nil {
+		t.Fatal(e)
+	}
+	done()
+	if l.buckets["idle"] != nil || l.buckets["running"] == nil {
+		t.Fatal("expired bucket retention")
+	}
+}

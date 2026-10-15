@@ -17,6 +17,7 @@ type Limiter struct {
 	Hourly, Concurrent int
 	Duration           time.Duration
 	buckets            map[string]*bucket
+	nextSweep          time.Time
 }
 
 func New(hourly, concurrent int, duration time.Duration) *Limiter {
@@ -24,12 +25,20 @@ func New(hourly, concurrent int, duration time.Duration) *Limiter {
 }
 func (l *Limiter) Acquire(ctx context.Context, principal string) (context.Context, func(), error) {
 	l.mu.Lock()
+	now := time.Now()
+	if !now.Before(l.nextSweep) {
+		for key, candidate := range l.buckets {
+			if candidate.running == 0 && (len(candidate.calls) == 0 || now.Sub(candidate.calls[len(candidate.calls)-1]) >= time.Hour) {
+				delete(l.buckets, key)
+			}
+		}
+		l.nextSweep = now.Add(time.Minute)
+	}
 	b := l.buckets[principal]
 	if b == nil {
 		b = &bucket{}
 		l.buckets[principal] = b
 	}
-	now := time.Now()
 	kept := b.calls[:0]
 	for _, t := range b.calls {
 		if now.Sub(t) < time.Hour {

@@ -16,6 +16,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/lease"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/pty"
+	"github.com/tzf1003/xmesh/internal/quota"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net"
 	"net/http"
@@ -38,6 +39,7 @@ type Agent struct {
 	Callers        *identity.Registry
 	Backends       *backend.Manager
 	Leases         *lease.Manager
+	quota          *quota.Limiter
 	mu             sync.Mutex
 	sessions       map[string]identity.Caller
 	servers        map[*mcp.ServerSession]bool
@@ -74,6 +76,7 @@ func New(store *config.Store) (*Agent, error) {
 	reg := identity.NewRegistry()
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	a.quota = quota.New(10000, 64, 10*time.Minute)
 	a.Backends = backend.New(c, a.Leases, a.upstream, func() {
 		select {
 		case a.backendChanged <- struct{}{}:
@@ -312,6 +315,18 @@ func (a *Agent) server(p Principal) *mcp.Server {
 						result, e = Result(nil, err), nil
 					}
 				}()
+			}
+			if method == "tools/call" {
+				call := req.(*mcp.CallToolRequest)
+				if call.Params.Name != "sys.info" {
+					caller := a.bind(call.Session, p)
+					limited, release, err := a.quota.Acquire(ctx, identity.Budget(caller))
+					if err != nil {
+						return Result(nil, err), nil
+					}
+					defer release()
+					ctx = limited
+				}
 			}
 			result, e = next(ctx, method, req)
 			if e == nil && method == "tools/list" {

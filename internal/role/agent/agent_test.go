@@ -6,6 +6,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/quota"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -67,6 +68,29 @@ func configuration(t *testing.T) (string, *config.Store) {
 		t.Fatal(e)
 	}
 	return path, s
+}
+
+func Test_NodeCallBudgetAcrossMCPSessions(t *testing.T) {
+	_, store := configuration(t)
+	a, e := New(store)
+	if e != nil {
+		t.Fatal(e)
+	}
+	a.quota = quota.New(1, 1, time.Minute)
+	t.Cleanup(a.Close)
+	server := httptest.NewServer(a.HTTP(Local))
+	t.Cleanup(server.Close)
+	first, second := connect(t, server.URL+"/mcp"), connect(t, server.URL+"/mcp")
+	if out := tool(t, first, "pty.list", map[string]any{}); out.IsError {
+		t.Fatal(out)
+	}
+	out := tool(t, second, "pty.list", map[string]any{})
+	if !out.IsError || object(t, out)["rule"] != "quota.exceeded" {
+		t.Fatal("session bypassed node budget", out)
+	}
+	if out = tool(t, second, "sys.info", map[string]any{}); out.IsError {
+		t.Fatal("status unavailable after quota exhaustion", out)
+	}
 }
 func connect(t *testing.T, url string) *mcp.ClientSession {
 	t.Helper()

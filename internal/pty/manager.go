@@ -29,19 +29,19 @@ type terminal interface {
 	PID() int
 }
 type Session struct {
-	ID, Owner, Node, OAuthClient, Name, CWD, State string
-	Cols, Rows                                     int
-	term                                           terminal
-	started                                        chan struct{}
-	closedAt, orphanAt                             time.Time
-	lastIO                                         atomic.Int64
-	opMu                                           sync.Mutex // Orders owner operations and ownership changes.
-	mu                                             sync.Mutex // Session-local ring lock (CON-IMPL-03).
-	ring                                           []byte
-	capacity                                       int
-	cursor                                         uint64
-	eof                                            bool
-	changed                                        chan struct{}
+	ID, Owner, Node, OAuthClient, Budget, Name, CWD, State string
+	Cols, Rows                                             int
+	term                                                   terminal
+	started                                                chan struct{}
+	closedAt, orphanAt                                     time.Time
+	lastIO                                                 atomic.Int64
+	opMu                                                   sync.Mutex // Orders owner operations and ownership changes.
+	mu                                                     sync.Mutex // Session-local ring lock (CON-IMPL-03).
+	ring                                                   []byte
+	capacity                                               int
+	cursor                                                 uint64
+	eof                                                    bool
+	changed                                                chan struct{}
 }
 type Manager struct {
 	mu       sync.Mutex // Protects sessions, owners, quota reservations and config.
@@ -192,7 +192,7 @@ func notOwner(s *Session) error {
 	return toolerr.New("not_owner", "此调用方不是终端所有者", "session_id", s.ID, "owner", s.Owner)
 }
 func size(c, r int) bool { return c >= 1 && c <= 512 && r >= 1 && r <= 512 }
-func (m *Manager) quotaLocked(caller string) error {
+func (m *Manager) quotaLocked(c identity.Caller) error {
 	total := 0
 	var oldest *Session
 	for _, s := range m.sessions {
@@ -207,11 +207,11 @@ func (m *Manager) quotaLocked(caller string) error {
 	inUse, limit := total, m.cfg.MaxSessions
 	if inUse < limit {
 		scope = "caller"
-		inUse = m.byCaller[caller]
+		inUse = m.byCaller[c.ID]
 		limit = m.cfg.MaxPerCaller
 	}
 	if inUse < limit {
-		return nil
+		return m.budgetLocked(identity.Budget(c), "")
 	}
 	old := Object{"id": "", "idle_s": 0}
 	if oldest != nil {
@@ -219,6 +219,18 @@ func (m *Manager) quotaLocked(caller string) error {
 		old["idle_s"] = int64(time.Since(time.Unix(0, oldest.lastIO.Load())).Seconds())
 	}
 	return toolerr.New("pty_limit", "终端会话配额已满", "scope", scope, "limit", limit, "in_use", inUse, "oldest_idle", old)
+}
+func (m *Manager) budgetLocked(budget, exclude string) error {
+	inUse := 0
+	for _, s := range m.sessions {
+		if s.ID != exclude && s.Budget == budget && (s.State == "active" || s.State == "orphaned") {
+			inUse++
+		}
+	}
+	if inUse >= m.cfg.MaxPerCaller {
+		return toolerr.New("policy_denied", "客户端终端配额已满", "rule", "quota.exceeded", "reason", "同一 OAuth client 或节点的终端数量已达到 max_per_caller")
+	}
+	return nil
 }
 func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a Args) (Object, error) {
 	if !identity.Valid(c.ID) || strings.HasSuffix(c.ID, "/init") {
@@ -258,14 +270,14 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 		return nil, e
 	}
 	capacity, _ := config.Size(cfg.ScrollbackBytes)
-	s := &Session{ID: "p-" + hex.EncodeToString(random), Owner: c.ID, Node: identity.Node(c.ID), OAuthClient: c.OAuthClient, Name: a.Name, CWD: resolved.Path, State: "active", Cols: a.Cols, Rows: a.Rows, capacity: capacity, changed: make(chan struct{}), started: make(chan struct{})}
+	s := &Session{ID: "p-" + hex.EncodeToString(random), Owner: c.ID, Node: identity.Node(c.ID), OAuthClient: c.OAuthClient, Budget: identity.Budget(c), Name: a.Name, CWD: resolved.Path, State: "active", Cols: a.Cols, Rows: a.Rows, capacity: capacity, changed: make(chan struct{}), started: make(chan struct{})}
 	s.touch()
 	m.mu.Lock()
 	if m.closing {
 		m.mu.Unlock()
 		return nil, toolerr.New("internal", "终端管理器正在关闭", "op", "pty.open")
 	}
-	if e = m.quotaLocked(c.ID); e != nil {
+	if e = m.quotaLocked(c); e != nil {
 		m.mu.Unlock()
 		return nil, e
 	}
@@ -395,10 +407,14 @@ func (m *Manager) transferLocked(s *Session, c identity.Caller, to string) (Obje
 	if m.byCaller[to] >= m.cfg.MaxPerCaller {
 		return nil, toolerr.New("pty_limit", "接收方终端配额已满", "scope", "caller", "limit", m.cfg.MaxPerCaller, "in_use", m.byCaller[to], "oldest_idle", Object{"id": s.ID, "idle_s": 0})
 	}
+	if e := m.budgetLocked(identity.Budget(target), s.ID); e != nil {
+		return nil, e
+	}
 	if s.State == "active" {
 		m.byCaller[s.Owner]--
 	}
 	s.Owner = to
+	s.Budget = identity.Budget(target)
 	s.State = "active"
 	m.byCaller[to]++
 	s.touch()

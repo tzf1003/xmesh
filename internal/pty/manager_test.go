@@ -221,3 +221,39 @@ func Test_RUL13_OrphanOwnership(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func Test_ClientPTYBudgetAcrossSessions(t *testing.T) {
+	for _, oauth := range []bool{false, true} {
+		t.Run(fmt.Sprint("oauth=", oauth), func(t *testing.T) {
+			m, r, p, reg := fixture(t)
+			m.mu.Lock()
+			cfg := m.cfg
+			m.mu.Unlock()
+			cfg.MaxPerCaller = 1
+			m.Configure(cfg)
+			a, b := identity.Caller{ID: "node/a"}, identity.Caller{ID: "node/b"}
+			other := identity.Caller{ID: "other/c"}
+			if oauth {
+				a.OAuthClient, b.OAuthClient, other.OAuthClient = "client-a", "client-a", "client-b"
+			}
+			for _, c := range []identity.Caller{a, b, other} {
+				_ = reg.Add(c)
+			}
+			out, e := invoke(m, r, p, a, "pty.open", Object{"cols": 80, "rows": 24})
+			if e != nil {
+				t.Fatal(e)
+			}
+			id := out["session_id"].(string)
+			m.Orphan(a.ID)
+			if _, e = invoke(m, r, p, b, "pty.open", Object{"cols": 80, "rows": 24}); e == nil || e.(*toolerr.Error).Fields["rule"] != "quota.exceeded" {
+				t.Fatal("new session bypassed client budget", e)
+			}
+			if _, e = invoke(m, r, p, other, "pty.open", Object{"cols": 80, "rows": 24}); e != nil {
+				t.Fatal("independent client budget", e)
+			}
+			if _, e = invoke(m, r, p, b, "pty.transfer", Object{"session_id": id, "to_caller": b.ID}); e != nil {
+				t.Fatal("reclaim existing allocation", e)
+			}
+		})
+	}
+}

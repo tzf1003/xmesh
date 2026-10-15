@@ -44,6 +44,14 @@ func Valid(id string) bool {
 }
 func Node(id string) string { n, _, _ := strings.Cut(id, "/"); return n }
 
+// Budget groups independent MCP sessions by their authenticated client or node.
+func Budget(c Caller) string {
+	if c.OAuthClient != "" {
+		return "oauth:" + c.OAuthClient
+	}
+	return "node:" + Node(c.ID)
+}
+
 type Registry struct {
 	mu      sync.RWMutex
 	callers map[string]Caller
