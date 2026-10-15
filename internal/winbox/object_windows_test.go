@@ -376,6 +376,12 @@ func Test_WindowsAppContainerGrantReleaseIdentity(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
+	for _, kind := range []string{"file", "directory"} {
+		t.Run(kind, func(t *testing.T) { testGrantReleaseIdentity(t, kind == "directory") })
+	}
+}
+
+func testGrantReleaseIdentity(t *testing.T, directory bool) {
 	p, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -385,8 +391,14 @@ func Test_WindowsAppContainerGrantReleaseIdentity(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	path := filepath.Join(t.TempDir(), "original.txt")
-	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
+	path := filepath.Join(t.TempDir(), "original")
+	create := func(path string) error {
+		if directory {
+			return os.Mkdir(path, 0700)
+		}
+		return os.WriteFile(path, []byte("content"), 0600)
+	}
+	if err := create(path); err != nil {
 		t.Fatal(err)
 	}
 	before := readObjectACL(t, path)
@@ -403,7 +415,7 @@ func Test_WindowsAppContainerGrantReleaseIdentity(t *testing.T) {
 	if err := os.Rename(path, moved); err != nil {
 		t.Fatal("rename during object grant", err)
 	}
-	if err := os.WriteFile(path, []byte("replacement"), 0600); err != nil {
+	if err := create(path); err != nil {
 		t.Fatal(err)
 	}
 	replacementACL := readObjectACL(t, path)

@@ -123,13 +123,10 @@ func (g *objectGrant) Close() error {
 // ReOpenFile retains object identity across rename/replacement. Acquire broad
 // access only during the ACL edit, after sandbox processes have exited.
 func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
-	h, _, callErr := reopenObject.Call(uintptr(object), windows.MAXIMUM_ALLOWED,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
-	if windows.Handle(h) == windows.InvalidHandle {
-		return fmt.Errorf("ReOpenFile for AppContainer ACL edit: %w", callErr)
+	handle, err := reopenForACL(object)
+	if err != nil {
+		return err
 	}
-	handle := windows.Handle(h)
 	defer windows.CloseHandle(handle)
 	dacl, err := objectDACL(handle)
 	if err != nil {
@@ -142,6 +139,42 @@ func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
 	// MAXIMUM_ALLOWED suppresses propagation of existing inheritable ACEs to
 	// children: https://learn.microsoft.com/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo
 	return windows.SetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION, nil, nil, merged, nil)
+}
+
+func reopenForACL(object windows.Handle) (windows.Handle, error) {
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(object, &info); err != nil {
+		return 0, err
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		h, _, err := reopenObject.Call(uintptr(object), windows.MAXIMUM_ALLOWED,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+			windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT)
+		if windows.Handle(h) == windows.InvalidHandle {
+			return 0, fmt.Errorf("ReOpenFile for AppContainer ACL edit: %w", err)
+		}
+		return windows.Handle(h), nil
+	}
+	// An empty relative NT name reopens the directory handle itself. This
+	// follows object identity even after rename and accepts directory objects.
+	name, err := windows.NewNTUnicodeString("")
+	if err != nil {
+		return 0, err
+	}
+	attributes := windows.OBJECT_ATTRIBUTES{
+		Length:        uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})),
+		RootDirectory: object,
+		ObjectName:    name,
+	}
+	var handle windows.Handle
+	var status windows.IO_STATUS_BLOCK
+	err = windows.NtCreateFile(&handle, windows.MAXIMUM_ALLOWED, &attributes, &status, nil, 0,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN,
+		windows.FILE_DIRECTORY_FILE|windows.FILE_OPEN_FOR_BACKUP_INTENT|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("reopen AppContainer directory for ACL edit: %w", err)
+	}
+	return handle, nil
 }
 
 func objectDACL(handle windows.Handle) (*windows.ACL, error) {
