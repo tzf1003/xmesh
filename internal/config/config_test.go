@@ -74,3 +74,37 @@ func Test_CTRCFG02_ReloadState(t *testing.T) {
 		t.Fatal("reverted cold fields still need restart")
 	}
 }
+
+func TestIngressPTYBudgetConfiguration(t *testing.T) {
+	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []any{nil, 3, 0, -1, 1.5, "8"} {
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		ingress := doc["ingress"].(map[string]any)
+		delete(ingress, "max_pty_per_client")
+		if limit != nil {
+			ingress["max_pty_per_client"] = limit
+		}
+		data, _ := json.Marshal(doc)
+		cfg, err := Parse(data)
+		if limit == nil || limit == 3 {
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 8
+			if limit == 3 {
+				want = 3
+			}
+			if cfg.Ingress.MaxPTYPerClient != want {
+				t.Fatal("unexpected ingress limit", cfg.Ingress.MaxPTYPerClient)
+			}
+		} else if err == nil {
+			t.Fatal("invalid ingress limit accepted", limit)
+		}
+	}
+}

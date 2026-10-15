@@ -14,7 +14,7 @@
 | 设备网络 | tsnet 注册与 WhoIs、tag 授权、临时节点内存身份与退出注销、LAN 证书配对与续期、mTLS、mDNS 发现 |
 | Gateway | 设备前缀、每设备独立能力刷新与重试退避、搜索、连接默认值、断线停路由、持续 drain 状态、本机 PAT 文件认证与 scope、凭据轮转和会话绑定 |
 | OAuth 与入口 | 元数据、动态注册、PKCE S256、单主体口令、CSRF、scope、令牌轮转、客户端注册及回调 URI 持久化、Funnel/隧道/HTTPS 入口装配 |
-| 治理与运行 | 元数据审计、热加载失败记录、重启提示、调用预算、Agent 客户端 PTY 预算、keep/kill drain、CLI 与服务失败退出、Windows 用户登录任务与可选 SCM 安装 |
+| 治理与运行 | 元数据审计、热加载失败记录、重启提示、调用预算、Agent 主体与入口跨设备 PTY 预算、keep/kill drain、CLI 与服务失败退出、Windows 用户登录任务与可选 SCM 安装 |
 
 25 个 Agent 内置工具已接入；Gateway 另提供设备列表、搜索和会话默认值。操作方法见[运行手册](operations.md)。
 
@@ -29,6 +29,8 @@
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 - Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；原生运行验收用例已加入并完成交叉编译。
 - Windows ConPTY：启动前 Job 分配、主 shell 退出后的后代清理、TERM/KILL 整组终止、Ctrl-C 输入和句柄关闭串行化已实现；原生回归用例覆盖这些路径，当前完成交叉编译，运行结果待 Windows 实机验证。
+- 入口 PTY 预算：两 Agent 集成测试覆盖跨设备并发准入、跨 MCP 会话主体计数、独立 client、入口重启后的孤儿计数与接管、关闭释放、向满额接收方转移拒绝、设备离线、结果不确定的持久化阻断与 Agent 重启恢复、状态写入失败的副作用阻断。控制资源授权与快照一致性测试通过。
+- Ubuntu 原生入口预算：上述两 Agent 集成场景在甲骨文主机连续两轮通过；使用独立临时工作目录与真实 Linux PTY。该验证使用主机内两个 Agent，跨物理主机的入口验收仍待执行。
 - 甲骨文 Ubuntu 的 bwrap 隔离环境：使用共享主机网络、独立 PID/文件系统与临时目录，连续两轮临时节点注册获得不同身份；每轮成功调用 macOS 和既有 Linux 节点，既有 Linux 节点反向调用成功。退出正常、节点离线、身份状态不落盘、临时工作目录清理均通过。此环境与既有 Linux 节点共用主机。
 
 Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该机 AppArmor 限制非特权 user namespace：普通用户 L2 验证使用只绑定测试目录中 bwrap 可执行文件、允许 `userns` 的临时 profile，测试结束已卸载。root 下的独立 L2 用例也通过。普通用户结果依赖该临时 profile，部署时须配置对应主机策略。
@@ -39,7 +41,7 @@ Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该�
 
 | 项目 | 当前边界 |
 | --- | --- |
-| 入口 PTY 总预算 | Agent 内按 OAuth client/节点跨会话计数已实现；跨设备入口聚合待实现 |
+| 入口 PTY 总预算 | 单入口跨设备聚合已实现；多入口进程的统一准入协调待实现 |
 | Windows L2 | 当前请求 L2 会拒绝执行；受限 token 沙箱待实现 |
 | 原生 Windows | 用户任务登录触发与原生运行、ConPTY、进程清理、SCM 服务安装待实机验证 |
 | 三设备互联 | 官方 Tailscale、Headscale、DERP 连接状态、真实 LAN 多播待验收 |

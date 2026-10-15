@@ -74,3 +74,14 @@ func (r *Registry) Get(id string) (Caller, bool) {
 	return c, ok
 }
 func (r *Registry) Remove(id string) { r.mu.Lock(); defer r.mu.Unlock(); delete(r.callers, id) }
+
+// Budgets reports the transport-authenticated principal of each connected caller.
+func (r *Registry) Budgets() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]string, len(r.callers))
+	for id, caller := range r.callers {
+		out[id] = Budget(caller)
+	}
+	return out
+}

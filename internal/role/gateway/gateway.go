@@ -38,6 +38,7 @@ type Options struct {
 	Dial      Dial
 	Discover  Discover
 	Audit     *audit.Logger
+	PTYBudget *PTYBudget
 }
 type device struct {
 	peer     mesh.Peer
@@ -96,6 +97,9 @@ type view struct {
 }
 
 func New(o Options) *Gateway {
+	if o.Ingress && o.PTYBudget == nil {
+		o.PTYBudget, _ = NewPTYBudget(8, "")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, quota: quota.New(10000, 64, 10*time.Minute)}
 	if o.LocalPeer.Name != "" {
@@ -630,13 +634,19 @@ func (v *view) publish(generation uint64) {
 	v.generation = generation
 	v.mu.Unlock()
 	if !same {
-		v.server.RemoveTools(old...)
 		for full, tool := range entries {
 			full := full
 			v.server.AddTool(mcpmux.Rename(tool, full), func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 				return v.forward(ctx, r, full)
 			})
 		}
+		removed := []string{}
+		for _, name := range old {
+			if entries[name] == nil {
+				removed = append(removed, name)
+			}
+		}
+		v.server.RemoveTools(removed...)
 	}
 }
 func builtin(name string) bool {
@@ -698,7 +708,15 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 	if dead {
 		return agent.Result(nil, toolerr.New("not_found", "设备连接已关闭", "name", deviceName)), nil
 	}
-	out, e := d.bridge.Call(ctx, tool, args, mcpmux.Progress{Original: r.Params.GetProgressToken(), Send: r.Session.NotifyProgress})
+	invoke := func(bridge *mcpmux.Bridge) (*mcp.CallToolResult, error) {
+		return bridge.Call(ctx, tool, args, mcpmux.Progress{Original: r.Params.GetProgressToken(), Send: r.Session.NotifyProgress})
+	}
+	var out *mcp.CallToolResult
+	if v.g.opts.Ingress && (tool == "pty.open" || tool == "pty.transfer") {
+		out, e = v.g.opts.PTYBudget.call(ctx, v, device.peer, tool, args, invoke)
+	} else {
+		out, e = invoke(d.bridge)
+	}
 	if e != nil {
 		v.mu.Lock()
 		d.dead = true

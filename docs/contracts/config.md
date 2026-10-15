@@ -10,6 +10,7 @@
 | --- | --- |
 | `roles` 含 `gateway` | `gateway.listen` 必须是回环地址。默认 `127.0.0.1:8080`。非回环地址拒绝启动 |
 | `roles` 含 `ingress` | `ingress` 对象必须存在，且 OAuth issuer 为 https |
+| `ingress.max_pty_per_client` | 正整数，默认 8；同一入口按 OAuth client 聚合各设备的 active/orphaned PTY，详见 [CTR-GW-06](gateway.md#ctr-gw-06) |
 | `roles` 含 `agent` | `agent.cwd_policy.allow` 至少一条 |
 | `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
 | `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
@@ -32,7 +33,7 @@
 | `agent.exec` 的配额数字、`agent.pty` 的上限 | 热加载。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
-| `node`、`mesh`、`ingress.listen` | 不热加载。`status` 提示需要重启 |
+| `node`、`mesh`、`ingress` | 不热加载。`status` 提示需要重启 |
 
 ### 密钥
 

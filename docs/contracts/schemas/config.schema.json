@@ -118,6 +118,7 @@
       "required": ["listen", "oauth"],
       "properties": {
         "listen": { "enum": ["funnel", "public:443", "tunnel"] },
+        "max_pty_per_client": { "type": "integer", "minimum": 1, "default": 8 },
         "domain": {
           "type": "string",
           "minLength": 1,

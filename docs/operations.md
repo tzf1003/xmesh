@@ -162,7 +162,9 @@ Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检
 
 exec 与 PTY 只继承程序搜索路径、用户目录、系统目录及语言设置，并过滤凭证名称和 `.ssh`、`gcloud`、`.azure`、`.aws` 路径。调用方的 `env` 经过同一过滤器。Windows 按大小写不敏感的变量名覆盖继承值，调用方同时提供 `Path` 和 `PATH` 等重复键时返回参数错误；Unix 保持大小写敏感。
 
-Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 64、单次最长 10 分钟。Agent 的 `sys.info` 免计数。Agent 主体优先采用可信 OAuth client，其余按节点 ID 计数，多个 MCP 会话共享预算。PTY 的设备与 caller 限额之外，同一主体还共享 `max_per_caller` 的 active/orphaned 额度；转移计入接收方额度。入口跨设备 PTY 聚合预算待实现。
+Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 64、单次最长 10 分钟。Agent 的 `sys.info` 免计数。Agent 主体优先采用可信 OAuth client，其余按节点 ID 计数，多个 MCP 会话共享预算。PTY 的设备与 caller 限额之外，同一主体还共享 `max_per_caller` 的 active/orphaned 额度；转移计入接收方额度。
+
+入口按 `ingress.max_pty_per_client`（默认 8）聚合各设备的终端占用，串行准入 open/transfer。所有发现设备须支持并授权入口读取 PTY 控制资源；资源不可确认时返回 `quota.unavailable`。保留状态目录中的 `ingress-pty.json`，入口重启后会据此核对仍有资源的设备。设备离线时恢复连接；调用结果丢失且留下待完成标志时，重启对应 Agent 后重新确认。关闭现有终端仍可执行。多入口进程的协调边界见 [CTR-GW-06](contracts/gateway.md#ctr-gw-06)。
 
 审计写入状态目录的 `audit`，默认保留 720 小时；记录工具、路径、状态、耗时等元数据。PTY 读操作按分钟汇总字节量，审计编码器限制可写字段。
 

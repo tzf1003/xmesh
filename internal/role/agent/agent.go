@@ -351,6 +351,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 		}
 	})
 	a.views[key] = server
+	a.installPTYBudget(server, p)
 	a.installBackends(server, p)
 	return server
 }

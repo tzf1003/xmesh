@@ -53,6 +53,7 @@ type Manager struct {
 	done     chan struct{}
 	once     sync.Once
 	closing  bool
+	epoch    string
 }
 type Args struct {
 	SessionID string            `json:"session_id"`
@@ -72,7 +73,7 @@ type Args struct {
 type Object = map[string]any
 
 func New(cfg config.PTY, callers *identity.Registry) *Manager {
-	m := &Manager{sessions: map[string]*Session{}, byCaller: map[string]int{}, cfg: cfg, callers: callers, stop: make(chan struct{}), done: make(chan struct{})}
+	m := &Manager{sessions: map[string]*Session{}, byCaller: map[string]int{}, cfg: cfg, callers: callers, stop: make(chan struct{}), done: make(chan struct{}), epoch: rand.Text()}
 	go m.reaper()
 	return m
 }

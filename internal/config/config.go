@@ -52,12 +52,13 @@ type PAT struct {
 	Scopes    []string `json:"scopes"`
 }
 type Ingress struct {
-	Listen   string `json:"listen"`
-	Domain   string `json:"domain"`
-	TLS      string `json:"tls"`
-	CertFile string `json:"cert_file"`
-	KeyFile  string `json:"key_file"`
-	OAuth    struct {
+	MaxPTYPerClient int    `json:"max_pty_per_client"`
+	Listen          string `json:"listen"`
+	Domain          string `json:"domain"`
+	TLS             string `json:"tls"`
+	CertFile        string `json:"cert_file"`
+	KeyFile         string `json:"key_file"`
+	OAuth           struct {
 		Issuer  string `json:"issuer"`
 		Clients map[string]struct {
 			Scopes []string `json:"scopes"`
@@ -179,6 +180,7 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
 	c.Gateway.Listen = "127.0.0.1:8080"
+	c.Ingress.MaxPTYPerClient = 8
 	c.Audit.Retention = "720h"
 	if e = json.Unmarshal(raw, c); e != nil {
 		return nil, e

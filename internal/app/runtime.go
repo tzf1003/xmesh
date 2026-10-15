@@ -257,7 +257,11 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if e != nil {
 			return e
 		}
-		g := gateway.New(gateway.Options{NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
+		ptyBudget, e := gateway.NewPTYBudget(c.Ingress.MaxPTYPerClient, filepath.Join(o.StateDir, "ingress-pty.json"))
+		if e != nil {
+			return e
+		}
+		g := gateway.New(gateway.Options{NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
 		addGateway(g)
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
 			token, ok := oauth.FromContext(r.Context())

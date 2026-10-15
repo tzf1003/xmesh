@@ -101,3 +101,17 @@ Agent 上不存在这个工具。若客户端直连 Agent 并调用它，得到 
 Agent 收到后拒绝新的 `exec.run`、`pty.open`、`backend.acquire` 和后端工具，错误码 `policy_denied`，规则名 `mesh.draining`。`drain: keep` 时已有 PTY 与租约按原超时结束。`drain: kill` 时按 `pty.close` 的顺序终止本机全部 PTY，并 release 全部租约。
 
 Gateway 收到后对该设备（或全网）停止路由，并发送 `tools/list_changed`。
+
+## CTR-GW-06
+
+### 入口 PTY 总预算
+
+`ingress.max_pty_per_client` 默认 8。入口把各 Agent 的同一 OAuth client 的 `active` 与 `orphaned` 终端相加；`closed` 释放额度。不同 MCP 会话共享额度。`pty.transfer` 使用目标 Agent 记录的接收方身份，向另一主体转移时检查接收方总额；同主体接管保持原有额度。
+
+入口在整个查询、准入与调用完成期间串行化 `pty.open` 和 `pty.transfer`。查询使用 Agent 的 MCP 控制资源 `xmesh://control/pty-budget`，由已认证且获 PTY 授权的 `tag:ingress` 读取。该资源包含当前终端 reservation、对应预算主体、在线 caller 的主体及进程 epoch，不含终端正文；Gateway 不向公网转发此资源。Agent 的启动 reservation 和断线孤儿均计数。
+
+入口状态目录的 `ingress-pty.json` 保存需要重新查询的设备 ID、Agent epoch 和待完成调用标志。发送有副作用的调用前原子落盘。该记录用于准入治理，终端归属与资源状态始终由 Agent 决定。入口重启后重新查询 Agent。已记载资源的设备离线、旧版 Agent 缺少控制资源或快照无效时，新增与转移返回 `policy_denied`、`rule: quota.unavailable`。读写、关闭与信号仍可作用于在线资源。
+
+调用结果丢失时，待完成标志保留；同一 Agent epoch 的快照无法证明旧调用已经完成，因此继续拒绝新增。重启对应 Agent 并重新查询到新 epoch 后可恢复准入。状态写入失败时停止新增；保留状态目录，修复存储后重启入口。总额已满返回 `policy_denied`、`rule: quota.exceeded`。
+
+此预算的原子准入范围是一个入口进程。多个入口进程及绕过入口的直接调用使用各自准入；Agent 上的设备与主体配额仍分别生效。多入口部署需要统一准入协调后才能承诺网格范围的原子总额。
