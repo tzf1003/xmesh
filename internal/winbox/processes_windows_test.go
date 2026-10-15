@@ -248,6 +248,15 @@ func Test_WindowsAppContainerProcessOwnerHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		child := exec.Command(executable, "-test.run=^Test_WindowsAppContainerProcessOwnerHelper$", "--", "member", "unused")
+		// The capability-free token cannot open NUL for exec.Cmd's default
+		// streams. Supply ordinary profile-owned file handles explicitly.
+		stdio, err := os.OpenFile(args[1]+".stdio", os.O_CREATE|os.O_RDWR, 0600)
+		if err != nil {
+			report("child-stdio", 0, err)
+			t.Fatal(err)
+		}
+		defer stdio.Close()
+		child.Stdin, child.Stdout, child.Stderr = stdio, stdio, stdio
 		if err := child.Start(); err != nil {
 			report("child-start", 0, err)
 			t.Fatal(err)
