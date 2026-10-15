@@ -58,7 +58,9 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 `beae5de` 的 push 与 PR 工作流全部通过，按已选句柄授权的 file/directory 原生用例通过。ACL 更新现按对象身份临时取得 `READ_CONTROL|WRITE_DAC`，直接设置所选对象的 DACL；保留根目录绑定的授权与回收、描述符控制与标签保持、已有子对象 ACL 保持的新原生用例待 CI。Windows 双架构 vet 和 amd64 测试交叉编译通过。
 
-`5d41040` 的 PR 三平台全量检查和 push/PR Windows 原生任务通过；普通继承与受保护根 DACL 的控制位、标签、子对象保持和真实 helper 隔离均通过。对象授权现保留独立窄权限安全句柄，覆盖 delete-pending 回收并检查两类句柄均不可继承；本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过，新原生用例待 CI。
+`5d41040` 的 PR 三平台全量检查和 push/PR Windows 原生任务通过；普通继承与受保护根 DACL 的控制位、标签、子对象保持和真实 helper 隔离均通过。对象授权现保留独立窄权限安全句柄，覆盖 delete-pending 回收并检查两类句柄均不可继承；本地全量 race/vet、Windows 双架构 vet 和 amd64 交叉编译通过；新原生用例已由 `0f0536a` 的 push 与 PR 工作流验收通过。
+
+`0f0536a` 的 PR 原生任务通过 delete-pending 文件与空目录的准确 ACL 回收及完整回归。现有快照对象的组合授权已实现按序准入、取消与失败回滚、独立项继续释放及失败项保留重试；Windows 双架构 vet 与 amd64 交叉编译通过，新组合用例待原生验收。
 
 ## 待实现与待验收
 
@@ -79,4 +81,4 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 
 `f4a1f6e` 的 push 与 PR 三平台全量检查通过。原生复验将受保护根的控制位差异定位为 `SE_DACL_AUTO_INHERITED`；直接更新现为已有自动继承状态提供请求标志，保留全部控制位与子对象断言，Windows 双架构 vet 与 amd64 交叉编译通过，原生复验待 CI。
 
-`79ec614` 的 PR 三平台全量检查通过。delete-pending 原生用例确认既有句柄仍可重开，用例现改为检查原路径不可打开后准确回收 ACL、重复释放与 profile 生命周期；复验待 CI。
+`79ec614` 的 PR 三平台全量检查通过。delete-pending 原生用例确认既有句柄仍可重开，用例改为检查原路径不可打开后准确回收 ACL、重复释放与 profile 生命周期，`0f0536a` 的 push 与 PR 工作流已全部通过。

@@ -169,7 +169,7 @@ go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
 
 AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。环回网络拒绝核对 helper 的准确 AppContainer SID，通过 Windows 网络隔离 API 确认该 SID 在探测前后均没有环回豁免，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
 
-内部单对象授权原语为准确 profile SID 添加显式、无继承的读写执行 ACE，并通过保留的元数据句柄跟踪对象；回收重读当前 DACL，只删除本次 ACE。原生用例验证普通 Medium 完整性文件与目录的授权写入、标签保持、未授权子目录与目录外拒绝，以及文件和目录改名、原路径替换后的对象回收。最终重解析点、硬链接和 null DACL 会拒绝授权。授权前按对象身份取得并保留独立的 `READ_CONTROL|WRITE_DAC` 句柄，直至准确 ACE 回收成功；对象进入 delete-pending 后可通过该句柄回收。ACL 通过 `NtSetSecurityObject` 直接更新所选对象，并显式保留 DACL 保护与自动继承状态。根路径固定时的更新、控制位、标签和子对象保持已通过 Windows 原生验收；delete-pending 文件与目录用例待原生复验。同进程 ACL 更新串行，其他 ACL 写入方需与工作目录所有者协调。进程退出并释放授权后才能删除 profile。
+内部单对象授权原语为准确 profile SID 添加显式、无继承的读写执行 ACE，并通过保留的元数据句柄跟踪对象；回收重读当前 DACL，只删除本次 ACE。原生用例验证普通 Medium 完整性文件与目录的授权写入、标签保持、未授权子目录与目录外拒绝，以及文件和目录改名、原路径替换后的对象回收。最终重解析点、硬链接和 null DACL 会拒绝授权。授权前按对象身份取得并保留独立的 `READ_CONTROL|WRITE_DAC` 句柄，直至准确 ACE 回收成功；对象进入 delete-pending 后可通过该句柄回收。ACL 通过 `NtSetSecurityObject` 直接更新所选对象，并显式保留 DACL 保护与自动继承状态。根路径固定时的更新、控制位、标签和子对象保持已通过 Windows 原生验收；delete-pending 文件与目录用例在 `0f0536a` 的 PR 原生任务通过。同进程 ACL 更新串行，其他 ACL 写入方需与工作目录所有者协调。进程退出并释放授权后才能删除 profile。
 
 工作树检查原语从本地卷根逐组件按句柄打开目录，固定工作目录及祖先的绑定；目录枚举中的 128 位对象 ID 必须与打开后的对象一致。扫描拒绝重解析点、硬链接、重复身份、对象超限及不完整结果，支持取消，关闭时释放全部句柄，扫描本身保持 ACL 不变。枚举缓冲区显式按八字节对齐。保留的子文件句柄会使 Windows 拒绝包含这些文件的目录改名；执行期授权需要独立处理这一生命周期，当前检查原语尚未接入工具启动路径。
 
@@ -247,3 +247,5 @@ go test ./internal/exec -run WindowsExec -v -timeout=120s
 用例检查准入前暂停、恢复后执行、正常退出和超时清理，以及大输入被后代持有时执行调用的结束。
 
 Windows 的 `fs.write` 和 `fs.edit` 使用 `FileRenameInfoEx` 的 POSIX 替换语义。Agent 文件读取句柄允许删除共享：已有读取句柄继续读取旧内容，之后打开的句柄读取完整新内容。其他应用以禁止删除共享的句柄占用目标、文件系统或系统版本不支持该操作时，写入返回错误，保留目标并清理临时文件。
+
+现有快照对象可组合授权：按选择顺序准入，取消或某对象失败时按逆序回滚。集合释放会继续清理其他对象，保留失败对象的句柄供重试，并保持 profile 的活动授权计数；命名空间 guard 由快照独立持有。该组合仍只覆盖所选已有对象，新对象继承、执行期工作树寿命与异常退出恢复仍需完成。
