@@ -178,3 +178,12 @@ go test ./cmd/xmesh -run WindowsUserTaskRuntime -v
 ```
 
 该用例创建临时任务并立即运行，核对用户 SID、会话 ID、工作目录与复杂参数，最后删除任务。自动测试覆盖与各平台原生安装的验收状态见[实现记录](implementation-status.md)。
+
+Windows ConPTY 进程在执行前加入专属 Job Object；shell 自行退出、TERM 宽限结束和 KILL 均清理其后代进程。INT 通过终端输入 Ctrl-C，应用的原始输入模式可能改变其行为。Windows 10 1809 或更新系统上的原生验收：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_PTY = "1"
+go test ./internal/pty -run WindowsPTY -v -timeout=120s
+```
+
+该用例检查 Ctrl-C 后继续交互、窗口调整、TERM/KILL/shell 退出后的后台进程清理，以及退出输出读取和重复关闭。

@@ -8,7 +8,7 @@
 | --- | --- |
 | 文件与路径 | 允许目录、别名、软链检查、UTF-8/BOM、原子写入、哈希冲突、精确编辑、删除预检、glob/grep 双引擎及嵌套忽略规则 |
 | 命令 | 公平队列、shared/exclusive、幂等隔离、超时清理、输出分页、L1 策略、Linux bwrap 与 macOS Seatbelt L2 |
-| PTY | 四状态、游标读取、配额、owner、断线孤儿、OAuth client 接管约束、转移串行化、Unix 会话进程组清理 |
+| PTY | 四状态、游标读取、配额、owner、断线孤儿、OAuth client 接管约束、转移串行化、Unix 会话进程组清理、Windows Job Object 进程树清理 |
 | 后端 | stdio/HTTP MCP、actor 串行、exclusive fencing lease、空闲回收、故障失效、策略重载保留有效租约 |
 | MCP 多路复用 | 上下游请求映射、通知、进度、sampling 路由、断线取消 |
 | 设备网络 | tsnet 注册与 WhoIs、tag 授权、临时节点内存身份与退出注销、LAN 证书配对与续期、mTLS、mDNS 发现 |
@@ -28,6 +28,7 @@
 - macOS 27.0.1 L2：原生测试验证目录外读取和写入拒绝、符号链接越界拒绝、网络拒绝、父进程信号与环境读取拒绝，以及含引号目录的参数传递。带 PAT 的真实 MCP L2 冒烟通过 exec 与 zsh PTY、审计及退出清理。
 - Ubuntu 24.04 L2 PTY：在 PID 命名空间内通过 util-linux `setsid --ctty` 建立控制终端；原生测试连续三次通过窗口调整、API SIGINT、键盘 Ctrl-C、shell 持续交互与关闭后的后台进程清理。Linux L2 PTY 需要系统提供 `setsid`。
 - Windows 用户任务：XML 注册参数、用户隔离命名、普通权限与登录会话配置、持续运行和失败重试、注册失败传播及临时文件清理的跨平台测试通过；原生运行验收用例已加入并完成交叉编译。
+- Windows ConPTY：启动前 Job 分配、主 shell 退出后的后代清理、TERM/KILL 整组终止、Ctrl-C 输入和句柄关闭串行化已实现；原生回归用例覆盖这些路径，当前完成交叉编译，运行结果待 Windows 实机验证。
 - 甲骨文 Ubuntu 的 bwrap 隔离环境：使用共享主机网络、独立 PID/文件系统与临时目录，连续两轮临时节点注册获得不同身份；每轮成功调用 macOS 和既有 Linux 节点，既有 Linux 节点反向调用成功。退出正常、节点离线、身份状态不落盘、临时工作目录清理均通过。此环境与既有 Linux 节点共用主机。
 
 Linux 测试机为本任务安装了发行版 `bubblewrap` 与 `ripgrep`。该机 AppArmor 限制非特权 user namespace：普通用户 L2 验证使用只绑定测试目录中 bwrap 可执行文件、允许 `userns` 的临时 profile，测试结束已卸载。root 下的独立 L2 用例也通过。普通用户结果依赖该临时 profile，部署时须配置对应主机策略。
