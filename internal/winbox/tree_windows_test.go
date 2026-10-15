@@ -25,6 +25,10 @@ func Test_WindowsAppContainerWorkspaceTree(t *testing.T) {
 	if err := os.MkdirAll(sub, 0700); err != nil {
 		t.Fatal(err)
 	}
+	empty := filepath.Join(root, "editable-directory")
+	if err := os.Mkdir(empty, 0700); err != nil {
+		t.Fatal(err)
+	}
 	// More than one directory-information buffer, including Unicode names.
 	for index := range 700 {
 		if err := os.WriteFile(filepath.Join(sub, fmt.Sprintf("file-%04d-资料.txt", index)), []byte("original"), 0600); err != nil {
@@ -33,12 +37,12 @@ func Test_WindowsAppContainerWorkspaceTree(t *testing.T) {
 	}
 	firstFile := filepath.Join(sub, "file-0000-资料.txt")
 	before := readObjectACL(t, firstFile)
-	tree, err := openWorkspaceTree(context.Background(), root, 702)
+	tree, err := openWorkspaceTree(context.Background(), root, 703)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(tree.Close)
-	if len(tree.objects) != 702 {
+	if len(tree.objects) != 703 {
 		t.Fatal("workspace object count", len(tree.objects))
 	}
 	objects := map[string]treeObject{}
@@ -59,20 +63,23 @@ func Test_WindowsAppContainerWorkspaceTree(t *testing.T) {
 	}
 	movedSub := sub + ".moved"
 	if err := os.Rename(sub, movedSub); err != nil {
-		t.Fatal("descendant directory rename", err)
-	}
-	if err := os.Mkdir(sub, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(firstFile, []byte("replacement"), 0600); err != nil {
-		t.Fatal(err)
+		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			t.Fatal("populated directory rename", err)
+		}
+		// NTFS can reject directory rename while handles to its children are
+		// open, even when all of them permit delete sharing. Keep this observed
+		// compatibility boundary separate from the root namespace guard.
+		t.Log("Windows refused populated directory rename while child handles are retained")
+		movedSub = sub
+	} else {
+		t.Log("Windows allowed populated directory rename with shared-delete child handles")
 	}
 	visited := 0
 	err = enumerateDirectory(context.Background(), objects["子目录"].handle, func(entry directoryEntry) error {
 		visited++
 		original, ok := objects[filepath.Join("子目录", entry.name)]
 		if !ok || original.id.ID != entry.id {
-			return fmt.Errorf("enumeration changed to the replacement directory")
+			return fmt.Errorf("enumeration selected a different object")
 		}
 		handle, err := openRelativeObject(objects["子目录"].handle, entry.name, true, false)
 		if err != nil {
@@ -86,7 +93,32 @@ func Test_WindowsAppContainerWorkspaceTree(t *testing.T) {
 		return verifyDirectoryEntry(original.id.Volume, entry, child)
 	})
 	if err != nil || visited != 700 {
-		t.Fatal("enumeration after directory rename", visited, err)
+		t.Fatal("retained directory enumeration", visited, err)
+	}
+	// An empty directory has no retained child handles. Rename it, replace its
+	// former path and populate both so enumeration must follow the old handle.
+	if err := os.Rename(empty, empty+".moved"); err != nil {
+		t.Fatal("empty descendant directory rename", err)
+	}
+	if err := os.Mkdir(empty, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(empty, "replacement.txt"), []byte("replacement"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(empty+".moved", "original.txt"), []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	visited = 0
+	err = enumerateDirectory(context.Background(), objects["editable-directory"].handle, func(entry directoryEntry) error {
+		visited++
+		if entry.name != "original.txt" {
+			return fmt.Errorf("enumeration selected the replacement directory")
+		}
+		return nil
+	})
+	if err != nil || visited != 1 {
+		t.Fatal("enumeration after empty directory rename and replacement", visited, err)
 	}
 	if err := os.Rename(filepath.Join(movedSub, "file-0000-资料.txt"), filepath.Join(movedSub, "renamed.txt")); err != nil {
 		t.Fatal("descendant file rename", err)
@@ -96,10 +128,13 @@ func Test_WindowsAppContainerWorkspaceTree(t *testing.T) {
 	}
 	tree.Close()
 	tree.Close()
+	if err := os.Rename(movedSub, movedSub+".released"); err != nil {
+		t.Fatal("populated directory binding not released", err)
+	}
 	if err := os.Rename(root, root+".moved"); err != nil {
 		t.Fatal("workspace root binding not released", err)
 	}
-	t.Log("702 objects, multiple enumeration buffers, Unicode, stable root/ancestors, descendant editing and handle-relative identity after rename passed")
+	t.Log("703 objects, multiple enumeration buffers, Unicode, stable root/ancestors, file editing and empty-directory rename/replacement identity passed")
 }
 
 func Test_WindowsAppContainerWorkspaceTreeAdmission(t *testing.T) {

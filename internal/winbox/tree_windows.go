@@ -27,8 +27,10 @@ type treeObject struct {
 
 // workspaceTree retains the actual objects selected before ACL admission.
 // Ancestors through the workspace root omit delete sharing to keep that binding
-// stable. Descendants permit replacement, rename and deletion; ACL operations
-// must use their retained handles rather than resolve the recorded names again.
+// stable. Descendants share delete access; retained child handles can still
+// prevent a directory rename on Windows. Execution admission must account for
+// that lifetime. ACL operations must use the retained object identities rather
+// than resolve the recorded names again.
 // No filesystem ACL changes occur while constructing or closing this snapshot.
 type workspaceTree struct {
 	ancestors []windows.Handle
