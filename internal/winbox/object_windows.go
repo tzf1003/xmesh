@@ -172,11 +172,19 @@ func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
 	if err := absolute.SetDACL(merged, true, defaulted); err != nil {
 		return err
 	}
-	relative, err := absolute.ToSelfRelative()
+	control, _, err := current.Control()
 	if err != nil {
 		return err
 	}
-	control, _, err := current.Control()
+	// NtSetSecurityObject consumes AUTO_INHERIT_REQ to preserve an existing
+	// AUTO_INHERITED state. Supplying AUTO_INHERITED alone clears it on NTFS.
+	// This direct kernel update does not walk existing children.
+	if control&windows.SE_DACL_AUTO_INHERITED != 0 {
+		if err := absolute.SetControl(windows.SE_DACL_AUTO_INHERIT_REQ, windows.SE_DACL_AUTO_INHERIT_REQ); err != nil {
+			return err
+		}
+	}
+	relative, err := absolute.ToSelfRelative()
 	if err != nil {
 		return err
 	}
@@ -189,8 +197,7 @@ func setObjectGrant(object windows.Handle, ace []byte, add bool) error {
 	// Set the selected kernel object's descriptor directly. SetSecurityInfo's
 	// recursive inheritance propagation would touch unselected child objects.
 	// Preserve the current descriptor's control bits and update only its DACL.
-	// Protection is selected by SECURITY_INFORMATION as well as descriptor
-	// control: DACL_SECURITY_INFORMATION alone clears SE_DACL_PROTECTED.
+	// Explicitly carry the current DACL protection choice into the update.
 	status, _, _ := setObjectSecurity.Call(uintptr(handle), uintptr(information), uintptr(unsafe.Pointer(relative)))
 	runtime.KeepAlive(relative)
 	if status != 0 {

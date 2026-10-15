@@ -74,3 +74,5 @@ Headscale v0.29.5 的 macOS 与 Ubuntu 节点双向工具调用通过，独立�
 以上自动测试覆盖已实现行为；各门的外部验收仍按[符合性矩阵](conformance.md)逐项执行。
 
 `0df20f1` 的 PR 三平台全量检查通过，根 ACL 原生测试中普通继承 DACL 用例通过，受保护 DACL 的描述符状态保持断言失败。ACL 更新现显式传入当前 DACL 保护状态，Windows 双架构 vet 与 amd64 交叉编译通过，原生复验待 CI。
+
+`f4a1f6e` 的 push 与 PR 三平台全量检查通过。原生复验将受保护根的控制位差异定位为 `SE_DACL_AUTO_INHERITED`；直接更新现为已有自动继承状态提供请求标志，保留全部控制位与子对象断言，Windows 双架构 vet 与 amd64 交叉编译通过，原生复验待 CI。
