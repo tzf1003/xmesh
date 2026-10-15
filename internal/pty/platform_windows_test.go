@@ -28,7 +28,7 @@ func nativeTerminal(t *testing.T) (*windowsTerminal, *windowsOutput) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := start(shell, []string{"-NoLogo", "-NoProfile"}, t.TempDir(), os.Environ(), 80, 24, false)
+	terminal, err := start(shell, []string{"-NoLogo", "-NoProfile", "-NoExit", "-Command", "Write-Output ('TERMINAL_'+'READY')"}, t.TempDir(), os.Environ(), 80, 24, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,6 +63,7 @@ func nativeTerminal(t *testing.T) (*windowsTerminal, *windowsOutput) {
 			t.Error("ConPTY reader survived cleanup")
 		}
 	})
+	output.until(t, `TERMINAL_READY`)
 	return term, output
 }
 

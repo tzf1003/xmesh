@@ -3,6 +3,7 @@
 package fs
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ func Test_WindowsAtomicReplaceOpenReader(t *testing.T) {
 	}
 	defer reader.Close()
 	if err := atomicWrite(target, []byte("new complete contents"), ""); err != nil {
-		t.Fatal(err)
+		t.Fatal(err, errors.Unwrap(err))
 	}
 	if old, err := io.ReadAll(reader); err != nil || string(old) != "old" {
 		t.Fatal("existing reader changed", string(old), err)

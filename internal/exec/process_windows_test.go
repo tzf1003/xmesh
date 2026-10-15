@@ -84,44 +84,54 @@ func Test_WindowsExecPowerShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tracked := range []bool{false, true} {
-		name := "standard-launch"
-		if tracked {
-			name = "job-launch"
-		}
-		t.Run(name, func(t *testing.T) {
-			cmd := osexec.Command(shell, "-NoProfile", "-Command", "Write-Output hello")
-			cmd.Dir, cmd.Env, cmd.Stdin = t.TempDir(), env, strings.NewReader("")
-			var output bytes.Buffer
-			cmd.Stdout, cmd.Stderr = &output, &output
+	for _, inherited := range []bool{false, true} {
+		for _, tracked := range []bool{false, true} {
+			name := "standard-launch"
 			if tracked {
-				prepare(cmd)
+				name = "job-launch"
 			}
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
+			if inherited {
+				name += "/inherited-env"
+			} else {
+				name += "/policy-env"
 			}
-			if tracked {
-				finish, err := track(cmd)
-				if err != nil {
-					_ = cmd.Process.Kill()
-					_ = cmd.Wait()
+			t.Run(name, func(t *testing.T) {
+				cmd := osexec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", "Write-Output hello")
+				cmd.Dir, cmd.Env, cmd.Stdin = t.TempDir(), env, strings.NewReader("")
+				if inherited {
+					cmd.Env = os.Environ()
+				}
+				var output bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &output, &output
+				if tracked {
+					prepare(cmd)
+				}
+				if err := cmd.Start(); err != nil {
 					t.Fatal(err)
 				}
-				defer finish()
-			}
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
-			select {
-			case err = <-done:
-			case <-time.After(20 * time.Second):
-				_ = cmd.Process.Kill()
-				<-done
-				t.Fatal("PowerShell launch did not complete")
-			}
-			if err != nil || strings.TrimSpace(output.String()) != "hello" {
-				t.Fatal("PowerShell output", output.String(), err)
-			}
-		})
+				if tracked {
+					finish, err := track(cmd)
+					if err != nil {
+						_ = cmd.Process.Kill()
+						_ = cmd.Wait()
+						t.Fatal(err)
+					}
+					defer finish()
+				}
+				done := make(chan error, 1)
+				go func() { done <- cmd.Wait() }()
+				select {
+				case err = <-done:
+				case <-time.After(10 * time.Second):
+					_ = cmd.Process.Kill()
+					<-done
+					t.Fatalf("PowerShell launch did not complete; output: %q", output.String())
+				}
+				if err != nil || strings.TrimSpace(output.String()) != "hello" {
+					t.Fatal("PowerShell output", output.String(), err)
+				}
+			})
+		}
 	}
 }
 
