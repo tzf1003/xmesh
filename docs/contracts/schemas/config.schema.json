@@ -119,6 +119,7 @@
       "properties": {
         "listen": { "enum": ["funnel", "public:443", "tunnel"] },
         "max_pty_per_client": { "type": "integer", "minimum": 1, "default": 8 },
+        "pty_budget_file": { "type": "string", "minLength": 1, "description": "本机共享的 PTY 预算文件绝对路径；默认使用入口状态目录中的 ingress-pty.json。" },
         "domain": {
           "type": "string",
           "minLength": 1,

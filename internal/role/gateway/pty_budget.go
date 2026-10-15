@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/filelock"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/pty"
@@ -26,11 +27,13 @@ type budgetPeer struct {
 
 type budgetState struct {
 	Version int                   `json:"version"`
+	Limit   int                   `json:"limit,omitempty"`
 	Peers   map[string]budgetPeer `json:"peers"`
 }
 
-// PTYBudget serializes admissions across all clients of one ingress. The journal
-// retains Agents with live OAuth terminals and fences calls with uncertain results.
+// PTYBudget serializes admissions across clients and processes sharing a journal
+// on one host. The journal retains Agents with live OAuth terminals and fences
+// calls with uncertain results.
 type PTYBudget struct {
 	limit int
 	path  string
@@ -47,24 +50,53 @@ func NewPTYBudget(limit int, path string) (*PTYBudget, error) {
 	if path == "" {
 		return b, nil
 	}
-	body, err := os.ReadFile(path)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := b.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if err := b.load(); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (b *PTYBudget) lock(ctx context.Context) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(b.path), 0700); err != nil {
+		return nil, err
+	}
+	return filelock.Acquire(ctx, b.path+".lock")
+}
+
+// load is called under the journal lock before every admission so independent
+// processes observe pending calls and device inventory written by their peers.
+func (b *PTYBudget) load() error {
+	body, err := os.ReadFile(b.path)
 	if os.IsNotExist(err) {
-		return b, nil
+		if len(b.state.Peers) != 0 {
+			return fmt.Errorf("入口 PTY 状态丢失")
+		}
+		return nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("读取入口 PTY 状态: %w", err)
+		return fmt.Errorf("读取入口 PTY 状态: %w", err)
 	}
 	var loaded budgetState
 	if err = json.Unmarshal(body, &loaded); err != nil || loaded.Version != 1 || loaded.Peers == nil {
-		return nil, fmt.Errorf("入口 PTY 状态无效")
+		return fmt.Errorf("入口 PTY 状态无效")
 	}
-	b.state = loaded
-	for id, peer := range b.state.Peers {
+	if loaded.Limit != 0 && loaded.Limit != b.limit {
+		return fmt.Errorf("共享入口 PTY 配额不一致")
+	}
+	for id, peer := range loaded.Peers {
 		if id == "" || peer.Name == "" || peer.Epoch == "" {
-			return nil, fmt.Errorf("入口 PTY 设备状态无效")
+			return fmt.Errorf("入口 PTY 设备状态无效")
 		}
 	}
-	return b, nil
+	b.state = loaded
+	return nil
 }
 
 func budgetUnavailable() error {
@@ -72,6 +104,7 @@ func budgetUnavailable() error {
 }
 
 func (b *PTYBudget) save(state budgetState) error {
+	state.Limit = b.limit
 	if b.path != "" {
 		if err := writeBudgetState(b.path, state); err != nil {
 			b.fault = true
@@ -162,6 +195,16 @@ func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool st
 	}
 	if ctx.Err() != nil || b.fault || v.p.ClientID == "" {
 		return agent.Result(nil, budgetUnavailable()), nil
+	}
+	if b.path != "" {
+		lock, err := b.lock(ctx)
+		if err != nil {
+			return agent.Result(nil, budgetUnavailable()), nil
+		}
+		defer lock.Close()
+		if err := b.load(); err != nil {
+			return agent.Result(nil, budgetUnavailable()), nil
+		}
 	}
 	devices, generation := v.g.snapshot()
 	peers := map[string]mesh.Peer{}

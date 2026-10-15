@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,6 +54,7 @@ type PAT struct {
 }
 type Ingress struct {
 	MaxPTYPerClient int    `json:"max_pty_per_client"`
+	PTYBudgetFile   string `json:"pty_budget_file"`
 	Listen          string `json:"listen"`
 	Domain          string `json:"domain"`
 	TLS             string `json:"tls"`
@@ -192,6 +194,9 @@ func Parse(b []byte) (*Config, error) {
 }
 func (c *Config) Validate() error {
 	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
+	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
+		return fail("/ingress/pty_budget_file")
+	}
 	if c.Gateway.Listen != "" {
 		host, _, e := net.SplitHostPort(c.Gateway.Listen)
 		if e != nil || host != "127.0.0.1" {

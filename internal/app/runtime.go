@@ -257,7 +257,11 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if e != nil {
 			return e
 		}
-		ptyBudget, e := gateway.NewPTYBudget(c.Ingress.MaxPTYPerClient, filepath.Join(o.StateDir, "ingress-pty.json"))
+		budgetFile := c.Ingress.PTYBudgetFile
+		if budgetFile == "" {
+			budgetFile = filepath.Join(o.StateDir, "ingress-pty.json")
+		}
+		ptyBudget, e := gateway.NewPTYBudget(c.Ingress.MaxPTYPerClient, budgetFile)
 		if e != nil {
 			return e
 		}

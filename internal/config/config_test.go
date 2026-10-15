@@ -108,3 +108,26 @@ func TestIngressPTYBudgetConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressPTYBudgetFileConfiguration(t *testing.T) {
+	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(t.TempDir(), "budget.json"), "relative/budget.json", ""} {
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc["ingress"].(map[string]any)["pty_budget_file"] = path
+		data, _ := json.Marshal(doc)
+		cfg, err := Parse(data)
+		if filepath.IsAbs(path) {
+			if err != nil || cfg.Ingress.PTYBudgetFile != path {
+				t.Fatal("absolute budget path rejected", err)
+			}
+		} else if err == nil {
+			t.Fatal("invalid budget path accepted", path)
+		}
+	}
+}
