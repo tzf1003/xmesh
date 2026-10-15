@@ -1,6 +1,8 @@
 package winjob
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,61 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func Test_WindowsJobCensusGuards(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_EXEC") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_EXEC=1 on Windows")
+	}
+	t.Setenv("XMESH_WINJOB_DRAIN_HELPER", "1")
+	t.Run("closed-and-cancelled", func(t *testing.T) {
+		_, census := newDrainCensus(t)
+		if err := census.WaitEmpty(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := census.TerminateAndWait(ctx, 1); !errors.Is(err, context.Canceled) {
+			t.Fatal("cancelled census confirmation", err)
+		}
+		for i := 0; i < 2; i++ {
+			if err := census.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := census.WaitEmpty(context.Background()); !errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+			t.Fatal("closed census accepted", err)
+		}
+	})
+	t.Run("nonempty-job", func(t *testing.T) {
+		job := newDrainJob(t)
+		process := startDrainProcess(t, job, "member", "unused", true)
+		census, err := NewProcessCensus(job)
+		if census != nil || !errors.Is(err, ErrIncompleteProcessSet) {
+			t.Fatal("late observation accepted", census, err)
+		}
+		assertDrainProcessAlive(t, process.Process)
+	})
+	t.Run("missing-notification", func(t *testing.T) {
+		job, census := newDrainCensus(t)
+		// Remove the association before admission to emulate a notification
+		// that was never delivered. Accounting must still retain the member.
+		var detached struct {
+			Key  uintptr
+			Port windows.Handle
+		}
+		if _, err := windows.SetInformationJobObject(job, windows.JobObjectAssociateCompletionPortInformation, uintptr(unsafe.Pointer(&detached)), uint32(unsafe.Sizeof(detached))); err != nil {
+			t.Fatal(err)
+		}
+		process := startDrainProcess(t, job, "member", "unused", true)
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		err := census.TerminateAndWait(ctx, 1)
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrIncompleteProcessSet) {
+			t.Fatal("missing notification certified an incomplete census", err)
+		}
+		assertDrainProcessAlive(t, process.Process)
+	})
+}
 
 // Keep a single application alive while reading its actual Job membership.
 // This diagnostic distinguishes kernel-created members from application trees.
@@ -20,6 +77,7 @@ func Test_WindowsJobMemberCensus(t *testing.T) {
 	for _, suspended := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "suspended-then-running"}[suspended], func(t *testing.T) {
 			job := newDrainJob(t)
+			observeJobTestMembers(t, job)
 			process := startDrainProcess(t, job, "member", "unused", suspended)
 			logJobCensus(t, job)
 			if suspended {
@@ -88,17 +146,15 @@ func observeJobTestMembers(t *testing.T, job windows.Handle) {
 	go func() {
 		defer close(done)
 		for {
-			var code uint32
-			var key uintptr
-			var value *windows.Overlapped
-			if err := windows.GetQueuedCompletionStatus(port, &code, &key, &value, windows.INFINITE); err != nil {
+			code, key, value, err := dequeueJobNotification(port)
+			if err != nil {
 				t.Log("job member event query", err)
 				return
 			}
 			if key == 1 {
 				return
 			}
-			pid := uint32(uintptr(unsafe.Pointer(value)))
+			pid := uint32(value)
 			t.Logf("job event code=%d process=%d", code, pid)
 			if code != 6 { // JOB_OBJECT_MSG_NEW_PROCESS
 				continue

@@ -235,7 +235,7 @@ go test -race ./internal/winjob -run WindowsJobAtomicAdmission -v -timeout=60s
 
 用例在宿主 `CreateProcess` 返回、子进程仍挂起时直接终止宿主，检查已绑定 Job 的子进程退出；独立对照保留未绑定的挂起子进程，随后按精确进程句柄清理。机制和最低系统版本见 [Windows 进程属性说明](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)。原生结果见 Windows 验收记录。
 
-内部 Job 退出确认原语可用 `$env:XMESH_TEST_WINDOWS_EXEC = "1"; go test -race ./internal/winjob -run WindowsJobDrain -v -timeout=60s` 验收。`WaitEmpty` 核对内核活动计数和每个生命周期进程句柄的退出信号，`TerminateAndWait` 在核对清单后请求终止并等待；等待支持取消并最多 30 秒。可信调用方须证明每个句柄属于该 Job，自准入起保留所有根及后代的句柄（包括已退出成员），总数须与内核累计分配计数一致，最多 10000 个独立身份；缺失、重复和未追踪的短生命周期成员保留错误。调用方保持句柄、禁止新进程加入，并在回收关联资源前持续保持准入静止。终止请求已发出后取消等待仍保留恢复义务，调用方可使用原句柄重试；单 Job 的空状态不能证明同一 profile 在其他 Job 中的进程已退出。AppContainer 测试 helper 已采用整棵 Job 退出确认；生产执行协调器接入与新增用例的原生结果继续验收。
+内部 Job 退出确认原语可用 `$env:XMESH_TEST_WINDOWS_EXEC = "1"; go test -race ./internal/winjob -run WindowsJob -v -timeout=60s` 验收。`WaitEmpty` 核对内核活动计数和每个生命周期进程句柄的退出信号，`TerminateAndWait` 在核对清单后请求终止并等待；等待支持取消并最多 30 秒。可信调用方须证明每个句柄属于该 Job，自准入起保留所有根及后代的句柄（包括已退出成员），总数须与内核累计分配计数一致，最多 10000 个独立身份；缺失、重复和未追踪的短生命周期成员保留错误。调用方保持句柄、禁止新进程加入，并在回收关联资源前持续保持准入静止。终止请求已发出后取消等待仍保留恢复义务，调用方可使用原句柄重试；单 Job 的空状态不能证明同一 profile 在其他 Job 中的进程已退出。AppContainer 测试 helper 已采用整棵 Job 退出确认；生产执行协调器接入与新增用例的原生结果继续验收。
 
 同机多入口 PTY 原生验收可使用同一 `XMESH_TEST_WINDOWS_PTY` 环境运行 `go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s`。用例覆盖两个入口子进程对两个 Agent 的并发准入、共享状态、转移、孤儿恢复和持久化阻断。
 
@@ -267,3 +267,6 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 
 内部 `recoverJournalDirectory` 对私有状态目录执行有界 sweep：目录仅接受普通 `.journal` 文件，最多 256 份，批次已验证记录合计不超过 64 MiB/65536 条。绑定入口的文件创建与恢复扫描按目录卷号/ID 使用同一 Global mutex，等待支持取消并限时 30 秒；跨用户/服务会话部署仍须验收。扫描、枚举身份核对与 profile/SID 重复检查先于恢复。调用方须提供协调回调，确认并保持进程已结束、外部写入协调和完整新对象清单，返回持有这些条件及所需卷句柄的非空 guard；回调不得在同一目录创建 journal 或重入恢复。guard 持有至完成记录刷盘后，失败回调已返回的 guard 也会释放。每份记录返回 retained/busy/complete/recovered 与错误；busy、损坏或未完成记录会使整体调用返回错误，独立有效记录仍可完成。完成 journal 保留，归档须在准入与恢复均静止时进行。调度器已在 Windows 原生回归中通过混合状态、预检/guard、跨进程创建协调及九种强制退出恢复验收；实际执行协调器仍须接入，生产 L2 门禁保持。
+
+
+内部 `NewProcessCensus` 在空私有 Job 准入前收集并保留真实成员句柄，包含系统自动加入的 console host；通知 PID 按 Job 归属核实，句柄保留至确认及资源回收结束。普通通知可能丢失，累计分配数与保留身份清单不一致时，确认返回错误并保持恢复义务。调用方须停止所有新准入；Close 仅释放观察器资源，不能代替退出确认或 ACL/profile 回收，且其独立 Job 句柄参与最后句柄关闭时的终止策略。生产协调器接入继续验收。

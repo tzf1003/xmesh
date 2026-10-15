@@ -20,7 +20,7 @@ func Test_WindowsJobDrain(t *testing.T) {
 	}
 	t.Setenv("XMESH_WINJOB_DRAIN_HELPER", "1")
 	t.Run("exited-root-live-descendant", func(t *testing.T) {
-		job := newDrainJob(t)
+		job, census := newDrainCensus(t)
 		proof := filepath.Join(t.TempDir(), "descendant.json")
 		root := startDrainProcess(t, job, "root", proof, false)
 		var pid uint32
@@ -56,11 +56,11 @@ func Test_WindowsJobDrain(t *testing.T) {
 		control := startDrainProcess(t, 0, "member", "unused", false)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
-		if err := WaitEmpty(ctx, job, root.Process, child); !errors.Is(err, context.DeadlineExceeded) {
+		if err := census.WaitEmpty(ctx); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("live descendant was not retained", err)
 		}
 		assertDrainProcessAlive(t, child)
-		if err := TerminateAndWait(context.Background(), job, 73, root.Process, child); err != nil {
+		if err := census.TerminateAndWait(context.Background(), 73); err != nil {
 			t.Fatal(err)
 		}
 		if result, err := windows.WaitForSingleObject(child, 0); err != nil || result != windows.WAIT_OBJECT_0 {
@@ -73,10 +73,10 @@ func Test_WindowsJobDrain(t *testing.T) {
 		if err := WaitEmpty(context.Background(), job, child); !errors.Is(err, ErrIncompleteProcessSet) {
 			t.Fatal("omitted exited root accepted", err)
 		}
-		if err := WaitEmpty(context.Background(), job, root.Process, child); err != nil {
+		if err := census.WaitEmpty(context.Background()); err != nil {
 			t.Fatal("empty observation retry", err)
 		}
-		if err := TerminateAndWait(context.Background(), job, 73, root.Process, child); err != nil {
+		if err := census.TerminateAndWait(context.Background(), 73); err != nil {
 			t.Fatal("termination retry", err)
 		}
 	})
@@ -146,8 +146,27 @@ func newDrainJob(t *testing.T) windows.Handle {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = windows.CloseHandle(job) })
-	observeJobTestMembers(t, job)
 	return job
+}
+
+func newDrainCensus(t *testing.T) (windows.Handle, *ProcessCensus) {
+	t.Helper()
+	job, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	census, err := NewProcessCensus(job)
+	if err != nil {
+		_ = windows.CloseHandle(job)
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := census.Close(); err != nil {
+			t.Error(err)
+		}
+		_ = windows.CloseHandle(job)
+	})
+	return job, census
 }
 
 func assertDrainProcessAlive(t *testing.T, process windows.Handle) {
