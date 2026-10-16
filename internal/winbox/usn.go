@@ -133,9 +133,12 @@ type journalDeletion struct {
 type workspaceChangePlan struct {
 	Created []journalObject
 	Unknown []journalObject // Entered a tracked directory without creation or census proof.
-	// Security lists identities already tracked before this plan whose security
-	// descriptor changed in the window. The planner cannot tell this package's
-	// own edits from an external writer's; the caller applies the ownership rule.
+	// Security lists identities already tracked before this plan whose records
+	// carry the security reason. NTFS accumulates reasons for as long as a file
+	// stays open, and this package keeps every admitted object open, so a record
+	// for an untouched descriptor can still carry the bit from this package's
+	// own earlier grant. The bit is therefore only a trigger: the caller compares
+	// the descriptor itself.
 	Security      []journalObject
 	DeleteIntents []journalDeletion
 	Deleted       []journalDeletion

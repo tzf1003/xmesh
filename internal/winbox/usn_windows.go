@@ -196,16 +196,17 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 // Close releases descendants only after reaping; import proofs and the production
 // coordinator remain required before production L2 use.
 func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int) error {
-	return checkpointWorkspaceChangesPolicy(ctx, j, sid, maxObjects, maxEvents, false)
+	return checkpointWorkspaceChangesPolicy(ctx, j, sid, maxObjects, maxEvents, nil)
 }
 
-// With enforceSecurity, a security-descriptor change on any object of the
-// admitted snapshot fails the checkpoint before anything is persisted, so the
-// unchanged cursor still lets cleanup replay the window. Live monitoring uses it
-// because this package edits those descriptors only before tracking starts and
-// after every process is reaped; release and recovery do not, since their own
-// earlier, partially completed edits legitimately appear in the stream.
-func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, enforceSecurity bool) error {
+// verifySecurity, when set, receives the admitted-snapshot identities whose
+// change records carry the security reason and fails the checkpoint before
+// anything is persisted, so the unchanged cursor still lets cleanup replay the
+// window. Live monitoring supplies it because this package edits those
+// descriptors only before tracking starts and after every process is reaped;
+// release and recovery do not, since their own earlier, partially completed
+// edits legitimately appear in the stream.
+func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, verifySecurity func([]journalObject) error) error {
 	if err := validateWorkspaceJournalOwnership(j, sid); err != nil {
 		return err
 	}
@@ -273,10 +274,16 @@ func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid 
 	if err != nil {
 		return err
 	}
-	if enforceSecurity {
+	if verifySecurity != nil && len(plan.Security) != 0 {
+		var admitted []journalObject
 		for _, object := range plan.Security {
 			if j.state.objects[object] {
-				return fmt.Errorf("%w (%d snapshot objects checked)", errWorkspaceSecurityChanged, len(j.state.objects))
+				admitted = append(admitted, object)
+			}
+		}
+		if len(admitted) != 0 {
+			if err := verifySecurity(admitted); err != nil {
+				return err
 			}
 		}
 	}
@@ -398,7 +405,7 @@ func (g *workspaceGrant) checkpointChanges(ctx context.Context, maxEvents int) e
 	if err := g.observePendingDeletes(ctx); err != nil {
 		return err
 	}
-	if err := checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, true); err != nil {
+	if err := checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, g.verifyDescriptors); err != nil {
 		return err
 	}
 	// Recorded unknown imports own reclamation, but no live execution may continue
