@@ -25,6 +25,10 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// buildVersion is overridden at release time with -ldflags "-X main.buildVersion=...".
+var buildVersion = "0.1.0"
+
 func run(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("用法: xmesh serve|install|status|pair --config xmesh.yaml")
@@ -43,7 +47,7 @@ func run(args []string) error {
 	case "status":
 		return status(args[1:])
 	case "version", "--version":
-		fmt.Println("xmesh 0.1.0")
+		fmt.Println("xmesh " + buildVersion)
 		return nil
 	default:
 		return fmt.Errorf("未知子命令: %s", args[0])
