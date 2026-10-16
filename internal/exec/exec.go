@@ -12,7 +12,6 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"io"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -185,44 +184,16 @@ func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string,
 			os.Remove(errout.Name())
 		}
 	}()
-	launch, argv, env, e := p.Sandbox(a.Cmd, a.Args, cwd, env)
+	started := time.Now()
+	var code int
+	var timedOut bool
+	if runner := p.SandboxRunner(); runner != nil {
+		code, timedOut, e = runManaged(ctx, runner, cwd, a, env, out, errout)
+	} else {
+		code, timedOut, e = runLaunched(ctx, p, cwd, a, env, out, errout)
+	}
 	if e != nil {
 		return nil, e
-	}
-	cmd := osexec.Command(launch, argv...)
-	cmd.Dir = cwd
-	cmd.Env = env
-	cmd.Stdin = strings.NewReader(a.Stdin)
-	cmd.Stdout = out
-	cmd.Stderr = errout
-	started := time.Now()
-	waitCommand, finish, e := startCommand(cmd)
-	if e != nil {
-		if _, ok := e.(*osexec.Error); ok || os.IsNotExist(e) {
-			return nil, toolerr.Args("cmd")
-		}
-		return nil, toolerr.Internal("exec.start", e)
-	}
-	defer finish()
-	done := make(chan error, 1)
-	go func() { done <- waitCommand() }()
-	timedOut := false
-	select {
-	case e = <-done:
-	case <-ctx.Done():
-		timedOut = true
-		terminate(cmd)
-		timer := time.NewTimer(200 * time.Millisecond)
-		select {
-		case e = <-done:
-			if !timer.Stop() {
-				<-timer.C
-			}
-		case <-timer.C:
-			kill(cmd)
-			e = <-done
-		}
-		kill(cmd)
 	}
 	duration := time.Since(started).Milliseconds()
 	limit, _ := config.Size(cfg.InlineOutputBytes)
@@ -235,7 +206,7 @@ func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string,
 		return nil, toolerr.Internal("exec.output", readErr)
 	}
 	truncated := outSize > int64(limit) || errSize > int64(limit)
-	result := Object{"exit_code": exitCode(cmd, e), "stdout": stdout, "stderr": stderr, "duration_ms": duration, "truncated": truncated, "resolved_path": cwd}
+	result := Object{"exit_code": code, "stdout": stdout, "stderr": stderr, "duration_ms": duration, "truncated": truncated, "resolved_path": cwd}
 	if wait >= time.Millisecond {
 		result["queue_wait_ms"] = wait.Milliseconds()
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/sandbox"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
@@ -22,6 +23,7 @@ type Rule struct {
 type Engine struct {
 	config config.Policy
 	rules  []Rule
+	runner sandbox.Runner
 }
 
 var safe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)

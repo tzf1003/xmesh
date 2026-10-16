@@ -1,0 +1,59 @@
+name: Windows 受限 helper 退出码压测
+# 调查 e747cb8 中 AppContainer helper 的退出码 66。该状态是 Go 竞态检测器的约定退出码；
+# 本工作流在真实 AppContainer 中固定该映射，并重复启动 helper 以统计无竞态报告的 66。
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'internal/winbox/**'
+      - '.github/workflows/windows-race-stress.yml'
+jobs:
+  stress:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/windows-race-stress.yml
+      - name: Runner environment
+        shell: pwsh
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED GOFLAGS
+          $os = Get-CimInstance Win32_OperatingSystem
+          "{0} build {1}" -f $os.Caption, $os.BuildNumber
+          "Physical memory free/total (MB): {0}/{1}" -f [int]($os.FreePhysicalMemory/1024), [int]($os.TotalVisibleMemorySize/1024)
+          "Virtual memory free/total (MB): {0}/{1}" -f [int]($os.FreeVirtualMemory/1024), [int]($os.TotalVirtualMemorySize/1024)
+          Get-CimInstance Win32_PageFileUsage | ForEach-Object { "Page file {0}: allocated {1} MB, peak {2} MB" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+      - name: Race exit status control and trivial launch stress
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          XMESH_TEST_WINDOWS_RACE_STRESS: "300"
+        run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerRaceDiagnosticsControl|Test_WindowsAppContainerRaceHelperLaunchStress' -v -count=1 -timeout=1500s
+      - name: Deletion recovery repetition
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerWorkspaceDeletionRecovery' -v -count=25 -timeout=1500s
+  runner:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/windows-race-stress.yml
+      - name: Managed runner exec and ConPTY acceptance
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run 'Test_WindowsManagedRunner' -v -count=1 -timeout=900s
