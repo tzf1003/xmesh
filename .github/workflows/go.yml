@@ -90,6 +90,9 @@ jobs:
           }
           $env:XMESH_TEST_WINDOWS_USER_SERVICE = '1'
           go test -race ./cmd/xmesh -run WindowsUserTaskRuntime -v -timeout=90s
+      - name: Windows private state directory ACL
+        if: ${{ !cancelled() }}
+        run: go test -race ./internal/privdir -run Windows -v -count=1 -timeout=120s
       - name: Windows AppContainer isolation primitive
         if: ${{ !cancelled() }}
         env:

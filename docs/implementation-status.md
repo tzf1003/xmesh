@@ -456,3 +456,25 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 新增原生用例 `Test_WindowsManagedRunnerProductionCoordinator`（真实 keeper 加围栏，连续两次真实 AppContainer exec，核对 token、工作区内写入、工作区外读取被拒、根 descriptor 逐字节恢复、journal 无残留）与 `Test_WindowsManagedRunnerRequiresVerifiableGuard`（测试替身 guard 在要求围栏时被拒绝且已释放），随主门禁运行。
 
 边界：`cmd/xmesh` 仍不安装 runner，Windows 生产 L2 保持 `sandbox.unavailable`。该 guard 不冻结树内写入，围栏只检出而不能阻止持有 WRITE_DAC 的同用户修改 DACL，census 仍是事后归并，普通账号读取变更日志待真实验收；因此这一步使前述各部件在同一条生产代码路径上可组合验证，并不证明安全条件已满足。
+
+## 2026-10-16 并行实现第一波合并记录
+
+以下内容按合并顺序记录第一波并行子任务（每项一个独立 PR，Windows 原生结果以 `windows-native` 作业为准）。Windows 生产 L2 在 `agent.policy.windows_appcontainer` 接入合并前后均默认关闭，仍返回 `sandbox.unavailable`。
+
+- **文档漂移与 CLI 输出（T8，#6）**：已修复差距清单中的第 1 至 6、8 至 11、13 至 16 项；第 7 项与第 12 项分别由 T4、T5 的实现收敛（`progress_unrouted` 审计事件与 CTR-CFG-02 小节标题），随各自 PR 一并处理。
+- **Agent 契约偏差（T6，#10）**：对等端离开后清理、早期饱和拒绝、grep 类型过滤、mDNS 行为、relay 提示信息、严格工具 schema；隔离级别 L0 与 L1 等价。
+- **Windows 外部写入者安全条件（T2，#5）**：四项安全条件（树内写入冻结、同用户 WRITE_DAC、后代 SECURITY_CHANGE、完整 census）的原生实现与验证已合入；仍未接入生产启动路径。
+- **OAuth、授权与配额（T5，#8）**：动态注册客户端 scope 默认只授予 `devices:read`；funnel 监听不信任 `X-Forwarded-For`，只有隧道监听在内核中处理单跳转发头；授权标签匹配使用 `path.Match`；调用配额进入配置。
+- **一致性检查与 CI 门禁（T7，#11）**：契约覆盖率检查脚本、门 2 固定场景、本机冒烟与 Headscale CI、发布门禁。
+- **跨主机入口 PTY 预算测试稳定性（#18）**：权威租约测试使用 4 秒租约，消除 1 秒租约在高负载 Windows runner 上的偶发失败，并避免该失败连带跳过 `windows-native` 后续步骤；生产有效期（30 秒，余量 5 秒）不变。
+- **网关、mcpmux 与 drain（T4，#9）**：网关三个工具发布真实 JSON schema；会话默认 `cwd`/`env` 只注入声明了这些参数的内置工具；网关为已获取的 lease 做心跳续约；未知进度令牌写入 `progress_unrouted` 审计事件；审计 `caller` 为 `<节点>/<会话>` 并记录 `oauth_session`；`gateway.expose_backends` 变化报告 `restart_required`；新增 `xmesh drain --scope device|mesh --mode keep|kill`；在线 Agent 返回的协议错误不再把设备标记为断开。真实 tailnet 与 LAN 下的 `drain --scope mesh` 待真实环境验收。
+- **发布流水线与验收步骤（T11，#20）**：推送 `v*-beta*` 标签生成预发布，带六个二进制与 `SHA256SUMS`，归档包含验收脚本；真实环境验收按[验收步骤](validation/real-environment-runbook.md)逐步执行。
+- **桌面 UI（阶段 6）**：本机控制通道契约 v1（#14）、Electron 托盘壳与 Control API 客户端（#17）、electron-builder 的 Windows/macOS 打包（#21）已合入；内核本机控制通道（#16）、meshadmin 库与 `xmesh mesh` CLI（#15）、平台集成（#19）仍为草稿。
+
+### 新增待办
+
+| 项目 | 说明 |
+| --- | --- |
+| Windows 状态目录 ACL | 状态目录目前只用 `os.MkdirAll(0700)` 创建，Windows 上不设 ACL，完全依赖父目录继承；在 `C:\` 根下新建目录时，其他本地用户可读写。应显式设置仅当前用户、SYSTEM、Administrators 可访问（T11 发现），作为下一轮独立闭环修复。 |
+| 普通账号不能使用 Windows L2 | 非管理员账号无法读取 NTFS 变更日志，应被拒绝并给出明确原因（T3，#4，待合并）；真实验收中普通账号步骤应预期该拒绝，而不是成功。 |
+| Windows 代码签名与 Apple 开发者证书 | 桌面 UI 正式发布前需要。 |

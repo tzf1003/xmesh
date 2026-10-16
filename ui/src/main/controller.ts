@@ -108,6 +108,12 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.wake?.();
   }
 
+  /** Re-check the kernel now, e.g. after the machine woke from sleep or the session was unlocked. */
+  nudge(): void {
+    this.stream?.close();
+    this.wake?.();
+  }
+
   setLoginItem(enabled: boolean): void {
     this.opts.setLoginItem(enabled);
     this.update({ settings: { ...this.snap.settings, loginItem: this.opts.getLoginItem() } });

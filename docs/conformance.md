@@ -22,6 +22,7 @@
 | 门 3 的 tailnet 互联（仅直连路径） | `headscale.yml`：一次性 Headscale、两个 tsnet 节点互调、`Test_TailnetPeerConnectivity` |
 | 门 4 的 OAuth 协议路径 | `headscale.yml` 里的 `scripts/oauth_client.py`：动态注册、PKCE、登录、`tools/list`、`exec.run`；证明协议，不证明 claude.ai 的展示 |
 | 发布门禁 | `release.yml` 先跑 vet、竞态测试、矩阵检查，并要求同一提交上 `go.yml`、`contracts.yml`、`headscale.yml` 都已成功 |
+| 控制面管理 | `meshadmin.yml`：`go test -race ./meshadmin ./cmd/xmesh`，带校验过的 Headscale 0.29.5 二进制运行集成场景 |
 
 ## 门 1 · 阶段 1 工具基础
 
@@ -108,6 +109,25 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 
 云沙箱加入 tailnet 是实验：Codex Cloud 与 Claude Code 云沙箱至少一家用 ephemeral pre-auth key 连上并调用一次对端工具。失败时写下出站限制，主路径（公网入口）的门 4 结果仍然有效。
 
+## 控制面管理（meshadmin）
+
+不依赖设备门，随 `meshadmin` 与 `xmesh mesh` 交付。Tailscale 一侧只用夹具（请求形状对照官方客户端），Headscale 一侧用真实 v0.29.5 二进制：本机用 `XMESH_TEST_HEADSCALE_BIN` 指向二进制即可运行，`meshadmin.yml` 在 CI 里下载并校验后运行。DERP 的真实公网探测与官方控制面联调不在自动化里，见 [运行手册](operations.md) 的“tailnet 管理”一节。
+
+| 编号 | 观察点 |
+| --- | --- |
+| CON-MESH-01 | `meshadmin` 不引用 `internal/`；内核、Gateway、Agent 不引用 `meshadmin` |
+| CON-MESH-02 | 登录与所有 CLI 输出里搜不到凭据和新建的 auth key；只读凭据发起写请求被拒 |
+| CON-MESH-03 | 默认只预览；`--apply` 才写；etag 冲突不覆盖；快照可回滚 |
+| CON-MESH-04 | 含用户注释、规则与同名 tagOwners 的策略往返后只有标记片段变化 |
+| CON-MESH-05 | region id 在 900 到 999；探测失败后策略恢复为写前文本 |
+| CON-MESH-06 | 放行文件损坏时拒绝；真实 `derpserver` 拒绝未放行节点；管理端点需要 token |
+| CTR-MESH-01 | 两个 Provider 的设备、tag、key 请求形状；明文 HTTP 只许环回 |
+| CTR-MESH-02 | 模板、托管片段幂等与回滚、凭据文件格式 |
+| CTR-MESH-03 | 设备检查、权限矩阵合并网络层与工具层 |
+| CTR-MESH-04 | DERP 片段写入、Headscale 生成的 YAML 被真实 Headscale 加载、探测的每项原因 |
+| CTR-MESH-05 | 准入接口契约、控制面设备同步到放行名单 |
+| RUL-20 RUL-21 RUL-22 | 只经 `Capabilities` 区分控制面；Headscale 版本检查为客户端侧；读写凭据分离 |
+
 ## 阶段 6 · 桌面 UI 与本机控制通道（U0 契约）
 
 契约先行：模式、夹具、Go 类型、TS 生成物。内核实现（U1、U2）与 UI（U3 起）各自追加自己的行，不改下表。
@@ -119,6 +139,15 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-CTL-05 CTR-CTL-06 CTR-CTL-07 | 对端、会话、drain、配置读写的请求与响应夹具；终端缓冲字段被拒绝；`replace` 缺 `before` 被拒绝 |
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 CTR-CTL-11 | 配对、PAT、入口、审计夹具；令牌与 `secret_hash` 泄漏的反例失败；`PatSecret` 之外的类型没有令牌字段；审计元素含 stdout 的反例失败 |
 | CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`contracts.yml`） |
+
+内核实现（U1）追加：
+
+| 编号 | 观察点 |
+| --- | --- |
+| CTR-CTL-01 | 端点文件记录传输、地址、boot id 与能力；客户端能从状态目录或逐个枚举用户目录找到通道，停机后端点文件被删除 |
+| CON-ARCH-09 | 运行中的节点：端点是套接字或管道而不是 TCP 地址；Agent 与 Gateway 的 TCP 监听都不应答控制路径；任何 MCP 工具列表都不含控制或 drain 工具 |
+| CON-ARCH-10 | 事件订阅者不告而别（模拟 UI 崩溃）后，终端会话、节点状态与通道本身不变，终端仍可正常关闭 |
+| CON-SEC-12 | Unix：只接受内核同一 euid 的对端（别的 uid 被丢弃），套接字 0600、目录 0700；Windows：描述符只含当前用户、SYSTEM、管理员与显式追加的 SID，别名与宽泛主体被拒，运行中的管道不含 Everyone 与 AppContainer；L2 工作区含套接字时被拒绝；非 GET 请求以 `actor=control` 写审计（`Test_ControlCallsAreAudited`） |
 
 ## 模式夹具
 

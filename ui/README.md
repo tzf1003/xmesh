@@ -30,6 +30,7 @@ npm start             # 另开终端，启动 Electron
 
 | 路径 | 内容 |
 | --- | --- |
+| `src/main/system/` | 平台相关的主进程模块：`binary`（找 `xmesh` 可执行文件）、`autostart`（登录项）、`notifier`（通知节流）、`firstrun`（只提示一次的标记） |
 | `src/main/` | 主进程：`discovery`（找实例）、`client`（Control API 客户端，含 SSE）、`controller`（连接状态机，重连、`Last-Event-ID`）、`menu`（菜单模型，纯数据）、`tray`、`actions`（菜单与 IPC 共用的操作）、`ipc`、`window`、`policy`（安全策略常量）、`protocol`（`app://panel` 页面服务）、`panel-service`（面板的数据读写，固定路由）、`setup`（首次运行向导的落盘与 `xmesh install/start`） |
 | `src/preload/` | 沙箱预加载脚本，只暴露白名单函数 |
 | `src/shared/` | 主进程、预加载、渲染进程共用的类型：控制接口类型（`generated/` 是契约生成物的副本）、状态、IPC 白名单、字符串表 |
@@ -86,6 +87,18 @@ npm start             # 另开终端，启动 Electron
 | 内核给的路径和地址不直接交给系统 | `actions.ts` 的 `checkOpenablePath`、`connect.ts` | 单元测试：配置只能是 `.yaml/.json/…` 文件，日志审计只能是目录，网关地址含 shell 元字符时拒绝复制 |
 
 Fuses 有两档。`release` 是发布用的，由后续的打包任务在 `afterPack` 里调用 `node scripts/flip-fuses.mjs --profile release --binary <app>`，之后用 `--verify` 复核。`test` 档只放开三项：Playwright 要靠 `--inspect` 连接（`EnableNodeCliInspectArguments`），测试从 `dist/` 的松散文件启动而不是 asar（`EnableEmbeddedAsarIntegrityValidation`、`OnlyLoadAppFromAsar`）。`RunAsNode`、`NODE_OPTIONS`、`file://` 额外权限在两档里都是关闭的。
+
+## Windows 与 macOS 平台集成
+
+| 项 | Windows | macOS |
+| --- | --- | --- |
+| UI 自启 | 写 `HKCU\...\Run`，读写都带可执行文件路径；用户在任务管理器「启动应用」里关掉时，菜单项保持未勾选并提示 | 登录项（`SMAppService`）；`requires-approval` 时保持未勾选并提示去「系统设置 > 登录项」允许 |
+| 开发模式 | 未打包时不写任何登录项，只提示「只有安装后的 xmesh 才能设置」 | 同左 |
+| 找 `xmesh` | `XMESH_BIN`，应用内 `resources/bin/xmesh.exe`，`PATH`，`%LOCALAPPDATA%\Programs\xmesh`、`%LOCALAPPDATA%\xmesh\bin`、`%ProgramFiles%\xmesh`、`~\go\bin` | 同序；登录项启动的 PATH 只有 `/usr/bin:/bin:…`，所以补查 `/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`、`~/go/bin` |
+| 找内核实例 | `%APPDATA%\xmesh\*`，再加 `%ProgramData%\xmesh\*`：`install --system` 的服务在 Session 0 以 SYSTEM 运行，它自己的用户配置目录普通用户读不到，需要用 `--state-dir` 放到 `%ProgramData%\xmesh\<节点名>`；管道本身由 `control.json` 的 `endpoint` 给出，UI 在用户会话里连接 | `<UserConfigDir>/xmesh/*` |
+| 通知 | 首次运行（仅安装版）提示一次：图标在溢出区时怎么固定到任务栏；通知需要开始菜单快捷方式带 AUMID（`app.xmesh.ui`，即 electron-builder 的 `appId`） | 用户通知中心；菜单栏图标是模板图像，无 Dock 图标（`app.dock.hide()`，Info.plist 的 `LSUIElement` 由 `electron-builder.config.mjs` 写入） |
+| 通知节流 | 同一条 60 秒内不重复；一批超过 3 条合并成一条；60 秒内最多 6 条；点击打开面板 | 同左 |
+| 睡眠与锁屏 | 唤醒、解锁时立刻重连事件流，不等 45 秒空闲超时 | 同左 |
 
 ## 打包与发布
 
@@ -161,7 +174,8 @@ UI 以 [docs/contracts/control.md](../docs/contracts/control.md) 为准。
 
 - 面板的结构化配置表单：目前是 YAML 编辑 + 差异预览；终端会话没有关闭路由（契约未定义），孤儿终端只展示
 - tailnet 管理页面（主机标签、权限矩阵、DERP），等 `xmesh mesh … --json` 合入后补
-- Windows 自启、macOS 登录项（S2、S3）；有证书后的签名与公证只差配置 secrets，尚未用真实证书验证过
+- 有证书后的签名与公证只差配置 secrets，尚未用真实证书验证过
+- 登录项和通知的运行时部分已在 `src/main/system/`，但只有安装版才生效，真机验证要等安装包
 - `xmesh restart` / `stop` 子命令由内核通道线程提供，托盘只在菜单里调用 `xmesh <cmd> --json`
 - 事件里的入口新客户端通知：契约的事件类型里没有入口事件，等内核提供
 - 菜单里「执行 n/m」目前只显示共享池，独占池（`exec_exclusive`）在面板里展示

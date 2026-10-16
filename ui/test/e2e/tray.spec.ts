@@ -166,3 +166,11 @@ test("two instances: the menu lists both and switching moves the tray to the cho
     await second.stop();
   }
 });
+
+test("an unpackaged run never registers a login item; the menu explains why", async () => {
+  h = await launch();
+  await expectIcon(h, "ok");
+  await h.clickMenu("settings.loginItem");
+  await expect.poll(async () => (await h.notices()).join("|")).toContain("只有安装后的 xmesh");
+  expect(menuHas((await h.tray()).menu, "settings.loginItem")?.checked).toBe(false);
+});

@@ -129,6 +129,15 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-
 
 两端分别导入对方，重启使配对生效。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。
 
+## 状态目录权限
+
+状态目录存放节点私钥、OAuth 凭据、PAT 计数与审计日志，只允许运行用户使用。启动（`serve`、`pair`）时由 `internal/privdir` 保证：
+
+- macOS、Linux：目录 `0700`，已存在的目录会收紧到 `0700`。
+- Windows：`os.MkdirAll` 不设置 ACL，目录只继承父目录，放在 `C:\` 根下新建的目录里时其他本地用户默认可读写。现在新目录创建时就带受保护 DACL（禁用继承），只授予运行用户、`SYSTEM`、`Administrators` 完全控制，并带对象/容器继承，之后创建的文件沿用。`install --system` 时运行用户就是 `SYSTEM`，实际只有 `SYSTEM` 与 `Administrators`。
+- Windows 已存在的目录：不是真实目录（符号链接、junction、文件）或属主不是运行用户、`SYSTEM`、`Administrators` 时拒绝启动，因为另一个属主可以改回 ACL；否则 DACL 不是上述受保护形态时直接改写并向已有子对象传播，随后扫描整棵树：遇到链接或其他属主的条目报错，显式授权给其他账户的子对象重置为私有。这不能撤销目录开放期间别人已经读走的内容，开放过的状态目录里的密钥应视为已泄露并轮换。
+- 状态目录的 ACL 不授予安装者或登录用户。`install --system` 后桌面 UI 以普通用户读取 `%ProgramData%\xmesh\<节点名>\control.json` 时，需要由写该文件的一方调用 `privdir.GrantRead(path, sid...)` 给文件单独加只读 ACE（Windows 允许任何账户穿越自己不能列目录的上级目录，按精确路径打开该文件即可）；目录本身与其他文件仍保持私有。内核控制通道每次写 `control.json`（临时文件改名之后）都会调用它，授权者就是命名管道 DACL 的 `--control-allow-sid`（`Test_ControlEndpointFileIsReadableByAllowedSIDs`）。
+
 ## 后端与入口
 
 后端启动命令、工作目录和策略配置在 `agent.backends`。exclusive 后端先 `backend.acquire`，后续请求以 `_lease_token` 携带返回的 fencing token；Agent 转发业务参数前剥离此字段。普通业务 `token` 字段照常转发。续期必须显式调用 `backend.renew`。只改策略时有效后端进程和租约保留，后端配置变更或故障会使旧租约失效。
@@ -322,6 +331,104 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 内部 `workspaceWriterFence` 把工作区与 journal 私有目录的祖先链以无 delete 共享的句柄钉住，并核对身份、reparse、硬链接、DACL 指纹及 NTFS 变更日志；`RequireWriterFence` 开启后生命周期拒绝无法 Verify 的 guard，违规使监视器终止执行，清理仍完成并返回违规。读取变更日志需要卷设备访问，普通账号须在目标账号上验收；该围栏默认关闭、尚未接入生产，且不随宿主崩溃存活。
 
+## 本机控制通道
+
+内核启动后在状态目录旁开一条只给本机用户的控制通道，供桌面 UI 和 `xmesh control` 使用。设计见 [12 桌面 UI 与本机控制通道](design/12-ui-and-control.md)。它不是 TCP 监听，不挂在 Gateway、入口或 MCP 上，`tools/list` 里没有它。通道起不来时节点照常运行，只在 stderr 打印「控制通道未启动」。
+
+| 平台 | 端点 | 谁能连 |
+| --- | --- | --- |
+| macOS、Linux | 状态目录下 `control.sock`（`0600`，目录 `0700`）；路径超过 100 字节时落到 `$TMPDIR/xmesh-<uid>/<节点名>.sock`（契约写作 `control.sock`；加上节点名是为了同一用户的多个节点不互相占用） | 对端 uid 必须等于内核运行用户（`SO_PEERCRED` / `LOCAL_PEERCRED`），其他用户的连接直接断开 |
+| Windows | 命名管道 `\\.\pipe\xmesh-<SID>-<节点名>`，创建时拒绝远程客户端，名字不可被抢占 | DACL 只含运行用户、`SYSTEM`、`Administrators`；`install --system` 额外加入安装者的 SID（`serve --control-allow-sid`）。AppContainer 不在其中 |
+
+状态目录里的 `control.json` 记录端点、PID、内核版本和 `control_api`，节点退出时删除。UI 与 CLI 按 `<用户配置目录>/xmesh/*/control.json` 找到本机所有节点；自定义了 `--state-dir` 的节点用 `--state-dir` 指定。
+
+L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目录或它的上级设为工作目录），exec 和 PTY 以 `policy_denied`、规则 `sandbox.control_channel` 拒绝。macOS 的 Seatbelt 本来就拒绝连接工作目录之外的套接字，Linux 的 bwrap 只绑定工作目录。
+
+### 接口
+
+接口、字段、错误码和事件格式以 [控制通道契约](contracts/control.md) 为准，内核的路由注册与它的路由表一一对应（`Test_ControlRegistersEveryContractRoute`），每个响应和事件在测试里都过契约模式。这里只写运维上需要知道的。
+
+内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`audit`，以及有配置文件时的 `config.read`、`config.write`。`pair`、`pats`、`ingress` 的路由已注册，但内核还没有声明这些能力，请求返回 `not_implemented`（501）。
+
+- `GET /v1/status`：`sys.info` 的超集，不按调用方 tag 过滤，另含 `control`、`lifecycle`、`drain`、`paths`、`gateway`、`peers`。`warnings` 是 `{code, severity, message}`。
+- `GET /v1/events`：SSE，首条 `hello`；`Last-Event-ID`（`<boot_id>.<seq>`）续传，保留最近 1024 条，id 属于上一次启动或已滚出缓存时先发 `reset`。事件由每秒一次的状态采样推导，短于一个采样周期的 exec 可能不会出现，`call` 事件来自审计记录，不受此限。字段是白名单，带 stdout 等内容的事件被拒绝（INV-10）。
+- `GET /v1/sessions`：PTY、排队和运行中的 exec（只有可执行文件基名）、后端租约（`token` 是 fencing 序号）。
+- `POST /v1/drain`、`POST /v1/resume`：`keep` 重复是 no-op，`keep` 可升级为 `kill`，`kill` 降级返回 `conflict`（`drain_downgrade`）。恢复只让本节点重新接受新调用，`kill` 已结束的终端和租约不会回来；同一进程里的 Gateway 一并恢复，其他节点上的 Gateway 自己的排空标记不由这里清除。
+- `GET /v1/config`、`PUT /v1/config`：整文件读写。`PUT` 必须带 `If-Match`（缺少 428，过期 412 并附 `current_etag`），内容经 `config.Parse` 校验（失败 422 `config_invalid`，带逐条诊断），临时文件加重命名原子替换，注释与格式由提交的内容决定。响应的 `diff` 是 JSON Pointer 操作列表，`weakens_security` 只是给 UI 弹确认的提示，内核不拦截，因为同一用户的进程本来就能直接改配置文件。`xmesh control config set --set/--delete` 在客户端读当前文件、改好再整体提交。
+- `GET /v1/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
+
+经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 时只能按路径前缀（`/node`、`/mesh`、`/gateway/listen`、`/ingress`）估计。
+
+### 命令行
+
+```
+xmesh status --control [--node 名 | --state-dir 目录] [--json]
+xmesh control status|peers|sessions|events|audit|drain|resume|config get|config set ...
+xmesh install|pair|uninstall|start|stop|restart ... --json
+```
+
+`xmesh control` 的输出都是 JSON；`events` 每行一个事件（首条为 `hello`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。
+
+### 尚未提供
+
+- 配对、PAT、入口客户端与口令的接口（契约里的 `pair`、`pats`、`ingress` 能力）。
+- `install --system` 的服务以 SYSTEM 运行，它的状态目录不在用户配置目录下，UI 自动发现不到；管道名里的 SID 是 SYSTEM 的，需要显式指定。
+- Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`）；AppContainer 内真实连接被拒的原生验收未做。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，CI 不运行。
+
 ## 测试版发布
 
 向仓库推送形如 `v0.2.0-beta.1`（或 `-rc`）的标签，`.github/workflows/release.yml` 会为 linux/amd64、linux/arm64、darwin/amd64、darwin/arm64、windows/amd64 和 windows/arm64 六个目标构建二进制（Windows 为 `.zip`，其余为 `.tar.gz`），生成 `SHA256SUMS.txt`，并创建 GitHub 预发布版。`xmesh version` 输出标签名。二进制未签名；该工作流只在标签推送时运行，不属于常规 CI。例如：`git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1`。
+
+## tailnet 管理（xmesh mesh）
+
+`xmesh mesh` 管理控制面（官方 Tailscale 或 Headscale）：设备与 tag、接入新设备、权限模板、第三方 DERP。管理凭据只存系统钥匙串或 `0600` 文件，不放进 `xmesh.yaml`，也不进内核进程，见 [CON-MESH-02](constraints/meshadmin.md#con-mesh-02)。命令都支持 `--json`，桌面 UI 通过它们调用。契约见 [meshadmin](contracts/meshadmin.md)。
+
+登录（密钥从标准输入读，不放命令行）：
+
+```bash
+# Tailscale：OAuth client（--client-id 给出时密钥视为 client secret；不给则视为 API token）。读写各存一份，写凭据只在要改东西时才放
+printf '%s' "$SECRET" | xmesh mesh login --profile home --kind tailscale --tailnet example.com --client-id ID --access read
+printf '%s' "$SECRET_W" | xmesh mesh login --profile home --kind tailscale --tailnet example.com --client-id ID_W --access write
+# Headscale：API key，等同完整权限；--url 必须是 https，本机验收可用环回 http
+printf '%s' "$KEY" | xmesh mesh login --profile lab --kind headscale --url https://hs.example.com --access write
+xmesh mesh status --profile home --node-config xmesh.yaml
+```
+
+没有钥匙串的主机（无桌面的 Linux 服务器）用 `--credential-file`，文件权限必须是 `0600`。
+
+读与写：
+
+```bash
+xmesh mesh tags --profile home                                   # 设备与 tag
+xmesh mesh tags --profile home --device DEVICE --set tag:device --apply
+xmesh mesh authkey --profile home --tags tag:device --out ./authkey            # 预授权 key 写入 0600 文件，不打印
+xmesh mesh onboard --profile home --authkey-file ./authkey --config xmesh.yaml # 新设备接入；加 --install 直接安装
+xmesh mesh matrix --profile home --node-config xmesh.yaml        # 网络层与 agent.authz 合并后的权限矩阵
+xmesh mesh policy --profile home --template team --owner autogroup:admin       # 预览
+xmesh mesh policy --profile home --template team --owner autogroup:admin --apply --expect-version VERSION
+xmesh mesh policy --profile home --snapshots
+xmesh mesh policy --profile home --rollback SNAPSHOT_ID --apply
+```
+
+所有写操作默认只预览（含控制面校验结果与 diff）；`tags`、`policy` 加 `--apply` 才写，DERP 用 `derp apply`（`derp plan` 只预览），写前存快照到本机状态目录。`--expect-version` 取预览里的 `base_version`，保证写入的正是看过的那一版。Headscale 以 `policy.mode=file` 运行时策略只读：命令给出文本，由运维写入服务器后 reload。Headscale 数据库模式没有原子的版本检查，见 [RUL-21](contracts/rulings.md#rul-21)。
+
+第三方 DERP：
+
+```bash
+xmesh mesh derp plan --profile home --region "code=lab,name=Lab,host=derp.example.com,ipv4=203.0.113.9"   # 预览 derpMap
+xmesh mesh derp apply --profile home --region "..."   # 写 derpMap，随后探测，失败自动回滚
+xmesh mesh derp probe --region "..." --compare-official
+xmesh mesh derp headscale --region "..." --out derp.yaml      # Headscale：生成 derp.paths 文件和 config 片段，重启 Headscale 生效
+```
+
+内部使用的准入（只放行已注册设备）：
+
+```bash
+derper ... --verify-client-url http://127.0.0.1:8480/admit --verify-client-url-fail-open=false
+xmesh mesh derp admit-serve --listen 127.0.0.1:8480 --allowlist allow.json --admin-token-file admin.token
+xmesh mesh derp sync --profile home --admission-url http://127.0.0.1:8480 --admission-token-file admin.token
+```
+
+`--verify-client-url-fail-open=false` 不能省：上游默认在准入服务不可达时放行。准入只在连接建立时判断，已有连接要重连才受影响。
+
+验证状态：Headscale 一侧用真实 v0.29.5 做过集成测试（`policy.mode=database`，含生成的 DERP 文件被其加载）；Tailscale 一侧只对照官方客户端的请求形状做了夹具测试，没有联调真实 tailnet；第三方 DERP 的探测与准入在本机回环验证过，没有跨公网验证。计量、计费、多租户目录没有实现。

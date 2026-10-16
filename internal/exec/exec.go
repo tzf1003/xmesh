@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,19 @@ type Manager struct {
 	dir       string
 	wg        sync.WaitGroup
 	closing   bool
+	runs      map[uint64]*Run // in-flight runs, for the local control channel
+	nextRun   uint64
+}
+
+// Run is the metadata of one queued or running call: who, which executable and
+// how it is scheduled. It never holds arguments, environment, stdin or output.
+type Run struct {
+	ID      uint64
+	Caller  string
+	Cmd     string // base name only
+	Mode    string
+	Running bool
+	Started time.Time
 }
 
 var keyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,200}$`)
@@ -55,7 +69,7 @@ func New(cfg config.Exec) (*Manager, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &Manager{cfg: cfg, scheduler: newScheduler(cfg.MaxConcurrent, cfg.ExclusiveSlots), cache: map[string]map[string]*record{}, history: map[string][]*record{}, outputs: map[string]*record{}, dir: dir}, nil
+	return &Manager{cfg: cfg, scheduler: newScheduler(cfg.MaxConcurrent, cfg.ExclusiveSlots), cache: map[string]map[string]*record{}, history: map[string][]*record{}, outputs: map[string]*record{}, runs: map[uint64]*Run{}, dir: dir}, nil
 }
 func (m *Manager) Configure(cfg config.Exec) {
 	m.mu.Lock()
@@ -139,7 +153,9 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	m.wg.Add(1)
 	m.mu.Unlock()
 	defer m.wg.Done()
-	result, err := m.execute(ctx, caller, resolved.Path, env, a, cfg, rec, timeout, p)
+	run := m.track(caller, a)
+	defer m.untrack(run)
+	result, err := m.execute(ctx, caller, resolved.Path, env, a, cfg, rec, timeout, p, run)
 	m.mu.Lock()
 	rec.result = clone(result)
 	rec.err = err
@@ -157,12 +173,15 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	m.mu.Unlock()
 	return result, err
 }
-func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration, p *policy.Engine) (Object, error) {
+func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration, p *policy.Engine, run *Run) (Object, error) {
 	release, wait, e := m.scheduler.acquire(ctx, caller, a.Mode)
 	if e != nil {
 		return nil, e
 	}
 	defer release()
+	m.mu.Lock()
+	run.Running = true
+	m.mu.Unlock()
 	if ctx.Err() != nil {
 		return nil, toolerr.New("exec_saturated", "执行槽等待超时", "queue_position", 1, "mode", a.Mode, "retry_after_ms", 1000)
 	}
@@ -310,6 +329,31 @@ func (m *Manager) evictLocked(rec *record) {
 		_ = os.Remove(rec.stdout)
 		_ = os.Remove(rec.stderr)
 	}
+}
+func (m *Manager) track(caller string, a Args) *Run {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextRun++
+	run := &Run{ID: m.nextRun, Caller: caller, Cmd: filepath.Base(a.Cmd), Mode: a.Mode, Started: time.Now()}
+	m.runs[run.ID] = run
+	return run
+}
+func (m *Manager) untrack(run *Run) {
+	m.mu.Lock()
+	delete(m.runs, run.ID)
+	m.mu.Unlock()
+}
+
+// Runs lists the calls that are queued or running, oldest first.
+func (m *Manager) Runs() []Run {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Run, 0, len(m.runs))
+	for _, r := range m.runs {
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 func (m *Manager) Counts() (shared, exclusive int) {
 	m.scheduler.mu.Lock()

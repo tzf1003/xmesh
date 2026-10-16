@@ -1,10 +1,10 @@
 import * as path from "node:path";
-import { Notification, app } from "electron";
+import { Notification, app, powerMonitor } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
 import { ShellController } from "./controller";
-import { discoverInstances, stateRoot } from "./discovery";
+import { discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, runSetup } from "./setup";
@@ -13,6 +13,9 @@ import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
 import { registerPanelScheme, servePanel } from "./protocol";
+import { Autostart, type LoginItemHint } from "./system/autostart";
+import { SeenFlags } from "./system/firstrun";
+import { Notifier } from "./system/notifier";
 import { TrayView } from "./tray";
 import { type PanelWindow, createPanelWindow, installSessionHardening, installWebContentsHardening } from "./window";
 
@@ -47,7 +50,7 @@ async function start(): Promise<void> {
 
   const locale = resolveLocale(process.env.XMESH_UI_LANG);
   const t = translator(locale);
-  const root = stateRoot();
+  const roots = stateRoots();
   let panel: PanelWindow | undefined;
   const showPanel = (): void => {
     if (!panel || panel.window.isDestroyed()) panel = createPanelWindow();
@@ -55,28 +58,47 @@ async function start(): Promise<void> {
   };
   app.on("second-instance", showPanel);
 
+  const notified: string[] = [];
+  const notifier = new Notifier({
+    supported: () => !TEST_MODE && Notification.isSupported(),
+    create: (o) => new Notification(o),
+    now: Date.now,
+    onClick: showPanel,
+    title: t("notice.title"),
+    summary: (count) => t("notice.burst", { count }),
+  });
+  const notify = (items: { key: string; text: string }[]): void => {
+    for (const i of items) notified.push(i.text);
+    notifier.push(items);
+  };
+
+  const autostart = new Autostart(app, { platform: process.platform, packaged: app.isPackaged, execPath: process.execPath });
+  const loginHints: Record<LoginItemHint, string | undefined> = {
+    unsupported: undefined,
+    unpackaged: t("hint.loginItem.unavailable"),
+    "requires-approval": t("hint.loginItem.requiresApproval"),
+    "disabled-by-user": t("hint.loginItem.disabledByUser"),
+  };
+
   const controller = new ShellController({
-    discover: () => discoverInstances(root),
-    getLoginItem: () => app.getLoginItemSettings().openAtLogin,
+    discover: () => discoverInstances(roots),
     locale,
-    setLoginItem: (openAtLogin) => app.setLoginItemSettings({ openAtLogin }),
+    getLoginItem: () => autostart.get().enabled,
+    setLoginItem: (enabled) => {
+      const hint = autostart.set(enabled).hint;
+      const text = hint === undefined ? undefined : loginHints[hint];
+      if (text !== undefined) notify([{ key: `login.${hint}`, text }]);
+    },
     ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, streamIdleMs: 2000 }),
   });
 
   const calls: RecordedCall[] = [];
   const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
-  const notified: string[] = [];
-  const notifyError = (message: string): void => notify(message);
+  const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
     : electronPlatform(showPanel, notifyError);
   const actions = new Actions(controller, platform, t);
-
-  function notify(body: string): void {
-    notified.push(body);
-    if (TEST_MODE || !Notification.isSupported()) return;
-    new Notification({ title: t("notice.title"), body }).show();
-  }
 
   const runAction = (a: Action): void => {
     void actions.dispatch(a);
@@ -84,7 +106,7 @@ async function start(): Promise<void> {
   const tray = new TrayView(t, runAction, showPanel);
 
   servePanel(rendererRoot());
-  const setupHost = fsSetupHost(root, async (args) => {
+  const setupHost = fsSetupHost(roots[0]!, async (args) => {
     if (TEST_MODE) {
       calls.push({ op: "setup-cli", arg: [...args] });
       if (answers.cliFails) throw new Error("simulated cli failure");
@@ -104,7 +126,7 @@ async function start(): Promise<void> {
   tray.update(prev);
   controller.on("change", (snap) => {
     tray.update(snap);
-    for (const n of diffNotices(prev, snap)) notify(noticeText(n, t));
+    notify(diffNotices(prev, snap).map((n) => ({ key: n.key, text: noticeText(n, t) })));
     prev = snap;
   });
 
@@ -112,6 +134,15 @@ async function start(): Promise<void> {
     void controller.stop();
   });
   app.on("will-quit", () => tray.destroy());
+
+  // After sleep or a lock the event stream is stale; do not wait for the idle timeout to notice.
+  powerMonitor.on("resume", () => controller.nudge());
+  powerMonitor.on("unlock-screen", () => controller.nudge());
+
+  // Windows 11 puts a new tray icon in the overflow flyout; say so once, for the installed app only.
+  if (process.platform === "win32" && app.isPackaged && new SeenFlags(path.join(app.getPath("userData"), "seen.json")).markOnce("trayOverflowHint")) {
+    notify([{ key: "hint.trayOverflow", text: t("hint.trayOverflow") }]);
+  }
 
   controller.start();
 

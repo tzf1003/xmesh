@@ -8,6 +8,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -116,6 +117,12 @@ func install(args []string) error {
 		arguments = append(arguments, "--service")
 	}
 	arguments = append(arguments, "--config", absolute)
+	if *system {
+		// The service runs as SYSTEM; let the installing user's UI reach its control pipe.
+		if sid := installerSID(); sid != "" {
+			arguments = append(arguments, "--control-allow-sid", sid)
+		}
+	}
 	if *state != "" {
 		p, e := filepath.Abs(*state)
 		if e != nil {
@@ -168,6 +175,9 @@ func pair(args []string) error {
 		if e != nil {
 			return e
 		}
+	}
+	if e = privdir.Ensure(dir); e != nil {
+		return e
 	}
 	dir = filepath.Join(dir, "lan")
 	if (*export == "") == (*importFile == "") {
