@@ -33,6 +33,7 @@ func records(t *testing.T, dir string) []map[string]any {
 	return result
 }
 
+// conformance: CTR-AUD-01
 func Test_CTRAUD01_PTYSummaryFlush(t *testing.T) {
 	for _, mode := range []string{"timer", "session-close", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {
@@ -83,6 +84,7 @@ func Test_CTRAUD01_PTYSummaryFlush(t *testing.T) {
 	}
 }
 
+// conformance: CTR-AUD-01
 func Test_CTRAUD01_PTYReadFailureRecorded(t *testing.T) {
 	dir := t.TempDir()
 	l, e := New(dir, time.Hour)
@@ -99,6 +101,7 @@ func Test_CTRAUD01_PTYReadFailureRecorded(t *testing.T) {
 	}
 }
 
+// conformance: INV-10 CON-SEC-08
 func Test_INV10_NoBodyInAudit(t *testing.T) {
 	dir := t.TempDir()
 	l, e := New(dir, time.Hour)

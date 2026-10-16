@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+// conformance: CTR-AUD-01 CON-SEC-06
 func Test_CTRCFG02_ReloadFailureAuditAndStatus(t *testing.T) {
 	path, store := configuration(t)
 	a, e := New(store)
@@ -164,6 +165,8 @@ func object(t *testing.T, r *mcp.CallToolResult) map[string]any {
 	}
 	return v
 }
+
+// conformance: CON-CONC-02
 func Test_Gate1_MCPRealHTTP(t *testing.T) {
 	_, store := configuration(t)
 	a, e := New(store)
@@ -238,6 +241,8 @@ func Test_Gate1_MCPRealHTTP(t *testing.T) {
 	}
 	t.Fatal("disconnect did not orphan PTY")
 }
+
+// conformance: CON-SEC-06
 func Test_CONSEC06_ReloadNextCall(t *testing.T) {
 	path, store := configuration(t)
 	a, e := New(store)
