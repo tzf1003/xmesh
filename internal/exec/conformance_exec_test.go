@@ -243,6 +243,10 @@ func Test_CONCONC10_ExclusiveSlotsBoundParallelism(t *testing.T) {
 		var codes []any
 		for i := 0; i < 3; i++ {
 			wg.Add(1)
+			// Stagger the starts so deadlines grow in queue order. With simultaneous starts the scheduler's
+			// early saturation estimate (RUL-01) can refuse a waiter whose deadline was computed a few
+			// microseconds before the deadline of the call it queues behind.
+			time.Sleep(30 * time.Millisecond)
 			go func() {
 				defer wg.Done()
 				o, err := run(m, r, p, "n/a", Object{"cmd": "/bin/sh", "args": probe, "mode": mode})
