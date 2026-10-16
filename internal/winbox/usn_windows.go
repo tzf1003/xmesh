@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -301,7 +302,31 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 }
 
 func confirmWorkspaceDeletion(volume windows.Handle, object journalObject) error {
-	h, err := openIdentityObject(volume, treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
+	anchor, err := inspectTreeObject(volume, "")
+	if err != nil || !anchor.directory || anchor.id.Volume != object.Volume || object.ID == [16]byte{} || [8]byte(object.ID[8:]) != [8]byte{} {
+		return fmt.Errorf("AppContainer deletion probe volume or NTFS reference mismatch: %v", err)
+	}
+	var filesystem [64]uint16
+	if err := windows.GetVolumeInformationByHandle(volume, nil, 0, nil, nil, nil, &filesystem[0], uint32(len(filesystem))); err != nil {
+		return err
+	}
+	if windows.UTF16ToString(filesystem[:]) != "NTFS" {
+		return fmt.Errorf("AppContainer deletion proof requires an NTFS reference")
+	}
+	// NTFS's 128-bit file reference is its 64-bit reference padded with zeros.
+	// Use the 8-byte reference form for absence probing: the extended-ID open
+	// can return INVALID_PARAMETER for deleted references, which proves no absence.
+	name := windows.NTUnicodeString{Length: 8, MaximumLength: 8, Buffer: (*uint16)(unsafe.Pointer(&object.ID[0]))}
+	attributes := windows.OBJECT_ATTRIBUTES{
+		Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: volume,
+		ObjectName: &name, Attributes: windows.OBJ_DONT_REPARSE,
+	}
+	var h windows.Handle
+	var status windows.IO_STATUS_BLOCK
+	err = windows.NtCreateFile(&h, windows.FILE_READ_ATTRIBUTES, &attributes, &status, nil, 0,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN,
+		windows.FILE_OPEN_BY_FILE_ID|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0)
+	runtime.KeepAlive(object)
 	if err == nil {
 		windows.CloseHandle(h)
 		return fmt.Errorf("AppContainer deletion receipt still has a live identity")

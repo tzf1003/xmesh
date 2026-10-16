@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -53,7 +54,18 @@ func Test_WindowsAppContainerWorkspaceDeletionRecovery(t *testing.T) {
 			}
 			defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 			ready := make(chan string, 1)
-			go func() { line, _ := bufio.NewReader(stdout).ReadString('\n'); ready <- line }()
+			go func() {
+				scanner := bufio.NewScanner(stdout)
+				var lines []string
+				for scanner.Scan() {
+					if scanner.Text() == "ready" {
+						ready <- "ready\n"
+						return
+					}
+					lines = append(lines, scanner.Text())
+				}
+				ready <- strings.Join(lines, "\n")
+			}()
 			select {
 			case line := <-ready:
 				if line != "ready\n" && line != "ready\r\n" {
@@ -171,8 +183,8 @@ func Test_WindowsAppContainerWorkspaceDeletionCrashHelper(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "new-dir"), []byte("replacement"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := confirmWorkspaceDeletion(g.tree.ancestors[0], j.records[1].Workspace.Root); err == nil {
-		t.Fatal("live root accepted as absent")
+	if err := confirmWorkspaceDeletion(g.tree.ancestors[0], j.records[1].Workspace.Root); err == nil || !strings.Contains(err.Error(), "still has a live identity") {
+		t.Fatal("live root reference probe", err)
 	}
 	if stage == "pending-close" {
 		name, _ := windows.UTF16PtrFromString(filepath.Join(root, "pending.txt"))
