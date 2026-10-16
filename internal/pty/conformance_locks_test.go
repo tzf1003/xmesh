@@ -29,6 +29,11 @@ type gateTerminal struct {
 	gateOnce sync.Once
 	gate     chan struct{} // nil: Write never blocks
 	entered  chan struct{} // receives one value each time Write is entered
+
+	mu      sync.Mutex // guards the recorders below
+	writes  []string
+	resizes [][2]int
+	signals []string
 }
 
 func newGateTerminal(gated bool) *gateTerminal {
@@ -47,7 +52,13 @@ func (g *gateTerminal) Read(b []byte) (int, error) {
 	}
 }
 func (g *gateTerminal) Write(p []byte) (int, error) {
-	g.entered <- struct{}{}
+	g.mu.Lock()
+	g.writes = append(g.writes, string(p))
+	g.mu.Unlock()
+	select {
+	case g.entered <- struct{}{}:
+	default:
+	}
 	if g.gate != nil {
 		select {
 		case <-g.gate:
@@ -56,14 +67,30 @@ func (g *gateTerminal) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-func (g *gateTerminal) release()              { g.once.Do(func() { close(g.closed) }) }
-func (g *gateTerminal) Close() error          { g.release(); return nil }
-func (*gateTerminal) Resize(int, int) error   { return nil }
-func (g *gateTerminal) Signal(s string) error { g.release(); return nil }
-func (g *gateTerminal) Wait() error           { <-g.closed; return nil }
-func (*gateTerminal) PID() int                { return 4321 }
-func (g *gateTerminal) unblockWrites()        { g.gateOnce.Do(func() { close(g.gate) }) }
-func (g *gateTerminal) output(text string)    { g.feed <- []byte(text) }
+func (g *gateTerminal) release()     { g.once.Do(func() { close(g.closed) }) }
+func (g *gateTerminal) Close() error { g.release(); return nil }
+func (g *gateTerminal) Resize(c, r int) error {
+	g.mu.Lock()
+	g.resizes = append(g.resizes, [2]int{c, r})
+	g.mu.Unlock()
+	return nil
+}
+func (g *gateTerminal) Signal(s string) error {
+	g.mu.Lock()
+	g.signals = append(g.signals, s)
+	g.mu.Unlock()
+	g.release()
+	return nil
+}
+func (g *gateTerminal) effects() (writes []string, resizes [][2]int, signals []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string{}, g.writes...), append([][2]int{}, g.resizes...), append([]string{}, g.signals...)
+}
+func (g *gateTerminal) Wait() error        { <-g.closed; return nil }
+func (*gateTerminal) PID() int             { return 4321 }
+func (g *gateTerminal) unblockWrites()     { g.gateOnce.Do(func() { close(g.gate) }) }
+func (g *gateTerminal) output(text string) { g.feed <- []byte(text) }
 func (g *gateTerminal) waitWriteEntered(t *testing.T) {
 	t.Helper()
 	select {

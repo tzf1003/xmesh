@@ -17,10 +17,13 @@ import (
 // Test_CONCONC01_NoGlobalLock. It exposes `echo` and a `block` tool that
 // does not return until the file named by its `release` argument exists.
 func TestConformanceBackendHelper(t *testing.T) {
-	helper := false
+	helper, logPath := false, ""
 	for _, arg := range os.Args {
 		if arg == "--xmesh-conformance-backend-helper" {
 			helper = true
+		}
+		if path, ok := strings.CutPrefix(arg, "--xmesh-conformance-log="); ok {
+			logPath = path
 		}
 	}
 	if !helper {
@@ -32,6 +35,13 @@ func TestConformanceBackendHelper(t *testing.T) {
 		s.AddTool(&mcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			var args map[string]any
 			_ = json.Unmarshal(r.Params.Arguments, &args)
+			if logPath != "" {
+				// Every request that reaches the backend leaves a line behind.
+				if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+					_, _ = f.WriteString(name + "\n")
+					_ = f.Close()
+				}
+			}
 			if name == "block" {
 				if started, _ := args["started"].(string); started != "" {
 					_ = os.WriteFile(started, []byte("x"), 0o600)
