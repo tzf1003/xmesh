@@ -9,7 +9,7 @@
 ## 为什么要解耦
 
 - 内核（`xmesh serve`）本来就是常驻无界面进程：Windows 用户任务或 SCM 服务，macOS LaunchAgent，Linux systemd 用户服务。`install --system` 的服务运行在 Session 0，根本不能弹窗。UI 只能是另一个进程。
-- 发布流水线 `release.yml` 在 Ubuntu 上以 `CGO_ENABLED=0` 交叉编译六个目标。macOS 菜单栏需要调用 AppKit，这类库通常经 cgo 构建，必须在 macOS runner 上编译。把 UI 并入内核二进制会破坏纯 Go 交叉编译。
+- 发布流水线 `release.yml` 在 Ubuntu 上以 `CGO_ENABLED=0` 交叉编译六个目标。UI 采用 Electron（Node 运行时加 Chromium，打包后上百 MB），只能是独立发布物，并入内核二进制会破坏纯 Go 的小体积交叉编译。
 - [CON-ARCH-02](../constraints/architecture.md#con-arch-02) 要求内核发布物是单个 `xmesh` 二进制，三个角色同进程。UI 是可选的第二个发布物，内核没有它必须完整可用，所以不与该约束冲突，但需要写成裁定。
 - UI 崩溃、升级、被用户退出，都不能影响节点上的 PTY、租约和进行中的 exec。
 
@@ -34,16 +34,16 @@ flowchart LR
     ctl["control 监听<br/>UDS 或命名管道"]
     roles --- ctl
   end
-  subgraph ui["xmesh-ui（新，可选发布物）"]
-    tray["托盘 / 菜单栏"]
-    bff["本机面板服务<br/>127.0.0.1 随机端口"]
-    cli["xmesh 子命令调用<br/>install / start / stop"]
+  subgraph ui["xmesh-ui（Electron，新，可选发布物）"]
+    main["主进程<br/>托盘 / 菜单栏、Control API 客户端"]
+    renderer["渲染进程<br/>面板窗口，无 Node 权限"]
+    cli["xmesh 子命令调用<br/>install / start / stop / mesh"]
+    renderer <-->|"受限 IPC"| main
+    main --- cli
   end
-  tray -->|"Control API v1"| ctl
-  bff -->|"Control API v1"| ctl
+  main -->|"Control API v1<br/>UDS / 命名管道"| ctl
   cli -->|"服务管理器"| svc["launchd / 任务计划 / SCM"]
   svc -.启停.-> kernel
-  browser["面板窗口<br/>浏览器，之后可换 WebView"] --> bff
   cloud["云端客户端 / 其他设备"] -->|"MCP only"| roles
 ```
 
@@ -106,9 +106,9 @@ flowchart LR
 ### 契约与解耦的工程保证
 
 - 契约落在 `docs/contracts/control.md` 和 `schemas/control-*.schema.json`，正反例夹具接入现有 `check_examples.py`。
-- 内核新增 `internal/control`，客户端类型与 Go 客户端放在公开包 `api/control/v1`。内核与 UI 共用该包的类型。
-- UI 是独立 Go module（`ui/go.mod`），只允许 import `api/control/v1`。Go 的 `internal` 规则按导入路径判定，嵌套 module 不会自动拦住，所以 CI 加一条检查：`go list -deps` 中出现任何 `internal/` 包就失败。
-- 提供 `ui/testserver`：按夹具回放的假内核。UI 开发与 CI 不依赖真实内核，也能覆盖「内核离线」「版本不兼容」「事件断流重连」。
+- 内核新增 `internal/control`，Go 类型放在公开包 `api/control/v1`，供内核与 CLI 使用。
+- UI 是 Electron 加 TypeScript 项目（`ui/package.json`），不 import 任何 Go 包，与内核之间只有 JSON Schema 这一份契约。UI 的类型由 `schemas/control-*.schema.json` 生成，CI 重新生成后 `git diff --exit-code`，生成物与契约不一致即失败。
+- 提供 `ui/testserver`：按夹具回放的假内核，在 Unix 域套接字或命名管道上监听，走与真实内核相同的传输。UI 开发与 CI 不依赖真实内核，也能覆盖「内核离线」「版本不兼容」「事件断流重连」。
 
 ## 托盘与菜单栏
 
@@ -125,7 +125,7 @@ flowchart LR
 
 ### 菜单
 
-两个平台一致，原生控件由各自平台的托盘实现渲染：
+两个平台一致，由 Electron 的 `Tray` 与 `Menu` 渲染，菜单是系统原生菜单：
 
 - 头部：节点名、状态文字、网络模式、在线对端数。
 - 活动：PTY 与 exec 占用，例如「终端 3/20」。
@@ -140,17 +140,23 @@ flowchart LR
 | 项 | Windows | macOS |
 | --- | --- | --- |
 | 内核常驻 | 默认用户登录任务；`--system` 的 SCM 服务在 Session 0，UI 仍在用户会话中经管道连接 | LaunchAgent |
-| UI 自启 | 在 `HKCU` 的 Run 项或启动文件夹注册 | `SMAppService` 登录项 |
-| 图标 | 通知区域；溢出区需引导用户固定；高 DPI、深浅主题 | `NSStatusItem`，模板图像随菜单栏明暗变色；以代理应用运行，无 Dock 图标 |
+| UI 自启 | `app.setLoginItemSettings`，写入 `HKCU` 的 Run 项 | `app.setLoginItemSettings`，登录项 |
+| 图标 | 通知区域；溢出区需引导用户固定；高 DPI、深浅主题 | Electron `Tray`（底层是 `NSStatusItem`），模板图像随菜单栏明暗变色；`app.dock.hide()` 并设置 `LSUIElement`，无 Dock 图标 |
 | 通知 | Windows 通知 | 用户通知中心 |
-| 签名分发 | 代码签名证书，避免 SmartScreen 警告 | Developer ID 签名加公证。不上 App Store，因为沙箱会阻止连接状态目录下的套接字 |
+| 签名分发 | 代码签名证书，避免 SmartScreen 警告；electron-builder 生成安装包 | Developer ID 签名、Hardened Runtime 加公证；生成 dmg。不上 App Store，因为沙箱会阻止连接状态目录下的套接字 |
 
 ## 面板
 
-面板是同一个 UI 进程里的本机 web 应用。第一版在默认浏览器里打开；之后可换成内嵌 WebView（Windows WebView2，macOS WKWebView），不改前端。
+面板是 Electron 的渲染进程窗口。关闭窗口只隐藏，托盘常驻；应用持单实例锁，重复启动只唤起已有窗口。
 
-- 本机面板服务只绑定 `127.0.0.1` 随机端口，每次启动生成一次性令牌，通过 URL 片段交给浏览器后换成同站 Cookie；校验 `Host` 与 `Origin`，防 DNS rebinding 与 CSRF。令牌不写盘。
-- 面板服务是纯代理：把浏览器的请求翻译成 Control API 调用。它不持有任何内核状态。
+主进程独占与内核的连接，渲染进程不直接访问。Node 的 `http` 支持以 `socketPath` 连接 Unix 域套接字和 Windows 命名管道，主进程把 Control API 与 SSE 事件流转成受限 IPC 交给渲染进程，所以不需要本机 web 服务，也没有 DNS rebinding 与 CSRF 的面。
+
+Electron 实施约束（写入 U0 的裁定，由 U3 与 U4 的验收覆盖）：
+
+- 渲染进程必须开启 `contextIsolation` 与 `sandbox`，关闭 `nodeIntegration`；预加载脚本只暴露一组白名单操作（对应 Control API 的端点与少量 CLI 动作），不暴露通用的 `invoke`、文件系统或子进程能力。
+- 只加载打包进应用的本地页面，设置严格 CSP，禁止远程脚本；拒绝 `will-navigate` 与新窗口，外链只通过白名单经 `shell.openExternal` 打开。
+- 打包时启用 Electron Fuses（关闭 `RunAsNode` 等）与 ASAR 完整性校验。依赖锁定版本，保持最小依赖面，并持续跟进 Electron 的安全补丁版本，因为只有最近几个大版本会收到修补。
+- UI 进程以用户身份持有控制通道，被攻破等于获得节点控制权，上述约束是它的主要防线，不是可选项。
 
 页面：
 
@@ -171,10 +177,12 @@ flowchart LR
 
 | 方案 | 结论 |
 | --- | --- |
-| Go 托盘库加本机 web 面板（默认） | 选用。语言与内核一致，一套代码覆盖两平台，前端可后续换 WebView。macOS 需要在 macOS runner 上构建 |
-| 两套原生：macOS Swift 菜单栏，Windows C# 或 Win32 | 原生体验最好，但两套代码、两套 CI。作为托盘细节不够用时的退路，Control API 是 JSON，任何语言都能接 |
-| Electron / Tauri 整包 | 体积或工具链过重，托盘能力仍要原生补。不选 |
-| 把托盘并入 `xmesh` 二进制 | 破坏 CGO=0 交叉编译和 CON-ARCH-02。不选 |
+| Electron（用户已定） | 选用。`Tray` 与 `Menu` 覆盖 Windows 通知区域和 macOS 菜单栏，渲染进程用同一套前端，不需要 cgo，也不需要在 macOS runner 上编译内核。Playwright 可在 Windows 与 macOS runner 上以 `_electron` 做端到端测试。代价是安装包与内存占用大，以及要持续升级 Electron |
+| Go 托盘库加本机 web 面板 | 原先的默认方案，已被取代。体积小，但 macOS 需要 cgo，面板要多一个本机 web 服务和对应的 CSRF 防护 |
+| 两套原生：macOS Swift，Windows C# 或 Win32 | 体验最好，但两套代码、两套 CI。Electron 的托盘细节不够用时的退路，Control API 是 JSON，任何语言都能接 |
+| 把 UI 并入 `xmesh` 二进制 | 破坏纯 Go 单二进制与交叉编译，违反 CON-ARCH-02 的意图。不选 |
+
+管理凭据的钥匙串访问不放在 Electron 里：`safeStorage` 的密文绑定该应用，CLI 读不到。凭据统一由 `xmesh mesh` 子命令经系统钥匙串存取，Electron 主进程调用该子命令并读取 `--json` 输出，见 [13](13-mesh-admin-and-derp.md)。
 
 Linux 托盘不在本期范围。控制通道和 CLI 对 Linux 同样可用，之后补托盘不需要改内核。
 
@@ -187,9 +195,9 @@ Linux 托盘不在本期范围。控制通道和 CLI 对 Linux 同样可用，�
 | U0 契约先行 | `docs/contracts/control.md`、模式与夹具、新增约束与裁定（见下）、`api/control/v1` 类型 | 无 |
 | U1 内核只读通道 | `internal/control`：监听、身份校验、`status` / `events` / `peers` / `sessions` / `audit`；`xmesh status --control`；服务子命令 `uninstall` / `start` / `stop` / `restart` 与 `--json` | U0 |
 | U2 内核写操作 | drain / resume、`config` 读写、配对库化、PAT、入口客户端与口令；审计 `actor=control` | U1 的骨架 |
-| U3 托盘壳 | 实例发现、Control API 客户端、状态机、菜单模型、`ui/testserver`、通知；先在假内核上跑通 | U0，可与 U1 并行 |
-| U4 面板 | 本机面板服务、前端七个页面、首次运行向导 | U3，写页面依赖 U2 |
-| U5 平台集成与分发 | Windows：管道 DACL 原生测试、自启、安装包与签名。macOS：登录项、`.app`、签名与公证。`release.yml` 增加 UI 构建，输出到同一个 beta 预发布 | U3 |
+| U3 Electron 壳 | 主进程：实例发现、Control API 客户端、状态机、托盘与菜单模型、受限 IPC、通知；`ui/testserver`；从 schemas 生成类型；先在假内核上跑通，`ui.yml` 在 Windows 与 macOS runner 上跑 Playwright | U0，可与 U1 并行 |
+| U4 面板 | 渲染进程：面板窗口、前端七个页面、首次运行向导 | U3，写页面依赖 U2 |
+| U5 平台集成与分发 | Windows：管道 DACL 原生测试、自启、electron-builder 安装包与签名。macOS：登录项、`.app`、签名与公证、dmg。`release.yml` 增加 UI 构建，输出到同一个 beta 预发布；自动更新方案（electron-updater 或仅提示下载）在此决定 | U3 |
 | U6 硬化 | L2 沙箱拒绝连接控制端点的验收、可访问性、高 DPI、英文资源、升级与回滚 | U2、U5 |
 | U7 到 U10 tailnet 管理 | UI 端管理主机 tag、权限划分与第三方 DERP，并为 DERP 提供商集成打基础。见 [13 tailnet 管理与 DERP 提供商路径](13-mesh-admin-and-derp.md) | U0 到 U3 |
 
@@ -199,10 +207,10 @@ Linux 托盘不在本期范围。控制通道和 CLI 对 Linux 同样可用，�
 | --- | --- | --- | --- |
 | C0 契约 | U0 | `docs/contracts/control.md`、`docs/contracts/schemas/control-*`、`api/control/v1/` | `docs/conformance.md`、`docs/constraints/*` 只追加 |
 | K1 内核通道 | U1，之后 U2 | `internal/control/**`、`cmd/xmesh/control.go`、`cmd/xmesh/service_cmd.go` | `internal/app/runtime.go`（只追加装配）、`cmd/xmesh/main.go`（只加子命令分支） |
-| S1 托盘壳 | U3 | `ui/**`（除 platform 与 web 目录） | `.github/workflows/go.yml` 追加 UI 作业 |
-| S2 Windows | U5 的 Windows 部分 | `ui/platform/windows/**` | 无 |
-| S3 macOS | U5 的 macOS 部分 | `ui/platform/darwin/**` | 无 |
-| W1 面板 | U4 | `ui/panel/**`、`ui/web/**` | 无 |
+| S1 Electron 壳 | U3 | `ui/package.json`、`ui/src/main/**`、`ui/src/preload/**`、`ui/src/shared/**`、`ui/testserver/**`、`.github/workflows/ui.yml` | 无，UI 作业放在独立工作流，不改 `go.yml` |
+| S2 Windows | U5 的 Windows 部分 | `ui/platform/windows/**`（管道、自启、安装包配置） | 无 |
+| S3 macOS | U5 的 macOS 部分 | `ui/platform/darwin/**`（登录项、签名与公证配置） | 无 |
+| W1 面板 | U4 | `ui/src/renderer/**` | 无 |
 | R1 发布 | U5 的分发 | `.github/workflows/release.yml`（独占）、`scripts/package-*` | 无 |
 
 K1 里 U2 的写操作拆成独立文件（`config.go`、`pats.go`、`pair.go`），不与 U1 文件冲突。Windows 安全闭环相关线程仍在改 `internal/winbox`、`internal/app` 的 L2 接线，K1 对 `runtime.go` 只追加监听器装配，冲突交集成方处理。
@@ -216,7 +224,7 @@ K1 里 U2 的写操作拆成独立文件（`config.go`、`pats.go`、`pair.go`�
 | CON-ARCH-09 | 内核可以提供仅限本机用户的控制通道（UDS 或命名管道）。它禁止监听 TCP，禁止挂在 Gateway、Ingress、tailnet 监听器上，禁止作为 MCP 工具暴露。与 CON-ARCH-01 的关系：云端客户端只见 MCP；本通道不面向云端客户端，也不是 `api/xmesh/v1` 那类节点间控制 |
 | CON-ARCH-10 | 内核不依赖 UI 存在：无 UI 时全部角色、drain、配置热加载与 CLI 状态读取照常工作。UI 退出、崩溃、升级不得改变 PTY owner、租约 token、进行中的 exec |
 | CON-SEC-12 | 控制通道只接受内核运行用户（Windows 另含 DACL 授权者）。L2 沙箱内的进程必须不能连接它。经控制通道的变更写审计 `actor=control`（审计模式需追加 `actor` 字段），只含元数据 |
-| RUL-（暂定） | 发布物：`xmesh`（内核，纯 Go）与 `xmesh-ui`（可选，托盘加面板）。CON-ARCH-02 的「单一二进制」指内核；UI 是可选的第二发布物，不属于必须同时部署的服务 |
+| RUL-（暂定） | 发布物：`xmesh`（内核，纯 Go）与 `xmesh-ui`（可选，Electron 托盘加面板）。CON-ARCH-02 的「单一二进制」指内核；UI 是可选的第二发布物，不属于必须同时部署的服务 |
 | CTR-CTL-01 至 | 状态、事件、会话、drain、配置、配对、PAT、入口、审计的请求与响应、错误码、`ETag` 语义 |
 
 ## 验收
@@ -230,15 +238,15 @@ K1 里 U2 的写操作拆成独立文件（`config.go`、`pats.go`、`pair.go`�
 | 沙箱 | L2 的 exec 子进程连接控制端点失败（macOS、Linux 原生测试；Windows AppContainer 原生测试） |
 | 隐私 | 事件流与审计视图的编码器沿用 INV-10：注入含 stdout 的对象时拒绝 |
 | 夹具 | 控制契约的正例过模式，反例失败，接入 `contracts.yml` |
-| UI | 假内核回放：内核离线、版本不匹配、事件断流重连、warnings 出现与消失，对应的图标状态与菜单项断言 |
+| UI | 假内核回放：内核离线、版本不匹配、事件断流重连、warnings 出现与消失，对应的图标状态与菜单项断言；Playwright `_electron` 端到端在 Windows 与 macOS runner 上通过 |
+| Electron 安全 | 测试断言渲染进程没有 `require` 与 `process`，预加载只暴露白名单操作，导航与新窗口被拒，CSP 生效，Fuses 已设置 |
 | 分发 | beta 预发布包含两个平台的 UI 包；Windows 签名通过 SmartScreen，macOS 公证通过 `spctl` 检查 |
 
 ## 需要用户提供或确认
 
-下面两项不阻塞 U0 到 U4，影响 U5 的分发。
+下面一项不阻塞 U0 到 U4，影响 U5 的分发。UI 技术选型已由用户定为 Electron。
 
 - Windows 代码签名证书与 macOS Apple Developer ID（含公证用凭据）。没有时 beta 仍可发布，但会有系统警告，需要用户手动放行。
-- 技术选型默认用 Go 托盘加 web 面板。若更想要原生 Swift 菜单栏，需要在 S1 开工前告知。
 
 ## 与路线图的关系
 
