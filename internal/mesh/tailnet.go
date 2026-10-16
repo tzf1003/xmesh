@@ -98,6 +98,29 @@ func (t *Tailnet) Self(ctx context.Context) (identity.Principal, error) {
 	}
 	return identity.Principal{Node: string(status.Self.ID), Tags: tags}, nil
 }
+
+// Online lists this node and every peer the control plane currently reports as
+// online. The tailnet status covers all nodes, so the answer is authoritative.
+func (t *Tailnet) Online(ctx context.Context) (map[string]bool, bool, error) {
+	lc, e := t.server.LocalClient()
+	if e != nil {
+		return nil, false, e
+	}
+	status, e := lc.Status(ctx)
+	if e != nil {
+		return nil, false, e
+	}
+	online := map[string]bool{}
+	if status.Self != nil {
+		online[string(status.Self.ID)] = true
+	}
+	for _, peer := range status.Peer {
+		if peer.Online && !peer.Expired {
+			online[string(peer.ID)] = true
+		}
+	}
+	return online, true, nil
+}
 func (t *Tailnet) Peers(ctx context.Context) ([]Peer, error) {
 	lc, e := t.server.LocalClient()
 	if e != nil {

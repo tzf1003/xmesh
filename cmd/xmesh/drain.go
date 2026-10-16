@@ -159,7 +159,7 @@ func openAdminNetwork(ctx context.Context, cfg *config.Config, authkey, state st
 				return nil, nil, e
 			}
 		}
-		lan, e := mesh.OpenLAN(ctx, cfg.Node.Name, filepath.Join(dir, "lan"))
+		lan, e := mesh.OpenLAN(ctx, cfg.Node.Name, filepath.Join(dir, "lan"), mesh.LANOptions{MDNS: true})
 		if e != nil {
 			return nil, nil, e
 		}

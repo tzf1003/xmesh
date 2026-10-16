@@ -27,6 +27,8 @@ type LAN struct {
 	trust         *TrustStore
 	mu            sync.Mutex
 	peers         map[string]lanPeer
+	presence      map[string]lanPeer // every paired node seen over mDNS, keyed by node id
+	mdns          bool
 	listener      net.Listener
 	advertisement *zeroconf.Server
 	cancel        context.CancelFunc
@@ -38,7 +40,15 @@ type lanPeer struct {
 	ttl  time.Duration
 }
 
-func OpenLAN(ctx context.Context, name, stateDir string) (*LAN, error) {
+// LANOptions carries the mesh.lan configuration into the transport.
+type LANOptions struct {
+	// MDNS enables DNS-SD advertisement and discovery. When false the node neither
+	// announces itself nor browses, so it can only be reached by a peer that
+	// already knows its address.
+	MDNS bool
+}
+
+func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*LAN, error) {
 	cert, e := LoadCertificate(stateDir, name)
 	if e != nil {
 		return nil, e
@@ -48,7 +58,11 @@ func OpenLAN(ctx context.Context, name, stateDir string) (*LAN, error) {
 		return nil, e
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, cancel: cancel, done: make(chan struct{})}
+	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, presence: map[string]lanPeer{}, mdns: options.MDNS, cancel: cancel, done: make(chan struct{})}
+	if !options.MDNS {
+		close(l.done)
+		return l, nil
+	}
 	if e = l.startDiscovery(ctx, 10*time.Second, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
 		resolver, err := zeroconf.NewResolver(nil)
 		if err != nil {
@@ -113,6 +127,21 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *zeroconf.ServiceEntr
 			if !ok || trusted.Name == l.name {
 				continue
 			}
+			id := "lan-" + fp[:24]
+			ttl := time.Duration(ent.TTL) * time.Second
+			l.mu.Lock()
+			if l.presence == nil {
+				l.presence = map[string]lanPeer{}
+			}
+			if ttl <= 0 {
+				// mDNS goodbye: the node is leaving, whatever it advertised before.
+				delete(l.peers, trusted.Name)
+				delete(l.presence, id)
+				l.mu.Unlock()
+				continue
+			}
+			l.presence[id] = lanPeer{seen: time.Now(), ttl: min(ttl, 30*time.Second)}
+			l.mu.Unlock()
 			device := false
 			for _, tag := range trusted.Tags {
 				if tag == "tag:device" {
@@ -132,18 +161,28 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *zeroconf.ServiceEntr
 			if address == "" {
 				continue
 			}
-			ttl := time.Duration(ent.TTL) * time.Second
-			if ttl <= 0 {
-				l.mu.Lock()
-				delete(l.peers, trusted.Name)
-				l.mu.Unlock()
-				continue
-			}
 			l.mu.Lock()
-			l.peers[trusted.Name] = lanPeer{Peer{ID: "lan-" + fp[:24], Name: trusted.Name, Address: "https://" + address + "/mcp", Tags: trusted.Tags, Online: true, Direct: true, Fingerprint: fp}, time.Now(), min(ttl, 30*time.Second)}
+			l.peers[trusted.Name] = lanPeer{Peer{ID: id, Name: trusted.Name, Address: "https://" + address + "/mcp", Tags: trusted.Tags, Online: true, Direct: true, Fingerprint: fp}, time.Now(), min(ttl, 30*time.Second)}
 			l.mu.Unlock()
 		}
 	}
+}
+
+// Online reports the paired nodes whose mDNS announcements are still fresh, plus
+// this node. It is not authoritative: a paired client that never advertises is
+// simply absent, so callers must only act on nodes they have seen here before.
+func (l *LAN) Online(context.Context) (map[string]bool, bool, error) {
+	online := map[string]bool{"lan-" + l.cert.Fingerprint[:24]: true}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for id, p := range l.presence {
+		if time.Since(p.seen) > p.ttl {
+			delete(l.presence, id)
+			continue
+		}
+		online[id] = true
+	}
+	return online, false, nil
 }
 func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
 	interfaces, e := net.Interfaces()
@@ -178,6 +217,9 @@ func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
 		return nil, e
 	}
 	l.listener = tls.NewListener(raw, l.trust.TLS(l.cert, "", true))
+	if !l.mdns {
+		return l.listener, nil
+	}
 	host := l.name + ".local."
 	advertisement, e := zeroconf.RegisterProxy(l.name, lanService, "local.", AgentPort, host, []string{ip.String()}, []string{"fingerprint=" + l.cert.Fingerprint}, []net.Interface{*selected})
 	if e != nil {
