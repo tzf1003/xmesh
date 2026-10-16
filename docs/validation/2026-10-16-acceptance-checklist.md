@@ -42,7 +42,7 @@
 | **外部 namespace/reparse/ACL 写入者强制约束** | 内核写入围栏已实现（`3bea72f`、`99ced05`） | Windows 原生通过（钉住、六类违规检测、绑定、生命周期 clean/violation） | 已随 `agent.policy.windows_appcontainer`（默认关闭）装配进生产启动路径（T1，#7），与 keeper 一并由 T9 联合验证；不阻止持有 WRITE_DAC 的同用户修改 DACL（仅检出）；后代 SECURITY_CHANGE 未纳入；普通账号读取变更日志待验收 |
 | **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | keeper 进程已实现（`1f2616b`） | Windows 原生通过：强杀宿主后 keeper 存活、接管、恢复完成后释放 | 已随 `agent.policy.windows_appcontainer`（默认关闭）装配进生产启动路径（T1，#7）；不冻结树内写入；整机重启/外层 Job 终止时失败关闭 |
 | **完整对象 census 与未知导入识别** | 未知导入归并与 `workspace-unknown-import` 已实现（`37645b5`） | Windows 原生通过（五个子场景加生命周期场景） | 事后归并不证明子树完整，仍需完整 census 证明 |
-| **exec/ConPTY 工具层接入** | `sandbox.Runner` 与 `winbox.Runner` 已实现（`2632168`）；`agent.policy.windows_appcontainer` 在生产启动链安装 runner（T1，#7，默认关闭） | 7 项 `Test_WindowsManagedRunner*` 与 5 项 `Test_WindowsL2Serve*` 原生通过 | 开关打开后的整体行为（keeper、写入围栏、未知导入组合）由 T9 联合验证；`sandbox.unavailable` 仍是默认 |
+| **exec/ConPTY 工具层接入** | `sandbox.Runner` 与 `winbox.Runner` 已实现（`2632168`）；`agent.policy.windows_appcontainer` 在生产启动链安装 runner（T1，#7，默认关闭） | 7 项 `Test_WindowsManagedRunner*` 与 5 项 `Test_WindowsL2Serve*` 原生通过 | 开关打开后的整体行为由 T9（#31）联合验证：`windows-l2-joint` 三轮全绿，沙箱内打不开控制管道已有原生用例；真实普通账户验收见 [windows-l2-acceptance.md](windows-l2-acceptance.md)，`sandbox.unavailable` 仍是默认 |
 | 普通用户登录任务、服务联网、跨用户/会话 ACL 与 mutex | 登录任务与可选 SCM 安装已实现 | 本机模式通过 | 需要真实 Windows 普通账户会话 |
 | Windows 状态目录私有 ACL | `privdir.Ensure` 与 `control.json` 只读授权已实现（#24、#16） | Windows 原生通过（含 SCM 服务 DACL 断言） | 真实普通账号下 UI 读取系统服务的 `control.json`；曾经开放过的目录里的密钥按已暴露处理 |
 | 非管理员账号的变更日志读取 | `ErrChangeJournalAccess` 明确拒绝（T3，#4） | Windows 原生通过 | 普通账号下 L2 被拒绝并给出该原因 |
@@ -70,5 +70,6 @@
 | 3 | 完整 census 与未知导入识别（已合入 `37645b5`） | 同上 |
 | 4 | exec/ConPTY 工具层接入；exit 66 调查（已合入 `62e11fc`） | 同上 |
 | T0 | 第一波并行实现收尾（T1 至 T8、T11、状态目录 ACL、桌面 UI 控制通道与面板）全部合入 master | 集成者按到达顺序合并，`windows-native` 与 UI 工作流绿灯为前提 |
+| T9 | L2 联合原生验证：`windows-l2-joint` 三轮、两个 winbox 偶发测试、控制管道拒绝用例（#31，已合入） | 集成者按到达顺序合并 |
 
 `docs/implementation-status.md` 只由集成者修改；子任务把文档更新内容交给集成者。
