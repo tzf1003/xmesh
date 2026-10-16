@@ -257,7 +257,14 @@ func (s *Server) Handler(mcp http.Handler) http.Handler {
 				oauthError(w, 401, "invalid_token")
 				return
 			}
-			mcp.ServeHTTP(w, r.WithContext(withToken(r.Context(), token)))
+			forward := r.WithContext(withToken(r.Context(), token))
+			if s.proxied {
+				// The origin was checked against the issuer above. The MCP SDK's
+				// DNS-rebinding guard rejects a public Host on a loopback listener,
+				// so hand it the loopback address the proxy actually reached.
+				forward.Host = "127.0.0.1"
+			}
+			mcp.ServeHTTP(w, forward)
 		default:
 			http.NotFound(w, r)
 		}

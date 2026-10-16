@@ -23,7 +23,7 @@
 issuer 的来源必须与客户端实际访问的 HTTPS 源一致。禁止返回另一个域的 issuer。入口在两处强制这一点：
 
 - 启动时核对 issuer 与监听方式。`public:443` 的 issuer 主机必须等于 `ingress.domain`（不接受 443 以外的端口）；`funnel` 的 issuer 必须是该节点的 `ts.net` 源。不一致拒绝启动，错误指向 `/ingress/oauth/issuer`。`tunnel` 没有可核对的域名，由下一条在运行时兜底。
-- 运行时每个请求的 `Host` 必须等于 issuer 的主机（忽略大小写和默认的 443 端口），否则返回 HTTP 421，`error` 为 `misdirected_request`。发现文档、授权、令牌、注册和 `/mcp` 都适用，所以元数据不会在另一个域名下返回。`tunnel` 只监听回环地址，外层隧道可能把 `Host` 改写成回环地址：此时回环 `Host` 被接受；隧道带 `X-Forwarded-Host` 时取其最后一项，必须等于 issuer 的主机。
+- 运行时每个请求的 `Host` 必须等于 issuer 的主机（忽略大小写和默认的 443 端口），否则返回 HTTP 421，`error` 为 `misdirected_request`。发现文档、授权、令牌、注册和 `/mcp` 都适用，所以元数据不会在另一个域名下返回。`tunnel` 只监听回环地址，外层隧道可能把 `Host` 改写成回环地址：此时回环 `Host` 被接受；隧道带 `X-Forwarded-Host` 时取其最后一项，必须等于 issuer 的主机。核对通过后，入口把转给 MCP 处理器的请求 `Host` 改为回环地址，因为 MCP SDK 的 DNS 重绑定保护会拒绝回环监听上的公网 `Host`（403），隧道因此可以直接转发公网 `Host`。
 
 ### 动态客户端注册
 

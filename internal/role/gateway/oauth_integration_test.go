@@ -31,6 +31,15 @@ func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(copy)
 }
 
+// tunnelTransport sends the public origin as Host, as a reverse tunnel does.
+type tunnelTransport struct{ bearerTransport }
+
+func (b tunnelTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	copy := r.Clone(r.Context())
+	copy.Host = "mesh.example"
+	return b.bearerTransport.RoundTrip(copy)
+}
+
 func Test_Gate4_OAuthGatewayAgent(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	doc, _ := json.Marshal(map[string]any{"node": map[string]any{"name": "device", "roles": []string{"agent"}}, "mesh": map[string]any{"mode": "lan", "lan": map[string]any{"mdns": true}}, "agent": map[string]any{"default_cwd": root, "cwd_policy": map[string]any{"allow": []string{root}}, "authz": map[string]any{"tag:ingress": map[string]any{"tools": []string{"*"}, "backends": []string{"*"}}}}})
@@ -120,7 +129,7 @@ func Test_Gate4_OAuthGatewayAgent(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		client := mcp.NewClient(&mcp.Implementation{Name: "oauth-test", Version: "1"}, nil)
-		s, e := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + "/mcp", HTTPClient: &http.Client{Transport: bearerTransport{token}}}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+		s, e := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + "/mcp", HTTPClient: &http.Client{Transport: tunnelTransport{bearerTransport{token}}}}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 		if e != nil {
 			t.Fatal(e)
 		}
