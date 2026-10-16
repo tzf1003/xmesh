@@ -8,6 +8,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -174,6 +175,9 @@ func pair(args []string) error {
 		if e != nil {
 			return e
 		}
+	}
+	if e = privdir.Ensure(dir); e != nil {
+		return e
 	}
 	dir = filepath.Join(dir, "lan")
 	if (*export == "") == (*importFile == "") {

@@ -8,6 +8,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
 	"github.com/tzf1003/xmesh/internal/policy"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"os"
 	"path/filepath"
@@ -37,10 +38,7 @@ type ioSummary struct {
 }
 
 func New(dir string, retention time.Duration) (*Logger, error) {
-	if e := os.MkdirAll(dir, 0700); e != nil {
-		return nil, e
-	}
-	if e := os.Chmod(dir, 0700); e != nil {
+	if e := privdir.Ensure(dir); e != nil {
 		return nil, e
 	}
 	b, _ := schemas.Files.ReadFile("audit-event.schema.json")
