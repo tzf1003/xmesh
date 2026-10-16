@@ -26,6 +26,13 @@ type workspaceExecutionOptions struct {
 // A guard returned with an error is still owned and must support Close retry.
 type workspaceExecutionPrepare func(context.Context, workspaceExecutionOptions) (io.Closer, error)
 
+// workspaceImportPrepare freezes external source namespace/reparse/ACL writers
+// before the lifecycle scans or moves the source. Its guard must also cover the
+// imported identities after the move, through durable execution cleanup. The
+// workspace's original guard continues to cover destination writers. Callbacks
+// run under the lifecycle operation gate and must not reenter this owner.
+type workspaceImportPrepare func(context.Context, string, string) (io.Closer, error)
+
 // workspaceExecution composes the private journal, identity, workspace tracking,
 // supervised process owner and monitor. A nonnil result accompanying an admission
 // error retains all obligations for closeContext retry. It never admits a process
@@ -34,6 +41,8 @@ type workspaceExecution struct {
 	operation chan struct{}
 	lifetime  context.Context
 	guard     io.Closer
+	imports   []io.Closer
+	maxEvents int
 	journal   *grantJournal
 	profile   *Profile
 	workspace *workspaceGrant
@@ -64,7 +73,7 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 	if guard == nil {
 		return nil, errors.Join(err, fmt.Errorf("AppContainer workspace coordinator did not retain a guard"))
 	}
-	e := &workspaceExecution{operation: make(chan struct{}, 1), lifetime: ctx, guard: guard}
+	e := &workspaceExecution{operation: make(chan struct{}, 1), lifetime: ctx, guard: guard, maxEvents: options.MaxEvents}
 	if err != nil {
 		return e, err
 	}
@@ -135,6 +144,63 @@ func (e *workspaceExecution) start(ctx context.Context, args []string, directory
 		return windows.ProcessInformation{}, err
 	}
 	return e.processes.startWithIO(ctx, args, directory, environment, stdio, console)
+}
+
+// moveImport shares launch/close admission and retains every returned source
+// guard, including one accompanying a preparation error. A failed operation can
+// already own a durable import census even when no rename occurred. Cleanup
+// releases those guards only after all journal/profile obligations complete.
+func (e *workspaceExecution) moveImport(ctx context.Context, source, destination string, prepare workspaceImportPrepare) (bool, error) {
+	release, err := e.acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	if !e.ready || e.closed || e.workspace == nil || prepare == nil || len(e.imports) >= 256 {
+		return false, fmt.Errorf("AppContainer execution import admission is unavailable or at its guard limit")
+	}
+	if err := e.lifetime.Err(); err != nil {
+		return false, err
+	}
+	for _, path := range []string{source, destination} {
+		if _, _, err := workspaceComponents(path); err != nil {
+			return false, err
+		}
+	}
+	// Acquire the workspace gate briefly to reject an already faulted monitor
+	// before asking the trusted source coordinator to acquire more resources.
+	check, err := e.workspace.acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	e.profile.mu.Lock()
+	err = e.workspace.importReady(e.maxEvents)
+	e.profile.mu.Unlock()
+	check()
+	if err != nil {
+		return false, err
+	}
+	guard, err := prepare(ctx, source, destination)
+	if guard != nil {
+		e.imports = append(e.imports, guard)
+	}
+	if err != nil {
+		return false, err
+	}
+	if guard == nil {
+		return false, fmt.Errorf("AppContainer import coordinator did not retain a guard")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := e.lifetime.Err(); err != nil {
+		return false, err
+	}
+	moved, err := e.workspace.moveImport(ctx, source, destination, e.maxEvents)
+	if moved && err != nil {
+		e.ready = false
+	}
+	return moved, err
 }
 
 // closeContext seals this owner before terminating Jobs, durably confirming the
@@ -210,6 +276,17 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 			return errors.Join(observationErr, err)
 		}
 		e.journal = nil
+	}
+	for len(e.imports) != 0 {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(observationErr, err)
+		}
+		last := len(e.imports) - 1
+		if err := e.imports[last].Close(); err != nil {
+			return errors.Join(observationErr, err)
+		}
+		e.imports[last] = nil
+		e.imports = e.imports[:last]
 	}
 	if e.guard != nil {
 		if err := e.guard.Close(); err != nil {
