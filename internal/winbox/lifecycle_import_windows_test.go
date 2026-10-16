@@ -59,6 +59,11 @@ func Test_WindowsAppContainerWorkspaceExecutionImport(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			importCount := func() int {
+				e.profile.mu.Lock()
+				defer e.profile.mu.Unlock()
+				return len(recoveryJournalInfo(e.journal).Imports)
+			}
 			defer func() {
 				if err := e.closeContext(context.Background(), 1); err != nil {
 					t.Error("import lifecycle cleanup", err)
@@ -74,7 +79,7 @@ func Test_WindowsAppContainerWorkspaceExecutionImport(t *testing.T) {
 			call, stop := context.WithCancel(ctx)
 			defer stop()
 			moved, importErr := e.moveImport(call, source, destination, func(_ context.Context, from, to string) (io.Closer, error) {
-				if from != source || to != destination || len(recoveryJournalInfo(e.journal).Imports) != 0 {
+				if from != source || to != destination || importCount() != 0 {
 					t.Fatal("source coordination did not precede census")
 				}
 				guard := recoveryTestGuard(func() error {
@@ -106,7 +111,7 @@ func Test_WindowsAppContainerWorkspaceExecutionImport(t *testing.T) {
 				t.Fatal("import lost preparation error", importErr)
 			}
 			if wantMove {
-				if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) || len(recoveryJournalInfo(e.journal).Imports) != 1 {
+				if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) || importCount() != 1 {
 					t.Fatal("import namespace/census", err)
 				}
 				// Exercise imported access through the lifecycle's supervised start.
@@ -136,7 +141,7 @@ func Test_WindowsAppContainerWorkspaceExecutionImport(t *testing.T) {
 				if data, err := os.ReadFile(proof); err != nil || string(data) != "imported" {
 					t.Fatal("imported access proof", err)
 				}
-			} else if _, err := os.Stat(source); err != nil || len(recoveryJournalInfo(e.journal).Imports) != 0 {
+			} else if _, err := os.Stat(source); err != nil || importCount() != 0 {
 				t.Fatal("failed preparation changed source/census", err)
 			}
 			if stage == "guard-retry" {
@@ -300,7 +305,10 @@ func Test_WindowsAppContainerWorkspaceExecutionImportFault(t *testing.T) {
 	if !result.moved || !errors.Is(result.err, context.Canceled) || e.ready || closes != 0 || len(e.imports) != 1 {
 		t.Fatal("post-move failure lost admission seal/source ownership", result, e.ready, closes)
 	}
-	if len(recoveryJournalInfo(e.journal).Imports) != 1 || !e.profile.processesConfirmed {
+	e.profile.mu.Lock()
+	confirmed := len(recoveryJournalInfo(e.journal).Imports) == 1 && e.profile.processesConfirmed
+	e.profile.mu.Unlock()
+	if !confirmed {
 		t.Fatal("post-move failure lost durable import/process proof")
 	}
 	if status, err := windows.WaitForSingleObject(process.Process, 0); err != nil || status != windows.WAIT_OBJECT_0 {
