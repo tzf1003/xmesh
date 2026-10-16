@@ -179,3 +179,40 @@ func (m *workspaceChangeMonitor) Stop(ctx context.Context) error {
 	}
 	return result
 }
+
+// finalSecurityCheck is the last live checkpoint of an execution. It runs under
+// the same gates as a monitor cycle, after the processes are confirmed gone, so
+// a descriptor change made since the last cycle cannot be attributed to the
+// sandbox. A finished or released workspace has nothing left to prove.
+func (g *workspaceGrant) finalSecurityCheck(ctx context.Context, maxEvents int) error {
+	return g.verifyDescendantSecurity(ctx, maxEvents, false)
+}
+
+// verifyDescendantSecurity reads the change stream up to now and fails if an
+// object of the admitted snapshot changed descriptor. Admission calls it with
+// the monitor attached so a change between monitor cycles cannot be followed by
+// a launch; the final check requires the monitor to be gone.
+func (g *workspaceGrant) verifyDescendantSecurity(ctx context.Context, maxEvents int, monitored bool) error {
+	release, err := g.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	p := g.profile
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	j := p.journal
+	if g.tree == nil || j == nil || j.state.changeCursor == nil || j.state.workspaceReleased || j.state.complete {
+		return nil
+	}
+	if !monitored && (p.workspaceMonitor != nil || g.monitor != nil) {
+		return nil
+	}
+	if err := validateWorkspaceJournalOwnership(j, p.sid); err != nil {
+		return err
+	}
+	if err := g.verifyAllDescriptors(); err != nil {
+		return err
+	}
+	return checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, g.verifyDescriptors)
+}
