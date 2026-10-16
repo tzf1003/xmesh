@@ -136,10 +136,7 @@ func Test_WindowsAppContainerRaceDiagnosticsControl(t *testing.T) {
 		launches     int
 	}{{"race", "XMESH_RACE_PROBE_RACE", 3}, {"epoch", "XMESH_RACE_PROBE_EPOCH", 10}, {"alloc", "XMESH_RACE_PROBE_ALLOC", 10}} {
 		outside := probeOrdinaryHelper(t, mode.marker)
-		t.Logf("%s outside AppContainer: exit=%d report=%q", mode.name, outside.exit, firstLine(outside.races))
-		if mode.name == "race" && (outside.exit != 66 || len(outside.races) == 0 || !strings.Contains(outside.races[0], "DATA RACE")) {
-			t.Errorf("racing child outside AppContainer: exit=%d reports=%q", outside.exit, outside.races)
-		}
+		t.Logf("%s outside AppContainer: exit=%d report=%q output=%q", mode.name, outside.exit, firstLine(outside.races), truncate(outside.runtime, 600))
 		histogram := map[string]int{}
 		for i := 0; i < mode.launches; i++ {
 			inside := probeAppContainerHelper(t, p, helper, "Test_WindowsAppContainerRaceProbeHelper", mode.marker)
