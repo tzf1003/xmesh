@@ -1,7 +1,7 @@
 name: Headscale 互联与 OAuth 协议
 # 单个 runner 上起一次性 Headscale，两个 xmesh 节点经 tsnet 入网并互调，再由第三个节点跑
 # Test_TailnetPeerConnectivity，最后让 scripts/oauth_client.py 走完 ingress 的 OAuth 协议路径。
-# 只覆盖直连路径：同机节点之间没有 DERP。DERP 兜底仍按 docs/validation/2026-10-15-headscale.md 多机验收。
+# 只覆盖直连路径：同机节点之间直连，虽然 Headscale 内置了回环 DERP/STUN（让 netcheck 成功，避免 magicsock 反复重绑）。DERP 兜底仍按 docs/validation/2026-10-15-headscale.md 多机验收。
 on:
   push:
   pull_request:

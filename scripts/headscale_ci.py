@@ -3,7 +3,7 @@
 
 The sequence follows docs/validation/2026-10-15-headscale.md, on one host:
 
-  1. start Headscale (SQLite, no embedded DERP, no DERP map) and create a tagged ephemeral key;
+  1. start Headscale (SQLite, loopback embedded DERP/STUN) and create a tagged ephemeral key;
   2. start two xmesh nodes (agent + gateway) that join with that key through tsnet (no TUN);
   3. run scripts/smoke_peer.py in both directions;
   4. run Test_TailnetPeerConnectivity from a third node against one of them (one retry: the first
@@ -13,7 +13,8 @@ The sequence follows docs/validation/2026-10-15-headscale.md, on one host:
      hs-b). The ingress is a separate node because a tag:ingress node may only reach Agents with
      an OAuth client identity (identity.FromPeer), so it cannot take part in the plain peer check.
 
-Only the direct path is covered: both nodes share the host and no DERP server is configured.
+Only the direct path is covered: all nodes share the host, so they find each other directly even though
+the embedded DERP server exists (it is there so that netchecks succeed and magicsock does not keep rebinding).
 Proving the DERP fallback (CON-NET-05) still needs the multi-host run in the validation notes.
 """
 
@@ -44,12 +45,11 @@ def sh(*command, **options):
 
 
 def headscale_config(work, port):
-    # Headscale refuses an empty DERP map. This one lists a STUN-only entry that is never contacted
-    # (stunport -1), so there is no relay and no outbound traffic; peers must find each other directly.
-    (work / "derp.yaml").write_text("\n".join([
-        "regions:", "  900:", "    regionid: 900", "    regioncode: test", "    regionname: unused",
-        "    nodes:", "      - name: 900a", "        regionid: 900", "        hostname: 127.0.0.1",
-        "        ipv4: 127.0.0.1", "        stunport: -1", "        stunonly: true", ""]))
+    # Headscale refuses an empty DERP map, and a map whose only entry cannot be reached makes every
+    # node's netcheck fail and rebind its UDP socket every few seconds, which can swallow a fresh
+    # WireGuard handshake. The embedded DERP server therefore runs on loopback with its STUN
+    # listener, so netchecks succeed. The nodes share the host and find each other directly.
+    stun = int(address().rsplit(":", 1)[1])
     (work / "policy.json").write_text(json.dumps({
         "tagOwners": {"tag:device": ["xmesh@"], "tag:peer": ["xmesh@"], "tag:ingress": ["xmesh@"]},
         # Whole-range prefixes rather than "*": a wildcard is expanded per node, so a node that joins
@@ -67,7 +67,9 @@ def headscale_config(work, port):
         f"noise:\n  private_key_path: {work / 'noise.key'}",
         "prefixes:\n  v4: 100.64.0.0/10\n  v6: fd7a:115c:a1e0::/48\n  allocation: sequential",
         f"database:\n  type: sqlite\n  sqlite:\n    path: {work / 'db.sqlite'}",
-        f"derp:\n  server:\n    enabled: false\n  urls: []\n  paths:\n    - {work / 'derp.yaml'}\n  auto_update_enabled: false",
+        "derp:\n  server:\n    enabled: true\n    region_id: 999\n    region_code: xmesh\n    region_name: xmesh-test\n"
+        f"    stun_listen_addr: 127.0.0.1:{stun}\n    private_key_path: {work / 'derp.key'}\n    ipv4: 127.0.0.1\n"
+        "    automatically_add_embedded_derp_region: true\n  urls: []\n  paths: []\n  auto_update_enabled: false",
         "dns:\n  magic_dns: false\n  base_domain: xmesh.test\n  override_local_dns: false\n  nameservers:\n    global: []",
         f"policy:\n  mode: file\n  path: {work / 'policy.json'}",
         f"unix_socket: {work / 'headscale.sock'}",
