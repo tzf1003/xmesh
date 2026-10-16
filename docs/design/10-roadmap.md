@@ -37,8 +37,8 @@ flowchart LR
 | U0 | 控制通道契约、约束与裁定、`api/control/v1` 类型 |
 | U1 | 内核只读通道：状态、事件、设备、会话、审计；服务启停子命令 |
 | U2 | 内核写操作：drain / resume、配置读写、配对、PAT、入口客户端 |
-| U3 | 托盘壳与假内核回放测试 |
-| U4 | 本机 web 面板与首次运行向导 |
+| U3 | Electron 壳（托盘 / 菜单栏）与假内核回放测试 |
+| U4 | Electron 面板窗口与首次运行向导 |
 | U5 | Windows 与 macOS 的自启、签名、安装包，并入 beta 预发布 |
 | U6 | 沙箱隔离验收、可访问性、英文资源、升级回滚 |
 | U7 到 U10 | UI 端 tailnet 管理：主机 tag、权限划分、第三方 DERP 设置，以及 DERP 提供商集成的客户端基础。见 [13 tailnet 管理与 DERP 提供商路径](13-mesh-admin-and-derp.md) |
