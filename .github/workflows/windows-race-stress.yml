@@ -41,3 +41,19 @@ jobs:
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
         run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerWorkspaceDeletionRecovery' -v -count=25 -timeout=1500s
+  runner:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/windows-race-stress.yml
+      - name: Managed runner exec and ConPTY acceptance
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerRunner' -v -count=1 -timeout=900s

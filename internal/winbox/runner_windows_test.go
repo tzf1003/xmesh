@@ -126,12 +126,22 @@ func (f *runnerFixture) execManager(t *testing.T, timeout string) *exec.Manager 
 
 func (f *runnerFixture) run(m *exec.Manager, arguments map[string]any) (map[string]any, error) {
 	raw, _ := json.Marshal(arguments)
-	return m.Run(context.Background(), "runner-test", f.resolver, f.policy, raw)
+	result, err := m.Run(context.Background(), "runner-test", f.resolver, f.policy, raw)
+	return result, describeToolError(err)
+}
+
+// describeToolError exposes the cause that tool errors hide from callers.
+func describeToolError(err error) error {
+	var tool *toolerr.Error
+	if errors.As(err, &tool) && tool.Cause != nil {
+		return fmt.Errorf("%w: %v", err, tool.Cause)
+	}
+	return err
 }
 
 func (f *runnerFixture) helperCall(mode string, paths ...string) map[string]any {
 	args := append([]string{"-test.run=^Test_WindowsAppContainerRunnerHelper$", "--", "--xmesh-runner-helper", mode}, paths...)
-	return map[string]any{"cmd": `.\helper`, "args": args, "env": map[string]string{"XMESH_RUNNER_HELPER": "1", "GORACE": "log_path=runner-race"}}
+	return map[string]any{"cmd": `.\helper`, "args": args, "env": map[string]string{"GORACE": "log_path=runner-race"}}
 }
 
 // requireReclaimed checks the outcome every finished execution must leave:
@@ -327,7 +337,7 @@ func (o *ptyOutput) call(name string, arguments map[string]any) map[string]any {
 	raw, _ := json.Marshal(arguments)
 	result, err := o.m.Call(context.Background(), o.caller, o.f.resolver, o.f.policy, name, raw)
 	if err != nil {
-		o.t.Fatal(name, err)
+		o.t.Fatal(name, describeToolError(err))
 	}
 	return result
 }
@@ -391,7 +401,6 @@ func Test_WindowsAppContainerRunnerTerminal(t *testing.T) {
 	m, reg := newTerminalManager(t)
 	o := f.openTerminal(t, m, reg, "conpty")
 	write := func(data string) { o.call("pty.write", map[string]any{"session_id": o.session, "data": data}) }
-	write("set XMESH_RUNNER_HELPER=1\r\n")
 	write("set MARK=OK\r\n")
 	write("echo MARK-%MARK%-END\r\n")
 	o.until(`MARK-OK-END`)
@@ -415,7 +424,7 @@ func Test_WindowsAppContainerRunnerTerminalKill(t *testing.T) {
 	o.until(`READY-Windows_NT`)
 	// A descendant that would outlive the shell keeps running until the
 	// execution is reclaimed.
-	o.call("pty.write", map[string]any{"session_id": o.session, "data": "set XMESH_RUNNER_HELPER=1\r\nstart /b helper.exe -test.run=Test_WindowsAppContainerRunnerHelper -- --xmesh-runner-helper tree-exit " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
+	o.call("pty.write", map[string]any{"session_id": o.session, "data": "start /b helper.exe -test.run=Test_WindowsAppContainerRunnerHelper -- --xmesh-runner-helper tree-exit " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
 	for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(100 * time.Millisecond) {
 		if body, err := os.ReadFile(filepath.Join(f.root, "terminal-pids.txt")); err == nil && len(strings.Fields(string(body))) == 2 {
 			break
@@ -457,15 +466,17 @@ func waitRunnerIdle(t *testing.T, f *runnerFixture, executions int) {
 }
 
 func Test_WindowsAppContainerRunnerHelper(t *testing.T) {
-	if os.Getenv("XMESH_RUNNER_HELPER") != "1" {
-		t.Skip("AppContainer runner helper")
-	}
+	// Policy withholds XMESH_* variables from commands, so the helper is
+	// selected by its arguments.
 	var mode string
 	var paths []string
 	for i, arg := range os.Args {
 		if arg == "--xmesh-runner-helper" && i+1 < len(os.Args) {
 			mode, paths = os.Args[i+1], os.Args[i+2:]
 		}
+	}
+	if mode == "" {
+		t.Skip("AppContainer runner helper")
 	}
 	var container, size uint32
 	if err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), 29, (*byte)(unsafe.Pointer(&container)), 4, &size); err != nil {
