@@ -5,8 +5,6 @@ import * as path from "node:path";
 export interface BinaryLookup {
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
-  /** Electron's `process.resourcesPath` of a packaged app; the installer may ship `bin/xmesh` there. */
-  resourcesPath?: string | undefined;
   home: string;
   exists: (p: string) => boolean;
 }
@@ -23,7 +21,6 @@ export function defaultLookup(): BinaryLookup {
   return {
     platform: process.platform,
     env: process.env,
-    resourcesPath: (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
     home: os.homedir(),
     exists: isFile,
   };
@@ -51,8 +48,8 @@ export function wellKnownDirs(l: Pick<BinaryLookup, "platform" | "env" | "home">
 
 /**
  * Finds the `xmesh` executable the tray shells out to (`xmesh restart|stop`).
- * Order: `XMESH_BIN` (taken at its word), the binary shipped inside the app,
- * `PATH`, then the usual install directories. Falls back to the bare name so
+ * Order: `XMESH_BIN` (taken at its word), `PATH`, then the usual install
+ * directories. (`cli.ts` tries the binary shipped inside the app before this.) Falls back to the bare name so
  * the OS reports "not found" through the normal error path.
  */
 export function resolveXmeshBinary(l: BinaryLookup = defaultLookup()): string {
@@ -62,10 +59,6 @@ export function resolveXmeshBinary(l: BinaryLookup = defaultLookup()): string {
   const p = win ? path.win32 : path.posix;
   const exe = win ? "xmesh.exe" : "xmesh";
 
-  if (l.resourcesPath) {
-    const bundled = p.join(l.resourcesPath, "bin", exe);
-    if (l.exists(bundled)) return bundled;
-  }
   const pathVar = win ? (l.env.Path ?? l.env.PATH) : l.env.PATH;
   const dirs = (pathVar ?? "").split(win ? ";" : ":").filter((d) => d !== "" && p.isAbsolute(d));
   for (const d of [...dirs, ...wellKnownDirs(l)]) {

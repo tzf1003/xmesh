@@ -14,14 +14,6 @@ test("XMESH_BIN is taken at its word, even if it does not exist", () => {
   assert.equal(resolveXmeshBinary(lookup({ env: { XMESH_BIN: "/opt/x/xmesh" } })), "/opt/x/xmesh");
 });
 
-test("the binary shipped inside the app beats PATH", () => {
-  const l = lookup({ platform: "darwin", env: { PATH: "/usr/bin" }, resourcesPath: "/Applications/xmesh.app/Contents/Resources", home: "/Users/u" }, [
-    "/Applications/xmesh.app/Contents/Resources/bin/xmesh",
-    "/usr/bin/xmesh",
-  ]);
-  assert.equal(resolveXmeshBinary(l), "/Applications/xmesh.app/Contents/Resources/bin/xmesh");
-});
-
 test("macOS finds Homebrew and ~/.local/bin although a login item's PATH is minimal", () => {
   const base = { platform: "darwin" as const, env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, home: "/Users/u" };
   assert.equal(resolveXmeshBinary(lookup(base, ["/opt/homebrew/bin/xmesh"])), "/opt/homebrew/bin/xmesh");
@@ -44,10 +36,6 @@ test("Windows: xmesh.exe, ';' separated Path, per-user and Program Files locatio
     "C:\\Users\\u\\AppData\\Local\\Programs\\xmesh\\xmesh.exe",
   );
   assert.equal(resolveXmeshBinary(lookup(w, ["C:\\Program Files\\xmesh\\xmesh.exe"])), "C:\\Program Files\\xmesh\\xmesh.exe");
-  assert.equal(
-    resolveXmeshBinary(lookup({ ...w, resourcesPath: "C:\\Program Files\\xmesh-ui\\resources" }, ["C:\\Program Files\\xmesh-ui\\resources\\bin\\xmesh.exe"])),
-    "C:\\Program Files\\xmesh-ui\\resources\\bin\\xmesh.exe",
-  );
 });
 
 test("falls back to the bare name so the OS reports not-found", () => {
