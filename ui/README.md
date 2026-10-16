@@ -41,7 +41,7 @@ npm start             # 另开终端，启动 Electron
 
 ## 面板页面
 
-渲染进程只通过 `window.xmesh`（预加载白名单）与外界交互，没有 `fetch`、没有 Node。依赖只有 `preact`（运行时，被 esbuild 打进 `app.js`）和 `esbuild`（构建期）。页面不使用内联脚本和样式表，`index.html` 自带与响应头同等严格的 CSP。
+渲染进程只通过 `window.xmesh`（预加载白名单）与外界交互，没有 `fetch`、没有 Node。依赖只有 `preact` 和 `esbuild`，都是 devDependency：esbuild 把 preact 打进 `app.js`，安装包里不带 `node_modules`。页面不使用内联脚本和样式表，`index.html` 自带与响应头同等严格的 CSP。
 
 | 页面 | 内容 | 需要的能力 |
 | --- | --- | --- |

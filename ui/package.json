@@ -31,12 +31,10 @@
     "electron": "44.8.0",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
+    "preact": "10.29.8",
     "typescript": "7.0.2"
   },
   "engines": {
     "node": ">=22.18"
-  },
-  "dependencies": {
-    "preact": "10.29.8"
   }
 }
