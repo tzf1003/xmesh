@@ -104,8 +104,11 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       return page;
     },
     close: async () => {
-      await app.close().catch(() => {});
-      await kernel.stop();
+      // A hung quit (seen on macOS runners) must not eat the whole test timeout; kill the process instead.
+      const quit = app.close().then(() => true, () => true);
+      const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000));
+      if (!(await Promise.race([quit, timeout]))) app.process().kill("SIGKILL");
+      await Promise.race([kernel.stop(), new Promise((resolve) => setTimeout(resolve, 5_000))]);
       fs.rmSync(root, { recursive: true, force: true });
       fs.rmSync(userData, { recursive: true, force: true });
     },

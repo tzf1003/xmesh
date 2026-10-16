@@ -2,6 +2,8 @@ import * as http from "node:http";
 import {
   CONTROL_VERSION_HEADER,
   ControlRequestError,
+  type ConfigDiagnostic,
+  type ControlError,
   type ControlEvent,
   type DrainResponse,
   type Peer,
@@ -126,26 +128,44 @@ export class ControlClient {
     };
   }
 
-  private async json(method: string, path: string, body?: unknown): Promise<Reply> {
-    const reply = await this.request(method, path, body);
+  /**
+   * Any other Control API route. The caller names the method and path, so only
+   * main-process code with fixed paths may use it (see panel-service.ts).
+   */
+  async call(method: string, path: string, opts: { body?: unknown; ifMatch?: string } = {}): Promise<unknown> {
+    const headers: Record<string, string> = opts.ifMatch === undefined ? {} : { "If-Match": `"${opts.ifMatch}"` };
+    return (await this.json(method, path, opts.body, headers)).body;
+  }
+
+  private async json(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<Reply> {
+    const reply = await this.request(method, path, body, extra);
     const version = headerValue(reply.headers, VERSION_HEADER);
     if (!isSupportedApiVersion(version)) throw new VersionMismatchError(version, this.kernelVersion);
     if (reply.status >= 400) {
-      const b = reply.body as { error?: unknown; message?: unknown; reason?: unknown } | null;
+      const b = reply.body as Partial<Record<keyof ControlError, unknown>> | null;
+      const details: ConstructorParameters<typeof ControlRequestError>[4] = {};
+      if (typeof b?.field === "string") details.field = b.field;
+      if (typeof b?.current_etag === "string") details.current_etag = b.current_etag;
+      if (Array.isArray(b?.diagnostics)) {
+        details.diagnostics = b.diagnostics.filter(
+          (d): d is ConfigDiagnostic => typeof d === "object" && d !== null && typeof (d as ConfigDiagnostic).message === "string",
+        );
+      }
       throw new ControlRequestError(
         typeof b?.error === "string" ? b.error : "internal",
         typeof b?.message === "string" ? b.message : `HTTP ${reply.status}`,
         reply.status,
         typeof b?.reason === "string" ? b.reason : undefined,
+        details,
       );
     }
     return reply;
   }
 
-  private request(method: string, path: string, body?: unknown): Promise<Reply> {
+  private request(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<Reply> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
-      const headers: Record<string, string | number> = { Accept: "application/json", Host: HOST };
+      const headers: Record<string, string | number> = { Accept: "application/json", Host: HOST, ...extra };
       if (payload !== undefined) {
         headers["Content-Type"] = "application/json";
         headers["Content-Length"] = Buffer.byteLength(payload);

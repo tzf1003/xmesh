@@ -2,7 +2,7 @@
 
 xmesh 的桌面托盘壳（Electron，路线图阶段 6 的 U3）。独立的 TypeScript 项目，不 import 任何 Go 代码，和内核之间只有一份契约：本机控制通道（Control API v1，Unix 域套接字或 Windows 命名管道）。设计见 [docs/design/12-ui-and-control.md](../docs/design/12-ui-and-control.md)。
 
-这一步交付的是壳：托盘 / 菜单栏图标和菜单、与内核的连接和重连、受限 IPC、窗口安全约束，以及对着假内核的端到端测试。面板页面、平台集成是后续子任务；打包发布见下文「打包与发布」。
+这一步交付的是壳：托盘 / 菜单栏图标和菜单、与内核的连接和重连、受限 IPC、窗口安全约束，以及对着假内核的端到端测试。面板页面见下文「面板页面」；平台集成是另一个子任务；打包发布见下文「打包与发布」。
 
 ## 运行
 
@@ -31,14 +31,33 @@ npm start             # 另开终端，启动 Electron
 | 路径 | 内容 |
 | --- | --- |
 | `src/main/system/` | 平台相关的主进程模块：`binary`（找 `xmesh` 可执行文件）、`autostart`（登录项）、`notifier`（通知节流）、`firstrun`（只提示一次的标记） |
-| `src/main/` | 主进程：`discovery`（找实例）、`client`（Control API 客户端，含 SSE）、`controller`（连接状态机，重连、`Last-Event-ID`）、`menu`（菜单模型，纯数据）、`tray`、`actions`（菜单与 IPC 共用的操作）、`ipc`、`window`、`policy`（安全策略常量）、`protocol`（`app://panel` 页面服务） |
+| `src/main/` | 主进程：`discovery`（找实例）、`client`（Control API 客户端，含 SSE）、`controller`（连接状态机，重连、`Last-Event-ID`）、`menu`（菜单模型，纯数据）、`tray`、`actions`（菜单与 IPC 共用的操作）、`ipc`、`window`、`policy`（安全策略常量）、`protocol`（`app://panel` 页面服务）、`panel-service`（面板的数据读写，固定路由）、`setup`（首次运行向导的落盘与 `xmesh install/start`） |
 | `src/preload/` | 沙箱预加载脚本，只暴露白名单函数 |
 | `src/shared/` | 主进程、预加载、渲染进程共用的类型：控制接口类型（`generated/` 是契约生成物的副本）、状态、IPC 白名单、字符串表 |
 | `testserver/` | 假内核：回放契约夹具，同样走 UDS / 命名管道，可编排状态、事件、断流、重启、版本不兼容、缺失能力 |
-| `static/placeholder-panel/` | 面板页面落地前的占位页，只用来证明 IPC 边界可用。`dist/renderer/index.html` 存在时优先用它 |
+| `src/renderer/` | 面板页面（Preact + TSX），由 `scripts/build-renderer.mjs`（esbuild）打成 `dist/renderer/app.js`，主进程经 `app://panel` 提供；页面、`lib/`（纯函数）、`messages.ts`（中英字符串表）见下文 |
 | `assets/tray/` | 托盘图标，`npm run icons` 生成（无图像依赖） |
 | `scripts/` | `flip-fuses.mjs`、`fuses.config.mjs`（release / test 两档 fuses），`gen-icons.mjs` |
 | `test/unit/`、`test/e2e/` | 单元测试与 Playwright `_electron` 端到端 |
+
+## 面板页面
+
+渲染进程只通过 `window.xmesh`（预加载白名单）与外界交互，没有 `fetch`、没有 Node。依赖只有 `preact` 和 `esbuild`，都是 devDependency：esbuild 把 preact 打进 `app.js`，安装包里不带 `node_modules`。页面不使用内联脚本和样式表，`index.html` 自带与响应头同等严格的 CSP。
+
+| 页面 | 内容 | 需要的能力 |
+| --- | --- | --- |
+| 概览 | 状态、负载、警告、最近调用（事件流 `call`）、暂停 / 恢复 / 强制排空 | `status`，排空需要 `drain` |
+| 设备 | 对端列表；配对导出 / 导入（导入必须手敲指纹） | `peers`，配对需要 `pair` |
+| 会话 | 在线会话与进程；没有会话时给空状态 | `sessions` |
+| 授权 | PAT 创建（密钥只显示一次）/ 轮换 / 删除；权限矩阵只读展示 | `pats`、`config.read` |
+| 入口 | 入口客户端撤销、入口密码轮换（12–256 字符，只写） | `ingress` |
+| 配置 | YAML 编辑，先 `dry_run` 看差异和 `weakens_security`，再带 `If-Match` 写入；`config_invalid` 诊断逐行显示，`precondition_failed` 提示重新载入 | `config.read`，写入需要 `config.write` |
+| 审计 | 事件 / 时间 / 主体过滤，游标翻页 | `audit` |
+| 首次运行向导 | 内核未运行且无实例时的默认页：节点名、角色、工作区、入口，主进程重新校验后用 `0600` 写配置，再执行 `xmesh install --config` 和 `xmesh start --config` | 无 |
+
+内核缺某项能力时，对应页面显示「内核不支持」，不会发出请求。`weakens_security` 只是 UI 层的二次确认，不是内核边界（契约如此规定）。
+
+构建：`npm run build` 先 `tsc`（主进程、预加载、测试用库），再 `scripts/build-renderer.mjs` 打包渲染进程；`XMESH_UI_MINIFY=1` 压缩。
 
 ## 状态与图标
 
@@ -153,7 +172,8 @@ UI 以 [docs/contracts/control.md](../docs/contracts/control.md) 为准。
 
 ## 还没做
 
-- 完整面板页面和首次运行向导（W1）
+- 面板的结构化配置表单：目前是 YAML 编辑 + 差异预览；终端会话没有关闭路由（契约未定义），孤儿终端只展示
+- tailnet 管理页面（主机标签、权限矩阵、DERP），等 `xmesh mesh … --json` 合入后补
 - 有证书后的签名与公证只差配置 secrets，尚未用真实证书验证过
 - 登录项和通知的运行时部分已在 `src/main/system/`，但只有安装版才生效，真机验证要等安装包
 - `xmesh restart` / `stop` 子命令由内核通道线程提供，托盘只在菜单里调用 `xmesh <cmd> --json`

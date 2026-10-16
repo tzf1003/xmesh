@@ -59,7 +59,7 @@ for (const need of ["/package.json", "/dist/src/main/main.js", "/dist/src/preloa
 }
 const stray = entries.filter((e) => /^\/(dist\/test|dist\/testserver|testserver|test|src|node_modules)(\/|$)/.test(e));
 if (stray.length > 0) fail(`app.asar contains files that must not ship: ${stray.slice(0, 5).join(", ")}`);
-if (!entries.some((e) => e.startsWith("/static/placeholder-panel/") || e.startsWith("/dist/renderer/"))) fail("app.asar has no panel page");
+if (!entries.some((e) => e.startsWith("/dist/renderer/"))) fail("app.asar has no panel page");
 ok(`app.asar: ${entries.length} entries, compiled app only`);
 
 // fuses

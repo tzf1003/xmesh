@@ -11,6 +11,7 @@ import {
   CONTROL_EVENT_TYPES,
   type Capability,
   type ControlEndpointFile,
+  type ControlError,
   type ControlEvent,
   type Peer,
   type StatusResponse,
@@ -26,6 +27,8 @@ export class ControlRequestError extends Error {
     message: string,
     readonly httpStatus?: number,
     readonly reason?: string,
+    /** Remaining fields of the error body the panel shows (`field`, `current_etag`, `diagnostics`). */
+    readonly details: Pick<ControlError, "field" | "current_etag" | "diagnostics"> = {},
   ) {
     super(message);
     this.name = "ControlRequestError";

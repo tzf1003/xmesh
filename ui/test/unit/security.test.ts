@@ -42,9 +42,9 @@ test("CSP: nothing remote, no inline code, no eval, no network from the page, no
   assert.equal(panelHeaders("text/html")["X-Content-Type-Options"], "nosniff");
 });
 
-test("the placeholder page ships its own CSP that is no looser than the header", async () => {
+test("the panel page ships its own CSP that is no looser than the header", async () => {
   const fs = await import("node:fs");
-  const html = fs.readFileSync(path.join(__dirname, "..", "..", "..", "static", "placeholder-panel", "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(__dirname, "..", "..", "..", "src", "renderer", "index.html"), "utf8");
   const m = /Content-Security-Policy"\s+content="([^"]+)"/.exec(html);
   assert.ok(m, "meta CSP present");
   assert.doesNotMatch(m[1]!, /unsafe-inline|unsafe-eval|https?:|\*/);

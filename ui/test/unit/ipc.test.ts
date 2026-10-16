@@ -42,8 +42,8 @@ test("booleans must be booleans", () => {
   for (const bad of ["true", 1, 0, null, undefined]) assert.equal(parseBoolean(bad), undefined);
 });
 
-test("every panel method except onSnapshot has an IPC channel, and channel names are unique", () => {
+test("every panel method except the two event subscriptions has an IPC channel, and channel names are unique", () => {
   const values = Object.values(CHANNELS);
   assert.equal(new Set(values).size, values.length);
-  assert.equal(PANEL_API_METHODS.length - 1, values.length);
+  assert.equal(PANEL_API_METHODS.length - 2, values.length);
 });

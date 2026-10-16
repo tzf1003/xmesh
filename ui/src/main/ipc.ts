@@ -1,14 +1,28 @@
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
 import {
+  CALLS_EVENT,
   CHANNELS,
   SNAPSHOT_EVENT,
   type ActionResult,
+  parseAuditQuery,
   parseBoolean,
+  parseClientId,
+  parseConfigSave,
   parseCopyKind,
+  parseDrainMode,
   parseExternalKey,
   parseInstanceId,
+  parseNodeName,
+  parsePairImport,
+  parsePassword,
+  parsePatCreate,
   parsePathKind,
+  parsePickKind,
 } from "../shared/ipc";
+import type { CallEventData } from "../shared/control";
+import type { PanelService } from "./panel-service";
+import type { SetupReport } from "../shared/ipc";
+import type { DataResult } from "../shared/ipc";
 import type { Snapshot } from "../shared/state";
 import type { Actions } from "./actions";
 import type { ShellController } from "./controller";
@@ -30,10 +44,13 @@ export function isTrustedSender(
 export interface IpcDeps {
   controller: ShellController;
   actions: Actions;
+  service: PanelService;
+  /** Validates and runs first-run setup; `params` is whatever the renderer sent. */
+  setup: (params: unknown) => Promise<DataResult<SetupReport>>;
   panel: () => WebContents | undefined;
 }
 
-export function registerIpc({ controller, actions, panel }: IpcDeps): () => void {
+export function registerIpc({ controller, actions, service, setup, panel }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -47,7 +64,11 @@ export function registerIpc({ controller, actions, panel }: IpcDeps): () => void
   };
 
   handle(CHANNELS.getSnapshot, (): Snapshot => controller.snapshot);
-  handle(CHANNELS.drain, () => actions.drain());
+  handle(CHANNELS.drain, (mode: unknown) => {
+    if (mode === undefined) return actions.drain();
+    const v = parseDrainMode(mode);
+    return v === undefined ? bad("drain mode") : actions.drain(v);
+  });
   handle(CHANNELS.resume, () => actions.resume());
   handle(CHANNELS.selectInstance, (id: unknown) => {
     const v = parseInstanceId(id);
@@ -70,14 +91,75 @@ export function registerIpc({ controller, actions, panel }: IpcDeps): () => void
     return v === undefined ? bad("link key") : actions.openExternal(v);
   });
 
+  handle(CHANNELS.getSessions, () => service.getSessions());
+  handle(CHANNELS.getConfig, () => service.getConfig());
+  handle(CHANNELS.putConfig, (req: unknown) => {
+    const v = parseConfigSave(req);
+    return v === undefined ? bad("config request") : service.putConfig(v);
+  });
+  handle(CHANNELS.listPats, () => service.listPats());
+  handle(CHANNELS.createPat, (args: unknown) => {
+    const v = parsePatCreate(args);
+    return v === undefined ? bad("PAT request") : service.createPat(v);
+  });
+  handle(CHANNELS.rotatePat, (name: unknown) => {
+    const v = parseNodeName(name);
+    return v === undefined ? bad("PAT name") : service.rotatePat(v);
+  });
+  handle(CHANNELS.deletePat, (name: unknown) => {
+    const v = parseNodeName(name);
+    return v === undefined ? bad("PAT name") : service.deletePat(v);
+  });
+  handle(CHANNELS.listIngressClients, () => service.listIngressClients());
+  handle(CHANNELS.revokeIngressClient, (id: unknown) => {
+    const v = parseClientId(id);
+    return v === undefined ? bad("client id") : service.revokeIngressClient(v);
+  });
+  handle(CHANNELS.rotateIngressPassword, (password: unknown) => {
+    const v = parsePassword(password);
+    return v === undefined ? bad("password") : service.rotateIngressPassword(v);
+  });
+  handle(CHANNELS.exportPair, () => service.exportPair());
+  handle(CHANNELS.importPair, (args: unknown) => {
+    const v = parsePairImport(args);
+    return v === undefined ? bad("pair request") : service.importPair(v);
+  });
+  handle(CHANNELS.queryAudit, (query: unknown) => {
+    const v = parseAuditQuery(query);
+    return v === undefined ? bad("audit query") : service.queryAudit(v);
+  });
+  handle(CHANNELS.getRecentCalls, (): CallEventData[] => service.recentCalls());
+  handle(CHANNELS.runSetup, (params: unknown) => setup(params));
+  handle(CHANNELS.pickPath, (kind: unknown) => {
+    const v = parsePickKind(kind);
+    return v === undefined ? bad("path kind") : actions.pickPath(v);
+  });
+
   const push = (snap: Snapshot): void => {
     const target = panel();
     if (target && !target.isDestroyed()) target.send(SNAPSHOT_EVENT, snap);
   };
   controller.on("change", push);
 
+  // Bursts of calls are coalesced so a busy kernel cannot flood the page.
+  let pending: CallEventData[] | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const pushCalls = (calls: CallEventData[]): void => {
+    pending = calls;
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      const target = panel();
+      if (pending && target && !target.isDestroyed()) target.send(CALLS_EVENT, pending);
+      pending = undefined;
+    }, 250);
+  };
+  controller.on("calls", pushCalls);
+
   return () => {
     for (const c of Object.values(CHANNELS)) ipcMain.removeHandler(c);
     controller.off("change", push);
+    controller.off("calls", pushCalls);
+    clearTimeout(timer);
   };
 }
