@@ -471,3 +471,41 @@ func errText(err error) string {
 	}
 	return err.Error()
 }
+
+// Parallel executions of one user grant the same objects with their own package
+// SID; that must not look like an external writer, while any other principal does.
+func Test_WindowsForeignPackageACE(t *testing.T) {
+	ace := func(kind byte, sid string) []byte {
+		parsed, err := windows.StringToSid(sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]byte, 8, 8+parsed.Len())
+		out[0] = kind
+		out = append(out, unsafe.Slice((*byte)(unsafe.Pointer(parsed)), parsed.Len())...)
+		for len(out)%4 != 0 {
+			out = append(out, 0)
+		}
+		return out
+	}
+	const own = "S-1-15-2-1-2-3-4-5-6-7"
+	const other = "S-1-15-2-7-6-5-4-3-2-1"
+	ownSID, _ := windows.StringToSid(own)
+	ownRaw := unsafe.Slice((*byte)(unsafe.Pointer(ownSID)), ownSID.Len())
+	for _, test := range []struct {
+		name string
+		ace  []byte
+		want bool
+	}{
+		{"other package allow", ace(windows.ACCESS_ALLOWED_ACE_TYPE, other), true},
+		{"other package deny", ace(windows.ACCESS_DENIED_ACE_TYPE, other), true},
+		{"own package", ace(windows.ACCESS_ALLOWED_ACE_TYPE, own), false},
+		{"all application packages", ace(windows.ACCESS_ALLOWED_ACE_TYPE, "S-1-15-2-1"), false},
+		{"everyone", ace(windows.ACCESS_ALLOWED_ACE_TYPE, "S-1-1-0"), false},
+		{"audit entry", ace(2, other), false},
+	} {
+		if got := foreignPackageACE(test.ace, ownRaw); got != test.want {
+			t.Errorf("%s: got %v want %v", test.name, got, test.want)
+		}
+	}
+}

@@ -192,7 +192,7 @@ func (g *workspaceGrant) verifyDescriptors(objects []journalObject) error {
 		if handle == 0 || grant.baseline == nil {
 			return fmt.Errorf("%w: no descriptor baseline for an admitted object", errWorkspaceSecurityChanged)
 		}
-		current, err := descriptorFingerprint(handle)
+		current, err := workspaceDescriptorFingerprint(handle, g.profile.sid)
 		if err != nil {
 			return fmt.Errorf("%w: cannot read an admitted object's descriptor: %v", errWorkspaceSecurityChanged, err)
 		}

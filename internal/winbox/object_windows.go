@@ -174,7 +174,7 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	if err := setObjectGrant(aclHandle, ace, true); err != nil {
 		return nil, err
 	}
-	baseline, err := descriptorFingerprint(aclHandle)
+	baseline, err := workspaceDescriptorFingerprint(aclHandle, p.sid)
 	if err != nil {
 		return nil, fmt.Errorf("read back AppContainer grant descriptor: %w", err)
 	}
