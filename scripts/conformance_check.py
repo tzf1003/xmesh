@@ -21,7 +21,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ID = r"(?:(?:CON|CTR)-[A-Z]+-\d+|INV-\d+|RUL-\d+)"
 GO_TEST = re.compile(r"^func (Test_[A-Za-z0-9_]+)\(", re.M)
-NAME_ID = re.compile(r"^Test_((?:CON|CTR)[A-Z]+\d+|INV\d+|RUL\d+)((?:_\d{2}(?!\d))*)")
+NAME_ID = re.compile(r"^Test_((?:CON|CTR)[A-Z]+\d+|INV\d+|RUL\d+)((?:_\d{2}(?=_|$))*)")
 MARKER = re.compile(r"^\s*(?://|#)\s*conformance:\s*(.+?)\s*$")
 SKIP_DIRS = {"node_modules", "vendor"}
 

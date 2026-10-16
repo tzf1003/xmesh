@@ -42,6 +42,7 @@ class ConformanceCheck(unittest.TestCase):
         code, out = self.run_check({
             "internal/a/a_test.go": "package a\nfunc Test_CONARCH02_Build(t *testing.T) {}\n"
                                     "func Test_CTRFS01_02_Pair(t *testing.T) {}\n"
+                                    "func Test_CONARCH02_20Builds(t *testing.T) {}\n"
                                     "// conformance: RUL-03, INV-01\nfunc TestOther(t *testing.T) {}\n"})
         self.assertEqual(code, 0, out)
         self.assertIn("5/5", out)
