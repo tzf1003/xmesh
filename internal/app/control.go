@@ -33,14 +33,15 @@ type controlDeps struct {
 	self      identity.Principal
 	mode      string
 	allowSIDs []string
-	drain     func(kill bool) // Run's own bookkeeping for gateways, beyond the agent
+	ingress   control.IngressAdmin // nil on a node without the ingress role
+	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume    func()
 }
 
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
-	options := control.Options{Host: &controlHost{d: d}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log}
+	options := control.Options{Host: &controlHost{d: d}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress}
 	s, e := control.Start(options)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "控制通道未启动:", e)

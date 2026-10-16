@@ -348,13 +348,16 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 
 接口、字段、错误码和事件格式以 [控制通道契约](contracts/control.md) 为准，内核的路由注册与它的路由表一一对应（`Test_ControlRegistersEveryContractRoute`），每个响应和事件在测试里都过契约模式。这里只写运维上需要知道的。
 
-内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`audit`，以及有配置文件时的 `config.read`、`config.write`。`pair`、`pats`、`ingress` 的路由已注册，但内核还没有声明这些能力，请求返回 `not_implemented`（501）。
+内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`pair`、`ingress`、`audit`，以及有配置文件时的 `config.read`、`config.write`、`pats`。
 
 - `GET /v1/status`：`sys.info` 的超集，不按调用方 tag 过滤，另含 `control`、`lifecycle`、`drain`、`paths`、`gateway`、`peers`。`warnings` 是 `{code, severity, message}`。
 - `GET /v1/events`：SSE，首条 `hello`；`Last-Event-ID`（`<boot_id>.<seq>`）续传，保留最近 1024 条，id 属于上一次启动或已滚出缓存时先发 `reset`。事件由每秒一次的状态采样推导，短于一个采样周期的 exec 可能不会出现，`call` 事件来自审计记录，不受此限。字段是白名单，带 stdout 等内容的事件被拒绝（INV-10）。
 - `GET /v1/sessions`：PTY、排队和运行中的 exec（只有可执行文件基名）、后端租约（`token` 是 fencing 序号）。
 - `POST /v1/drain`、`POST /v1/resume`：`keep` 重复是 no-op，`keep` 可升级为 `kill`，`kill` 降级返回 `conflict`（`drain_downgrade`）。恢复只让本节点重新接受新调用，`kill` 已结束的终端和租约不会回来；同一进程里的 Gateway 一并恢复，其他节点上的 Gateway 自己的排空标记不由这里清除。
 - `GET /v1/config`、`PUT /v1/config`：整文件读写。`PUT` 必须带 `If-Match`（缺少 428，过期 412 并附 `current_etag`），内容经 `config.Parse` 校验（失败 422 `config_invalid`，带逐条诊断），临时文件加重命名原子替换，注释与格式由提交的内容决定。响应的 `diff` 是 JSON Pointer 操作列表，`weakens_security` 只是给 UI 弹确认的提示，内核不拦截，因为同一用户的进程本来就能直接改配置文件。`xmesh control config set --set/--delete` 在客户端读当前文件、改好再整体提交。
+- `POST /v1/pair/export`、`POST /v1/pair/import`：只在 `lan` 模式可用（否则 `unsupported_mode`）。导入要同时核对三处指纹：用户确认的、配对文件里写的、证书本身算出的，任一不符返回 `fingerprint_mismatch`；成功后同样需要重启节点才生效（响应 `restart_required: true`）。文件落在 `<状态目录>/lan/`，与 `xmesh pair` 相同。
+- `GET/POST /v1/pats`、`POST /v1/pats/{name}/rotate`、`DELETE /v1/pats/{name}`：改 `gateway.pats` 与令牌文件，Gateway 逐请求读取，立即生效。控制通道创建的令牌放在 `<状态目录>/pats/<名字>.token`（`0600`），先写文件再写配置条目，删除时先删条目再删文件；配置里指向别处的令牌文件可以轮转，但删除 PAT 时不会被删。节点没有 `gateway` 配置时创建返回 `conflict`（`gateway_not_configured`）。令牌正文只在创建与轮转的响应里出现一次。
+- `GET /v1/ingress/clients`、`DELETE /v1/ingress/clients/{client_id}`、`PUT /v1/ingress/password`：没有 `ingress` 角色返回 `role_disabled`。撤销客户端同时清掉它的授权码、access 与 refresh token 并持久化；写在 `ingress.oauth.clients` 里的客户端下次启动会重新登记，但旧 token 不会复活。轮转口令先原子重写口令文件（`0600`）再让运行中的服务切换，已签发的 token 不受影响；口令长度 12 到 256 个字符，首尾不能有空白。
 - `GET /v1/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
 
 经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 时只能按路径前缀（`/node`、`/mesh`、`/gateway/listen`、`/ingress`）估计。

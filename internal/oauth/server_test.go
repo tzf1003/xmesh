@@ -571,3 +571,72 @@ func Test_CTROAUTH01_IssuerOrigin(t *testing.T) {
 		t.Fatal("loopback Host accepted without a proxy", w.Code)
 	}
 }
+
+// A revoked client loses its registration and every token; a rotated password applies at once.
+func Test_ControlRevokeClientAndSetPassword(t *testing.T) {
+	dir := t.TempDir()
+	s, e := New(Options{Issuer: "https://mesh.example", Password: "correct horse battery staple", StateDir: dir, DynamicScopes: testScopes})
+	if e != nil {
+		t.Fatal(e)
+	}
+	h := serve(s, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, "ok") }))
+	t.Cleanup(h.Close)
+	id := registerClient(t, h)
+	verifier := strings.Repeat("v", 43)
+	code, _ := authCode(t, h, id, verifier)
+	form := url.Values{"grant_type": {"authorization_code"}, "client_id": {id}, "code": {code}, "redirect_uri": {"http://127.0.0.1:1234/callback"}, "code_verifier": {verifier}}
+	status, _, body := request(t, h, "POST", "/oauth/token", form.Encode(), "application/x-www-form-urlencoded")
+	if status != 200 {
+		t.Fatal(status, body)
+	}
+	var token map[string]any
+	_ = json.Unmarshal([]byte(body), &token)
+	call := func() int {
+		req, _ := http.NewRequest("POST", h.URL+"/mcp", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+token["access_token"].(string))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if call() != 200 {
+		t.Fatal("token should work before revocation")
+	}
+	clients := s.Clients()
+	if len(clients) != 1 || clients[0].ID != id || clients[0].SecretHash != "" {
+		t.Fatalf("%+v", clients)
+	}
+	if found, err := s.RevokeClient("missing"); found || err != nil {
+		t.Fatal(found, err)
+	}
+	if found, err := s.RevokeClient(id); !found || err != nil {
+		t.Fatal(found, err)
+	}
+	if call() != 401 {
+		t.Fatal("access token survived revocation")
+	}
+	refresh := url.Values{"grant_type": {"refresh_token"}, "client_id": {id}, "refresh_token": {token["refresh_token"].(string)}}
+	if status, _, _ = request(t, h, "POST", "/oauth/token", refresh.Encode(), "application/x-www-form-urlencoded"); status != 401 {
+		t.Fatal("refresh token survived revocation", status)
+	}
+	if len(s.Clients()) != 0 {
+		t.Fatal("client still listed")
+	}
+	reopened, e := New(Options{Issuer: "https://mesh.example", Password: "x", StateDir: dir})
+	if e != nil || len(reopened.Clients()) != 0 {
+		t.Fatal("revocation was not persisted", e)
+	}
+
+	other := registerClient(t, h)
+	q := url.Values{"response_type": {"code"}, "client_id": {other}, "redirect_uri": {"http://127.0.0.1:1234/callback"}, "state": {"s"}, "code_challenge_method": {"S256"}, "code_challenge": {digest(verifier)}}
+	path := "/oauth/authorize?" + q.Encode()
+	s.SetPassword("a brand new password")
+	if status, _ := loginAttempt(t, h, path, "correct horse battery staple", true); status != 401 {
+		t.Fatal("old password still works", status)
+	}
+	if status, _ := loginAttempt(t, h, path, "a brand new password", true); status != 302 {
+		t.Fatal("new password refused", status)
+	}
+}

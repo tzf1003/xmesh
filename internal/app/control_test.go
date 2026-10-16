@@ -387,3 +387,61 @@ func Test_CONARCH10_UIExitDoesNotAffectKernel(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+// A PAT made through the control channel is honoured by the running Gateway at once and refused
+// once it is rotated away or deleted; pairing documents come from the node's own LAN certificate.
+func Test_ControlPatsReachTheGateway(t *testing.T) {
+	n := startNode(t)
+	status := func(token string) int {
+		req, _ := http.NewRequest("POST", "http://"+n.gateway+"/mcp", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	open := status("")
+	call := func(method, path string, body any, def string, out any) {
+		t.Helper()
+		r, err := n.control.Do(context.Background(), method, path, body, nil)
+		if err != nil || (r.Status != 200 && r.Status != 201 && r.Status != 204) {
+			t.Fatalf("%s %s: %v %v", method, path, r, err)
+		}
+		if def != "" {
+			if err = schemacheck.Validate(def, r.Body); err != nil {
+				t.Fatalf("%s %s violates the contract: %v\n%s", method, path, err, r.Body)
+			}
+			if err = json.Unmarshal(r.Body, out); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var made v1.PatSecret
+	call("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, "PatSecret", &made)
+	enforced := status("")
+	if enforced == open || status(made.Token) != open {
+		t.Fatalf("open=%d without token=%d with token=%d", open, enforced, status(made.Token))
+	}
+	var rotated v1.PatSecret
+	call("POST", "/v1/pats/ci/rotate", nil, "PatSecret", &rotated)
+	if status(made.Token) != enforced || status(rotated.Token) != open {
+		t.Fatal("rotation did not switch the credential")
+	}
+	call("DELETE", "/v1/pats/ci", nil, "", nil)
+	if status("") != open {
+		t.Fatal("deleting the last PAT should turn authentication off again")
+	}
+	var export v1.PairExportResponse
+	call("POST", "/v1/pair/export", nil, "PairExportResponse", &export)
+	if export.Pair.Name != "app-ctl-node" || export.Pair.Fingerprint == "" {
+		t.Fatalf("%+v", export)
+	}
+	if n.status().Gateway == nil {
+		t.Fatal("gateway info missing")
+	}
+}

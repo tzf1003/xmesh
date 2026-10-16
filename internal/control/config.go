@@ -92,23 +92,34 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 		writeJSON(w, 200, v1.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
 		return
 	}
-	if err = writeAtomic(path, next); err != nil {
+	etag, restart, err := s.storeConfigLocked(next, diff)
+	if err != nil {
 		failWith(w, newError(v1.ErrInternal, "写入配置文件失败"))
 		return
+	}
+	w.Header().Set("ETag", `"`+etag+`"`)
+	writeJSON(w, 200, v1.ConfigPutResponse{Applied: true, ETag: etag, Diff: diff, RestartRequired: restart})
+}
+
+// storeConfigLocked replaces the configuration file with next, which the caller has validated and
+// diffed against the current content, and announces it on the event stream. The caller holds
+// configMu. It returns the new ETag and the store's own restart_required verdict.
+func (s *Server) storeConfigLocked(next []byte, diff []v1.ConfigChange) (etag string, restart bool, err error) {
+	if err = writeAtomic(s.o.Store.Path(), next); err != nil {
+		return "", false, err
 	}
 	s.digest = sum(next)
 	s.lastParsed = parsedOf(next)
 	// Reload now so restart_required is the store's own verdict, not the prefix heuristic.
 	s.o.Store.Get()
 	restart, s.failures = s.o.Store.State()
-	etag := etagOf(next)
+	etag = etagOf(next)
 	paths := make([]string, len(diff))
 	for i, c := range diff {
 		paths[i] = c.Pointer
 	}
 	_ = s.bus.Publish(v1.EventConfig, v1.ConfigEventData{Change: "written", Actor: v1.ActorControl, ETag: &etag, RestartRequired: restart, ChangedPaths: paths})
-	w.Header().Set("ETag", `"`+etag+`"`)
-	writeJSON(w, 200, v1.ConfigPutResponse{Applied: true, ETag: etag, Diff: diff, RestartRequired: restart})
+	return etag, restart, nil
 }
 
 // watchConfigFile announces edits made outside the channel (editor, CLI).

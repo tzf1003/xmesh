@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -302,6 +303,63 @@ func (s *Server) saveClients() error {
 	}
 	return os.Rename(f.Name(), s.path)
 }
+
+// Issuer is the origin this server issues tokens for.
+func (s *Server) Issuer() string { return s.issuer }
+
+// Clients lists the registered clients by id. The secret hash is not included.
+func (s *Server) Clients() []Client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Client, 0, len(s.clients))
+	for _, c := range s.clients {
+		c.SecretHash = ""
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// RevokeClient removes a client and every code, access token and refresh token it holds. It reports
+// whether the client existed. A client named in the configuration is registered again at the next
+// start, but its tokens stay revoked.
+func (s *Server) RevokeClient(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, ok := s.clients[id]
+	if !ok {
+		return false, nil
+	}
+	delete(s.clients, id)
+	if e := s.saveClients(); e != nil {
+		s.clients[id] = client
+		return false, e
+	}
+	for k, g := range s.codes {
+		if g.Client == id {
+			delete(s.codes, k)
+		}
+	}
+	for k, t := range s.access {
+		if t.ClientID == id {
+			delete(s.access, k)
+		}
+	}
+	for k, t := range s.refresh {
+		if t.ClientID == id {
+			delete(s.refresh, k)
+		}
+	}
+	return true, nil
+}
+
+// SetPassword replaces the login password. Tokens already issued stay valid.
+func (s *Server) SetPassword(password string) {
+	s.mu.Lock()
+	s.passwordHash = sha256.Sum256([]byte(password))
+	s.mu.Unlock()
+}
+
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		oauthError(w, 405, "invalid_request")

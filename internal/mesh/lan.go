@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/grandcat/zeroconf"
 	"github.com/tzf1003/xmesh/internal/identity"
@@ -306,6 +307,13 @@ func ExportPair(stateDir, name, path string) (string, error) {
 	}
 	return cert.Fingerprint, nil
 }
+
+// ErrPairFingerprint means the fingerprint the user confirmed is not the one of the pairing file.
+var ErrPairFingerprint = errors.New("配对指纹与 --fingerprint 不一致")
+
+// ErrPairTag means a requested LAN role is not one that pairing may grant.
+var ErrPairTag = errors.New("不支持的配对角色")
+
 func ImportPair(stateDir, path, expected string, tags []string) error {
 	b, e := os.ReadFile(path)
 	if e != nil {
@@ -315,16 +323,22 @@ func ImportPair(stateDir, path, expected string, tags []string) error {
 	if e = json.Unmarshal(b, &p); e != nil {
 		return e
 	}
+	return ImportTrusted(stateDir, p, expected, tags)
+}
+
+// ImportTrusted stores a peer's public pairing document after the user's own copy of its fingerprint
+// matches it. The certificate itself must hash to that fingerprint (the trust store checks it).
+func ImportTrusted(stateDir string, p Trusted, expected string, tags []string) error {
 	if expected == "" || p.Fingerprint != strings.ToLower(strings.ReplaceAll(expected, ":", "")) {
-		return fmt.Errorf("配对指纹与 --fingerprint 不一致")
+		return ErrPairFingerprint
 	}
 	for _, tag := range tags {
 		if tag != "tag:peer" && tag != "tag:device" && tag != "tag:ingress" && tag != "tag:admin" {
-			return fmt.Errorf("不支持的配对角色")
+			return ErrPairTag
 		}
 	}
 	p.Tags = tags
-	if e = os.MkdirAll(stateDir, 0700); e != nil {
+	if e := os.MkdirAll(stateDir, 0700); e != nil {
 		return e
 	}
 	store, e := OpenTrust(filepath.Clean(stateDir))
