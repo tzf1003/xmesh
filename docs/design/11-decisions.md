@@ -21,6 +21,8 @@
 - 2026-10-15，#1。[RUL-13](../contracts/rulings.md#rul-13)：带 `oauth_client` 的 orphaned 会话只能由同一个 OAuth client 接管。`active` 会话由 owner 主动 `transfer` 时允许交给另一个 client。
 - 2026-10-15，#1。[CON-SEC-11](../constraints/security.md#con-sec-11)：入口的注册和登录必须限速。
 - 2026-10-15，#1。`ingress.listen` 的 `tunnel` 与 [入口方式](03-mesh.md) 里的反向隧道是同一种暴露方式，配置注释与模式取值一致。
+- 2026-10-16。[RUL-20](../contracts/rulings.md#rul-20)、[RUL-21](../contracts/rulings.md#rul-21)、[RUL-22](../contracts/rulings.md#rul-22)：控制面管理库 `meshadmin` 的 Provider 边界、策略写入的版本检查强度（Headscale 非原子）、读写凭据分离。约束见 [CON-MESH-01 到 06](../constraints/meshadmin.md)。
+- 2026-10-16。用户决定内部小范围使用的 DERP 先不处理法律问题，因此 U10 的法律前置在内部自建准入范围内取消；计量、计费、多租户目录仍未做，对外提供前须另行评估。
 
 ## 风险
 

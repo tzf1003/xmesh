@@ -145,3 +145,26 @@ drain 经控制通道重复调用的结果是确定的，不报错：已在 `kee
 ## RUL-18
 
 托盘状态的优先级是：未运行，版本不匹配，排空中，需重启，降级，正常，取第一条命中的（[CTR-CTL-03](control.md#ctr-ctl-03)）。降级只看 `severity` 为 `warning` 或 `error` 的警告；`restart_required` 与 `allow_dangerous` 是 `info`，不使图标变黄。理由：排空是用户主动动作，应该比被动告警更显眼；需重启已有专门图标，不重复变黄。
+
+## RUL-20
+
+`meshadmin` 的 `Provider` 接口是两个控制面的唯一分界。调用方只通过 `Capabilities()` 判断某个控制面能不能做某件事（例如 `policy_write`、`atomic_policy_write`），不按 `Kind()` 分支，也不拼控制面各自的路径。Headscale 以文件模式运行时策略只读，`policy_write` 为假，写入返回 `ErrUnsupported`，预览里 `writable` 为假。
+
+编号 RUL-14 到 RUL-18 已由桌面 UI 与本机控制通道的设计占用，本篇从 RUL-20 起。
+
+## RUL-21
+
+写策略的统一路径是：读版本、生成新文本、控制面校验、预览、快照、带版本写入。其中版本检查的强度取决于控制面：
+
+- Tailscale 用 `If-Match`（ETag），由服务器原子判断。
+- Headscale 的 `PUT /api/v1/policy` 不接受版本条件，`meshadmin` 在写前重新读取并与 `base_version` 比较，再发 PUT。这一步读与写之间有很小的窗口，不是原子的；`Capabilities().atomic_policy_write` 为假，调用方传 `--expect-version` 把窗口缩到「预览与写入之间」之外，并在文档里把它记为已知限制。
+
+`updatedAt` 在 Headscale 文件模式下为 `null`，据此判定策略不可写。数据库模式下从没存过策略时 `GET` 返回 500 `acl policy not found`，当作没有策略。
+
+xmesh 只修改带 `// xmesh:managed <section>` 标记的元素，见 [CON-MESH-04](../constraints/meshadmin.md#con-mesh-04)。
+
+## RUL-22
+
+管理凭据有 `read` 与 `write` 两份。读操作优先 `read`，没有时才用 `write`；写操作只用 `write`。Tailscale 的 OAuth client 的 scope 在签发时固定，`read` 凭据发起写请求时控制面返回 403，`meshadmin` 把它映射成 `ErrUnauthorized`（带所需 scope 的 `ScopeError`），不重试、不换凭据。
+
+OAuth client 的 token 由 `meshadmin` 用 client credentials 换取并缓存在内存，进程退出即丢弃，不落盘。`Credential` 的 `String()`、`GoString()` 与错误信息都不含密钥。

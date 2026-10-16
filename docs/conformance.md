@@ -22,6 +22,7 @@
 | 门 3 的 tailnet 互联（仅直连路径） | `headscale.yml`：一次性 Headscale、两个 tsnet 节点互调、`Test_TailnetPeerConnectivity` |
 | 门 4 的 OAuth 协议路径 | `headscale.yml` 里的 `scripts/oauth_client.py`：动态注册、PKCE、登录、`tools/list`、`exec.run`；证明协议，不证明 claude.ai 的展示 |
 | 发布门禁 | `release.yml` 先跑 vet、竞态测试、矩阵检查，并要求同一提交上 `go.yml`、`contracts.yml`、`headscale.yml` 都已成功 |
+| 控制面管理 | `meshadmin.yml`：`go test -race ./meshadmin ./cmd/xmesh`，带校验过的 Headscale 0.29.5 二进制运行集成场景 |
 
 ## 门 1 · 阶段 1 工具基础
 
@@ -107,6 +108,25 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CON-SEC-10 | L2 沙箱在 Linux 上用 bwrap 或 nsjail 跑一条被允许的命令，并挡住网络与凭证目录 |
 
 云沙箱加入 tailnet 是实验：Codex Cloud 与 Claude Code 云沙箱至少一家用 ephemeral pre-auth key 连上并调用一次对端工具。失败时写下出站限制，主路径（公网入口）的门 4 结果仍然有效。
+
+## 控制面管理（meshadmin）
+
+不依赖设备门，随 `meshadmin` 与 `xmesh mesh` 交付。Tailscale 一侧只用夹具（请求形状对照官方客户端），Headscale 一侧用真实 v0.29.5 二进制：本机用 `XMESH_TEST_HEADSCALE_BIN` 指向二进制即可运行，`meshadmin.yml` 在 CI 里下载并校验后运行。DERP 的真实公网探测与官方控制面联调不在自动化里，见 [运行手册](operations.md) 的“tailnet 管理”一节。
+
+| 编号 | 观察点 |
+| --- | --- |
+| CON-MESH-01 | `meshadmin` 不引用 `internal/`；内核、Gateway、Agent 不引用 `meshadmin` |
+| CON-MESH-02 | 登录与所有 CLI 输出里搜不到凭据和新建的 auth key；只读凭据发起写请求被拒 |
+| CON-MESH-03 | 默认只预览；`--apply` 才写；etag 冲突不覆盖；快照可回滚 |
+| CON-MESH-04 | 含用户注释、规则与同名 tagOwners 的策略往返后只有标记片段变化 |
+| CON-MESH-05 | region id 在 900 到 999；探测失败后策略恢复为写前文本 |
+| CON-MESH-06 | 放行文件损坏时拒绝；真实 `derpserver` 拒绝未放行节点；管理端点需要 token |
+| CTR-MESH-01 | 两个 Provider 的设备、tag、key 请求形状；明文 HTTP 只许环回 |
+| CTR-MESH-02 | 模板、托管片段幂等与回滚、凭据文件格式 |
+| CTR-MESH-03 | 设备检查、权限矩阵合并网络层与工具层 |
+| CTR-MESH-04 | DERP 片段写入、Headscale 生成的 YAML 被真实 Headscale 加载、探测的每项原因 |
+| CTR-MESH-05 | 准入接口契约、控制面设备同步到放行名单 |
+| RUL-20 RUL-21 RUL-22 | 只经 `Capabilities` 区分控制面；Headscale 版本检查为客户端侧；读写凭据分离 |
 
 ## 阶段 6 · 桌面 UI 与本机控制通道（U0 契约）
 

@@ -378,3 +378,57 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 ## 测试版发布
 
 向仓库推送形如 `v0.2.0-beta.1`（或 `-rc`）的标签，`.github/workflows/release.yml` 会为 linux/amd64、linux/arm64、darwin/amd64、darwin/arm64、windows/amd64 和 windows/arm64 六个目标构建二进制（Windows 为 `.zip`，其余为 `.tar.gz`），生成 `SHA256SUMS.txt`，并创建 GitHub 预发布版。`xmesh version` 输出标签名。二进制未签名；该工作流只在标签推送时运行，不属于常规 CI。例如：`git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1`。
+
+## tailnet 管理（xmesh mesh）
+
+`xmesh mesh` 管理控制面（官方 Tailscale 或 Headscale）：设备与 tag、接入新设备、权限模板、第三方 DERP。管理凭据只存系统钥匙串或 `0600` 文件，不放进 `xmesh.yaml`，也不进内核进程，见 [CON-MESH-02](constraints/meshadmin.md#con-mesh-02)。命令都支持 `--json`，桌面 UI 通过它们调用。契约见 [meshadmin](contracts/meshadmin.md)。
+
+登录（密钥从标准输入读，不放命令行）：
+
+```bash
+# Tailscale：OAuth client（--client-id 给出时密钥视为 client secret；不给则视为 API token）。读写各存一份，写凭据只在要改东西时才放
+printf '%s' "$SECRET" | xmesh mesh login --profile home --kind tailscale --tailnet example.com --client-id ID --access read
+printf '%s' "$SECRET_W" | xmesh mesh login --profile home --kind tailscale --tailnet example.com --client-id ID_W --access write
+# Headscale：API key，等同完整权限；--url 必须是 https，本机验收可用环回 http
+printf '%s' "$KEY" | xmesh mesh login --profile lab --kind headscale --url https://hs.example.com --access write
+xmesh mesh status --profile home --node-config xmesh.yaml
+```
+
+没有钥匙串的主机（无桌面的 Linux 服务器）用 `--credential-file`，文件权限必须是 `0600`。
+
+读与写：
+
+```bash
+xmesh mesh tags --profile home                                   # 设备与 tag
+xmesh mesh tags --profile home --device DEVICE --set tag:device --apply
+xmesh mesh authkey --profile home --tags tag:device --out ./authkey            # 预授权 key 写入 0600 文件，不打印
+xmesh mesh onboard --profile home --authkey-file ./authkey --config xmesh.yaml # 新设备接入；加 --install 直接安装
+xmesh mesh matrix --profile home --node-config xmesh.yaml        # 网络层与 agent.authz 合并后的权限矩阵
+xmesh mesh policy --profile home --template team --owner autogroup:admin       # 预览
+xmesh mesh policy --profile home --template team --owner autogroup:admin --apply --expect-version VERSION
+xmesh mesh policy --profile home --snapshots
+xmesh mesh policy --profile home --rollback SNAPSHOT_ID --apply
+```
+
+所有写操作默认只预览（含控制面校验结果与 diff）；`tags`、`policy` 加 `--apply` 才写，DERP 用 `derp apply`（`derp plan` 只预览），写前存快照到本机状态目录。`--expect-version` 取预览里的 `base_version`，保证写入的正是看过的那一版。Headscale 以 `policy.mode=file` 运行时策略只读：命令给出文本，由运维写入服务器后 reload。Headscale 数据库模式没有原子的版本检查，见 [RUL-21](contracts/rulings.md#rul-21)。
+
+第三方 DERP：
+
+```bash
+xmesh mesh derp plan --profile home --region "code=lab,name=Lab,host=derp.example.com,ipv4=203.0.113.9"   # 预览 derpMap
+xmesh mesh derp apply --profile home --region "..."   # 写 derpMap，随后探测，失败自动回滚
+xmesh mesh derp probe --region "..." --compare-official
+xmesh mesh derp headscale --region "..." --out derp.yaml      # Headscale：生成 derp.paths 文件和 config 片段，重启 Headscale 生效
+```
+
+内部使用的准入（只放行已注册设备）：
+
+```bash
+derper ... --verify-client-url http://127.0.0.1:8480/admit --verify-client-url-fail-open=false
+xmesh mesh derp admit-serve --listen 127.0.0.1:8480 --allowlist allow.json --admin-token-file admin.token
+xmesh mesh derp sync --profile home --admission-url http://127.0.0.1:8480 --admission-token-file admin.token
+```
+
+`--verify-client-url-fail-open=false` 不能省：上游默认在准入服务不可达时放行。准入只在连接建立时判断，已有连接要重连才受影响。
+
+验证状态：Headscale 一侧用真实 v0.29.5 做过集成测试（`policy.mode=database`，含生成的 DERP 文件被其加载）；Tailscale 一侧只对照官方客户端的请求形状做了夹具测试，没有联调真实 tailnet；第三方 DERP 的探测与准入在本机回环验证过，没有跨公网验证。计量、计费、多租户目录没有实现。

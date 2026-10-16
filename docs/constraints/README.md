@@ -107,3 +107,14 @@
 | [CON-IMPL-03](implementation.md#con-impl-03) | 必须 | PTY 的 map 锁与 ring 锁分离，读写不互斥 |
 | [CON-IMPL-04](implementation.md#con-impl-04) | 必须 | Windows 默认 `pwsh`；WSL 注册为独立设备 |
 | [CON-IMPL-05](implementation.md#con-impl-05) | 必须 | `fs.grep` 优先 `rg --json`，否则纯 Go，结果同构 |
+
+## 控制面管理
+
+| 编号 | 级别 | 陈述 |
+| --- | --- | --- |
+| [CON-MESH-01](meshadmin.md#con-mesh-01) | 禁止 | 内核、Gateway、Agent 引用 `meshadmin` 或持有管理凭据；两个控制面的差异只在 Provider 里 |
+| [CON-MESH-02](meshadmin.md#con-mesh-02) | 禁止 | 管理凭据出现在配置、命令行参数、日志、输出里；只存钥匙串或 `0600` 文件 |
+| [CON-MESH-03](meshadmin.md#con-mesh-03) | 必须 | 写策略默认只预览；`--apply` 才写，写前快照、带版本、可回滚 |
+| [CON-MESH-04](meshadmin.md#con-mesh-04) | 必须 | 只改带 `xmesh:managed` 标记的策略元素，其余字节原样保留 |
+| [CON-MESH-05](meshadmin.md#con-mesh-05) | 必须 | 自建 DERP region id 在 900 到 999；写入后探测，失败即回滚 |
+| [CON-MESH-06](meshadmin.md#con-mesh-06) | 必须 | DERP 准入对放行名单失败即关闭；管理端点需要 bearer token |
