@@ -100,6 +100,7 @@ func Test_ControlPats(t *testing.T) {
 	if e := apiError(t, bare.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil), v1.ErrConflict); e.Reason != "gateway_not_configured" {
 		t.Fatalf("%+v", e)
 	}
+	bare.server.Close() // the pipe name is global on Windows: one server per node at a time
 	f := newFixtureConfig(t, gatewayConfig)
 	var none v1.PatList
 	decodeAs(t, f.ok("GET", "/v1/pats", nil, "PatList"), &none)
@@ -249,8 +250,10 @@ func Test_ControlIngress(t *testing.T) {
 	apiError(t, plain.do("DELETE", "/v1/ingress/clients/abc", nil, nil), v1.ErrRoleDisabled)
 	apiError(t, plain.do("PUT", "/v1/ingress/password", v1.IngressPasswordRequest{Password: "a long enough password"}, nil), v1.ErrRoleDisabled)
 
+	plain.server.Close() // the pipe name is global on Windows: one server per node at a time
 	notReady := newFixtureConfig(t, tailnetIngressConfig)
 	apiError(t, notReady.do("GET", "/v1/ingress/clients", nil, nil), v1.ErrUnavailable)
+	notReady.server.Close()
 
 	admin := &fakeIngress{clients: map[string]bool{"c1": true}}
 	f := newFixtureConfig(t, tailnetIngressConfig, func(o *Options) { o.Ingress = admin })
