@@ -65,6 +65,7 @@ type journalRecord struct {
 	Profile           string            `json:"profile,omitempty"`
 	SID               string            `json:"sid,omitempty"`
 	Workspace         *journalWorkspace `json:"workspace,omitempty"`
+	CreatedObjects    []journalObject   `json:"created_objects,omitempty"`
 	Grant             *journalGrant     `json:"grant,omitempty"`
 	GrantSequence     uint64            `json:"grant_sequence,omitempty"`
 	ExecutionID       string            `json:"execution_id,omitempty"`
@@ -79,6 +80,7 @@ type journalState struct {
 	pending           map[uint64]bool
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
+	created           map[journalObject]bool
 	executions        map[uint64]bool
 	executionIDs      map[string]bool
 }
@@ -94,6 +96,9 @@ func (s *journalState) accept(r journalRecord) error {
 	executionFields := r.ExecutionID != "" || r.ExecutionSequence != 0
 	if executionFields && r.Kind != "execution" && r.Kind != "execution-reaped" {
 		return fmt.Errorf("unexpected journal execution fields")
+	}
+	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
+		return fmt.Errorf("unexpected journal created-object fields")
 	}
 	switch r.Kind {
 	case "profile":
@@ -133,9 +138,35 @@ func (s *journalState) accept(r journalRecord) error {
 		s.workspace = true
 		s.objects = make(map[journalObject]bool, len(w.Objects))
 		s.granted = make(map[journalObject]bool)
+		s.created = make(map[journalObject]bool)
 		for _, object := range w.Objects {
 			s.objects[object] = true
 		}
+	case "workspace-created":
+		if !s.workspace || s.workspaceReleased || len(r.CreatedObjects) == 0 || len(s.objects)+len(s.created)+len(r.CreatedObjects) > 10000 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace created-object batch")
+		}
+		// Compare physical IDs independently of type. Validate the entire batch
+		// before changing replay ownership, including conflicts in its last item.
+		seen := make(map[[16]byte]bool, len(s.objects)+len(s.created)+len(r.CreatedObjects))
+		var volume uint64
+		for object := range s.objects {
+			seen[object.ID] = true
+			volume = object.Volume
+		}
+		for object := range s.created {
+			seen[object.ID] = true
+		}
+		for _, object := range r.CreatedObjects {
+			if !validJournalObject(object) || object.Volume != volume || seen[object.ID] {
+				return fmt.Errorf("invalid or repeated journal created-object identity")
+			}
+			seen[object.ID] = true
+		}
+		for _, object := range r.CreatedObjects {
+			s.created[object] = true
+		}
+
 	case "grant":
 		if !s.profile || s.workspaceReleased || profileFields || r.Workspace != nil || r.GrantSequence != 0 || r.Grant == nil || !validJournalObject(r.Grant.Object) {
 			return fmt.Errorf("invalid journal grant intent")
@@ -284,6 +315,10 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.granted = make(map[journalObject]bool, len(j.state.granted))
 	for object := range j.state.granted {
 		next.granted[object] = true
+	}
+	next.created = make(map[journalObject]bool, len(j.state.created))
+	for object := range j.state.created {
+		next.created[object] = true
 	}
 	next.executions = make(map[uint64]bool, len(j.state.executions))
 	for sequence := range j.state.executions {

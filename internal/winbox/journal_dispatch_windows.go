@@ -24,11 +24,12 @@ type journalRecoveryResult struct {
 // A detached manifest for the trusted execution coordinator. Volumes includes
 // every recorded volume, even if its explicit obligations were acknowledged.
 type journalRecoveryInfo struct {
-	Profile   string
-	SID       string
-	Workspace *journalWorkspace
-	Objects   []journalObject
-	Volumes   []uint64
+	Profile        string
+	SID            string
+	Workspace      *journalWorkspace
+	Objects        []journalObject
+	CreatedObjects []journalObject
+	Volumes        []uint64
 }
 
 type journalRecoveryLease struct {
@@ -196,6 +197,7 @@ func recoveryJournalInfo(j *grantJournal) journalRecoveryInfo {
 		volumes[w.Root.Volume] = true
 	}
 	for _, r := range j.records {
+		info.CreatedObjects = append(info.CreatedObjects, r.CreatedObjects...)
 		if r.Grant != nil {
 			info.Objects = append(info.Objects, r.Grant.Object)
 			volumes[r.Grant.Object.Volume] = true

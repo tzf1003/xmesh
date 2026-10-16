@@ -20,7 +20,7 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	for _, stage := range []string{"admitted", "explicit-released", "workspace-released"} {
+	for _, stage := range []string{"admitted", "explicit-released", "workspace-released", "created-checkpointed", "created-partial-released"} {
 		t.Run(stage, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "workspace")
 			child := filepath.Join(root, "existing-child")
@@ -92,8 +92,8 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 			}
 			defer j.Close()
 			// The helper reaps its sandbox before readiness. Its coordinated
-			// namespace moves only initial IDs outside the root; all new objects
-			// remain within the recovery census.
+			// namespace moves initial and checkpointed new IDs outside the root.
+			// Recovery must retain both identity sets across the forced host exit.
 			defer func() {
 				if j == nil || j.file == nil {
 					var err error
@@ -108,7 +108,15 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				}
 				j.Close()
 			}()
-			created := filepath.Join(root, "new-tree", "level-1", "level-2", "created.txt")
+			createdRoot := filepath.Join(root, "new-tree")
+			movedCreated := stage == "created-checkpointed" || stage == "created-partial-released"
+			if movedCreated {
+				createdRoot = root + ".moved-created"
+				if len(j.state.created) != 6 {
+					t.Fatal("created-object checkpoint was not durably restored", len(j.state.created))
+				}
+			}
+			created := filepath.Join(createdRoot, "level-1", "level-2", "created.txt")
 			createdLabel := objectLabel(t, created)
 			if stage == "admitted" {
 				admitted, control := kernelJournalState(t, root)
@@ -185,19 +193,51 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 			}
 			defer otherGrant.Close()
 			profile := j.records[0]
+			profileSID, err := windows.StringToSid(profile.SID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			createdBefore := make(map[string]state)
+			if err := filepath.WalkDir(createdRoot, func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				acl, control := kernelJournalState(t, path)
+				merged, changed, err := editInheritedProfileACL((*windows.ACL)(unsafe.Pointer(&acl[0])), profileSID, entry.IsDir(), true)
+				if err != nil {
+					return err
+				}
+				if changed {
+					header, aces, err := aclParts(merged)
+					if err != nil {
+						return err
+					}
+					acl = bytes.Clone(header)
+					for _, ace := range aces {
+						acl = append(acl, ace...)
+					}
+				}
+				createdBefore[path] = state{acl, control, objectLabel(t, path)}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
 			if err := j.Close(); err != nil {
 				t.Fatal(err)
 			}
 			prepared, closed := 0, 0
 			report, err := recoverJournalDirectory(context.Background(), statePath, 8, 64, func(_ context.Context, info journalRecoveryInfo) (*journalRecoveryLease, error) {
 				prepared++
-				if info.Profile != profile.Profile || info.SID != profile.SID || info.Workspace == nil || info.Workspace.Path != root || len(info.Workspace.Objects) != 3 || len(info.Volumes) != 1 {
+				if info.Profile != profile.Profile || info.SID != profile.SID || info.Workspace == nil || info.Workspace.Path != root || len(info.Workspace.Objects) != 3 || len(info.CreatedObjects) != len(j.state.created) || len(info.Volumes) != 1 {
 					t.Fatal("workspace sweep manifest", info)
 				}
 				// Coordinator snapshots are detached from the owned journal.
 				info.Workspace.Path = ""
 				info.Workspace.Objects[0].ID[0] ^= 1
 				info.Objects[0].ID[0] ^= 1
+				if len(info.CreatedObjects) != 0 {
+					info.CreatedObjects[0].ID[0] ^= 1
+				}
 				info.Volumes[0]++
 				return &journalRecoveryLease{Guard: recoveryTestGuard(func() error { closed++; return nil })}, nil
 			})
@@ -228,17 +268,28 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			sidBytes := unsafe.Slice((*byte)(unsafe.Pointer(sid)), sid.Len())
-			if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-				if walkErr != nil {
-					return walkErr
+			verifyTree := func(tree string) error {
+				return filepath.WalkDir(tree, func(path string, entry os.DirEntry, walkErr error) error {
+					if walkErr != nil {
+						return walkErr
+					}
+					acl, _ := kernelJournalState(t, path)
+					if bytes.Contains(acl, sidBytes) {
+						return fmt.Errorf("profile ACE remains on %s", path)
+					}
+					return nil
+				})
+			}
+			for _, tree := range []string{root, createdRoot} {
+				if err := verifyTree(tree); err != nil {
+					t.Fatal(err)
 				}
-				acl, _ := kernelJournalState(t, path)
-				if bytes.Contains(acl, sidBytes) {
-					return fmt.Errorf("profile ACE remains on %s", path)
+			}
+			for path, expected := range createdBefore {
+				acl, control := kernelJournalState(t, path)
+				if !bytes.Equal(acl, expected.acl) || control != expected.control || objectLabel(t, path) != expected.label {
+					t.Fatal("created-object recovery changed unrelated descriptor state", path)
 				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
 			}
 			acl, _ := kernelJournalState(t, created)
 			if !bytes.Contains(acl, otherGrant.ace) || objectLabel(t, created) != createdLabel {
@@ -301,7 +352,54 @@ func Test_WindowsAppContainerWorkspaceJournalCrashHelper(t *testing.T) {
 	if p.Close() == nil {
 		t.Fatal("profile closed before workspace cleanup")
 	}
-	switch os.Getenv("XMESH_WORKSPACE_STAGE") {
+	stage := os.Getenv("XMESH_WORKSPACE_STAGE")
+	if stage == "created-checkpointed" || stage == "created-partial-released" {
+		if err := checkpointJournalWorkspace(j, p.sid, 64); err != nil {
+			t.Fatal(err)
+		}
+		count := len(j.records)
+		if err := checkpointJournalWorkspace(j, p.sid, 64); err != nil || len(j.records) != count {
+			t.Fatal("repeat observation", err)
+		}
+		if stage == "created-partial-released" {
+			census, err := censusJournalWorkspace(j, p.sid, 64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer census.Close()
+			released := false
+			var createdID fileIdentity
+			for _, object := range census.tree.objects {
+				if filepath.Base(object.relative) == "created.txt" {
+					createdID = object.id
+				}
+			}
+			for _, object := range census.objects {
+				if object.id == createdID && !census.initial[object.id] && !object.directory {
+					if err := releaseJournalWorkspaceObject(object, p.sid, true, journalRecord{}); err != nil {
+						t.Fatal(err)
+					}
+					released = true
+					break
+				}
+			}
+			if !released {
+				t.Fatal("partial-created release fixture has no file")
+			}
+			// Release path handles before moving the populated directory.
+			census.Close()
+		}
+		if err := os.Rename(filepath.Join(root, "new-tree"), root+".moved-created"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(root, "new-tree"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "new-tree", "replacement.txt"), []byte("replacement"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	switch stage {
 	case "explicit-released":
 		if err := g.selected.Close(); err != nil {
 			t.Fatal(err)
