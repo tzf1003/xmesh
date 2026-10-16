@@ -1,6 +1,7 @@
 package winbox
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"unsafe"
@@ -41,6 +42,9 @@ func openIdentityObject(volume windows.Handle, expected treeObject) (windows.Han
 	actual, err := inspectTreeObject(handle, "")
 	if err != nil || actual.id != expected.id || actual.directory != expected.directory {
 		windows.CloseHandle(handle)
+		if errors.Is(err, errNonOrdinaryObject) {
+			return 0, fmt.Errorf("AppContainer recovered object identity or type mismatch: %w", err)
+		}
 		return 0, fmt.Errorf("AppContainer recovered object identity or type mismatch: %v", err)
 	}
 	return handle, nil

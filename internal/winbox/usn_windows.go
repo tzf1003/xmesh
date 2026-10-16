@@ -341,6 +341,13 @@ func checkpointWorkspaceChangesOnce(ctx context.Context, j *grantJournal, sid *w
 		}
 		h, err := openIdentityObject(tree.ancestors[0], treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
 		if err != nil {
+			// An object recorded as created that is now a reparse point or has a
+			// second link was changed by a writer outside this package. The link
+			// record that explains it may sit in a later read; both orders of
+			// observation are the same violation.
+			if errors.Is(err, errNonOrdinaryObject) {
+				return fmt.Errorf("%w: %v", errWorkspaceLinkChange, err)
+			}
 			if errors.Is(err, windows.STATUS_INVALID_PARAMETER) || errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) || errors.Is(err, windows.STATUS_OBJECT_PATH_NOT_FOUND) {
 				return fmt.Errorf("%w: %v", errWorkspaceObjectVanished, err)
 			}

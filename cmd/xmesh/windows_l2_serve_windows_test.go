@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/control"
 	"golang.org/x/sys/windows"
 )
 
@@ -492,4 +493,53 @@ func Test_WindowsL2ServeNoKeeperFailsClosed(t *testing.T) {
 	}
 	// Other tools keep working on the node.
 	n.call("fs.write", map[string]any{"path": "plain.txt", "content": "ok"})
+}
+
+// The kernel control channel is a named pipe whose DACL leaves out AppContainer
+// packages. With the runner on, a command running in the sandbox must be refused
+// when it tries to open that pipe, while the account that started the node can.
+//
+// conformance: CON-SEC-12
+func Test_WindowsL2ServeSandboxCannotOpenControlPipe(t *testing.T) {
+	n := newL2Node(t)
+	n.start()
+	if warnings := n.warnings(); strings.Contains(warnings, "sandbox.unavailable") {
+		t.Fatalf("the runner did not start: %s\n%s", warnings, n.log.String())
+	}
+	var endpoint control.Endpoint
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		var err error
+		if endpoint, err = control.ReadEndpoint(n.state); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("control.json was not written: %v\n%s", err, n.log.String())
+		}
+	}
+	address := endpoint.Address()
+	if !strings.HasPrefix(address, `\\.\pipe\`) {
+		t.Fatalf("control endpoint %q is not a named pipe", address)
+	}
+	// The host account reaches the pipe, so a refusal below is the sandbox's and
+	// not a missing or misspelled pipe.
+	name, err := windows.UTF16PtrFromString(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var host windows.Handle
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		host, err = windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0)
+		if err != windows.ERROR_PIPE_BUSY || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatal("the node's own account cannot open the control pipe", err)
+	}
+	windows.CloseHandle(host)
+	refused := n.cmdCall("type", address)
+	text := strings.ToLower(fmt.Sprint(refused["stdout"], refused["stderr"]))
+	if refused["exit_code"] == float64(0) || !strings.Contains(text, "denied") {
+		t.Fatalf("the sandboxed command was not refused by the control pipe: %v\n%s", refused, n.log.String())
+	}
 }
