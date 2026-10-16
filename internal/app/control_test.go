@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -311,10 +312,16 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 	if err := os.WriteFile(program, []byte("package main\nimport \"time\"\nfunc main() { time.Sleep(4 * time.Second) }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan struct{})
+	// Warm the build cache so the run below spends its time in the program, not in a cold Windows compile.
+	if out, err := osexec.Command("go", "build", "-o", filepath.Join(t.TempDir(), "sleep"), program).CombinedOutput(); err != nil {
+		t.Fatalf("warm-up build: %v\n%s", err, out)
+	}
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
-		call(t, direct, "exec.run", map[string]any{"cmd": "go", "args": []string{"run", program, "--secret-flag=SECRET-ARG"}, "env": map[string]string{"SECRET_ENV": "SECRET-VALUE"}})
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_, err := direct.CallTool(ctx, &mcp.CallToolParams{Name: "exec.run", Arguments: map[string]any{"cmd": "go", "args": []string{"run", program, "--secret-flag=SECRET-ARG"}, "env": map[string]string{"SECRET_ENV": "SECRET-VALUE"}}})
+		done <- err
 	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -333,7 +340,9 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("exec.run: %v", err)
+	}
 	var after v1.SessionsResponse
 	n.get("/v1/sessions", "SessionsResponse", &after)
 	if len(after.Exec) != 0 {
