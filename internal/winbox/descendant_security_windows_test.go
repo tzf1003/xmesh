@@ -224,19 +224,23 @@ func Test_WindowsAppContainerStartRefusesDescendantChange(t *testing.T) {
 	}
 	defer func() { _ = e.closeContext(context.Background(), 91) }()
 	tamperDACL(t, filepath.Join(options.Workspace, "sub", "initial.txt"))
-	// The change record may lag the write by a moment; what matters is that no
-	// launch is ever admitted once the change is visible.
+	// The change record may lag the write by a moment. A launch attempt that
+	// reaches the Job consumes its admission, so wait until the check itself can
+	// see the change and then require the launch to be refused.
 	began := time.Now()
 	for {
-		_, err := e.start(ctx, []string{"unused.exe"}, e.profile.Directory(), nil, nil, 0)
+		err := e.workspace.verifyDescendantSecurity(ctx, e.maxEvents, true)
 		if errors.Is(err, errWorkspaceSecurityChanged) {
-			t.Log("launch refused after", time.Since(began))
+			t.Log("change visible after", time.Since(began))
 			break
 		}
 		if time.Since(began) > 10*time.Second {
-			t.Fatal("launch was admitted after a descriptor change", err)
+			t.Fatal("descriptor change never became visible", err)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := e.start(ctx, []string{"unused.exe"}, e.profile.Directory(), nil, nil, 0); !errors.Is(err, errWorkspaceSecurityChanged) {
+		t.Fatal("launch was admitted after a descriptor change", err)
 	}
 	if err := e.closeContext(ctx, 91); !errors.Is(err, errWorkspaceSecurityChanged) || !e.closed {
 		t.Fatal("close", err, e.closed)
