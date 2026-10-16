@@ -19,13 +19,18 @@ import (
 	"github.com/tzf1003/xmesh/internal/role/agent"
 )
 
+// authorityTestTTL is the lease length of the Agent-hosted authority in these tests. It is deliberately
+// generous: a 1s lease leaves under a second of usable time after the safety margin, which a loaded
+// Windows runner running with -race can spend before the first call has even been dispatched.
+const authorityTestTTL = 4 * time.Second
+
 // twoIngress returns the fixture's ingress plus a second one that has its own
 // budget file, node identity and OAuth sessions, as a separate host would.
 func twoIngress(t *testing.T, limit int) (*budgetFixture, *Gateway) {
 	t.Helper()
 	f := newBudgetFixture(t, limit)
 	f.authority = "device-b"
-	f.agents["device-b"].BudgetAuthority = pty.NewBudgetAuthorityTTL(time.Second)
+	f.agents["device-b"].BudgetAuthority = pty.NewBudgetAuthorityTTL(authorityTestTTL)
 	f.restart()
 	return f, f.second()
 }
@@ -196,7 +201,7 @@ func Test_IngressPTYLeaseDeadlineBoundsTheCall(t *testing.T) {
 	}
 	// The lease starts when the authority grants it, before the call is invoked, so on a slow runner
 	// (Windows with -race) the remaining time can already be zero or negative; it must never exceed the lease.
-	if remaining := deadline.Sub(invoked); remaining >= time.Second {
-		t.Fatal("call is not bounded by the 1s lease", remaining)
+	if remaining := deadline.Sub(invoked); remaining >= authorityTestTTL {
+		t.Fatal("call is not bounded by the lease", authorityTestTTL, remaining)
 	}
 }
