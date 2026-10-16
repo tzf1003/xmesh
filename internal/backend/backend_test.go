@@ -76,6 +76,8 @@ func fixture(t *testing.T, policy string) (*Manager, *lease.Manager) {
 	return m, leases
 }
 func raw(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+
+// conformance: INV-04 CON-TOOL-10 CON-TOOL-11 CON-CONC-07
 func Test_Gate2_TokenStrippingAndCrashRestart(t *testing.T) {
 	m, l := fixture(t, "exclusive")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -133,6 +135,8 @@ func Test_Gate2_TokenStrippingAndCrashRestart(t *testing.T) {
 		t.Fatal("stale", e)
 	}
 }
+
+// conformance: CTR-BE-01 CON-TOOL-11
 func Test_CTRBE01_SharedAndPerCaller(t *testing.T) {
 	for _, policy := range []string{"shared", "per-caller"} {
 		t.Run(policy, func(t *testing.T) {
@@ -165,6 +169,7 @@ func Test_CTRBE01_SharedAndPerCaller(t *testing.T) {
 	}
 }
 
+// conformance: CTR-BE-01
 func Test_PerCallerIdleRecycle(t *testing.T) {
 	m, _ := fixture(t, "per-caller")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -206,6 +211,7 @@ func Test_PerCallerIdleRecycle(t *testing.T) {
 	}
 }
 
+// conformance: CON-SEC-06
 func Test_CONSEC06_PolicyReloadRetainsProcessAndLease(t *testing.T) {
 	m, leases := fixture(t, "exclusive")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

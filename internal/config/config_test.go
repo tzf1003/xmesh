@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// conformance: CTR-CFG-01
 func Test_CTRCFG01(t *testing.T) {
 	root := "../../docs/contracts/schemas/examples"
 	entries, _ := os.ReadDir(root)
