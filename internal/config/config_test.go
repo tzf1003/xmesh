@@ -155,3 +155,48 @@ func TestIngressPTYBudgetAuthorityConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func Test_CTRCFG01_ExposeBackendsNeedsRestart(t *testing.T) {
+	b, e := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if e = os.WriteFile(path, b, 0600); e != nil {
+		t.Fatal(e)
+	}
+	s, e := NewStore(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	started := s.Get().Gateway.ExposeBackends
+	var doc map[string]any
+	_ = json.Unmarshal(b, &doc)
+	gateway, _ := doc["gateway"].(map[string]any)
+	if gateway == nil {
+		gateway = map[string]any{}
+		doc["gateway"] = gateway
+	}
+	next := "favorite"
+	if started == "favorite" {
+		next = "all"
+	}
+	gateway["expose_backends"] = next
+	changed, _ := json.Marshal(doc)
+	if e = os.WriteFile(path, changed, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if got := s.Get().Gateway.ExposeBackends; got != started {
+		t.Fatal("expose_backends took effect without a restart", got)
+	}
+	if restart, _ := s.State(); !restart {
+		t.Fatal("changed expose_backends is not reported as restart_required")
+	}
+	if e = os.WriteFile(path, b, 0600); e != nil {
+		t.Fatal(e)
+	}
+	s.Get()
+	if restart, _ := s.State(); restart {
+		t.Fatal("reverted expose_backends still needs restart")
+	}
+}

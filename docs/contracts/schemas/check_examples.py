@@ -42,6 +42,7 @@ if "date-time" not in FormatChecker.checkers:
     "error-exec-saturated.json": "error.schema.json",
     "lease.json": "lease.schema.json",
     "audit-event.json": "audit-event.schema.json",
+    "audit-progress-unrouted.json": "audit-event.schema.json",
     "xmesh.ingress-public.json": "config.schema.json",
     "xmesh.ingress-multihost.json": "config.schema.json",
 }

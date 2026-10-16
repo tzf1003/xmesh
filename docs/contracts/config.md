@@ -35,7 +35,7 @@
 | `agent.exec` 的配额数字、`agent.pty` 的上限 | 热加载。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
-| `node`、`mesh`、`ingress` | 不热加载。`status` 提示需要重启 |
+| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值 |
 
 ### 密钥
 

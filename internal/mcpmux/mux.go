@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 func Split(name, separator string) (string, string, error) {
@@ -187,14 +188,23 @@ type Bridge struct {
 	mu       sync.Mutex
 	progress map[string]*progressRoute
 	sequence atomic.Uint64
+	unrouted func()
+	reported time.Time
 }
 type Options struct {
 	Changed func()
 	Reverse func() *mcp.ServerSession
+	// Unrouted is told about a progress notification whose token matches no
+	// pending call (CTR-MUX-02). It runs on its own goroutine and is invoked at
+	// most once per second per Bridge, so a noisy backend cannot flood the audit.
+	Unrouted func()
 }
 
+// unroutedInterval bounds how often Options.Unrouted fires for one Bridge.
+const unroutedInterval = time.Second
+
 func Connect(ctx context.Context, t mcp.Transport, opts Options) (*Bridge, error) {
-	b := &Bridge{progress: map[string]*progressRoute{}}
+	b := &Bridge{progress: map[string]*progressRoute{}, unrouted: opts.Unrouted}
 	client := mcp.NewClient(&mcp.Implementation{Name: "xmesh-mux", Version: "0.1.0"}, &mcp.ClientOptions{
 		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {
 			if opts.Changed != nil {
@@ -227,18 +237,25 @@ func Connect(ctx context.Context, t mcp.Transport, opts Options) (*Bridge, error
 }
 
 func (b *Bridge) notifyProgress(ctx context.Context, params *mcp.ProgressNotificationParams) {
-	token, ok := params.ProgressToken.(string)
-	if !ok {
-		return
-	}
+	token, isString := params.ProgressToken.(string)
 	b.mu.Lock()
 	route, ok := b.progress[token]
-	if ok {
+	if isString && ok {
 		route.pending.Add(1)
 	}
+	report := false
+	if !isString || !ok {
+		if b.unrouted != nil && time.Since(b.reported) >= unroutedInterval {
+			b.reported = time.Now()
+			report = true
+		}
+	}
 	b.mu.Unlock()
-	if !ok {
+	if !isString || !ok {
 		slog.Debug("progress_unrouted")
+		if report {
+			go b.unrouted()
+		}
 		return
 	}
 	p := *params

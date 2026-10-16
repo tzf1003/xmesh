@@ -25,13 +25,19 @@ import (
 type Principal struct {
 	ClientID     string
 	CredentialID string
+	// OAuthSession identifies the OAuth grant behind an ingress request. It is
+	// only used to correlate audit records and is never written verbatim.
+	OAuthSession string
 	Scopes       []string
 	Local        bool
 }
 type Dial func(context.Context, mesh.Peer, Principal, mcpmux.Options) (*mcpmux.Bridge, error)
 type Discover func(context.Context) ([]mesh.Peer, error)
 type Options struct {
-	NodeName  string
+	NodeName string
+	// NodeID is the network identity that Agents see as the caller's node
+	// (CTR-ID-01). Audit callers are NodeID/<session>; it defaults to NodeName.
+	NodeID    string
 	Ingress   bool
 	Favorite  bool
 	LocalPeer mesh.Peer
@@ -89,6 +95,8 @@ type view struct {
 	server     *mcp.Server
 	session    *mcp.ServerSession
 	defaults   map[string]json.RawMessage
+	leases     map[string]*leaseBeat
+	oauthAudit string
 	down       map[string]*downstream
 	names      []string
 	generation uint64
@@ -160,10 +168,14 @@ func (g *Gateway) Update(peers []mesh.Peer) {
 		if !seen[name] && d.online {
 			d.online = false
 			g.devices[name] = d
+			// A device that leaves the network and returns is a fresh process;
+			// its drain state is memory-only (docs/operations.md).
+			delete(g.draining, name)
 			changed = true
 		}
 		if !d.online && time.Since(d.lastSeen) > 24*time.Hour {
 			delete(g.devices, name)
+			delete(g.draining, name)
 			changed = true
 		}
 	}
@@ -276,11 +288,11 @@ func scopeKey(scopes []string) string {
 }
 func (g *Gateway) newView(p Principal) *view {
 	ctx, cancel := context.WithCancel(g.ctx)
-	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
+	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, leases: map[string]*leaseBeat{}, oauthAudit: oauthAuditID(p.OAuthSession), down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
 	v.server = mcp.NewServer(&mcp.Implementation{Name: "xmesh-gateway", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, r *mcp.InitializedRequest) { v.bind(r.Session) }})
-	for _, name := range []string{"devices.list", "tools.search", "session.set_defaults"} {
-		name := name
-		v.server.AddTool(&mcp.Tool{Name: name, Description: name, InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	for _, tool := range controlTools() {
+		name := tool.Name
+		v.server.AddTool(tool, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			v.bind(r.Session)
 			return v.control(ctx, name, r.Params.Arguments), nil
 		})
@@ -295,7 +307,8 @@ func (g *Gateway) newView(p Principal) *view {
 					if !ok || out == nil {
 						out = agent.Result(nil, toolerr.Internal("tools.call", e))
 					}
-					if err := g.opts.Audit.Record("gateway/"+call.Session.ID(), v.p.ClientID, g.opts.NodeName, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+					device, caller := v.auditIdentity(call.Params.Name, call.Session.ID())
+					if err := g.opts.Audit.RecordSession(v.oauthAudit, caller, v.p.ClientID, device, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
 						result, e = agent.Result(nil, err), nil
 					}
 				}()
@@ -530,7 +543,7 @@ func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d 
 			}
 			v.mu.Unlock()
 			go v.refresh()
-		}, Reverse: func() *mcp.ServerSession { v.mu.Lock(); defer v.mu.Unlock(); return v.session }})
+		}, Reverse: func() *mcp.ServerSession { v.mu.Lock(); defer v.mu.Unlock(); return v.session }, Unrouted: func() { v.auditUnrouted(name) }})
 		if err == nil {
 			d = &downstream{bridge: bridge, peerID: job.peer.ID, peerAddress: job.peer.Address}
 			created = true
@@ -698,9 +711,13 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 	}
 	v.mu.Lock()
 	d := v.down[deviceName]
-	for _, key := range []string{"cwd", "env"} {
-		if _, explicit := args[key]; !explicit && v.defaults[key] != nil {
-			args[key] = append(json.RawMessage{}, v.defaults[key]...)
+	// Session defaults belong to the built-in tools that declare the parameter;
+	// backend tools are forwarded verbatim (CTR-GW-01, CON-TOOL-10).
+	if d != nil && builtin(tool) {
+		for _, key := range []string{"cwd", "env"} {
+			if _, explicit := args[key]; !explicit && v.defaults[key] != nil && declares(d.tools, tool, key) {
+				args[key] = append(json.RawMessage{}, v.defaults[key]...)
+			}
 		}
 	}
 	dead := d == nil || d.dead
@@ -723,6 +740,18 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 		v.mu.Unlock()
 		go v.refresh()
 		return agent.Result(nil, toolerr.New("not_found", "设备连接已断开", "name", deviceName)), nil
+	}
+	if out != nil && out.IsError && meshDraining(out) {
+		// The Agent is draining: stop routing to it now rather than waiting
+		// for the control message to reach this Gateway (CTR-GW-05).
+		v.g.Drain(deviceName)
+	} else if out != nil && !out.IsError {
+		switch tool {
+		case "backend.acquire":
+			v.keepLease(deviceName, d, args, out)
+		case "backend.release":
+			v.dropLease(deviceName, args)
+		}
 	}
 	return out, nil
 }

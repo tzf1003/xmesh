@@ -220,7 +220,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		return gateway.RemoteDial(network.HTTPClient(peer))(ctx, peer, p, opts)
 	}
 	if c.HasRole("gateway") {
-		g := gateway.New(gateway.Options{NodeName: c.Node.Name, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
+		g := gateway.New(gateway.Options{NodeName: c.Node.Name, NodeID: self.Node, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
 		addGateway(g)
 		listener, e := net.Listen("tcp", c.Gateway.Listen)
 		if e != nil {
@@ -270,14 +270,14 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 				return e
 			}
 		}
-		g := gateway.New(gateway.Options{NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
+		g := gateway.New(gateway.Options{NodeName: c.Node.Name, NodeID: self.Node, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
 		addGateway(g)
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
 			token, ok := oauth.FromContext(r.Context())
 			if !ok {
 				return gateway.Principal{}, fmt.Errorf("OAuth 会话未认证")
 			}
-			return gateway.Principal{ClientID: token.ClientID, Scopes: token.Scopes}, nil
+			return gateway.Principal{ClientID: token.ClientID, OAuthSession: token.Family, Scopes: token.Scopes}, nil
 		}))
 		var listener net.Listener
 		var tlsConfig *tls.Config
