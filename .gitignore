@@ -1,0 +1,5 @@
+/bin/
+/coverage.out
+/.xmesh/
+*.test
+__pycache__/

@@ -78,6 +78,8 @@ Agent 上不存在这个工具。若客户端直连 Agent 并调用它，得到 
 
 对每个在线节点，`sys.info` 的缓存时间不超过 30 秒。调用失败时保留上一份缓存并标记 `stale: true`，连续失败超过 30 秒则把工具表视为空并通知上游，但节点仍显示在线直到 Status 说它不在。
 
+各设备独立刷新连接与能力表。首次 `tools/list` 等待本机 Agent 的能力就绪，远端设备就绪后通过 `tools/list_changed` 加入；对指定设备的首次调用或 `tools.search` 仅等待该设备。已有能力缓存的调用可在后台刷新时继续执行。单次刷新最长 10 秒，失败后至少间隔 5 秒重试；设备身份或地址变化时重新连接。上游会话结束时取消其待完成刷新并关闭下游连接。
+
 ### lan
 
 用 mDNS 的出现与消失代替 Status。证书不是 `tag:device` 的节点不连接。
@@ -99,3 +101,29 @@ Agent 上不存在这个工具。若客户端直连 Agent 并调用它，得到 
 Agent 收到后拒绝新的 `exec.run`、`pty.open`、`backend.acquire` 和后端工具，错误码 `policy_denied`，规则名 `mesh.draining`。`drain: keep` 时已有 PTY 与租约按原超时结束。`drain: kill` 时按 `pty.close` 的顺序终止本机全部 PTY，并 release 全部租约。
 
 Gateway 收到后对该设备（或全网）停止路由，并发送 `tools/list_changed`。
+
+## CTR-GW-06
+
+### 入口 PTY 总预算
+
+`ingress.max_pty_per_client` 默认 8。入口把各 Agent 的同一 OAuth client 的 `active` 与 `orphaned` 终端相加；`closed` 释放额度。不同 MCP 会话共享额度。`pty.transfer` 使用目标 Agent 记录的接收方身份，向另一主体转移时检查接收方总额；同主体接管保持原有额度。
+
+入口在整个查询、准入与调用完成期间串行化 `pty.open` 和 `pty.transfer`。查询使用 Agent 的 MCP 控制资源 `xmesh://control/pty-budget`，由已认证且获 PTY 授权的 `tag:ingress` 读取。该资源包含当前终端 reservation、对应预算主体、在线 caller 的主体及进程 epoch，不含终端正文；Gateway 不向公网转发此资源。Agent 的启动 reservation 和断线孤儿均计数。
+
+入口状态目录的 `ingress-pty.json` 保存需要重新查询的设备 ID、Agent epoch 和待完成调用标志。发送有副作用的调用前原子落盘。该记录用于准入治理，终端归属与资源状态始终由 Agent 决定。入口重启后重新查询 Agent。已记载资源的设备离线、旧版 Agent 缺少控制资源或快照无效时，新增与转移返回 `policy_denied`、`rule: quota.unavailable`。读写、关闭与信号仍可作用于在线资源。
+
+调用结果丢失时，待完成标志保留；同一 Agent epoch 的快照无法证明旧调用已经完成，因此继续拒绝新增。重启对应 Agent 并重新查询到新 epoch 后可恢复准入。状态写入失败时停止新增；保留状态目录，修复存储后重启入口。总额已满返回 `policy_denied`、`rule: quota.exceeded`。
+
+入口使用独立的持久化 `.lock` 文件锁住预算文件，在锁内重读记录、查询 Agent、准入和完成调用。同一主机的多个入口通过 `ingress.pty_budget_file` 指向同一本地文件时共享原子准入；进程退出后由操作系统释放锁，待完成标志仍保留。共享文件记录配额值，各入口配置不一致时拒绝启动或新增。版本 1 的既有记录会在下一次写入时补充配额值。
+
+共享入口必须使用支持文件锁的版本、同一 OAuth client 身份域和本地预算文件，并保留预算文件及其 `.lock` 文件。不要把预算文件放在网络文件系统上。直接调用 Agent 使用 Agent 上的设备与主体配额。
+
+**跨主机入口。** 多台主机各运行入口时，在每个入口配置相同的 `ingress.pty_budget_authority`（一台 Agent 的设备名）。该 Agent 通过 `tag:ingress` 专用的控制资源模板 `xmesh://control/pty-budget-authority{?q}` 托管一把带围栏令牌的互斥租约，`q` 是 base64url 编码的 JSON 请求（`acquire`、`mark`、`release`）。入口在每次 `pty.open`/`pty.transfer` 的查询、准入与调用期间持有该租约，因此不同主机上的入口按同一顺序准入；总额仍由各 Agent 的实时快照得出。要求：
+
+- 租约所有者由经过认证的入口节点身份加进程随机数组成；一台入口不能使用、释放或代替另一台入口的租约。读取该资源与读取 `xmesh://control/pty-budget` 使用同一授权：已认证的 `tag:ingress`、带 OAuth client 并获得 `pty.open` 或 `pty.transfer` 授权，策略重载立即生效。
+- 租约有效期 30 秒。入口只用其中 25 秒：持有者在发出请求前开始计时，调用的上下文截止时间早于权威侧到期时间，因此沉默的持有者最多阻塞其他入口 30 秒，且不依赖主机间时钟一致。权威 Agent 启动后一个有效期内不发放租约，使上一进程发出的租约一定已经过期。
+- 发送有副作用的调用前，持有者向权威侧登记待完成记录（目标设备与 Agent epoch）。调用完成并确认后释放时清除；结果不确定（传输中断、超时、持有者崩溃或租约过期）时记录保留，其他入口读取到同一 epoch 的记录时，与本机待完成标志一样拒绝新增，直到目标 Agent 重启并出现新 epoch。释放消息未送达但调用已确认完成时，持有者在下一次获取租约时携带已完成声明，由权威侧清除。
+- 权威 Agent 离线、不可达、租约在 10 秒内无法取得，或响应无效时，新增与转移返回 `policy_denied`、`rule: quota.unavailable`，不创建终端。读写、关闭与信号不受影响。权威 Agent 重启会丢失待完成记录，因此须先确认没有结果不确定的调用，再重启；重启后一个有效期内不发放租约。
+- 权威设备必须是所有入口都能连到的 Agent，且应长期在线。它同时是 Agent，其自身的终端也计入总额。未配置 `ingress.pty_budget_authority` 时行为与此前一致：只在本机协调。
+
+跨主机协调只约束 `pty.open` 与 `pty.transfer` 的准入顺序；不影响 exec 配额，也不改变 Agent 上的设备与主体限额。

@@ -1,0 +1,17 @@
+# 本机工具验收。cwd_policy.allow 按需改为要操作的目录。
+node:
+  name: local-dev
+  roles: [agent]
+mesh:
+  mode: lan
+  lan:
+    mdns: true
+agent:
+  default_cwd: .
+  cwd_policy:
+    allow: ["."]
+    deny: ["~/.ssh", "~/.config/gcloud", "~/.azure"]
+  authz:
+    tag:peer:
+      tools: ["*"]
+      backends: ["*"]

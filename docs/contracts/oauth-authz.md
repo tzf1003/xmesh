@@ -155,3 +155,5 @@ tag 没有配置项 → 拒绝。`tools` 为空数组 → 该 tag 不能调用�
 ### PAT
 
 tailnet 模式的 PAT 是入口之外的本地凭据，绑定一组与 OAuth 相同的 scope。PAT 只呈给本机 Gateway。Agent 仍然用 WhoIs 做第二层，不接受调用方把 PAT 转贴到工具参数里。
+
+配置为 `gateway.pats.<name>.token_file` 和 `scopes`。名称区分本机会话身份与调用预算；Gateway 转发时保留本节点身份。每次请求重新认证，文件轮转、删除配置及 scope 收窄立即约束后续请求，scope 改变须重新建立 MCP 会话。具体文件约束见[配置](config.md#密钥)。

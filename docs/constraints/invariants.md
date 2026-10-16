@@ -20,7 +20,7 @@
 
 Gateway 角色和 Ingress 角色重启后，不需要恢复 PTY、租约、幂等缓存、文件锁或 exec 输出分页。这些状态只存在于目标 Agent。
 
-Gateway 允许持有的只有：到对等节点的 MCP 连接、发现缓存、本连接上的 `session.set_defaults`，以及审计写入缓冲。发现缓存过期或连接断开后可以重建，丢失不改变设备上的资源归属。
+Gateway 持有到对等节点的 MCP 连接、发现缓存、本连接上的 `session.set_defaults`，以及审计写入缓冲。入口另外持有 [CTR-GW-06](../contracts/gateway.md#ctr-gw-06) 的准入治理记录：设备 ID、Agent epoch 与待完成标志；实际 PTY 数量和归属均从 Agent 重新查询。发现缓存过期或连接断开后可以重建，丢失不改变设备上的资源归属。准入记录保存在入口状态目录，用于在入口重启后继续核对离线设备和结果未确认的调用。
 
 ## INV-04
 

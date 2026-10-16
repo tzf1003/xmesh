@@ -30,9 +30,11 @@ Windows 上 `pty.default_shell: auto` 解析为 `pwsh`，`pwsh` 不存在时解�
 
 | 请求 | Windows 行为 |
 | --- | --- |
-| `INT` | 向该 ConPTY 进程组 `GenerateConsoleCtrlEvent(CTRL_C_EVENT)` |
-| `TERM` | `CTRL_BREAK_EVENT`，若进程不处理则在短超时后 `TerminateProcess` |
-| `KILL` | `TerminateProcess` |
+| `INT` | 向 ConPTY 输入 Ctrl-C（`0x03`），由该终端的控制字符处理模式交给应用 |
+| `TERM` | 尝试输入 Ctrl-C，250ms 后仍运行则终止整个 Job Object |
+| `KILL` | 立即终止整个 Job Object |
+
+ConPTY 主进程以挂起状态创建，加入带 `KILL_ON_JOB_CLOSE` 的专属 Job Object 后恢复执行。主 shell 退出或终端关闭时，Job 中的后代进程一并清理。Agent 可运行在独立登录任务或 SCM 会话；信号通过其 ConPTY 传入。应用关闭控制字符处理的原始输入模式会改变 Ctrl-C 行为，TERM/KILL 的 Job 终止仍有效。
 
 WSL 发行版不由 Windows 节点的 `exec` 隐式进入。需要 Linux 工具时，把该发行版注册成另一台 xmesh 设备。
 

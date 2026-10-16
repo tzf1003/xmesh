@@ -14,5 +14,18 @@ XmeSh（X mesh，也是 X me sh：我的 sh）让 Codex Cloud、Claude Cloud 等
 | 实现时哪些规则不能破 | [约束](docs/constraints/README.md) |
 | 工具、错误、租约、OAuth 的精确行为 | [契约](docs/contracts/README.md) |
 | 某一条规则落到哪一阶段的测试 | [符合性矩阵](docs/conformance.md) |
+| 如何构建、配对、入网和运行 | [运行手册](docs/operations.md) · [实现记录](docs/implementation-status.md) |
 
 阅读规范用语、编号和裁定方式见文档库首页。
+
+## 本机开发
+
+需要 Go 1.27。先在 `xmesh.local.yaml` 中设置允许访问的目录，然后运行：
+
+```bash
+go run ./cmd/xmesh serve --local --config xmesh.local.yaml
+go run ./cmd/xmesh status --json
+go test -race ./...
+```
+
+本机 MCP 地址为 `http://127.0.0.1:7433/mcp`，提供 `sys.info`、`fs.*`、`pty.*`、`exec.*`。客户端使用有会话的 Streamable HTTP MCP。`--local` 是显式开发模式；当前实现进度和外部验收状态见 [实现记录](docs/implementation-status.md)。

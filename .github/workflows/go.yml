@@ -1,0 +1,75 @@
+name: Go 实现
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/go.yml
+      - run: go test -race ./... -timeout=120s
+        if: ${{ !cancelled() }}
+      - run: go vet ./...
+        if: ${{ !cancelled() }}
+      - run: go build ./cmd/xmesh
+        if: ${{ !cancelled() }}
+  windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/go.yml
+      - name: Windows native process, terminal, and file regression
+        env:
+          XMESH_TEST_WINDOWS_EXEC: "1"
+          XMESH_TEST_WINDOWS_PTY: "1"
+        run: go test -race ./internal/exec ./internal/pty ./internal/fs ./internal/winjob -run Windows -v -timeout=180s
+      - name: Windows gateway file visibility regression
+        run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=50 -v -timeout=120s
+      - name: Windows ingress PTY budget and cross-process admission
+        env:
+          XMESH_TEST_WINDOWS_PTY: "1"
+        run: go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s
+      - name: Build Windows service acceptance binary
+        run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
+      - name: Windows SCM install, runtime, and cleanup
+        env:
+          XMESH_TEST_WINDOWS_SYSTEM_SERVICE: "1"
+          XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
+        run: go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s
+      - name: Windows current-user scheduled task runtime
+        if: ${{ !cancelled() }}
+        run: |
+          $session = (Get-Process -Id $PID).SessionId
+          Write-Output "Runner Windows session: $session"
+          if ($session -eq 0) {
+            Write-Output '::notice::Current-user task acceptance requires an interactive Windows session.'
+            exit 0
+          }
+          $env:XMESH_TEST_WINDOWS_USER_SERVICE = '1'
+          go test -race ./cmd/xmesh -run WindowsUserTaskRuntime -v -timeout=90s
+      - name: Windows AppContainer isolation primitive
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
+        run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=300s
+      - name: Windows managed runner exec and ConPTY acceptance
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run Test_WindowsManagedRunner -v -count=1 -timeout=600s
