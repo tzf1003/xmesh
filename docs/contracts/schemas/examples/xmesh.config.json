@@ -30,7 +30,7 @@
     }
   },
   "agent": {
-    "default_cwd": "~",
+    "default_cwd": "~/repos/foo",
     "workspaces": {
       "foo": { "path": "~/repos/foo", "desc": "主项目 (Rust)" },
       "ida": { "path": "~/ida/work", "desc": "IDA 工作目录" }

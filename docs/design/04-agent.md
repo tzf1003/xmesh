@@ -49,7 +49,7 @@ ingress:                     # 仅入口节点配置；roles 不含 ingress 时�
       claude: { scopes: ["devices:read", "exec:*", "pty:*", "fs:*", "backend:win-dev-01:ida"] }
 
 agent:
-  default_cwd: ~
+  default_cwd: ~/repos/foo   # 不要用 ~：启用 Windows L2 时对象数超过 10000 的工作区会被拒绝
   workspaces:                # 别名，供 cwd 参数使用（cwd: "@foo"）
     foo: { path: ~/repos/foo, desc: "主项目 (Rust)" }
     ida: { path: ~/ida/work,  desc: "IDA 工作目录" }

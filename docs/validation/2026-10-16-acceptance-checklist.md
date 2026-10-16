@@ -10,6 +10,8 @@
 
 2026-10-16 之后新增或改写的行（T1、T3、状态目录 ACL、桌面 UI 控制通道）以对应 PR 合并前的 CI 为证：T1 为 PR #7 的运行 38962188952（`windows-native` 成功），其余见 #4、#24、#16 各自的检查记录，以及 master 上 `673dd5a` 之后的 push CI。
 
+T9（#31）与 T10（#30）同样晚于基线：T9 的合并提交 `0cb514d` 的 push CI 为 38970637015，该次 `test (windows-latest)` 因两个冷启动 PowerShell 的 agent 用例超时而失败，已由 #33 修复（合并提交 `48ebbe8`）；T10 的合并提交 `9a0b99a` 的 push CI 为 38974744722。这两行的“完成”只覆盖代码与 CI 层，不含真实环境验收。
+
 ## 核验结论
 
 - 远端工作分支 `codex/implementation-acceptance` 的 HEAD 为 `199f7a391c31b506ac8257b0117663d0abb452f1`，draft PR #2（目标 `master`）指向同一提交，状态为 draft，合并状态 clean。
@@ -71,5 +73,6 @@
 | 4 | exec/ConPTY 工具层接入；exit 66 调查（已合入 `62e11fc`） | 同上 |
 | T0 | 第一波并行实现收尾（T1 至 T8、T11、状态目录 ACL、桌面 UI 控制通道与面板）全部合入 master | 集成者按到达顺序合并，`windows-native` 与 UI 工作流绿灯为前提 |
 | T9 | L2 联合原生验证：`windows-l2-joint` 三轮、两个 winbox 偶发测试、控制管道拒绝用例（#31，已合入） | 集成者按到达顺序合并 |
+| T10 | 准入成本与大工作区：授权日志批量写入、对象数超 10000 以 `sandbox.workspace_too_large` 拒绝（#30，已合入） | 集成者按到达顺序合并 |
 
 `docs/implementation-status.md` 只由集成者修改；子任务把文档更新内容交给集成者。
