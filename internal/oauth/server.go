@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -59,11 +60,26 @@ type Server struct {
 	path            string
 	now             func() time.Time
 	maxScopes       []string
+	dynamicScopes   []string
+	issuerHost      string
+	proxied         bool
 }
 type Options struct {
 	Issuer, Password, StateDir string
 	Clients                    map[string][]string
+	// DynamicScopes caps what a dynamically registered client may hold. Nil means
+	// devices:read only; an empty slice means no tool scope at all.
+	DynamicScopes []string
+	// Proxied marks a deployment where exactly one trusted reverse proxy fronts a
+	// loopback-only listener (ingress.listen = tunnel). Only then are the proxy's
+	// X-Forwarded-For and X-Forwarded-Host headers believed, and only their last
+	// entry, and a loopback Host (the proxy rewriting it) is accepted.
+	Proxied bool
 }
+
+// DefaultDynamicScopes is what an open registration may receive when the
+// operator has not widened it.
+var DefaultDynamicScopes = []string{"devices:read"}
 
 func New(o Options) (*Server, error) {
 	u, e := url.Parse(o.Issuer)
@@ -73,7 +89,15 @@ func New(o Options) (*Server, error) {
 	if o.Password == "" {
 		return nil, fmt.Errorf("入口需要单主体登录口令文件")
 	}
-	s := &Server{issuer: o.Issuer, passwordHash: sha256.Sum256([]byte(o.Password)), clients: map[string]Client{}, codes: map[string]grant{}, access: map[string]Token{}, refresh: map[string]Token{}, csrf: map[string]time.Time{}, windows: map[string][]time.Time{}, login: map[string]loginLimit{}, now: time.Now, maxScopes: []string{"devices:read", "exec:*", "pty:*", "fs:read:*", "fs:write:*", "sys:*", "backend:*:*"}}
+	dynamic := o.DynamicScopes
+	if dynamic == nil {
+		dynamic = DefaultDynamicScopes
+	}
+	dynamic, e = Expand(dynamic)
+	if e != nil {
+		return nil, e
+	}
+	s := &Server{issuer: o.Issuer, issuerHost: hostKey(u.Host), proxied: o.Proxied, dynamicScopes: dynamic, passwordHash: sha256.Sum256([]byte(o.Password)), clients: map[string]Client{}, codes: map[string]grant{}, access: map[string]Token{}, refresh: map[string]Token{}, csrf: map[string]time.Time{}, windows: map[string][]time.Time{}, login: map[string]loginLimit{}, now: time.Now, maxScopes: []string{"devices:read", "exec:*", "pty:*", "fs:read:*", "fs:write:*", "sys:*", "backend:*:*"}}
 	if o.StateDir != "" {
 		if e = os.MkdirAll(o.StateDir, 0700); e != nil {
 			return nil, e
@@ -86,6 +110,20 @@ func New(o Options) (*Server, error) {
 			}
 		} else if !os.IsNotExist(e) {
 			return nil, e
+		}
+	}
+	// A dynamic client keeps no more than the current cap, so tightening the cap
+	// (or upgrading from a build that granted every scope) takes effect on restart.
+	for id, c := range s.clients {
+		if _, configured := o.Clients[id]; !configured {
+			kept := []string{}
+			for _, scope := range c.Scopes {
+				if subset([]string{scope}, dynamic) {
+					kept = append(kept, scope)
+				}
+			}
+			c.Scopes = kept
+			s.clients[id] = c
 		}
 	}
 	for id, scopes := range o.Clients {
@@ -122,9 +160,51 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func oauthError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
-func (s *Server) limited(w http.ResponseWriter, r *http.Request, action string, n int, window time.Duration) bool {
+
+// clientIP is the rate-limit identity of the caller. Behind the one trusted
+// reverse proxy it is the last X-Forwarded-For entry, which that proxy appended
+// itself; entries further left are client-supplied and ignored. Everywhere else
+// the socket peer is used, so a forged header cannot mint fresh limit buckets.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.proxied {
+		parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		if ip, e := netip.ParseAddr(strings.TrimSpace(parts[len(parts)-1])); e == nil {
+			return ip.Unmap().String()
+		}
+	}
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	key := action + ":" + host
+	return host
+}
+
+// hostKey lower-cases a host[:port] and drops the default HTTPS port.
+func hostKey(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return strings.TrimSuffix(host, ":443")
+}
+
+// originOK reports whether the request was addressed to the issuer's origin.
+// Behind the one trusted reverse proxy the listener is loopback-only, and a
+// proxy that rewrites Host to that loopback address is expected; its
+// X-Forwarded-Host, when present, names the origin the client really used.
+func (s *Server) originOK(r *http.Request) bool {
+	if s.proxied {
+		if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
+			parts := strings.Split(forwarded, ",")
+			return hostKey(parts[len(parts)-1]) == s.issuerHost
+		}
+		if host := r.Host; host != "" {
+			if name, _, e := net.SplitHostPort(host); e == nil {
+				host = name
+			}
+			if ip, e := netip.ParseAddr(strings.Trim(host, "[]")); (e == nil && ip.IsLoopback()) || strings.EqualFold(host, "localhost") {
+				return true
+			}
+		}
+	}
+	return hostKey(r.Host) == s.issuerHost
+}
+func (s *Server) limited(w http.ResponseWriter, r *http.Request, action string, n int, window time.Duration) bool {
+	key := action + ":" + s.clientIP(r)
 	now := s.now()
 	old := s.windows[key]
 	kept := old[:0]
@@ -147,6 +227,10 @@ func (s *Server) Handler(mcp http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		if !s.originOK(r) {
+			oauthError(w, 421, "misdirected_request")
+			return
+		}
 		switch r.URL.Path {
 		case "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp":
 			if r.Method != "GET" {
@@ -252,7 +336,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 400, "invalid_client_metadata")
 		return
 	}
-	c := Client{ID: random(), Name: req.Name, Redirects: req.Redirects, Method: req.Method, Scopes: append([]string{}, s.maxScopes...)}
+	c := Client{ID: random(), Name: req.Name, Redirects: req.Redirects, Method: req.Method, Scopes: append([]string{}, s.dynamicScopes...)}
 	secret := ""
 	if c.Method == "client_secret_basic" {
 		secret = random()
@@ -264,7 +348,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 500, "server_error")
 		return
 	}
-	response := map[string]any{"client_id": c.ID, "client_name": c.Name, "redirect_uris": c.Redirects, "token_endpoint_auth_method": c.Method, "grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}}
+	response := map[string]any{"client_id": c.ID, "client_name": c.Name, "redirect_uris": c.Redirects, "token_endpoint_auth_method": c.Method, "grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}, "scope": strings.Join(c.Scopes, " ")}
 	if secret != "" {
 		response["client_secret"] = secret
 	}
@@ -321,7 +405,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	host := s.clientIP(r)
 	if r.Method == "GET" {
 		csrf := random()
 		s.csrf[digest(csrf+"|"+r.URL.RawQuery)] = s.now().Add(5 * time.Minute)

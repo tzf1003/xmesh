@@ -42,6 +42,8 @@ type Agent struct {
 	Backends        *backend.Manager
 	Leases          *lease.Manager
 	quota           *quota.Limiter
+	quotaMu         sync.Mutex
+	quotaApplied    config.Quota
 	mu              sync.Mutex
 	sessions        map[string]identity.Caller
 	servers         map[*mcp.ServerSession]bool
@@ -78,7 +80,7 @@ func New(store *config.Store) (*Agent, error) {
 	reg := identity.NewRegistry()
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
-	a.quota = quota.New(10000, 64, 10*time.Minute)
+	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
 	a.Backends = backend.New(c, a.Leases, a.upstream, func() {
 		select {
 		case a.backendChanged <- struct{}{}:
@@ -144,12 +146,24 @@ func Result(out any, err error) *mcp.CallToolResult {
 	}
 	return &mcp.CallToolResult{IsError: isError, StructuredContent: out, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}
 }
-func Allowed(c *config.Config, caller identity.Caller, tool, backend string) bool {
-	for _, tag := range caller.Tags {
-		grant, ok := c.Agent.Authz[tag]
-		if !ok {
-			continue
+
+// grantsFor returns every agent.authz entry whose key matches one of the
+// caller's tags. A key may end in or contain `*` (tag:* matches any tag); a tag
+// with no matching key gets nothing, so the default stays deny.
+func grantsFor(c *config.Config, caller identity.Caller) []config.Grant {
+	var grants []config.Grant
+	for key, grant := range c.Agent.Authz {
+		for _, tag := range caller.Tags {
+			if ok, _ := path.Match(key, tag); ok {
+				grants = append(grants, grant)
+				break
+			}
 		}
+	}
+	return grants
+}
+func Allowed(c *config.Config, caller identity.Caller, tool, backend string) bool {
+	for _, grant := range grantsFor(c, caller) {
 		if backend != "" {
 			for _, pattern := range grant.Backends {
 				if ok, _ := path.Match(pattern, backend); ok {
@@ -165,6 +179,17 @@ func Allowed(c *config.Config, caller identity.Caller, tool, backend string) boo
 		}
 	}
 	return false
+}
+
+// syncQuota applies agent.quota when the hot-reloaded value differs from the one
+// already in force, leaving the limiter alone otherwise.
+func (a *Agent) syncQuota(q config.Quota) {
+	a.quotaMu.Lock()
+	defer a.quotaMu.Unlock()
+	if q != a.quotaApplied {
+		a.quota.SetLimits(q.Limits())
+		a.quotaApplied = q
+	}
 }
 func (a *Agent) bind(session *mcp.ServerSession, p Principal) identity.Caller {
 	id := p.Node + "/" + session.ID()
@@ -322,6 +347,11 @@ func (a *Agent) server(p Principal) *mcp.Server {
 				call := req.(*mcp.CallToolRequest)
 				if call.Params.Name != "sys.info" {
 					caller := a.bind(call.Session, p)
+					cfg := a.store.Get()
+					a.syncQuota(cfg.Agent.Quota)
+					if err := a.quota.CheckExecTimeout(call.Params.Name, call.Params.Arguments, config.Duration(cfg.Agent.Exec.DefaultTimeout)); err != nil {
+						return Result(nil, err), nil
+					}
 					limited, release, err := a.quota.Acquire(ctx, identity.Budget(caller))
 					if err != nil {
 						return Result(nil, err), nil

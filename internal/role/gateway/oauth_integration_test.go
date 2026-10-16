@@ -49,17 +49,18 @@ func Test_Gate4_OAuthGatewayAgent(t *testing.T) {
 	t.Cleanup(agentHTTP.Close)
 	g := New(Options{NodeName: "device", Ingress: true, LocalPeer: mesh.Peer{Name: "device", ID: "device", Address: agentHTTP.URL + "/mcp"}, Dial: RemoteDial(agentHTTP.Client())})
 	t.Cleanup(g.Close)
-	authorization, e := oauth.New(oauth.Options{Issuer: "https://mesh.example", Password: "integration-login-fixture", StateDir: t.TempDir()})
+	authorization, e := oauth.New(oauth.Options{Issuer: "https://mesh.example", Password: "integration-login-fixture", StateDir: t.TempDir(), DynamicScopes: []string{"devices:read", "sys:*", "fs:*", "pty:*"}, Proxied: true})
 	if e != nil {
 		t.Fatal(e)
 	}
-	server := httptest.NewServer(authorization.Handler(g.HTTP(func(r *http.Request) (Principal, error) {
+	oauthHandler := authorization.Handler(g.HTTP(func(r *http.Request) (Principal, error) {
 		token, ok := oauth.FromContext(r.Context())
 		if !ok {
 			t.Fatal("missing authenticated context")
 		}
 		return Principal{ClientID: token.ClientID, Scopes: token.Scopes}, nil
-	})))
+	}))
+	server := httptest.NewServer(oauthHandler)
 	t.Cleanup(server.Close)
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	request := func(method, path, body, content, cookie string) (int, http.Header, string) {

@@ -220,7 +220,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		return gateway.RemoteDial(network.HTTPClient(peer))(ctx, peer, p, opts)
 	}
 	if c.HasRole("gateway") {
-		g := gateway.New(gateway.Options{NodeName: c.Node.Name, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
+		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
 		addGateway(g)
 		listener, e := net.Listen("tcp", c.Gateway.Listen)
 		if e != nil {
@@ -253,7 +253,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		for id, client := range c.Ingress.OAuth.Clients {
 			clients[id] = client.Scopes
 		}
-		authorization, e := oauth.New(oauth.Options{Issuer: c.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(o.StateDir, "oauth"), Clients: clients})
+		authorization, e := oauth.New(oauth.Options{Issuer: c.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(o.StateDir, "oauth"), Clients: clients, DynamicScopes: c.Ingress.OAuth.DynamicClientScopes, Proxied: c.Ingress.Listen == "tunnel"})
 		if e != nil {
 			return e
 		}
@@ -270,7 +270,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 				return e
 			}
 		}
-		g := gateway.New(gateway.Options{NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
+		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
 		addGateway(g)
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
 			token, ok := oauth.FromContext(r.Context())

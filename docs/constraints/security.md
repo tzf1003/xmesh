@@ -15,13 +15,15 @@
 
 公网入口没有「关闭认证」的配置。每个已注册 client 的 scope 列表是它的全部权限，空 scope 表示只能完成 OAuth，不能调用工具。
 
+动态注册不需要管理员点击，所以它不能默认拿到全部权限：动态注册客户端的 scope 上限是 `ingress.oauth.dynamic_client_scopes`，缺省只有 `devices:read`。更多权限须由运维显式写进该上限，或预注册客户端。
+
 `tailnet` 模式下的本机 Gateway 可以用 PAT 或对端节点身份代替 OAuth。PAT 绑定的 scope 语法与 OAuth scope 相同。
 
 ## CON-SEC-03
 
 Agent 从 `LocalClient().WhoIs(remoteAddr)` 取对端节点与 tag。取不到身份时拒绝，错误码 `unauthenticated`。禁止信任客户端在工具参数里自报的 tag 或节点名。
 
-`agent.authz` 的键是 tag。未列出的 tag 默认拒绝。`backends` 与 `tools` 都是允许列表，`*` 只在该字段显式写出时才表示全部。
+`agent.authz` 的键是 tag，可含 `*`（按 `path.Match`，如 `tag:*`）。没有任何键匹配的 tag 默认拒绝；多个键同时匹配时允许列表取并集。`backends` 与 `tools` 都是允许列表，`*` 只在该字段显式写出时才表示全部。
 
 ## CON-SEC-04
 
@@ -82,6 +84,8 @@ Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺�
 | `exec.deny.format` | 命令基名为磁盘格式化工具 |
 | `quota.exceeded` | 超过入口或设备配额 |
 
+配额数字来自 `agent.quota` 与 `gateway.quota`（`calls_per_hour`、`max_concurrent`、`max_call_duration`），缺省每小时 10000 次、并发 64、单次 10 分钟。`exec.run` 的 `timeout`（缺省时取 `agent.exec.default_timeout`）不得超过 `max_call_duration`：超过的调用以 `invalid_args`（`field: timeout`，`reason: quota.max_call_duration`）拒绝，不消耗预算，而不是被调用时限静默截断。配置里 `agent.exec.default_timeout` 超过 `agent.quota.max_call_duration` 时拒绝启动。
+
 上表里的 exec 规则和 `agent.policy.exec.deny_patterns` 使用同一种匹配，见 [RUL-11](../contracts/rulings.md#rul-11)：对规范化命令行做 RE2 搜索，不对每个 `args[i]` 单独匹配。因此 `["rm", "-rf", "/"]` 会变成 `rm -rf /` 并命中 `rm\s+-rf\s+/`。`sh -c`、`pwsh -Command` 和 `cmd /c` 的脚本字符串会再搜一次，所以写在这些脚本里的 `curl | sh` 也能命中。`python -c` 与 `node -e` 不在这次搜索里。
 
 用户配置可以加严，不可以删除上表中的格式化与 `curl \| sh` 两类规则。若部署确实要关掉它们，必须在配置里显式 `allow_dangerous: true`，并且 `status` 输出警告。默认 `allow_dangerous` 为 false。
@@ -91,3 +95,5 @@ Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺�
 入口必须按 [CTR-OAUTH-01](../contracts/oauth-authz.md#ctr-oauth-01) 的限速表限制 `POST /oauth/register`、登录口令校验和 `GET /oauth/authorize`。超限返回 HTTP 429，并带 `Retry-After`。
 
 授权服务器只有一个口令，动态注册又不需要管理员点击。没有这道限速时，公网入口就是口令爆破面。计数放在入口进程内存里，重启后清零；它用来拖慢爆破，不是跨节点的配额。
+
+计数的来源 IP 在 `tunnel` 下取代理追加的 `X-Forwarded-For` 最后一项，在 `public:443` 和 `funnel` 下取连接对端，见 [CTR-OAUTH-01](../contracts/oauth-authz.md#ctr-oauth-01)。客户端自填的转发头不得用来换取新的计数桶。

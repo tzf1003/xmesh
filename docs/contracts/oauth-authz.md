@@ -20,7 +20,10 @@
 | `grant_types_supported` | `["authorization_code", "refresh_token"]` |
 | `response_types_supported` | `["code"]` |
 
-issuer 的来源必须与客户端实际访问的 HTTPS 源一致。禁止返回另一个域的 issuer。
+issuer 的来源必须与客户端实际访问的 HTTPS 源一致。禁止返回另一个域的 issuer。入口在两处强制这一点：
+
+- 启动时核对 issuer 与监听方式。`public:443` 的 issuer 主机必须等于 `ingress.domain`（不接受 443 以外的端口）；`funnel` 的 issuer 必须是该节点的 `ts.net` 源。不一致拒绝启动，错误指向 `/ingress/oauth/issuer`。`tunnel` 没有可核对的域名，由下一条在运行时兜底。
+- 运行时每个请求的 `Host` 必须等于 issuer 的主机（忽略大小写和默认的 443 端口），否则返回 HTTP 421，`error` 为 `misdirected_request`。发现文档、授权、令牌、注册和 `/mcp` 都适用，所以元数据不会在另一个域名下返回。`tunnel` 只监听回环地址，外层隧道可能把 `Host` 改写成回环地址：此时回环 `Host` 被接受；隧道带 `X-Forwarded-Host` 时取其最后一项，必须等于 issuer 的主机。
 
 ### 动态客户端注册
 
@@ -37,9 +40,21 @@ issuer 的来源必须与客户端实际访问的 HTTPS 源一致。禁止返回
 
 已在配置里写好的 `clients.codex` 与 `clients.claude` 是预注册客户端，与动态注册并存。
 
+动态注册的客户端不会得到全部 scope。它的 scope 上限是 `ingress.oauth.dynamic_client_scopes`，缺省 `["devices:read"]`；空数组表示只能完成 OAuth。注册响应的 `scope` 字段给出实际授予的 scope，授权或刷新请求超出该上限返回 `invalid_scope`。需要更多权限时，运维把它们写进上限，或者把客户端预注册在 `clients` 里。入口重启时，已持久化的动态客户端按当前上限收窄，只减不增，因此调低上限或从旧版本升级都会生效；配置里写好的客户端不受影响。
+
 ### 限速
 
 单口令加上开放的动态注册，公网入口会被拿来爆破。下列限额是契约的一部分，见 [CON-SEC-11](../constraints/security.md#con-sec-11)。计数在入口进程内存中，按来源 IP，重启后清零。超限的响应是 HTTP 429，并且必须带 `Retry-After`（秒）。
+
+「来源 IP」取决于监听方式：
+
+| 监听方式 | 来源 IP |
+| --- | --- |
+| `public:443` | 连接的对端地址。`X-Forwarded-For` 由客户端自填，不采信 |
+| `funnel` | 连接的对端地址。tsnet 把 Funnel 流的源地址（真实客户端，不是 Funnel 节点）作为对端地址，`X-Forwarded-For` 不采信 |
+| `tunnel` | 隧道代理追加的 `X-Forwarded-For` 的**最后一项**；更左边的项由客户端自填，忽略。缺失或不是 IP 地址时退回连接对端（回环地址），所有请求共用同一计数 |
+
+只有 `tunnel` 采信代理头，因为只有它前面恰好有一层受信代理，且监听只在回环地址上，外部无法绕过代理直接连入。
 
 | 动作 | 限额 | 锁定如何结束 |
 | --- | --- | --- |
@@ -143,6 +158,8 @@ tag:ingress:
   backends: ["ida"]
   tools: ["sys.*", "exec.*", "pty.*", "fs.*"]
 ```
+
+`agent.authz` 的键是 tag，也可以含 `*`，按 `path.Match` 与调用方的 tag 比较：`tag:*` 匹配任意 `tag:` 开头的 tag，`tag:ingress-*` 匹配 `tag:ingress-eu` 而不匹配 `tag:ingress`。调用方有多个 tag 或多个键同时匹配时，允许列表取并集；没有任何键匹配仍然拒绝。
 
 `tools` 的项支持末尾 `*`，只匹配一个路径段里的前缀，不跨 `/`。`fs.*` 匹配 `fs.read`、`fs.delete`，不匹配 `fsx.read`。`backends: ["*"]` 表示全部后端。后端工具还要同时通过 `tools` 与 `backends`：`ida.decompile_function` 需要 backends 含 `ida` 或 `*`，且 tools 含 `ida.*` 或 `*`。
 

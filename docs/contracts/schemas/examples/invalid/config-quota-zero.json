@@ -1,0 +1,166 @@
+{
+  "node": {
+    "name": "win-dev-01",
+    "roles": [
+      "agent",
+      "gateway"
+    ]
+  },
+  "mesh": {
+    "mode": "tailnet",
+    "control_url": "https://controlplane.tailscale.com",
+    "authkey_file": "/etc/xmesh/authkey",
+    "lan": {
+      "mdns": true
+    }
+  },
+  "gateway": {
+    "listen": "127.0.0.1:8080",
+    "expose_backends": "all",
+    "quota": {
+      "calls_per_hour": 10000,
+      "max_concurrent": 64,
+      "max_call_duration": "10m"
+    }
+  },
+  "ingress": {
+    "listen": "funnel",
+    "oauth": {
+      "issuer": "https://win-dev-01.tailnet.ts.net",
+      "dynamic_client_scopes": [
+        "devices:read"
+      ],
+      "clients": {
+        "codex": {
+          "scopes": [
+            "devices:read",
+            "exec:*",
+            "pty:*",
+            "fs:*"
+          ]
+        },
+        "claude": {
+          "scopes": [
+            "devices:read",
+            "exec:*",
+            "pty:*",
+            "fs:*",
+            "backend:win-dev-01:ida"
+          ]
+        }
+      }
+    }
+  },
+  "agent": {
+    "default_cwd": "~",
+    "workspaces": {
+      "foo": {
+        "path": "~/repos/foo",
+        "desc": "主项目 (Rust)"
+      },
+      "ida": {
+        "path": "~/ida/work",
+        "desc": "IDA 工作目录"
+      }
+    },
+    "cwd_policy": {
+      "allow": [
+        "~/repos",
+        "~/ida",
+        "/tmp"
+      ],
+      "deny": [
+        "~/.ssh",
+        "~/.config/gcloud"
+      ]
+    },
+    "quota": {
+      "calls_per_hour": 0
+    },
+    "exec": {
+      "max_concurrent": 4,
+      "exclusive_slots": 1,
+      "default_timeout": "120s",
+      "idempotency_cache": 200,
+      "inline_output_bytes": "256KiB"
+    },
+    "pty": {
+      "max_sessions": 20,
+      "max_per_caller": 8,
+      "idle_timeout": "30m",
+      "orphan_grace": "10m",
+      "scrollback_bytes": "1MiB",
+      "default_shell": "auto",
+      "closed_retain": "5m",
+      "closed_retain_max": 20
+    },
+    "backends": {
+      "ida": {
+        "transport": "stdio",
+        "command": [
+          "python",
+          "-m",
+          "ida_pro_mcp"
+        ],
+        "policy": "exclusive",
+        "idle_timeout": "30m",
+        "favorite": true
+      },
+      "frida": {
+        "transport": "http",
+        "url": "http://127.0.0.1:9000/mcp",
+        "policy": "shared"
+      },
+      "ghidra": {
+        "transport": "stdio",
+        "command": [
+          "ghidra-mcp"
+        ],
+        "policy": "per-caller"
+      }
+    },
+    "authz": {
+      "tag:peer": {
+        "backends": [
+          "*"
+        ],
+        "tools": [
+          "*"
+        ]
+      },
+      "tag:ingress": {
+        "backends": [
+          "ida"
+        ],
+        "tools": [
+          "sys.*",
+          "exec.*",
+          "pty.*",
+          "fs.*"
+        ]
+      }
+    },
+    "policy": {
+      "isolation": "L1",
+      "exec": {
+        "deny_patterns": [
+          "rm\\s+-rf\\s+/",
+          "curl\\s+.*\\|\\s*sh",
+          "\\bformat\\b"
+        ]
+      },
+      "env": {
+        "deny_names": [
+          "AWS_*",
+          "GOOGLE_APPLICATION_CREDENTIALS",
+          "SSH_AUTH_SOCK"
+        ],
+        "deny_path_substrings": [
+          ".ssh",
+          "gcloud",
+          ".azure"
+        ]
+      }
+    }
+  }
+}

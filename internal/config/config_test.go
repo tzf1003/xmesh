@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func Test_CTRCFG01(t *testing.T) {
@@ -19,7 +20,7 @@ func Test_CTRCFG01(t *testing.T) {
 			})
 		}
 	}
-	for _, name := range []string{"config-relay.json", "config-funnel-with-domain.json", "config-pat-empty-scopes.json", "config-lan-ephemeral.json"} {
+	for _, name := range []string{"config-relay.json", "config-funnel-with-domain.json", "config-pat-empty-scopes.json", "config-lan-ephemeral.json", "config-quota-zero.json", "config-dynamic-scope-invalid.json"} {
 		if _, e := Load(filepath.Join(root, "invalid", name)); e == nil {
 			t.Fatal("invalid accepted", name)
 		}
@@ -153,5 +154,148 @@ func TestIngressPTYBudgetAuthorityConfiguration(t *testing.T) {
 		if !valid && err == nil {
 			t.Fatal("invalid authority accepted", authority)
 		}
+	}
+}
+
+func ingressConfig(t *testing.T, edit func(doc map[string]any)) (*Config, error) {
+	t.Helper()
+	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	edit(doc)
+	data, _ := json.Marshal(doc)
+	return Parse(data)
+}
+
+func Test_CTRCFG01_FunnelControlPlane(t *testing.T) {
+	funnel := func(controlURL string) error {
+		_, err := ingressConfig(t, func(doc map[string]any) {
+			doc["mesh"].(map[string]any)["control_url"] = controlURL
+			ingress := doc["ingress"].(map[string]any)
+			for _, key := range []string{"domain", "tls"} {
+				delete(ingress, key)
+			}
+			ingress["listen"] = "funnel"
+			ingress["oauth"].(map[string]any)["issuer"] = "https://vps-mcp.tailnet.ts.net"
+		})
+		return err
+	}
+	for _, ok := range []string{"https://controlplane.tailscale.com", "https://login.tailscale.com", "https://Controlplane.Tailscale.com:443/"} {
+		if err := funnel(ok); err != nil {
+			t.Fatal("official control plane refused", ok, err)
+		}
+	}
+	for _, bad := range []string{"https://hs.example.com", "http://controlplane.tailscale.com", "https://controlplane.tailscale.com.evil.example", "https://evil.example/controlplane.tailscale.com", "https://user@controlplane.tailscale.com", "https://controlplane.tailscale.com:8443", "https://tailscale.com", "https://evil-controlplane.tailscale.com"} {
+		if err := funnel(bad); err == nil {
+			t.Fatal("non-official control plane accepted", bad)
+		}
+	}
+}
+
+func Test_CTROAUTH01_IssuerOriginMatchesIngress(t *testing.T) {
+	issuer := func(listen, domain, value string) error {
+		_, err := ingressConfig(t, func(doc map[string]any) {
+			ingress := doc["ingress"].(map[string]any)
+			ingress["listen"] = listen
+			if listen == "public:443" {
+				ingress["domain"] = domain
+			} else {
+				delete(ingress, "domain")
+				delete(ingress, "tls")
+			}
+			if listen == "funnel" {
+				doc["mesh"].(map[string]any)["control_url"] = "https://controlplane.tailscale.com"
+			}
+			ingress["oauth"].(map[string]any)["issuer"] = value
+		})
+		return err
+	}
+	cases := []struct {
+		listen, domain, issuer string
+		ok                     bool
+	}{
+		{"public:443", "mcp.example.com", "https://mcp.example.com", true},
+		{"public:443", "MCP.example.com", "https://mcp.example.com:443", true},
+		{"public:443", "mcp.example.com", "https://other.example.com", false},
+		{"public:443", "mcp.example.com", "https://mcp.example.com:8443", false},
+		{"public:443", "mcp.example.com", "https://mcp.example.com.evil.example", false},
+		{"funnel", "", "https://vps.tail1234.ts.net", true},
+		{"funnel", "", "https://mcp.example.com", false},
+		{"funnel", "", "https://evilts.net", false},
+		{"tunnel", "", "https://mcp.example.com", true},
+	}
+	for _, c := range cases {
+		if err := issuer(c.listen, c.domain, c.issuer); (err == nil) != c.ok {
+			t.Fatal(c, err)
+		}
+	}
+}
+
+func Test_CONSEC02_DynamicClientScopesConfiguration(t *testing.T) {
+	for name, want := range map[string][]string{"absent": nil, "empty": {}, "set": {"devices:read", "fs:read:laptop"}} {
+		cfg, err := ingressConfig(t, func(doc map[string]any) {
+			if name != "absent" {
+				doc["ingress"].(map[string]any)["oauth"].(map[string]any)["dynamic_client_scopes"] = want
+			}
+		})
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		got := cfg.Ingress.OAuth.DynamicClientScopes
+		if (got == nil) != (want == nil) || len(got) != len(want) {
+			t.Fatal(name, got)
+		}
+	}
+	for _, scope := range []string{"root", "exec:", "fs:read:", "exec:bad name"} {
+		if _, err := ingressConfig(t, func(doc map[string]any) {
+			doc["ingress"].(map[string]any)["oauth"].(map[string]any)["dynamic_client_scopes"] = []string{scope}
+		}); err == nil {
+			t.Fatal("invalid dynamic scope accepted", scope)
+		}
+	}
+}
+
+func Test_CONSEC10_QuotaConfiguration(t *testing.T) {
+	cfg, err := ingressConfig(t, func(map[string]any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, q := range map[string]Quota{"agent": cfg.Agent.Quota, "gateway": cfg.Gateway.Quota} {
+		hourly, concurrent, duration := q.Limits()
+		if hourly != 10000 || concurrent != 64 || duration != 10*time.Minute {
+			t.Fatal(name, "defaults changed", hourly, concurrent, duration)
+		}
+	}
+	cfg, err = ingressConfig(t, func(doc map[string]any) {
+		doc["agent"].(map[string]any)["quota"] = map[string]any{"calls_per_hour": 50, "max_call_duration": "45m"}
+		doc["agent"].(map[string]any)["exec"] = map[string]any{"default_timeout": "30m"}
+		doc["gateway"].(map[string]any)["quota"] = map[string]any{"max_concurrent": 2}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, c, d := cfg.Agent.Quota.Limits(); h != 50 || c != 64 || d != 45*time.Minute {
+		t.Fatal("agent quota", h, c, d)
+	}
+	if h, c, d := cfg.Gateway.Quota.Limits(); h != 10000 || c != 2 || d != 10*time.Minute {
+		t.Fatal("gateway quota", h, c, d)
+	}
+	for name, quota := range map[string]map[string]any{"zero calls": {"calls_per_hour": 0}, "negative": {"max_concurrent": -1}, "bad duration": {"max_call_duration": "soon"}, "zero duration": {"max_call_duration": "0s"}, "unknown": {"burst": 1}} {
+		for _, section := range []string{"agent", "gateway"} {
+			if _, err := ingressConfig(t, func(doc map[string]any) { doc[section].(map[string]any)["quota"] = quota }); err == nil {
+				t.Fatal("invalid quota accepted", section, name)
+			}
+		}
+	}
+	// A default exec timeout longer than the call budget would be cut short silently.
+	if _, err := ingressConfig(t, func(doc map[string]any) {
+		doc["agent"].(map[string]any)["exec"] = map[string]any{"default_timeout": "30m"}
+	}); err == nil {
+		t.Fatal("exec default_timeout above the 10m call budget accepted")
 	}
 }
