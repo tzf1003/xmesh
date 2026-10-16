@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -100,10 +101,25 @@ type fixture struct {
 	path   string
 }
 
+// shortTempDir is t.TempDir for tests that bind a Unix socket: macOS temp paths are long enough to
+// overflow sun_path (104 bytes), so the directory goes under /tmp there.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return t.TempDir()
+	}
+	dir, err := os.MkdirTemp("/tmp", "xmc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // newFixture starts a server on a fresh state directory.
 func newFixture(t *testing.T, mutate ...func(*Options)) *fixture {
 	t.Helper()
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	state := filepath.Join(dir, "s")
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)

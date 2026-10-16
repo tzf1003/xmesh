@@ -27,7 +27,7 @@ func get(t *testing.T, path string) (int, error) {
 
 // Rule CON-SEC-12 (its matrix entry arrives with the control contract): only the kernel's own user may use the channel
 func Test_CONSEC12_PeerCredentialCheck(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	serve := func(name string, uid uint32) string {
 		path := filepath.Join(dir, name)
 		l, err := listenUnix(path, uid)
