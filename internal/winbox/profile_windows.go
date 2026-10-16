@@ -42,9 +42,10 @@ type Profile struct {
 	deleted                     bool
 	processes                   *executionProcesses
 	standaloneProcessAttributes bool
-	processesConfirmed          bool // Protected by mu; includes durable exit confirmation.
-	reclaiming                  bool // Blocks launch admission throughout workspace reclamation.
-	workspaceClosing            bool // Keeps admission sealed after tracked handle handoff, including retries.
+	processesConfirmed          bool                    // Protected by mu; includes durable exit confirmation.
+	reclaiming                  bool                    // Blocks launch admission throughout workspace reclamation.
+	workspaceClosing            bool                    // Keeps admission sealed after tracked handle handoff, including retries.
+	workspaceMonitor            *workspaceChangeMonitor // Pins the active observation owner through Stop.
 }
 
 func hresult(operation string, result uintptr) error {

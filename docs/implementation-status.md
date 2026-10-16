@@ -269,3 +269,13 @@ journal-backed profile 的受管所有者在任何进程准入前刷盘唯一 `e
 Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer 原生用例验证 classic disposition 删除初始文件、未确认退出时句柄保持、正常关闭、外部数据句柄保留错误与重试、追加失败后重开日志重试、根绑定保持、准确 DACL/控制位/标签恢复和持久完成重放；三个原生子场景均通过。独立 checkpoint 在执行期间继续持有初始句柄时可保留最终 close 错误。生产执行协调器须接入该关闭协议，并继续完成导入子树证明、周期 checkpoint、外部 ACL/命名空间/reparse writer 协调及 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
 
 `644d177` 的 [push 工作流 38835272980](https://github.com/tzf1003/xmesh/actions/runs/38835272980) 与 [PR 工作流 38835280980](https://github.com/tzf1003/xmesh/actions/runs/38835280980) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38835272987` / `38835281068` 通过。原生 job `116762888408` / `116762912424` 的完整日志各确认 153 个独立 Job/AppContainer PASS 标记，保留全部既有 149 项。三个新增子场景验证存活宿主的正常关闭、外部句柄阻塞后的重试，以及日志追加失败后重开恢复。真实 AppContainer 设置 classic disposition 后，未确认退出时保留初始句柄，确认后关闭本所有者的后代句柄；失败期间根绑定、profile 引用和准入封闭保持，成功后准确恢复存活对象 DACL/控制位/标签、清空 grant 引用，并持久重放完成状态。
+
+## 执行期周期 USN checkpoint
+
+新增内部 `workspaceChangeMonitor`，在已追踪工作区、唯一执行所有者且尚无 Job 准入时创建；入口先完成一次有界补读，再以 10 毫秒至 1 分钟的周期运行。工作区操作门与 profile 互斥锁串行后台 checkpoint、进程退出回执和关闭交接；外部命名空间/reparse/ACL writer guard 仍由调用方自快照起持续持有。累计身份、事件和 journal 容量继续受既有限额约束，周期调度不能替代 USN 保留区间与连续性证明。
+
+后台补读错误或生命周期取消先永久封闭该 profile 的启动与授权准入，再以独立 30 秒期限请求终止全部受管 Job 并确认退出。原始错误与退出确认失败共同保留，写盘失败时不确认执行。已有初始句柄延迟最终 close、未知导入或链接/reparse 证明不足同样使监视器保留错误并终止执行，须由后续生产协调完善这些执行期证明。监视器不修改 ACL；根/祖先/凭证绑定和 profile 引用保持到清理成功。
+
+正常 `Stop` 要求持久进程退出确认，故障后可收取已终止监视器的结果；停止会等待在途 checkpoint 结束后才解除工作区/profile 附着，超时继续保留所有权。观察 `Wait` 的取消或超时只影响观察者。附着期间禁止第二监视器、新执行所有者和新授权，工作区关闭须先完成监视器交接。后续工作区关闭继续执行最终 USN 补读及按 ID 回收。
+
+本地全量 race 共 300 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。新增四个真实 AppContainer 原生场景覆盖周期持久化、已移出目录的后续子对象、生命周期取消、历史连续性故障和写盘失败后的终止/恢复；并检查重复准入、停止前退出门禁、等待/停止期限、准确安全恢复与持久重放。Windows 原生结果待 CI。导入子树证明、执行期延迟 close 协调、外部 writer 协调、生产执行协调器和 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。

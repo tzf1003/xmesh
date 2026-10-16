@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -17,13 +16,14 @@ import (
 // sandbox process before Close. Descendant security handles use volume/file-ID
 // opens so populated directories can be renamed while grants remain bound.
 type workspaceGrant struct {
-	mu          sync.Mutex
+	operation   chan struct{}
 	profile     *Profile
 	tree        *workspaceTree
 	selected    *selectedObjectGrants
 	path        string
 	maxObjects  int
 	credentials []windows.Handle
+	monitor     *workspaceChangeMonitor // Protected by operation and profile.mu.
 }
 
 // grantWorkspace authorizes selected existing objects and inheritance from each
@@ -76,7 +76,7 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	// selected grants. It is released only after complete tree cleanup.
 	p.grants++
 	p.mu.Unlock()
-	g := &workspaceGrant{profile: p, tree: tree, selected: &selectedObjectGrants{}, path: path, maxObjects: maxObjects, credentials: credentials}
+	g := &workspaceGrant{operation: make(chan struct{}, 1), profile: p, tree: tree, selected: &selectedObjectGrants{}, path: path, maxObjects: maxObjects, credentials: credentials}
 	for _, object := range tree.objects {
 		if err = ctx.Err(); err != nil {
 			break
@@ -155,8 +155,14 @@ func (g *workspaceGrant) retainIdentityHandles(ctx context.Context) error {
 // root and removes this profile's inherited ACEs by object identity. Any failed
 // or incomplete scan retains the profile reference and namespace guard for retry.
 func (g *workspaceGrant) Close() error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	release, err := g.acquire(context.Background())
+	if err != nil {
+		return err
+	}
+	defer release()
+	if g.monitor != nil {
+		return errWorkspaceMonitorActive
+	}
 	if g.tree == nil {
 		return nil
 	}
@@ -242,6 +248,25 @@ func (g *workspaceGrant) Close() error {
 	g.profile.grants--
 	g.profile.mu.Unlock()
 	return nil
+}
+
+func (g *workspaceGrant) acquire(ctx context.Context) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if g == nil || g.operation == nil {
+		return nil, fmt.Errorf("AppContainer workspace owner is unavailable")
+	}
+	select {
+	case g.operation <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-g.operation
+			return nil, err
+		}
+		return func() { <-g.operation }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (g *workspaceGrant) closeUnjournaled() error {
