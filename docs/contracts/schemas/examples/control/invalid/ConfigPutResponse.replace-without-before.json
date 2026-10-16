@@ -1,0 +1,14 @@
+{
+  "applied": true,
+  "etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "restart_required": false,
+  "diff": [
+    {
+      "pointer": "/a",
+      "op": "replace",
+      "after": 1,
+      "restart_required": false,
+      "weakens_security": false
+    }
+  ]
+}

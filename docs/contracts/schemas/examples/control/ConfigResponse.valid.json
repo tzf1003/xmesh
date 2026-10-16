@@ -1,0 +1,16 @@
+{
+  "etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "content": "node:\n  name: win-dev-01\n  roles: [agent]\n",
+  "parsed": {
+    "node": {
+      "name": "win-dev-01",
+      "roles": [
+        "agent"
+      ]
+    }
+  },
+  "valid": true,
+  "load_error": null,
+  "effective_etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "restart_required": false
+}
