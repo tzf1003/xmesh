@@ -224,10 +224,26 @@ func runObjectHelper(t *testing.T, p *Profile, helper, workspace, outside string
 	return proof
 }
 
+// runAppContainerHelper runs helper in a fresh managed execution. A child that
+// exits 66 because the race runtime failed to map its own memory before any test
+// code ran is launched once more; every other nonzero status fails the test.
 func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, workspace, outside string) []byte {
+	t.Helper()
+	body, retry := runAppContainerHelperOnce(t, p, helper, testName, marker, workspace, outside, true)
+	if retry {
+		body, _ = runAppContainerHelperOnce(t, p, helper, testName, marker, workspace, outside, false)
+	}
+	return body
+}
+
+func runAppContainerHelperOnce(t *testing.T, p *Profile, helper, testName, marker, workspace, outside string, mayRetry bool) (_ []byte, retry bool) {
 	t.Helper()
 	output := filepath.Join(p.Directory(), "object-proof.json")
 	_ = os.Remove(output)
+	stale, _ := filepath.Glob(filepath.Join(p.Directory(), "object-race.*"))
+	for _, path := range stale {
+		_ = os.Remove(path)
+	}
 	owner, err := newExecutionProcesses(p, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -264,9 +280,11 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	}
 	var exit uint32
 	if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 0 {
+		var diagnostic []string
 		if _, seekErr := diagnostics.Seek(0, io.SeekStart); seekErr == nil {
 			body, readErr := io.ReadAll(io.LimitReader(diagnostics, 64*1024))
 			t.Logf("sandbox runtime diagnostic: %s (read error: %v)", body, readErr)
+			diagnostic = append(diagnostic, string(body))
 		}
 		logs, _ := filepath.Glob(filepath.Join(p.Directory(), "object-race.*"))
 		for _, path := range logs {
@@ -275,9 +293,14 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 				t.Log("open sandbox race diagnostic", openErr)
 				continue
 			}
-			diagnostic, readErr := io.ReadAll(io.LimitReader(file, 64*1024))
+			body, readErr := io.ReadAll(io.LimitReader(file, 64*1024))
 			_ = file.Close()
-			t.Logf("sandbox race diagnostic: %s (read error: %v)", diagnostic, readErr)
+			t.Logf("sandbox race diagnostic: %s (read error: %v)", body, readErr)
+			diagnostic = append(diagnostic, string(body))
+		}
+		if mayRetry && err == nil && raceRuntimeStartFailed(exit, diagnostic...) {
+			t.Log("race runtime failed to start before any test code ran; launching the helper once more")
+			return nil, true
 		}
 		t.Fatal("object helper exit", exit, err)
 	}
@@ -285,7 +308,7 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	if err != nil {
 		t.Fatal(err)
 	}
-	return body
+	return body, false
 }
 
 func setMediumLabel(t *testing.T, path string) {

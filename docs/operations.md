@@ -193,7 +193,7 @@ Agent 与 Gateway 的工具调用预算缺省为每主体每小时 10000 次、�
 
 审计写入状态目录的 `audit`，默认保留 720 小时；记录工具、路径、状态、耗时等元数据。PTY 读操作按分钟汇总字节量，审计编码器限制可写字段。
 
-`/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使当前进程的 Agent 与 Gateway 进入 drain，控制器须向其他节点分别发送控制消息。重启重置内存 drain 状态。
+`/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使收到消息的进程的 Agent 与 Gateway 进入 drain。用 `xmesh drain --scope mesh` 向所有在线设备逐台发送，`--scope device --device NAME` 只下线一台，`--mode kill` 同时终止 PTY 并释放租约；tailnet 模式须提供带 `tag:admin` 的 `--authkey-file`，LAN 模式须在各设备上用 `--tags tag:admin` 导入管理员机器的配对文件。其他节点的 Gateway 一旦在调用中看到 `mesh.draining` 就停止路由该设备。重启重置内存 drain 状态。
 
 `install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken` 和 `LeastPrivilege` 配置运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
 

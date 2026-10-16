@@ -83,6 +83,30 @@ func (c *executionTestConsole) until(t *testing.T, expression string) []string {
 	return nil
 }
 
+func (c *executionTestConsole) snapshot() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.text.String()
+}
+
+// readyOrExited waits for the helper's CONSOLE_READY line and reports false when
+// the process exits without printing it, so a start-up failure is seen at once
+// instead of as an output deadline.
+func (c *executionTestConsole) readyOrExited(t *testing.T, process windows.Handle) bool {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		if strings.Contains(c.snapshot(), "CONSOLE_READY") {
+			return true
+		}
+		if result, err := windows.WaitForSingleObject(process, 0); err == nil && result == windows.WAIT_OBJECT_0 {
+			return strings.Contains(c.snapshot(), "CONSOLE_READY")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("AppContainer pseudoconsole output deadline: %q", c.snapshot())
+	return false
+}
+
 func (c *executionTestConsole) close(t *testing.T) {
 	t.Helper()
 	// The reader remains active while ClosePseudoConsole flushes output.
@@ -102,95 +126,113 @@ func Test_WindowsAppContainerProcessConsole(t *testing.T) {
 	}
 	for _, mode := range []struct{ supervised, terminate bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
 		t.Run(fmt.Sprintf("supervised=%t/terminate=%t", mode.supervised, mode.terminate), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			state := filepath.Join(t.TempDir(), "state")
-			privateJournalDirectory(t, state)
-			journal, err := openBoundGrantJournal(ctx, filepath.Join(state, "console.journal"), true)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer journal.Close()
-			p, err := newProfile(journal)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := p.Close(); err != nil {
-					t.Error(err)
+			// A helper whose race runtime fails to start (status 66 without a race
+			// report) is launched once more in a fresh profile; nothing else retries.
+			attempt := func(mayRetry bool) (retry bool) {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				state := filepath.Join(t.TempDir(), "state")
+				privateJournalDirectory(t, state)
+				journal, err := openBoundGrantJournal(ctx, filepath.Join(state, "console.journal"), true)
+				if err != nil {
+					t.Fatal(err)
 				}
-			}()
-			c := newExecutionTestConsole(t)
-			defer c.close(t)
-			var owner *executionProcesses
-			if mode.supervised {
-				owner, err = newSupervisedExecutionProcesses(ctx, p, 1, supervisorTestCommand(t, false))
-			} else {
-				owner, err = newExecutionProcesses(p, 1)
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() {
-				if err := owner.reap(context.Background(), 93); err != nil {
-					t.Error("console execution cleanup", err)
+				defer journal.Close()
+				p, err := newProfile(journal)
+				if err != nil {
+					t.Fatal(err)
 				}
-				if err := owner.Close(); err != nil {
-					t.Error(err)
+				defer func() {
+					if err := p.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+				c := newExecutionTestConsole(t)
+				defer c.close(t)
+				var owner *executionProcesses
+				if mode.supervised {
+					owner, err = newSupervisedExecutionProcesses(ctx, p, 1, supervisorTestCommand(t, false))
+				} else {
+					owner, err = newExecutionProcesses(p, 1)
 				}
-			}()
-			body, err := os.ReadFile(os.Args[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			helper := filepath.Join(p.Directory(), "console-helper.exe")
-			if err := os.WriteFile(helper, body, 0700); err != nil {
-				t.Fatal(err)
-			}
-			process, err := owner.startWithConsole(ctx, []string{helper, "-test.run=^Test_WindowsAppContainerConsoleHelper$"}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_CONSOLE_HELPER=1", "GORACE=log_path=console-race"}, c.handle)
-			if err != nil {
-				t.Fatal("console launch", err)
-			}
-			defer windows.CloseHandle(process.Process)
-			defer windows.CloseHandle(process.Thread)
-			c.until(t, "CONSOLE_READY")
-			if mode.terminate {
-				if err := owner.reap(ctx, 93); err != nil {
-					t.Fatal("blocked console execution reap", err)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := owner.reap(context.Background(), 93); err != nil {
+						t.Error("console execution cleanup", err)
+					}
+					if err := owner.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
+				body, err := os.ReadFile(os.Args[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				helper := filepath.Join(p.Directory(), "console-helper.exe")
+				if err := os.WriteFile(helper, body, 0700); err != nil {
+					t.Fatal(err)
+				}
+				process, err := owner.startWithConsole(ctx, []string{helper, "-test.run=^Test_WindowsAppContainerConsoleHelper$"}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_CONSOLE_HELPER=1", "GORACE=log_path=console-race"}, c.handle)
+				if err != nil {
+					t.Fatal("console launch", err)
+				}
+				defer windows.CloseHandle(process.Process)
+				defer windows.CloseHandle(process.Thread)
+				if !c.readyOrExited(t, process.Process) {
+					var exit uint32
+					if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil {
+						t.Fatal("console process exit query", err)
+					}
+					if mayRetry && raceRuntimeStartFailed(exit, append(raceRuntimeLogs(p.Directory(), "console-race"), c.snapshot())...) {
+						return true
+					}
+					t.Fatalf("console process exited %d before it was ready: %q", exit, c.snapshot())
+				}
+				if mode.terminate {
+					if err := owner.reap(ctx, 93); err != nil {
+						t.Fatal("blocked console execution reap", err)
+					}
+					var exit uint32
+					if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 93 {
+						t.Fatal("terminated console process exit", exit, err)
+					}
+					if err := requireJournalProcessesReaped(journal); err != nil {
+						t.Fatal("terminated console durable confirmation", err)
+					}
+					return false
+				}
+				if err := windows.ResizePseudoConsole(c.handle, windows.Coord{X: 137, Y: 43}); err != nil {
+					t.Fatal("caller pseudoconsole lost", err)
+				}
+				input := "input 日本 😀"
+				if _, err := io.WriteString(c.input, input+"\r"); err != nil {
+					t.Fatal(err)
+				}
+				match := c.until(t, `CONSOLE_PROOF app=1 size=137x43 input=([A-Za-z0-9+/=]+)`)
+				decoded, err := base64.StdEncoding.DecodeString(match[1])
+				if err != nil || string(decoded) != input {
+					t.Fatal("console input", string(decoded), err)
+				}
+				if result, err := windows.WaitForSingleObject(process.Process, 10000); err != nil || result != windows.WAIT_OBJECT_0 {
+					t.Fatal("console exit wait", result, err)
 				}
 				var exit uint32
-				if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 93 {
-					t.Fatal("terminated console process exit", exit, err)
+				if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 0 {
+					t.Fatal("console process exit", exit, err)
+				}
+				if err := owner.reap(ctx, 0); err != nil {
+					t.Fatal("console identity confirmation", err)
 				}
 				if err := requireJournalProcessesReaped(journal); err != nil {
-					t.Fatal("terminated console durable confirmation", err)
+					t.Fatal("console durable confirmation", err)
 				}
-				return
+				return false
 			}
-			if err := windows.ResizePseudoConsole(c.handle, windows.Coord{X: 137, Y: 43}); err != nil {
-				t.Fatal("caller pseudoconsole lost", err)
-			}
-			input := "input 日本 😀"
-			if _, err := io.WriteString(c.input, input+"\r"); err != nil {
-				t.Fatal(err)
-			}
-			match := c.until(t, `CONSOLE_PROOF app=1 size=137x43 input=([A-Za-z0-9+/=]+)`)
-			decoded, err := base64.StdEncoding.DecodeString(match[1])
-			if err != nil || string(decoded) != input {
-				t.Fatal("console input", string(decoded), err)
-			}
-			if result, err := windows.WaitForSingleObject(process.Process, 10000); err != nil || result != windows.WAIT_OBJECT_0 {
-				t.Fatal("console exit wait", result, err)
-			}
-			var exit uint32
-			if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 0 {
-				t.Fatal("console process exit", exit, err)
-			}
-			if err := owner.reap(ctx, 0); err != nil {
-				t.Fatal("console identity confirmation", err)
-			}
-			if err := requireJournalProcessesReaped(journal); err != nil {
-				t.Fatal("console durable confirmation", err)
+			if attempt(true) {
+				t.Log("race runtime failed to start before any test code ran; launching the helper once more")
+				attempt(false)
 			}
 		})
 	}

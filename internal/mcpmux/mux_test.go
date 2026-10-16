@@ -192,3 +192,45 @@ func Test_CTRMUX02_ResponseWaitsForProgressForwarding(t *testing.T) {
 		t.Fatal("call did not complete after progress forwarding", ctx.Err())
 	}
 }
+
+func Test_CTRMUX02_UnknownProgressTokenReported(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	left, right := net.Pipe()
+	server := mcp.NewServer(&mcp.Implementation{Name: "mock", Version: "1"}, nil)
+	server.AddTool(&mcp.Tool{Name: "noisy", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		for _, token := range []any{"unknown", "other", 7} {
+			_ = r.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: token, Progress: 1})
+		}
+		_ = r.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{ProgressToken: r.Params.GetProgressToken(), Progress: 2})
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+	})
+	ss, err := server.Connect(ctx, &mcp.IOTransport{Reader: left, Writer: left}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ss.Close()
+	reports := make(chan struct{}, 8)
+	b, err := Connect(ctx, &mcp.IOTransport{Reader: right, Writer: right}, Options{Unrouted: func() { reports <- struct{}{} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	routed := 0
+	if _, err = b.Call(ctx, "noisy", map[string]any{}, Progress{Original: "owner", Send: func(context.Context, *mcp.ProgressNotificationParams) error { routed++; return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if routed != 1 {
+		t.Fatal("the owner's own progress was dropped", routed)
+	}
+	select {
+	case <-reports:
+	case <-ctx.Done():
+		t.Fatal("unknown progress token was not reported")
+	}
+	select {
+	case <-reports:
+		t.Fatal("a burst must produce one report per interval")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
