@@ -315,3 +315,5 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 返回值单独报告移动是否已经发生。移动后的取消、ACL 或 checkpoint 错误永久封闭该 profile 的准入，以独立期限终止并确认受管 Job；确认写盘失败继续保留执行义务。后续按完整清单回收 ACL，保留已经发生的 namespace 移动。调用方仍须在入口前冻结全部源和目标 namespace/reparse/ACL writer，并持续持有工作区外部 writer guard；生产 writer 生命周期、未知导入处理和 exec/ConPTY 接入继续实现，Windows L2 保持 `sandbox.unavailable`。
 
 本地全量 race 390 项、vet、Windows amd64/arm64 vet 及 amd64 测试编译通过。新增原生场景覆盖目录、单文件、嵌套目标、重复导入、日志重开、真实 AppContainer 后续写入、准确安全回收和完成重放；拒绝覆盖、越界、reparse、hardlink、预存 profile ACE、追加失败、取消、移动被占用及限额。移动后 ACL 边界的取消和日志关闭故障同时验证真实受管进程终止、持久执行确认与恢复重试。本阶段提交时等待 Windows 原生 CI 验收。
+
+原生首轮 `4996819` 的 [push 38846510170](https://github.com/tzf1003/xmesh/actions/runs/38846510170) 与 [PR 38846513723](https://github.com/tzf1003/xmesh/actions/runs/38846513723) 中，三平台常规检查及契约通过，九个导入拒绝子场景通过；五个移动场景及两个移动后故障场景在 namespace 调用处返回参数错误。绑定目标父目录的相对重命名现通过 `NtSetInformationFile(FileRenameInformation)` 执行；Win32 `FileRenameInfoEx` 接口要求 `RootDirectory` 为空，不能承接该绑定。双架构 vet 与 amd64 测试编译通过，修复后等待原生复验。

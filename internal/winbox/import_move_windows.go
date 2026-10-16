@@ -310,8 +310,11 @@ func renameImportObject(source, parent windows.Handle, name string) error {
 	info.RootDirectory = parent
 	info.NameLength = uint32(2 * (len(encoded) - 1))
 	copy(unsafe.Slice((*uint16)(unsafe.Pointer(&buffer[offset])), len(encoded)), encoded)
-	// Flags remain zero: an existing destination is never replaced.
-	if err := windows.SetFileInformationByHandle(source, windows.FileRenameInfoEx, &buffer[0], uint32(len(buffer))); err != nil {
+	// The native rename information accepts a bound target-directory handle.
+	// The Win32 FileRenameInfoEx interface requires a null RootDirectory.
+	// ReplaceIfExists remains zero: an existing destination is never replaced.
+	var status windows.IO_STATUS_BLOCK
+	if err := windows.NtSetInformationFile(source, &status, &buffer[0], uint32(len(buffer)), windows.FileRenameInformation); err != nil {
 		return fmt.Errorf("move AppContainer import by identity: %w", err)
 	}
 	return nil
