@@ -288,3 +288,17 @@ test("the peer list is read when peers is advertised and changes arrive as event
   );
   assert.equal(c.snapshot.connection.kind === "connected" && c.snapshot.connection.status.peers.online, 3);
 });
+
+test("nudge drops a live event stream and the controller resubscribes at once", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "node-a");
+  const c = controller();
+  c.start();
+  await ready(c, k);
+  const eventRequests = (): number => k.requests.filter((r) => r.path === "/v1/events").length;
+  const opened = eventRequests();
+  c.nudge();
+  const deadline = Date.now() + 3000;
+  while (eventRequests() === opened && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(eventRequests() > opened, "stream reopened after nudge");
+});
