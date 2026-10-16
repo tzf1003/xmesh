@@ -32,7 +32,7 @@ func startNode(t *testing.T) *node {
 	t.Helper()
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	n := &node{t: t, stateDir: filepath.Join(root, "state"), gateway: address(t), agent: address(t)}
-	doc := map[string]any{"node": map[string]any{"name": "ctl-node", "roles": []string{"agent", "gateway"}}, "mesh": map[string]any{"mode": "lan", "lan": map[string]bool{"mdns": true}}, "gateway": map[string]any{"listen": n.gateway}, "agent": map[string]any{"default_cwd": root, "cwd_policy": map[string]any{"allow": []string{root}}, "authz": map[string]any{"tag:peer": map[string]any{"tools": []string{"*"}, "backends": []string{"*"}}}}}
+	doc := map[string]any{"node": map[string]any{"name": "app-ctl-node", "roles": []string{"agent", "gateway"}}, "mesh": map[string]any{"mode": "lan", "lan": map[string]bool{"mdns": true}}, "gateway": map[string]any{"listen": n.gateway}, "agent": map[string]any{"default_cwd": root, "cwd_policy": map[string]any{"allow": []string{root}}, "authz": map[string]any{"tag:peer": map[string]any{"tools": []string{"*"}, "backends": []string{"*"}}}}}
 	b, _ := json.Marshal(doc)
 	path := filepath.Join(root, "config.json")
 	if err := os.WriteFile(path, b, 0600); err != nil {
@@ -178,7 +178,7 @@ func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 func Test_ControlStatusFromRunningNode(t *testing.T) {
 	n := startNode(t)
 	st := n.status()
-	if st.Hostname != "ctl-node" || st.Control.KernelVersion != Version || st.Control.APIVersion != v1.APIVersion || st.Drain.Draining || st.Lifecycle != "running" {
+	if st.Hostname != "app-ctl-node" || st.Control.KernelVersion != Version || st.Control.APIVersion != v1.APIVersion || st.Drain.Draining || st.Lifecycle != "running" {
 		t.Fatalf("%+v", st)
 	}
 	if len(st.Roles) != 2 || st.Limits.PTYMaxSessions == 0 || st.Network.Mode != "local" || st.Paths.StateDir != n.stateDir || st.Paths.ConfigFile == "" {
@@ -189,7 +189,7 @@ func Test_ControlStatusFromRunningNode(t *testing.T) {
 	}
 	var peers v1.PeersResponse
 	n.get("/v1/peers", "PeersResponse", &peers)
-	if len(peers.Peers) != 1 || !peers.Peers[0].Self || peers.Peers[0].Name != "ctl-node" || peers.Peers[0].Connection != "local" {
+	if len(peers.Peers) != 1 || !peers.Peers[0].Self || peers.Peers[0].Name != "app-ctl-node" || peers.Peers[0].Connection != "local" {
 		t.Fatalf("%+v", peers)
 	}
 	var cfg v1.ConfigResponse
