@@ -26,7 +26,7 @@ func (s spec) validate(raw json.RawMessage) error {
 }
 
 // ignoredArguments are accepted and then ignored on every built-in tool.
-var ignoredArguments = []string{"caller_id", "owner", "node_id", "cwd", "env"}
+var ignoredArguments = []string{"caller_id", "owner", "node_id"}
 
 var builtinSpecs = sync.OnceValue(buildSpecs)
 

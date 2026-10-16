@@ -319,7 +319,7 @@ func ImportPair(stateDir, path, expected string, tags []string) error {
 		return fmt.Errorf("配对指纹与 --fingerprint 不一致")
 	}
 	for _, tag := range tags {
-		if tag != "tag:peer" && tag != "tag:device" && tag != "tag:ingress" {
+		if tag != "tag:peer" && tag != "tag:device" && tag != "tag:ingress" && tag != "tag:admin" {
 			return fmt.Errorf("不支持的配对角色")
 		}
 	}
