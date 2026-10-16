@@ -40,6 +40,7 @@ test("every op is accepted in its documented shape", () => {
     { op: "policy.show" },
     { op: "policy.snapshots" },
     { op: "policy.template", template: "team", owner: "autogroup:admin", apply: false },
+    { op: "policy.template", template: "team", owner: "tag:admins", apply: false },
     { op: "policy.template", template: "personal", owner: "alice@", port: 7433, apply: true, expectVersion: "v3" },
     { op: "policy.rollback", snapshot: "20261016T083000Z-1", apply: true, expectVersion: "sha256:abc" },
     { op: "matrix", mismatchOnly: true, port: 7433 },
@@ -73,6 +74,7 @@ test("requests are refused for stray keys, bad types and injection attempts", ()
   assert.equal(field({ op: "onboard", tags: ["tag:a"], ttl: "1h", ephemeral: false, user: "a b", file: "/k", overwrite: false }), "user");
   assert.equal(field({ op: "policy.template", template: "admin", owner: "a@", apply: false }), "template");
   assert.equal(field({ op: "policy.template", template: "team", owner: "a b", apply: false }), "owner");
+  assert.equal(field({ op: "policy.template", template: "team", owner: "tag:", apply: false }), "owner");
   assert.equal(field({ op: "policy.template", template: "team", owner: "autogroup:admin", port: 70000, apply: false }), "port");
   assert.equal(field({ op: "policy.template", template: "team", owner: "autogroup:admin", port: 80.5, apply: false }), "port");
   assert.equal(field({ op: "policy.template", template: "team", owner: "autogroup:admin", apply: false, expectVersion: "a b" }), "expectVersion");
@@ -178,6 +180,10 @@ test("login commands: fixed text, copied by key", () => {
   assert.ok((COPY_KINDS as readonly string[]).includes("meshLoginRead"));
   assert.equal(clipboardText("meshLoginRead", undefined), MESH_LOGIN_COMMANDS.read);
   assert.equal(clipboardText("meshLoginWrite", undefined), MESH_LOGIN_COMMANDS.write);
+  assert.equal(clipboardText("meshLoginReadHeadscale", undefined), MESH_LOGIN_COMMANDS.readHeadscale);
+  assert.equal(clipboardText("meshLoginWriteHeadscale", undefined), MESH_LOGIN_COMMANDS.writeHeadscale);
+  // The text is pasted into a terminal: no pipes, redirects or substitutions.
+  for (const c of Object.values(MESH_LOGIN_COMMANDS)) assert.doesNotMatch(c, /[|&;<>$`\\(){}]/);
   assert.equal(clipboardText("gatewayUrl", undefined), undefined);
   for (const k of ["authkeySave", "allowlistFile", "tokenFile"]) assert.ok((PICK_KINDS as readonly string[]).includes(k));
 });

@@ -64,8 +64,13 @@ test("no credential: the page shows the login commands, copies them, and recover
   await expect(page.getByTestId("mesh-no-credential")).toBeVisible();
   await expect(page.getByTestId("mesh-no-credential")).toContainText("xmesh mesh login");
   await page.getByTestId("mesh-copy-write").click();
-  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual(["xmesh mesh login --kind tailscale|headscale --access write"]);
-  await expect(page.getByTestId("toast")).toContainText("已复制");
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual(["xmesh mesh login --kind tailscale --access write"]);
+  await page.getByTestId("mesh-copy-read-headscale").click();
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual([
+    "xmesh mesh login --kind tailscale --access write",
+    "xmesh mesh login --kind headscale --url https://headscale.example.com --access read",
+  ]);
+  await expect(page.getByTestId("toast").first()).toContainText("已复制");
 
   await patch({ credential: true });
   await page.getByTestId("mesh-refresh").click();

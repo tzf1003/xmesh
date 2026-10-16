@@ -10,7 +10,7 @@ import { MESH_LOGIN_COMMANDS, type MeshPlan } from "../../../shared/mesh";
 export function MeshError({ error, toast }: { error: ActionError; toast: (text: string, error?: boolean) => void }): JSX.Element {
   const t = useT();
   if (error.code !== "no_credential") return <ErrorBanner error={error} testid="mesh-error" />;
-  const copy = async (kind: "meshLoginRead" | "meshLoginWrite"): Promise<void> => {
+  const copy = async (kind: "meshLoginRead" | "meshLoginWrite" | "meshLoginReadHeadscale" | "meshLoginWriteHeadscale"): Promise<void> => {
     const r = await getApi().copy(kind);
     toast(r.ok ? t("mesh.copied") : t("mesh.copyFailed"), !r.ok);
   };
@@ -20,20 +20,30 @@ export function MeshError({ error, toast }: { error: ActionError; toast: (text: 
         <strong>{t("mesh.noCredential.title")}</strong>
       </p>
       <p>{t("mesh.noCredential.body")}</p>
-      <ul>
-        <li>
-          {t("mesh.noCredential.read")} <code>{MESH_LOGIN_COMMANDS.read}</code>{" "}
-          <button type="button" class="btn small" onClick={() => void copy("meshLoginRead")} data-testid="mesh-copy-read">
-            {t("mesh.copy")}
-          </button>
-        </li>
-        <li>
-          {t("mesh.noCredential.write")} <code>{MESH_LOGIN_COMMANDS.write}</code>{" "}
-          <button type="button" class="btn small" onClick={() => void copy("meshLoginWrite")} data-testid="mesh-copy-write">
-            {t("mesh.copy")}
-          </button>
-        </li>
-      </ul>
+      {(
+        [
+          ["read", "meshLoginRead", "meshLoginReadHeadscale", "mesh-copy-read", "mesh-copy-read-headscale"],
+          ["write", "meshLoginWrite", "meshLoginWriteHeadscale", "mesh-copy-write", "mesh-copy-write-headscale"],
+        ] as const
+      ).map(([access, tsKind, hsKind, tsId, hsId]) => (
+        <div key={access}>
+          <p>{t(access === "read" ? "mesh.noCredential.read" : "mesh.noCredential.write")}</p>
+          <ul class="plain">
+            <li>
+              Tailscale: <code>{MESH_LOGIN_COMMANDS[access]}</code>{" "}
+              <button type="button" class="btn small" onClick={() => void copy(tsKind)} data-testid={tsId}>
+                {t("mesh.copy")}
+              </button>
+            </li>
+            <li>
+              Headscale: <code>{MESH_LOGIN_COMMANDS[access === "read" ? "readHeadscale" : "writeHeadscale"]}</code>{" "}
+              <button type="button" class="btn small" onClick={() => void copy(hsKind)} data-testid={hsId}>
+                {t("mesh.copy")}
+              </button>
+            </li>
+          </ul>
+        </div>
+      ))}
       <p class="hint">{t("mesh.noCredential.hint")}</p>
     </Banner>
   );

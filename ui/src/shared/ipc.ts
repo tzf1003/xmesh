@@ -58,7 +58,7 @@ export const SNAPSHOT_EVENT = "xmesh:snapshot";
 /** Main -> renderer push channel: the newest `call` events (metadata only), newest last. */
 export const CALLS_EVENT = "xmesh:calls";
 
-export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig", "meshLoginRead", "meshLoginWrite"] as const;
+export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig", "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
 
 export const PATH_KINDS = ["config", "logs", "audit"] as const;

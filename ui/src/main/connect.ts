@@ -14,6 +14,8 @@ export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined): s
   // Terminal commands for the tailnet admin login; the secret is typed into the CLI, never into this app.
   if (kind === "meshLoginRead") return MESH_LOGIN_COMMANDS.read;
   if (kind === "meshLoginWrite") return MESH_LOGIN_COMMANDS.write;
+  if (kind === "meshLoginReadHeadscale") return MESH_LOGIN_COMMANDS.readHeadscale;
+  if (kind === "meshLoginWriteHeadscale") return MESH_LOGIN_COMMANDS.writeHeadscale;
   if (gatewayUrl === undefined || !isSafeGatewayUrl(gatewayUrl)) return undefined;
   switch (kind) {
     case "gatewayUrl":

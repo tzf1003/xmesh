@@ -62,7 +62,7 @@ export const MESH_OPS = [
 const DEVICE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const TAG = /^tag:[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const TTL = /^[1-9][0-9]{0,3}(m|h)$/;
-const OWNER = /^(autogroup:[a-z]{1,32}|group:[A-Za-z0-9._-]{1,64}|[A-Za-z0-9._%+-]{1,64}@([A-Za-z0-9.-]{1,128})?)$/;
+const OWNER = /^(autogroup:[a-z]{1,32}|group:[A-Za-z0-9._-]{1,64}|tag:[A-Za-z0-9-]{1,63}|[A-Za-z0-9._%+-]{1,64}@([A-Za-z0-9.-]{1,128})?)$/;
 const USER = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
 const SNAPSHOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const VERSION = /^[\x21-\x7e]{1,256}$/;
@@ -737,9 +737,14 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
 
 // ---- helpers for the page ----
 
-/** Terminal commands the page shows when no credential is saved. The secret is typed or piped into the CLI, never into this app. */
+/**
+ * Terminal commands the page shows when no credential is saved. They run as written (no shell metacharacters);
+ * the secret is typed at the prompt or piped on stdin, never into this app. The Headscale URL is a placeholder to edit.
+ */
 export const MESH_LOGIN_COMMANDS = {
-  read: "xmesh mesh login --kind tailscale|headscale --access read",
-  write: "xmesh mesh login --kind tailscale|headscale --access write",
+  read: "xmesh mesh login --kind tailscale --access read",
+  write: "xmesh mesh login --kind tailscale --access write",
+  readHeadscale: "xmesh mesh login --kind headscale --url https://headscale.example.com --access read",
+  writeHeadscale: "xmesh mesh login --kind headscale --url https://headscale.example.com --access write",
 } as const;
 export type MeshLoginKind = keyof typeof MESH_LOGIN_COMMANDS;
