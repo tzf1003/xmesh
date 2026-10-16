@@ -5,6 +5,7 @@ package pty
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -83,10 +84,24 @@ func Test_JobControlInterruptAndClose(t *testing.T) {
 		t.Fatal(e)
 	}
 	deadline = time.Now().Add(time.Second)
-	for syscall.Kill(background, 0) == nil {
+	for processRunning(background) {
 		if time.Now().After(deadline) {
 			t.Fatal("background job survived close", background)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// processRunning reports whether pid is alive. A zombie that an init process
+// has not yet reaped (common in minimal containers) counts as exited.
+func processRunning(pid int) bool {
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return true
+	}
+	end := strings.LastIndexByte(string(stat), ')')
+	return end < 0 || len(stat) < end+3 || stat[end+2] != 'Z'
 }
