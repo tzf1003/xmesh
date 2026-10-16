@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/privdir"
@@ -88,28 +90,55 @@ func ReadEndpoint(dir string) (Endpoint, error) {
 // Address is the socket path or pipe name to dial.
 func (e Endpoint) Address() string { return e.ControlEndpointFile.Endpoint }
 
-// Discover lists the endpoints of every node of the current user, i.e.
-// <UserConfigDir>/xmesh/*/control.json. Stale files are returned too; a client
-// finds out by connecting.
-func Discover() ([]Endpoint, error) {
-	root, err := os.UserConfigDir()
-	if err != nil {
-		return nil, err
+// SystemStateRoot is where a Windows service running as SYSTEM keeps its node
+// directories, %ProgramData%\xmesh, so a user's desktop UI can find them. It is
+// empty on other platforms.
+func SystemStateRoot() string { return SystemStateRootFor(runtime.GOOS, os.Getenv) }
+
+// SystemStateRootFor is SystemStateRoot for an explicit platform and environment.
+func SystemStateRootFor(goos string, getenv func(string) string) string {
+	if goos != "windows" {
+		return ""
 	}
-	entries, err := os.ReadDir(filepath.Join(root, "xmesh"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
+	base := strings.TrimRight(getenv("ProgramData"), `\/`)
+	if base == "" {
+		base = `C:\ProgramData`
+	}
+	return base + `\xmesh`
+}
+
+// Discover lists the endpoints of every node of the current user, i.e.
+// <UserConfigDir>/xmesh/*/control.json, plus those of SYSTEM services under
+// %ProgramData%\xmesh on Windows. Stale files are returned too; a client finds
+// out by connecting.
+func Discover() ([]Endpoint, error) {
+	roots := []string{}
+	userRoot, userErr := os.UserConfigDir()
+	if userErr == nil {
+		roots = append(roots, filepath.Join(userRoot, "xmesh"))
+	}
+	if system := SystemStateRoot(); system != "" {
+		roots = append(roots, system)
+	}
+	if len(roots) == 0 {
+		return nil, userErr
 	}
 	out := []Endpoint{}
-	for _, ent := range entries {
-		if !ent.IsDir() {
-			continue
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		if e, err := ReadEndpoint(filepath.Join(root, "xmesh", ent.Name())); err == nil {
-			out = append(out, e)
+		for _, ent := range entries {
+			if !ent.IsDir() {
+				continue
+			}
+			if e, err := ReadEndpoint(filepath.Join(root, ent.Name())); err == nil {
+				out = append(out, e)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node < out[j].Node })
