@@ -25,8 +25,8 @@ UI 端的目标是把这三件事变成可预览、可校验、可回滚的操�
 | 凭据 | API token（最长 90 天）、OAuth client（客户端密钥长期有效，直到撤销）、联合身份（OIDC）。已核实 | API key，默认 90 天过期，只显示一次。已核实 |
 | 最小权限 | OAuth scope 可拆分：`devices:core:read`、`devices:core`（改 tag、授权设备，创建时须选定 tag）、`policy_file:read`、`policy_file`、`auth_keys:read`、`auth_keys`。已核实 | 无 scope，API key 即完整权限 |
 | 设备与 tag | 设备列表、`SetTags`、授权、路由。官方 Go 客户端 `tailscale.com/client/tailscale/v2` 已封装。已核实 | gRPC 与 REST（`/api/v1`），文档明确覆盖用户、节点、API key。tag 的完整接口以 `/swagger` 为准，未逐项核实 |
-| 策略 | `PolicyFile` 的 `Get`、`Raw`、`Set`（带 etag）、`Validate`。已核实 | 策略来自 `policy.path` 文件，改后须 reload（SIGHUP）。数据库模式的写接口文档未说明，待核实 |
-| auth key | `Keys` 创建带 tag、有效期、一次性或可复用的 auth key。已核实 | 预授权 key 经 CLI 或 API，细节待核实 |
+| 策略 | `PolicyFile` 的 `Get`、`Raw`、`Set`（带 etag）、`Validate`。已核实 | 策略来自 `policy.path` 文件，改后须 reload（SIGHUP）。v0.29.5 实测：`policy.mode=database` 时 `GET`、`PUT /api/v1/policy` 与 `POST /api/v1/policy/check` 可用；文件模式拒绝 `PUT`。已核实 |
+| auth key | `Keys` 创建带 tag、有效期、一次性或可复用的 auth key。已核实 | `POST /api/v1/preauthkey`，`user` 为数字 ID，`aclTags` 带 tag，key 正文只在创建响应出现一次；`POST /api/v1/node/{id}/tags` 改 tag，tag 须在 `tagOwners` 有属主（属主写 `user@`）。v0.29.5 实测，已核实 |
 
 ### DERP 事实
 
@@ -86,7 +86,7 @@ flowchart LR
 
 - 提供「xmesh 权限模板」：个人（设备互通，入口只连设备）、团队（按角色隔离）、受限（入口只能调用指定设备）。模板生成 `tagOwners` 与访问规则，覆盖 Agent 端口 `tcp:7433`、入口到设备、`tag:admin` 到 `/control/drain`。
 - 权限矩阵视图合并两层：网络层来自控制面策略，工具层来自各节点的 `agent.authz`，显示「谁可以对谁调用哪些工具」，并标出两层不一致的格子（网络放行但工具层拒绝，或反过来）。
-- 写入策略必须经过：差异预览、`Validate`、`If-Match` etag、写前快照、二次确认。Tailscale 策略是带注释的 HuJSON，使用保留注释的解析往返，只改 xmesh 管理的片段，不覆盖用户自己的规则。Headscale 文件模式只能生成文件和 reload 指令，除非 UI 与服务端同机，待核实数据库模式后再评估远程写入。
+- 写入策略必须经过：差异预览、`Validate`、`If-Match` etag、写前快照、二次确认。Tailscale 策略是带注释的 HuJSON，使用保留注释的解析往返，只改 xmesh 管理的片段，不覆盖用户自己的规则。Headscale 文件模式只能生成文件和 reload 指令，除非 UI 与服务端同机，数据库模式已核实可远程写入（见 [CTR-MESH-01](../contracts/meshadmin.md#ctr-mesh-01)），但写入没有原子的版本检查，见 [RUL-21](../contracts/rulings.md#rul-21)。
 
 ### 第三方 DERP 设置
 
@@ -112,7 +112,7 @@ flowchart LR
 | U7 meshadmin 契约 | `docs/contracts/meshadmin.md`、Provider 接口、xmesh 权限模板规范、钥匙串存取约束、裁定（Provider 差异只在 `meshadmin`） | U0 |
 | U8 只读管理 | Tailscale 与 Headscale 的只读 Provider；设备与 tag 视图、角色检查、权限矩阵、DERP 地域与健康探测、直连或中继展示；`xmesh mesh status` | U7、U1（`/v1/peers`） |
 | U9 写管理 | 改 tag、创建 auth key、接入向导、策略写入（预览、校验、etag、快照、回滚）、`derpMap` 与 `derp.paths` 写入 | U8 |
-| U10 提供商集成 | 目录格式与签名、节点公钥注册、用量展示、降级。只做客户端侧；服务端准入与计量属于提供商业务，另开仓库 | U9，法务结论 |
+| U10 提供商集成 | 目录格式与签名、节点公钥注册、用量展示、降级。只做客户端侧；服务端准入与计量属于提供商业务，另开仓库 | U9 |
 
 文件归属：`meshadmin/**`、`ui/panel` 的 mesh 页面、`cmd/xmesh/mesh.go`。不触碰 `internal/` 内核包。U7 的文档只追加约束库。
 
@@ -130,7 +130,7 @@ flowchart LR
 
 ## 需要用户决定或提供
 
-- 是否走商业化：U7 到 U9 本身对所有 xmesh 用户都有用，不涉及收费。U10 开始之前需要律师就境内中继的电信业务许可、跨境风险、备案与日志义务给结论。这一步建议现在就启动，因为它决定 DERP 提供商业务的可行形态。
+- 是否走商业化：U7 到 U9 本身对所有 xmesh 用户都有用，不涉及收费。U10 对外提供（收费或给第三方使用）之前需要律师就境内中继的电信业务许可、跨境风险、备案与日志义务给结论。2026-10-16 用户决定：当前只在小范围内部使用，先不处理法律问题；内部自建准入已按这个范围实现，计量、计费与多租户目录没有做。这一步建议现在就启动，因为它决定 DERP 提供商业务的可行形态。
 - 目标控制面：官方 Tailscale 与 Headscale 都做 Provider。若国内版以 Headscale 为主（不受官方 `derpMap` alpha 状态影响，也不依赖境外控制面），U8、U9 的 Headscale 部分要先行，且需要补全 Headscale 的 tag、预授权 key 与数据库策略接口的核实。
 - 提供商身份：自己做提供商，还是与现有云厂商合作做 derper 节点。这影响是否需要自建计量与计费。
 

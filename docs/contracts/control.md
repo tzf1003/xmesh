@@ -32,7 +32,7 @@
 
 内核在开始监听之后写 `control.json`（`ControlEndpointFile`），位置是状态目录（[`app.StateDir`](../../internal/app/runtime.go)，即 `<UserConfigDir>/xmesh/<节点名>/`）。写法是同目录临时文件加重命名；正常退出时删除。`endpoint` 永远是实际使用的路径，因此 UDS 回退到 `$TMPDIR` 时 UI 也不需要猜。
 
-UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点实例。文件存在不代表内核还活着：以连接是否成功为准，`pid` 只作提示。连接被拒绝或文件缺失都按「未运行」处理，不删除文件。
+UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点实例；Windows 上还要枚举 `%ProgramData%\xmesh\*\control.json`，`install --system` 的 SYSTEM 服务默认把状态目录放在 `%ProgramData%\xmesh\<节点名>`。文件存在不代表内核还活着：以连接是否成功为准，`pid` 只作提示。连接被拒绝或文件缺失都按「未运行」处理，不删除文件。
 
 ### 身份与边界
 

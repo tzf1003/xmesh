@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import * as path from "node:path";
 import { test } from "node:test";
-import { CHANNELS, PANEL_API_GLOBAL, PANEL_API_METHODS, SNAPSHOT_EVENT } from "../../src/shared/ipc";
+import { CALLS_EVENT, CHANNELS, PANEL_API_GLOBAL, PANEL_API_METHODS, SNAPSHOT_EVENT } from "../../src/shared/ipc";
 
 interface Exposed {
   name: string;
@@ -76,6 +76,53 @@ test("each method calls its own channel with only the caller's argument", async 
   ]);
 });
 
+test("panel data methods use their own fixed channels and forward only the caller's argument", async () => {
+  const { exposed, invoked } = loadPreload();
+  const api = exposed[0]!.api;
+  const cfg = { content: "x", etag: "e", dry_run: true };
+  await api.getSessions!();
+  await api.getConfig!();
+  await api.putConfig!(cfg);
+  await api.listPats!();
+  await api.createPat!({ name: "ci" });
+  await api.rotatePat!("ci");
+  await api.deletePat!("ci");
+  await api.listIngressClients!();
+  await api.revokeIngressClient!("c1");
+  await api.rotateIngressPassword!("a-long-enough-password");
+  await api.exportPair!();
+  await api.importPair!({ text: "t", fingerprint: "f" });
+  await api.queryAudit!({ limit: 5 });
+  await api.getRecentCalls!();
+  await api.runSetup!({ any: 1 });
+  await api.pickPath!("workspace");
+  await api.mesh!({ op: "status" });
+  assert.deepEqual(
+    invoked.map((i) => i.channel),
+    [
+      CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.listPats, CHANNELS.createPat,
+      CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
+      CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.queryAudit,
+      CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
+    ],
+  );
+  assert.deepEqual(invoked[2]!.args, [cfg]);
+  assert.deepEqual(invoked[5]!.args, ["ci"]);
+});
+
+test("onCalls hands the page the calls only and unsubscribes", () => {
+  const { exposed, listeners } = loadPreload();
+  const got: unknown[][] = [];
+  const off = exposed[0]!.api.onCalls!((...a: unknown[]) => got.push(a)) as () => void;
+  const set = listeners.get(CALLS_EVENT)!;
+  assert.equal(set.size, 1);
+  for (const l of set) l({ sender: "secret" }, [{ id: 1 }]);
+  assert.deepEqual(got, [[[{ id: 1 }]]]);
+  off();
+  assert.equal(set.size, 0);
+  assert.throws(() => exposed[0]!.api.onCalls!("nope"), TypeError);
+});
+
 test("no method lets the page pick a channel", async () => {
   const { exposed, invoked } = loadPreload();
   const api = exposed[0]!.api;
@@ -101,6 +148,6 @@ test("the preload source mentions only the fixed channel literals", async () => 
   const fs = await import("node:fs");
   const src = fs.readFileSync(path.join(__dirname, "..", "..", "src", "preload", "index.js"), "utf8");
   const literals = new Set([...src.matchAll(/"(xmesh:[a-z-]+)"/g)].map((m) => m[1]));
-  assert.deepEqual([...literals].sort(), [...Object.values(CHANNELS), SNAPSHOT_EVENT].sort());
+  assert.deepEqual([...literals].sort(), [...Object.values(CHANNELS), SNAPSHOT_EVENT, CALLS_EVENT].sort());
   assert.doesNotMatch(src, /exposeInMainWorld\([^)]*ipcRenderer/);
 });

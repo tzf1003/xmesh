@@ -33,7 +33,7 @@ type Session struct {
 	Cols, Rows                                             int
 	term                                                   terminal
 	started                                                chan struct{}
-	closedAt, orphanAt                                     time.Time
+	closedAt, orphanAt, created                            time.Time
 	lastIO                                                 atomic.Int64
 	opMu                                                   sync.Mutex // Orders owner operations and ownership changes.
 	mu                                                     sync.Mutex // Session-local ring lock (CON-IMPL-03).
@@ -277,7 +277,7 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 		return nil, e
 	}
 	capacity, _ := config.Size(cfg.ScrollbackBytes)
-	s := &Session{ID: "p-" + hex.EncodeToString(random), Owner: c.ID, Node: identity.Node(c.ID), OAuthClient: c.OAuthClient, Budget: identity.Budget(c), Name: a.Name, CWD: resolved.Path, State: "active", Cols: a.Cols, Rows: a.Rows, capacity: capacity, changed: make(chan struct{}), started: make(chan struct{})}
+	s := &Session{ID: "p-" + hex.EncodeToString(random), Owner: c.ID, Node: identity.Node(c.ID), OAuthClient: c.OAuthClient, Budget: identity.Budget(c), Name: a.Name, CWD: resolved.Path, State: "active", Cols: a.Cols, Rows: a.Rows, created: time.Now(), capacity: capacity, changed: make(chan struct{}), started: make(chan struct{})}
 	s.touch()
 	m.mu.Lock()
 	if m.closing {
@@ -469,6 +469,30 @@ func (m *Manager) List() []Object {
 		out = append(out, Object{"id": s.ID, "name": s.Name, "owner": s.Owner, "pid": pid, "state": s.State, "idle_s": max(int64(0), int64(time.Since(time.Unix(0, s.lastIO.Load())).Seconds())), "cols": s.Cols, "rows": s.Rows, "cwd": s.CWD})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["id"].(string) < out[j]["id"].(string) })
+	return out
+}
+
+// View is the metadata of one session for the local control channel. It has no terminal
+// content; pty.list stays the contract surface for tools.
+type View struct {
+	ID, Name, Owner, OAuthClient, State, CWD string
+	PID, IdleS, Cols, Rows                   int
+	Created                                  time.Time
+}
+
+func (m *Manager) Views() []View {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []View{}
+	for _, s := range m.sessions {
+		pid := 0
+		if s.State != "closed" && s.term != nil {
+			pid = s.term.PID()
+		}
+		idle := max(int64(0), int64(time.Since(time.Unix(0, s.lastIO.Load())).Seconds()))
+		out = append(out, View{ID: s.ID, Name: s.Name, Owner: s.Owner, OAuthClient: s.OAuthClient, State: s.State, CWD: s.CWD, PID: pid, IdleS: int(idle), Cols: s.Cols, Rows: s.Rows, Created: s.created})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 func (m *Manager) Counts() (inUse, active, closed int) {

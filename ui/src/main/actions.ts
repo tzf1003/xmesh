@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EXTERNAL_LINKS, type ActionResult, type CopyKind, type ExternalKey, type PathKind } from "../shared/ipc";
+import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type PathKind, type PickKind } from "../shared/ipc";
 import type { Translate } from "../shared/i18n";
-import { ControlRequestError } from "../shared/control";
+import { ControlRequestError, type DrainMode } from "../shared/control";
 import { CliError, type CliCommand } from "./cli";
 import { clipboardText } from "./connect";
 import type { ShellController } from "./controller";
@@ -18,6 +18,8 @@ export interface Platform {
   quit(): void;
   runCli(command: CliCommand): Promise<unknown>;
   notifyError(message: string): void;
+  /** Native chooser; resolves to the chosen absolute path or undefined on cancel. */
+  pickPath(kind: PickKind): Promise<string | undefined>;
 }
 
 const CONFIG_EXTENSIONS = new Set([".yaml", ".yml", ".json", ".toml", ".txt"]);
@@ -69,8 +71,8 @@ export class Actions {
     return ok;
   }
 
-  drain(): Promise<ActionResult> {
-    return this.control(() => this.controller.drain());
+  drain(mode: DrainMode = "keep"): Promise<ActionResult> {
+    return this.control(() => this.controller.drain(mode));
   }
 
   resume(): Promise<ActionResult> {
@@ -105,6 +107,11 @@ export class Actions {
     if (problem) return fail("invalid_path", problem);
     const err = await this.platform.openPath(p);
     return err === "" ? ok : fail("open_failed", err);
+  }
+
+  async pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>> {
+    const p = await this.platform.pickPath(kind);
+    return { ok: true, data: { path: p ?? null } };
   }
 
   async openExternal(key: ExternalKey): Promise<ActionResult> {

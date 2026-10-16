@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"os"
 	"reflect"
@@ -81,4 +82,19 @@ func (s *Store) State() (restart bool, failures uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.restart, s.failures
+}
+
+// Path is the configuration file this store reloads, or "" for a static store.
+func (s *Store) Path() string { return s.path }
+
+// Digest is the SHA-256 (hex) of the file bytes behind the generation now in
+// effect. It differs from the file's own digest while an edit is pending a
+// restart or was rejected on reload. Static stores report "".
+func (s *Store) Digest() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.path == "" {
+		return ""
+	}
+	return hex.EncodeToString(s.digest[:])
 }

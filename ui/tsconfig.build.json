@@ -1,4 +1,13 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["src/**/*.ts", "testserver/**/*.ts", "test/unit/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "testserver/**/*.ts",
+    "test/unit/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/renderer/**"
+  ]
 }

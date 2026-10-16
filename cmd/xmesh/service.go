@@ -7,7 +7,9 @@ import (
 	"github.com/kardianos/service"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -127,8 +129,14 @@ func install(args []string) error {
 		arguments = append(arguments, "--service")
 	}
 	arguments = append(arguments, "--config", absolute)
-	if *state != "" {
-		p, e := filepath.Abs(*state)
+	if *system {
+		// The service runs as SYSTEM; let the installing user's UI reach its control pipe.
+		if sid := installerSID(); sid != "" {
+			arguments = append(arguments, "--control-allow-sid", sid)
+		}
+	}
+	if dir := installStateDir(runtime.GOOS, os.Getenv, *system, *state, cfg.Node.Name); dir != "" {
+		p, e := filepath.Abs(dir)
 		if e != nil {
 			return e
 		}
@@ -155,6 +163,21 @@ func install(args []string) error {
 	fmt.Println("已安装服务:", serviceConfig.Name)
 	return nil
 }
+
+// installStateDir is the --state-dir an installed service is given. A SYSTEM
+// service on Windows would otherwise keep its state under the service
+// profile, which the user's desktop UI cannot read, so it defaults to
+// %ProgramData%\xmesh\<node>, the place the UI looks for such nodes.
+func installStateDir(goos string, getenv func(string) string, system bool, flagValue, node string) string {
+	if flagValue != "" || !system {
+		return flagValue
+	}
+	root := control.SystemStateRootFor(goos, getenv)
+	if root == "" {
+		return ""
+	}
+	return root + `\` + node
+}
 func pair(args []string) error {
 	flags := flag.NewFlagSet("pair", flag.ContinueOnError)
 	path := flags.String("config", "xmesh.yaml", "配置路径")
@@ -179,6 +202,9 @@ func pair(args []string) error {
 		if e != nil {
 			return e
 		}
+	}
+	if e = privdir.Ensure(dir); e != nil {
+		return e
 	}
 	dir = filepath.Join(dir, "lan")
 	if (*export == "") == (*importFile == "") {

@@ -105,7 +105,12 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, err := windows.DecomposeCommandLine(installed.BinaryPathName)
-	wantArgs := []string{binary, "serve", "--service", "--config", configFile, "--state-dir", stateDir}
+	// the installing user is allowed to reach the SYSTEM service's control pipe
+	wantArgs := []string{binary, "serve", "--service", "--config", configFile}
+	if sid := installerSID(); sid != "" {
+		wantArgs = append(wantArgs, "--control-allow-sid", sid)
+	}
+	wantArgs = append(wantArgs, "--state-dir", stateDir)
 	if err != nil || !reflect.DeepEqual(args, wantArgs) || installed.StartType != mgr.StartAutomatic || !strings.EqualFold(installed.ServiceStartName, "LocalSystem") {
 		t.Fatal("installed SCM configuration", installed, args, err)
 	}
@@ -170,6 +175,21 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	proof, err := os.ReadFile(filepath.Join(root, "service-proof.txt"))
 	if err != nil || string(proof) != "SCM runtime proof" {
 		t.Fatal("SCM file side effect", string(proof), err)
+	}
+	// The kernel runs as SYSTEM: its state directory must be private to SYSTEM and
+	// Administrators, not whatever the parent directory grants.
+	stateSD, err := windows.GetNamedSecurityInfo(stateDir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal("SCM state directory security", err)
+	}
+	stateACL := stateSD.String()
+	if !strings.HasPrefix(stateACL, "D:P") || !strings.Contains(stateACL, ";;;SY)") || !strings.Contains(stateACL, ";;;BA)") {
+		t.Fatal("SCM state directory is not protected for SYSTEM and Administrators", stateACL)
+	}
+	for _, broad := range []string{";;;WD)", ";;;BU)", ";;;AU)", ";;;IU)", ";;;CO)"} {
+		if strings.Contains(stateACL, broad) {
+			t.Fatal("SCM state directory grants a broad group", broad, stateACL)
+		}
 	}
 	read := scmTool(t, ctx, client, "fs.read", map[string]any{"path": "service-proof.txt"})
 	content, _ := read["content"].(string)

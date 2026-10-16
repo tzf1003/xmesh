@@ -2,7 +2,7 @@
 
 xmesh 的桌面托盘壳（Electron，路线图阶段 6 的 U3）。独立的 TypeScript 项目，不 import 任何 Go 代码，和内核之间只有一份契约：本机控制通道（Control API v1，Unix 域套接字或 Windows 命名管道）。设计见 [docs/design/12-ui-and-control.md](../docs/design/12-ui-and-control.md)。
 
-这一步交付的是壳：托盘 / 菜单栏图标和菜单、与内核的连接和重连、受限 IPC、窗口安全约束，以及对着假内核的端到端测试。面板页面、平台集成是后续子任务；打包发布见下文「打包与发布」。
+这一步交付的是壳：托盘 / 菜单栏图标和菜单、与内核的连接和重连、受限 IPC、窗口安全约束，以及对着假内核的端到端测试。面板页面见下文「面板页面」；平台集成是另一个子任务；打包发布见下文「打包与发布」。
 
 ## 运行
 
@@ -31,14 +31,47 @@ npm start             # 另开终端，启动 Electron
 | 路径 | 内容 |
 | --- | --- |
 | `src/main/system/` | 平台相关的主进程模块：`binary`（找 `xmesh` 可执行文件）、`autostart`（登录项）、`notifier`（通知节流）、`firstrun`（只提示一次的标记） |
-| `src/main/` | 主进程：`discovery`（找实例）、`client`（Control API 客户端，含 SSE）、`controller`（连接状态机，重连、`Last-Event-ID`）、`menu`（菜单模型，纯数据）、`tray`、`actions`（菜单与 IPC 共用的操作）、`ipc`、`window`、`policy`（安全策略常量）、`protocol`（`app://panel` 页面服务） |
+| `src/main/` | 主进程：`discovery`（找实例）、`client`（Control API 客户端，含 SSE）、`controller`（连接状态机，重连、`Last-Event-ID`）、`menu`（菜单模型，纯数据）、`tray`、`actions`（菜单与 IPC 共用的操作）、`ipc`、`window`、`policy`（安全策略常量）、`protocol`（`app://panel` 页面服务）、`panel-service`（面板的数据读写，固定路由）、`mesh-service`（tailnet 管理：校验过的请求 → `xmesh mesh --json`）、`mesh-fake`（测试用的命令行替身）、`setup`（首次运行向导的落盘与 `xmesh install/start`） |
 | `src/preload/` | 沙箱预加载脚本，只暴露白名单函数 |
 | `src/shared/` | 主进程、预加载、渲染进程共用的类型：控制接口类型（`generated/` 是契约生成物的副本）、状态、IPC 白名单、字符串表 |
 | `testserver/` | 假内核：回放契约夹具，同样走 UDS / 命名管道，可编排状态、事件、断流、重启、版本不兼容、缺失能力 |
-| `static/placeholder-panel/` | 面板页面落地前的占位页，只用来证明 IPC 边界可用。`dist/renderer/index.html` 存在时优先用它 |
+| `src/renderer/` | 面板页面（Preact + TSX），由 `scripts/build-renderer.mjs`（esbuild）打成 `dist/renderer/app.js`，主进程经 `app://panel` 提供；页面、`lib/`（纯函数）、`messages.ts`（中英字符串表）见下文 |
 | `assets/tray/` | 托盘图标，`npm run icons` 生成（无图像依赖） |
 | `scripts/` | `flip-fuses.mjs`、`fuses.config.mjs`（release / test 两档 fuses），`gen-icons.mjs` |
 | `test/unit/`、`test/e2e/` | 单元测试与 Playwright `_electron` 端到端 |
+
+## 面板页面
+
+渲染进程只通过 `window.xmesh`（预加载白名单）与外界交互，没有 `fetch`、没有 Node。依赖只有 `preact` 和 `esbuild`，都是 devDependency：esbuild 把 preact 打进 `app.js`，安装包里不带 `node_modules`。页面不使用内联脚本和样式表，`index.html` 自带与响应头同等严格的 CSP。
+
+| 页面 | 内容 | 需要的能力 |
+| --- | --- | --- |
+| 概览 | 状态、负载、警告、最近调用（事件流 `call`）、暂停 / 恢复 / 强制排空 | `status`，排空需要 `drain` |
+| 设备 | 对端列表；配对导出 / 导入（导入必须手敲指纹） | `peers`，配对需要 `pair` |
+| 会话 | 在线会话与进程；没有会话时给空状态 | `sessions` |
+| 授权 | PAT 创建（密钥只显示一次）/ 轮换 / 删除；权限矩阵只读展示 | `pats`、`config.read` |
+| 入口 | 入口客户端撤销、入口密码轮换（12–256 字符，只写） | `ingress` |
+| 配置 | YAML 编辑，先 `dry_run` 看差异和 `weakens_security`，再带 `If-Match` 写入；`config_invalid` 诊断逐行显示，`precondition_failed` 提示重新载入 | `config.read`，写入需要 `config.write` |
+| 审计 | 事件 / 时间 / 主体过滤，游标翻页 | `audit` |
+| 首次运行向导 | 内核未运行且无实例时的默认页：节点名、角色、工作区、入口，主进程重新校验后用 `0600` 写配置，再执行 `xmesh install --config` 和 `xmesh start --config` | 无 |
+
+内核缺某项能力时，对应页面显示「内核不支持」，不会发出请求。`weakens_security` 只是 UI 层的二次确认，不是内核边界（契约如此规定）。
+
+### Tailnet 管理页面
+
+侧栏的「Tailnet 管理」不依赖本机内核：它通过控制面（Tailscale 或 Headscale）管理整个 tailnet，实现方式是调用 `xmesh mesh … --json`（meshadmin）。凭据留在命令行的系统钥匙串配置里，**从不经过 Electron**：界面没有输入密钥的地方，没有凭据时只给出可复制的终端命令（`xmesh mesh login --kind … --access read|write`）。
+
+| 标签页 | 内容 |
+| --- | --- |
+| 设备与标签 | `mesh status`：设备、在线、角色、问题；改标签先预览（`mesh tags`），策略 `tagOwners` 里没有属主的标签不允许写 |
+| 接入新设备 | `mesh authkey --out <文件>`：预授权 key 由命令行直接写进用户选的文件（0600，另存为对话框），界面只拿到路径 |
+| 策略 | 当前策略、xmesh 模板（`mesh policy --template`）预览 → 确认 → 写入，写入带预览时的版本（`--expect-version`），策略期间被改动则拒绝；每次写入自动留快照，可预览后回滚；文件模式的控制面（`policy_write` 为 false）只显示完整新策略供手工放到服务器上 |
+| 权限矩阵 | `mesh matrix`：网络层（控制面策略）与工具层（节点 `agent.authz`）两层的放行结果，两层不一致的格子高亮；连着内核时把节点配置传给命令行 |
+| DERP 中继 | 探测（`derp probe`，可对比官方延迟）、预览、写入（`derp apply`，探测失败自动回滚）；Headscale 生成 `derp.paths` 文件和 `config.yaml` 片段；准入同步（`derp sync`，本机放行文件或远端准入服务，token 只传文件路径） |
+
+主进程里的 `MeshService`（`src/main/mesh-service.ts`）只接受 `parseMeshRequest`（`src/shared/mesh.ts`）校验过的请求，转成固定的 argv：子命令写死，每个值都用 `--flag=value` 贴在旗标上，不会被当成旗标；DERP 地域里不允许出现命令行自己的分隔符 `,` 和 `=`。命令行输出的 JSON 先经容错的归一化（Go 的 `null` 切片、零值时间）再交给页面。测试用 `src/main/mesh-fake.ts` 在进程内模拟命令行（`XMESH_UI_TEST=1` 才会接入）。
+
+构建：`npm run build` 先 `tsc`（主进程、预加载、测试用库），再 `scripts/build-renderer.mjs` 打包渲染进程；`XMESH_UI_MINIFY=1` 压缩。
 
 ## 状态与图标
 
@@ -153,7 +186,8 @@ UI 以 [docs/contracts/control.md](../docs/contracts/control.md) 为准。
 
 ## 还没做
 
-- 完整面板页面和首次运行向导（W1）
+- 面板的结构化配置表单：目前是 YAML 编辑 + 差异预览；终端会话没有关闭路由（契约未定义），孤儿终端只展示
+- tailnet 管理页面目前只用默认凭据配置（profile `default`），没有多配置切换；没有系统钥匙串的机器（例如无桌面的 Linux）要在终端里带 `--credential-file` 使用命令行
 - 有证书后的签名与公证只差配置 secrets，尚未用真实证书验证过
 - 登录项和通知的运行时部分已在 `src/main/system/`，但只有安装版才生效，真机验证要等安装包
 - `xmesh restart` / `stop` 子命令由内核通道线程提供，托盘只在菜单里调用 `xmesh <cmd> --json`

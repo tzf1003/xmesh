@@ -36,6 +36,7 @@ const usage = `用法: xmesh <子命令> [参数]
   serve    按配置启动已启用的角色
            --config 路径  --local  --listen 地址  --state-dir 目录
            --ingress  --tunnel-listen 地址  --oauth-password-file 文件
+           --control-allow-sid SID,...（仅 Windows：额外允许访问控制管道的用户）
   install  安装为本平台的用户级服务（Windows 默认注册当前用户的登录计划任务）
            --config 路径  --executable 路径  --state-dir 目录
            --oauth-password-file 文件  --system（仅 Windows：管理员 SCM 服务）
@@ -44,6 +45,13 @@ const usage = `用法: xmesh <子命令> [参数]
            --export 文件，或 --import 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
   status   读取运行中节点的状态（不读配置文件，没有 --config）
            --endpoint 地址  --tool 工具名  --pat-file 文件  --json
+           --control [--node 节点名 | --state-dir 目录]  经本机控制通道读取，不需要 PAT
+  control  本机控制通道客户端：status、peers、sessions、events、audit、drain、resume、config
+           （xmesh control help 查看参数）
+  uninstall / start / stop / restart
+           卸载、启动、停止、重启已安装的服务
+           --config 路径（或 --name 服务名）  --system（仅 Windows）  --json
+  mesh     管理 tailnet 控制面：tag、权限矩阵、策略、DERP；见 xmesh mesh help
   version  打印版本号（也可写作 --version）`
 
 func run(args []string) error {
@@ -61,11 +69,17 @@ func run(args []string) error {
 	case "serve":
 		return serve(args[1:])
 	case "install":
-		return install(args[1:])
+		return withJSON("install", args[1:], install)
 	case "pair":
-		return pair(args[1:])
+		return withJSON("pair", args[1:], pair)
 	case "status":
 		return status(args[1:])
+	case "mesh":
+		return meshCmd(args[1:])
+	case "control":
+		return controlCommand(args[1:])
+	case "uninstall", "start", "stop", "restart":
+		return withJSON(args[0], args[1:], func(rest []string) error { return serviceCommand(args[0], rest) })
 	case "drain":
 		return drain(args[1:])
 	case "version", "--version":
@@ -85,6 +99,7 @@ func serve(args []string) error {
 	ingress := flags.Bool("ingress", false, "启用已配置的公网入口")
 	tunnel := flags.String("tunnel-listen", "127.0.0.1:8443", "反向隧道入口地址")
 	asService := flags.Bool("service", false, "由系统服务管理器启动")
+	controlSIDs := flags.String("control-allow-sid", "", "Windows：额外允许访问控制管道的 SID，逗号分隔")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
@@ -93,6 +108,9 @@ func serve(args []string) error {
 		return e
 	}
 	options := app.Options{Local: *local, Listen: *listen, StateDir: *state, PasswordFile: *password, Ingress: *ingress, TunnelListen: *tunnel}
+	if *controlSIDs != "" {
+		options.ControlAllowSIDs = strings.Split(*controlSIDs, ",")
+	}
 	if *asService {
 		return runService(store, options)
 	}
@@ -106,8 +124,14 @@ func status(args []string) error {
 	machine := flags.Bool("json", false, "输出 JSON")
 	tool := flags.String("tool", "sys.info", "状态工具名；Gateway 使用 local/sys.info")
 	patFile := flags.String("pat-file", "", "本机 Gateway 的 PAT 文件")
+	viaControl := flags.Bool("control", false, "经本机控制通道读取（不需要 PAT 或 MCP 地址）")
+	node := flags.String("node", "", "与 --control 合用：节点名")
+	stateDir := flags.String("state-dir", "", "与 --control 合用：节点状态目录")
 	if e := flags.Parse(args); e != nil {
 		return e
+	}
+	if *viaControl {
+		return controlStatus(*node, *stateDir, *machine)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -189,6 +213,10 @@ func formatStatus(info map[string]any) string {
 	}
 	if warnings, ok := info["warnings"].([]any); ok {
 		for _, warning := range warnings {
+			// sys.info lists warnings as text; the control channel lists {code, severity, message}.
+			if entry, ok := warning.(map[string]any); ok {
+				warning = entry["message"]
+			}
 			fmt.Fprintf(&out, "警告: %v\n", warning)
 		}
 	}

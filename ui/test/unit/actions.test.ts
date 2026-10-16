@@ -44,6 +44,7 @@ function fakePlatform(confirm = true) {
     quit: () => void log.push("quit"),
     runCli: async (c) => void log.push(`cli:${c}`),
     notifyError: (m) => void log.push(`err:${m}`),
+    pickPath: async () => undefined,
   };
   return { platform, log };
 }

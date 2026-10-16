@@ -12,6 +12,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 	"github.com/tzf1003/xmesh/internal/sandbox"
@@ -29,6 +30,8 @@ type Options struct {
 	Local                                        bool
 	Listen, StateDir, PasswordFile, TunnelListen string
 	Ingress                                      bool
+	// ControlAllowSIDs adds Windows principals to the control pipe's access list.
+	ControlAllowSIDs []string
 }
 
 func StateDir(name string) (string, error) {
@@ -58,10 +61,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return e
 		}
 	}
-	if e := os.MkdirAll(o.StateDir, 0700); e != nil {
-		return e
-	}
-	if e := os.Chmod(o.StateDir, 0700); e != nil {
+	if e := privdir.Ensure(o.StateDir); e != nil {
 		return e
 	}
 	auditDir := c.Audit.Dir
@@ -339,6 +339,31 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if len(servers) == 0 {
 		return fmt.Errorf("没有可启动的角色")
 	}
+	mode := c.Mesh.Mode
+	if o.Local {
+		mode = "local"
+	}
+	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs,
+		drain: func(kill bool) {
+			gatewaysMu.Lock()
+			pendingDrain[c.Node.Name] = true
+			current := append([]*gateway.Gateway{}, gateways...)
+			gatewaysMu.Unlock()
+			for _, g := range current {
+				g.Drain(c.Node.Name)
+			}
+		},
+		resume: func() {
+			gatewaysMu.Lock()
+			delete(pendingDrain, c.Node.Name)
+			delete(pendingDrain, "")
+			current := append([]*gateway.Gateway{}, gateways...)
+			gatewaysMu.Unlock()
+			for _, g := range current {
+				g.Resume(c.Node.Name)
+				g.Resume("")
+			}
+		}})()
 	select {
 	case <-ctx.Done():
 		return nil

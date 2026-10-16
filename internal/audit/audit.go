@@ -8,12 +8,14 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
 	"github.com/tzf1003/xmesh/internal/policy"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +28,7 @@ type Logger struct {
 	stop      chan struct{}
 	done      chan struct{}
 	once      sync.Once
+	observer  atomic.Pointer[func(map[string]any)]
 }
 type ioSummary struct {
 	bytes   int
@@ -35,10 +38,7 @@ type ioSummary struct {
 }
 
 func New(dir string, retention time.Duration) (*Logger, error) {
-	if e := os.MkdirAll(dir, 0700); e != nil {
-		return nil, e
-	}
-	if e := os.Chmod(dir, 0700); e != nil {
+	if e := privdir.Ensure(dir); e != nil {
 		return nil, e
 	}
 	b, _ := schemas.Files.ReadFile("audit-event.schema.json")
@@ -236,7 +236,15 @@ func (l *Logger) writeLocked(record map[string]any) error {
 		_ = l.append(safe)
 		return toolerr.New("internal", "审计记录包含未允许的字段", "op", "audit.encode")
 	}
-	return l.append(b)
+	if e = l.append(b); e != nil {
+		return e
+	}
+	if observe := l.observer.Load(); observe != nil {
+		if record, ok := normalized.(map[string]any); ok {
+			(*observe)(record)
+		}
+	}
+	return nil
 }
 func (l *Logger) append(b []byte) error {
 	path := filepath.Join(l.dir, time.Now().UTC().Format("20060102T1504")+".jsonl")
@@ -282,4 +290,14 @@ func (l *Logger) Close() {
 		<-l.done
 		_ = l.flush(time.Now(), true, "", "")
 	})
+}
+
+// Observe registers fn to see every record after it is stored. fn runs under the
+// writer lock and must not block or call back into the Logger.
+func (l *Logger) Observe(fn func(map[string]any)) {
+	if fn == nil {
+		l.observer.Store(nil)
+		return
+	}
+	l.observer.Store(&fn)
 }

@@ -18,7 +18,7 @@ ACL、MagicDNS 和密钥仍由控制面负责。xmesh 不自建第二套节点�
 
 ## CON-NET-04
 
-切换官方 Tailscale 与 Headscale 时，只改变 `mesh.control_url` 和 auth key 的签发方。业务代码里禁止出现「如果是 Headscale 就走另一套 RPC」的分支。Funnel 只在官方控制面可用；Headscale 下把 `ingress.listen: funnel` 视为配置错误并拒绝启动。
+切换官方 Tailscale 与 Headscale 时，只改变 `mesh.control_url` 和 auth key 的签发方。业务代码里禁止出现「如果是 Headscale 就走另一套 RPC」的分支。Funnel 只在官方控制面可用；Headscale 下把 `ingress.listen: funnel` 视为配置错误并拒绝启动。管理控制面的 `xmesh mesh` 子命令与 `meshadmin` 不在数据通路上，是该规则唯一的例外，见 [CON-MESH-01](meshadmin.md#con-mesh-01)。
 
 ## CON-NET-05
 

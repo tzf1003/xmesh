@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"math"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -160,6 +161,20 @@ func (m *Manager) Owner(name string) string {
 		return ""
 	}
 	return r.lease.Owner
+}
+
+// Active lists the leases that have not expired, ordered by resource.
+func (m *Manager) Active() []Lease {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []Lease{}
+	for name := range m.resources {
+		if r := m.entry(name); r.lease != nil {
+			out = append(out, *r.lease)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Resource < out[j].Resource })
+	return out
 }
 func (m *Manager) Sweep() {
 	m.mu.Lock()

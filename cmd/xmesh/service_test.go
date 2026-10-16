@@ -47,3 +47,27 @@ func Test_ServiceRequestedStop(t *testing.T) {
 	default:
 	}
 }
+
+func Test_InstallStateDir(t *testing.T) {
+	env := func(k string) string {
+		if k == "ProgramData" {
+			return `D:\PD`
+		}
+		return ""
+	}
+	cases := []struct {
+		goos, flag, want string
+		system           bool
+	}{
+		{"windows", "", `D:\PD\xmesh\n1`, true},
+		{"windows", `E:\own`, `E:\own`, true},
+		{"windows", "", "", false},
+		{"linux", "", "", true},
+		{"darwin", "/s", "/s", false},
+	}
+	for _, c := range cases {
+		if got := installStateDir(c.goos, env, c.system, c.flag, "n1"); got != c.want {
+			t.Errorf("%+v: got %q", c, got)
+		}
+	}
+}
