@@ -19,12 +19,14 @@
         "pty_io",
         "authz_deny",
         "policy_reload_failed",
-        "audit_dropped"
+        "audit_dropped",
+        "control"
       ]
     },
     "caller": { "type": "string", "minLength": 1 },
     "oauth_client": { "type": "string" },
     "oauth_session": { "type": "string" },
+    "actor": { "const": "control", "description": "经本机控制通道发生的变更。" },
     "device": { "type": "string", "minLength": 1 },
     "tool": { "type": "string", "minLength": 1 },
     "args_digest": {

@@ -33,7 +33,8 @@ PTY 的 `read` 默认不写每条记录，只在 `pty.read` 返回非空数据�
 | 字段 | 规则 |
 | --- | --- |
 | `time` | RFC3339，毫秒，UTC |
-| `event` | `tool_call`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed` |
+| `event` | `tool_call`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`control` |
+| `actor` | 仅 `control`：变更经本机控制通道发生（`event` 为 `control`，`tool` 为 `control.config.put`、`control.drain`、`control.resume`）。`args_digest.keys` 只列被改的配置路径，不含值 |
 | `caller` | `caller_id`，入口层若还没有下游会话，填 OAuth 会话 id 并使用字段 `oauth_session` |
 | `oauth_client` | 仅入口层。预注册名或动态 `client_id` |
 | `device` | 节点名 |

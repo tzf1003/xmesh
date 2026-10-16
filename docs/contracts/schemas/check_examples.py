@@ -44,6 +44,7 @@ if "date-time" not in FormatChecker.checkers:
     "audit-event.json": "audit-event.schema.json",
     "xmesh.ingress-public.json": "config.schema.json",
     "xmesh.ingress-multihost.json": "config.schema.json",
+    "audit-control.json": "audit-event.schema.json",
 }
 
 # 反例同样按文件名选择模式。这些文件必须无法通过校验。
@@ -56,6 +57,7 @@ if "date-time" not in FormatChecker.checkers:
     "invalid/config-funnel-with-domain.json": "config.schema.json",
     "invalid/error-pty-limit-named-active.json": "error.schema.json",
     "invalid/config-pty-authority-bad-name.json": "config.schema.json",
+    "invalid/audit-control-bad-actor.json": "audit-event.schema.json",
 }
 
 

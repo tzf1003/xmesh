@@ -76,3 +76,6 @@ func (s *Store) State() (restart bool, failures uint64) {
 	defer s.mu.Unlock()
 	return s.restart, s.failures
 }
+
+// Path is the configuration file this store reloads, or "" for a static store.
+func (s *Store) Path() string { return s.path }

@@ -1,0 +1,317 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/tzf1003/xmesh/internal/app"
+	"github.com/tzf1003/xmesh/internal/control"
+)
+
+func init() { app.Version = buildVersion }
+
+const controlUsage = `用法: xmesh control <子命令> [参数]
+
+本机控制通道客户端（Unix 域套接字或 Windows 命名管道），输出均为 JSON。
+公共参数: --node 节点名  --state-dir 目录（默认在当前用户的节点目录中自动发现）
+
+子命令:
+  status | peers | sessions       读取状态、对端、会话
+  events [--last-event-id N] [--count N]  不带 --last-event-id 只收新事件，0 表示从保留的最早事件开始
+                                   订阅事件流，每行一个事件
+  audit [--tool T --device D --caller C --status ok|error --event E
+         --since RFC3339 --until RFC3339 --limit N --cursor C]
+  drain [--mode keep|kill]        排空本节点；resume 恢复
+  resume
+  config get                      读取配置原文与 ETag
+  config set --if-match ETAG [--dry-run] (--yaml-file 文件 | --set /路径=JSON ... | --delete /路径 ...)`
+
+// controlTarget resolves which node's channel to talk to.
+func controlTarget(node, stateDir string) (control.Endpoint, error) {
+	if stateDir != "" {
+		return control.ReadEndpoint(stateDir)
+	}
+	found, err := control.Discover()
+	if err != nil {
+		return control.Endpoint{}, err
+	}
+	matches := found[:0:0]
+	for _, e := range found {
+		if node == "" || e.Node == node {
+			matches = append(matches, e)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return control.Endpoint{}, fmt.Errorf("没有找到运行中的节点（缺少 control.json）；节点是否已启动？")
+	case 1:
+		return matches[0], nil
+	}
+	names := []string{}
+	for _, e := range matches {
+		names = append(names, e.Node)
+	}
+	return control.Endpoint{}, fmt.Errorf("找到多个节点（%s），请用 --node 指定", strings.Join(names, "、"))
+}
+
+type targetFlags struct{ node, stateDir *string }
+
+func addTarget(f *flag.FlagSet) targetFlags {
+	return targetFlags{f.String("node", "", "节点名"), f.String("state-dir", "", "节点状态目录")}
+}
+func (t targetFlags) client() (*control.Client, error) {
+	e, err := controlTarget(*t.node, *t.stateDir)
+	if err != nil {
+		return nil, err
+	}
+	return control.NewClient(e), nil
+}
+
+// show prints a successful reply's body, or returns the channel's error.
+func show(r *control.Response, err error) error {
+	if err != nil {
+		return err
+	}
+	if err = r.Error(); err != nil {
+		return err
+	}
+	var pretty json.RawMessage = r.Body
+	out, _ := json.MarshalIndent(pretty, "", "  ")
+	fmt.Println(string(out))
+	return nil
+}
+
+func controlCommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%s", controlUsage)
+	}
+	verb, rest := args[0], args[1:]
+	flags := flag.NewFlagSet("control "+verb, flag.ContinueOnError)
+	target := addTarget(flags)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	switch verb {
+	case "help", "--help", "-h":
+		fmt.Println(controlUsage)
+		return nil
+	case "status", "peers", "sessions":
+		if err := flags.Parse(rest); err != nil {
+			return err
+		}
+		c, err := target.client()
+		if err != nil {
+			return err
+		}
+		return show(c.Do(ctx, "GET", "/v1/"+verb, nil, nil))
+	case "resume":
+		if err := flags.Parse(rest); err != nil {
+			return err
+		}
+		c, err := target.client()
+		if err != nil {
+			return err
+		}
+		return show(c.Do(ctx, "POST", "/v1/resume", nil, nil))
+	case "drain":
+		mode := flags.String("mode", "keep", "keep 或 kill")
+		if err := flags.Parse(rest); err != nil {
+			return err
+		}
+		c, err := target.client()
+		if err != nil {
+			return err
+		}
+		return show(c.Do(ctx, "POST", "/v1/drain", map[string]string{"mode": *mode}, nil))
+	case "audit":
+		return controlAudit(ctx, flags, target, rest)
+	case "events":
+		return controlEvents(ctx, flags, target, rest)
+	case "config":
+		return controlConfig(ctx, flags, target, rest)
+	}
+	return fmt.Errorf("未知的 control 子命令: %s\n\n%s", verb, controlUsage)
+}
+
+func controlAudit(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
+	query := map[string]*string{}
+	for _, name := range []string{"tool", "device", "caller", "status", "event", "since", "until", "limit", "cursor"} {
+		query[name] = flags.String(name, "", "")
+	}
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	c, err := target.client()
+	if err != nil {
+		return err
+	}
+	values := []string{}
+	for name, v := range query {
+		if *v != "" {
+			values = append(values, name+"="+queryEscape(*v))
+		}
+	}
+	path := "/v1/audit"
+	if len(values) > 0 {
+		path += "?" + strings.Join(values, "&")
+	}
+	return show(c.Do(ctx, "GET", path, nil, nil))
+}
+func queryEscape(s string) string {
+	var b strings.Builder
+	for _, r := range []byte(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.', r == '~':
+			b.WriteByte(r)
+		default:
+			fmt.Fprintf(&b, "%%%02X", r)
+		}
+	}
+	return b.String()
+}
+
+// controlEvents prints each event's JSON on one line until the count is reached
+// or the stream ends.
+func controlEvents(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
+	last := flags.String("last-event-id", "", "从该事件之后续传")
+	count := flags.Int("count", 0, "收到这么多事件后退出；0 表示一直订阅")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	c, err := target.client()
+	if err != nil {
+		return err
+	}
+	headers := map[string]string{}
+	if *last != "" {
+		headers["Last-Event-ID"] = *last
+	}
+	res, err := c.Stream(ctx, "/v1/events", headers)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return (&control.Response{Status: res.StatusCode, Body: body}).Error()
+	}
+	seen := 0
+	scanner := bufio.NewScanner(res.Body)
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
+	for scanner.Scan() {
+		if data, ok := strings.CutPrefix(scanner.Text(), "data: "); ok {
+			fmt.Println(data)
+			if seen++; *count > 0 && seen >= *count {
+				return nil
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return scanner.Err()
+}
+
+type editFlags []control.Edit
+
+func (e *editFlags) String() string { return fmt.Sprint(len(*e)) }
+func (e *editFlags) Set(v string) error {
+	path, raw, ok := strings.Cut(v, "=")
+	if !ok {
+		return fmt.Errorf("--set 需要 /路径=JSON 值")
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return fmt.Errorf("--set 的值不是 JSON: %w", err)
+	}
+	*e = append(*e, control.Edit{Path: path, Value: value})
+	return nil
+}
+
+type deleteFlags []control.Edit
+
+func (d *deleteFlags) String() string { return "" }
+func (d *deleteFlags) Set(path string) error {
+	*d = append(*d, control.Edit{Path: path, Delete: true})
+	return nil
+}
+
+func controlConfig(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
+	if len(args) == 0 || (args[0] != "get" && args[0] != "set") {
+		return fmt.Errorf("用法: xmesh control config get|set")
+	}
+	verb := args[0]
+	var edits editFlags
+	match := flags.String("if-match", "", "ETag（来自 config get）")
+	dry := flags.Bool("dry-run", false, "只校验并返回差异")
+	yamlFile := flags.String("yaml-file", "", "用该文件的内容整体替换配置")
+	flags.Var(&edits, "set", "/路径=JSON，可重复")
+	flags.Var((*deleteFlags)(&edits), "delete", "/路径，删除该键，可重复")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	c, err := target.client()
+	if err != nil {
+		return err
+	}
+	if verb == "get" {
+		return show(c.Do(ctx, "GET", "/v1/config", nil, nil))
+	}
+	if *match == "" {
+		return fmt.Errorf("config set 需要 --if-match")
+	}
+	body := map[string]any{"dry_run": *dry}
+	switch {
+	case *yamlFile != "" && len(edits) == 0:
+		raw, err := os.ReadFile(*yamlFile)
+		if err != nil {
+			return err
+		}
+		body["yaml"] = string(raw)
+	case *yamlFile == "" && len(edits) > 0:
+		body["set"] = []control.Edit(edits)
+	default:
+		return fmt.Errorf("--yaml-file 与 --set 二选一")
+	}
+	return show(c.Do(ctx, "PUT", "/v1/config", body, map[string]string{"If-Match": *match}))
+}
+
+// controlStatus implements `xmesh status --control`.
+func controlStatus(node, stateDir string, machine bool) error {
+	e, err := controlTarget(node, stateDir)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r, err := control.NewClient(e).Do(ctx, "GET", "/v1/status", nil, nil)
+	if err != nil {
+		return fmt.Errorf("无法连接节点 %s 的控制通道: %w", e.Node, err)
+	}
+	if err = r.Error(); err != nil {
+		return err
+	}
+	if machine {
+		fmt.Println(string(r.Body))
+		return nil
+	}
+	var info map[string]any
+	if err = json.Unmarshal(r.Body, &info); err != nil {
+		return err
+	}
+	info["hostname"] = info["node"]
+	text := formatStatus(info)
+	if info["draining"] == true {
+		text += "排空中: 是\n"
+	}
+	fmt.Print(text)
+	return nil
+}
