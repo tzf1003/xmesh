@@ -136,7 +136,7 @@ func call(t *testing.T, s *mcp.ClientSession, name string, args any) (map[string
 	return v, o.IsError
 }
 
-// Rule CON-ARCH-09 (its matrix entry arrives with the control contract): the channel is not on TCP, not behind the Gateway, and not an MCP tool
+// Rule CON-ARCH-09: the channel is not on TCP, not behind the Gateway, and not an MCP tool
 func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 	n := startNode(t)
 	ep, err := control.ReadEndpoint(n.stateDir)
@@ -338,5 +338,43 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 	n.get("/v1/sessions", "SessionsResponse", &after)
 	if len(after.Exec) != 0 {
 		t.Fatalf("%+v", after.Exec)
+	}
+}
+
+// Rule CON-ARCH-10: the kernel does not depend on the UI. An event subscriber that vanishes (a crashed
+// UI) leaves the terminal, the node status and the channel itself untouched.
+func Test_CONARCH10_UIExitDoesNotAffectKernel(t *testing.T) {
+	n := startNode(t)
+	direct := session(t, "http://"+n.agent+"/mcp")
+	opened, failed := call(t, direct, "pty.open", map[string]any{"cols": 80, "rows": 24})
+	if failed {
+		t.Fatal(opened)
+	}
+	id, _ := opened["session_id"].(string)
+	// a UI subscribes to the event stream and is then killed without a goodbye
+	for i := 0; i < 3; i++ {
+		ctx, kill := context.WithCancel(context.Background())
+		res, err := n.control.Stream(ctx, "/v1/events", nil)
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("subscribe: %v", err)
+		}
+		buf := make([]byte, 1)
+		if _, err = res.Body.Read(buf); err != nil {
+			t.Fatal(err)
+		}
+		kill()
+		res.Body.Close()
+	}
+	time.Sleep(200 * time.Millisecond)
+	var sessions v1.SessionsResponse
+	n.get("/v1/sessions", "SessionsResponse", &sessions)
+	if len(sessions.PTY) != 1 || sessions.PTY[0].ID != id {
+		t.Fatalf("terminal lost: %+v", sessions.PTY)
+	}
+	if st := n.status(); st.Control.Capabilities == nil || n.status().Drain.Draining {
+		t.Fatalf("%+v", st)
+	}
+	if out, failed := call(t, direct, "pty.close", map[string]any{"session_id": id}); failed {
+		t.Fatal(out)
 	}
 }

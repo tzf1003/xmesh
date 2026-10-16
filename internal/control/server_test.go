@@ -228,6 +228,7 @@ func Test_ControlDrainSetElsewhere(t *testing.T) {
 	}
 }
 
+// conformance: CTR-CTL-01 the endpoint file names the transport, address, boot id and capabilities
 func Test_ControlEndpointFile(t *testing.T) {
 	f := newFixture(t)
 	raw, err := os.ReadFile(f.server.o.StateDir + "/" + FileName)
@@ -254,6 +255,7 @@ func Test_ControlEndpointFile(t *testing.T) {
 	}
 }
 
+// conformance: CTR-CTL-01 a client finds a node's channel from its state directory or by enumerating the per-user directories
 func Test_ControlDiscover(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "AppData"} {
