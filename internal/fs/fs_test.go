@@ -207,9 +207,54 @@ func Test_SearchLimitsAndNestedNegation(t *testing.T) {
 	if len(got) != 1 || got[0]["path"] != filepath.Join(root, "child", "keep.log") {
 		t.Fatal("child negation", o)
 	}
-	for _, name := range []string{".env", ".bashrc", ".zshenv", "profile", "setup.ksh", "setup.sh"} {
-		if !filterFile(root, filepath.Join(root, name), Args{Type: "sh"}) {
+	for _, name := range []string{".bashrc", ".zshenv", "profile", "setup.ksh", "setup.sh"} {
+		if !filterFile(root, filepath.Join(root, name), Args{Type: "sh"}, builtinTypes) {
 			t.Fatal("shell type omitted", name)
 		}
+	}
+}
+
+func Test_CTRFS05_TypesMatchRg(t *testing.T) {
+	s, root := fixture(t)
+	files := map[string]string{"main.cpp": "needle\n", "lib.rs": "needle\n", "Makefile": "needle\n", "api.proto": "needle\n", "notes.txt": "needle\n", "deploy.tf": "needle\n"}
+	for p, c := range files {
+		if e := os.WriteFile(filepath.Join(root, p), []byte(c), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	expect := map[string]string{"cpp": "main.cpp", "rust": "lib.rs", "make": "Makefile", "protobuf": "api.proto", "txt": "notes.txt", "tf": "deploy.tf"}
+	_, rgErr := exec.LookPath("rg")
+	for typ, want := range expect {
+		a := Args{Pattern: "needle", Type: typ, OutputMode: "files", HeadLimit: 10}
+		pure, e := s.grepEngine(context.Background(), root, a, true)
+		if e != nil {
+			t.Fatal(typ, e)
+		}
+		if got := pure["files"].([]string); len(got) != 1 || filepath.Base(got[0]) != want {
+			t.Fatal("pure engine type", typ, got)
+		}
+		if rgErr == nil {
+			fast, e := s.grepEngine(context.Background(), root, a, false)
+			if e != nil || !reflect.DeepEqual(fast, pure) {
+				t.Fatal("engines disagree on type", typ, fast, pure, e)
+			}
+		}
+	}
+	for _, pure := range []bool{true, false} {
+		a := Args{Pattern: "needle", Type: "no-such-type", OutputMode: "files", HeadLimit: 10}
+		if _, e := s.grepEngine(context.Background(), root, a, pure); e == nil || e.(*toolerr.Error).Code != "invalid_args" {
+			t.Fatal("unknown type accepted", pure, e)
+		}
+	}
+	if rgErr != nil {
+		return
+	}
+	// The embedded table is exactly the local rg's, unless rg is a different release.
+	rg, _ := exec.LookPath("rg")
+	if version, _ := exec.Command(rg, "--version").Output(); !strings.HasPrefix(string(version), "ripgrep 14.1.") {
+		t.Skip("embedded type table is pinned to ripgrep 14.1")
+	}
+	if live := fileTypes(rg); !reflect.DeepEqual(live, builtinTypes) {
+		t.Fatal("embedded type table drifted from rg --type-list")
 	}
 }
