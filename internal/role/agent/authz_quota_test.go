@@ -135,7 +135,8 @@ func Test_CONSEC10_ExecTimeoutNotSilentlyTruncated(t *testing.T) {
 	run := func(timeout any) map[string]any {
 		args := map[string]any{"cmd": "printf", "args": []string{"ok"}}
 		if runtime.GOOS == "windows" {
-			args = map[string]any{"cmd": "powershell", "args": []string{"-NoProfile", "-Command", "Write-Output ok"}}
+			// The 2 s timeout case needs a command that starts well inside it; a cold PowerShell took 2.2 s on a loaded runner.
+			args = map[string]any{"cmd": "cmd", "args": []string{"/c", "echo ok"}}
 		}
 		if timeout != nil {
 			args["timeout"] = timeout
