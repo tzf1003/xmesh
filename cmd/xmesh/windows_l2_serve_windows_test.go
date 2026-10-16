@@ -227,6 +227,11 @@ func (n *l2Node) cmdCall(args ...string) map[string]any {
 	return n.call("exec.run", map[string]any{"cmd": "cmd.exe", "args": append([]string{"/d", "/c"}, args...)})
 }
 
+// writeInside creates a file in the workspace from inside the sandbox.
+func (n *l2Node) writeInside(name string) map[string]any {
+	return n.call("exec.run", map[string]any{"cmd": "cmd.exe", "args": []string{"/d", "/s", "/c", "echo x>" + name}})
+}
+
 type l2Terminal struct {
 	n       *l2Node
 	session string
@@ -348,7 +353,22 @@ func Test_WindowsL2ServeExecAppContainer(t *testing.T) {
 	if denied["exit_code"] == float64(0) || strings.Contains(text, l2Secret) {
 		t.Fatalf("the sandboxed command read outside its workspace: %v", denied)
 	}
-	written := n.cmdCall("copy", "NUL", "inside.txt")
+	// Several ways to create something inside the workspace, all logged, so a
+	// failure shows which operation the sandbox refuses.
+	for _, probe := range []struct {
+		name string
+		args []string
+	}{
+		{"echo", []string{"/d", "/s", "/c", "echo x>inside.txt"}},
+		{"mkdir", []string{"/d", "/c", "mkdir", "inside-dir"}},
+		{"copy", []string{"/d", "/c", "copy", "NUL", "inside-copy.txt"}},
+	} {
+		result := n.call("exec.run", map[string]any{"cmd": "cmd.exe", "args": probe.args})
+		t.Logf("write probe %s: %v", probe.name, result)
+	}
+	icacls, _ := osexec.Command("icacls.exe", n.root).CombinedOutput()
+	t.Logf("workspace ACL after probes:\n%s", icacls)
+	written := n.writeInside("inside.txt")
 	if written["exit_code"] != float64(0) {
 		t.Fatalf("the sandboxed command could not write inside its workspace: %v\n%s", written, n.log.String())
 	}
@@ -436,7 +456,7 @@ func crashAndRecover(t *testing.T, killKeeper bool) {
 	if rest := guardKeepers(t, n.binary); len(rest) != 0 {
 		t.Fatalf("recovery left guard keepers: %v", rest)
 	}
-	if result := n.cmdCall("copy", "NUL", "after-recovery.txt"); result["exit_code"] != float64(0) {
+	if result := n.writeInside("after-recovery.txt"); result["exit_code"] != float64(0) {
 		t.Fatalf("L2 did not work after recovery: %v\n%s", result, n.log.String())
 	}
 }
@@ -460,7 +480,7 @@ func Test_WindowsL2ServeNoKeeperFailsClosed(t *testing.T) {
 	if warnings := n.warnings(); !strings.Contains(warnings, "sandbox.unavailable") {
 		t.Fatalf("an unrecoverable journal was not reported: %q\n%s", warnings, n.log.String())
 	}
-	refused := n.call("exec.run", map[string]any{"cmd": "cmd.exe", "args": []string{"/d", "/c", "copy", "NUL", "must-not-run.txt"}})
+	refused := n.writeInside("must-not-run.txt")
 	if refused["error"] != "policy_denied" || refused["rule"] != "sandbox.unavailable" {
 		t.Fatalf("L2 ran without a recovered runner: %v", refused)
 	}
