@@ -138,10 +138,14 @@ func Discover() ([]Endpoint, error) {
 				continue
 			}
 			dir := filepath.Join(root, ent.Name())
-			if seen[strings.ToLower(dir)] {
+			key := dir
+			if runtime.GOOS == "windows" {
+				key = strings.ToLower(dir)
+			}
+			if seen[key] {
 				continue // the same directory reached through two roots
 			}
-			seen[strings.ToLower(dir)] = true
+			seen[key] = true
 			if e, err := ReadEndpoint(dir); err == nil {
 				out = append(out, e)
 			}
