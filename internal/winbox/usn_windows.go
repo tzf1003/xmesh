@@ -49,9 +49,9 @@ func openWorkspaceChangeSource(anchor windows.Handle, volume uint64) (*workspace
 	if err != nil {
 		return nil, err
 	}
-	h, err := windows.CreateFile(ptr, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
+	h, err := openChangeSourceHandle(ptr, path)
 	if err != nil {
-		return nil, fmt.Errorf("open AppContainer NTFS change source: %w", err)
+		return nil, err
 	}
 	// Reopen the GUID root and compare its full volume/128-bit root identity to
 	// the retained anchor. The GUID selects the raw device used for this stream.
