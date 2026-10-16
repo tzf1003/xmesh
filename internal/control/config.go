@@ -3,44 +3,25 @@ package control
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
-	"time"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/config"
-	"github.com/tzf1003/xmesh/internal/toolerr"
 	"go.yaml.in/yaml/v3"
 )
-
-// maxConfigBytes bounds a PUT /v1/config body.
-const maxConfigBytes = 1 << 20
-
-// Edit changes one value of the configuration file. Path is a JSON Pointer such
-// as /agent/policy/allow_dangerous; arrays are replaced as a whole.
-type Edit struct {
-	Path   string `json:"path"`
-	Value  any    `json:"value"`
-	Delete bool   `json:"delete"`
-}
-type Change struct {
-	Path      string `json:"path"`
-	Before    any    `json:"before"`
-	After     any    `json:"after"`
-	Sensitive bool   `json:"sensitive,omitempty"`
-}
-
-// sensitivePrefixes mark changes the UI should confirm. The kernel does not
-// block them: any process of the same user can edit the file directly.
-var sensitivePrefixes = []string{"/agent/policy", "/agent/cwd_policy", "/agent/authz", "/agent/backends", "/gateway/pats", "/ingress"}
 
 // restartPrefixes mirror config.Store: these sections only apply after a restart.
 var restartPrefixes = []string{"/node", "/mesh", "/gateway/listen", "/ingress"}
 
-func hasPrefix(path string, prefixes []string) bool {
+func hasPrefix(path string, prefixes ...string) bool {
 	for _, p := range prefixes {
 		if path == p || strings.HasPrefix(path, p+"/") {
 			return true
@@ -49,105 +30,180 @@ func hasPrefix(path string, prefixes []string) bool {
 	return false
 }
 
-func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
 	path := s.o.Store.Path()
-	if path == "" {
-		fail(w, 404, toolerr.New("not_found", "此节点没有配置文件", "name", "config"))
-		return
-	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		fail(w, 500, toolerr.Internal("config.read", err))
+		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
 		return
 	}
-	restart, failures := s.o.Store.State()
-	w.Header().Set("ETag", etagOf(raw))
-	writeJSON(w, 200, map[string]any{"path": path, "etag": etagOf(raw), "yaml": string(raw), "config": s.o.Store.Get(), "restart_required": restart, "policy_reload_failures": failures})
+	s.o.Store.Get() // apply a pending reload so effective_etag is current
+	restart, _ := s.o.Store.State()
+	etag := etagOf(raw)
+	out := v1.ConfigResponse{ETag: etag, Content: string(raw), EffectiveETag: "sha256-" + s.o.Store.Digest(), RestartRequired: restart}
+	if _, err = config.Parse(raw); err != nil {
+		out.LoadError = loadError(err)
+	} else {
+		out.Valid, out.Parsed = true, parsedOf(raw)
+	}
+	w.Header().Set("ETag", `"`+etag+`"`)
+	writeJSON(w, 200, out)
 }
 
-func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
-	started := time.Now()
+func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	path := s.o.Store.Path()
-	if path == "" {
-		fail(w, 404, toolerr.New("not_found", "此节点没有配置文件", "name", "config"))
-		return
-	}
 	match := r.Header.Get("If-Match")
-	if match == "" {
-		fail(w, 428, toolerr.Args("If-Match"))
+	if strings.TrimSpace(match) == "" {
+		failWith(w, newError(v1.ErrPreconditionNeeded, "修改配置必须带 If-Match"))
 		return
 	}
-	var req struct {
-		YAML   *string `json:"yaml"`
-		Set    []Edit  `json:"set"`
-		DryRun bool    `json:"dry_run"`
-	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConfigBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || (req.YAML == nil) == (len(req.Set) == 0) {
-		fail(w, 400, toolerr.Args("body"))
+	var req v1.ConfigPutRequest
+	if e := decode(r, &req, true); e != nil {
+		failWith(w, e)
 		return
 	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(path)
 	if err != nil {
-		fail(w, 500, toolerr.Internal("config.read", err))
+		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
 		return
 	}
-	if unquote(match) != sum(old) {
-		fail(w, 412, toolerr.New("conflict", "配置文件已被修改，请重新读取", "path", path, "current_sha256", sum(old)))
+	if current := etagOf(old); strings.Trim(strings.TrimSpace(match), `"`) != current {
+		e := newError(v1.ErrPreconditionFailed, "配置文件已被修改，请重新读取后再保存")
+		e.CurrentETag = current
+		failWith(w, e)
 		return
 	}
-	next := []byte(nil)
-	if req.YAML != nil {
-		next = []byte(*req.YAML)
-	} else if next, err = applyEdits(old, req.Set); err != nil {
-		fail(w, 400, toolerr.New("invalid_args", "无法应用修改: "+err.Error(), "field", "set"))
+	next := []byte(req.Content)
+	if _, err = config.Parse(next); err != nil {
+		e := newError(v1.ErrConfigInvalid, "配置未通过校验，没有写入")
+		e.Diagnostics = diagnostics(err)
+		failWith(w, e)
 		return
 	}
-	updated, err := config.Parse(next)
-	if err != nil {
-		s.audit("control.config.put", "invalid_args", nil, started)
-		fail(w, 400, toolerr.New("invalid_args", clip("配置无效: "+err.Error(), 2000), "field", "config"))
-		return
-	}
-	before, err := config.Parse(old)
-	if err != nil {
-		// The file on disk is already invalid (the node kept the last good generation).
-		before = s.o.Store.Get()
-	}
-	changes := diffConfigs(before, updated)
-	keys := make([]string, len(changes))
-	for i, c := range changes {
-		keys[i] = c.Path
-	}
+	diff := diffConfigs(parsedOf(old), parsedOf(next))
 	restart, _ := s.o.Store.State()
-	for _, c := range changes {
-		restart = restart || hasPrefix(c.Path, restartPrefixes)
+	for _, c := range diff {
+		restart = restart || c.RestartRequired
 	}
-	if req.DryRun || bytes.Equal(old, next) {
-		writeJSON(w, 200, map[string]any{"applied": false, "etag": etagOf(old), "changes": changes, "restart_required": restart})
+	applied := !req.DryRun && !bytes.Equal(old, next)
+	if !applied {
+		writeJSON(w, 200, v1.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
 		return
 	}
 	if err = writeAtomic(path, next); err != nil {
-		s.audit("control.config.put", "internal", keys, started)
-		fail(w, 500, toolerr.Internal("config.write", err))
+		failWith(w, newError(v1.ErrInternal, "写入配置文件失败"))
 		return
 	}
 	s.digest = sum(next)
-	// Reload now so restart_required is the store's own verdict, not the heuristic.
+	s.lastParsed = parsedOf(next)
+	// Reload now so restart_required is the store's own verdict, not the prefix heuristic.
 	s.o.Store.Get()
-	restart, _ = s.o.Store.State()
-	s.audit("control.config.put", "", keys, started)
-	_ = s.bus.Publish("config", map[string]any{"etag": etagOf(next), "source": "control", "restart_required": restart, "changes": len(changes)})
-	w.Header().Set("ETag", etagOf(next))
-	writeJSON(w, 200, map[string]any{"applied": true, "etag": etagOf(next), "changes": changes, "restart_required": restart})
+	restart, s.failures = s.o.Store.State()
+	etag := etagOf(next)
+	paths := make([]string, len(diff))
+	for i, c := range diff {
+		paths[i] = c.Pointer
+	}
+	_ = s.bus.Publish(v1.EventConfig, v1.ConfigEventData{Change: "written", Actor: v1.ActorControl, ETag: &etag, RestartRequired: restart, ChangedPaths: paths})
+	w.Header().Set("ETag", `"`+etag+`"`)
+	writeJSON(w, 200, v1.ConfigPutResponse{Applied: true, ETag: etag, Diff: diff, RestartRequired: restart})
 }
 
-func clip(text string, n int) string {
-	if len(text) > n {
-		return text[:n] + "…"
+// watchConfigFile announces edits made outside the channel (editor, CLI).
+func (s *Server) watchConfigFile() {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	now := s.fileDigest()
+	if now == "" || now == s.digest {
+		return
+	}
+	s.digest = now
+	raw, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		return
+	}
+	etag := etagOf(raw)
+	s.o.Store.Get()
+	restart, failures := s.o.Store.State()
+	data := v1.ConfigEventData{Change: "reloaded", Actor: v1.ActorFile, ETag: &etag, RestartRequired: restart, ChangedPaths: []string{}}
+	if failures > s.failures {
+		data.Change = "reload_failed"
+	} else if parsed := parsedOf(raw); parsed != nil {
+		for _, c := range diffConfigs(s.lastParsed, parsed) {
+			data.ChangedPaths = append(data.ChangedPaths, c.Pointer)
+		}
+		s.lastParsed = parsed
+	}
+	s.failures = failures
+	_ = s.bus.Publish(v1.EventConfig, data)
+}
+
+// parsedOf is the YAML document as the JSON data model, or nil if it does not parse.
+func parsedOf(raw []byte) map[string]any {
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if json.Unmarshal(b, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+var yamlLine = regexp.MustCompile(`line (\d+)`)
+
+// diagnostics turns a config.Parse error into one entry per failing location.
+func diagnostics(err error) []v1.Diagnostic {
+	var ve *jsonschema.ValidationError
+	if errors.As(err, &ve) {
+		out := []v1.Diagnostic{}
+		var walk func(u *jsonschema.OutputUnit)
+		walk = func(u *jsonschema.OutputUnit) {
+			if u.Error != nil && len(out) < 20 {
+				out = append(out, v1.Diagnostic{Pointer: u.InstanceLocation, Message: oneLine(u.Error.String())})
+			}
+			for i := range u.Errors {
+				walk(&u.Errors[i])
+			}
+		}
+		walk(ve.DetailedOutput())
+		if len(out) > 0 {
+			return out
+		}
+	}
+	d := v1.Diagnostic{Message: oneLine(err.Error())}
+	if m := yamlLine.FindStringSubmatch(err.Error()); m != nil {
+		d.Line, _ = strconv.Atoi(m[1])
+	}
+	return []v1.Diagnostic{d}
+}
+
+func loadError(err error) *v1.ConfigLoadError {
+	d := diagnostics(err)[0]
+	out := &v1.ConfigLoadError{Message: d.Message}
+	if d.Pointer != "" {
+		out.Message = d.Pointer + ": " + d.Message
+	}
+	if d.Line > 0 {
+		out.Line = &d.Line
+	}
+	if d.Column > 0 {
+		out.Column = &d.Column
+	}
+	return out
+}
+
+func oneLine(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 300 {
+		text = text[:300] + "…"
 	}
 	return text
 }
@@ -183,138 +239,106 @@ func writeAtomic(path string, data []byte) error {
 	return err
 }
 
-// applyEdits changes src through a YAML node tree, so comments and key order of
-// everything not edited survive.
-func applyEdits(src []byte, edits []Edit) ([]byte, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(src, &doc); err != nil {
-		return nil, err
+// diffConfigs lists the RFC 6902 style operations that turn before into after, as the
+// contract's ConfigChange rows (CTR-CTL-07). Arrays are compared element by element.
+func diffConfigs(before, after map[string]any) []v1.ConfigChange {
+	var out []v1.ConfigChange
+	if before == nil {
+		before = map[string]any{}
 	}
-	if doc.Kind == 0 {
-		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
+	if after == nil {
+		after = map[string]any{}
 	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("配置根必须是映射")
+	diffValue("", before, after, &out)
+	for i := range out {
+		out[i].RestartRequired = hasPrefix(out[i].Pointer, restartPrefixes...)
+		out[i].WeakensSecurity = weakensSecurity(out[i], before, after)
 	}
-	for _, e := range edits {
-		segments, err := pointer(e.Path)
-		if err != nil {
-			return nil, err
-		}
-		if err = edit(doc.Content[0], segments, e); err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Path, err)
-		}
+	if out == nil {
+		out = []v1.ConfigChange{}
 	}
-	var out bytes.Buffer
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, err
-	}
-	if err := enc.Close(); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
-func pointer(p string) ([]string, error) {
-	if !strings.HasPrefix(p, "/") || p == "/" {
-		return nil, fmt.Errorf("路径必须是 JSON Pointer: %q", p)
-	}
-	parts := strings.Split(p[1:], "/")
-	for i, part := range parts {
-		if part == "" {
-			return nil, fmt.Errorf("路径含空段: %q", p)
-		}
-		parts[i] = strings.NewReplacer("~1", "/", "~0", "~").Replace(part)
-	}
-	return parts, nil
-}
-func edit(m *yaml.Node, segments []string, e Edit) error {
-	key, rest := segments[0], segments[1:]
-	index := -1
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == key {
-			index = i
-			break
-		}
-	}
-	if len(rest) == 0 {
-		if e.Delete {
-			if index < 0 {
-				return nil
-			}
-			m.Content = append(m.Content[:index], m.Content[index+2:]...)
-			return nil
-		}
-		value := &yaml.Node{}
-		if err := value.Encode(e.Value); err != nil {
-			return err
-		}
-		if index >= 0 {
-			old := m.Content[index+1]
-			value.HeadComment, value.LineComment, value.FootComment = old.HeadComment, old.LineComment, old.FootComment
-			m.Content[index+1] = value
-			return nil
-		}
-		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
-		return nil
-	}
-	if index < 0 {
-		if e.Delete {
-			return nil
-		}
-		child := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, child)
-		return edit(child, rest, e)
-	}
-	child := m.Content[index+1]
-	if child.Kind != yaml.MappingNode {
-		return fmt.Errorf("%q 不是映射", key)
-	}
-	return edit(child, rest, e)
-}
-
-// diffConfigs lists every leaf that differs between two parsed configurations.
-// Arrays are leaves.
-func diffConfigs(before, after *config.Config) []Change {
-	a, b := map[string]any{}, map[string]any{}
-	flatten("", asJSON(before), a)
-	flatten("", asJSON(after), b)
-	paths := map[string]struct{}{}
-	for p := range a {
-		paths[p] = struct{}{}
-	}
-	for p := range b {
-		paths[p] = struct{}{}
-	}
-	out := []Change{}
-	for _, p := range sortedKeys(paths) {
-		x, y := a[p], b[p]
-		if jsonEqual(x, y) {
-			continue
-		}
-		out = append(out, Change{Path: p, Before: x, After: y, Sensitive: hasPrefix(p, sensitivePrefixes)})
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
-func asJSON(c *config.Config) any {
-	raw, _ := json.Marshal(c)
-	var v any
-	_ = json.Unmarshal(raw, &v)
-	return v
+
+func escapePointer(key string) string {
+	return strings.NewReplacer("~", "~0", "/", "~1").Replace(key)
 }
-func flatten(prefix string, v any, out map[string]any) {
-	if m, ok := v.(map[string]any); ok && len(m) > 0 {
-		for k, child := range m {
-			flatten(prefix+"/"+strings.NewReplacer("~", "~0", "/", "~1").Replace(k), child, out)
+
+func diffValue(ptr string, a, b any, out *[]v1.ConfigChange) {
+	raw := func(v any) json.RawMessage { r, _ := json.Marshal(v); return r }
+	switch x := a.(type) {
+	case map[string]any:
+		if y, ok := b.(map[string]any); ok {
+			keys := map[string]struct{}{}
+			for k := range x {
+				keys[k] = struct{}{}
+			}
+			for k := range y {
+				keys[k] = struct{}{}
+			}
+			for _, k := range sortedKeys(keys) {
+				from, inA := x[k]
+				to, inB := y[k]
+				switch {
+				case inA && inB:
+					diffValue(ptr+"/"+escapePointer(k), from, to, out)
+				case inA:
+					*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + escapePointer(k), Op: "remove", Before: raw(from)})
+				default:
+					*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + escapePointer(k), Op: "add", After: raw(to)})
+				}
+			}
+			return
 		}
-		return
+	case []any:
+		if y, ok := b.([]any); ok {
+			n := min(len(x), len(y))
+			for i := 0; i < n; i++ {
+				diffValue(ptr+"/"+strconv.Itoa(i), x[i], y[i], out)
+			}
+			for i := n; i < len(y); i++ {
+				*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + strconv.Itoa(i), Op: "add", After: raw(y[i])})
+			}
+			for i := len(x) - 1; i >= n; i-- {
+				*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + strconv.Itoa(i), Op: "remove", Before: raw(x[i])})
+			}
+			return
+		}
 	}
-	out[prefix] = v
+	if !reflect.DeepEqual(a, b) {
+		*out = append(*out, v1.ConfigChange{Pointer: ptr, Op: "replace", Before: raw(a), After: raw(b)})
+	}
 }
-func jsonEqual(a, b any) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return bytes.Equal(x, y)
+
+// weakensSecurity marks changes the UI should confirm (CTR-CTL-07). It is a UI courtesy, not an
+// authorization boundary: the kernel writes the change either way, and any process of the same
+// user could edit the file directly. It errs towards asking.
+func weakensSecurity(c v1.ConfigChange, before, after map[string]any) bool {
+	changed := c.Op == "add" || c.Op == "replace"
+	switch {
+	case c.Pointer == "/agent/policy/allow_dangerous":
+		return string(c.After) == "true"
+	case hasPrefix(c.Pointer, "/agent/cwd_policy/allow"):
+		return changed
+	case hasPrefix(c.Pointer, "/agent/cwd_policy/deny"):
+		return c.Op == "remove" || c.Op == "replace"
+	case hasPrefix(c.Pointer, "/agent/authz"):
+		return changed
+	case hasPrefix(c.Pointer, "/gateway/pats"):
+		if changed {
+			return true
+		}
+		return len(patsOf(before)) > 0 && len(patsOf(after)) == 0
+	case hasPrefix(c.Pointer, "/ingress/listen"):
+		return true
+	case c.Pointer == "/ingress":
+		return changed
+	}
+	return false
+}
+
+func patsOf(doc map[string]any) map[string]any {
+	gateway, _ := doc["gateway"].(map[string]any)
+	pats, _ := gateway["pats"].(map[string]any)
+	return pats
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	winio "github.com/tailscale/go-winio"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"golang.org/x/sys/windows"
 )
 
@@ -16,21 +17,21 @@ import (
 // clients, and carries a protected DACL naming only the kernel's user, SYSTEM,
 // Administrators and the extra SIDs. AppContainer packages are not in it, so L2
 // sandboxes cannot open the pipe (CON-SEC-12).
-func Listen(o ListenOptions) (net.Listener, Endpoint, error) {
+func Listen(o ListenOptions) (net.Listener, Bound, error) {
 	sid, err := CurrentSID()
 	if err != nil {
-		return nil, Endpoint{}, err
+		return nil, Bound{}, err
 	}
 	sddl, err := PipeSDDL(sid, o.AllowSIDs)
 	if err != nil {
-		return nil, Endpoint{}, err
+		return nil, Bound{}, err
 	}
 	name := PipeName(sid, o.Node)
 	l, err := winio.ListenPipe(name, &winio.PipeConfig{SecurityDescriptor: sddl, InputBufferSize: 64 << 10, OutputBufferSize: 64 << 10})
 	if err != nil {
-		return nil, Endpoint{}, err
+		return nil, Bound{}, err
 	}
-	return l, Endpoint{Transport: "pipe", Address: name}, nil
+	return l, Bound{Transport: v1.TransportPipe, Address: name}, nil
 }
 
 func PipeName(sid, node string) string { return `\\.\pipe\xmesh-` + sid + "-" + node }
@@ -61,4 +62,13 @@ func PipeSDDL(own string, extra []string) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// connectionIdentity names the pipe's user in the audit record. A pipe does not tell the server
+// which of the allowed principals connected, so this is the kernel's own SID.
+func connectionIdentity() string {
+	if sid, err := CurrentSID(); err == nil {
+		return sid
+	}
+	return "unknown"
 }

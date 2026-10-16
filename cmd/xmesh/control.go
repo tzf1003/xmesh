@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -26,14 +27,14 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
 
 子命令:
   status | peers | sessions       读取状态、对端、会话
-  events [--last-event-id N] [--count N]  不带 --last-event-id 只收新事件，0 表示从保留的最早事件开始
-                                   订阅事件流，每行一个事件
+  events [--last-event-id ID] [--count N]  订阅事件流，每行一个事件（首条为 hello）；
+                                   带 --last-event-id 时先补发其后的事件，id 失效则先收到 reset
   audit [--tool T --device D --caller C --status ok|error --event E
          --since RFC3339 --until RFC3339 --limit N --cursor C]
   drain [--mode keep|kill]        排空本节点；resume 恢复
   resume
   config get                      读取配置原文与 ETag
-  config set --if-match ETAG [--dry-run] (--yaml-file 文件 | --set /路径=JSON ... | --delete /路径 ...)`
+  config set [--if-match ETAG] [--dry-run] (--yaml-file 文件 | --set /路径=JSON ... | --delete /路径 ...)`
 
 // controlTarget resolves which node's channel to talk to.
 func controlTarget(node, stateDir string) (control.Endpoint, error) {
@@ -250,7 +251,7 @@ func controlConfig(ctx context.Context, flags *flag.FlagSet, target targetFlags,
 	}
 	verb := args[0]
 	var edits editFlags
-	match := flags.String("if-match", "", "ETag（来自 config get）")
+	match := flags.String("if-match", "", "ETag（来自 config get）；缺省使用刚读到的当前值")
 	dry := flags.Bool("dry-run", false, "只校验并返回差异")
 	yamlFile := flags.String("yaml-file", "", "用该文件的内容整体替换配置")
 	flags.Var(&edits, "set", "/路径=JSON，可重复")
@@ -265,24 +266,37 @@ func controlConfig(ctx context.Context, flags *flag.FlagSet, target targetFlags,
 	if verb == "get" {
 		return show(c.Do(ctx, "GET", "/v1/config", nil, nil))
 	}
-	if *match == "" {
-		return fmt.Errorf("config set 需要 --if-match")
+	current, err := c.Do(ctx, "GET", "/v1/config", nil, nil)
+	if err != nil {
+		return err
 	}
-	body := map[string]any{"dry_run": *dry}
+	if err = current.Error(); err != nil {
+		return err
+	}
+	var file v1.ConfigResponse
+	if err = json.Unmarshal(current.Body, &file); err != nil {
+		return err
+	}
+	if tag := strings.Trim(*match, `"`); tag != "" && tag != file.ETag {
+		return fmt.Errorf("配置文件已被修改（当前 ETag %s），请重新读取", file.ETag)
+	}
+	var next []byte
 	switch {
 	case *yamlFile != "" && len(edits) == 0:
-		raw, err := os.ReadFile(*yamlFile)
-		if err != nil {
+		if next, err = os.ReadFile(*yamlFile); err != nil {
 			return err
 		}
-		body["yaml"] = string(raw)
 	case *yamlFile == "" && len(edits) > 0:
-		body["set"] = []control.Edit(edits)
+		if next, err = control.ApplyEdits([]byte(file.Content), edits); err != nil {
+			return err
+		}
 	default:
-		return fmt.Errorf("--yaml-file 与 --set 二选一")
+		return fmt.Errorf("--yaml-file 与 --set/--delete 二选一")
 	}
-	return show(c.Do(ctx, "PUT", "/v1/config", body, map[string]string{"If-Match": *match}))
+	return show(c.Do(ctx, "PUT", "/v1/config", v1.ConfigPutRequest{Content: string(next), DryRun: *dry}, map[string]string{"If-Match": `"` + file.ETag + `"`}))
 }
+
+func text2(v any) string { return fmt.Sprint(v) }
 
 // controlStatus implements `xmesh status --control`.
 func controlStatus(node, stateDir string, machine bool) error {
@@ -307,10 +321,9 @@ func controlStatus(node, stateDir string, machine bool) error {
 	if err = json.Unmarshal(r.Body, &info); err != nil {
 		return err
 	}
-	info["hostname"] = info["node"]
 	text := formatStatus(info)
-	if info["draining"] == true {
-		text += "排空中: 是\n"
+	if drain, ok := info["drain"].(map[string]any); ok && drain["draining"] == true {
+		text += "排空中: 是（" + text2(drain["mode"]) + "）\n"
 	}
 	fmt.Print(text)
 	return nil

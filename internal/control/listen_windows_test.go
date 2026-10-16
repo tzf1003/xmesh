@@ -40,7 +40,7 @@ func Test_CONSEC12_PipeSDDL(t *testing.T) {
 // Everyone are absent, so sandboxed processes cannot open it.
 func Test_CONSEC12_LivePipeDACL(t *testing.T) {
 	f := newFixture(t)
-	address := f.server.Endpoint().Address
+	address := f.server.Endpoint().Address()
 	if !strings.HasPrefix(address, `\\.\pipe\xmesh-S-1-`) || !strings.HasSuffix(address, "-ctl-node") {
 		t.Fatalf("pipe name %s", address)
 	}

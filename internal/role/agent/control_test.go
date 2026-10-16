@@ -16,7 +16,7 @@ func Test_ControlResumeAcceptsWorkAgain(t *testing.T) {
 	t.Cleanup(server.Close)
 	client := connect(t, server.URL+"/mcp")
 	a.Drain(false)
-	if !a.Draining() || !a.Overview().Draining {
+	if !a.Draining() {
 		t.Fatal("not draining")
 	}
 	if o := tool(t, client, "pty.open", map[string]any{"cols": 80, "rows": 24}); !o.IsError {
@@ -31,7 +31,7 @@ func Test_ControlResumeAcceptsWorkAgain(t *testing.T) {
 		t.Fatal(opened)
 	}
 	sessions := a.Sessions()
-	if len(sessions.PTY) != 1 || sessions.Exec["shared"] == 0 {
+	if len(sessions.PTY) != 1 || sessions.PTY[0].Kind != "pty" || sessions.PTY[0].CreatedAt.IsZero() || sessions.Exec == nil || sessions.Leases == nil {
 		t.Fatalf("%+v", sessions)
 	}
 	_ = tool(t, client, "pty.close", map[string]any{"session_id": object(t, opened)["session_id"]})
@@ -45,7 +45,7 @@ func Test_ControlOverviewIsUnfilteredByTags(t *testing.T) {
 	}
 	t.Cleanup(a.Close)
 	ov := a.Overview()
-	if ov.Limits["pty_max_sessions"] == nil || ov.Warnings == nil || ov.Backends == nil || ov.Workspaces == nil {
+	if ov.Limits.PTYMaxSessions == 0 || ov.Limits.ExecShared == 0 || ov.Warnings == nil || ov.Backends == nil || ov.Workspaces == nil || ov.Hostname == "" || ov.PathSep == "" {
 		t.Fatalf("%+v", ov)
 	}
 }

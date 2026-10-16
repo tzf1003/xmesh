@@ -1,133 +1,71 @@
 package control
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
+
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
-// ringSize is how many events a reconnecting client can replay.
-const ringSize = 1024
-
-// Event is one record of GET /v1/events. Data holds metadata only: the encoder
-// below refuses any field that is not on the allow-list of its type (INV-10).
-type Event struct {
-	ID   uint64         `json:"id"`
-	Type string         `json:"type"`
-	Time string         `json:"time"`
-	Data map[string]any `json:"data"`
-}
-
-type field int
-
-const (
-	str field = iota
-	num
-	flag
-	list
-	obj
-)
-
-// eventFields lists, per event type, the only fields an event may carry.
-// Parameters, command lines, file content and output are not representable.
-var eventFields = map[string]map[string]field{
-	"status":    {"health": str, "draining": flag, "restart_required": flag, "warnings": list, "limits": obj},
-	"peer":      {"change": str, "id": str, "name": str, "online": flag, "direct": flag, "relay": str, "tags": list},
-	"call":      {"event": str, "caller": str, "oauth_client": str, "device": str, "tool": str, "status": str, "error": str, "duration_ms": num, "actor": str},
-	"session":   {"change": str, "session_id": str, "name": str, "owner": str, "state": str},
-	"warning":   {"message": str, "active": flag},
-	"config":    {"etag": str, "source": str, "restart_required": flag, "changes": num},
-	"lifecycle": {"state": str, "mode": str, "reason": str},
-}
-
-func kindOf(v any) field {
-	switch v.(type) {
-	case string:
-		return str
-	case bool:
-		return flag
-	case []string, []any:
-		return list
-	case map[string]any:
-		return obj
-	case nil:
-		return str
-	default:
-		return num
-	}
-}
-
-// encode returns data as a JSON-normalised map, or an error naming the first
-// field that is not allowed for the event type.
-func encode(kind string, data map[string]any) (map[string]any, error) {
-	allowed, ok := eventFields[kind]
-	if !ok {
-		return nil, fmt.Errorf("未知事件类型: %s", kind)
-	}
-	for key, value := range data {
-		want, ok := allowed[key]
-		if !ok {
-			return nil, fmt.Errorf("事件 %s 不允许字段 %s", kind, key)
-		}
-		if value != nil && kindOf(value) != want && !(want == num && isNumber(value)) {
-			return nil, fmt.Errorf("事件 %s 的字段 %s 类型不符", kind, key)
-		}
-	}
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err = json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-func isNumber(v any) bool {
-	switch v.(type) {
-	case int, int32, int64, uint, uint32, uint64, float32, float64:
-		return true
-	}
-	return false
-}
-
-// Bus keeps the last ringSize events and fans new ones out to subscribers.
+// Bus keeps the last v1.EventRingSize events of this boot and fans new ones out.
+//
+// Every payload is decoded back into the typed struct of its event type with unknown fields
+// refused, so a field outside the contract (stdout, arguments, file content...) cannot reach the
+// stream (INV-10): Publish drops the event and counts it.
 type Bus struct {
 	mu       sync.Mutex
-	next     uint64
-	ring     []Event
+	boot     string
+	seq      uint64
+	ring     []v1.Event
 	subs     map[*Subscription]struct{}
 	rejected uint64
+	closed   bool
 }
 
-// Subscription receives events published after it was created. C is closed when
-// the subscriber fell behind or the bus closed; the client reconnects with
-// Last-Event-ID and replays from the ring.
+// Subscription receives events published after it was created. C is closed when the subscriber
+// fell behind or the bus closed; the client reconnects with Last-Event-ID and replays or resets.
 type Subscription struct {
-	C      chan Event
+	C      chan v1.Event
 	bus    *Bus
 	closed bool
 }
 
-func NewBus() *Bus { return &Bus{next: 1, subs: map[*Subscription]struct{}{}} }
+func NewBus() *Bus {
+	raw := make([]byte, 4)
+	_, _ = rand.Read(raw)
+	return &Bus{boot: hex.EncodeToString(raw), subs: map[*Subscription]struct{}{}}
+}
+
+// BootID is the random id of this boot, the first half of every event id.
+func (b *Bus) BootID() string { return b.boot }
 
 // Publish validates and stores an event. It never blocks on subscribers.
-func (b *Bus) Publish(kind string, data map[string]any) error {
-	clean, err := encode(kind, data)
+func (b *Bus) Publish(typ v1.EventType, data any) error {
+	raw, err := json.Marshal(data)
 	if err != nil {
-		b.mu.Lock()
-		b.rejected++
-		b.mu.Unlock()
 		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	e := Event{ID: b.next, Type: kind, Time: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), Data: clean}
-	b.next++
+	if b.closed {
+		return nil
+	}
+	e := v1.Event{Time: v1.Now(), Type: typ, Data: raw}
+	if _, err = e.Payload(); err != nil || typ == v1.EventHello || typ == v1.EventReset {
+		b.rejected++
+		if err == nil {
+			err = fmt.Errorf("事件 %s 不进入事件流缓存", typ)
+		}
+		return err
+	}
+	b.seq++
+	e.Seq, e.ID = b.seq, v1.FormatEventID(b.boot, b.seq)
 	b.ring = append(b.ring, e)
-	if len(b.ring) > ringSize {
-		b.ring = append(b.ring[:0], b.ring[len(b.ring)-ringSize:]...)
+	if len(b.ring) > v1.EventRingSize {
+		b.ring = append(b.ring[:0], b.ring[len(b.ring)-v1.EventRingSize:]...)
 	}
 	for s := range b.subs {
 		select {
@@ -146,6 +84,20 @@ func (b *Bus) Rejected() uint64 {
 	return b.rejected
 }
 
+// Head is the id of the newest event, or nil before the first one.
+func (b *Bus) Head() *string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.headLocked()
+}
+func (b *Bus) headLocked() *string {
+	if b.seq == 0 {
+		return nil
+	}
+	head := v1.FormatEventID(b.boot, b.seq)
+	return &head
+}
+
 func (b *Bus) dropLocked(s *Subscription) {
 	if !s.closed {
 		s.closed = true
@@ -154,37 +106,57 @@ func (b *Bus) dropLocked(s *Subscription) {
 	}
 }
 
-// Subscribe returns the events after since (0 means none are replayed) and a live
-// subscription, atomically, so no event is missed or duplicated. gap reports that
-// since is older than the oldest retained event.
-func (b *Bus) Subscribe(since uint64, replay bool) (past []Event, gap bool, s *Subscription) {
+// Join is what a new stream connection starts with: the hello head, an optional reset, the events
+// to replay, and a live subscription. All four are taken under one lock, so no event is missed or
+// repeated.
+type Join struct {
+	Head   *string
+	Reset  *v1.ResetData
+	Replay []v1.Event
+	Sub    *Subscription
+}
+
+// Subscribe joins the stream. since is the client's Last-Event-ID, or "" for a first connection.
+func (b *Bus) Subscribe(since string) Join {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	s = &Subscription{C: make(chan Event, 256), bus: b}
-	b.subs[s] = struct{}{}
-	if !replay {
-		return nil, false, s
+	j := Join{Head: b.headLocked(), Sub: &Subscription{C: make(chan v1.Event, 256), bus: b}}
+	if b.closed {
+		j.Sub.closed = true
+		close(j.Sub.C)
+		return j
 	}
-	if len(b.ring) > 0 && since+1 < b.ring[0].ID {
-		gap = true
+	b.subs[j.Sub] = struct{}{}
+	if since == "" {
+		return j
 	}
-	for _, e := range b.ring {
-		if e.ID > since {
-			past = append(past, e)
+	boot, seq, err := v1.ParseEventID(since)
+	switch {
+	case err != nil || boot != b.boot || seq > b.seq:
+		j.Reset = &v1.ResetData{Reason: "boot_changed", Head: j.Head}
+	case len(b.ring) > 0 && seq+1 < b.ring[0].Seq, len(b.ring) == 0 && seq < b.seq:
+		j.Reset = &v1.ResetData{Reason: "gap", Head: j.Head}
+	default:
+		for _, e := range b.ring {
+			if e.Seq > seq {
+				j.Replay = append(j.Replay, e)
+			}
 		}
 	}
-	return past, gap, s
+	return j
 }
+
 func (s *Subscription) Close() {
 	s.bus.mu.Lock()
 	defer s.bus.mu.Unlock()
 	s.bus.dropLocked(s)
 }
 
-// Close ends every subscription.
+// Close ends every subscription and stops accepting events.
 func (b *Bus) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.closed = true
 	for s := range b.subs {
 		b.dropLocked(s)
 	}

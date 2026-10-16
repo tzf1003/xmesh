@@ -11,11 +11,13 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
 func get(t *testing.T, path string) (int, error) {
 	t.Helper()
-	c := NewClient(Endpoint{Transport: "unix", Address: path})
+	c := NewClient(Endpoint{ControlEndpointFile: v1.ControlEndpointFile{Transport: v1.TransportUnix, Endpoint: path}})
 	r, err := c.Do(t.Context(), "GET", "/v1/status", nil, nil)
 	if err != nil {
 		return 0, err
@@ -51,14 +53,14 @@ func Test_ControlSocketPermissions(t *testing.T) {
 	if err := os.Chmod(f.server.o.StateDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	st, err := os.Stat(f.server.Endpoint().Address)
+	st, err := os.Stat(f.server.Endpoint().Address())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if st.Mode()&os.ModeSocket == 0 || st.Mode().Perm() != 0600 {
 		t.Fatalf("socket mode %v", st.Mode())
 	}
-	if f.server.Endpoint().Transport != "unix" || filepath.Base(f.server.Endpoint().Address) != "control.sock" {
+	if f.server.Endpoint().Transport != v1.TransportUnix || filepath.Base(f.server.Endpoint().Address()) != "control.sock" {
 		t.Fatalf("%+v", f.server.Endpoint())
 	}
 }

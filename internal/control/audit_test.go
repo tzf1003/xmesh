@@ -1,6 +1,7 @@
 package control
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
 )
 
@@ -17,6 +19,21 @@ func record(at time.Time, tool, status, errCode string) map[string]any {
 		r["error"] = errCode
 	}
 	return r
+}
+
+// auditTools lists the tool field of every event in an audit response, in order.
+func auditTools(t *testing.T, r *Response) (tools []string, next *string) {
+	t.Helper()
+	var out v1.AuditResponse
+	decodeAs(t, r, &out)
+	for _, raw := range out.Events {
+		var e struct{ Tool string }
+		if err := json.Unmarshal(raw, &e); err != nil {
+			t.Fatal(err)
+		}
+		tools = append(tools, e.Tool)
+	}
+	return tools, out.NextCursor
 }
 
 func Test_ControlAuditView(t *testing.T) {
@@ -37,20 +54,28 @@ func Test_ControlAuditView(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	all := decode(t, f.do("GET", "/v1/audit", nil, nil))
-	records := all["records"].([]any)
-	if len(records) != 6 || records[0].(map[string]any)["tool"] != "exec.run5" || records[5].(map[string]any)["tool"] != "exec.run0" {
-		t.Fatalf("newest-first order: %v", records)
+	list := func(query string) []string {
+		t.Helper()
+		tools, _ := auditTools(t, f.ok("GET", "/v1/audit"+query, nil, "AuditResponse"))
+		return tools
 	}
-	if got := decode(t, f.do("GET", "/v1/audit?status=error", nil, nil))["records"].([]any); len(got) != 2 {
+	var all v1.AuditResponse
+	decodeAs(t, f.ok("GET", "/v1/audit", nil, "AuditResponse"), &all)
+	if !all.Enabled || all.NextCursor != nil {
+		t.Fatalf("%+v", all)
+	}
+	if got := strings.Join(list(""), ","); got != "exec.run5,exec.run4,exec.run3,exec.run2,exec.run1,exec.run0" {
+		t.Fatalf("newest-first order: %s", got)
+	}
+	if got := list("?status=error"); len(got) != 2 {
 		t.Fatalf("status filter: %v", got)
 	}
-	if got := decode(t, f.do("GET", "/v1/audit?tool=run3", nil, nil))["records"].([]any); len(got) != 1 {
+	if got := list("?tool=run3"); len(got) != 1 {
 		t.Fatalf("tool filter: %v", got)
 	}
 	since := base.Add(2 * time.Second).Format(time.RFC3339Nano)
 	until := base.Add(4 * time.Second).Format(time.RFC3339Nano)
-	if got := decode(t, f.do("GET", "/v1/audit?since="+since+"&until="+until, nil, nil))["records"].([]any); len(got) != 3 {
+	if got := list("?since=" + since + "&until=" + until); len(got) != 3 {
 		t.Fatalf("time filter: %v", got)
 	}
 	// paging walks all six records exactly once
@@ -60,21 +85,18 @@ func Test_ControlAuditView(t *testing.T) {
 		if cursor != "" {
 			path += "&cursor=" + cursor
 		}
-		got := decode(t, f.do("GET", path, nil, nil))
-		for _, r := range got["records"].([]any) {
-			seen = append(seen, r.(map[string]any)["tool"].(string))
-		}
-		if cursor, _ = got["next_cursor"].(string); cursor == "" {
+		tools, next := auditTools(t, f.ok("GET", path, nil, "AuditResponse"))
+		seen = append(seen, tools...)
+		if next == nil {
 			break
 		}
+		cursor = *next
 	}
 	if strings.Join(seen, ",") != "exec.run5,exec.run4,exec.run3,exec.run2,exec.run1,exec.run0" {
 		t.Fatalf("paging: %v", seen)
 	}
 	for _, bad := range []string{"limit=0", "limit=5000", "since=yesterday", "status=maybe", "cursor=../../etc/passwd:1", "cursor=nope"} {
-		if r := f.do("GET", "/v1/audit?"+bad, nil, nil); r.Status != 400 {
-			t.Errorf("%s: %d %s", bad, r.Status, r.Body)
-		}
+		apiError(t, f.do("GET", "/v1/audit?"+bad, nil, nil), v1.ErrInvalidArgs)
 	}
 }
 
@@ -95,19 +117,77 @@ func Test_INV10_AuditViewWithholdsContent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "20261016T1000.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	r := f.do("GET", "/v1/audit", nil, nil)
-	got := decode(t, r)
-	if len(got["records"].([]any)) != 1 || got["rejected"] != 3.0 {
-		t.Fatalf("%s", r.Body)
-	}
-	if strings.Contains(string(r.Body), "SECRET") {
-		t.Fatalf("content leaked: %s", r.Body)
+	r := f.ok("GET", "/v1/audit", nil, "AuditResponse")
+	var got v1.AuditResponse
+	decodeAs(t, r, &got)
+	if len(got.Events) != 1 || strings.Contains(string(r.Body), "SECRET") {
+		t.Fatalf("content leaked or good record lost: %s", r.Body)
 	}
 }
 
-func Test_ControlAuditNoDirectory(t *testing.T) {
+// With no audit directory the view is empty and says so.
+func Test_ControlAuditDisabled(t *testing.T) {
 	f := newFixture(t, func(o *Options) { o.AuditDir = "" })
-	if r := f.do("GET", "/v1/audit", nil, nil); r.Status != 404 {
-		t.Fatal(r.Status)
+	var got v1.AuditResponse
+	decodeAs(t, f.ok("GET", "/v1/audit", nil, "AuditResponse"), &got)
+	if got.Enabled || len(got.Events) != 0 || got.NextCursor != nil {
+		t.Fatalf("%+v", got)
+	}
+	// a directory that nothing has written to yet is enabled and empty
+	f2 := newFixture(t)
+	decodeAs(t, f2.ok("GET", "/v1/audit", nil, "AuditResponse"), &got)
+	if !got.Enabled || len(got.Events) != 0 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Every non-GET request is audited as control_call with the route id as the tool and only key
+// names and sizes as arguments; reads are not (CTR-CTL-02).
+func Test_ControlCallsAreAudited(t *testing.T) {
+	var log *audit.Logger
+	f := newFixture(t, func(o *Options) {
+		var err error
+		if log, err = audit.New(o.AuditDir, 0); err != nil {
+			t.Fatal(err)
+		}
+		o.Audit = log
+	})
+	defer log.Close()
+	f.ok("GET", "/v1/status", nil, "StatusResponse")
+	f.ok("POST", "/v1/drain", map[string]string{"mode": "keep"}, "DrainResponse")
+	apiError(t, f.do("POST", "/v1/drain", map[string]string{"mode": "bogus"}, nil), v1.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v1/pair/export", nil, nil), v1.ErrNotImplemented)
+	r := f.ok("GET", "/v1/audit?event=control_call", nil, "AuditResponse")
+	var got v1.AuditResponse
+	decodeAs(t, r, &got)
+	if len(got.Events) != 3 {
+		t.Fatalf("%s", r.Body)
+	}
+	type row struct {
+		Event, Actor, Caller, Tool, Status, Error string
+		Digest                                    struct {
+			Keys  []string
+			Bytes int
+		} `json:"args_digest"`
+	}
+	byTool := map[string]row{}
+	for _, raw := range got.Events {
+		var rec row
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Event != "control_call" || rec.Actor != "control" || !strings.HasPrefix(rec.Caller, "control:") {
+			t.Fatalf("not attributed to the control channel: %s", raw)
+		}
+		byTool[rec.Tool+"/"+rec.Status] = rec
+	}
+	ok := byTool["control.drain.start/ok"]
+	if len(ok.Digest.Keys) != 1 || ok.Digest.Keys[0] != "mode" || ok.Digest.Bytes == 0 || byTool["control.drain.start/error"].Error != "invalid_args" || byTool["control.pair.export/error"].Error != "not_implemented" {
+		t.Fatalf("%+v", byTool)
+	}
+	for _, raw := range got.Events {
+		if strings.Contains(string(raw), "keep") || strings.Contains(string(raw), "bogus") {
+			t.Fatalf("a request value reached the audit record: %s", raw)
+		}
 	}
 }

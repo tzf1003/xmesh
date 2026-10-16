@@ -6,26 +6,28 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
 // FileName is written into the node's state directory while the channel is up.
-const FileName = "control.json"
+const FileName = v1.ControlFileName
 
-// Endpoint is the content of control.json: how a local UI finds a node's channel.
+// Bound is where a listener ended up: the transport and its address (socket path or pipe name).
+type Bound struct {
+	Transport v1.Transport
+	Address   string
+}
+
+// Endpoint is control.json plus the directory it was read from.
 type Endpoint struct {
-	Transport     string `json:"transport"` // "unix" or "pipe"
-	Address       string `json:"address"`
-	Node          string `json:"node"`
-	PID           int    `json:"pid"`
-	KernelVersion string `json:"kernel_version"`
-	ControlAPI    string `json:"control_api"`
-	StartedAt     string `json:"started_at"`
+	v1.ControlEndpointFile
 	// Dir is the state directory the file was read from. Not serialised.
 	Dir string `json:"-"`
 }
 
 // WriteEndpoint stores e atomically with owner-only permission.
-func WriteEndpoint(dir string, e Endpoint) error {
+func WriteEndpoint(dir string, e v1.ControlEndpointFile) error {
 	raw, err := json.MarshalIndent(e, "", "  ")
 	if err != nil {
 		return err
@@ -62,15 +64,18 @@ func ReadEndpoint(dir string) (Endpoint, error) {
 		return Endpoint{}, err
 	}
 	var e Endpoint
-	if err = json.Unmarshal(raw, &e); err != nil {
+	if err = json.Unmarshal(raw, &e.ControlEndpointFile); err != nil {
 		return Endpoint{}, err
 	}
-	if e.Address == "" || (e.Transport != "unix" && e.Transport != "pipe") {
+	if e.ControlEndpointFile.Endpoint == "" || (e.Transport != v1.TransportUnix && e.Transport != v1.TransportPipe) {
 		return Endpoint{}, errors.New("control.json 无效")
 	}
 	e.Dir = dir
 	return e, nil
 }
+
+// Address is the socket path or pipe name to dial.
+func (e Endpoint) Address() string { return e.ControlEndpointFile.Endpoint }
 
 // Discover lists the endpoints of every node of the current user, i.e.
 // <UserConfigDir>/xmesh/*/control.json. Stale files are returned too; a client

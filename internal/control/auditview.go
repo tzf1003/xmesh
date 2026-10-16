@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tzf1003/xmesh/internal/toolerr"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
 // Fields CTR-AUD-01 allows. A record carrying anything else is withheld from
@@ -22,7 +22,7 @@ var auditFields = map[string]bool{"time": true, "event": true, "caller": true, "
 var digestFields = map[string]bool{"keys": true, "resolved_path": true, "cmd": true, "args_len": true, "stdin_sha256": true, "session_id": true, "signal": true, "mode": true, "backend": true, "token": true, "value_len": true, "value_sha256": true, "bytes": true}
 
 const (
-	defaultAuditLimit = 200
+	defaultAuditLimit = 100
 	maxAuditLimit     = 1000
 )
 
@@ -33,44 +33,57 @@ type auditQuery struct {
 	cursor                             string
 }
 
-func (s *Server) auditView(w http.ResponseWriter, r *http.Request) {
+// auditList serves GET /v1/audit (CTR-CTL-11): CTR-AUD-01 events, newest first, passed through
+// without added fields.
+func (s *Server) auditList(w http.ResponseWriter, r *http.Request, _ *call) {
 	q := auditQuery{limit: defaultAuditLimit}
 	v := r.URL.Query()
 	var err error
 	for name, dst := range map[string]*time.Time{"since": &q.since, "until": &q.until} {
 		if text := v.Get(name); text != "" {
-			if *dst, err = time.Parse(time.RFC3339, text); err != nil {
-				fail(w, 400, toolerr.Args(name))
+			if *dst, err = time.Parse(time.RFC3339Nano, text); err != nil {
+				failWith(w, argError(name, "时间必须是 RFC3339"))
 				return
 			}
 		}
 	}
 	if text := v.Get("limit"); text != "" {
 		if q.limit, err = strconv.Atoi(text); err != nil || q.limit < 1 || q.limit > maxAuditLimit {
-			fail(w, 400, toolerr.Args("limit"))
+			failWith(w, argError("limit", "limit 必须在 1 到 1000 之间"))
 			return
 		}
 	}
 	q.tool, q.device, q.caller, q.status, q.kind, q.cursor = v.Get("tool"), v.Get("device"), v.Get("caller"), v.Get("status"), v.Get("event"), v.Get("cursor")
 	if q.status != "" && q.status != "ok" && q.status != "error" {
-		fail(w, 400, toolerr.Args("status"))
+		failWith(w, argError("status", "status 只能是 ok 或 error"))
 		return
 	}
+	out := v1.AuditResponse{Events: []json.RawMessage{}}
 	if s.o.AuditDir == "" {
-		fail(w, 404, toolerr.New("not_found", "此节点没有审计目录", "name", "audit"))
+		writeJSON(w, 200, out)
 		return
 	}
-	records, next, rejected, err := readAudit(s.o.AuditDir, q)
-	var invalid *toolerr.Error
-	if errors.As(err, &invalid) && invalid.Code == "invalid_args" {
-		fail(w, 400, invalid)
+	out.Enabled = true
+	records, next, _, err := readAudit(s.o.AuditDir, q)
+	var invalid *v1.Error
+	switch {
+	case errors.As(err, &invalid):
+		failWith(w, invalid)
+		return
+	case os.IsNotExist(err):
+		records, next = nil, ""
+	case err != nil:
+		failWith(w, newError(v1.ErrInternal, "无法读取审计目录"))
 		return
 	}
-	if err != nil {
-		fail(w, 500, toolerr.Internal("audit.read", err))
-		return
+	for _, record := range records {
+		raw, _ := json.Marshal(record)
+		out.Events = append(out.Events, raw)
 	}
-	writeJSON(w, 200, map[string]any{"records": records, "next_cursor": next, "rejected": rejected})
+	if next != "" {
+		out.NextCursor = &next
+	}
+	writeJSON(w, 200, out)
 }
 
 // readAudit returns up to q.limit records, newest first. The cursor is
@@ -92,7 +105,7 @@ func readAudit(dir string, q auditQuery) (records []map[string]any, next string,
 		name, line, ok := strings.Cut(q.cursor, ":")
 		n, convErr := strconv.Atoi(line)
 		if !ok || convErr != nil || n < 0 || filepath.Base(name) != name {
-			return nil, "", 0, toolerr.Args("cursor")
+			return nil, "", 0, argError("cursor", "游标无效")
 		}
 		startFile, startLine = name, n
 	}

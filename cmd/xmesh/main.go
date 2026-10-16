@@ -208,6 +208,10 @@ func formatStatus(info map[string]any) string {
 	}
 	if warnings, ok := info["warnings"].([]any); ok {
 		for _, warning := range warnings {
+			// sys.info lists warnings as text; the control channel lists {code, severity, message}.
+			if entry, ok := warning.(map[string]any); ok {
+				warning = entry["message"]
+			}
 			fmt.Fprintf(&out, "警告: %v\n", warning)
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kardianos/service"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -19,15 +20,20 @@ const cliConfig = "node:\n  name: cli-node\n  roles: [agent]\nmesh:\n  mode: lan
 
 type cliHost struct{ draining atomic.Bool }
 
-func (h *cliHost) Status() control.Status {
-	return control.Status{Node: "cli-node", Roles: []string{"agent"}, Draining: h.draining.Load(), Warnings: []string{"示例警告"}, Backends: []control.Backend{}, Workspaces: []control.Workspace{}, Network: &control.Network{Mode: "lan", Node: "cli-node", Tags: []string{"tag:peer"}}}
+func (h *cliHost) Status() v1.StatusResponse {
+	return v1.StatusResponse{
+		OS: "linux", Arch: "amd64", Hostname: "cli-node", Home: "/h", Roles: []string{"agent"}, PathSep: "/", Shells: []string{}, Workspaces: []v1.Workspace{}, Backends: []v1.Backend{},
+		Warnings: []v1.Warning{{Code: v1.WarnRestartRequired, Severity: v1.SeverityInfo, Message: "示例警告"}},
+		Network:  v1.NetworkIdentity{Mode: "lan", NodeID: "cli-node", Tags: []string{"tag:peer"}},
+	}
 }
-func (h *cliHost) Peers(context.Context) (control.Peers, error) {
-	return control.Peers{Mode: "lan", Peers: []control.Peer{{ID: "n2", Name: "box", Online: true}}}, nil
+func (h *cliHost) Draining() bool { return h.draining.Load() }
+func (h *cliHost) Peers(context.Context) ([]v1.Peer, error) {
+	return []v1.Peer{{Name: "cli-node", Self: true, NodeID: "cli-node", Tags: []string{}, Online: true, Connection: "local", Addrs: []string{}}, {Name: "box", NodeID: "n2", Tags: []string{}, Online: true, Connection: "direct", Addrs: []string{}}}, nil
 }
-func (h *cliHost) Sessions() control.Sessions { return control.Sessions{} }
-func (h *cliHost) Drain(bool)                 { h.draining.Store(true) }
-func (h *cliHost) Resume()                    { h.draining.Store(false) }
+func (h *cliHost) Sessions() v1.SessionsResponse { return v1.SessionsResponse{} }
+func (h *cliHost) Drain(bool) (int, int)         { h.draining.Store(true); return 0, 0 }
+func (h *cliHost) Resume()                       { h.draining.Store(false) }
 
 // startKernelStub runs a real control server and returns its state directory.
 func startKernelStub(t *testing.T) (state, configPath string) {
@@ -73,42 +79,46 @@ func Test_CLIControlSubcommands(t *testing.T) {
 		}
 		return v
 	}
-	if st := object("status"); st["node"] != "cli-node" || st["version"] != "t" {
+	if st := object("status"); st["hostname"] != "cli-node" || st["control"].(map[string]any)["kernel_version"] != "t" {
 		t.Fatal(st)
 	}
-	if peers := object("peers"); len(peers["peers"].([]any)) != 1 {
+	if peers := object("peers"); len(peers["peers"].([]any)) != 2 {
 		t.Fatal(peers)
 	}
 	object("sessions")
-	if d := object("drain", "--mode", "kill"); d["draining"] != true || d["mode"] != "kill" {
+	if d := object("drain", "--mode", "kill"); d["drain"].(map[string]any)["draining"] != true || d["drain"].(map[string]any)["mode"] != "kill" {
 		t.Fatal(d)
 	}
-	if st := object("status"); st["draining"] != true {
+	if st := object("status"); st["drain"].(map[string]any)["draining"] != true {
 		t.Fatal(st)
 	}
-	if d := object("resume"); d["draining"] != false {
+	if d := object("resume"); d["drain"].(map[string]any)["draining"] != false {
 		t.Fatal(d)
 	}
 	got := object("config", "get")
 	etag := got["etag"].(string)
-	if got["yaml"] != cliConfig {
+	if got["content"] != cliConfig {
 		t.Fatal(got)
 	}
 	dry := object("config", "set", "--if-match", etag, "--dry-run", "--set", "/agent/policy/allow_dangerous=true")
-	if dry["applied"] != false || len(dry["changes"].([]any)) != 1 {
+	if dry["applied"] != false || len(dry["diff"].([]any)) != 1 {
 		t.Fatal(dry)
 	}
 	applied := object("config", "set", "--if-match", etag, "--set", "/agent/exec/max_concurrent=2", "--delete", "/agent/default_cwd")
-	if applied["applied"] != true {
+	if applied["applied"] != true || len(applied["diff"].([]any)) != 2 {
 		t.Fatal(applied)
 	}
+	// without --if-match the CLI uses the ETag it just read; a stale explicit one is refused
 	if _, err := output(t, func() error {
 		return controlCommand([]string{"config", "set", "--if-match", etag, "--set", "/agent/exec/max_concurrent=3", "--state-dir", state})
-	}); err == nil || !strings.Contains(err.Error(), "conflict") {
+	}); err == nil || !strings.Contains(err.Error(), "已被修改") {
 		t.Fatalf("stale etag: %v", err)
 	}
+	if again := object("config", "set", "--set", "/agent/exec/max_concurrent=3"); again["applied"] != true {
+		t.Fatal(again)
+	}
 	if _, err := output(t, func() error { return controlCommand([]string{"config", "set", "--state-dir", state}) }); err == nil {
-		t.Fatal("config set without --if-match")
+		t.Fatal("config set without any change")
 	}
 	if events, err := output(t, func() error {
 		return controlCommand([]string{"events", "--last-event-id", "0", "--count", "1", "--state-dir", state})
@@ -136,7 +146,7 @@ func Test_CLIStatusViaControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	var st map[string]any
-	if json.Unmarshal([]byte(raw), &st) != nil || st["node"] != "cli-node" {
+	if json.Unmarshal([]byte(raw), &st) != nil || st["hostname"] != "cli-node" {
 		t.Fatalf("--json: %q", raw)
 	}
 	// through status() itself
@@ -162,14 +172,14 @@ func Test_CLIControlTargetErrors(t *testing.T) {
 		if err = os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err = control.WriteEndpoint(dir, control.Endpoint{Transport: "unix", Address: "/x/" + node, Node: node}); err != nil {
+		if err = control.WriteEndpoint(dir, v1.ControlEndpointFile{APIVersion: v1.APIVersion, Transport: v1.TransportUnix, Endpoint: "/x/" + node, Node: node}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err = controlTarget("", ""); err == nil || !strings.Contains(err.Error(), "--node") {
 		t.Fatalf("ambiguous: %v", err)
 	}
-	if e, err := controlTarget("b", ""); err != nil || e.Address != "/x/b" {
+	if e, err := controlTarget("b", ""); err != nil || e.Address() != "/x/b" {
 		t.Fatalf("%+v %v", e, err)
 	}
 	if _, err = controlTarget("zzz", ""); err == nil {

@@ -1,20 +1,23 @@
 package control
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/tzf1003/xmesh/internal/audit"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
-func (f *fixture) etag() string {
+func (f *fixture) config() v1.ConfigResponse {
 	f.t.Helper()
-	r := f.do("GET", "/v1/config", nil, nil)
-	if r.Status != 200 || r.Header.Get("ETag") == "" {
-		f.t.Fatalf("GET /v1/config: %d %s", r.Status, r.Body)
+	r := f.ok("GET", "/v1/config", nil, "ConfigResponse")
+	var out v1.ConfigResponse
+	decodeAs(f.t, r, &out)
+	if tag := r.Header.Get("ETag"); tag != `"`+out.ETag+`"` {
+		f.t.Fatalf("ETag header %q vs body %q", tag, out.ETag)
 	}
-	return r.Header.Get("ETag")
+	return out
 }
 func (f *fixture) file() string {
 	f.t.Helper()
@@ -24,223 +27,324 @@ func (f *fixture) file() string {
 	}
 	return string(b)
 }
-func put(f *fixture, etag string, body any) *Response {
+
+// put sends a whole-file replacement guarded by etag (empty means no If-Match header).
+func (f *fixture) put(etag, content string, dry bool) *Response {
 	f.t.Helper()
 	headers := map[string]string{}
 	if etag != "" {
-		headers["If-Match"] = etag
+		headers["If-Match"] = `"` + etag + `"`
 	}
-	return f.do("PUT", "/v1/config", body, headers)
+	return f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: content, DryRun: dry}, headers)
+}
+
+func (f *fixture) putOK(etag, content string, dry bool) v1.ConfigPutResponse {
+	f.t.Helper()
+	r := f.put(etag, content, dry)
+	if r.Status != 200 {
+		f.t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	valid(f.t, "ConfigPutResponse", r.Body)
+	var out v1.ConfigPutResponse
+	decodeAs(f.t, r, &out)
+	return out
 }
 
 func Test_ControlConfigGet(t *testing.T) {
 	f := newFixture(t)
-	body := decode(t, f.do("GET", "/v1/config", nil, nil))
-	if body["yaml"] != testConfig || body["path"] != f.path || body["restart_required"] != false {
-		t.Fatal(body)
+	c := f.config()
+	if c.Content != testConfig || !c.Valid || c.LoadError != nil || c.RestartRequired || c.EffectiveETag != c.ETag || !strings.HasPrefix(c.ETag, "sha256-") {
+		t.Fatalf("%+v", c)
 	}
-	if cfg, _ := body["config"].(map[string]any); cfg["node"].(map[string]any)["name"] != "ctl-node" {
-		t.Fatal(body["config"])
+	if c.Parsed["node"].(map[string]any)["name"] != "ctl-node" {
+		t.Fatalf("%+v", c.Parsed)
+	}
+	// an invalid file on disk is returned as text with a load error, and is not effective
+	if err := os.WriteFile(f.path, []byte("node: [\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bad := f.config()
+	if bad.Valid || bad.Parsed != nil || bad.LoadError == nil || bad.LoadError.Line == nil || *bad.LoadError.Line != 1 || bad.EffectiveETag != c.ETag || bad.ETag == c.ETag {
+		t.Fatalf("%+v", bad)
 	}
 }
 
-func Test_ControlConfigSetKeepsComments(t *testing.T) {
+// The client sends the whole document it wants; comments and layout are the client's own.
+func Test_ControlConfigPutKeepsContentVerbatim(t *testing.T) {
 	f := newFixture(t)
-	r := put(f, f.etag(), map[string]any{"set": []Edit{{Path: "/agent/policy/allow_dangerous", Value: true}, {Path: "/agent/exec/max_concurrent", Value: 2}}})
-	if r.Status != 200 {
-		t.Fatalf("%d %s", r.Status, r.Body)
+	before := f.config()
+	next := strings.Replace(strings.Replace(testConfig, "allow_dangerous: false", "allow_dangerous: true", 1), "default_cwd: .", "default_cwd: .\n  exec:\n    max_concurrent: 2", 1)
+	got := f.putOK(before.ETag, next, false)
+	if !got.Applied || got.RestartRequired || len(got.Diff) != 2 {
+		t.Fatalf("%+v", got)
 	}
-	got := decode(t, r)
-	if got["applied"] != true || got["restart_required"] != false {
-		t.Fatal(got)
+	if f.file() != next {
+		t.Fatalf("the file is not the submitted content:\n%s", f.file())
 	}
-	changes := got["changes"].([]any)
-	if len(changes) != 2 {
-		t.Fatalf("changes: %v", changes)
-	}
-	first := changes[0].(map[string]any)
-	if first["path"] != "/agent/exec/max_concurrent" || first["before"] != 4.0 || first["after"] != 2.0 {
-		t.Fatalf("diff: %v", first)
-	}
-	if second := changes[1].(map[string]any); second["path"] != "/agent/policy/allow_dangerous" || second["sensitive"] != true || second["after"] != true {
-		t.Fatalf("diff: %v", second)
-	}
-	text := f.file()
-	for _, keep := range []string{"# 节点配置", "# 节点名", "# 危险命令开关", "allow_dangerous: true", "max_concurrent: 2"} {
-		if !strings.Contains(text, keep) {
-			t.Errorf("%q lost:\n%s", keep, text)
+	for _, keep := range []string{"# 节点配置", "# 节点名", "# 危险命令开关"} {
+		if !strings.Contains(f.file(), keep) {
+			t.Errorf("%q lost", keep)
 		}
 	}
-	// the node itself sees the new values at its next Get
 	if c := f.store.Get(); !c.Agent.Policy.AllowDangerous || c.Agent.Exec.MaxConcurrent != 2 {
 		t.Fatalf("store not reloaded: %+v", c.Agent.Policy)
 	}
-	if etag := f.etag(); etag != got["etag"] {
-		t.Fatalf("etag %v != %v", etag, got["etag"])
+	after := f.config()
+	if after.ETag != got.ETag || after.EffectiveETag != after.ETag {
+		t.Fatalf("%+v vs %+v", after, got)
 	}
-}
-
-func Test_ControlConfigDelete(t *testing.T) {
-	f := newFixture(t)
-	r := put(f, f.etag(), map[string]any{"set": []Edit{{Path: "/agent/policy/allow_dangerous", Delete: true}, {Path: "/agent/policy/nothing/here", Delete: true}}})
-	if r.Status != 200 || strings.Contains(f.file(), "allow_dangerous") {
-		t.Fatalf("%d %s\n%s", r.Status, r.Body, f.file())
+	ops := map[string]v1.ConfigChange{}
+	for _, c := range got.Diff {
+		ops[c.Pointer] = c
+	}
+	danger, exec := ops["/agent/policy/allow_dangerous"], ops["/agent/exec"]
+	if danger.Op != "replace" || string(danger.Before) != "false" || string(danger.After) != "true" || !danger.WeakensSecurity || danger.RestartRequired {
+		t.Fatalf("%+v", danger)
+	}
+	if exec.Op != "add" || exec.Before != nil || !strings.Contains(string(exec.After), "max_concurrent") || exec.WeakensSecurity {
+		t.Fatalf("%+v", exec)
 	}
 }
 
 func Test_ControlConfigPreconditions(t *testing.T) {
 	f := newFixture(t)
-	etag := f.etag()
-	edit := map[string]any{"set": []Edit{{Path: "/agent/exec/max_concurrent", Value: 3}}}
-	if r := put(f, "", edit); r.Status != 428 || decode(t, r)["error"] != "invalid_args" {
-		t.Fatalf("missing If-Match: %d %s", r.Status, r.Body)
-	}
-	if r := put(f, `"`+strings.Repeat("0", 64)+`"`, edit); r.Status != 412 || decode(t, r)["error"] != "conflict" {
-		t.Fatalf("stale etag: %d %s", r.Status, r.Body)
+	etag := f.config().ETag
+	next := strings.Replace(testConfig, "mdns: true", "mdns: true\n  # edited", 1)
+	apiError(t, f.put("", next, false), v1.ErrPreconditionNeeded)
+	e := apiError(t, f.put("sha256-"+strings.Repeat("0", 64), next, false), v1.ErrPreconditionFailed)
+	if e.CurrentETag != etag {
+		t.Fatalf("current_etag %q, want %q", e.CurrentETag, etag)
 	}
 	if f.file() != testConfig {
 		t.Fatal("rejected write changed the file")
 	}
-	if r := put(f, etag, edit); r.Status != 200 {
+	// a quoted header and a bare one both work
+	if r := f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: next}, map[string]string{"If-Match": etag}); r.Status != 200 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	// a second writer holding the old etag loses
-	if r := put(f, etag, edit); r.Status != 412 {
-		t.Fatalf("lost update accepted: %d %s", r.Status, r.Body)
+	e = apiError(t, f.put(etag, next+"# more\n", false), v1.ErrPreconditionFailed)
+	if e.CurrentETag == etag {
+		t.Fatalf("%+v", e)
 	}
 	// someone else edits the file between GET and PUT
-	etag = f.etag()
+	etag = f.config().ETag
 	if err := os.WriteFile(f.path, []byte(testConfig+"\n# edited\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if r := put(f, etag, edit); r.Status != 412 {
-		t.Fatalf("concurrent edit accepted: %d", r.Status)
-	}
+	apiError(t, f.put(etag, next, false), v1.ErrPreconditionFailed)
 }
 
 func Test_ControlConfigRejectsInvalid(t *testing.T) {
 	f := newFixture(t)
-	etag := f.etag()
-	for name, body := range map[string]any{
-		"schema violation": map[string]any{"set": []Edit{{Path: "/agent/exec/max_concurrent", Value: "many"}}},
-		"unknown key":      map[string]any{"set": []Edit{{Path: "/agent/nonsense", Value: 1}}},
-		"broken yaml":      map[string]any{"yaml": "node: [unclosed"},
-		"bad pointer":      map[string]any{"set": []Edit{{Path: "agent/exec", Value: 1}}},
-		"through scalar":   map[string]any{"set": []Edit{{Path: "/node/name/deeper", Value: 1}}},
-		"both":             map[string]any{"yaml": testConfig, "set": []Edit{{Path: "/node/name", Value: "x"}}},
-		"neither":          map[string]any{},
-		"unknown field":    map[string]any{"yaml": testConfig, "force": true},
+	etag := f.config().ETag
+	for name, content := range map[string]string{
+		"schema violation": strings.Replace(testConfig, "default_cwd: .", "default_cwd: .\n  exec:\n    max_concurrent: many", 1),
+		"unknown key":      testConfig + "nonsense: 1\n",
+		"broken yaml":      "node: [unclosed",
+		"empty":            "",
+		"two documents":    testConfig + "---\nnode: {}\n",
 	} {
-		r := put(f, etag, body)
-		if r.Status != 400 || decode(t, r)["error"] != "invalid_args" {
-			t.Errorf("%s: %d %s", name, r.Status, r.Body)
+		r := f.put(etag, content, false)
+		e := apiError(t, r, v1.ErrConfigInvalid)
+		if len(e.Diagnostics) == 0 || e.Diagnostics[0].Message == "" {
+			t.Errorf("%s: no diagnostics: %s", name, r.Body)
 		}
+	}
+	// the schema failure names the location
+	r := f.put(etag, strings.Replace(testConfig, "default_cwd: .", "default_cwd: .\n  exec:\n    max_concurrent: many", 1), false)
+	var e v1.Error
+	decodeAs(t, r, &e)
+	found := false
+	for _, d := range e.Diagnostics {
+		found = found || d.Pointer == "/agent/exec/max_concurrent"
+	}
+	if !found {
+		t.Fatalf("%s", r.Body)
+	}
+	// yaml errors carry a line
+	var y v1.Error
+	decodeAs(t, f.put(etag, "node: [unclosed", false), &y)
+	if y.Diagnostics[0].Line == 0 {
+		t.Fatalf("%+v", y)
 	}
 	if f.file() != testConfig {
 		t.Fatal("an invalid write changed the file")
 	}
+	// body errors
+	e2 := apiError(t, f.do("PUT", "/v1/config", map[string]any{"content": testConfig, "force": true}, map[string]string{"If-Match": etag}), v1.ErrInvalidArgs)
+	if e2.Field != "force" {
+		t.Fatalf("%+v", e2)
+	}
+	apiError(t, f.do("PUT", "/v1/config", map[string]any{}, map[string]string{"If-Match": etag}), v1.ErrConfigInvalid)
+}
+
+func Test_ControlConfigBodyLimit(t *testing.T) {
+	f := newFixture(t)
+	etag := f.config().ETag
+	// 70 KiB is fine for the configuration (limit 1 MiB) ...
+	if r := f.put(etag, testConfig+"# "+strings.Repeat("x", 70<<10)+"\n", true); r.Status != 200 {
+		t.Fatalf("%d %.200s", r.Status, r.Body)
+	}
+	// ... and 1 MiB plus is not.
+	apiError(t, f.put(etag, testConfig+"# "+strings.Repeat("x", v1.MaxConfigBytes)+"\n", true), v1.ErrPayloadTooLarge)
 }
 
 func Test_ControlConfigDryRunAndNoop(t *testing.T) {
 	f := newFixture(t)
-	etag := f.etag()
-	r := put(f, etag, map[string]any{"dry_run": true, "set": []Edit{{Path: "/node/name", Value: "renamed"}}})
-	got := decode(t, r)
-	if r.Status != 200 || got["applied"] != false || got["restart_required"] != true || len(got["changes"].([]any)) != 1 {
-		t.Fatalf("%d %s", r.Status, r.Body)
+	etag := f.config().ETag
+	renamed := strings.Replace(testConfig, "name: ctl-node", "name: renamed", 1)
+	got := f.putOK(etag, renamed, true)
+	if got.Applied || !got.RestartRequired || len(got.Diff) != 1 || got.Diff[0].Pointer != "/node/name" || !got.Diff[0].RestartRequired || got.ETag != etag {
+		t.Fatalf("%+v", got)
 	}
 	if f.file() != testConfig {
 		t.Fatal("dry run wrote the file")
 	}
-	got = decode(t, put(f, etag, map[string]any{"yaml": testConfig}))
-	if got["applied"] != false || len(got["changes"].([]any)) != 0 {
-		t.Fatalf("identical text should be a no-op: %v", got)
+	same := f.putOK(etag, testConfig, false)
+	if same.Applied || len(same.Diff) != 0 || same.ETag != etag {
+		t.Fatalf("identical text should be a no-op: %+v", same)
+	}
+	if strings.Contains(string(f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: testConfig}, map[string]string{"If-Match": etag}).Body), "null") {
+		t.Fatal("diff must be an array")
+	}
+	// a comment-only change is written even though nothing in the data model moved
+	commented := testConfig + "# note\n"
+	if c := f.putOK(etag, commented, false); !c.Applied || len(c.Diff) != 0 || c.ETag == etag {
+		t.Fatalf("%+v", c)
 	}
 }
 
-func Test_ControlConfigWholeFileAndRestart(t *testing.T) {
+func Test_ControlConfigRestartRequired(t *testing.T) {
 	f := newFixture(t)
-	next := strings.Replace(testConfig, "name: ctl-node", "name: renamed", 1)
 	events := f.stream("")
-	r := put(f, f.etag(), map[string]any{"yaml": next})
-	got := decode(t, r)
-	if r.Status != 200 || got["applied"] != true || got["restart_required"] != true {
-		t.Fatalf("%d %s", r.Status, r.Body)
-	}
-	if f.file() != next {
-		t.Fatal("whole-file replacement not stored verbatim")
+	renamed := strings.Replace(testConfig, "name: ctl-node", "name: renamed", 1)
+	got := f.putOK(f.config().ETag, renamed, false)
+	if !got.Applied || !got.RestartRequired || f.file() != renamed {
+		t.Fatalf("%+v", got)
 	}
 	// the store pins the node name until restart, and says so
 	if c := f.store.Get(); c.Node.Name != "ctl-node" {
 		t.Fatalf("node name changed live: %s", c.Node.Name)
 	}
-	if st := decode(t, f.do("GET", "/v1/config", nil, nil)); st["restart_required"] != true {
-		t.Fatal(st)
+	if c := f.config(); !c.RestartRequired {
+		t.Fatal(c)
 	}
-	e := events.next(t, ofType("config"))
-	if e.Data["source"] != "control" || e.Data["restart_required"] != true || e.Data["changes"] != 1.0 {
-		t.Fatal(e)
+	var data v1.ConfigEventData
+	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
+	if data.Change != "written" || data.Actor != v1.ActorControl || !data.RestartRequired || len(data.ChangedPaths) != 1 || data.ChangedPaths[0] != "/node/name" || data.ETag == nil || *data.ETag != got.ETag {
+		t.Fatalf("%+v", data)
+	}
+	if strings.Contains(string(mustJSON(t, data)), "renamed") {
+		t.Fatal("the event carries a value")
 	}
 }
 
-func Test_ControlConfigFileEditAnnounced(t *testing.T) {
-	f := newFixture(t)
-	events := f.stream("")
-	if err := os.WriteFile(f.path, []byte(testConfig+"# touched\n"), 0600); err != nil {
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if e := events.next(t, ofType("config")); e.Data["source"] != "file" {
-		t.Fatal(e)
+	return b
+}
+
+func Test_ControlConfigFileEditsAnnounced(t *testing.T) {
+	f := newFixture(t)
+	events := f.stream("")
+	edited := strings.Replace(testConfig, "allow_dangerous: false", "allow_dangerous: true", 1)
+	if err := os.WriteFile(f.path, []byte(edited), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var data v1.ConfigEventData
+	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
+	if data.Change != "reloaded" || data.Actor != v1.ActorFile || len(data.ChangedPaths) != 1 || data.ChangedPaths[0] != "/agent/policy/allow_dangerous" {
+		t.Fatalf("%+v", data)
+	}
+	// a file that does not validate is reported, and the node keeps the last good generation
+	if err := os.WriteFile(f.path, []byte("node: ["), 0600); err != nil {
+		t.Fatal(err)
+	}
+	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
+	if data.Change != "reload_failed" || data.Actor != v1.ActorFile || len(data.ChangedPaths) != 0 {
+		t.Fatalf("%+v", data)
+	}
+	if !f.store.Get().Agent.Policy.AllowDangerous {
+		t.Fatal("the node dropped its last good configuration")
 	}
 }
 
-// Rule CON-SEC-12 (its matrix entry arrives with the control contract): changes made through the channel are audited with actor=control, metadata only
-func Test_CONSEC12_ConfigChangeAuditedAsControl(t *testing.T) {
-	var log *audit.Logger
-	f := newFixture(t, func(o *Options) {
-		var err error
-		if log, err = audit.New(o.AuditDir, 0); err != nil {
+func Test_ControlConfigDiffSecurityHints(t *testing.T) {
+	json2 := func(s string) map[string]any {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(s), &m); err != nil {
 			t.Fatal(err)
 		}
-		o.Audit = log
-	})
-	defer log.Close()
-	r := put(f, f.etag(), map[string]any{"set": []Edit{{Path: "/agent/policy/allow_dangerous", Value: true}}})
-	if r.Status != 200 {
-		t.Fatalf("%d %s", r.Status, r.Body)
+		return m
 	}
-	f.do("POST", "/v1/drain", nil, nil)
-	if r := put(f, f.etag(), map[string]any{"yaml": "node: {}"}); r.Status != 400 {
-		t.Fatal(r.Status)
+	cases := []struct {
+		name          string
+		before, after string
+		want          map[string]bool // pointer -> weakens_security
+	}{
+		{"allow_dangerous on", `{"agent":{"policy":{"allow_dangerous":false}}}`, `{"agent":{"policy":{"allow_dangerous":true}}}`, map[string]bool{"/agent/policy/allow_dangerous": true}},
+		{"allow_dangerous off", `{"agent":{"policy":{"allow_dangerous":true}}}`, `{"agent":{"policy":{"allow_dangerous":false}}}`, map[string]bool{"/agent/policy/allow_dangerous": false}},
+		{"cwd allow grows", `{"agent":{"cwd_policy":{"allow":["a"]}}}`, `{"agent":{"cwd_policy":{"allow":["a","b"]}}}`, map[string]bool{"/agent/cwd_policy/allow/1": true}},
+		{"cwd allow shrinks", `{"agent":{"cwd_policy":{"allow":["a","b"]}}}`, `{"agent":{"cwd_policy":{"allow":["a"]}}}`, map[string]bool{"/agent/cwd_policy/allow/1": false}},
+		{"cwd deny shrinks", `{"agent":{"cwd_policy":{"deny":["a","b"]}}}`, `{"agent":{"cwd_policy":{"deny":["a"]}}}`, map[string]bool{"/agent/cwd_policy/deny/1": true}},
+		{"pat scope widens", `{"gateway":{"pats":{"ci":{"scopes":["a:read"]}}}}`, `{"gateway":{"pats":{"ci":{"scopes":["a:read","a:write"]}}}}`, map[string]bool{"/gateway/pats/ci/scopes/1": true}},
+		{"pats emptied", `{"gateway":{"pats":{"ci":{"token_file":"/t"}}}}`, `{"gateway":{"pats":{}}}`, map[string]bool{"/gateway/pats/ci": true}},
+		{"one of two pats removed", `{"gateway":{"pats":{"ci":{"token_file":"/t"},"dev":{"token_file":"/u"}}}}`, `{"gateway":{"pats":{"ci":{"token_file":"/t"}}}}`, map[string]bool{"/gateway/pats/dev": false}},
+		{"ingress listen", `{"ingress":{"listen":"tunnel"}}`, `{"ingress":{"listen":"funnel"}}`, map[string]bool{"/ingress/listen": true}},
+		{"unrelated", `{"audit":{"retention":"1h"}}`, `{"audit":{"retention":"2h"}}`, map[string]bool{"/audit/retention": false}},
+		{"pointer escaping", `{"a/b":1}`, `{"a/b":2}`, map[string]bool{"/a~1b": false}},
 	}
-	got := decode(t, f.do("GET", "/v1/audit?event=control", nil, nil))
-	records := got["records"].([]any)
-	if len(records) != 3 || got["rejected"] != 0.0 {
-		t.Fatalf("records: %v", got)
-	}
-	tools := map[string]map[string]any{}
-	for _, raw := range records {
-		rec := raw.(map[string]any)
-		if rec["actor"] != "control" || rec["event"] != "control" {
-			t.Fatalf("not attributed to control: %v", rec)
+	for _, c := range cases {
+		got := map[string]bool{}
+		for _, ch := range diffConfigs(json2(c.before), json2(c.after)) {
+			got[ch.Pointer] = ch.WeakensSecurity
 		}
-		tools[rec["tool"].(string)+"/"+rec["status"].(string)] = rec
-	}
-	ok := tools["control.config.put/ok"]
-	if ok == nil || tools["control.drain/ok"] == nil || tools["control.config.put/error"] == nil {
-		t.Fatalf("records: %v", records)
-	}
-	keys := ok["args_digest"].(map[string]any)["keys"].([]any)
-	if len(keys) != 1 || keys[0] != "/agent/policy/allow_dangerous" {
-		t.Fatalf("audit keys: %v", keys)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: %v", c.name, got)
+			continue
+		}
+		for p, w := range c.want {
+			if v, ok := got[p]; !ok || v != w {
+				t.Errorf("%s: %s weakens=%v (present %v), want %v", c.name, p, v, ok, w)
+			}
+		}
 	}
 }
 
+// Without a configuration file the config capabilities are not declared and their routes say so.
 func Test_ControlConfigStaticStore(t *testing.T) {
 	f := newFixture(t, func(o *Options) { o.Store = staticStore(t) })
-	for _, r := range []*Response{f.do("GET", "/v1/config", nil, nil), put(f, `"x"`, map[string]any{"yaml": "a: 1"})} {
-		if r.Status != 404 {
-			t.Fatalf("%d %s", r.Status, r.Body)
+	for _, c := range []v1.Capability{v1.CapConfigRead, v1.CapConfigWrite} {
+		if f.server.hasCapability(c) {
+			t.Fatalf("declared %s", c)
+		}
+	}
+	apiError(t, f.do("GET", "/v1/config", nil, nil), v1.ErrNotImplemented)
+	apiError(t, f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: "a: 1"}, map[string]string{"If-Match": `"x"`}), v1.ErrNotImplemented)
+}
+
+func Test_ApplyEditsKeepsComments(t *testing.T) {
+	out, err := ApplyEdits([]byte(testConfig), []Edit{{Path: "/agent/policy/allow_dangerous", Value: true}, {Path: "/agent/exec/max_concurrent", Value: 2}, {Path: "/agent/cwd_policy/allow", Delete: true}, {Path: "/nothing/here", Delete: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(out)
+	for _, keep := range []string{"# 节点配置", "# 节点名", "# 危险命令开关", "allow_dangerous: true", "max_concurrent: 2"} {
+		if !strings.Contains(text, keep) {
+			t.Errorf("%q lost:\n%s", keep, text)
+		}
+	}
+	if strings.Contains(text, "allow:") {
+		t.Errorf("delete did not apply:\n%s", text)
+	}
+	for _, bad := range []Edit{{Path: "agent/exec", Value: 1}, {Path: "/node/name/deeper", Value: 1}, {Path: "/", Value: 1}} {
+		if _, err = ApplyEdits([]byte(testConfig), []Edit{bad}); err == nil {
+			t.Errorf("accepted %+v", bad)
 		}
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
 // maxSocketPath is below the smallest sun_path (104 bytes on macOS, 108 on Linux).
@@ -18,23 +20,23 @@ const maxSocketPath = 100
 
 // Listen opens control.sock in the state directory (mode 0600 in a 0700 directory)
 // and returns a listener that accepts only connections from the kernel's own uid.
-func Listen(o ListenOptions) (net.Listener, Endpoint, error) {
+func Listen(o ListenOptions) (net.Listener, Bound, error) {
 	path := filepath.Join(o.StateDir, "control.sock")
 	if len(path) > maxSocketPath {
 		dir := filepath.Join(os.TempDir(), "xmesh-"+strconv.Itoa(os.Geteuid()))
 		if err := privateDir(dir); err != nil {
-			return nil, Endpoint{}, err
+			return nil, Bound{}, err
 		}
 		path = filepath.Join(dir, o.Node+".sock")
 		if len(path) > maxSocketPath {
-			return nil, Endpoint{}, errors.New("控制通道套接字路径过长")
+			return nil, Bound{}, errors.New("控制通道套接字路径过长")
 		}
 	}
 	l, err := listenUnix(path, uint32(os.Geteuid()))
 	if err != nil {
-		return nil, Endpoint{}, err
+		return nil, Bound{}, err
 	}
-	return l, Endpoint{Transport: "unix", Address: path}, nil
+	return l, Bound{Transport: v1.TransportUnix, Address: path}, nil
 }
 
 // privateDir makes sure dir exists, is owned by this user, is not a symlink and
@@ -109,3 +111,7 @@ func (g *guarded) Accept() (net.Conn, error) {
 		_ = c.Close()
 	}
 }
+
+// connectionIdentity names the peer of every accepted connection in the audit record: the listener
+// only accepts the kernel's own uid, so that is the identity (CTR-CTL-02).
+func connectionIdentity() string { return "uid-" + strconv.Itoa(os.Geteuid()) }

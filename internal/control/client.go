@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
 
 // Client talks to one node's control channel. The URL host is a placeholder;
@@ -33,17 +35,14 @@ type Response struct {
 	Body   json.RawMessage
 }
 
-// Error returns the CTR-ERR-01 envelope as an error when the status is not 2xx.
+// Error returns the ControlError body as a *v1.Error when the status is not 2xx.
 func (r *Response) Error() error {
 	if r.Status/100 == 2 {
 		return nil
 	}
-	var env struct {
-		Code    string `json:"error"`
-		Message string `json:"message"`
-	}
-	if json.Unmarshal(r.Body, &env) == nil && env.Code != "" {
-		return fmt.Errorf("%s: %s", env.Code, env.Message)
+	var e v1.Error
+	if json.Unmarshal(r.Body, &e) == nil && e.Code != "" {
+		return &e
 	}
 	return fmt.Errorf("控制通道返回 HTTP %d", r.Status)
 }

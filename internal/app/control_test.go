@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	"github.com/tzf1003/xmesh/api/control/v1/schemacheck"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -72,23 +74,35 @@ func startNode(t *testing.T) *node {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
-func (n *node) get(path string) map[string]any {
+
+// get fetches path, checks the body against the contract definition def, and decodes it into out.
+func (n *node) get(path, def string, out any) {
 	n.t.Helper()
 	r, err := n.control.Do(context.Background(), "GET", path, nil, nil)
 	if err != nil || r.Status != 200 {
 		n.t.Fatalf("GET %s: %v %v", path, r, err)
 	}
-	var out map[string]any
-	if err = json.Unmarshal(r.Body, &out); err != nil {
+	if err = schemacheck.Validate(def, r.Body); err != nil {
+		n.t.Fatalf("GET %s violates the contract: %v\n%s", path, err, r.Body)
+	}
+	if err = json.Unmarshal(r.Body, out); err != nil {
 		n.t.Fatal(err)
 	}
-	return out
+}
+func (n *node) status() v1.StatusResponse {
+	n.t.Helper()
+	var st v1.StatusResponse
+	n.get("/v1/status", "StatusResponse", &st)
+	return st
 }
 func (n *node) post(path string, body any) {
 	n.t.Helper()
 	r, err := n.control.Do(context.Background(), "POST", path, body, nil)
 	if err != nil || r.Status != 200 {
 		n.t.Fatalf("POST %s: %v %v", path, r, err)
+	}
+	if err = schemacheck.Validate("DrainResponse", r.Body); err != nil {
+		n.t.Fatalf("POST %s violates the contract: %v\n%s", path, err, r.Body)
 	}
 }
 func session(t *testing.T, endpoint string) *mcp.ClientSession {
@@ -129,7 +143,7 @@ func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ep.Transport != "unix" && ep.Transport != "pipe" || strings.Contains(ep.Address, "127.0.0.1") || strings.Contains(ep.Address, "http") {
+	if ep.Transport != v1.TransportUnix && ep.Transport != v1.TransportPipe || strings.Contains(ep.Address(), "127.0.0.1") || strings.Contains(ep.Address(), "http") {
 		t.Fatalf("endpoint is not a socket or pipe: %+v", ep)
 	}
 	// Neither the Agent's nor the Gateway's TCP listener serves the control API.
@@ -163,21 +177,25 @@ func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 
 func Test_ControlStatusFromRunningNode(t *testing.T) {
 	n := startNode(t)
-	st := n.get("/v1/status")
-	if st["node"] != "ctl-node" || st["version"] != Version || st["control_api"] != control.APIVersion || st["draining"] != false {
-		t.Fatalf("%v", st)
+	st := n.status()
+	if st.Hostname != "ctl-node" || st.Control.KernelVersion != Version || st.Control.APIVersion != v1.APIVersion || st.Drain.Draining || st.Lifecycle != "running" {
+		t.Fatalf("%+v", st)
 	}
-	if roles := st["roles"].([]any); len(roles) != 2 {
-		t.Fatalf("%v", roles)
+	if len(st.Roles) != 2 || st.Limits.PTYMaxSessions == 0 || st.Network.Mode != "local" || st.Paths.StateDir != n.stateDir || st.Paths.ConfigFile == "" {
+		t.Fatalf("%+v", st)
 	}
-	if limits, _ := st["limits"].(map[string]any); limits["pty_max_sessions"] == nil {
-		t.Fatalf("limits: %v", st["limits"])
+	if st.Gateway == nil || st.Gateway.Listen != n.gateway || st.Gateway.URL != "http://"+n.gateway+"/mcp" || st.Gateway.Auth != "none" || st.Ingress != nil {
+		t.Fatalf("gateway info: %+v ingress %+v", st.Gateway, st.Ingress)
 	}
-	if network := st["network"].(map[string]any); network["mode"] != "local" {
-		t.Fatalf("network: %v", network)
+	var peers v1.PeersResponse
+	n.get("/v1/peers", "PeersResponse", &peers)
+	if len(peers.Peers) != 1 || !peers.Peers[0].Self || peers.Peers[0].Name != "ctl-node" || peers.Peers[0].Connection != "local" {
+		t.Fatalf("%+v", peers)
 	}
-	if peers := n.get("/v1/peers"); peers["mode"] != "local" || len(peers["peers"].([]any)) != 0 {
-		t.Fatalf("%v", peers)
+	var cfg v1.ConfigResponse
+	n.get("/v1/config", "ConfigResponse", &cfg)
+	if !cfg.Valid || cfg.EffectiveETag != cfg.ETag {
+		t.Fatalf("%+v", cfg)
 	}
 }
 
@@ -190,16 +208,16 @@ func Test_ControlDrainResumeEndToEnd(t *testing.T) {
 		t.Fatal("exec before drain failed")
 	}
 	n.post("/v1/drain", map[string]string{"mode": "keep"})
-	if st := n.get("/v1/status"); st["draining"] != true || st["health"] != "draining" {
-		t.Fatalf("%v", st)
+	if st := n.status(); !st.Drain.Draining || *st.Drain.Mode != v1.DrainKeep {
+		t.Fatalf("%+v", st.Drain)
 	}
 	out, isErr := call(t, direct, "pty.open", map[string]any{"cols": 80, "rows": 24})
 	if !isErr || out["error"] != "policy_denied" || out["rule"] != "mesh.draining" {
 		t.Fatalf("drained node accepted work: %v", out)
 	}
 	n.post("/v1/resume", nil)
-	if st := n.get("/v1/status"); st["draining"] != false || st["health"] == "draining" {
-		t.Fatalf("%v", st)
+	if st := n.status(); st.Drain.Draining {
+		t.Fatalf("%+v", st.Drain)
 	}
 	opened, isErr := call(t, direct, "pty.open", map[string]any{"cols": 80, "rows": 24})
 	if isErr {
@@ -210,10 +228,10 @@ func Test_ControlDrainResumeEndToEnd(t *testing.T) {
 	if isErr || len(list["sessions"].([]any)) != 1 {
 		t.Fatalf("gateway after resume: %v", list)
 	}
-	sessions := n.get("/v1/sessions")
-	ptys := sessions["pty"].([]any)
-	if len(ptys) != 1 || ptys[0].(map[string]any)["id"] != opened["session_id"] {
-		t.Fatalf("sessions: %v", sessions)
+	var sessions v1.SessionsResponse
+	n.get("/v1/sessions", "SessionsResponse", &sessions)
+	if len(sessions.PTY) != 1 || sessions.PTY[0].ID != opened["session_id"] || sessions.PTY[0].State != "active" || sessions.PTY[0].CreatedAt.IsZero() {
+		t.Fatalf("sessions: %+v", sessions)
 	}
 	call(t, direct, "pty.close", map[string]any{"session_id": opened["session_id"]})
 }
@@ -270,9 +288,10 @@ func Test_ControlEventsAndAuditFromRunningNode(t *testing.T) {
 			t.Fatal("no call event")
 		}
 	}
-	got := n.get("/v1/audit?tool=exec.run")
-	if records := got["records"].([]any); len(records) == 0 || got["rejected"] != 0.0 {
-		t.Fatalf("audit view: %v", got)
+	var got v1.AuditResponse
+	n.get("/v1/audit?tool=exec.run", "AuditResponse", &got)
+	if !got.Enabled || len(got.Events) == 0 {
+		t.Fatalf("audit view: %+v", got)
 	}
 }
 
@@ -281,5 +300,43 @@ func Test_ControlEndpointRemovedOnShutdown(t *testing.T) {
 	n.stop()
 	if _, err := control.ReadEndpoint(n.stateDir); err == nil {
 		t.Fatal("control.json left behind")
+	}
+}
+
+// A running exec call is visible in the sessions view with its executable's base name only.
+func Test_ControlSessionsShowRunningExec(t *testing.T) {
+	n := startNode(t)
+	direct := session(t, "http://"+n.agent+"/mcp")
+	program := filepath.Join(n.stateDir, "..", "sleep.go")
+	if err := os.WriteFile(program, []byte("package main\nimport \"time\"\nfunc main() { time.Sleep(4 * time.Second) }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		call(t, direct, "exec.run", map[string]any{"cmd": "go", "args": []string{"run", program, "--secret-flag=SECRET-ARG"}, "env": map[string]string{"SECRET_ENV": "SECRET-VALUE"}})
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var sessions v1.SessionsResponse
+		n.get("/v1/sessions", "SessionsResponse", &sessions)
+		if len(sessions.Exec) == 1 {
+			run := sessions.Exec[0]
+			raw, _ := json.Marshal(sessions)
+			if run.Cmd != "go" || run.Mode != "shared" || strings.Contains(string(raw), "SECRET") {
+				t.Fatalf("%+v", run)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("exec run never appeared")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	<-done
+	var after v1.SessionsResponse
+	n.get("/v1/sessions", "SessionsResponse", &after)
+	if len(after.Exec) != 0 {
+		t.Fatalf("%+v", after.Exec)
 	}
 }
