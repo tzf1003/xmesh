@@ -63,7 +63,7 @@ flowchart LR
 | macOS、Linux | 状态目录下 `control.sock`，目录 `0700`，套接字 `0600`。路径超过 UDS 长度上限时落到 `$TMPDIR/xmesh-<uid>/` | 连接时用对端凭据（`LOCAL_PEERCRED` / `SO_PEERCRED`）核对 uid 等于内核运行用户 |
 | Windows | 命名管道 `\\.\pipe\xmesh-<sid>-<节点名>` | 创建时设置 DACL：运行用户 SID、`SYSTEM`、`Administrators`；`install --system` 时额外授权安装者的 SID；拒绝远程客户端（`PIPE_REJECT_REMOTE_CLIENTS`） |
 
-状态目录里写 `control.json`（端点、内核版本、Control API 版本、PID），UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点实例（Windows 另外读 `%ProgramData%\xmesh\*\control.json`，用于 `install --system` 的系统服务内核）。一个用户可以有多个节点，面板按实例切换。
+状态目录里写 `control.json`（端点、内核版本、Control API 版本、PID），UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点实例（Windows 另外列出 `%ProgramData%\xmesh`，按节点名精确打开 `<节点名>\control.json`，用于 `install --system` 的系统服务内核；节点目录本身普通用户不能列出）。一个用户可以有多个节点，面板按实例切换。
 
 ### 为什么不用 loopback TCP
 
