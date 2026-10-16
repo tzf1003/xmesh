@@ -114,6 +114,24 @@ func Test_TailnetPeerConnectivity(t *testing.T) {
 			}
 			stop()
 			t.Logf("Agent request attempt %d: %v", attempt, err)
+			if attempt >= 2 && ctx.Err() == nil {
+				// Evidence for a stalled dial: the WireGuard layer (TSMP) and the peer's counters.
+				pingCtx, stopPing := context.WithTimeout(ctx, 5*time.Second)
+				tsmp, perr := lc.Ping(pingCtx, ip, tailcfg.PingTSMP)
+				stopPing()
+				if perr != nil {
+					t.Logf("TSMP ping error: %v", perr)
+				} else {
+					t.Logf("TSMP ping err=%q endpoint=%s latency=%fs", tsmp.Err, tsmp.Endpoint, tsmp.LatencySeconds)
+				}
+				if st, serr := lc.Status(ctx); serr == nil {
+					for _, p := range st.Peer {
+						if len(p.TailscaleIPs) > 0 && p.TailscaleIPs[0] == ip {
+							t.Logf("peer status: online=%t active=%t curaddr=%q relay=%q handshake=%s rx=%d tx=%d inNetworkMap=%t", p.Online, p.Active, p.CurAddr, p.Relay, p.LastHandshake, p.RxBytes, p.TxBytes, p.InNetworkMap)
+						}
+					}
+				}
+			}
 			if ctx.Err() != nil {
 				t.Fatal(err)
 			}

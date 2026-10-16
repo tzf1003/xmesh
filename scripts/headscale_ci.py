@@ -108,6 +108,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="xmesh-headscale-") as temporary:
         work = pathlib.Path(temporary).resolve()
         try:
+            probe_test = work / "mesh.test"
+            if not options.skip_go_test:
+                # Compile first: building the test binary takes a minute on a CI runner and would starve
+                # the running nodes if done after they have started.
+                sh("go", "test", "-c", "-o", probe_test, "./internal/mesh", cwd=ROOT)
             config = headscale_config(work, CONTROL_PORT)
             hs, hs_log = spawn([headscale, "-c", config, "serve"], "headscale")
             deadline = time.monotonic() + 60
@@ -173,11 +178,12 @@ def main():
                                      "cwd_policy": {"allow": [str(probe_dir / "workspace")]}})
                 (probe_dir / "config.json").write_text(json.dumps(cfg))
                 env = dict(os.environ, XMESH_TEST_TAILNET_CONFIG=str(probe_dir / "config.json"),
-                           XMESH_TEST_TAILNET_STATE=str(probe_dir / "state"), XMESH_TEST_TAILNET_PEER="hs-b")
+                           XMESH_TEST_TAILNET_STATE=str(probe_dir / "state"), XMESH_TEST_TAILNET_PEER="hs-b",
+                           XMESH_TEST_TAILNET_VERBOSE="1")
                 for attempt in (1, 2):
-                    probe = subprocess.run(["go", "test", "./internal/mesh", "-run", "^Test_TailnetPeerConnectivity$",
-                                            "-v", "-count=1", "-timeout=120s"], cwd=ROOT, env=env,
-                                           capture_output=True, text=True)
+                    probe = subprocess.run([probe_test, "-test.run", "^Test_TailnetPeerConnectivity$",
+                                            "-test.v", "-test.count=1", "-test.timeout=120s"], cwd=ROOT / "internal" / "mesh",
+                                           env=env, capture_output=True, text=True)
                     sys.stderr.write(f"--- go test attempt {attempt}\n{probe.stdout}{probe.stderr}")
                     if probe.returncode == 0 and "--- PASS: Test_TailnetPeerConnectivity" in probe.stdout:
                         break

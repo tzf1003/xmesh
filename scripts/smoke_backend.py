@@ -39,6 +39,21 @@ def error_of(result):
     return result.get("structuredContent") or {}
 
 
+def attempt(session, name, arguments):
+    """tools/call that reports an MCP "unknown tool" protocol error as an error result.
+
+    While the backend is down its tools can leave the Gateway catalog, so a call then fails at the
+    protocol level instead of with a tool error.
+    """
+    try:
+        return session.request("tools/call", {"name": name, "arguments": arguments})
+    except AssertionError as failure:
+        detail = failure.args[0] if failure.args else None
+        if isinstance(detail, dict) and "unknown tool" in str(detail.get("error", {}).get("message", "")):
+            return {"isError": True, "structuredContent": {"error": "unknown_tool"}}
+        raise
+
+
 def settled(session, name, arguments, seconds=20):
     """Call a tool, retrying while the Gateway reports the device connection as dropped.
 
@@ -48,8 +63,8 @@ def settled(session, name, arguments, seconds=20):
     """
     deadline = time.monotonic() + seconds
     while True:
-        result = session.request("tools/call", {"name": name, "arguments": arguments})
-        if not (result.get("isError") and (result.get("structuredContent") or {}).get("error") == "not_found"):
+        result = attempt(session, name, arguments)
+        if not (result.get("isError") and (result.get("structuredContent") or {}).get("error") in ("not_found", "unknown_tool")):
             return result
         assert time.monotonic() < deadline, "device connection did not come back: %r" % result
         time.sleep(0.2)
@@ -128,11 +143,10 @@ def main():
 
                 # Kill the backend from outside the Agent.
                 kill(first_pid)
-                # The next call with the old token must fail. Besides the lease errors, not_found is
-                # tolerated here: see settled().
-                crashed = error_of(first.request("tools/call", {
-                    "name": "local/ida.echo", "arguments": {"_lease_token": token}}))
-                assert crashed["error"] in ("backend_unavailable", "resource_busy", "not_found"), crashed
+                # The next call with the old token must fail. Besides the lease errors, not_found and
+                # unknown_tool are tolerated here: see settled() and attempt().
+                crashed = error_of(attempt(first, "local/ida.echo", {"_lease_token": token}))
+                assert crashed["error"] in ("backend_unavailable", "resource_busy", "not_found", "unknown_tool"), crashed
                 if crashed["error"] == "resource_busy":
                     assert crashed["reason"] == "token_stale", crashed
 
