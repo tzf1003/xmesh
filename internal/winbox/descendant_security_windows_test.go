@@ -69,11 +69,26 @@ func startDescendantHelper(t *testing.T, ctx context.Context, e *workspaceExecut
 	return process, proof
 }
 
-func waitDescendantProof(t *testing.T, ctx context.Context, e *workspaceExecution, proof string) string {
+func waitDescendantProof(t *testing.T, ctx context.Context, e *workspaceExecution, process windows.ProcessInformation, proof string) string {
 	t.Helper()
+	read := func() (string, bool) {
+		data, err := os.ReadFile(proof)
+		if err != nil || len(data) == 0 || data[len(data)-1] != '\n' {
+			return "", false
+		}
+		return strings.TrimSpace(string(data)), true
+	}
 	for {
-		if data, err := os.ReadFile(proof); err == nil && len(data) != 0 && data[len(data)-1] == '\n' {
-			return strings.TrimSpace(string(data))
+		if text, ok := read(); ok {
+			return text
+		}
+		if status, _ := windows.WaitForSingleObject(process.Process, 0); status == windows.WAIT_OBJECT_0 {
+			if text, ok := read(); ok {
+				return text
+			}
+			var code uint32
+			_ = windows.GetExitCodeProcess(process.Process, &code)
+			t.Fatal("descendant helper exited without a report, exit code", code)
 		}
 		select {
 		case <-ctx.Done():
@@ -117,7 +132,7 @@ func Test_WindowsAppContainerDescendantSecurity(t *testing.T) {
 			defer func() { _ = e.closeContext(context.Background(), 91) }()
 			journal, monitor := e.journal, e.monitor
 			process, proof := startDescendantHelper(t, ctx, e, options.Workspace, "plain")
-			if got := waitDescendantProof(t, ctx, e, proof); got != "ready" {
+			if got := waitDescendantProof(t, ctx, e, process, proof); got != "ready" {
 				t.Fatal("helper", got)
 			}
 			if mode.target == "" {
@@ -194,8 +209,8 @@ func Test_WindowsAppContainerSandboxCannotWriteDACL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = e.closeContext(context.Background(), 91) }()
-	_, proof := startDescendantHelper(t, ctx, e, options.Workspace, "write-dacl")
-	if got := waitDescendantProof(t, ctx, e, proof); got != "denied denied denied" {
+	process, proof := startDescendantHelper(t, ctx, e, options.Workspace, "write-dacl")
+	if got := waitDescendantProof(t, ctx, e, process, proof); got != "denied denied denied" {
 		t.Fatal("sandbox descriptor edit outcome", got)
 	}
 	time.Sleep(300 * time.Millisecond)
@@ -275,7 +290,7 @@ func Test_WindowsAppContainerTreeExternalWriters(t *testing.T) {
 			defer func() { _ = e.closeContext(context.Background(), 91) }()
 			monitor, journal := e.monitor, e.journal
 			process, proof := startDescendantHelper(t, ctx, e, options.Workspace, "plain")
-			if got := waitDescendantProof(t, ctx, e, proof); got != "ready" {
+			if got := waitDescendantProof(t, ctx, e, process, proof); got != "ready" {
 				t.Fatal("helper", got)
 			}
 			ext := filepath.Join(options.Workspace, "ext")
@@ -411,29 +426,36 @@ func Test_WindowsAppContainerDescendantSecurityHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A failing step is reported to the parent, which would otherwise wait for
+	// a proof that never arrives.
+	fail := func(step string, err error) {
+		report("failed " + step + ": " + errText(err))
+		time.Sleep(30 * time.Second)
+		t.Fatal(step, err)
+	}
 	directory := filepath.Join(workspace, "new-dir")
 	if err := os.Mkdir(directory, 0700); err != nil {
-		t.Fatal(err)
+		fail("mkdir", err)
 	}
 	created := filepath.Join(directory, "new.txt")
 	if err := os.WriteFile(created, []byte("new"), 0600); err != nil {
-		t.Fatal(err)
+		fail("create", err)
 	}
 	switch mode {
 	case "plain":
 		// Exercise the sandbox's ordinary namespace activity on admitted and new
 		// objects: none of it may be mistaken for a descriptor change.
 		if err := os.Rename(created, filepath.Join(directory, "renamed.txt")); err != nil {
-			t.Fatal(err)
+			fail("rename-new", err)
 		}
 		if err := os.WriteFile(filepath.Join(workspace, "sub", "initial.txt"), []byte("changed contents"), 0600); err != nil {
-			t.Fatal(err)
+			fail("write-initial", err)
 		}
 		if err := os.Rename(filepath.Join(workspace, "top.txt"), filepath.Join(workspace, "moved.txt")); err != nil {
-			t.Fatal(err)
+			fail("rename-top", err)
 		}
 		if err := os.Remove(filepath.Join(directory, "renamed.txt")); err != nil {
-			t.Fatal(err)
+			fail("remove-new", err)
 		}
 		report("ready")
 	case "write-dacl":
