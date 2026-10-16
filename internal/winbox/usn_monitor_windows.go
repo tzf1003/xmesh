@@ -63,6 +63,11 @@ func (g *workspaceGrant) monitorChanges(ctx context.Context, owner *executionPro
 }
 
 func (m *workspaceChangeMonitor) checkpoint(ctx context.Context) error {
+	if check := m.workspace.writerCheck; check != nil {
+		if err := check(ctx); err != nil {
+			return err
+		}
+	}
 	release, err := m.workspace.acquire(ctx)
 	if err != nil {
 		return err

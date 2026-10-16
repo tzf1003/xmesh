@@ -16,6 +16,10 @@ type workspaceExecutionOptions struct {
 	Interval            time.Duration
 	MaxEvents           int
 	SupervisorCommand   []string
+	// RequireWriterFence rejects any guard that cannot prove, through Verify,
+	// that the pinned namespace/reparse/ACL boundary is unchanged. The guard is
+	// still released by closeContext.
+	RequireWriterFence bool
 }
 
 // workspaceExecutionPrepare is a trusted integration boundary. Before returning,
@@ -41,6 +45,7 @@ type workspaceExecution struct {
 	operation chan struct{}
 	lifetime  context.Context
 	guard     io.Closer
+	fence     writerVerifier // guard, when it proves the writer boundary.
 	imports   []io.Closer
 	maxEvents int
 	journal   *grantJournal
@@ -75,10 +80,17 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 		return nil, errors.Join(err, fmt.Errorf("AppContainer workspace coordinator did not retain a guard"))
 	}
 	e := &workspaceExecution{operation: make(chan struct{}, 1), lifetime: ctx, guard: guard, maxEvents: options.MaxEvents}
+	e.fence, _ = guard.(writerVerifier)
+	if err == nil && options.RequireWriterFence && e.fence == nil {
+		err = fmt.Errorf("AppContainer workspace execution requires a verified external writer fence")
+	}
 	if err != nil {
 		return e, err
 	}
 	if err := ctx.Err(); err != nil {
+		return e, err
+	}
+	if err := e.verifyFence(ctx); err != nil {
 		return e, err
 	}
 	e.journal, err = openBoundGrantJournal(ctx, options.Journal, true)
@@ -103,6 +115,9 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 		return e, err
 	}
 	if err := beginWorkspaceChangeTracking(ctx, e.journal, e.profile.sid, options.MaxObjects); err != nil {
+		return e, err
+	}
+	if err := e.sealFence(ctx); err != nil {
 		return e, err
 	}
 	e.processes, err = newSupervisedExecutionProcesses(ctx, e.profile, options.MaxJobs, options.SupervisorCommand)
@@ -153,6 +168,9 @@ func (e *workspaceExecution) start(ctx context.Context, args []string, directory
 	if err := e.lifetime.Err(); err != nil {
 		return windows.ProcessInformation{}, err
 	}
+	if err := e.verifyFence(ctx); err != nil {
+		return windows.ProcessInformation{}, err
+	}
 	return e.processes.startWithIO(ctx, args, directory, environment, stdio, console)
 }
 
@@ -170,6 +188,9 @@ func (e *workspaceExecution) moveImport(ctx context.Context, source, destination
 		return false, fmt.Errorf("AppContainer execution import admission is unavailable or at its guard limit")
 	}
 	if err := e.lifetime.Err(); err != nil {
+		return false, err
+	}
+	if err := e.verifyFence(ctx); err != nil {
 		return false, err
 	}
 	for _, path := range []string{source, destination} {
@@ -234,9 +255,17 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 			return err
 		}
 	}
+	// A violated boundary does not stop cleanup: ACLs and the profile must still
+	// be reclaimed by identity. The violation is reported with the result.
 	var observationErr error
+	if err := e.verifyFence(ctx); err != nil {
+		if !errors.Is(err, errWriterFenceViolated) {
+			return err
+		}
+		observationErr = err
+	}
 	if e.monitor != nil {
-		observationErr = e.monitor.Stop(ctx)
+		observationErr = errors.Join(observationErr, e.monitor.Stop(ctx))
 		p := e.monitor.workspace.profile
 		p.mu.Lock()
 		attached := p.workspaceMonitor == e.monitor || e.monitor.workspace.monitor == e.monitor

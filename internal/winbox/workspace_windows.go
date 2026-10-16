@@ -24,6 +24,9 @@ type workspaceGrant struct {
 	maxObjects  int
 	credentials []windows.Handle
 	monitor     *workspaceChangeMonitor // Protected by operation and profile.mu.
+	// writerCheck proves the external writer boundary on every monitor cycle.
+	// It is set before the monitor starts and never changed afterward.
+	writerCheck func(context.Context) error
 }
 
 // grantWorkspace authorizes selected existing objects and inheritance from each
