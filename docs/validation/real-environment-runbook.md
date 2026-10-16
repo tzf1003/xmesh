@@ -22,7 +22,7 @@
 
 1. 在 Tailscale 管理台给这台机器的注册 key 授予 `tag:ingress` 和 `tag:device`，开启 Funnel。
 2. 配置参考 `docs/contracts/schemas/examples/xmesh.config.json` 的 `ingress` 段：`listen: funnel`，`oauth.issuer` 写成 `https://<这台机器>.<你的tailnet>.ts.net`，`clients` 里为 `claude` 或 `codex` 各留一项 scope。
-3. 在状态目录里放一个 `oauth-password` 文件（随机长口令，权限 0600），`xmesh serve` 启动。
+3. 在状态目录里放一个 `oauth-password` 文件（随机长口令，权限 0600，也可用 `--oauth-password-file` 指向别处）。`node.roles` 要含 `ingress`（例如 `[agent, gateway, ingress]`），或者启动时加 `--ingress`；两者都没有时配置里的 `ingress` 段不会生效，Funnel 也不会开。然后 `xmesh serve` 启动。
 4. 在 claude.ai 或 Codex 中添加自定义 MCP 连接，地址填 `<issuer>/mcp`，按页面提示授权，口令填上面的文件内容。
 5. 授权后开新对话，让它依次：列出设备、读一个测试文件、执行一次 `exec.run echo hello`、打开一个终端并关闭。
 
@@ -59,7 +59,7 @@
 需要：一台 Windows，用普通（非管理员）账户登录，并保持登录。
 
 1. 在这个账户下构建或拷入 `xmesh.exe`，写配置，执行 `xmesh install`（Windows 默认注册当前用户的登录计划任务）。
-2. 注销再登录，确认任务已自动启动：`xmesh status --endpoint http://127.0.0.1:8080/mcp --tool sys.info --json`。
+2. 注销再登录，确认任务已自动启动：`xmesh status --endpoint http://127.0.0.1:8080/mcp --tool local/sys.info --json`（这里打的是本机 Gateway，所以工具名是 `local/sys.info`；配置的 `roles` 需含 `gateway`）。
 3. 再开第二个用户的会话，尝试访问第一个用户的状态目录和命名对象：应被拒绝。
 
 交回：第 2 步输出；第 3 步各命令的拒绝信息。
