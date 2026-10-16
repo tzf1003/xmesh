@@ -256,6 +256,8 @@ journal-backed profile 的受管所有者在任何进程准入前刷盘唯一 `e
 
 删除回执保存原身份和最终 close USN；目录生命周期结束后的新子对象、同身份后续变更、冲突删除回执及工作区根删除均拒绝。创建帧、删除帧和游标帧之间的完整持久前缀可独立重放，已记录身份及删除回执去重。回收在首次 ACL 修改前重新确认全部已删除 ID 不存在，跳过其描述符并在其余对象清理成功后确认对应初始 grant；待确认进程仍阻止清理。恢复协调器收到独立复制的删除回执。
 
-本地全量 race 共 300 项、vet、Windows amd64/arm64 vet、amd64 测试编译及契约检查通过。新增便携回归覆盖完整创建/删除计划、回执前缀重放、非法生命周期及日志迁移/拒绝/写入失败。Windows 原生夹具使用真实 AppContainer 创建并删除目录和文件，覆盖首次观察前删除、已 checkpoint、删除回执后游标前宿主强退、初始文件删除后宿主强退、仍有数据句柄时保留错误及追加失败重试；原生结果待 CI。
+本地全量 race 共 300 项、vet、Windows amd64/arm64 vet、amd64 测试编译及契约检查通过。新增便携回归覆盖完整创建/删除计划、回执前缀重放、非法生命周期及日志迁移/拒绝/写入失败。Windows 原生夹具使用真实 AppContainer 创建并删除目录和文件，覆盖首次观察前删除、已 checkpoint、删除回执后游标前宿主强退、初始文件删除后宿主强退、仍有数据句柄时保留错误及追加失败重试；六个原生子场景均通过。
 
 初始对象的存活身份句柄可延迟最终 close；当前在该条件下保留错误，宿主强退并关闭其句柄后由恢复路径重新核实。生产协调器仍须处理这些句柄的清理与关闭、外部 writer 协调、导入子树证明和周期 checkpoint，并接入 exec/ConPTY；Windows L2 生产门禁保持 `sandbox.unavailable`。含 `workspace-deleted` 的日志须由本版本或更新恢复二进制处理。
+
+`7a1ef30` 的 [push 工作流 38834238017](https://github.com/tzf1003/xmesh/actions/runs/38834238017) 与 [PR 工作流 38834241340](https://github.com/tzf1003/xmesh/actions/runs/38834241340) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38834237927` / `38834241346` 通过。原生 job `116759632979` / `116759645800` 的完整日志各确认 149 个独立 Job/AppContainer PASS 标记，保留全部既有 142 项。六个删除子场景均通过：首次观察前删除、已 checkpoint、删除回执后的持久前缀、初始文件删除、classic delete-pending 句柄及追加失败重试。最终状态验证准确根 DACL/控制位、树内 profile ACE 清理、协调器清单复制、重复恢复和持久 complete 重放。classic disposition 用例先读回内核 `DeletePending`，验证句柄存活时保持游标与日志、关闭后重试完成。
