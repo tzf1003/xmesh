@@ -34,10 +34,11 @@ func Test_JobControlInterruptAndClose(t *testing.T) {
 		t.Fatal(e)
 	}
 	cursor := uint64(0)
-	readUntil := func(pattern *regexp.Regexp) string {
+	// poll reads terminal output until pattern appears or the window closes.
+	poll := func(pattern *regexp.Regexp, window time.Duration) (string, bool) {
 		t.Helper()
 		var output strings.Builder
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(window)
 		for time.Now().Before(deadline) {
 			v, e := invoke(m, r, p, c, "pty.read", Object{"session_id": id, "cursor": cursor, "wait_ms": 50})
 			if e != nil {
@@ -46,11 +47,18 @@ func Test_JobControlInterruptAndClose(t *testing.T) {
 			cursor = v["next_cursor"].(uint64)
 			output.WriteString(v["data"].(string))
 			if pattern.MatchString(output.String()) {
-				return output.String()
+				return output.String(), true
 			}
 		}
-		t.Fatalf("terminal output deadline: %q", output.String())
-		return ""
+		return output.String(), false
+	}
+	readUntil := func(pattern *regexp.Regexp) string {
+		t.Helper()
+		output, ok := poll(pattern, 5*time.Second)
+		if !ok {
+			t.Fatalf("terminal output deadline: %q", output)
+		}
+		return output
 	}
 	marker := regexp.MustCompile(`BG_PID=([0-9]+)[\s\S]*FG_READY`)
 	output := readUntil(marker)
@@ -70,13 +78,27 @@ func Test_JobControlInterruptAndClose(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if _, e = invoke(m, r, p, c, "pty.signal", Object{"session_id": id, "signal": "INT"}); e != nil {
-		t.Fatal(e)
+	// A dash foreground job that receives SIGINT between announcing readiness and
+	// exec defers its trap and then drops the signal at exec, so a single interrupt
+	// can be lost. Repeat interrupt and probe until the shell answers; each
+	// interrupt still goes through pty.signal to the then-current foreground group.
+	ready := regexp.MustCompile(`SHELL_READY`)
+	var seen strings.Builder
+	answered := false
+	for deadline := time.Now().Add(5 * time.Second); !answered && time.Now().Before(deadline); {
+		if _, e = invoke(m, r, p, c, "pty.signal", Object{"session_id": id, "signal": "INT"}); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = invoke(m, r, p, c, "pty.write", Object{"session_id": id, "data": "printf 'SHELL_%s\\n' READY\n"}); e != nil {
+			t.Fatal(e)
+		}
+		var output string
+		output, answered = poll(ready, 300*time.Millisecond)
+		seen.WriteString(output)
 	}
-	if _, e = invoke(m, r, p, c, "pty.write", Object{"session_id": id, "data": "printf 'SHELL_%s\\n' READY\n"}); e != nil {
-		t.Fatal(e)
+	if !answered {
+		t.Fatalf("shell did not recover after interrupt: %q", seen.String())
 	}
-	readUntil(regexp.MustCompile(`SHELL_READY`))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	args, _ := json.Marshal(Object{"session_id": id})
