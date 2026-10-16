@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -153,6 +154,23 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 			return fmt.Errorf("AppContainer journal created-object ownership mismatch")
 		}
 	}
+	unknown := make(map[journalObject]bool)
+	for _, record := range j.records {
+		for _, object := range record.UnknownImports {
+			if !created[object] || unknown[object] {
+				return fmt.Errorf("AppContainer journal unknown-import ownership mismatch")
+			}
+			unknown[object] = true
+		}
+	}
+	if len(unknown) != len(j.state.unknown) {
+		return fmt.Errorf("AppContainer journal unknown-import manifest mismatch")
+	}
+	for object := range unknown {
+		if !j.state.unknown[object] {
+			return fmt.Errorf("AppContainer journal unknown-import receipt mismatch")
+		}
+	}
 	deletePending := make(map[journalObject]bool)
 	for _, record := range j.records {
 		for _, object := range record.PendingDeletes {
@@ -281,6 +299,9 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 	if err := appendWorkspaceCreated(j, census.discovered); err != nil {
 		return err
 	}
+	if err := appendWorkspaceUnknown(j, census.adopted); err != nil {
+		return err
+	}
 	for index := len(census.objects) - 1; index >= 0; index-- {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -340,7 +361,10 @@ func checkpointJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects in
 	if j.state.changeCursor != nil && len(census.discovered) != 0 {
 		return errWorkspaceChangesLost
 	}
-	return appendWorkspaceCreated(j, census.discovered)
+	if err := appendWorkspaceCreated(j, census.discovered); err != nil {
+		return err
+	}
+	return appendWorkspaceUnknown(j, census.adopted)
 }
 
 func appendWorkspaceCreated(j *grantJournal, objects []journalObject) error {
@@ -351,12 +375,26 @@ func appendWorkspaceCreated(j *grantJournal, objects []journalObject) error {
 	return err
 }
 
+func appendWorkspaceUnknown(j *grantJournal, objects []journalObject) error {
+	if len(objects) == 0 {
+		return nil
+	}
+	_, err := j.append(journalRecord{Kind: "workspace-unknown-import", UnknownImports: objects})
+	return err
+}
+
+// discovered identities have no explanation in the journal. adopted identities
+// sit beneath a recorded uncoordinated import: their enclosing subtree was never
+// censused before it entered, so the present tree supplies the remaining members.
+// An object that left that subtree before the first observation is unrecoverable
+// and is reported through the retained unknown-import record, not hidden.
 type journalWorkspaceCensus struct {
 	tree       *workspaceTree
 	objects    []treeObject
 	initial    map[fileIdentity]bool
 	intents    map[fileIdentity]journalRecord
 	discovered []journalObject
+	adopted    []journalObject
 }
 
 func (c *journalWorkspaceCensus) Close() {
@@ -452,13 +490,30 @@ func censusJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *wi
 			}
 		}
 	}
+	// Tree enumeration lists every directory before its children. A directory
+	// explains its descendants when it is a recorded unknown import, or itself
+	// became one through this reconciliation.
+	var adopted []journalObject
+	unknownPath := make(map[string]bool)
 	for _, object := range current.objects {
 		if err := retain(object); err != nil {
 			return nil, err
 		}
-		if !known[object.id] {
-			discovered = append(discovered, journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory})
+		key := journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory}
+		if known[object.id] {
+			if j.state.unknown[key] && object.directory {
+				unknownPath[object.relative] = true
+			}
+			continue
 		}
+		if object.relative != "" && j.state.changeCursor != nil && unknownPath[parentRelative(object.relative)] {
+			adopted = append(adopted, key)
+			if object.directory {
+				unknownPath[object.relative] = true
+			}
+			continue
+		}
+		discovered = append(discovered, key)
 	}
 	intents := make(map[fileIdentity]journalRecord)
 	for _, record := range j.records {
@@ -486,7 +541,7 @@ func censusJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *wi
 		}
 	}
 	success = true
-	return &journalWorkspaceCensus{tree: current, objects: objects, initial: initial, intents: intents, discovered: discovered}, nil
+	return &journalWorkspaceCensus{tree: current, objects: objects, initial: initial, intents: intents, discovered: discovered, adopted: adopted}, nil
 }
 
 func releaseJournalWorkspaceObject(object treeObject, sid *windows.SID, created bool, intent journalRecord) error {
@@ -555,4 +610,11 @@ func editJournalWorkspaceACL(acl *windows.ACL, sid *windows.SID, object treeObje
 		merged = acl
 	}
 	return merged, changed || matches == 1, nil
+}
+
+func parentRelative(relative string) string {
+	if index := strings.LastIndexByte(relative, '\\'); index >= 0 {
+		return relative[:index]
+	}
+	return ""
 }

@@ -3,6 +3,7 @@ package winbox
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"testing"
@@ -151,7 +152,7 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 	if plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 3); err != nil || len(plan.Created) != 0 {
 		t.Fatal("cursor replay deduplication", plan, err)
 	}
-	for _, name := range []string{"limit", "hardlink", "reparse", "import", "missing-create", "type", "parent-type"} {
+	for _, name := range []string{"limit", "hardlink", "reparse", "type", "parent-type"} {
 		t.Run(name, func(t *testing.T) {
 			original := map[[16]byte]journalObject{root.ID: root}
 			batch := []workspaceChange{{ID: [16]byte{2}, Parent: root.ID, Reason: usnReasonCreate, Attributes: usnDirectory}, {ID: [16]byte{3}, Parent: [16]byte{2}, Reason: usnReasonCreate}}
@@ -163,10 +164,6 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 				batch[1].Reason |= usnReasonHardLink
 			case "reparse":
 				batch[1].Reason |= usnReasonReparse
-			case "import":
-				batch[1].Reason |= usnReasonRenameNew
-			case "missing-create":
-				batch[1].Reason = 1
 			case "type":
 				batch[1].ID = root.ID
 			case "parent-type":
@@ -365,5 +362,66 @@ func TestWorkspaceChangeDeleteIntentPlan(t *testing.T) {
 		if err != nil || len(plan.DeleteIntents) != 0 || (len(plan.Deleted) == 1) != close || len(intents) != 1 || intents[directory] != 100 {
 			t.Fatal("later intent resolution", close, plan, err)
 		}
+	}
+}
+
+func TestWorkspaceChangeUnknownImportPlan(t *testing.T) {
+	root := journalObject{Volume: 17, ID: [16]byte{1}, Directory: true}
+	known := map[[16]byte]journalObject{root.ID: root}
+	imported := journalObject{Volume: 17, ID: [16]byte{2}, Directory: true}
+	child := journalObject{Volume: 17, ID: [16]byte{3}}
+	file := journalObject{Volume: 17, ID: [16]byte{4}}
+	activity := journalObject{Volume: 17, ID: [16]byte{5}}
+	changes := []workspaceChange{
+		// A rename-in has no creation record; so does later activity on an identity
+		// whose entry into the tracked directory was never observed.
+		{ID: imported.ID, Parent: root.ID, USN: 100, Reason: usnReasonRenameNew, Attributes: usnDirectory},
+		{ID: file.ID, Parent: root.ID, USN: 110, Reason: usnReasonCreate | usnReasonRenameNew},
+		{ID: activity.ID, Parent: root.ID, USN: 120, Reason: 1},
+		// Descendant creation inside an imported directory remains an ordinary
+		// tracked lifetime; its parent is attributable once the import is recorded.
+		{ID: child.ID, Parent: imported.ID, USN: 130, Reason: usnReasonCreate},
+		// Unrelated parents stay outside this workspace's census.
+		{ID: [16]byte{99}, Parent: [16]byte{98}, USN: 140, Reason: usnReasonRenameNew},
+	}
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 5)
+	if err != nil || !slices.Equal(plan.Unknown, []journalObject{imported, file, {Volume: 17, ID: activity.ID}}) || !slices.Equal(plan.Created, []journalObject{child}) || len(known) != 1 {
+		t.Fatal("unknown import classification", plan, err)
+	}
+	// A recorded batch is known to the next plan: replay of an old cursor is empty.
+	for _, object := range append(plan.Unknown, plan.Created...) {
+		known[object.ID] = object
+	}
+	replay, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 5)
+	if err != nil || len(replay.Unknown) != 0 || len(replay.Created) != 0 {
+		t.Fatal("unknown import replay", replay, err)
+	}
+	// The cumulative census bound includes unproved identities.
+	if _, err := planWorkspaceChanges(changes, 17, root.ID, map[[16]byte]journalObject{root.ID: root}, nil, nil, 4); err == nil {
+		t.Fatal("unknown imports exceeded census bound")
+	}
+	// Link and reparse evidence still requires its own proof, and a rename-in
+	// beneath a non-directory remains structurally invalid.
+	for _, reason := range []uint32{usnReasonHardLink, usnReasonReparse} {
+		batch := []workspaceChange{{ID: imported.ID, Parent: root.ID, USN: 100, Reason: usnReasonRenameNew | reason, Attributes: usnDirectory}}
+		if _, err := planWorkspaceChanges(batch, 17, root.ID, map[[16]byte]journalObject{root.ID: root}, nil, nil, 5); err == nil {
+			t.Fatal("linked or reparse import accepted", reason)
+		}
+	}
+	under := map[[16]byte]journalObject{root.ID: root, file.ID: file}
+	if _, err := planWorkspaceChanges([]workspaceChange{{ID: imported.ID, Parent: file.ID, USN: 100, Reason: usnReasonRenameNew}}, 17, root.ID, under, nil, nil, 5); err == nil {
+		t.Fatal("import below a file accepted")
+	}
+	// Deleting an imported identity before the checkpoint yields the same
+	// intent/receipt obligations as any tracked object.
+	gone, err := planWorkspaceChanges([]workspaceChange{
+		{ID: imported.ID, Parent: root.ID, USN: 100, Reason: usnReasonRenameNew, Attributes: usnDirectory},
+		{ID: imported.ID, Parent: root.ID, USN: 110, Reason: usnReasonDelete | usnReasonClose, Attributes: usnDirectory},
+	}, 17, root.ID, map[[16]byte]journalObject{root.ID: root}, nil, nil, 5)
+	if err != nil || len(gone.Unknown) != 1 || len(gone.Deleted) != 1 || gone.Deleted[0].Object != imported {
+		t.Fatal("imported deletion receipt", gone, err)
+	}
+	if !errors.Is(fmt.Errorf("%w: 1 recorded identities", errWorkspaceUnknownImport), errWorkspaceUnknownImport) {
+		t.Fatal("typed unknown import error")
 	}
 }

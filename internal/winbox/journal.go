@@ -67,6 +67,7 @@ type journalRecord struct {
 	Workspace         *journalWorkspace      `json:"workspace,omitempty"`
 	Import            *journalImport         `json:"import,omitempty"`
 	CreatedObjects    []journalObject        `json:"created_objects,omitempty"`
+	UnknownImports    []journalObject        `json:"unknown_imports,omitempty"`
 	PendingDeletes    []journalObject        `json:"pending_deletes,omitempty"`
 	DeleteIntents     []journalDeletion      `json:"delete_intents,omitempty"`
 	DeletedObjects    []journalDeletion      `json:"deleted_objects,omitempty"`
@@ -87,6 +88,7 @@ type journalState struct {
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
 	created           map[journalObject]bool
+	unknown           map[journalObject]bool // Subset of created without creation or census proof.
 	deletePending     map[journalObject]bool
 	deleteIntents     map[journalObject]int64
 	deleted           map[journalObject]int64
@@ -112,6 +114,9 @@ func (s *journalState) accept(r journalRecord) error {
 	}
 	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
 		return fmt.Errorf("unexpected journal created-object fields")
+	}
+	if r.UnknownImports != nil && r.Kind != "workspace-unknown-import" {
+		return fmt.Errorf("unexpected journal unknown-import fields")
 	}
 	if r.PendingDeletes != nil && r.Kind != "workspace-delete-pending" {
 		return fmt.Errorf("unexpected journal pending-delete fields")
@@ -165,6 +170,7 @@ func (s *journalState) accept(r journalRecord) error {
 		s.objects = make(map[journalObject]bool, len(w.Objects))
 		s.granted = make(map[journalObject]bool)
 		s.created = make(map[journalObject]bool)
+		s.unknown = make(map[journalObject]bool)
 		s.deletePending = make(map[journalObject]bool)
 		s.deleteIntents = make(map[journalObject]int64)
 		s.deleted = make(map[journalObject]int64)
@@ -242,6 +248,31 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 		for _, object := range r.CreatedObjects {
 			s.created[object] = true
+		}
+
+	case "workspace-unknown-import":
+		// An uncoordinated rename-in has no pre-move census. The identity batch
+		// takes the same recovery ownership as a created object, with a separate
+		// durable mark so reconciliation never mistakes it for a proved creation.
+		if !s.workspace || s.workspaceReleased || s.changeCursor == nil || len(r.UnknownImports) == 0 || len(s.objects)+len(s.created)+len(r.UnknownImports) > 10000 || profileFields || r.Workspace != nil || r.CreatedObjects != nil || r.Import != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace unknown-import batch")
+		}
+		seen := make(map[[16]byte]bool, len(s.objects)+len(s.created)+len(r.UnknownImports))
+		for object := range s.objects {
+			seen[object.ID] = true
+		}
+		for object := range s.created {
+			seen[object.ID] = true
+		}
+		for _, object := range r.UnknownImports {
+			if !validJournalObject(object) || object.Volume != s.root.Volume || seen[object.ID] {
+				return fmt.Errorf("invalid or repeated journal unknown-import identity")
+			}
+			seen[object.ID] = true
+		}
+		for _, object := range r.UnknownImports {
+			s.created[object] = true
+			s.unknown[object] = true
 		}
 
 	case "workspace-delete-pending":
@@ -450,6 +481,10 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.created = make(map[journalObject]bool, len(j.state.created))
 	for object := range j.state.created {
 		next.created[object] = true
+	}
+	next.unknown = make(map[journalObject]bool, len(j.state.unknown))
+	for object := range j.state.unknown {
+		next.unknown[object] = true
 	}
 	next.deletePending = make(map[journalObject]bool, len(j.state.deletePending))
 	for object := range j.state.deletePending {
