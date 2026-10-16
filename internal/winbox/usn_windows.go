@@ -355,3 +355,71 @@ func confirmWorkspaceDeletion(volume windows.Handle, object journalObject) error
 	}
 	return nil
 }
+
+// Called under the workspace operation gate and profile mutex. NTFS may withhold
+// FILE_DELETE until final close; inspect retained initial identities separately.
+// A kernel pending observation keeps live census/ACL obligations and never
+// substitutes for a final USN close record or independent absence proof.
+func (g *workspaceGrant) checkpointChanges(ctx context.Context, maxEvents int) error {
+	p := g.profile
+	j := p.journal
+	if err := validateWorkspaceJournalOwnership(j, p.sid); err != nil {
+		return err
+	}
+	if err := g.observePendingDeletes(ctx); err != nil {
+		return err
+	}
+	return checkpointWorkspaceChanges(ctx, j, p.sid, g.maxObjects, maxEvents)
+}
+
+func (g *workspaceGrant) observePendingDeletes(ctx context.Context) error {
+	j := g.profile.journal
+	if err := validateWorkspaceJournalOwnership(j, g.profile.sid); err != nil {
+		return err
+	}
+	if g.tree == nil || g.selected == nil || j.state.changeCursor == nil || j.state.workspaceReleased || j.state.complete || len(g.selected.grants) > g.maxObjects {
+		return fmt.Errorf("AppContainer pending-delete observations require a live bounded tracked workspace")
+	}
+	var pending []journalObject
+	for _, grant := range g.selected.grants {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if grant == nil || grant.handle == 0 {
+			return fmt.Errorf("AppContainer pending-delete identity handle unavailable")
+		}
+		actual, err := inspectTreeObject(grant.handle, "")
+		if err != nil {
+			return err
+		}
+		object := journalObject{Volume: actual.id.Volume, ID: actual.id.ID, Directory: actual.directory}
+		if actual.id != grant.id || !j.state.objects[object] {
+			return fmt.Errorf("AppContainer pending-delete identity binding mismatch")
+		}
+		var info [3]uint64
+		if err := windows.GetFileInformationByHandleEx(grant.handle, windows.FileStandardInfo, (*byte)(unsafe.Pointer(&info[0])), 24); err != nil {
+			return err
+		}
+		standard := unsafe.Slice((*byte)(unsafe.Pointer(&info[0])), 24)
+		if (standard[21] != 0) != object.Directory {
+			return fmt.Errorf("AppContainer pending-delete object type mismatch")
+		}
+		if standard[20] == 0 {
+			continue
+		}
+		if object == j.state.root {
+			return fmt.Errorf("AppContainer workspace root deletion")
+		}
+		if !j.state.deletePending[object] {
+			pending = append(pending, object)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(pending) != 0 {
+		_, err := j.append(journalRecord{Kind: "workspace-delete-pending", PendingDeletes: pending})
+		return err
+	}
+	return nil
+}

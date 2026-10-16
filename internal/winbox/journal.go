@@ -66,6 +66,7 @@ type journalRecord struct {
 	SID               string                 `json:"sid,omitempty"`
 	Workspace         *journalWorkspace      `json:"workspace,omitempty"`
 	CreatedObjects    []journalObject        `json:"created_objects,omitempty"`
+	PendingDeletes    []journalObject        `json:"pending_deletes,omitempty"`
 	DeleteIntents     []journalDeletion      `json:"delete_intents,omitempty"`
 	DeletedObjects    []journalDeletion      `json:"deleted_objects,omitempty"`
 	ChangeCursor      *workspaceChangeCursor `json:"change_cursor,omitempty"`
@@ -85,6 +86,7 @@ type journalState struct {
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
 	created           map[journalObject]bool
+	deletePending     map[journalObject]bool
 	deleteIntents     map[journalObject]int64
 	deleted           map[journalObject]int64
 	changeCursor      *workspaceChangeCursor
@@ -106,6 +108,9 @@ func (s *journalState) accept(r journalRecord) error {
 	}
 	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
 		return fmt.Errorf("unexpected journal created-object fields")
+	}
+	if r.PendingDeletes != nil && r.Kind != "workspace-delete-pending" {
+		return fmt.Errorf("unexpected journal pending-delete fields")
 	}
 	if r.DeleteIntents != nil && r.Kind != "workspace-delete-intent" {
 		return fmt.Errorf("unexpected journal delete-intent fields")
@@ -156,6 +161,7 @@ func (s *journalState) accept(r journalRecord) error {
 		s.objects = make(map[journalObject]bool, len(w.Objects))
 		s.granted = make(map[journalObject]bool)
 		s.created = make(map[journalObject]bool)
+		s.deletePending = make(map[journalObject]bool)
 		s.deleteIntents = make(map[journalObject]int64)
 		s.deleted = make(map[journalObject]int64)
 		for _, object := range w.Objects {
@@ -210,6 +216,24 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 		for _, object := range r.CreatedObjects {
 			s.created[object] = true
+		}
+
+	case "workspace-delete-pending":
+		if !s.workspace || s.workspaceReleased || s.changeCursor == nil || len(r.PendingDeletes) == 0 || profileFields || r.Workspace != nil || r.CreatedObjects != nil || r.ChangeCursor != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace pending-delete batch")
+		}
+		seen := make(map[journalObject]bool, len(r.PendingDeletes))
+		for _, object := range r.PendingDeletes {
+			_, deleted := s.deleted[object]
+			// Kernel observations use retained initial handles and keep the
+			// object's census obligations. They supply no USN deletion proof.
+			if !s.objects[object] || object == s.root || s.deletePending[object] || deleted || seen[object] {
+				return fmt.Errorf("invalid or repeated journal pending-delete identity")
+			}
+			seen[object] = true
+		}
+		for _, object := range r.PendingDeletes {
+			s.deletePending[object] = true
 		}
 
 	case "workspace-delete-intent":
@@ -400,6 +424,10 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.created = make(map[journalObject]bool, len(j.state.created))
 	for object := range j.state.created {
 		next.created[object] = true
+	}
+	next.deletePending = make(map[journalObject]bool, len(j.state.deletePending))
+	for object := range j.state.deletePending {
+		next.deletePending[object] = true
 	}
 	next.deleteIntents = make(map[journalObject]int64, len(j.state.deleteIntents))
 	for object, usn := range j.state.deleteIntents {

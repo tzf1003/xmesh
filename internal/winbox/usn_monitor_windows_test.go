@@ -165,29 +165,28 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 			wait(func() bool { data, _ := os.ReadFile(proof); return string(data) == "ready" }, "sandbox readiness")
 			wait(func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(j.state.created) == 2 }, "periodic created identities")
 			if delayed {
-				wait(func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(j.state.deleteIntents) == 1 }, "periodic deletion intent")
+				wait(func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(j.state.deletePending) == 1 }, "periodic kernel pending-delete observation")
 				p.mu.Lock()
-				for object, usn := range j.state.deleteIntents {
-					if _, deleted := j.state.deleted[object]; deleted || usn >= j.state.changeCursor.Next || j.state.workspaceReleased {
+				for object := range j.state.deletePending {
+					if _, deleted := j.state.deleted[object]; deleted || j.state.workspaceReleased {
 						p.mu.Unlock()
 						t.Fatal("intent was treated as final deletion")
 					}
 				}
 				manifest := recoveryJournalInfo(j)
-				if len(manifest.DeleteIntents) != 1 {
+				if len(manifest.PendingDeletes) != 1 {
 					p.mu.Unlock()
 					t.Fatal("missing recovery deletion intent")
 				}
-				manifest.DeleteIntents[0].USN++
-				manifest.DeleteIntents[0].Object.ID[0] ^= 1
+				manifest.PendingDeletes[0].ID[0] ^= 1
 				if err := validateWorkspaceJournalOwnership(j, p.sid); err != nil {
 					p.mu.Unlock()
 					t.Fatal("detached intent manifest changed owner", err)
 				}
-				for object, usn := range j.state.deleteIntents {
-					j.state.deleteIntents[object]++
+				for object := range j.state.deletePending {
+					j.state.deletePending[object] = false
 					err := validateWorkspaceJournalOwnership(j, p.sid)
-					j.state.deleteIntents[object] = usn
+					j.state.deletePending[object] = true
 					if err == nil {
 						p.mu.Unlock()
 						t.Fatal("altered intent manifest accepted")
@@ -301,8 +300,8 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 				if stage == "cancel-disposition" {
 					expected = 0
 				}
-				if len(j.state.deleteIntents) != 1 || len(j.state.deleted) != expected {
-					t.Fatal("deletion intent resolution", j.state.deleteIntents, j.state.deleted)
+				if len(j.state.deletePending) != 1 || len(j.state.deleted) != expected {
+					t.Fatal("deletion intent resolution", j.state.deletePending, j.state.deleted)
 				}
 				_, err := os.Stat(initial)
 				if (stage == "delayed-delete" && !os.IsNotExist(err)) || (stage == "cancel-disposition" && err != nil) {

@@ -283,10 +283,10 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 `20df0c0` 的 [push 工作流 38837835870](https://github.com/tzf1003/xmesh/actions/runs/38837835870) 与 [PR 工作流 38837840099](https://github.com/tzf1003/xmesh/actions/runs/38837840099) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38837835871` / `38837840086` 通过。原生 job `116770827835` / `116770840522` 的完整日志各确认 158 个独立 Job/AppContainer PASS 标记，保留全部既有 153 项。四个新增子场景验证真实 AppContainer 存活期间周期登记新增 ID，目录移出根后继续登记其新增子对象，以及取消、历史连续性故障和写盘失败后的封闭准入、进程终止与重试恢复。等待/停止期限保留附着，正常停止要求持久退出确认，写盘失败保持执行未确认；恢复完成后根描述符/控制位/标签准确、树外对象 profile ACE 清空，完成状态可持久重放。
 
 
-### 执行期删除意图跨 checkpoint 保留
+### 执行期删除观测跨 checkpoint 保留
 
-内部 USN 规划器对尚未出现最终 `FILE_DELETE | CLOSE` 的删除观测生成 `workspace-delete-intent`，记录准确卷/对象身份与首次观测 USN。新增身份和删除意图刷盘后才推进游标；每个完整持久前缀可重放、去重，游标必须覆盖意图 USN。累计对象限额继续包含这些身份。恢复清单独立复制意图，恢复前核对完整持久所有权。
+监视器先通过保留的初始身份句柄读取 `FileStandardInfo.DeletePending`，验证准确卷/对象身份与类型，将内核待删除观测刷盘为 `workspace-delete-pending`；该记录保留初始对象的 live census 义务。NTFS 可在最终关闭前延后发出删除事件，因此内核观测独立于 USN 删除证明。内部 USN 规划器对尚未出现最终 `FILE_DELETE | CLOSE` 的删除观测生成 `workspace-delete-intent`，记录准确卷/对象身份与首次观测 USN。新增身份和删除意图刷盘后才推进游标；每个完整持久前缀可重放、去重，游标必须覆盖意图 USN。累计对象限额继续包含这些身份。恢复清单独立复制意图，恢复前核对完整持久所有权。
 
-删除意图保留对象在 live census 中的义务。已登记对象继续允许后续有界事件和目录继承源追踪；ACL 和存活身份句柄保留到进程退出确认。后续最终 close 仍须结合 NTFS 当前占用记录证明原身份不存在才登记删除回执。撤销 disposition 后仍存活的对象走正常身份核实和 ACL 回收；意图记录作为历史观测保留。新增但无法按 ID 核实的 delete-pending 对象、缺少独立不存在证明的最终 close、历史缺口和导入/link/reparse 证明不足继续保留错误。
+两类删除观测均保留对象在 live census 中的义务。已登记对象继续允许后续有界事件和目录继承源追踪；ACL 和存活身份句柄保留到进程退出确认。后续最终 close 仍须结合 NTFS 当前占用记录证明原身份不存在才登记删除回执。撤销 disposition 后仍存活的对象走正常身份核实和 ACL 回收；意图记录作为历史观测保留。新增但无法按 ID 核实的 delete-pending 对象、缺少独立不存在证明的最终 close、历史缺口和导入/link/reparse 证明不足继续保留错误。
 
-本地全量 race 共 329 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。原生监视器新增延迟删除和撤销 disposition 两个场景，覆盖执行期意图持久化、独立恢复清单、所有权校验、最终删除或存活回收和完成重放；本阶段提交时等待 Windows CI 验收。含 `workspace-delete-intent` 的日志须由本版本或更新恢复二进制处理。外部 writer 协调、导入子树证明和生产执行协调器及 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。
+本地全量 race 共 358 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。原生监视器新增延迟删除和撤销 disposition 两个场景，覆盖执行期内核待删除观测持久化、独立恢复清单、所有权校验、最终删除或存活回收和完成重放；本阶段提交时等待 Windows CI 验收。含 `workspace-delete-intent` / `workspace-delete-pending` 的日志须由本版本或更新恢复二进制处理。外部 writer 协调、导入子树证明和生产执行协调器及 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。

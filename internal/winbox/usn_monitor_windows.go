@@ -50,7 +50,7 @@ func (g *workspaceGrant) monitorChanges(ctx context.Context, owner *executionPro
 	}
 	// A readable baseline precedes publication and any launch. A failed baseline
 	// permanently closes this execution's admission; its intent still needs reap.
-	if err := checkpointWorkspaceChanges(ctx, p.journal, p.sid, g.maxObjects, maxEvents); err != nil {
+	if err := g.checkpointChanges(ctx, maxEvents); err != nil {
 		p.workspaceClosing, owner.sealed = true, true
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (m *workspaceChangeMonitor) checkpoint(ctx context.Context) error {
 	if m.workspace.monitor != m || p.workspaceMonitor != m || m.workspace.tree == nil || p.workspaceClosing || p.reclaiming || (p.processes != m.owner && p.processes != nil) {
 		return fmt.Errorf("AppContainer change monitor lost its workspace ownership")
 	}
-	return checkpointWorkspaceChanges(ctx, p.journal, p.sid, m.workspace.maxObjects, m.maxEvents)
+	return m.workspace.checkpointChanges(ctx, m.maxEvents)
 }
 
 func (m *workspaceChangeMonitor) run(ctx context.Context) {
