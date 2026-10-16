@@ -411,7 +411,9 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 
 边界：这是事后归并，不证明子树完整；未知导入目录内原有子对象若在被观察前已移出工作区，仍无法找回；回收沿用严格 ACE 格式规则，带非工作区格式 profile ACE 的导入对象仍回收失败并保留。这是代码实现加 GitHub Windows runner 的模拟验证，不是真实生产环境验收，生产 Windows L2 保持 `sandbox.unavailable`。
 
-两个子任务分支合入集成分支后的整树结果：本地全量 race、vet、Windows amd64/arm64 vet 与 `internal/winbox` 测试交叉编译通过；push CI 结果见下一节记录。
+三个子任务（guard keeper、未知导入归并、内核写入围栏）合入同一分支后，本地全量 race、vet、Windows amd64/arm64 vet 与 `internal/winbox` 测试交叉编译通过。`27d8ba2` 的 [push 工作流 38867849083](https://github.com/tzf1003/xmesh/actions/runs/38867849083) 与 [PR 工作流 38867854889](https://github.com/tzf1003/xmesh/actions/runs/38867854889) 的 macOS、Ubuntu、Windows 全量 race/vet/build 和 windows-native 任务全部通过，契约工作流通过。本次仅记录任务结论：运行环境无法下载原生日志的存储主机，未逐项核对 PASS 标识计数，该计数核对仍待补。
+
+合入后的 CI 中，`internal/pty` 的 `Test_JobControlInterruptAndClose` 在 Ubuntu 与 macOS 各出现一次失败。根因是测试时序：dash 前台任务若在输出就绪标记之后、`exec` 之前收到 SIGINT，会推迟 trap 并在 `exec` 时丢弃该信号，shell 便一直等待 `sleep`。在 32 个并行进程的压力下该失败约为 12/480；测试现在重复“中断加探针”直到 shell 响应，同压力下 0/480，产品代码未改。同一用例在容器内还会因孤儿僵尸进程被 `kill(pid,0)` 判为存活，测试现读取 `/proc/<pid>/stat` 并把僵尸视为已退出。
 
 ## 内核写入围栏（workspaceWriterFence）
 
