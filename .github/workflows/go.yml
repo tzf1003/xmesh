@@ -110,6 +110,12 @@ jobs:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
         run: go test -race ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s
+      - name: Windows L2 admission cost measurement
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          XMESH_TEST_WINDOWS_ADMISSION_COST: "1"
+        run: go test ./internal/winbox -run Test_WindowsAdmissionCost -v -count=1 -timeout=1500s
   l2-unix:
     # L2 sandbox tests that need a real bubblewrap or sandbox-exec: they refuse
     # connections to the kernel control socket, outside reads and the network, and

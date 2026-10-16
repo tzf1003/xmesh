@@ -176,6 +176,7 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 	if err != nil {
 		return err
 	}
+	stageMark(ctx, "usn_open")
 	census, err := censusJournalWorkspace(j, sid, maxObjects)
 	if err != nil {
 		return err
@@ -187,6 +188,7 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	stageMark(ctx, "tracking_census")
 	_, err = j.append(journalRecord{Kind: "workspace-tracking", ChangeCursor: &workspaceChangeCursor{JournalID: span.JournalID, Next: span.Next}})
 	return err
 }

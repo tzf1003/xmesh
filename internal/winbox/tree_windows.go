@@ -10,6 +10,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/tzf1003/xmesh/internal/sandbox"
 	"golang.org/x/sys/windows"
 )
 
@@ -130,7 +131,7 @@ func openWorkspaceTree(ctx context.Context, path string, maxObjects int) (_ *wor
 		}
 		err := enumerateDirectory(ctx, current.handle, func(entry directoryEntry) error {
 			if len(tree.objects) >= maxObjects {
-				return fmt.Errorf("AppContainer workspace exceeds %d objects", maxObjects)
+				return &sandbox.WorkspaceTooLargeError{Limit: maxObjects}
 			}
 			if entry.attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 				return fmt.Errorf("AppContainer workspace contains a reparse point")

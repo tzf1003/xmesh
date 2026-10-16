@@ -97,14 +97,13 @@ type journalState struct {
 	executionIDs      map[string]bool
 }
 
-// Check transitions before writing and during replay. Recovery integration must
-// additionally verify full SID/profile binding, ACE ownership and filesystem
-// identities before editing any security descriptor.
-func (s *journalState) accept(r journalRecord) error {
+// checkEnvelope rejects a record whose version, completion state or payload
+// fields cannot belong to its kind. It is the part of validation shared by every
+// record and never changes the state.
+func (s *journalState) checkEnvelope(r journalRecord) error {
 	if r.Version != journalVersion || s.complete {
 		return fmt.Errorf("invalid journal version or completed state")
 	}
-	profileFields := r.Profile != "" || r.SID != ""
 	executionFields := r.ExecutionID != "" || r.ExecutionSequence != 0
 	if executionFields && r.Kind != "execution" && r.Kind != "execution-reaped" {
 		return fmt.Errorf("unexpected journal execution fields")
@@ -130,6 +129,17 @@ func (s *journalState) accept(r journalRecord) error {
 	if r.ChangeCursor != nil && r.Kind != "workspace-tracking" && r.Kind != "workspace-tracked" {
 		return fmt.Errorf("unexpected journal change cursor")
 	}
+	return nil
+}
+
+// Check transitions before writing and during replay. Recovery integration must
+// additionally verify full SID/profile binding, ACE ownership and filesystem
+// identities before editing any security descriptor.
+func (s *journalState) accept(r journalRecord) error {
+	if err := s.checkEnvelope(r); err != nil {
+		return err
+	}
+	profileFields := r.Profile != "" || r.SID != ""
 	switch r.Kind {
 	case "profile":
 		if s.profile || r.Sequence != 1 || !journalProfileName.MatchString(r.Profile) || !validJournalSID(r.SID) || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
@@ -330,28 +340,15 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 
 	case "grant":
-		if !s.profile || s.workspaceReleased || profileFields || r.Workspace != nil || r.GrantSequence != 0 || r.Grant == nil || !validJournalObject(r.Grant.Object) {
-			return fmt.Errorf("invalid journal grant intent")
+		if err := s.checkGrant(r, profileFields); err != nil {
+			return err
 		}
-		ace := r.Grant.ACE
-		if len(ace) < 16 || len(ace) > 65535 || len(ace)%4 != 0 || ace[0] != 0 || int(binary.LittleEndian.Uint16(ace[2:4])) != len(ace) {
-			return fmt.Errorf("invalid journal grant ACE")
-		}
-		if s.workspace {
-			if !s.objects[r.Grant.Object] || s.granted[r.Grant.Object] {
-				return fmt.Errorf("invalid or repeated journal workspace grant")
-			}
-			s.granted[r.Grant.Object] = true
-		}
-		s.pending[r.Sequence] = true
+		s.applyGrant(r)
 	case "released":
-		if len(s.executions) != 0 {
-			return errJournalProcessesPending
+		if err := s.checkRelease(r, profileFields); err != nil {
+			return err
 		}
-		if !s.profile || profileFields || r.Workspace != nil || r.Grant != nil || !s.pending[r.GrantSequence] {
-			return fmt.Errorf("invalid journal grant release")
-		}
-		delete(s.pending, r.GrantSequence)
+		s.applyRelease(r)
 	case "workspace-released":
 		if len(s.executions) != 0 {
 			return errJournalProcessesPending
@@ -373,6 +370,51 @@ func (s *journalState) accept(r journalRecord) error {
 	}
 	return nil
 }
+
+// Grant intents and their releases are the only records written once per
+// workspace object, so they alone have a check/apply/revert split: a check reads
+// the state, apply and revert change just the entries the record owns. That lets
+// them be validated and committed without cloning every map in the state.
+func (s *journalState) checkGrant(r journalRecord, profileFields bool) error {
+	if !s.profile || s.workspaceReleased || profileFields || r.Workspace != nil || r.GrantSequence != 0 || r.Grant == nil || !validJournalObject(r.Grant.Object) {
+		return fmt.Errorf("invalid journal grant intent")
+	}
+	ace := r.Grant.ACE
+	if len(ace) < 16 || len(ace) > 65535 || len(ace)%4 != 0 || ace[0] != 0 || int(binary.LittleEndian.Uint16(ace[2:4])) != len(ace) {
+		return fmt.Errorf("invalid journal grant ACE")
+	}
+	if s.workspace && (!s.objects[r.Grant.Object] || s.granted[r.Grant.Object]) {
+		return fmt.Errorf("invalid or repeated journal workspace grant")
+	}
+	return nil
+}
+
+func (s *journalState) applyGrant(r journalRecord) {
+	if s.workspace {
+		s.granted[r.Grant.Object] = true
+	}
+	s.pending[r.Sequence] = true
+}
+
+func (s *journalState) revertGrant(r journalRecord) {
+	if s.workspace {
+		delete(s.granted, r.Grant.Object)
+	}
+	delete(s.pending, r.Sequence)
+}
+
+func (s *journalState) checkRelease(r journalRecord, profileFields bool) error {
+	if len(s.executions) != 0 {
+		return errJournalProcessesPending
+	}
+	if !s.profile || profileFields || r.Workspace != nil || r.Grant != nil || !s.pending[r.GrantSequence] {
+		return fmt.Errorf("invalid journal grant release")
+	}
+	return nil
+}
+
+func (s *journalState) applyRelease(r journalRecord)  { delete(s.pending, r.GrantSequence) }
+func (s *journalState) revertRelease(r journalRecord) { s.pending[r.GrantSequence] = true }
 
 func validJournalObject(o journalObject) bool { return o.ID != [16]byte{} }
 
@@ -467,6 +509,13 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 		return 0, fmt.Errorf("AppContainer journal record limit")
 	}
 	record.Version, record.Sequence = journalVersion, uint64(len(j.records)+1)
+	if record.Kind == "grant" || record.Kind == "released" {
+		sequences, err := j.appendBatch([]journalRecord{record})
+		if err != nil {
+			return 0, err
+		}
+		return sequences[0], nil
+	}
 	// Validate against an independent state: a rejected append must not advance
 	// recovery ownership. Decoding below also freezes caller-owned slices.
 	next := j.state
@@ -552,4 +601,104 @@ func (j *grantJournal) Close() error {
 		j.namespace = nil
 	}
 	return result
+}
+
+// appendBatch writes grant intents, or grant releases, as consecutive frames
+// followed by one flush. Each frame is an ordinary record, so replay, recovery
+// and older readers see exactly what separate appends would have written. The
+// only difference is when the flush happens: a caller that appends intents here
+// must still do so before the first mutation any of them describes, which a
+// single flush covering all of them satisfies. A release batch is the same
+// trade a crash between a descriptor edit and its release record already makes.
+//
+// Records are validated in order against the live state, each seeing the ones
+// before it. A rejected or unflushed batch leaves the state unchanged.
+func (j *grantJournal) appendBatch(records []journalRecord) ([]uint64, error) {
+	if len(records) == 0 {
+		return nil, nil
+	}
+	if j.blocked != nil || j.file == nil {
+		return nil, fmt.Errorf("AppContainer journal unavailable: %w", j.blocked)
+	}
+	if len(j.records)+len(records) > maxJournalRecords {
+		return nil, fmt.Errorf("AppContainer journal record limit")
+	}
+	applied := make([]journalRecord, 0, len(records))
+	revert := func() {
+		for i := len(applied) - 1; i >= 0; i-- {
+			if applied[i].Kind == "grant" {
+				j.state.revertGrant(applied[i])
+			} else {
+				j.state.revertRelease(applied[i])
+			}
+		}
+	}
+	sequences := make([]uint64, len(records))
+	var buffer []byte
+	size := j.bytes
+	for i, record := range records {
+		record.Version, record.Sequence = journalVersion, uint64(len(j.records)+i+1)
+		profileFields := record.Profile != "" || record.SID != ""
+		err := j.state.checkEnvelope(record)
+		switch {
+		case err != nil:
+		case record.Kind == "grant":
+			if err = j.state.checkGrant(record, profileFields); err == nil {
+				j.state.applyGrant(record)
+			}
+		case record.Kind == "released":
+			if err = j.state.checkRelease(record, profileFields); err == nil {
+				j.state.applyRelease(record)
+			}
+		default:
+			err = fmt.Errorf("unexpected journal batch record kind")
+		}
+		if err != nil {
+			revert()
+			return nil, err
+		}
+		applied = append(applied, record)
+		body, err := json.Marshal(record)
+		if err == nil && (len(body) > maxJournalFrame || size+int64(len(body)+8) > maxJournalBytes) {
+			err = fmt.Errorf("AppContainer journal size limit")
+		}
+		if err != nil {
+			revert()
+			return nil, err
+		}
+		frame := make([]byte, 8+len(body))
+		binary.LittleEndian.PutUint32(frame[:4], uint32(len(body)))
+		binary.LittleEndian.PutUint32(frame[4:8], crc32.ChecksumIEEE(body))
+		copy(frame[8:], body)
+		buffer = append(buffer, frame...)
+		size += int64(len(frame))
+		sequences[i] = record.Sequence
+	}
+	n, err := j.file.WriteAt(buffer, j.bytes)
+	if err == nil && n != len(buffer) {
+		err = io.ErrShortWrite
+	}
+	if err == nil {
+		err = j.file.Sync()
+	}
+	if err != nil {
+		revert()
+		j.blocked = err
+		return nil, err
+	}
+	// Freeze the committed records from their encoded form, as a replay would.
+	frozen := make([]journalRecord, 0, len(records))
+	reader := bytes.NewReader(buffer)
+	for range records {
+		record, _, err := readJournalFrame(reader)
+		if err != nil {
+			revert()
+			j.blocked = err
+			return nil, err
+		}
+		frozen = append(frozen, record)
+	}
+	j.records = append(j.records, frozen...)
+	j.bytes = size
+	return sequences, nil
 }

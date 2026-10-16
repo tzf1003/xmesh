@@ -135,6 +135,7 @@ func (m *managedExecution) close(ctx context.Context) error {
 		m.cancel()
 	}
 	m.runner.release(m)
+	m.exec.logTiming()
 	// A completed journal has no recovery content. Remove it so the bounded
 	// state directory does not fill; failure to do so is harmless.
 	discardCompletedJournal(ctx, m.journal)
@@ -222,6 +223,11 @@ func (r *Runner) open(ctx context.Context, workspace string) (*managedExecution,
 	}
 	if err := r.retry(ctx); err != nil {
 		return nil, err
+	}
+	// Refuse an oversized workspace before it costs a profile, a keeper and a
+	// writer fence. The grant scan stays the authoritative bound.
+	if workspaceExceeds(ctx, workspace, r.config.MaxObjects) {
+		return nil, &sandbox.WorkspaceTooLargeError{Limit: r.config.MaxObjects}
 	}
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
