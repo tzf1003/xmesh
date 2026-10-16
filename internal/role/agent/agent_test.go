@@ -70,6 +70,7 @@ func configuration(t *testing.T) (string, *config.Store) {
 	return path, s
 }
 
+// conformance: CON-ARCH-05
 func Test_NodeCallBudgetAcrossMCPSessions(t *testing.T) {
 	_, store := configuration(t)
 	a, e := New(store)
@@ -164,6 +165,8 @@ func object(t *testing.T, r *mcp.CallToolResult) map[string]any {
 	}
 	return v
 }
+
+// conformance: CTR-ID-01
 func Test_Gate1_MCPRealHTTP(t *testing.T) {
 	_, store := configuration(t)
 	a, e := New(store)
@@ -238,6 +241,8 @@ func Test_Gate1_MCPRealHTTP(t *testing.T) {
 	}
 	t.Fatal("disconnect did not orphan PTY")
 }
+
+// conformance: CON-ARCH-05
 func Test_CONSEC06_ReloadNextCall(t *testing.T) {
 	path, store := configuration(t)
 	a, e := New(store)

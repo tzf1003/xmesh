@@ -23,6 +23,8 @@ func address(t *testing.T) string {
 	l.Close()
 	return a
 }
+
+// conformance: CON-ARCH-03
 func Test_Runtime_AgentGatewaySharedState(t *testing.T) {
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
