@@ -73,3 +73,9 @@ jobs:
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
         run: go test -race ./internal/winbox -run Test_WindowsManagedRunner -v -count=1 -timeout=600s
+      - name: Windows L2 production serve acceptance
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
+        run: go test -race ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s

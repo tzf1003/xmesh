@@ -305,6 +305,9 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 		delete(m.sessions, s.ID)
 		close(s.started)
 		m.mu.Unlock()
+		if runner != nil {
+			return nil, toolerr.SandboxRunner("sandbox.runner_failed", e)
+		}
 		return nil, toolerr.Internal("pty.open", e)
 	}
 	s.term = term

@@ -46,7 +46,7 @@ func runManaged(ctx context.Context, runner sandbox.Runner, cwd string, a Args, 
 		if ctx.Err() != nil {
 			return 1, true, nil
 		}
-		return 0, false, toolerr.Internal("exec.start", startErr)
+		return 0, false, toolerr.SandboxRunner("sandbox.runner_failed", startErr)
 	}
 	type result struct {
 		code int
@@ -72,7 +72,7 @@ func runManaged(ctx context.Context, runner sandbox.Runner, cwd string, a Args, 
 	}
 	<-fed
 	if closeErr != nil {
-		return 0, false, toolerr.Internal("exec.sandbox_cleanup", closeErr)
+		return 0, false, toolerr.SandboxRunner("sandbox.cleanup_pending", closeErr)
 	}
 	if r.err != nil && !timedOut {
 		return 0, false, toolerr.Internal("exec.wait", r.err)

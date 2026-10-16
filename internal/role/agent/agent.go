@@ -17,6 +17,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/pty"
 	"github.com/tzf1003/xmesh/internal/quota"
+	"github.com/tzf1003/xmesh/internal/sandbox"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net"
 	"net/http"
@@ -52,6 +53,7 @@ type Agent struct {
 	backendNames    map[*mcp.Server][]string
 	auditLog        atomic.Pointer[audit.Logger]
 	networkInfo     atomic.Pointer[NetworkInfo]
+	sandbox         atomic.Pointer[sandboxState]
 	draining        atomic.Bool
 	backendChanged  chan struct{}
 	stop            chan struct{}
@@ -122,6 +124,28 @@ func (a *Agent) supervise(previous *config.Config) {
 	}
 }
 func (a *Agent) SetAudit(log *audit.Logger) { a.auditLog.Store(log) }
+
+// sandboxState is the managed isolation runner and the startup notes about it.
+type sandboxState struct {
+	runner   sandbox.Runner
+	warnings []string
+}
+
+// SetSandbox installs the managed isolation runner used for L2 execution and the
+// startup notes reported in sys.info. The runner is long-lived and shared by every
+// call; the policy engine is rebuilt per call and re-attached each time. A nil
+// runner keeps L2 failing closed on platforms without a native launcher.
+func (a *Agent) SetSandbox(runner sandbox.Runner, warnings ...string) {
+	a.sandbox.Store(&sandboxState{runner: runner, warnings: append([]string{}, warnings...)})
+}
+
+// attachSandbox gives a freshly built policy engine the managed runner. Only a
+// non-nil interface value is installed, so an absent runner is never a typed nil.
+func (a *Agent) attachSandbox(engine *policy.Engine) {
+	if state := a.sandbox.Load(); state != nil && state.runner != nil {
+		engine.UseSandboxRunner(state.runner)
+	}
+}
 func (a *Agent) SetNetwork(mode string, p Principal) {
 	a.networkInfo.Store(&NetworkInfo{Mode: mode, Node: p.Node, Tags: append([]string{}, p.Tags...)})
 }
@@ -268,6 +292,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 			if e != nil {
 				return Result(nil, toolerr.Internal("policy", e)), nil
 			}
+			a.attachSandbox(engine)
 			a.PTY.Configure(cfg.Agent.PTY)
 			a.Exec.Configure(cfg.Agent.Exec)
 			var out any
@@ -399,6 +424,9 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	}
 	if c.Agent.Policy.AllowDangerous {
 		warnings = append(warnings, "allow_dangerous 已启用")
+	}
+	if state := a.sandbox.Load(); state != nil {
+		warnings = append(warnings, state.warnings...)
 	}
 	readable := false
 	if c.Mesh.Mode == "tailnet" {

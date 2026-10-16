@@ -57,9 +57,20 @@ func (p *program) Stop(service.Service) error {
 	select {
 	case <-p.done:
 		return p.err
-	case <-time.After(30 * time.Second):
+	case <-time.After(p.stopLimit()):
 		return fmt.Errorf("等待服务停止超时")
 	}
+}
+
+// stopLimit is how long Stop waits for the runtime. A node with the Windows
+// AppContainer runner also waits for the runner to reclaim live sandboxes, which
+// is bounded by app.RunnerShutdownLimit after the roles have drained.
+func (p *program) stopLimit() time.Duration {
+	limit := 30 * time.Second
+	if runtime.GOOS == "windows" && p.store != nil && p.store.Get().Agent.Policy.WindowsAppContainer {
+		limit += app.RunnerShutdownLimit()
+	}
+	return limit
 }
 func runService(store *config.Store, options app.Options) error {
 	p := &program{store: store, options: options, onFailure: func(e error) {

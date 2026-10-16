@@ -61,11 +61,12 @@ func (s *Store) Get() *Config {
 		return s.current
 	}
 	// Node, network and listeners use the startup generation until restart.
-	s.restart = !reflect.DeepEqual(c.Node, s.current.Node) || !reflect.DeepEqual(c.Mesh, s.current.Mesh) || c.Gateway.Listen != s.current.Gateway.Listen || !reflect.DeepEqual(c.Ingress, s.current.Ingress)
+	s.restart = !reflect.DeepEqual(c.Node, s.current.Node) || !reflect.DeepEqual(c.Mesh, s.current.Mesh) || c.Gateway.Listen != s.current.Gateway.Listen || !reflect.DeepEqual(c.Ingress, s.current.Ingress) || c.Agent.Policy.WindowsAppContainer != s.current.Agent.Policy.WindowsAppContainer
 	c.Node = s.current.Node
 	c.Mesh = s.current.Mesh
 	c.Gateway.Listen = s.current.Gateway.Listen
 	c.Ingress = s.current.Ingress
+	c.Agent.Policy.WindowsAppContainer = s.current.Agent.Policy.WindowsAppContainer
 	s.current = c
 	s.digest = digest
 	return c

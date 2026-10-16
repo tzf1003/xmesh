@@ -19,7 +19,7 @@ func Test_CTRCFG01(t *testing.T) {
 			})
 		}
 	}
-	for _, name := range []string{"config-relay.json", "config-funnel-with-domain.json", "config-pat-empty-scopes.json", "config-lan-ephemeral.json"} {
+	for _, name := range []string{"config-relay.json", "config-funnel-with-domain.json", "config-pat-empty-scopes.json", "config-lan-ephemeral.json", "config-windows-appcontainer-not-boolean.json"} {
 		if _, e := Load(filepath.Join(root, "invalid", name)); e == nil {
 			t.Fatal("invalid accepted", name)
 		}

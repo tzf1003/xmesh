@@ -35,7 +35,18 @@
 | `agent.exec` 的配额数字、`agent.pty` 的上限 | 热加载。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
+| `agent.policy.windows_appcontainer` | 不热加载。只在启动时读取，变更后 `status` 提示需要重启；见下方 [Windows L2 开关](#windows-l2-开关) |
 | `node`、`mesh`、`ingress` | 不热加载。`status` 提示需要重启 |
+
+### Windows L2 开关
+
+`agent.policy.windows_appcontainer`（布尔，默认 `false`）控制 Windows 节点是否在启动时安装托管 AppContainer 运行器。它是实验性开关：
+
+- 为 `false` 或节点不是 Windows 时不安装运行器，Windows 上的 L2 请求保持 `policy_denied`，规则名 `sandbox.unavailable`，行为与未引入此开关时一致。
+- 为 `true` 时，启动流程在状态目录的 `sandbox` 子目录建立运行器，并先完成一次启动恢复，回收上一次进程异常退出遗留的日志、ACL 授权与 AppContainer profile。运行器创建或恢复失败时服务照常启动，L2 继续失败关闭，`sys.info` 的 `warnings` 给出原因，细节写入节点日志。
+- 运行器只在 `isolation: L2` 的调用中使用，`isolation` 仍可热加载。L1 与 L2 之间的切换从下一次工具调用起生效。
+- stdio 后端的 L2 不经过托管运行器，仍然失败关闭。
+- 非 Windows 节点配置为 `true` 不会报错，`sys.info` 的 `warnings` 提示该开关不生效。
 
 ### 密钥
 
