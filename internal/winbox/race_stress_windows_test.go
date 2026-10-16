@@ -50,6 +50,11 @@ func probeAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker 
 			t.Error("probe owner close", err)
 		}
 	}()
+	// Logs of earlier launches in this profile must not be attributed to this one.
+	stale, _ := filepath.Glob(filepath.Join(p.Directory(), "probe-race.*"))
+	for _, path := range stale {
+		_ = os.Remove(path)
+	}
 	input, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +86,9 @@ func probeAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker 
 	}
 	logs, _ := filepath.Glob(filepath.Join(p.Directory(), "probe-race.*"))
 	for _, path := range logs {
-		if body, err := os.ReadFile(path); err == nil {
+		body, err := os.ReadFile(path)
+		_ = os.Remove(path)
+		if err == nil {
 			if len(body) > 64*1024 {
 				body = body[:64*1024]
 			}
@@ -142,6 +149,13 @@ func Test_WindowsAppContainerRaceDiagnosticsControl(t *testing.T) {
 			t.Logf("%s inside AppContainer: %d of %d launches: %s", mode.name, count, mode.launches, outcome)
 		}
 	}
+}
+
+func truncate(text string, limit int) string {
+	if len(text) > limit {
+		return text[:limit]
+	}
+	return text
 }
 
 func firstLine(values []string) string {
