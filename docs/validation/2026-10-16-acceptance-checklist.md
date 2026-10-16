@@ -38,9 +38,9 @@
 | 独立进程 supervisor 与持久退出回执 | 完成 | 原生通过 | 无 |
 | 卷级 namespace lease（参与协议的操作互斥） | 完成 | 原生通过 | 只约束参与协议的操作 |
 | 受管标准流与 ConPTY 启动 | 完成（内部原语） | 原生通过 | 无 |
-| 生命周期所有者与协调导入（start/import/close 串行，来源 guard 上限 256） | 完成（内部） | 原生通过，291 个 `Test_` PASS 标识 | 接入生产路径 |
-| **外部 namespace/reparse/ACL 写入者强制约束** | 内核写入围栏已实现（`3bea72f`、`99ced05`） | Windows 原生通过（钉住、六类违规检测、绑定、生命周期 clean/violation） | 默认关闭、未接入生产；不阻止持有 WRITE_DAC 的同用户修改 DACL（仅检出）；后代 SECURITY_CHANGE 未纳入；普通账号读取变更日志待验收；与 keeper 尚未组合 |
-| **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | keeper 进程已实现（`1f2616b`） | Windows 原生通过：强杀宿主后 keeper 存活、接管、恢复完成后释放 | 接入生产启动路径；不冻结树内写入；整机重启/外层 Job 终止时失败关闭 |
+| 生命周期所有者与协调导入（start/import/close 串行，来源 guard 上限 256） | 完成（内部） | 原生通过，291 个 `Test_` PASS 标识 | 已随 `agent.policy.windows_appcontainer`（默认关闭）接入生产路径（T1，#7） |
+| **外部 namespace/reparse/ACL 写入者强制约束** | 内核写入围栏已实现（`3bea72f`、`99ced05`） | Windows 原生通过（钉住、六类违规检测、绑定、生命周期 clean/violation） | 已随 `agent.policy.windows_appcontainer`（默认关闭）装配进生产启动路径（T1，#7），与 keeper 一并由 T9 联合验证；不阻止持有 WRITE_DAC 的同用户修改 DACL（仅检出）；后代 SECURITY_CHANGE 未纳入；普通账号读取变更日志待验收 |
+| **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | keeper 进程已实现（`1f2616b`） | Windows 原生通过：强杀宿主后 keeper 存活、接管、恢复完成后释放 | 已随 `agent.policy.windows_appcontainer`（默认关闭）装配进生产启动路径（T1，#7）；不冻结树内写入；整机重启/外层 Job 终止时失败关闭 |
 | **完整对象 census 与未知导入识别** | 未知导入归并与 `workspace-unknown-import` 已实现（`37645b5`） | Windows 原生通过（五个子场景加生命周期场景） | 事后归并不证明子树完整，仍需完整 census 证明 |
 | **exec/ConPTY 工具层接入** | `sandbox.Runner` 与 `winbox.Runner` 已实现（`2632168`）；`agent.policy.windows_appcontainer` 在生产启动链安装 runner（T1，#7，默认关闭） | 7 项 `Test_WindowsManagedRunner*` 与 5 项 `Test_WindowsL2Serve*` 原生通过 | 开关打开后的整体行为（keeper、写入围栏、未知导入组合）由 T9 联合验证；`sandbox.unavailable` 仍是默认 |
 | 普通用户登录任务、服务联网、跨用户/会话 ACL 与 mutex | 登录任务与可选 SCM 安装已实现 | 本机模式通过 | 需要真实 Windows 普通账户会话 |
