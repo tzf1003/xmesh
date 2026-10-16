@@ -88,16 +88,20 @@ func (e *executionProcesses) acquire(ctx context.Context) (func(), error) {
 
 // start returns caller-owned process/thread handles. It always creates the root
 // suspended, pins its verified Job identity, then resumes it under the admission
-// gate. ConPTY integration and production L2 admission have separate gates.
+// gate. Production exec/ConPTY L2 admission has a separate integration gate.
 // A failed launch can retain a Job obligation until reap and Close.
 func (e *executionProcesses) start(ctx context.Context, args []string, directory string, environment []string) (windows.ProcessInformation, error) {
-	return e.startWithStdio(ctx, args, directory, environment, nil)
+	return e.startWithIO(ctx, args, directory, environment, nil, 0)
 }
 
 // startWithStdio transfers only private duplicates of the three explicit stream
 // handles. The caller retains its originals and supplies only capabilities that
 // the child may use; inherited streams can access objects outside workspace ACLs.
 func (e *executionProcesses) startWithStdio(ctx context.Context, args []string, directory string, environment []string, stdio *executionStdio) (windows.ProcessInformation, error) {
+	return e.startWithIO(ctx, args, directory, environment, stdio, 0)
+}
+
+func (e *executionProcesses) startWithIO(ctx context.Context, args []string, directory string, environment []string, stdio *executionStdio, console windows.Handle) (windows.ProcessInformation, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var process windows.ProcessInformation
@@ -157,7 +161,7 @@ func (e *executionProcesses) startWithStdio(ctx context.Context, args []string, 
 	e.jobs = append(e.jobs, entry)
 	job := entry.handle
 	attributeCount := uint32(2)
-	if handles != nil {
+	if handles != nil || console != 0 {
 		attributeCount++
 	}
 	attrs, err := windows.NewProcThreadAttributeList(attributeCount)
@@ -183,6 +187,13 @@ func (e *executionProcesses) startWithStdio(ctx context.Context, args []string, 
 		startup.StdInput, startup.StdOutput, startup.StdErr = handles[0], handles[1], handles[2]
 	}
 	flags := uint32(windows.CREATE_SUSPENDED | windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_NO_WINDOW | windows.CREATE_UNICODE_ENVIRONMENT)
+	if console != 0 {
+		if err := applyExecutionConsole(attrs, console); err != nil {
+			return process, err
+		}
+		startup.Flags = windows.STARTF_USESTDHANDLES
+		flags &^= windows.CREATE_NO_WINDOW
+	}
 	if err := windows.CreateProcess(nil, command, nil, nil, handles != nil, flags, &block[0], dir, &startup.StartupInfo, &process); err != nil {
 		return windows.ProcessInformation{}, err
 	}

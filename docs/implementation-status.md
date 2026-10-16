@@ -351,7 +351,17 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 
 内部 `executionProcesses.startWithStdio` 接受可信调用方显式提供的 stdin/stdout/stderr 文件或管道句柄。入口验证三项句柄，创建可继承的私有副本，并通过 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` 与 `STARTF_USESTDHANDLES` 传入子进程；原句柄继承标记及寿命保持，启动返回时关闭副本。显式流是调用方授予的访问能力，可承载工作区 ACL 范围以外的对象。创建时 Job 绑定、挂起准入、身份清单登记后恢复及独立监督路径继续适用。
 
-新增原生回归覆盖管道、stdout/stderr 共用文件和受监督启动，核实 Unicode/换行/NUL 输入、双输出、实际 AppContainer token、其他可继承文件句柄隔离、原句柄保持，以及无效句柄/取消/启动失败的清理义务。工作区测试 helper 使用 NUL 输入与 profile 私有运行日志，失败时有界采集标准输出、标准错误及 race sidecar。本地全量 race 390 项/22 包、vet、Windows amd64/arm64 vet 和 amd64 测试编译通过；新增场景的 Windows 原生验收等待 CI。ConPTY、生产执行协调器和外部 writer 生命周期继续实现；Windows L2 保持 `sandbox.unavailable`。
+新增原生回归覆盖管道、stdout/stderr 共用文件和受监督启动，核实 Unicode/换行/NUL 输入、双输出、实际 AppContainer token、其他可继承文件句柄隔离、原句柄保持，以及无效句柄/取消/启动失败的清理义务。工作区测试 helper 使用 NUL 输入与 profile 私有运行日志，失败时有界采集标准输出、标准错误及 race sidecar。本地全量 race 390 项/22 包、vet、Windows amd64/arm64 vet 和 amd64 测试编译通过；新增场景已通过双轮 Windows 原生验收，证据见下。ConPTY、生产执行协调器和外部 writer 生命周期继续实现；Windows L2 保持 `sandbox.unavailable`。
 
 
-`bf7ec68` 的 [push 38855624507](https://github.com/tzf1003/xmesh/actions/runs/38855624507) 与 [PR 38855628133](https://github.com/tzf1003/xmesh/actions/runs/38855628133) 均通过三平台常规检查和契约；新增标准流的三个运行场景未通过。共享文件场景的完整日志定位到测试 helper 对未继承句柄调用 `GetFileInformationByHandle`，在 AppContainer 内触发 `0xc0000008`；管道场景在父进程等待退出时超时。句柄隔离核验现由父进程在 helper 等待 stdin 时复制并核对准确文件身份，管道输出同时排空并有界保留诊断。原生复验等待 CI；既有退出码 66 的原因继续待查。
+`bf7ec68` 的 [push 38855624507](https://github.com/tzf1003/xmesh/actions/runs/38855624507) 与 [PR 38855628133](https://github.com/tzf1003/xmesh/actions/runs/38855628133) 均通过三平台常规检查和契约；新增标准流的三个运行场景未通过。共享文件场景的完整日志定位到测试 helper 对未继承句柄调用 `GetFileInformationByHandle`，在 AppContainer 内触发 `0xc0000008`；管道场景在父进程等待退出时超时。句柄隔离核验现由父进程在 helper 等待 stdin 时复制并核对准确文件身份，管道输出同时排空并有界保留诊断。修正后的原生复验结果见下；既有退出码 66 的原因继续待查。
+
+
+`cd48542` 的 [push 工作流 38856278814](https://github.com/tzf1003/xmesh/actions/runs/38856278814) 与 [PR 工作流 38856284255](https://github.com/tzf1003/xmesh/actions/runs/38856284255) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38856278672` / `38856284293` 通过。原生 job `116828346274` / `116828362178` 完整日志各含 253 个独立测试 PASS 标识、322 个 PASS 行，其中 Job/AppContainer 为 207 个，保留全部既有 248/202 项且零失败。管道、共享文件、独立监督三个运行场景及标准流准入均通过：Unicode/换行/NUL 输入和双输出准确，实际 token 为 AppContainer，无关可继承文件能力保持隔离，原句柄寿命/继承标记保持，取消与失败启动保留准确回收义务。父进程的句柄身份核验及并发排空已通过原生验证；helper 顶层 SKIP 单独记录。既有 `e747cb8` 的退出码 66 在两轮均未重现，其原因仍未确认。
+
+
+### 受管 AppContainer ConPTY 准入
+
+内部 `executionProcesses.startWithConsole` 接受可信调用方持有的 HPCON，在创建时合并 pseudoconsole、Job 与 AppContainer 启动属性；统一执行挂起创建、完整进程身份登记和恢复准入，支持独立监督所有者。终端标准流由 ConPTY 提供，进程启动采用显式标准句柄配置。调用方持续排空输出并管理输入、窗口尺寸、HPCON 与管道寿命，保持到全部附着进程退出；关闭 HPCON 期间仍须排空输出。
+
+新增原生场景覆盖普通和受监督启动的 Unicode 输入、真实 AppContainer token、运行中窗口调整与正常退出，以及阻塞终端输入时的 Job 终止、准确退出码和持久执行确认；另验证无效 HPCON、预取消和启动失败后的 Job/调用方终端所有权。本地全量 race 390 项/22 包、vet、Windows amd64/arm64 vet 及 amd64 测试编译通过。ConPTY 新增原生场景等待 CI；生产执行协调器、外部 writer/异常宿主 guard 生命周期及工具层 exec/ConPTY 接入继续实现，Windows L2 保持 `sandbox.unavailable`。
