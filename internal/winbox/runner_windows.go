@@ -135,6 +135,7 @@ func (m *managedExecution) close(ctx context.Context) error {
 		m.cancel()
 	}
 	m.runner.release(m)
+	m.exec.logTiming()
 	// A completed journal has no recovery content. Remove it so the bounded
 	// state directory does not fill; failure to do so is harmless.
 	discardCompletedJournal(ctx, m.journal)

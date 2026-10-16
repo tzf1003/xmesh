@@ -46,10 +46,12 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 		return nil, err
 	}
 	defer writers.Close()
+	stageMark(ctx, "namespace_writers")
 	tree, err := openWorkspaceTree(ctx, path, maxObjects)
 	if err != nil {
 		return nil, err
 	}
+	stageMark(ctx, "scan")
 	if tree.objects[0].id != bound.objects[0].id {
 		tree.Close()
 		return nil, fmt.Errorf("AppContainer workspace admission identity changed")
@@ -93,6 +95,7 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	// selected grants. It is released only after complete tree cleanup.
 	p.grants++
 	p.mu.Unlock()
+	stageMark(ctx, "journal_snapshot")
 	g := &workspaceGrant{operation: make(chan struct{}, 1), profile: p, tree: tree, selected: &selectedObjectGrants{}, path: path, maxObjects: maxObjects, credentials: credentials}
 	for _, object := range tree.objects {
 		if err = ctx.Err(); err != nil {
@@ -108,10 +111,12 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	if err == nil {
 		err = ctx.Err()
 	}
+	stageMark(ctx, "grant_acls")
 	if err == nil {
 		err = g.retainIdentityHandles(ctx)
 	}
 	if err == nil {
+		stageMark(ctx, "retain_handles")
 		return g, nil
 	}
 	if cleanupErr := g.Close(); cleanupErr != nil {

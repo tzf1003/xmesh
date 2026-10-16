@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -61,6 +62,9 @@ type workspaceExecution struct {
 	// reporting its result without re-reading a stream that cleanup itself wrote.
 	checked  bool
 	observed error
+	// timing attributes admission, launch and cleanup cost to phases. It is
+	// diagnostic only.
+	timing *executionTiming
 }
 
 func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOptions, prepare workspaceExecutionPrepare) (*workspaceExecution, error) {
@@ -78,13 +82,17 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 	}
 	// The callback receives a copy so retaining or changing its command slice
 	// cannot change the supervisor command subsequently used by this owner.
+	timing := &executionTiming{}
+	timing.admit.begin()
+	stages := withStageTimer(ctx, &timing.admit)
 	prepared := options
 	prepared.SupervisorCommand = append([]string(nil), options.SupervisorCommand...)
 	guard, err := prepare(ctx, prepared)
+	timing.admit.mark("coordinator")
 	if guard == nil {
 		return nil, errors.Join(err, fmt.Errorf("AppContainer workspace coordinator did not retain a guard"))
 	}
-	e := &workspaceExecution{operation: make(chan struct{}, 1), lifetime: ctx, guard: guard, maxEvents: options.MaxEvents}
+	e := &workspaceExecution{operation: make(chan struct{}, 1), lifetime: ctx, guard: guard, maxEvents: options.MaxEvents, timing: timing}
 	e.fence, _ = guard.(writerVerifier)
 	if err == nil && options.RequireWriterFence && e.fence == nil {
 		err = fmt.Errorf("AppContainer workspace execution requires a verified external writer fence")
@@ -98,10 +106,12 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 	if err := e.verifyFence(ctx); err != nil {
 		return e, err
 	}
+	timing.admit.mark("verify_fence")
 	e.journal, err = openBoundGrantJournal(ctx, options.Journal, true)
 	if err != nil {
 		return e, err
 	}
+	timing.admit.mark("journal_open")
 	// An independent keeper verifies this exact journal's completion before it
 	// agrees to release, so it must learn the journal's identity once.
 	if binder, ok := guard.(interface {
@@ -111,28 +121,35 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 			return e, err
 		}
 	}
+	timing.admit.mark("bind_journal")
 	e.profile, err = newProfile(e.journal)
 	if err != nil {
 		return e, err
 	}
-	e.workspace, err = e.profile.grantWorkspace(ctx, options.Workspace, options.MaxObjects)
+	timing.admit.mark("profile")
+	e.workspace, err = e.profile.grantWorkspace(stages, options.Workspace, options.MaxObjects)
 	if err != nil {
 		return e, err
 	}
-	if err := beginWorkspaceChangeTracking(ctx, e.journal, e.profile.sid, options.MaxObjects); err != nil {
+	timing.objects = len(e.workspace.tree.objects)
+	if err := beginWorkspaceChangeTracking(stages, e.journal, e.profile.sid, options.MaxObjects); err != nil {
 		return e, err
 	}
+	timing.admit.mark("tracking")
 	if err := e.sealFence(ctx); err != nil {
 		return e, err
 	}
+	timing.admit.mark("seal_fence")
 	e.processes, err = newSupervisedExecutionProcesses(ctx, e.profile, options.MaxJobs, options.SupervisorCommand)
 	if err != nil {
 		return e, err
 	}
+	timing.admit.mark("supervisor")
 	e.monitor, err = e.workspace.monitorChanges(ctx, e.processes, options.Interval, options.MaxEvents)
 	if err != nil {
 		return e, err
 	}
+	timing.admit.mark("monitor")
 	if err := ctx.Err(); err != nil {
 		return e, err
 	}
@@ -173,13 +190,19 @@ func (e *workspaceExecution) start(ctx context.Context, args []string, directory
 	if err := e.lifetime.Err(); err != nil {
 		return windows.ProcessInformation{}, err
 	}
+	launch := e.timing.launchTimer()
+	launch.begin()
 	if err := e.verifyFence(ctx); err != nil {
 		return windows.ProcessInformation{}, err
 	}
+	launch.mark("verify_fence")
 	if err := e.workspace.verifyDescendantSecurity(ctx, e.maxEvents, true); err != nil {
 		return windows.ProcessInformation{}, err
 	}
-	return e.processes.startWithIO(ctx, args, directory, environment, stdio, console)
+	launch.mark("descendant_security")
+	info, err := e.processes.startWithIO(ctx, args, directory, environment, stdio, console)
+	launch.mark("spawn")
+	return info, err
 }
 
 // moveImport shares launch/close admission and retains every returned source
@@ -258,11 +281,15 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		return nil
 	}
 	e.ready = false
+	cleanup := e.timing.cleanupTimer()
+	cleanup.begin()
+	stages := withStageTimer(ctx, cleanup)
 	if e.processes != nil {
 		if err := e.processes.reap(ctx, exitCode); err != nil {
 			return err
 		}
 	}
+	cleanup.mark("reap")
 	// A violated boundary does not stop cleanup: ACLs and the profile must still
 	// be reclaimed by identity. The violation is reported with the result.
 	var observationErr error
@@ -272,6 +299,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		observationErr = err
 	}
+	cleanup.mark("verify_fence")
 	if e.monitor != nil {
 		observationErr = errors.Join(observationErr, e.monitor.Stop(ctx))
 		p := e.monitor.workspace.profile
@@ -283,6 +311,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.monitor = nil
 	}
+	cleanup.mark("monitor_stop")
 	// Every process is gone and no cleanup edit has happened yet, so any further
 	// descriptor change on the admitted snapshot is an external writer's.
 	if e.workspace != nil && !e.checked {
@@ -292,6 +321,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.checked, e.observed = true, err
 	}
+	cleanup.mark("final_security")
 	observationErr = errors.Join(observationErr, e.observed)
 	// Finish observation before releasing its process owner. Cancellation can
 	// make a live monitor request reap; a stopped monitor cannot send a request
@@ -302,17 +332,19 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.processes = nil
 	}
+	cleanup.mark("processes_close")
 	if e.workspace != nil {
 		// Reclamation edits the root's descriptor; from here a retry must not
 		// read this package's own edit as a foreign one.
 		if e.fence != nil {
 			e.fence.unsealRoot()
 		}
-		if err := e.workspace.closeContext(ctx); err != nil {
+		if err := e.workspace.closeContext(stages); err != nil {
 			return errors.Join(observationErr, err)
 		}
 		e.workspace = nil
 	}
+	cleanup.mark("workspace_reclaim")
 	if err := ctx.Err(); err != nil {
 		return errors.Join(observationErr, err)
 	}
@@ -322,6 +354,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.profile = nil
 	}
+	cleanup.mark("profile_delete")
 	if e.journal != nil {
 		if e.journal.blocked != nil {
 			return errors.Join(observationErr, e.journal.blocked)
@@ -340,6 +373,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.journal = nil
 	}
+	cleanup.mark("journal_close")
 	for len(e.imports) != 0 {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(observationErr, err)
@@ -357,6 +391,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.guard = nil
 	}
+	cleanup.mark("guard_close")
 	e.closed = true
 	// Recorded imports were reclaimed by identity, but their prior subtree and
 	// writers were never proved. Report them even after durable completion.
@@ -364,4 +399,16 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		observationErr = errors.Join(observationErr, fmt.Errorf("%w: %d recorded identities", errWorkspaceUnknownImport, e.unknown))
 	}
 	return observationErr
+}
+
+// logTiming reports where one execution's sandbox cost went. It is a debug
+// record: the stage lists name phases, never paths or command content.
+func (e *workspaceExecution) logTiming() {
+	if e == nil || e.timing == nil {
+		return
+	}
+	t := e.timing
+	slog.Debug("sandbox_execution_timing", "objects", t.objects,
+		"admit_ms", t.admit.total().Milliseconds(), "launch_ms", t.launch.total().Milliseconds(), "cleanup_ms", t.cleanup.total().Milliseconds(),
+		"admit", t.admit.String(), "launch", t.launch.String(), "cleanup", t.cleanup.String())
 }
