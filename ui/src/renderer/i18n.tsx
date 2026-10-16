@@ -38,6 +38,7 @@ const ERROR_KEYS: Record<string, Key> = {
   not_found: "err.not_found",
   invalid_args: "err.invalid_args",
   forbidden: "err.forbidden",
+  keychain_unavailable: "err.keychain_unavailable",
   payload_too_large: "err.payload_too_large",
 };
 

@@ -143,3 +143,11 @@ pre.preview { background: var(--surface-2); border-radius: 6px; padding: 10px 12
 .checklist li { padding: 4px 0; display: flex; gap: 8px; }
 @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } .sidebar { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); } }
 @media (prefers-reduced-motion: no-preference) { .bar > span { transition: width 0.3s; } }
+
+/* Tailnet admin tabs */
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); margin: 8px 0 14px; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; cursor: pointer; color: var(--muted); }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+ul.plain { list-style: none; margin: 0; padding: 0; }
+tr[data-mismatch="true"] { background: var(--warn-bg); }

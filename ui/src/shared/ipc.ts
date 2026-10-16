@@ -21,6 +21,7 @@ import type {
   PatSecret,
   SessionsResponse,
 } from "./control";
+import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
 
 /** `ipcMain.handle` channels. The preload script hard-codes the same strings; a unit test checks they agree. */
@@ -49,6 +50,7 @@ export const CHANNELS = {
   getRecentCalls: "xmesh:get-recent-calls",
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
+  mesh: "xmesh:mesh",
 } as const;
 
 /** Main -> renderer push channel. */
@@ -56,7 +58,7 @@ export const SNAPSHOT_EVENT = "xmesh:snapshot";
 /** Main -> renderer push channel: the newest `call` events (metadata only), newest last. */
 export const CALLS_EVENT = "xmesh:calls";
 
-export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig"] as const;
+export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig", "meshLoginRead", "meshLoginWrite"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
 
 export const PATH_KINDS = ["config", "logs", "audit"] as const;
@@ -68,8 +70,8 @@ export const EXTERNAL_LINKS = {
 } as const;
 export type ExternalKey = keyof typeof EXTERNAL_LINKS;
 
-/** What the native chooser selects: the workspace is a directory, the auth key a file. */
-export const PICK_KINDS = ["workspace", "authkeyFile"] as const;
+/** What the native chooser selects: the workspace is a directory; the others are files (`authkeySave` names one to be created). */
+export const PICK_KINDS = ["workspace", "authkeyFile", "authkeySave", "allowlistFile", "tokenFile"] as const;
 export type PickKind = (typeof PICK_KINDS)[number];
 
 /** What the renderer learns about a failed operation. `diagnostics` and `current_etag` come from the kernel's error body (CTR-CTL-02). */
@@ -160,6 +162,8 @@ export interface PanelApi {
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
   /** Opens the system file chooser; `path` is null when the user cancels. */
   pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>>;
+  /** Tailnet administration through `xmesh mesh ... --json`; credentials stay in the CLI's keychain profile. */
+  mesh<R extends MeshRequest>(request: R): Promise<DataResult<MeshResultFor<R>>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -189,6 +193,7 @@ export const PANEL_API_METHODS = [
   "onCalls",
   "runSetup",
   "pickPath",
+  "mesh",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";

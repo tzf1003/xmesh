@@ -96,13 +96,14 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.getRecentCalls!();
   await api.runSetup!({ any: 1 });
   await api.pickPath!("workspace");
+  await api.mesh!({ op: "status" });
   assert.deepEqual(
     invoked.map((i) => i.channel),
     [
       CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.listPats, CHANNELS.createPat,
       CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
       CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.queryAudit,
-      CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath,
+      CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
     ],
   );
   assert.deepEqual(invoked[2]!.args, [cfg]);
