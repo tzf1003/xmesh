@@ -19,8 +19,8 @@ type timingCapture struct {
 }
 
 func (c *timingCapture) Enabled(context.Context, slog.Level) bool { return true }
-func (c *timingCapture) WithAttrs([]slog.Attr) slog.Handler      { return c }
-func (c *timingCapture) WithGroup(string) slog.Handler           { return c }
+func (c *timingCapture) WithAttrs([]slog.Attr) slog.Handler       { return c }
+func (c *timingCapture) WithGroup(string) slog.Handler            { return c }
 func (c *timingCapture) Handle(_ context.Context, r slog.Record) error {
 	if r.Message != "sandbox_execution_timing" {
 		return nil
