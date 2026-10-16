@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// conformance: CTR-MUX-01 CON-CONC-12 CON-IMPL-02
 func Test_CTRMUX01_SameUpstreamIDs(t *testing.T) {
 	m := NewMapper()
 	id, _ := jsonrpc.MakeID(float64(1))
@@ -28,6 +29,8 @@ func Test_CTRMUX01_SameUpstreamIDs(t *testing.T) {
 		t.Fatal("disconnected mapping remained")
 	}
 }
+
+// conformance: CTR-MUX-01 CON-IMPL-02
 func Test_CTRMUX01_TransportPipes(t *testing.T) {
 	a, b := net.Pipe()
 	ctx := context.Background()
@@ -64,6 +67,8 @@ func Test_CTRMUX01_TransportPipes(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// conformance: CTR-MUX-02 CON-CONC-12
 func Test_CTRMUX02_ProgressIsolationAndReverseDeny(t *testing.T) {
 	left, right := net.Pipe()
 	server := mcp.NewServer(&mcp.Implementation{Name: "mock", Version: "1"}, nil)
@@ -117,6 +122,7 @@ func Test_CTRMUX02_ProgressIsolationAndReverseDeny(t *testing.T) {
 	}
 }
 
+// conformance: CTR-MUX-02
 func Test_CTRMUX02_ResponseWaitsForProgressForwarding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

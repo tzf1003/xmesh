@@ -113,6 +113,8 @@ func object(t *testing.T, o *mcp.CallToolResult) map[string]any {
 	_ = json.Unmarshal(b, &v)
 	return v
 }
+
+// conformance: CTR-GW-01 CTR-GW-03
 func Test_CTRGW01_03_SessionDefaults(t *testing.T) {
 	g, root := fixture(t, false)
 	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
@@ -160,6 +162,8 @@ func Test_CTRGW01_03_SessionDefaults(t *testing.T) {
 		t.Fatal("default not cleared")
 	}
 }
+
+// conformance: INV-08
 func Test_INV08_IngressScopes(t *testing.T) {
 	g, _ := fixture(t, true)
 	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) {
@@ -185,6 +189,8 @@ func Test_INV08_IngressScopes(t *testing.T) {
 		t.Fatal(o)
 	}
 }
+
+// conformance: INV-09
 func Test_INV09_OfflineRoutesRemoved(t *testing.T) {
 	g, _ := fixture(t, false)
 	local := g.opts.LocalPeer
@@ -216,6 +222,7 @@ func Test_INV09_OfflineRoutesRemoved(t *testing.T) {
 	}
 }
 
+// conformance: CTR-AUD-01
 func Test_CTRAUD01_RejectedCalls(t *testing.T) {
 	g, _ := fixture(t, true)
 	dir := t.TempDir()
@@ -264,6 +271,7 @@ func Test_CTRAUD01_RejectedCalls(t *testing.T) {
 	}
 }
 
+// conformance: CTR-GW-02
 func Test_CTRGW02_CatalogRefreshAndFavorite(t *testing.T) {
 	backend := mcp.NewServer(&mcp.Implementation{Name: "device", Version: "1"}, nil)
 	backend.AddTool(&mcp.Tool{Name: "sys.info", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
