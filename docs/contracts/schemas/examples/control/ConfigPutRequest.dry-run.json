@@ -1,0 +1,4 @@
+{
+  "content": "node:\n  name: win-dev-01\n  roles: [agent]\n",
+  "dry_run": true
+}

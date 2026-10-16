@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-error:1",
+  "title": "ControlErrorFile",
+  "description": "CTR-CTL-02。控制通道的失败响应体。信封与 CTR-ERR-01 相同（error、message、retry_after_ms），错误码是控制通道自己的集合，HTTP 状态按 x-http-status 对应。",
+  "x-http-status": {
+    "invalid_args": 400,
+    "forbidden": 403,
+    "not_found": 404,
+    "conflict": 409,
+    "role_disabled": 409,
+    "unsupported_mode": 409,
+    "precondition_failed": 412,
+    "payload_too_large": 413,
+    "config_invalid": 422,
+    "fingerprint_mismatch": 422,
+    "precondition_required": 428,
+    "internal": 500,
+    "not_implemented": 501,
+    "unavailable": 503
+  },
+  "$defs": {
+    "ControlErrorCode": {
+      "enum": [
+        "invalid_args",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "role_disabled",
+        "unsupported_mode",
+        "precondition_failed",
+        "payload_too_large",
+        "config_invalid",
+        "fingerprint_mismatch",
+        "precondition_required",
+        "internal",
+        "not_implemented",
+        "unavailable"
+      ]
+    },
+    "ConfigDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "pointer": {
+          "type": "string",
+          "description": "RFC 6901 JSON Pointer，指向 YAML 转成 JSON 数据模型之后出错的位置。语法错误时没有。"
+        },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ControlError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "message"],
+      "properties": {
+        "error": { "$ref": "#/$defs/ControlErrorCode" },
+        "message": { "type": "string", "minLength": 1, "description": "中文，一行。" },
+        "retry_after_ms": { "type": "integer", "minimum": 0 },
+        "field": { "type": "string", "minLength": 1, "description": "invalid_args 指出出错的字段。" },
+        "reason": { "type": "string", "minLength": 1, "description": "同一错误码下的细分原因，蛇形命名。" },
+        "current_etag": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag",
+          "description": "precondition_failed 返回磁盘上当前的 ETag，客户端重新读取后合并。"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfigDiagnostic" },
+          "description": "config_invalid 的逐条诊断。"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "error": { "const": "precondition_failed" } }, "required": ["error"] },
+          "then": { "required": ["current_etag"] }
+        },
+        {
+          "if": { "properties": { "error": { "const": "config_invalid" } }, "required": ["error"] },
+          "then": { "required": ["diagnostics"] }
+        },
+        {
+          "if": { "properties": { "error": { "const": "invalid_args" } }, "required": ["error"] },
+          "then": { "required": ["field"] }
+        }
+      ]
+    }
+  }
+}

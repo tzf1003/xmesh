@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-ingress:1",
+  "title": "ControlIngress",
+  "description": "CTR-CTL-10。入口的 OAuth 客户端与登录口令。roles 不含 ingress 时这些路由返回 role_disabled。",
+  "$defs": {
+    "IngressClient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_id", "client_name", "redirect_uris", "scopes", "token_endpoint_auth_method"],
+      "properties": {
+        "client_id": { "type": "string", "minLength": 1 },
+        "client_name": { "type": "string" },
+        "redirect_uris": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "scopes": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Scope" } },
+        "token_endpoint_auth_method": { "type": "string", "minLength": 1 }
+      }
+    },
+    "IngressClientsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "clients"],
+      "properties": {
+        "issuer": { "type": ["string", "null"] },
+        "clients": { "type": "array", "items": { "$ref": "#/$defs/IngressClient" } }
+      }
+    },
+    "IngressPasswordRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["password"],
+      "properties": {
+        "password": { "type": "string", "minLength": 12, "maxLength": 256 }
+      }
+    },
+    "IngressPasswordResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rotated_at"],
+      "properties": {
+        "rotated_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+      }
+    }
+  }
+}

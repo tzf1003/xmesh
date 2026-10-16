@@ -16,6 +16,8 @@
 
 `closed` 不占用 `max_sessions`，也不占用 `max_per_caller`。进程已经退出，留下的只是环形缓冲。`closed` 的数量 ≤ `pty.closed_retain_max`，超出时立刻释放最老的 `closed`，见 [RUL-12](../contracts/rulings.md#rul-12)。`orphaned` 占用设备总额，但不占用原 caller 的 `max_per_caller`，否则断线会把个人配额卡死到宽限结束。关联：[CON-CONC-03](concurrency.md#con-conc-03)、[CTR-PTY-01](../contracts/pty.md#ctr-pty-01)。
 
+在按会话（`caller_id`）计数的上限之外，Agent 还按主体统计 `active` 与 `orphaned` 终端：主体优先取可信的 OAuth client，否则取节点 ID，同一主体的多个 MCP 会话共享，本机 Gateway 转发的会话共用一个节点主体。该合计达到 `pty.max_per_caller` 时 `open` 返回 `policy_denied`、规则 `quota.exceeded`；`transfer` 的接收方同样计入。因此断线后的 `orphaned` 终端仍占着原主体的额度，直到被接管、回收或进程退出。
+
 ## INV-03
 
 Gateway 角色和 Ingress 角色重启后，不需要恢复 PTY、租约、幂等缓存、文件锁或 exec 输出分页。这些状态只存在于目标 Agent。

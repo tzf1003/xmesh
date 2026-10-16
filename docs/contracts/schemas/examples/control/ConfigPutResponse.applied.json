@@ -1,0 +1,37 @@
+{
+  "applied": true,
+  "etag": "sha256-b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+  "restart_required": true,
+  "diff": [
+    {
+      "pointer": "/agent/allow_dangerous",
+      "op": "replace",
+      "before": false,
+      "after": true,
+      "restart_required": false,
+      "weakens_security": true
+    },
+    {
+      "pointer": "/agent/cwd_policy/allow/1",
+      "op": "add",
+      "after": "C:\\Users\\x\\repos",
+      "restart_required": false,
+      "weakens_security": true
+    },
+    {
+      "pointer": "/mesh/mode",
+      "op": "replace",
+      "before": "lan",
+      "after": "tailnet",
+      "restart_required": true,
+      "weakens_security": false
+    },
+    {
+      "pointer": "/agent/pty/closed_retain_max",
+      "op": "remove",
+      "before": 20,
+      "restart_required": false,
+      "weakens_security": false
+    }
+  ]
+}

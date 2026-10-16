@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/bmatcuk/doublestar/v4"
 	ignore "github.com/sabhiram/go-gitignore"
@@ -163,13 +164,36 @@ func (s *Service) glob(ctx context.Context, root string, a Args) (Object, error)
 	return Object{"resolved_path": root, "matches": out, "truncated": truncated}, nil
 }
 
-// A conservative supported type set is shared by both engines. Unsupported
-// types return invalid_args as required by CTR-FS-05 rather than guessing.
-var types = map[string][]string{
-	"go": {"*.go"}, "rust": {"*.rs"}, "py": {"*.py", "*.pyi"}, "python": {"*.py", "*.pyi"}, "js": {"*.js", "*.jsx", "*.cjs", "*.mjs", "*.vue"}, "ts": {"*.ts", "*.tsx", "*.cts", "*.mts"}, "typescript": {"*.ts", "*.tsx", "*.cts", "*.mts"}, "json": {"*.json", "*.sarif", "composer.lock"}, "yaml": {"*.yaml", "*.yml"}, "toml": {"*.toml", "Cargo.lock"}, "md": {"*.md", "*.markdown", "*.mdown", "*.mdwn", "*.mdx", "*.mkd", "*.mkdn"}, "markdown": {"*.md", "*.markdown", "*.mdown", "*.mdwn", "*.mdx", "*.mkd", "*.mkdn"}, "txt": {"*.txt"}, "html": {"*.html", "*.htm", "*.ejs"}, "css": {"*.css", "*.scss"}, "java": {"*.java", "*.jsp", "*.jspx", "*.properties"}, "swift": {"*.swift"}, "c": {"*.[chH]", "*.[chH].in", "*.cats"}, "sh": {"*.bash", "*.bashrc", "*.csh", "*.cshrc", "*.env", "*.ksh", "*.kshrc", "*.sh", "*.tcsh", "*.zsh", ".bash_login", ".bash_logout", ".bash_profile", ".bashrc", ".cshrc", ".env", ".kshrc", ".login", ".logout", ".profile", ".tcshrc", ".zlogin", ".zlogout", ".zprofile", ".zshenv", ".zshrc", "bash_login", "bash_logout", "bash_profile", "bashrc", "profile", "zlogin", "zlogout", "zprofile", "zshenv", "zshrc"},
+var rgTypeCache sync.Map // rg path -> map[string][]string
+
+// fileTypes returns the file type table CTR-FS-05 requires both engines to
+// share: the local rg's own `--type-list` when rg is present, ripgrep's built-in
+// set otherwise. Unknown names are rejected with invalid_args by the caller.
+func fileTypes(rg string) map[string][]string {
+	if rg == "" {
+		return builtinTypes
+	}
+	if cached, ok := rgTypeCache.Load(rg); ok {
+		return cached.(map[string][]string)
+	}
+	table := builtinTypes
+	if out, e := exec.Command(rg, "--no-config", "--type-list").Output(); e == nil {
+		parsed := map[string][]string{}
+		for _, line := range strings.Split(string(out), "\n") {
+			name, globs, ok := strings.Cut(strings.TrimSpace(line), ": ")
+			if ok && name != "" {
+				parsed[name] = strings.Split(globs, ", ")
+			}
+		}
+		if len(parsed) > 0 {
+			table = parsed
+		}
+	}
+	rgTypeCache.Store(rg, table)
+	return table
 }
 
-func filterFile(root, p string, a Args) bool {
+func filterFile(root, p string, a Args, types map[string][]string) bool {
 	if a.Glob != "" {
 		rel, _ := filepath.Rel(root, p)
 		pattern := a.Glob
@@ -183,7 +207,7 @@ func filterFile(root, p string, a Args) bool {
 	}
 	if a.Type != "" {
 		for _, pattern := range types[a.Type] {
-			if ok, _ := filepath.Match(pattern, filepath.Base(p)); ok {
+			if ok, _ := doublestar.Match(pattern, filepath.Base(p)); ok {
 				return true
 			}
 		}
@@ -219,6 +243,11 @@ func (s *Service) grepEngine(ctx context.Context, root string, a Args, pure bool
 	if e != nil {
 		return nil, toolerr.Args("pattern")
 	}
+	rg, _ := exec.LookPath("rg")
+	if pure {
+		rg = ""
+	}
+	types := fileTypes(rg)
 	if a.Type != "" && types[a.Type] == nil {
 		return nil, toolerr.Args("type")
 	}
@@ -227,17 +256,13 @@ func (s *Service) grepEngine(ctx context.Context, root string, a Args, pure bool
 			return nil, toolerr.Args("glob")
 		}
 	}
-	rg, _ := exec.LookPath("rg")
-	if pure {
-		rg = ""
-	}
 	files := []string{}
 	matches := []Object{}
 	counts := []Object{}
 	total := 0
 	truncated := false
 	e = s.walkFiles(ctx, root, false, func(p string, st fs.FileInfo) error {
-		if !filterFile(root, p, a) {
+		if !filterFile(root, p, a, types) {
 			return nil
 		}
 		// Per-file bounds prevent an arbitrarily large input from exhausting memory.

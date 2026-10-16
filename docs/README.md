@@ -45,8 +45,10 @@
 | [07 Gateway 与入口](design/07-gateway.md) | 发现、命名、会话默认值、OAuth、接入 |
 | [08 安全与授权](design/08-security.md) | 双层授权、策略引擎、配额、审计 |
 | [09 Go 实现](design/09-implementation.md) | 仓库骨架、依赖、跨平台 |
-| [10 落地路线](design/10-roadmap.md) | 五个阶段与验收 |
+| [10 落地路线](design/10-roadmap.md) | 五个阶段与验收，以及阶段 6 概览 |
 | [11 已决事项与风险](design/11-decisions.md) | 五项已决、风险与缓解 |
+| [12 桌面 UI 与本机控制通道](design/12-ui-and-control.md) | Windows / macOS 托盘与面板、UI 与内核解耦、拆分与验收 |
+| [13 tailnet 管理与 DERP 提供商路径](design/13-mesh-admin-and-derp.md) | UI 端管理 tag、权限、第三方 DERP；国内 DERP 提供商的研究与风险 |
 | [术语表](glossary.md) | 角色、身份、资源名词 |
 
 ### 约束

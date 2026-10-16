@@ -6,7 +6,28 @@ on:
 permissions:
   contents: write
 jobs:
+  # 红提交不得发布：同一提交上的 Go 实现与契约夹具两个工作流都必须已经成功（含 Windows 原生作业），
+  # 另外在这里重跑 vet、竞态测试和符合性矩阵检查。标签推送得太早时，最多等 30 分钟让它们跑完。
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test -race ./... -timeout=300s
+      - run: python3 scripts/conformance_check.py
+      - name: 同一提交上的 CI 全绿
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
   build:
+    needs: verify
     strategy:
       fail-fast: true
       matrix:

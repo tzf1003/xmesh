@@ -1,0 +1,25 @@
+{
+  "seq": 1,
+  "time": "2026-10-16T15:30:00.123Z",
+  "type": "peer",
+  "data": {
+    "change": "online",
+    "peer": {
+      "name": "mac-dev-01",
+      "self": false,
+      "node_id": "mac-dev-01",
+      "tags": [
+        "tag:device"
+      ],
+      "online": true,
+      "connection": "direct",
+      "derp_region": null,
+      "addrs": [
+        "100.64.0.7"
+      ],
+      "last_seen": "2026-10-16T15:30:00.123Z",
+      "os": "darwin",
+      "version": "0.4.0"
+    }
+  }
+}

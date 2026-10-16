@@ -1,0 +1,71 @@
+{
+  "peers": [
+    {
+      "name": "win-dev-01",
+      "self": true,
+      "node_id": "win-dev-01",
+      "tags": [
+        "tag:device"
+      ],
+      "online": true,
+      "connection": "local",
+      "derp_region": null,
+      "addrs": [
+        "100.64.0.3"
+      ],
+      "last_seen": null,
+      "os": "windows",
+      "version": "0.4.0"
+    },
+    {
+      "name": "mac-dev-01",
+      "self": false,
+      "node_id": "mac-dev-01",
+      "tags": [
+        "tag:device"
+      ],
+      "online": true,
+      "connection": "direct",
+      "derp_region": null,
+      "addrs": [
+        "100.64.0.7"
+      ],
+      "last_seen": "2026-10-16T15:30:00.123Z",
+      "os": "darwin",
+      "version": "0.4.0"
+    },
+    {
+      "name": "cloud-vm",
+      "self": false,
+      "node_id": "cloud-vm",
+      "tags": [
+        "tag:device"
+      ],
+      "online": true,
+      "connection": "derp",
+      "derp_region": "hkg",
+      "addrs": [
+        "100.64.0.7"
+      ],
+      "last_seen": "2026-10-16T15:30:00.123Z",
+      "os": "darwin",
+      "version": "0.4.0"
+    },
+    {
+      "name": "linux-box",
+      "self": false,
+      "node_id": "linux-box",
+      "tags": [
+        "tag:device",
+        "tag:ingress"
+      ],
+      "online": false,
+      "connection": "unknown",
+      "derp_region": null,
+      "addrs": [],
+      "last_seen": "2026-10-16T08:12:44.500Z",
+      "os": "linux",
+      "version": null
+    }
+  ]
+}

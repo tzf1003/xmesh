@@ -82,7 +82,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if c.Mesh.Mode == "tailnet" {
 			network, e = mesh.OpenTailnet(ctx, c, filepath.Join(o.StateDir, "network"))
 		} else {
-			network, e = mesh.OpenLAN(ctx, c.Node.Name, filepath.Join(o.StateDir, "lan"))
+			network, e = mesh.OpenLAN(ctx, c.Node.Name, filepath.Join(o.StateDir, "lan"), mesh.LANOptions{MDNS: c.Mesh.LAN.MDNS})
 		}
 		if e != nil {
 			return e
@@ -105,6 +105,9 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			mode = "local"
 		}
 		a.SetNetwork(mode, self)
+		if presence, ok := network.(mesh.Presence); ok {
+			a.WatchPeers(presence.Online, 5*time.Second)
+		}
 		defer a.Close()
 	}
 	servers := []*http.Server{}

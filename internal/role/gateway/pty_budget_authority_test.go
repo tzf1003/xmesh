@@ -194,7 +194,9 @@ func Test_IngressPTYLeaseDeadlineBoundsTheCall(t *testing.T) {
 	if err == nil {
 		t.Fatal("expired call reported success")
 	}
-	if remaining := deadline.Sub(invoked); remaining >= time.Second || remaining <= 0 {
+	// The lease starts when the authority grants it, before the call is invoked, so on a slow runner
+	// (Windows with -race) the remaining time can already be zero or negative; it must never exceed the lease.
+	if remaining := deadline.Sub(invoked); remaining >= time.Second {
 		t.Fatal("call is not bounded by the 1s lease", remaining)
 	}
 }

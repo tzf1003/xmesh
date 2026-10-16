@@ -1,0 +1,9 @@
+{
+  "drain": {
+    "draining": true,
+    "mode": null,
+    "since": "2026-10-16T15:30:00.123Z"
+  },
+  "closed_pty": 0,
+  "released_leases": 0
+}

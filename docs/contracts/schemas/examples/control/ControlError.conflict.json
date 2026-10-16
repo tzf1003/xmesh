@@ -1,0 +1,5 @@
+{
+  "error": "conflict",
+  "message": "示例错误",
+  "reason": "drain_downgrade"
+}
