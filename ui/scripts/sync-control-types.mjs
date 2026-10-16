@@ -13,7 +13,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const source = join(here, "..", "..", "api", "control", "v1", "ts", "control.ts");
 const target = join(here, "..", "src", "shared", "generated", "control.ts");
 
-const upstream = readFileSync(source, "utf8");
+// Git on Windows may check files out with CRLF; the copy is always written and compared as LF.
+const lf = (text) => text.replace(/\r\n/g, "\n");
+
+const upstream = lf(readFileSync(source, "utf8"));
 const header =
   "// Copy of api/control/v1/ts/control.ts. Do not edit: run `npm run sync-types` after the contract changes.\n";
 const wanted = header + upstream;
@@ -21,7 +24,7 @@ const wanted = header + upstream;
 if (process.argv.includes("--check")) {
   let have = "";
   try {
-    have = readFileSync(target, "utf8");
+    have = lf(readFileSync(target, "utf8"));
   } catch {
     // missing counts as stale
   }
