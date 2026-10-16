@@ -24,6 +24,12 @@ jobs:
       - name: 校验正例、反例和文档链接
         run: python3 docs/contracts/schemas/check_examples.py
 
+      - name: 符合性矩阵每条编号都有测试
+        run: python3 scripts/conformance_check.py
+
+      - name: 脚本自测
+        run: python3 scripts/test_scripts.py
+
   # 控制通道的 TypeScript 类型由 JSON Schema 生成（CTR-CTL-12）。
   # 重新生成后与提交的生成物逐字相同，并且能通过 strict 类型检查。
   check-control-ts:

@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+// conformance: CON-NET-09 CON-NET-02
 func Test_CONNET09_PairedMTLS(t *testing.T) {
 	oneDir, twoDir := t.TempDir(), t.TempDir()
 	one, e := LoadCertificate(oneDir, "one")
@@ -178,6 +179,8 @@ func Test_PairFingerprintAndPermissions(t *testing.T) {
 		t.Fatal("trust not persisted")
 	}
 }
+
+// conformance: RUL-02
 func Test_RUL02_IngressIdentity(t *testing.T) {
 	if _, e := identity.FromPeer("node", []string{"tag:ingress"}, ""); e == nil {
 		t.Fatal("ingress identity missing")

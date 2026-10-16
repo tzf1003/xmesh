@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// conformance: CTR-GW-05
 func Test_CTRGW05_DrainKeepsExistingResources(t *testing.T) {
 	_, store := configuration(t)
 	a, e := New(store)

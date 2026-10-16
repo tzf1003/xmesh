@@ -84,6 +84,8 @@ func authCode(t *testing.T, h *httptest.Server, id, verifier string) (string, st
 	}
 	return redirect.Query().Get("code"), path
 }
+
+// conformance: CTR-OAUTH-01 CON-SEC-09
 func Test_CTROAUTH01_PKCEAndRotation(t *testing.T) {
 	_, h := oauthFixture(t)
 	status, headers, _ := request(t, h, "POST", "/mcp", `{}`, "application/json")
@@ -124,6 +126,8 @@ func Test_CTROAUTH01_PKCEAndRotation(t *testing.T) {
 		t.Fatal(resp.StatusCode)
 	}
 }
+
+// conformance: CON-SEC-11
 func Test_CONSEC11_RegisterRate(t *testing.T) {
 	s, h := oauthFixture(t)
 	for i := 0; i < 5; i++ {
@@ -138,6 +142,8 @@ func Test_CONSEC11_RegisterRate(t *testing.T) {
 	s.mu.Unlock()
 	registerClient(t, h)
 }
+
+// conformance: CTR-OAUTH-01 CON-SEC-09
 func Test_CTROAUTH01_PKCERequiredAndRedirects(t *testing.T) {
 	_, h := oauthFixture(t)
 	id := registerClient(t, h)
@@ -152,6 +158,8 @@ func Test_CTROAUTH01_PKCERequiredAndRedirects(t *testing.T) {
 		}
 	}
 }
+
+// conformance: CTR-OAUTH-02 RUL-09
 func Test_CTROAUTH02_Scopes(t *testing.T) {
 	expanded, e := Expand([]string{"fs:*", "backend:win:ida"})
 	if e != nil || !Allows(expanded, "win", "fs.read", "") || !Allows(expanded, "win", "fs.write", "") || !Allows(expanded, "win", "ida.echo", "") || Allows(expanded, "mac", "ida.echo", "") {
@@ -191,6 +199,7 @@ func loginAttempt(t *testing.T, h *httptest.Server, path, password string, valid
 	return resp.StatusCode, resp.Header
 }
 
+// conformance: CON-SEC-11
 func Test_CONSEC11_LoginLockAndCSRF(t *testing.T) {
 	s, h := oauthFixture(t)
 	id := registerClient(t, h)
@@ -216,6 +225,7 @@ func Test_CONSEC11_LoginLockAndCSRF(t *testing.T) {
 	}
 }
 
+// conformance: CON-SEC-11
 func Test_CONSEC11_AuthorizeRateAndCleanup(t *testing.T) {
 	s, h := oauthFixture(t)
 	id := registerClient(t, h)

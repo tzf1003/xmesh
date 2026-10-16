@@ -14,6 +14,14 @@ import tempfile
 import time
 
 
+WINDOWS = sys.platform == "win32"
+
+
+def powershell(script):
+    """The exec.run arguments that run a PowerShell script, for hosts without sh."""
+    return {"cmd": "pwsh", "args": ["-NoProfile", "-NonInteractive", "-Command", script]}
+
+
 def address():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -21,9 +29,9 @@ def address():
 
 
 class MCP:
-    def __init__(self, addr, token=None):
+    def __init__(self, addr, token=None, host=None):
         self.addr, self.session, self.counter = addr, None, 0
-        self.token = token
+        self.token, self.host = token, host
         self.request("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                     "clientInfo": {"name": "xmesh-smoke", "version": "1"}})
         self.request("notifications/initialized", {}, notification=True)
@@ -39,6 +47,8 @@ class MCP:
             headers["Mcp-Session-Id"] = self.session
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
+        if self.host:
+            headers["Host"] = self.host
         connection = http.client.HTTPConnection(self.addr, timeout=15)
         try:
             connection.request("POST", "/mcp", json.dumps(body), headers)
@@ -71,6 +81,8 @@ class MCP:
             headers = {"Mcp-Session-Id": self.session, "MCP-Protocol-Version": "2025-11-25"}
             if self.token:
                 headers["Authorization"] = "Bearer " + self.token
+            if self.host:
+                headers["Host"] = self.host
             connection.request("DELETE", "/mcp", headers=headers)
             response = connection.getresponse()
             response.read()
@@ -80,13 +92,39 @@ class MCP:
             connection.close()
 
 
+def wait_for_gateway(process, gateway, log, token=None, seconds=15, host=None):
+    """Return an MCP session once the Gateway answers, or raise with the runtime log."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            return MCP(gateway, token, host)
+        except (OSError, http.client.HTTPException):
+            if process.poll() is not None or time.monotonic() >= deadline:
+                log.seek(0)
+                raise RuntimeError(log.read())
+            time.sleep(0.05)
+
+
+def stop_runtime(process, windows=sys.platform == "win32"):
+    """Stop the runtime and require a clean exit. Windows has no SIGTERM, so any exit code passes."""
+    process.terminate()
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise AssertionError("runtime shutdown exceeded 15s")
+    assert windows or process.returncode == 0, process.returncode
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=pathlib.Path)
     parser.add_argument("--isolation", choices=["L1", "L2"], default="L1")
-    parser.add_argument("--shell", default="/bin/sh", help="Agent PTY shell (or auto)")
+    parser.add_argument("--shell", default="auto" if WINDOWS else "/bin/sh", help="Agent PTY shell (or auto)")
     parser.add_argument("--pat", action="store_true", help="Require a temporary Gateway PAT")
     options = parser.parse_args()
+    assert not (WINDOWS and options.isolation == "L2"), "L2 is not available through this script on Windows"
     binary = options.binary.resolve()
     with tempfile.TemporaryDirectory(prefix="xmesh-smoke-") as temporary:
         root = pathlib.Path(temporary).resolve()
@@ -116,16 +154,7 @@ def main():
             process = subprocess.Popen([str(binary), "serve", "--local", "--config", str(config),
                                         "--state-dir", str(state), "--listen", direct], stdout=log, stderr=log)
             try:
-                deadline = time.monotonic() + 15
-                while True:
-                    try:
-                        client = MCP(gateway, token)
-                        break
-                    except (OSError, http.client.HTTPException):
-                        if process.poll() is not None or time.monotonic() >= deadline:
-                            log.seek(0)
-                            raise RuntimeError(log.read())
-                        time.sleep(0.05)
+                client = wait_for_gateway(process, gateway, log, token)
                 status = subprocess.check_output([str(binary), "status", "--endpoint", f"http://{direct}/mcp", "--json"])
                 info = json.loads(status)
                 assert info["roles"] == ["agent", "gateway"] and info["network"]["mode"] == "local", info
@@ -141,17 +170,24 @@ def main():
                 if options.isolation == "L2":
                     home_check = 'test "$HOME" = "$PWD"' if sys.platform == "darwin" else 'test "$HOME" = /tmp'
                     script = home_check + ' && test ! -r ' + shlex.quote(str(outside)) + ' && ' + script
-                executed = client.call("local/exec.run", {"cmd": "sh", "args": ["-c", script]})
+                if WINDOWS:
+                    # Write() adds no newline, matching printf.
+                    run = powershell("[Console]::Out.Write('SMOKE_EXEC_MARKER')")
+                else:
+                    run = {"cmd": "sh", "args": ["-c", script]}
+                executed = client.call("local/exec.run", run)
                 assert executed["exit_code"] == 0 and executed["stdout"] == "SMOKE_EXEC_MARKER", executed
                 terminal = client.call("local/pty.open", {"cols": 80, "rows": 24})
                 sid, owner = terminal["session_id"], terminal["owner"]
                 assert owner.startswith("local/") and len(owner) > len("local/")
-                terminal_command = "printf 'SMOKE_%s\\n' PTY_MARKER"
+                terminal_command = ("Write-Output ('SMOKE_' + 'PTY_MARKER')" if WINDOWS
+                                    else "printf 'SMOKE_%s\\n' PTY_MARKER")
                 if options.isolation == "L2":
                     terminal_command = ('if test ! -r ' + shlex.quote(str(outside)) +
                         '; then (printf blocked > ' + shlex.quote(str(outside)) +
                         ') 2>/dev/null; ' + terminal_command + '; fi')
-                client.call("local/pty.write", {"session_id": sid, "data": terminal_command + "\n"})
+                newline = "\r" if WINDOWS else "\n"
+                client.call("local/pty.write", {"session_id": sid, "data": terminal_command + newline})
                 text, cursor = "", 0
                 deadline = time.monotonic() + 5
                 while "SMOKE_PTY_MARKER" not in text and time.monotonic() < deadline:
@@ -161,8 +197,9 @@ def main():
                 assert "SMOKE_PTY_MARKER" in text, text
                 assert "job control turned off" not in text, text
                 client.call("local/pty.resize", {"session_id": sid, "cols": 101, "rows": 37})
-                client.call("local/pty.write", {"session_id": sid,
-                    "data": "printf 'SMOKE_SIZE='; stty size\n"})
+                size_command = ("Write-Output ('SMOKE_SIZE=' + $Host.UI.RawUI.WindowSize.Height + ' ' + "
+                                "$Host.UI.RawUI.WindowSize.Width)" if WINDOWS else "printf 'SMOKE_SIZE='; stty size")
+                client.call("local/pty.write", {"session_id": sid, "data": size_command + newline})
                 resized = ""
                 deadline = time.monotonic() + 5
                 while "SMOKE_SIZE=37 101" not in resized and time.monotonic() < deadline:
@@ -174,14 +211,7 @@ def main():
                 assert outside.read_text() == "host-only", "sandbox changed host file"
                 client.close()
             finally:
-                process.terminate()
-                try:
-                    process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                    raise AssertionError("runtime shutdown exceeded 15s")
-                assert process.returncode == 0, process.returncode
+                stop_runtime(process)
             audit = "".join(path.read_text() for path in (state / "audit").glob("*.jsonl"))
             assert audit and all(marker not in audit for marker in ["SMOKE_PRIVATE_BODY", "SMOKE_EXEC_MARKER", "SMOKE_PTY_MARKER"])
             print(json.dumps({"result": "PASS", "isolation": options.isolation, "pat": options.pat, "tools": len(tools),

@@ -1,0 +1,37 @@
+name: Headscale 互联与 OAuth 协议
+# 单个 runner 上起一次性 Headscale，两个 xmesh 节点经 tsnet 入网并互调，再由第三个节点跑
+# Test_TailnetPeerConnectivity，最后让 scripts/oauth_client.py 走完 ingress 的 OAuth 协议路径。
+# 只覆盖直连路径：同机节点之间直连，虽然 Headscale 内置了回环 DERP/STUN（让 netcheck 成功，避免 magicsock 反复重绑）。DERP 兜底仍按 docs/validation/2026-10-15-headscale.md 多机验收。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+env:
+  HEADSCALE_VERSION: "0.29.5"
+  # linux/amd64 发布资产的 SHA-256，取自 https://github.com/juanfont/headscale/releases/tag/v0.29.5 的 checksums.txt。
+  HEADSCALE_SHA256: e979d27fe17d924d33bb6ab7504f6338d0635989a0cfdcfbc0ceb637dbcbe980
+jobs:
+  headscale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/headscale.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 下载并校验 Headscale
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/headscale" "https://github.com/juanfont/headscale/releases/download/v${HEADSCALE_VERSION}/headscale_${HEADSCALE_VERSION}_linux_amd64"
+          echo "${HEADSCALE_SHA256}  $RUNNER_TEMP/headscale" | sha256sum --check -
+          chmod +x "$RUNNER_TEMP/headscale"
+      - name: 构建 xmesh
+        run: go build -o "$RUNNER_TEMP/xmesh" ./cmd/xmesh
+      - name: 两节点互调、tailnet 探针、ingress OAuth 协议
+        run: python3 scripts/headscale_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh" --ingress
