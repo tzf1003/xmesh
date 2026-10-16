@@ -307,4 +307,4 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 内部 `workspaceExecution` 要求可信调用方在准备开始前取得并持续持有外部 namespace/reparse/ACL writer guard；该 guard 覆盖 journal、profile、授权、USN 追踪、进程与监视器的完整寿命。准备返回所有者及错误时，保留所有者并调用带 context 的关闭接口重试。关闭封闭新准入，确认全部 Job 与持久进程清单回执，停止监视器并释放进程所有者，再按身份回收 ACL、删除 profile、刷盘 complete、关闭 journal，最后释放 guard。取消或期限到达保留清理义务；guard 关闭失败保留重试状态，poisoned journal 保留供恢复。普通进程与 ConPTY 启动检查生命周期取消并串行准入。生产部署仍须完成外部 writer 及异常宿主后 guard 寿命、完整 census、未知导入和工具层 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
 
-协调导入由生命周期串行入口调用受信源协调器；协调器需接收源、目标路径，在 census/移动前协调外部 namespace/reparse/ACL 写入者，并持续保护移动后的导入对象身份直至持久化清理完成及 guard 成功释放。guard 随准备错误一并返回时仍由生命周期接管；最多保留 256 个，关闭按源 guard 逆序、原 workspace guard 最后的顺序释放，失败后重试关闭以完成剩余释放。宿主故障后的保护需要独立存续的协调机制；该生产接入与本次 Windows 原生 CI 验收待完成，Windows 生产 L2 保持 `sandbox.unavailable`。
+协调导入由生命周期串行入口调用受信源协调器；协调器接收源、目标路径，在 census/移动前协调外部 namespace/reparse/ACL 写入者，并持续保护移动后的导入对象身份，覆盖完整清理期间直至 guard 成功释放。guard 随准备错误一并返回时仍由生命周期接管；最多保留 256 个。关闭完成进程回收、ACL 恢复及 profile/journal 持久化清理后，逆序释放源 guard，再释放原 workspace guard；失败时保留所有者并重试关闭。宿主故障后的保护须由独立存续的协调机制提供。生产外部协调及工具层 exec/ConPTY L2 集成仍待完成，Windows 生产 L2 保持 `sandbox.unavailable`。
