@@ -2,6 +2,8 @@ package control
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -258,7 +260,7 @@ func Test_ControlEndpointFile(t *testing.T) {
 // conformance: CTR-CTL-01 a client finds a node's channel from its state directory or by enumerating the per-user directories
 func Test_ControlDiscover(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "AppData"} {
+	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "AppData", "ProgramData"} {
 		t.Setenv(name, root)
 	}
 	base, err := os.UserConfigDir()
@@ -279,6 +281,41 @@ func Test_ControlDiscover(t *testing.T) {
 	}
 	found, err := Discover()
 	if err != nil || len(found) != 2 || found[0].Node != "a-node" || !strings.HasSuffix(found[1].Dir, "b-node") {
+		t.Fatalf("%v %+v", err, found)
+	}
+}
+
+func Test_SystemStateRoot(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if got := SystemStateRootFor("linux", env(map[string]string{"ProgramData": "/x"})); got != "" {
+		t.Fatalf("non-Windows has no system root: %q", got)
+	}
+	if got := SystemStateRootFor("windows", env(map[string]string{"ProgramData": `D:\PD\`})); got != `D:\PD\xmesh` {
+		t.Fatal(got)
+	}
+	if got := SystemStateRootFor("windows", env(nil)); got != `C:\ProgramData\xmesh` {
+		t.Fatal(got)
+	}
+}
+
+// A SYSTEM service's node, under %ProgramData%\xmesh, is found next to the user's own nodes.
+func Test_ControlDiscoverSystemServices(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("%ProgramData% is Windows only")
+	}
+	root := t.TempDir()
+	for _, name := range []string{"AppData", "ProgramData"} {
+		t.Setenv(name, root)
+	}
+	dir := filepath.Join(root, "xmesh", "svc-node")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEndpoint(dir, v1.ControlEndpointFile{APIVersion: v1.APIVersion, Node: "svc-node", Transport: v1.TransportPipe, Endpoint: `\\.\pipe\x`}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := Discover()
+	if err != nil || len(found) == 0 || found[0].Node != "svc-node" {
 		t.Fatalf("%v %+v", err, found)
 	}
 }

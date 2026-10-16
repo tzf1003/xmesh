@@ -206,7 +206,7 @@ Agent 与 Gateway 的工具调用预算缺省为每主体每小时 10000 次、�
 
 `install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken` 和 `LeastPrivilege` 配置运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
 
-Windows 可用 `install --system` 选择管理员 SCM 服务，默认以 LocalSystem 身份运行于 Session 0；配置、状态和工作目录须允许该账户访问。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
+Windows 可用 `install --system` 选择管理员 SCM 服务，默认以 LocalSystem 身份运行于 Session 0，状态目录默认 `%ProgramData%\xmesh\<节点名>`（可用 `--state-dir` 覆盖）；配置、状态和工作目录须允许该账户访问。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
 
 用户任务设置 `LeastPrivilege`；[Windows 的 RunLevel 规则](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-runlevel-principaltype-element)规定内置 Administrator、LocalSystem、LocalService 或关闭 UAC 时忽略该设置。需要普通权限时使用标准账户或启用 UAC 的普通管理员账户。
 
@@ -372,7 +372,7 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 ### 尚未提供
 
 - 配对、PAT、入口客户端与口令的接口（契约里的 `pair`、`pats`、`ingress` 能力）。
-- `install --system` 的服务以 SYSTEM 运行，它的状态目录不在用户配置目录下，UI 自动发现不到；管道名里的 SID 是 SYSTEM 的，需要显式指定。
+- `install --system` 的服务以 SYSTEM 运行。不带 `--state-dir` 时安装命令默认补上 `--state-dir %ProgramData%\xmesh\<节点名>`（`Test_InstallStateDir`），UI 和 `xmesh ... --control` 会枚举这个位置（`Test_ControlDiscoverSystemServices`）；管道名里的 SID 是 SYSTEM 的，以 `control.json` 的 `endpoint` 为准。已有的 SYSTEM 服务若原来用了默认目录（SYSTEM 的用户配置目录），升级后会换到新目录，需要重新配对或重新注册，或在重新安装时显式传原来的 `--state-dir`。
 - Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`）；AppContainer 内真实连接被拒的原生验收未做。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，CI 不运行。
 
 ## 测试版发布
