@@ -117,6 +117,12 @@ func install(args []string) error {
 		arguments = append(arguments, "--service")
 	}
 	arguments = append(arguments, "--config", absolute)
+	if *system {
+		// The service runs as SYSTEM; let the installing user's UI reach its control pipe.
+		if sid := installerSID(); sid != "" {
+			arguments = append(arguments, "--control-allow-sid", sid)
+		}
+	}
 	if *state != "" {
 		p, e := filepath.Abs(*state)
 		if e != nil {

@@ -120,6 +120,15 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 CTR-CTL-11 | 配对、PAT、入口、审计夹具；令牌与 `secret_hash` 泄漏的反例失败；`PatSecret` 之外的类型没有令牌字段；审计元素含 stdout 的反例失败 |
 | CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`contracts.yml`） |
 
+内核实现（U1）追加：
+
+| 编号 | 观察点 |
+| --- | --- |
+| CTR-CTL-01 | 端点文件记录传输、地址、boot id 与能力；客户端能从状态目录或逐个枚举用户目录找到通道，停机后端点文件被删除 |
+| CON-ARCH-09 | 运行中的节点：端点是套接字或管道而不是 TCP 地址；Agent 与 Gateway 的 TCP 监听都不应答控制路径；任何 MCP 工具列表都不含控制或 drain 工具 |
+| CON-ARCH-10 | 事件订阅者不告而别（模拟 UI 崩溃）后，终端会话、节点状态与通道本身不变，终端仍可正常关闭 |
+| CON-SEC-12 | Unix：只接受内核同一 euid 的对端（别的 uid 被丢弃），套接字 0600、目录 0700；Windows：描述符只含当前用户、SYSTEM、管理员与显式追加的 SID，别名与宽泛主体被拒，运行中的管道不含 Everyone 与 AppContainer；L2 工作区含套接字时被拒绝；非 GET 请求以 `actor=control` 写审计（`Test_ControlCallsAreAudited`） |
+
 ## 模式夹具
 
 每次改契约或模式，都要执行：
