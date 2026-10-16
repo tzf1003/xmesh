@@ -212,6 +212,13 @@ func Parse(b []byte) (*Config, error) {
 	if e = json.Unmarshal(raw, &normalized); e != nil {
 		return nil, e
 	}
+	// relay is a known future mode, not a typo: name it as unimplemented (CON-NET-08)
+	// instead of surfacing a bare enum mismatch. The process still refuses to start.
+	if root, ok := normalized.(map[string]any); ok {
+		if mesh, ok := root["mesh"].(map[string]any); ok && mesh["mode"] == "relay" {
+			return nil, fmt.Errorf("配置无效: /mesh/mode: relay 模式本期未实现，请改用 tailnet 或 lan")
+		}
+	}
 	if e = compiled.Validate(normalized); e != nil {
 		return nil, e
 	}
@@ -341,7 +348,7 @@ func Size(s string) (int, error) {
 }
 
 // officialControlHosts are the control planes Funnel is allowed to talk to.
-// Anything else, including look-alike suffixes and Headscale hosts, is refused.
+// Anything else, including look-alike suffixes and self-hosted control planes, is refused.
 var officialControlHosts = map[string]bool{"controlplane.tailscale.com": true, "login.tailscale.com": true}
 
 func officialControlURL(u *url.URL) bool {

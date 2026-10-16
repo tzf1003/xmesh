@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
+// conformance: CTR-CFG-01
 func Test_CTRCFG01(t *testing.T) {
 	root := "../../docs/contracts/schemas/examples"
 	entries, _ := os.ReadDir(root)
@@ -297,5 +299,23 @@ func Test_CONSEC10_QuotaConfiguration(t *testing.T) {
 		doc["agent"].(map[string]any)["exec"] = map[string]any{"default_timeout": "30m"}
 	}); err == nil {
 		t.Fatal("exec default_timeout above the 10m call budget accepted")
+	}
+}
+
+func Test_CONNET08_RelayMessage(t *testing.T) {
+	_, e := Load(filepath.Join("../../docs/contracts/schemas/examples/invalid/config-relay.json"))
+	if e == nil {
+		t.Fatal("relay accepted")
+	}
+	if msg := e.Error(); !strings.Contains(msg, "relay") || !strings.Contains(msg, "未实现") {
+		t.Fatal("error does not say relay is not implemented:", msg)
+	}
+	// Other unknown modes remain ordinary schema failures.
+	path := filepath.Join(t.TempDir(), "config.json")
+	if e = os.WriteFile(path, []byte(`{"node":{"name":"n","roles":["agent"]},"mesh":{"mode":"mesh9"},"agent":{"cwd_policy":{"allow":["/tmp"]}}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = Load(path); e == nil || strings.Contains(e.Error(), "未实现") {
+		t.Fatal(e)
 	}
 }

@@ -40,6 +40,7 @@ func (b tunnelTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return b.bearerTransport.RoundTrip(copy)
 }
 
+// conformance: CTR-OAUTH-01 CTR-OAUTH-02 CON-SEC-09 RUL-09 RUL-02
 func Test_Gate4_OAuthGatewayAgent(t *testing.T) {
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	doc, _ := json.Marshal(map[string]any{"node": map[string]any{"name": "device", "roles": []string{"agent"}}, "mesh": map[string]any{"mode": "lan", "lan": map[string]any{"mdns": true}}, "agent": map[string]any{"default_cwd": root, "cwd_policy": map[string]any{"allow": []string{root}}, "authz": map[string]any{"tag:ingress": map[string]any{"tools": []string{"*"}, "backends": []string{"*"}}}}})

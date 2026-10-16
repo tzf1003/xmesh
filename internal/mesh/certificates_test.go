@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+// conformance: CON-NET-09 CON-NET-02
 func Test_CONNET09_PairedMTLS(t *testing.T) {
 	oneDir, twoDir := t.TempDir(), t.TempDir()
 	one, e := LoadCertificate(oneDir, "one")
@@ -178,6 +179,8 @@ func Test_PairFingerprintAndPermissions(t *testing.T) {
 		t.Fatal("trust not persisted")
 	}
 }
+
+// conformance: RUL-02
 func Test_RUL02_IngressIdentity(t *testing.T) {
 	if _, e := identity.FromPeer("node", []string{"tag:ingress"}, ""); e == nil {
 		t.Fatal("ingress identity missing")
@@ -190,4 +193,87 @@ func Test_RUL02_IngressIdentity(t *testing.T) {
 	if e != nil || p.OAuthClient != "client" {
 		t.Fatal(fmt.Sprint(p), e)
 	}
+}
+
+func Test_LANMdnsDisabled(t *testing.T) {
+	l, e := OpenLAN(context.Background(), "quiet", t.TempDir(), LANOptions{MDNS: false})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if l.advertisement != nil {
+		t.Fatal("advertised with mdns disabled")
+	}
+	if _, e := l.Listen(context.Background()); e == nil {
+		if l.advertisement != nil {
+			t.Fatal("listener advertised with mdns disabled")
+		}
+	} else {
+		t.Log("no private interface in this environment:", e)
+	}
+	online, authoritative, e := l.Online(context.Background())
+	if e != nil || authoritative || len(online) != 1 || !online["lan-"+l.cert.Fingerprint[:24]] {
+		t.Fatal(online, authoritative, e)
+	}
+	if peers, _ := l.Peers(context.Background()); len(peers) != 0 {
+		t.Fatal(peers)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- l.Close() }()
+	select {
+	case e := <-closed:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close blocked without a discovery loop")
+	}
+}
+
+func Test_LANPresenceFollowsAnnouncements(t *testing.T) {
+	cert, _ := LoadCertificate(t.TempDir(), "laptop")
+	trust, _ := OpenTrust(t.TempDir())
+	// A paired client is not a device: it never appears in Peers but is still present.
+	if e := trust.Add(Trusted{Name: "laptop", Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM), Tags: []string{"tag:peer"}}); e != nil {
+		t.Fatal(e)
+	}
+	self, _ := LoadCertificate(t.TempDir(), "self")
+	l := &LAN{name: "self", cert: self, trust: trust, peers: map[string]lanPeer{}, done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() { cancel(); <-l.done }()
+	var rounds atomic.Int32
+	if e := l.startDiscovery(ctx, 20*time.Millisecond, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
+		entries := make(chan *zeroconf.ServiceEntry, 1)
+		ent := zeroconf.NewServiceEntry("laptop", lanService, "local.")
+		ent.Text, ent.Port, ent.AddrIPv4 = []string{"fingerprint=" + cert.Fingerprint}, AgentPort, []net.IP{net.ParseIP("192.168.1.9")}
+		if rounds.Add(1) <= 2 {
+			ent.TTL = 120
+		} else {
+			// mDNS goodbye: TTL zero, no addresses.
+			ent.TTL, ent.AddrIPv4 = 0, nil
+		}
+		entries <- ent
+		go func() { <-ctx.Done(); close(entries) }()
+		return entries, nil
+	}); e != nil {
+		t.Fatal(e)
+	}
+	id := "lan-" + cert.Fingerprint[:24]
+	seen := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		online, authoritative, _ := l.Online(ctx)
+		if authoritative {
+			t.Fatal("LAN presence must not be authoritative")
+		}
+		if online[id] {
+			seen = true
+			if peers, _ := l.Peers(ctx); len(peers) != 0 {
+				t.Fatal("non-device listed as a peer", peers)
+			}
+		} else if seen {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("goodbye did not remove the node", seen)
 }
