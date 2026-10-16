@@ -1,4 +1,0 @@
-body { font: 14px system-ui, sans-serif; margin: 24px; color: #1f2328; background: #fff; }
-@media (prefers-color-scheme: dark) { body { color: #e6edf3; background: #0d1117; } }
-h1 { font-size: 20px; }
-button { margin-right: 8px; }

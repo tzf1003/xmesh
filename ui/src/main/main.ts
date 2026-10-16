@@ -7,6 +7,9 @@ import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { discoverInstances, stateRoot } from "./discovery";
 import { registerIpc } from "./ipc";
+import { PanelService } from "./panel-service";
+import { fsSetupHost, runSetup } from "./setup";
+import { runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -44,7 +47,8 @@ async function start(): Promise<void> {
   await app.whenReady();
   installSessionHardening();
 
-  const t = translator(resolveLocale(process.env.XMESH_UI_LANG));
+  const locale = resolveLocale(process.env.XMESH_UI_LANG);
+  const t = translator(locale);
   const root = stateRoot();
   let panel: PanelWindow | undefined;
   const showPanel = (): void => {
@@ -56,6 +60,7 @@ async function start(): Promise<void> {
   const controller = new ShellController({
     discover: () => discoverInstances(root),
     getLoginItem: () => app.getLoginItemSettings().openAtLogin,
+    locale,
     setLoginItem: (openAtLogin) => app.setLoginItemSettings({ openAtLogin }),
     ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, streamIdleMs: 2000 }),
   });
@@ -81,7 +86,21 @@ async function start(): Promise<void> {
   const tray = new TrayView(t, runAction, showPanel);
 
   servePanel(rendererRoot());
-  registerIpc({ controller, actions, panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined) });
+  const setupHost = fsSetupHost(root, async (args) => {
+    if (TEST_MODE) {
+      calls.push({ op: "setup-cli", arg: [...args] });
+      if (answers.cliFails) throw new Error("simulated cli failure");
+      return `ok ${args[0]}`;
+    }
+    return runXmeshSetup(args);
+  });
+  registerIpc({
+    controller,
+    actions,
+    service: new PanelService(controller),
+    setup: (params) => runSetup(params, setupHost),
+    panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
+  });
 
   let prev: Snapshot = controller.snapshot;
   tray.update(prev);

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { EXTERNAL_LINKS, type ActionResult, type CopyKind, type ExternalKey, type PathKind } from "../shared/ipc";
 import type { Translate } from "../shared/i18n";
-import { ControlRequestError } from "../shared/control";
+import { ControlRequestError, type DrainMode } from "../shared/control";
 import { CliError, type CliCommand } from "./cli";
 import { clipboardText } from "./connect";
 import type { ShellController } from "./controller";
@@ -69,8 +69,8 @@ export class Actions {
     return ok;
   }
 
-  drain(): Promise<ActionResult> {
-    return this.control(() => this.controller.drain());
+  drain(mode: DrainMode = "keep"): Promise<ActionResult> {
+    return this.control(() => this.controller.drain(mode));
   }
 
   resume(): Promise<ActionResult> {
