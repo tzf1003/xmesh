@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
@@ -45,6 +46,8 @@ type Options struct {
 	Discover  Discover
 	Audit     *audit.Logger
 	PTYBudget *PTYBudget
+	// Quota is gateway.quota; zero fields take the built-in defaults.
+	Quota config.Quota
 }
 type device struct {
 	peer     mesh.Peer
@@ -109,7 +112,7 @@ func New(o Options) *Gateway {
 		o.PTYBudget, _ = NewPTYBudget(8, "")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, quota: quota.New(10000, 64, 10*time.Minute)}
+	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, quota: quota.New(o.Quota.Limits())}
 	if o.LocalPeer.Name != "" {
 		g.devices[o.LocalPeer.Name] = device{o.LocalPeer, true, time.Now()}
 	}
@@ -320,6 +323,10 @@ func (g *Gateway) newView(p Principal) *view {
 				}
 				if principal == "" {
 					principal = "local"
+				}
+				call := r.(*mcp.CallToolRequest)
+				if e := g.quota.CheckExecTimeout(call.Params.Name, call.Params.Arguments, 0); e != nil {
+					return agent.Result(nil, e), nil
 				}
 				limited, release, e := g.quota.Acquire(ctx, principal)
 				if e != nil {
