@@ -393,7 +393,7 @@ func Test_WindowsL2ServePTYAppContainer(t *testing.T) {
 	before := n.descriptor()
 	terminal := n.openTerminal()
 	terminal.write("echo L2^-PTY\r\n")
-	terminal.until(`\r\nL2-PTY`)
+	terminal.until(`L2-PTY`)
 	terminal.write("type " + filepath.Join(n.outside, "secret.txt") + "\r\n")
 	terminal.until(`(?i)access is denied`)
 	if strings.Contains(terminal.text.String(), l2Secret) {
@@ -419,7 +419,7 @@ func crashAndRecover(t *testing.T, killKeeper bool) {
 	before := n.descriptor()
 	terminal := n.openTerminal()
 	terminal.write("echo REA^DY\r\n")
-	terminal.until(`\r\nREADY`)
+	terminal.until(`READY`)
 	n.waitJournal(true)
 	keepers := guardKeepers(t, n.binary)
 	n.kill()
