@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"github.com/tzf1003/xmesh/internal/sandbox"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"os"
 	"os/exec"
@@ -8,6 +9,20 @@ import (
 	"runtime"
 	"strings"
 )
+
+// UseSandboxRunner installs a managed isolation runner for L2 execution. It
+// must be called before the engine is shared. No runner is installed by default:
+// platforms without a native launcher then fail closed in Sandbox and SandboxPTY.
+func (e *Engine) UseSandboxRunner(r sandbox.Runner) { e.runner = r }
+
+// SandboxRunner returns the managed runner that must execute commands when L2 is
+// configured, or nil when the launcher form from Sandbox/SandboxPTY applies.
+func (e *Engine) SandboxRunner() sandbox.Runner {
+	if e.config.Isolation != "L2" {
+		return nil
+	}
+	return e.runner
+}
 
 // Sandbox returns the platform isolation launcher. Unsupported hosts fail closed.
 func (e *Engine) Sandbox(cmd string, args []string, cwd string, env []string) (string, []string, []string, error) {

@@ -262,9 +262,15 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	if e = p.Command(shell, nil); e != nil {
 		return nil, e
 	}
-	launch, argv, env, innerTerminal, e := p.SandboxPTY(shell, nil, resolved.Path, env)
-	if e != nil {
-		return nil, e
+	runner := p.SandboxRunner()
+	var launch string
+	var argv []string
+	var innerTerminal bool
+	if runner == nil {
+		launch, argv, env, innerTerminal, e = p.SandboxPTY(shell, nil, resolved.Path, env)
+		if e != nil {
+			return nil, e
+		}
 	}
 	random := make([]byte, 12)
 	if _, e = rand.Read(random); e != nil {
@@ -285,7 +291,12 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	m.sessions[s.ID] = s
 	m.byCaller[c.ID]++
 	m.mu.Unlock()
-	term, e := start(launch, argv, resolved.Path, env, a.Cols, a.Rows, innerTerminal)
+	var term terminal
+	if runner != nil {
+		term, e = startManaged(runner, shell, resolved.Path, env, a.Cols, a.Rows)
+	} else {
+		term, e = start(launch, argv, resolved.Path, env, a.Cols, a.Rows, innerTerminal)
+	}
 	m.mu.Lock()
 	if e != nil {
 		if s.State == "active" {
