@@ -56,6 +56,11 @@ type workspaceExecution struct {
 	ready     bool
 	closed    bool
 	unknown   int // Uncoordinated imports recorded durably before the journal closed.
+	// checked and observed hold the one final descendant-security proof, taken
+	// after reaping and before the first descriptor edit of cleanup. Retries keep
+	// reporting its result without re-reading a stream that cleanup itself wrote.
+	checked  bool
+	observed error
 }
 
 func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOptions, prepare workspaceExecutionPrepare) (*workspaceExecution, error) {
@@ -275,6 +280,16 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.monitor = nil
 	}
+	// Every process is gone and no cleanup edit has happened yet, so any further
+	// descriptor change on the admitted snapshot is an external writer's.
+	if e.workspace != nil && !e.checked {
+		err := e.workspace.finalSecurityCheck(ctx, e.maxEvents)
+		if err != nil && !errors.Is(err, errWriterFenceViolated) && !errors.Is(err, errWorkspaceUnknownImport) {
+			return errors.Join(observationErr, err)
+		}
+		e.checked, e.observed = true, err
+	}
+	observationErr = errors.Join(observationErr, e.observed)
 	// Finish observation before releasing its process owner. Cancellation can
 	// make a live monitor request reap; a stopped monitor cannot send a request
 	// to a supervisor that is already completing its close acknowledgement.

@@ -187,6 +187,16 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 // Close releases descendants only after reaping; import proofs and the production
 // coordinator remain required before production L2 use.
 func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int) error {
+	return checkpointWorkspaceChangesPolicy(ctx, j, sid, maxObjects, maxEvents, false)
+}
+
+// With enforceSecurity, a security-descriptor change on any object of the
+// admitted snapshot fails the checkpoint before anything is persisted, so the
+// unchanged cursor still lets cleanup replay the window. Live monitoring uses it
+// because this package edits those descriptors only before tracking starts and
+// after every process is reaped; release and recovery do not, since their own
+// earlier, partially completed edits legitimately appear in the stream.
+func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, enforceSecurity bool) error {
 	if err := validateWorkspaceJournalOwnership(j, sid); err != nil {
 		return err
 	}
@@ -253,6 +263,13 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 	plan, err := planWorkspaceChanges(changes, w.Root.Volume, w.Root.ID, known, j.state.deleted, j.state.deleteIntents, maxObjects)
 	if err != nil {
 		return err
+	}
+	if enforceSecurity {
+		for _, object := range plan.Security {
+			if j.state.objects[object] {
+				return fmt.Errorf("%w (%d snapshot objects checked)", errWorkspaceSecurityChanged, len(j.state.objects))
+			}
+		}
 	}
 	deleted := make(map[journalObject]bool, len(j.state.deleted)+len(plan.Deleted))
 	for object := range j.state.deleted {
@@ -372,7 +389,7 @@ func (g *workspaceGrant) checkpointChanges(ctx context.Context, maxEvents int) e
 	if err := g.observePendingDeletes(ctx); err != nil {
 		return err
 	}
-	if err := checkpointWorkspaceChanges(ctx, j, p.sid, g.maxObjects, maxEvents); err != nil {
+	if err := checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, true); err != nil {
 		return err
 	}
 	// Recorded unknown imports own reclamation, but no live execution may continue

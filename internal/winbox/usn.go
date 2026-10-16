@@ -14,6 +14,12 @@ var errWorkspaceChangesLost = errors.New("AppContainer workspace change history 
 // never proved, so execution that observed one must not continue.
 var errWorkspaceUnknownImport = errors.New("AppContainer workspace received an uncoordinated import")
 
+// errWorkspaceSecurityChanged reports a security-descriptor change on an object
+// of the admitted workspace snapshot while the execution owned its descriptor.
+// This package edits those descriptors only before tracking starts and after the
+// processes are gone, so the writer is external. It is a writer-fence violation.
+var errWorkspaceSecurityChanged = fmt.Errorf("%w: workspace descendant security descriptor changed", errWriterFenceViolated)
+
 const (
 	usnReasonCreate    = 0x00000100
 	usnReasonDelete    = 0x00000200
@@ -119,8 +125,12 @@ type journalDeletion struct {
 }
 
 type workspaceChangePlan struct {
-	Created       []journalObject
-	Unknown       []journalObject // Entered a tracked directory without creation or census proof.
+	Created []journalObject
+	Unknown []journalObject // Entered a tracked directory without creation or census proof.
+	// Security lists identities already tracked before this plan whose security
+	// descriptor changed in the window. The planner cannot tell this package's
+	// own edits from an external writer's; the caller applies the ownership rule.
+	Security      []journalObject
 	DeleteIntents []journalDeletion
 	Deleted       []journalDeletion
 }
@@ -142,6 +152,7 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 	}
 	pending := make(map[[16]byte]journalDeletion)
 	var pendingOrder [][16]byte
+	secured := make(map[[16]byte]bool)
 	for _, change := range changes {
 		object, exists := observed[change.ID]
 		parent, parentExists := observed[change.Parent]
@@ -163,6 +174,12 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 		}
 		if change.Reason&(usnReasonHardLink|usnReasonReparse) != 0 {
 			return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires link or reparse proof")
+		}
+		if exists && change.Reason&usnReasonSecurity != 0 && !secured[change.ID] {
+			if _, tracked := known[change.ID]; tracked {
+				secured[change.ID] = true
+				plan.Security = append(plan.Security, known[change.ID])
+			}
 		}
 		if !exists {
 			if len(observed) >= maxObjects {
