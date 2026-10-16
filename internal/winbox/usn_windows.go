@@ -3,8 +3,10 @@ package winbox
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -207,6 +209,32 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 // release and recovery do not, since their own earlier, partially completed
 // edits legitimately appear in the stream.
 func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, verifySecurity func([]journalObject) error) error {
+	// An identity named by a create record can be deleted before it is reopened,
+	// with its delete record still beyond the span read. Nothing is persisted
+	// before that point, so re-reading from the same cursor sees the delete.
+	for attempt := 0; ; attempt++ {
+		err := checkpointWorkspaceChangesOnce(ctx, j, sid, maxObjects, maxEvents, verifySecurity)
+		if !errors.Is(err, errWorkspaceObjectVanished) || attempt >= vanishedRetryLimit {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(vanishedRetryDelay):
+		}
+	}
+}
+
+const (
+	vanishedRetryLimit = 40
+	vanishedRetryDelay = 50 * time.Millisecond
+)
+
+// errWorkspaceObjectVanished marks an identity that could not be reopened
+// because it no longer exists; it is retried before it fails the checkpoint.
+var errWorkspaceObjectVanished = errors.New("AppContainer workspace object vanished before it could be reopened")
+
+func checkpointWorkspaceChangesOnce(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, verifySecurity func([]journalObject) error) error {
 	if err := validateWorkspaceJournalOwnership(j, sid); err != nil {
 		return err
 	}
@@ -313,6 +341,9 @@ func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid 
 		}
 		h, err := openIdentityObject(tree.ancestors[0], treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
 		if err != nil {
+			if errors.Is(err, windows.STATUS_INVALID_PARAMETER) || errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) || errors.Is(err, windows.STATUS_OBJECT_PATH_NOT_FOUND) {
+				return fmt.Errorf("%w: %v", errWorkspaceObjectVanished, err)
+			}
 			return err
 		}
 		windows.CloseHandle(h)
