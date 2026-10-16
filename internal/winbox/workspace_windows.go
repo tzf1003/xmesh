@@ -168,6 +168,59 @@ func (g *workspaceGrant) retainIdentityHandles(ctx context.Context) error {
 	return nil
 }
 
+// verifyDescriptors compares each named admitted object's current descriptor
+// with the one read back when this execution granted it. The caller holds the
+// operation gate and the profile mutex. An object whose descriptor cannot be
+// read or no longer matches is an external writer's work: nothing else edits it
+// while the execution is live.
+func (g *workspaceGrant) verifyDescriptors(objects []journalObject) error {
+	for _, object := range objects {
+		identity := fileIdentity{Volume: object.Volume, ID: object.ID}
+		var grant *objectGrant
+		for _, candidate := range g.selected.grants {
+			if candidate != nil && candidate.id == identity {
+				grant = candidate
+			}
+		}
+		if grant == nil {
+			continue
+		}
+		handle := grant.aclHandle
+		if handle == 0 {
+			handle = grant.handle
+		}
+		if handle == 0 || grant.baseline == nil {
+			return fmt.Errorf("%w: no descriptor baseline for an admitted object", errWorkspaceSecurityChanged)
+		}
+		current, err := workspaceDescriptorFingerprint(handle, g.profile.sid)
+		if err != nil {
+			return fmt.Errorf("%w: cannot read an admitted object's descriptor: %v", errWorkspaceSecurityChanged, err)
+		}
+		if !bytes.Equal(current, grant.baseline) {
+			return fmt.Errorf("%w (%d admitted objects)", errWorkspaceSecurityChanged, len(g.selected.grants))
+		}
+	}
+	return nil
+}
+
+// verifyAllDescriptors compares every admitted object's descriptor, not only the
+// ones a change record names. NTFS folds reasons into one record per open file
+// and writes no new record for a reason already accumulated, and this execution
+// keeps every admitted object open, so a repeated descriptor edit may leave no
+// record. The caller holds the operation gate and the profile mutex.
+func (g *workspaceGrant) verifyAllDescriptors() error {
+	if g.selected == nil {
+		return nil
+	}
+	objects := make([]journalObject, 0, len(g.selected.grants))
+	for _, grant := range g.selected.grants {
+		if grant != nil && !grant.removed && (grant.handle != 0 || grant.aclHandle != 0) {
+			objects = append(objects, journalObject{Volume: grant.id.Volume, ID: grant.id.ID})
+		}
+	}
+	return g.verifyDescriptors(objects)
+}
+
 // Close first removes explicit inheritance sources, then scans the still-bound
 // root and removes this profile's inherited ACEs by object identity. Any failed
 // or incomplete scan retains the profile reference and namespace guard for retry.
