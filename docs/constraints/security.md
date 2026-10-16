@@ -92,3 +92,13 @@ Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺�
 入口必须按 [CTR-OAUTH-01](../contracts/oauth-authz.md#ctr-oauth-01) 的限速表限制 `POST /oauth/register`、登录口令校验和 `GET /oauth/authorize`。超限返回 HTTP 429，并带 `Retry-After`。
 
 授权服务器只有一个口令，动态注册又不需要管理员点击。没有这道限速时，公网入口就是口令爆破面。计数放在入口进程内存里，重启后清零；它用来拖慢爆破，不是跨节点的配额。
+
+## CON-SEC-12
+
+控制通道只接受内核运行用户的连接（Windows 另含 DACL 授权者），不使用令牌。L2 沙箱内的进程必须不能连接它：Seatbelt 规则拒绝该套接字，bwrap 不绑定状态目录，Windows AppContainer 不在管道 DACL 中。
+
+经控制通道发生的变更写审计，`actor` 为 `control`，只含元数据（[CTR-CTL-02](../contracts/control.md#ctr-ctl-02)）。通道内的事件流、会话视图与审计视图遵守 [INV-10](invariants.md#inv-10)；令牌正文只出现在创建或轮转 PAT 的那一次响应里。
+
+`weakens_security` 是给 UI 弹确认的提示，不是内核的授权边界；同一用户下的进程本来就能改配置文件，通道没有增加权限（[CTR-CTL-07](../contracts/control.md#ctr-ctl-07)）。
+
+验收：另一个 OS 用户连接被拒；Windows 原生测试验证管道 DACL 与远程客户端拒绝；L2 的 exec 子进程连接控制端点失败。

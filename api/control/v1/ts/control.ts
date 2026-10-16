@@ -379,9 +379,9 @@ export interface HelloData {
 }
 export interface ResetData {
   /**
-   * gap：Last-Event-ID 早于环形缓存。boot_changed：内核已重启。overflow：本连接的发送队列溢出后重连。
+   * gap：Last-Event-ID 早于环形缓存里最旧的一条。boot_changed：Last-Event-ID 属于上一次启动。
    */
-  reason: "gap" | "boot_changed" | "overflow";
+  reason: "gap" | "boot_changed";
   head: EventId | null;
 }
 export interface HelloEvent {

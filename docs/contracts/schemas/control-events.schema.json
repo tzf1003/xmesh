@@ -26,8 +26,8 @@
       "required": ["reason", "head"],
       "properties": {
         "reason": {
-          "enum": ["gap", "boot_changed", "overflow"],
-          "description": "gap：Last-Event-ID 早于环形缓存。boot_changed：内核已重启。overflow：本连接的发送队列溢出后重连。"
+          "enum": ["gap", "boot_changed"],
+          "description": "gap：Last-Event-ID 早于环形缓存里最旧的一条。boot_changed：Last-Event-ID 属于上一次启动。"
         },
         "head": {
           "oneOf": [

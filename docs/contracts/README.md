@@ -42,6 +42,18 @@
 | [CTR-AUTHZ-01](oauth-authz.md#ctr-authz-01) | 授权 | 双层判定 |
 | [CTR-AUD-01](audit.md#ctr-aud-01) | 审计 | 事件字段 |
 | [CTR-CFG-01](config.md#ctr-cfg-01) | 配置 | `xmesh.yaml` |
+| [CTR-CTL-01](control.md#ctr-ctl-01) | 控制通道 | 传输、发现、身份 |
+| [CTR-CTL-02](control.md#ctr-ctl-02) | 控制通道 | 约定、版本兼容、ETag、审计 |
+| [CTR-CTL-03](control.md#ctr-ctl-03) | 控制通道 | `GET /v1/status`、警告、托盘状态判定 |
+| [CTR-CTL-04](control.md#ctr-ctl-04) | 控制通道 | `GET /v1/events` 事件流 |
+| [CTR-CTL-05](control.md#ctr-ctl-05) | 控制通道 | 对端与会话视图 |
+| [CTR-CTL-06](control.md#ctr-ctl-06) | 控制通道 | drain / resume |
+| [CTR-CTL-07](control.md#ctr-ctl-07) | 控制通道 | 配置读写 |
+| [CTR-CTL-08](control.md#ctr-ctl-08) | 控制通道 | LAN 配对 |
+| [CTR-CTL-09](control.md#ctr-ctl-09) | 控制通道 | PAT |
+| [CTR-CTL-10](control.md#ctr-ctl-10) | 控制通道 | 入口客户端与口令 |
+| [CTR-CTL-11](control.md#ctr-ctl-11) | 控制通道 | 审计视图 |
+| [CTR-CTL-12](control.md#ctr-ctl-12) | 控制通道 | 路由表、Go 与 TypeScript 生成物 |
 
 ## 模式文件
 
@@ -51,6 +63,8 @@
 | [schemas/lease.schema.json](schemas/lease.schema.json) | CTR-LEASE-01 |
 | [schemas/audit-event.schema.json](schemas/audit-event.schema.json) | CTR-AUD-01 |
 | [schemas/config.schema.json](schemas/config.schema.json) | CTR-CFG-01 |
+| [schemas/control-*.schema.json](schemas/) 与 [schemas/control-routes.json](schemas/control-routes.json) | CTR-CTL-01 至 CTR-CTL-12，列表见 [control.md](control.md) |
 | [schemas/examples/](schemas/examples/) | 错误与配置的正例、反例 |
+| [schemas/examples/control/](schemas/examples/control/) | 控制通道的正例，`invalid/` 下是反例，文件名 `<定义名>.<变体>.json` |
 
 模式使用 JSON Schema draft 2020-12。`$id` 使用 `urn:xmesh:schema:*`，不依赖尚未决定的公网域名。配置文件是 YAML，校验前先按 YAML 1.2 解析成 JSON 数据模型，再套 `config.schema.json`。
