@@ -94,16 +94,30 @@ func Test_TailnetPeerConnectivity(t *testing.T) {
 		if os.Getenv("XMESH_TEST_TAILNET_REQUIRE_DERP") == "1" && (ping.Endpoint != "" || ping.DERPRegionID == 0) {
 			t.Fatal("expected a DERP route")
 		}
-		request, err := http.NewRequestWithContext(ctx, "GET", peer.Address, nil)
-		if err != nil {
-			t.Fatal(err)
+		// A node that has just joined can have its first TCP dial swallowed until the peer has the
+		// new WireGuard key, so dial again with a short per-attempt deadline instead of waiting
+		// the whole test deadline on one connection.
+		var response *http.Response
+		for attempt := 1; ; attempt++ {
+			attemptCtx, stop := context.WithTimeout(ctx, 8*time.Second)
+			request, err := http.NewRequestWithContext(attemptCtx, "GET", peer.Address, nil)
+			if err != nil {
+				stop()
+				t.Fatal(err)
+			}
+			response, err = network.HTTPClient(peer).Do(request)
+			if err == nil {
+				io.Copy(io.Discard, response.Body)
+				response.Body.Close()
+				stop()
+				break
+			}
+			stop()
+			t.Logf("Agent request attempt %d: %v", attempt, err)
+			if ctx.Err() != nil {
+				t.Fatal(err)
+			}
 		}
-		response, err := network.HTTPClient(peer).Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.Copy(io.Discard, response.Body)
-		response.Body.Close()
 		// GET without an initialized MCP session is rejected by the live Agent.
 		if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusMethodNotAllowed {
 			t.Fatalf("Agent response: %d", response.StatusCode)
