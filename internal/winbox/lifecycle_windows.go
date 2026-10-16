@@ -303,6 +303,11 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		e.processes = nil
 	}
 	if e.workspace != nil {
+		// Reclamation edits the root's descriptor; from here a retry must not
+		// read this package's own edit as a foreign one.
+		if e.fence != nil {
+			e.fence.unsealRoot()
+		}
 		if err := e.workspace.closeContext(ctx); err != nil {
 			return errors.Join(observationErr, err)
 		}

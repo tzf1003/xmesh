@@ -18,7 +18,21 @@ import (
 // that exist at admission, so they belong to the admitted snapshot.
 func descendantSecurityFixture(t *testing.T, interval time.Duration) workspaceExecutionOptions {
 	t.Helper()
-	options := workspaceExecutionTestOptions(t)
+	return descendantSecurityFixtureIn(t, t.TempDir(), interval)
+}
+
+func descendantSecurityFixtureIn(t *testing.T, base string, interval time.Duration) workspaceExecutionOptions {
+	t.Helper()
+	root := filepath.Join(base, "workspace")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	setMediumLabel(t, root)
+	state := filepath.Join(base, "state")
+	privateJournalDirectory(t, state)
+	options := workspaceExecutionOptions{Workspace: root, Journal: filepath.Join(state, "execution.journal"),
+		MaxObjects: 32, MaxJobs: 2, Interval: interval, MaxEvents: maxWorkspaceChangeEvents,
+		SupervisorCommand: supervisorTestCommand(t, false)}
 	options.RequireWriterFence = true
 	options.Interval = interval
 	sub := filepath.Join(options.Workspace, "sub")
@@ -83,7 +97,7 @@ func Test_WindowsAppContainerDescendantSecurity(t *testing.T) {
 		{name: "clean"},
 		{name: "descendant-file", interval: 20 * time.Millisecond, target: `sub\initial.txt`},
 		{name: "descendant-directory", interval: 20 * time.Millisecond, target: "sub"},
-		{name: "top-level-file", interval: 20 * time.Millisecond, target: "top.txt"},
+		{name: "top-level-file", interval: 20 * time.Millisecond, target: "moved.txt"}, // The helper renames top.txt.
 		// The monitor never ticks, so only the post-reap check can see it.
 		{name: "final-check", interval: time.Minute, target: `sub\initial.txt`, viaClose: true},
 	} {
@@ -210,8 +224,19 @@ func Test_WindowsAppContainerStartRefusesDescendantChange(t *testing.T) {
 	}
 	defer func() { _ = e.closeContext(context.Background(), 91) }()
 	tamperDACL(t, filepath.Join(options.Workspace, "sub", "initial.txt"))
-	if _, err := e.start(ctx, []string{"unused.exe"}, e.profile.Directory(), nil, nil, 0); !errors.Is(err, errWorkspaceSecurityChanged) {
-		t.Fatal("launch was admitted after a descriptor change", err)
+	// The change record may lag the write by a moment; what matters is that no
+	// launch is ever admitted once the change is visible.
+	began := time.Now()
+	for {
+		_, err := e.start(ctx, []string{"unused.exe"}, e.profile.Directory(), nil, nil, 0)
+		if errors.Is(err, errWorkspaceSecurityChanged) {
+			t.Log("launch refused after", time.Since(began))
+			break
+		}
+		if time.Since(began) > 10*time.Second {
+			t.Fatal("launch was admitted after a descriptor change", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if err := e.closeContext(ctx, 91); !errors.Is(err, errWorkspaceSecurityChanged) || !e.closed {
 		t.Fatal("close", err, e.closed)
@@ -228,7 +253,16 @@ func Test_WindowsAppContainerTreeExternalWriters(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			options := descendantSecurityFixture(t, 20*time.Millisecond)
+			base := t.TempDir()
+			if mode == "junction" {
+				// Reclamation stays withheld while the unproved link exists, so the
+				// journal cannot be removed with the test's directory.
+				var err error
+				if base, err = os.MkdirTemp("", "xmesh-junction-"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			options := descendantSecurityFixtureIn(t, base, 20*time.Millisecond)
 			before, control := kernelJournalState(t, options.Workspace)
 			e, err := newWorkspaceExecution(ctx, options, kernelWriterFencePrepare)
 			if err != nil {

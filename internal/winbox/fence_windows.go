@@ -311,6 +311,25 @@ func (f *workspaceWriterFence) sealRoot(ctx context.Context) error {
 	return nil
 }
 
+// unsealRoot ends the protection of the workspace root's own descriptor. Cleanup
+// is about to edit it, so later verification must not mistake this package's
+// reclamation, including a retried one, for a foreign writer. Everything else
+// stays pinned and verified.
+func (f *workspaceWriterFence) unsealRoot() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed || len(f.trees) == 0 || len(f.trees[0].objects) == 0 {
+		return
+	}
+	root := f.trees[0].objects[0].id
+	for index := range f.objects {
+		if pin := &f.objects[index]; pin.id == root && pin.role == fenceAncestor {
+			pin.fingerprint, pin.role = nil, fenceWorkspaceRoot
+			f.pinned[root.ID] = fenceWorkspaceRoot
+		}
+	}
+}
+
 // bindChains requires the lifecycle's own workspace and journal-directory
 // chains to be the pinned objects, directory by directory.
 func (f *workspaceWriterFence) bindChains(workspace, journal *workspaceTree) error {
@@ -376,6 +395,7 @@ type writerVerifier interface {
 	io.Closer
 	Verify(context.Context) error
 	sealRoot(context.Context) error
+	unsealRoot()
 	bindChains(workspace, journal *workspaceTree) error
 }
 
