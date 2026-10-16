@@ -147,7 +147,7 @@ func Test_ManagedRunnerTerminalStartFailure(t *testing.T) {
 	m, r, p := managedPTYFixture(t, runner)
 	c := identity.Caller{ID: "node/session"}
 	_, e := invoke(m, r, p, c, "pty.open", Object{"cols": 80, "rows": 24, "shell": "/bin/sh"})
-	if e == nil || e.(*toolerr.Error).Code != "internal" {
+	if e == nil || e.(*toolerr.Error).Code != "policy_denied" || e.(*toolerr.Error).Fields["rule"] != "sandbox.runner_failed" || !errors.Is(e, runner.err) {
 		t.Fatal(e)
 	}
 	m.mu.Lock()

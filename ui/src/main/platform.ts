@@ -24,6 +24,17 @@ export function electronPlatform(showPanel: () => void, notifyError: (message: s
     quit: () => app.quit(),
     runCli: (command) => runXmesh(command),
     notifyError,
+    pickPath: async (kind) => {
+      if (kind === "authkeySave") {
+        // A file to be created: the pre-auth key is written there (0600) by the CLI, never shown or kept here.
+        const r = await dialog.showSaveDialog({ defaultPath: "xmesh-authkey.txt", properties: ["createDirectory", "showOverwriteConfirmation"] });
+        return r.canceled ? undefined : r.filePath;
+      }
+      const r = await dialog.showOpenDialog({
+        properties: kind === "workspace" ? ["openDirectory", "createDirectory"] : ["openFile"],
+      });
+      return r.canceled ? undefined : r.filePaths[0];
+    },
   };
 }
 
@@ -36,7 +47,7 @@ export interface RecordedCall {
 export function recordingPlatform(
   showPanel: () => void,
   calls: RecordedCall[],
-  answers: { confirm: boolean; cliFails: boolean },
+  answers: { confirm: boolean; cliFails: boolean; picked?: string },
 ): Platform {
   return {
     writeClipboard: (text) => void calls.push({ op: "clipboard", arg: text }),
@@ -56,5 +67,9 @@ export function recordingPlatform(
       if (answers.cliFails) throw new Error("simulated cli failure");
     },
     notifyError: (m) => void calls.push({ op: "error", arg: m }),
+    pickPath: async (kind) => {
+      calls.push({ op: "pickPath", arg: kind });
+      return answers.picked;
+    },
   };
 }

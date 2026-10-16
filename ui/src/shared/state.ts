@@ -1,4 +1,5 @@
 import { type Peer, type StatusResponse, isDegrading } from "./control";
+import type { Locale } from "./i18n";
 
 /** What the main process currently knows about the kernel. */
 export type Connection =
@@ -17,6 +18,8 @@ export interface InstanceInfo {
 
 export interface UiSettings {
   loginItem: boolean;
+  /** Language of the tray and the panel; the panel has no other way to learn it. */
+  locale: Locale;
 }
 
 /** Everything the tray menu and the panel render from. */
@@ -53,5 +56,5 @@ export const EMPTY_SNAPSHOT: Snapshot = {
   connection: { kind: "offline" },
   instances: [],
   selectedInstance: "",
-  settings: { loginItem: false },
+  settings: { loginItem: false, locale: "zh" },
 };

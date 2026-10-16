@@ -15,6 +15,7 @@ import {
   type Warning,
 } from "../src/shared/control";
 import { fixture, peersFixture, statusFixture } from "./fixtures";
+import { PanelData } from "./panel-routes";
 
 export interface FakeKernelOptions {
   /** Defaults to a unique socket (POSIX) or named pipe (Windows). */
@@ -40,6 +41,15 @@ export interface RecordedRequest {
 
 const RING = 1024;
 
+/** Panel route prefixes and the capability that gates each (PUT /v1/config needs config.write instead). */
+const PANEL_ROUTE_CAPS: [string, Capability][] = [
+  ["/v1/config", "config.read"],
+  ["/v1/pats", "pats"],
+  ["/v1/ingress", "ingress"],
+  ["/v1/pair", "pair"],
+  ["/v1/audit", "audit"],
+];
+
 export function randomEndpoint(): string {
   const tag = randomBytes(5).toString("hex");
   return process.platform === "win32"
@@ -60,6 +70,8 @@ export class FakeKernel {
   readonly endpoint: string;
   readonly kernelVersion: string;
   readonly requests: RecordedRequest[] = [];
+  /** Data behind the panel routes (config, PATs, ingress, pairing, audit, sessions). */
+  readonly panel = new PanelData();
   private controlVersion: string;
   private status: StatusResponse;
   private peers: Peer[];
@@ -263,7 +275,8 @@ export class FakeKernel {
       if (req.headers.origin !== undefined) {
         return this.error(res, 403, "forbidden", "带 Origin 的请求被拒绝");
       }
-      this.route(rec.method, url, body, lastEventId, res);
+      const ifMatch = typeof req.headers["if-match"] === "string" ? req.headers["if-match"] : undefined;
+      this.route(rec.method, url, body, lastEventId, res, ifMatch);
     });
   }
 
@@ -273,7 +286,7 @@ export class FakeKernel {
     return false;
   }
 
-  private route(method: string, url: string, body: unknown, lastEventId: string | undefined, res: http.ServerResponse): void {
+  private route(method: string, url: string, body: unknown, lastEventId: string | undefined, res: http.ServerResponse, ifMatch?: string): void {
     const failure = this.failures.get(url);
     if (failure) {
       this.failures.delete(url);
@@ -288,7 +301,7 @@ export class FakeKernel {
       return;
     }
     if (method === "GET" && url === "/v1/sessions") {
-      if (this.requires(res, "sessions")) this.send(res, 200, fixture("SessionsResponse.empty"));
+      if (this.requires(res, "sessions")) this.send(res, 200, this.panel.sessions);
       return;
     }
     if (method === "GET" && url === "/v1/events") {
@@ -301,6 +314,22 @@ export class FakeKernel {
     }
     if (method === "POST" && url === "/v1/resume") {
       if (this.requires(res, "drain")) this.resume(res);
+      return;
+    }
+    const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
+    if (cap && this.requires(res, method === "PUT" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
+      const r = this.panel.handle(method, url, body, ifMatch);
+      if (r) {
+        if (r.status === 204) {
+          res.writeHead(204, { [CONTROL_VERSION_HEADER]: this.controlVersion });
+          res.end();
+        } else {
+          res.writeHead(r.status, { "Content-Type": "application/json", [CONTROL_VERSION_HEADER]: this.controlVersion, ...r.headers });
+          res.end(JSON.stringify(r.body));
+        }
+        return;
+      }
+    } else if (cap) {
       return;
     }
     this.error(res, 404, "not_found", "没有这个接口");

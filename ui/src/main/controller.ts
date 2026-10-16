@@ -1,11 +1,15 @@
 import { EventEmitter } from "node:events";
 import {
+  type CallEventData,
+  type Capability,
   ControlRequestError,
   type ControlEvent,
+  type DrainMode,
   VersionMismatchError,
   hasCapability,
   isSupportedApiVersion,
 } from "../shared/control";
+import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
 import type { Instance } from "./discovery";
@@ -13,6 +17,8 @@ import type { Instance } from "./discovery";
 export interface ControllerOptions {
   discover: () => Instance[];
   getLoginItem: () => boolean;
+  /** Tray and panel language; default Chinese. */
+  locale?: Locale;
   setLoginItem: (enabled: boolean) => void;
   /** How often to look for a kernel while none is connected, and for new instances while connected. */
   pollMs?: number;
@@ -30,7 +36,12 @@ export interface ControllerOptions {
 
 export interface ControllerEvents {
   change: [snapshot: Snapshot];
+  /** The newest `call` events, oldest first. Metadata only (CTR-CTL-04). */
+  calls: [calls: CallEventData[]];
 }
+
+/** How many call events are kept for the panel's recent-activity list. */
+const RECENT_CALLS = 100;
 
 /** A connection that lasted at least this long counts as healthy and resets the backoff. */
 const HEALTHY_MS = 3000;
@@ -60,10 +71,11 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   private refreshing = false;
   private refreshDirty = false;
   private loop: Promise<void> = Promise.resolve();
+  private recent: CallEventData[] = [];
 
   constructor(private readonly opts: ControllerOptions) {
     super();
-    this.snap = { ...EMPTY_SNAPSHOT, settings: { loginItem: opts.getLoginItem() } };
+    this.snap = { ...EMPTY_SNAPSHOT, settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh" } };
   }
 
   get snapshot(): Snapshot {
@@ -88,6 +100,10 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   selectInstance(id: string): void {
     if (id === this.explicit) return;
     this.explicit = id;
+    if (this.recent.length > 0) {
+      this.recent = [];
+      this.emit("calls", []);
+    }
     this.stream?.close();
     this.wake?.();
   }
@@ -100,13 +116,17 @@ export class ShellController extends EventEmitter<ControllerEvents> {
 
   setLoginItem(enabled: boolean): void {
     this.opts.setLoginItem(enabled);
-    this.update({ settings: { loginItem: this.opts.getLoginItem() } });
+    this.update({ settings: { ...this.snap.settings, loginItem: this.opts.getLoginItem() } });
   }
 
-  /** `keep`: refuse new calls, leave running work alone. */
-  async drain(): Promise<void> {
+  get recentCalls(): CallEventData[] {
+    return this.recent.slice();
+  }
+
+  /** `keep` (default): refuse new calls, leave running work alone. `kill` also ends every PTY and lease. */
+  async drain(mode: DrainMode = "keep"): Promise<void> {
     const c = this.requireCapable("drain");
-    await c.drain("keep");
+    await c.drain(mode);
     await this.refresh(c);
   }
 
@@ -116,7 +136,8 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     await this.refresh(c);
   }
 
-  private requireCapable(capability: "drain"): ControlClient {
+  /** The client of the instance the panel is showing, if connected and the kernel declares `capability`. */
+  requireCapable(capability: Capability): ControlClient {
     const conn = this.snap.connection;
     if (!this.current || conn.kind !== "connected") {
       throw new ControlRequestError("unavailable", "xmesh kernel is not connected");
@@ -217,8 +238,14 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   }
 
   private onEvent(client: ControlClient, e: ControlEvent): void {
-    // `hello` only describes the stream, and a call event carries nothing the snapshot shows.
-    if (e.type === "hello" || e.type === "call") return;
+    // `hello` only describes the stream. A call event carries nothing the snapshot shows; it feeds the recent-calls list.
+    if (e.type === "hello") return;
+    if (e.type === "call") {
+      this.recent.push(e.data);
+      if (this.recent.length > RECENT_CALLS) this.recent.splice(0, this.recent.length - RECENT_CALLS);
+      this.emit("calls", this.recent.slice());
+      return;
+    }
     this.scheduleRefresh(client);
   }
 

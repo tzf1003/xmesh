@@ -2,6 +2,7 @@ package winbox
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"runtime"
@@ -68,20 +69,129 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren bool) (*objectGrant, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil || p.deleted || p.reclaiming || p.workspaceClosing || p.workspaceMonitor != nil {
-		return nil, fmt.Errorf("AppContainer profile unavailable")
+	if err := p.requireGrantableLocked(); err != nil {
+		return nil, err
 	}
+	prepared, err := p.prepareGrantLocked(object, inheritChildren)
+	if err != nil {
+		return nil, err
+	}
+	var intent uint64
+	if p.journal != nil {
+		intent, err = p.journal.append(prepared.intentRecord())
+		if err != nil {
+			prepared.discard()
+			return nil, err
+		}
+	}
+	return p.applyGrantLocked(prepared, intent)
+}
+
+// grantWorkspaceObjects grants every object of an admitted snapshot, writing all
+// intents with one flush. The write-ahead rule is unchanged: every intent is
+// durable before the first descriptor edit. Recovery already tolerates an
+// intent whose edit never happened, which is the state of every object after a
+// crash between the flush and its edit.
+//
+// A non-nil grants slice with an error holds the grants already applied; the
+// caller releases them with the workspace. Objects after the failure have an
+// intent and no edit, and are reclaimed by identity like the failed one.
+func (p *Profile) grantWorkspaceObjects(ctx context.Context, objects []treeObject) ([]*objectGrant, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.requireGrantableLocked(); err != nil {
+		return nil, err
+	}
+	prepared := make([]*preparedGrant, 0, len(objects))
+	discard := func(from int) {
+		for _, grant := range prepared[from:] {
+			grant.discard()
+		}
+	}
+	for _, object := range objects {
+		if err := ctx.Err(); err != nil {
+			discard(0)
+			return nil, err
+		}
+		grant, err := p.prepareGrantLocked(object, object.directory)
+		if err != nil {
+			discard(0)
+			return nil, err
+		}
+		prepared = append(prepared, grant)
+	}
+	intents := make([]uint64, len(prepared))
+	if p.journal != nil {
+		records := make([]journalRecord, len(prepared))
+		for i, grant := range prepared {
+			records[i] = grant.intentRecord()
+		}
+		sequences, err := p.journal.appendBatch(records)
+		if err != nil {
+			discard(0)
+			return nil, err
+		}
+		copy(intents, sequences)
+	}
+	grants := make([]*objectGrant, 0, len(prepared))
+	for i, grant := range prepared {
+		if err := ctx.Err(); err != nil {
+			discard(i)
+			return grants, err
+		}
+		applied, err := p.applyGrantLocked(grant, intents[i])
+		if err != nil {
+			discard(i + 1)
+			return grants, err
+		}
+		grants = append(grants, applied)
+	}
+	return grants, nil
+}
+
+func (p *Profile) requireGrantableLocked() error {
+	if p.sid == nil || p.deleted || p.reclaiming || p.workspaceClosing || p.workspaceMonitor != nil {
+		return fmt.Errorf("AppContainer profile unavailable")
+	}
+	return nil
+}
+
+// preparedGrant is an object whose identity, journal binding and ACE have been
+// checked but whose intent is not yet recorded and whose descriptor is untouched.
+type preparedGrant struct {
+	handle, aclHandle windows.Handle
+	actual            treeObject
+	ace               []byte
+}
+
+func (g *preparedGrant) discard() {
+	if g.aclHandle != 0 {
+		windows.CloseHandle(g.aclHandle)
+		g.aclHandle = 0
+	}
+	if g.handle != 0 {
+		windows.CloseHandle(g.handle)
+		g.handle = 0
+	}
+}
+
+func (g *preparedGrant) intentRecord() journalRecord {
+	return journalRecord{Kind: "grant", Grant: &journalGrant{
+		Object: journalObject{Volume: g.actual.id.Volume, ID: g.actual.id.ID, Directory: g.actual.directory}, ACE: g.ace,
+	}}
+}
+
+// prepareGrantLocked validates one selected object and builds the ACE it will
+// receive. It changes neither the journal nor any descriptor. The caller holds
+// p.mu and owns the result.
+func (p *Profile) prepareGrantLocked(object treeObject, inheritChildren bool) (_ *preparedGrant, resultErr error) {
 	if p.journal != nil {
 		if p.journal.state.workspaceReleased {
 			return nil, fmt.Errorf("AppContainer journaled workspace already released")
 		}
 		if p.journal.state.workspace {
 			selected := journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory}
-			found := false
-			for _, admitted := range p.journal.records[1].Workspace.Objects {
-				found = found || selected == admitted
-			}
-			if !found || inheritChildren != object.directory {
+			if !p.journal.state.objects[selected] || inheritChildren != object.directory {
 				return nil, fmt.Errorf("AppContainer grant does not match journal workspace snapshot")
 			}
 		} else if inheritChildren {
@@ -91,18 +201,17 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	if err := reopenObject.Find(); err != nil {
 		return nil, err
 	}
-	var h windows.Handle
-	process := windows.CurrentProcess()
-	if err := windows.DuplicateHandle(process, object.handle, process, &h, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
-		return nil, fmt.Errorf("retain selected AppContainer object: %w", err)
-	}
-	retained := false
+	prepared := &preparedGrant{}
 	defer func() {
-		if !retained {
-			windows.CloseHandle(h)
+		if resultErr != nil {
+			prepared.discard()
 		}
 	}()
-	actual, err := inspectTreeObject(h, object.relative)
+	process := windows.CurrentProcess()
+	if err := windows.DuplicateHandle(process, object.handle, process, &prepared.handle, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
+		return nil, fmt.Errorf("retain selected AppContainer object: %w", err)
+	}
+	actual, err := inspectTreeObject(prepared.handle, object.relative)
 	if err != nil {
 		return nil, err
 	}
@@ -115,15 +224,10 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	// Acquire security access before admission and retain it through release.
 	// Release keeps the admitted security access and object identity independent
 	// of subsequent namespace and disposition changes after sandbox execution.
-	aclHandle, err := reopenForACL(h)
+	prepared.aclHandle, err = reopenForACL(prepared.handle)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if !retained {
-			windows.CloseHandle(aclHandle)
-		}
-	}()
 	mask := windows.ACCESS_MASK(windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE)
 	if actual.directory {
 		const fileDeleteChild = 0x0040
@@ -156,31 +260,36 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	if err != nil || len(aces) != 1 {
 		return nil, fmt.Errorf("AppContainer grant ACE: %v", err)
 	}
-	ace := bytes.Clone(aces[0])
-	lock, err := acquireObjectACL(actual.id, 30000)
+	prepared.ace = bytes.Clone(aces[0])
+	prepared.actual = actual
+	return prepared, nil
+}
+
+// applyGrantLocked edits the descriptor of a prepared object whose intent is
+// durable, reads the result back as the object's baseline and takes ownership of
+// the prepared handles. On error it releases them.
+func (p *Profile) applyGrantLocked(prepared *preparedGrant, intent uint64) (_ *objectGrant, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			prepared.discard()
+		}
+	}()
+	lock, err := acquireObjectACL(prepared.actual.id, 30000)
 	if err != nil {
 		return nil, err
 	}
 	defer lock.Close()
-	var intent uint64
-	if p.journal != nil {
-		intent, err = p.journal.append(journalRecord{Kind: "grant", Grant: &journalGrant{
-			Object: journalObject{Volume: actual.id.Volume, ID: actual.id.ID, Directory: actual.directory}, ACE: ace,
-		}})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := setObjectGrant(aclHandle, ace, true); err != nil {
+	if err := setObjectGrant(prepared.aclHandle, prepared.ace, true); err != nil {
 		return nil, err
 	}
-	baseline, err := workspaceDescriptorFingerprint(aclHandle, p.sid)
+	baseline, err := workspaceDescriptorFingerprint(prepared.aclHandle, p.sid)
 	if err != nil {
 		return nil, fmt.Errorf("read back AppContainer grant descriptor: %w", err)
 	}
 	p.grants++
-	retained = true
-	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace, id: actual.id, intent: intent, baseline: baseline}, nil
+	grant := &objectGrant{profile: p, handle: prepared.handle, aclHandle: prepared.aclHandle, ace: prepared.ace, id: prepared.actual.id, intent: intent, baseline: baseline}
+	prepared.handle, prepared.aclHandle = 0, 0
+	return grant, nil
 }
 
 // Close removes exactly the acquired ACE from the current ACL. Failed releases

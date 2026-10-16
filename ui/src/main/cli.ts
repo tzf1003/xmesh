@@ -45,3 +45,22 @@ export function runXmesh(command: CliCommand, bin: string = xmeshBinary()): Prom
     });
   });
 }
+
+/** First-run subcommands. Unlike `CliCommand` these take arguments, built here from validated values only. */
+export type SetupCliArgs = readonly ["install", "--config", string] | readonly ["start", "--config", string];
+
+/**
+ * Runs `xmesh install|start --config <file>` without a shell and returns a
+ * single line for people: the first line of stdout on success, of stderr on
+ * failure. A missing binary is reported as such.
+ */
+export function runXmeshSetup(args: SetupCliArgs, bin: string = xmeshBinary()): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(bin, [...args], { timeout: 120_000, windowsHide: true }, (err, stdout, stderr) => {
+      const line = (s: string): string => s.trim().split(/\r?\n/)[0]?.slice(0, 300) ?? "";
+      if (!err) return resolve(line(stdout));
+      const missing = (err as NodeJS.ErrnoException).code === "ENOENT";
+      reject(new CliError(args[0], missing ? `找不到 xmesh 可执行文件：${bin}` : line(String(stderr)) || err.message));
+    });
+  });
+}

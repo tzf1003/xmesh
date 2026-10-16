@@ -146,7 +146,7 @@ func Test_ManagedRunnerCleanupFailureIsReported(t *testing.T) {
 	runner := &fakeRunner{closeErr: errors.New("reclaim incomplete")}
 	m, r, p := managedFixture(t, runner)
 	o, e := run(m, r, p, "n/a", Object{"cmd": "/bin/sh", "args": []string{"-c", "printf done"}})
-	if e == nil || o != nil || e.(*toolerr.Error).Code != "internal" {
+	if e == nil || o != nil || e.(*toolerr.Error).Code != "policy_denied" || e.(*toolerr.Error).Fields["rule"] != "sandbox.cleanup_pending" {
 		t.Fatal("incomplete cleanup was hidden behind the command result", o, e)
 	}
 }
@@ -154,8 +154,12 @@ func Test_ManagedRunnerCleanupFailureIsReported(t *testing.T) {
 func Test_ManagedRunnerStartFailure(t *testing.T) {
 	runner := &fakeRunner{startErr: errors.New("workspace admission refused")}
 	m, r, p := managedFixture(t, runner)
-	if _, e := run(m, r, p, "n/a", Object{"cmd": "/bin/sh"}); e == nil || e.(*toolerr.Error).Code != "internal" {
+	_, e := run(m, r, p, "n/a", Object{"cmd": "/bin/sh"})
+	if e == nil || e.(*toolerr.Error).Code != "policy_denied" || e.(*toolerr.Error).Fields["rule"] != "sandbox.runner_failed" {
 		t.Fatal(e)
+	}
+	if !errors.Is(e, runner.startErr) {
+		t.Fatal("the runner cause was dropped", e)
 	}
 }
 

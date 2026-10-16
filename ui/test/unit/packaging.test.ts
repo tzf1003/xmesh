@@ -118,3 +118,8 @@ test("xmeshBinary prefers XMESH_BIN, then the bundled kernel, then PATH", () => 
     fs.rmSync(res, { recursive: true, force: true });
   }
 });
+
+test("no runtime dependencies: the renderer is bundled, so app.asar must not carry node_modules", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(UI, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
+  assert.deepEqual(Object.keys(pkg.dependencies ?? {}), []);
+});

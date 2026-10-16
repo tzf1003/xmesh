@@ -46,10 +46,12 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 		return nil, err
 	}
 	defer writers.Close()
+	stageMark(ctx, "namespace_writers")
 	tree, err := openWorkspaceTree(ctx, path, maxObjects)
 	if err != nil {
 		return nil, err
 	}
+	stageMark(ctx, "scan")
 	if tree.objects[0].id != bound.objects[0].id {
 		tree.Close()
 		return nil, fmt.Errorf("AppContainer workspace admission identity changed")
@@ -93,25 +95,18 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	// selected grants. It is released only after complete tree cleanup.
 	p.grants++
 	p.mu.Unlock()
+	stageMark(ctx, "journal_snapshot")
 	g := &workspaceGrant{operation: make(chan struct{}, 1), profile: p, tree: tree, selected: &selectedObjectGrants{}, path: path, maxObjects: maxObjects, credentials: credentials}
-	for _, object := range tree.objects {
-		if err = ctx.Err(); err != nil {
-			break
-		}
-		var grant *objectGrant
-		grant, err = p.grantSelectedObjectMode(object, object.directory)
-		if err != nil {
-			break
-		}
-		g.selected.grants = append(g.selected.grants, grant)
-	}
+	g.selected.grants, err = p.grantWorkspaceObjects(ctx, tree.objects)
 	if err == nil {
 		err = ctx.Err()
 	}
+	stageMark(ctx, "grant_acls")
 	if err == nil {
 		err = g.retainIdentityHandles(ctx)
 	}
 	if err == nil {
+		stageMark(ctx, "retain_handles")
 		return g, nil
 	}
 	if cleanupErr := g.Close(); cleanupErr != nil {
@@ -174,14 +169,16 @@ func (g *workspaceGrant) retainIdentityHandles(ctx context.Context) error {
 // read or no longer matches is an external writer's work: nothing else edits it
 // while the execution is live.
 func (g *workspaceGrant) verifyDescriptors(objects []journalObject) error {
-	for _, object := range objects {
-		identity := fileIdentity{Volume: object.Volume, ID: object.ID}
-		var grant *objectGrant
-		for _, candidate := range g.selected.grants {
-			if candidate != nil && candidate.id == identity {
-				grant = candidate
-			}
+	// Index once: a lookup per object would make a whole-workspace check
+	// quadratic. A repeated identity keeps its last grant, as a scan would.
+	byIdentity := make(map[fileIdentity]*objectGrant, len(g.selected.grants))
+	for _, candidate := range g.selected.grants {
+		if candidate != nil {
+			byIdentity[candidate.id] = candidate
 		}
+	}
+	for _, object := range objects {
+		grant := byIdentity[fileIdentity{Volume: object.Volume, ID: object.ID}]
 		if grant == nil {
 			continue
 		}

@@ -269,7 +269,7 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 // accounted for. The journal stays open; the next release covers it.
 var errWorkspaceReclaimRaced = errors.New("AppContainer workspace changed while it was being reclaimed")
 
-// releaseObjectHook is a test seam called after each object's release is durable.
+// releaseObjectHook is a test seam called after each object's descriptor is reclaimed.
 var releaseObjectHook func(done, total int)
 
 func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) error {
@@ -310,19 +310,35 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 	if err := appendWorkspaceUnknown(j, census.adopted); err != nil {
 		return err
 	}
+	// Release acknowledgements follow their descriptor edits and are flushed
+	// together. A crash before the flush leaves intents whose ACE is already
+	// gone, which recovery acknowledges without editing, exactly as a crash
+	// between one edit and its own acknowledgement always has. Edits that
+	// completed are acknowledged even when a later one fails.
+	var acknowledged []journalRecord
+	acknowledge := func() error {
+		pending := acknowledged
+		acknowledged = nil
+		_, err := j.appendBatch(pending)
+		return err
+	}
+	fail := func(err error) error {
+		if ackErr := acknowledge(); ackErr != nil {
+			return errors.Join(err, ackErr)
+		}
+		return err
+	}
 	for index := len(census.objects) - 1; index >= 0; index-- {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fail(err)
 		}
 		object := census.objects[index]
 		intent := census.intents[object.id]
 		if err := releaseJournalWorkspaceObjectContext(ctx, object, sid, !census.initial[object.id], intent); err != nil {
-			return err
+			return fail(err)
 		}
 		if intent.Grant != nil {
-			if _, err := j.append(journalRecord{Kind: "released", GrantSequence: intent.Sequence}); err != nil {
-				return err
-			}
+			acknowledged = append(acknowledged, journalRecord{Kind: "released", GrantSequence: intent.Sequence})
 		}
 		if hook := releaseObjectHook; hook != nil {
 			hook(len(census.objects)-index, len(census.objects))
@@ -332,16 +348,17 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 	// grant intents only after every live object passed census and reclamation.
 	for _, record := range j.records {
 		if err := ctx.Err(); err != nil {
-			return err
+			return fail(err)
 		}
 		if record.Grant == nil || !j.state.pending[record.Sequence] {
 			continue
 		}
 		if _, deleted := j.state.deleted[record.Grant.Object]; deleted {
-			if _, err := j.append(journalRecord{Kind: "released", GrantSequence: record.Sequence}); err != nil {
-				return err
-			}
+			acknowledged = append(acknowledged, journalRecord{Kind: "released", GrantSequence: record.Sequence})
 		}
+	}
+	if err := acknowledge(); err != nil {
+		return err
 	}
 	if j.state.changeCursor != nil {
 		if err := proveWorkspaceReclaimed(ctx, j, sid, maxObjects); err != nil {

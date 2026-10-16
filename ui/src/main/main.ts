@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { Notification, app, powerMonitor } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
@@ -7,6 +6,11 @@ import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
+import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
+import { MeshService, execMeshRunner } from "./mesh-service";
+import { PanelService } from "./panel-service";
+import { fsSetupHost, runSetup } from "./setup";
+import { runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -20,10 +24,9 @@ import { type PanelWindow, createPanelWindow, installSessionHardening, installWe
 const UI_ROOT = path.join(__dirname, "..", "..", "..");
 const TEST_MODE = process.env.XMESH_UI_TEST === "1" && !app.isPackaged;
 
-/** `dist/renderer` is the panel build (W1); until it exists the placeholder page is served. */
+/** `dist/renderer` is the esbuild bundle of src/renderer (scripts/build-renderer.mjs). */
 function rendererRoot(): string {
-  const built = path.join(UI_ROOT, "dist", "renderer");
-  return fs.existsSync(path.join(built, "index.html")) ? built : path.join(UI_ROOT, "static", "placeholder-panel");
+  return path.join(UI_ROOT, "dist", "renderer");
 }
 
 registerPanelScheme();
@@ -47,7 +50,8 @@ async function start(): Promise<void> {
   await app.whenReady();
   installSessionHardening();
 
-  const t = translator(resolveLocale(process.env.XMESH_UI_LANG));
+  const locale = resolveLocale(process.env.XMESH_UI_LANG);
+  const t = translator(locale);
   const roots = stateRoots();
   let panel: PanelWindow | undefined;
   const showPanel = (): void => {
@@ -80,6 +84,7 @@ async function start(): Promise<void> {
 
   const controller = new ShellController({
     discover: () => discoverInstances(roots),
+    locale,
     getLoginItem: () => autostart.get().enabled,
     setLoginItem: (enabled) => {
       const hint = autostart.set(enabled).hint;
@@ -90,7 +95,7 @@ async function start(): Promise<void> {
   });
 
   const calls: RecordedCall[] = [];
-  const answers = { confirm: true, cliFails: false };
+  const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
@@ -103,7 +108,29 @@ async function start(): Promise<void> {
   const tray = new TrayView(t, runAction, showPanel);
 
   servePanel(rendererRoot());
-  registerIpc({ controller, actions, panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined) });
+  const setupHost = fsSetupHost(roots[0]!, async (args) => {
+    if (TEST_MODE) {
+      calls.push({ op: "setup-cli", arg: [...args] });
+      if (answers.cliFails) throw new Error("simulated cli failure");
+      return `ok ${args[0]}`;
+    }
+    return runXmeshSetup(args);
+  });
+  // Tailnet administration shells out to `xmesh mesh --json`; the credential lives in that CLI's keychain profile.
+  const fakeMesh = TEST_MODE ? freshFakeMesh() : undefined;
+  const meshService = new MeshService(fakeMesh ? fakeMeshRunner(fakeMesh) : execMeshRunner(), () => {
+    const c = controller.snapshot.connection;
+    const file = c.kind === "connected" ? c.status.paths?.config_file : undefined;
+    return typeof file === "string" && file !== "" ? file : undefined;
+  });
+  registerIpc({
+    controller,
+    actions,
+    service: new PanelService(controller),
+    setup: (params) => runSetup(params, setupHost),
+    mesh: (request) => meshService.request(request),
+    panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
+  });
 
   let prev: Snapshot = controller.snapshot;
   tray.update(prev);
@@ -137,6 +164,7 @@ async function start(): Promise<void> {
       calls: () => calls.slice(),
       notices: () => notified.slice(),
       answers,
+      mesh: fakeMesh,
       showPanel,
       panelWebContents: () => panel?.window.webContents,
       panelPreferences: () => panel?.webPreferences,

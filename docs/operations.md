@@ -167,15 +167,59 @@ python3 scripts/smoke_local.py --binary bin/xmesh --isolation L2 --pat --shell /
 
 `sandbox-exec` 已被 Apple 标记为废弃，系统升级后应重新执行上述验收。系统缺少启动器时拒绝 L2 启动。当前实现允许读取 `/bin`、`/sbin`、`/usr`、`/System`、`/opt/homebrew`，以及必要的设备与目录元数据。
 
-Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检查 `.ssh`、`.config/gcloud`、`.azure` 和 `.aws`，包括已存在的符号链接目标。工作目录中的既有硬链接仍共享主机 inode；部署时应使用独立工作目录。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要额外的生命周期约束。Windows 当前配置 L2 时拒绝命令和终端启动。
+Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检查 `.ssh`、`.config/gcloud`、`.azure` 和 `.aws`，包括已存在的符号链接目标。工作目录中的既有硬链接仍共享主机 inode；部署时应使用独立工作目录。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要额外的生命周期约束。Windows 默认配置 L2 时拒绝命令和终端启动，只有显式开启实验开关才会使用 AppContainer，见下节。
 
 ## Windows L2
 
-当前 Windows exec 与 PTY 的 L2 请求返回 `sandbox.unavailable`。`internal/winbox` 提供独立 AppContainer profile、能力为空的启动属性和 profile 删除原语；真实工作目录绑定、exec/ConPTY 接入及异常退出回收仍在实现。其原生核验使用临时 profile，在 Windows 会话中执行：
+默认情况下 Windows exec 与 PTY 的 L2 请求返回 `sandbox.unavailable`。设置 `agent.policy.windows_appcontainer: true`（实验性，改动后需重启）后，`xmesh serve` 在状态目录的 `sandbox` 子目录建立 AppContainer 运行器，`isolation: L2` 的 exec 与 PTY 经它在独立 profile、工作目录授权和变更日志下执行。运行器使用守护 keeper 加内核写入围栏，并在启动时先回收上一次异常退出遗留的日志、授权与 profile：keeper 仍在时由它接管，keeper 已不存在（重启、注销或被终止）时用新围栏冻结工作目录后再回收。运行器创建或恢复失败时节点照常启动，L2 继续返回 `sandbox.unavailable`，`sys.info` 的 `warnings` 给出提示，原因写入节点日志。运行器失败的单次调用返回 `policy_denied`，规则名 `sandbox.runner_failed` 或 `sandbox.cleanup_pending`。stdio 后端的 L2 不经过托管运行器，仍然失败关闭。停止服务时先排空工具调用，再最多等待两分钟回收沙箱，服务停止等待相应延长。
+
+该开关不代表安全条件已经满足：工作目录树内写入冻结、同用户 WRITE_DAC 阻断、后代安全描述符变更纳入围栏与完整对象普查仍在 [实现状态](implementation-status.md) 列出，普通账户和真实环境验收也尚未完成。
+
+### Windows L2 的准入成本与工作目录规模
+
+每次 `isolation: L2` 的 exec 或 PTY 调用都重新做完整准入与回收：建立独立 AppContainer profile，为工作目录里的每个对象授权并记入日志，读取一遍 USN 基线，启动监督进程和监控；结束时核对、回收每个对象的授权并删除 profile。成本随工作目录的对象数（目录、文件和根本身）近似线性增长，与命令本身无关。
+
+GitHub `windows-latest` 上、不带竞态检测器、使用测试替身协调器的单次调用实测：
+
+| 工作目录对象数 | 单次调用总耗时 | 其中准入 | 其中回收 |
+| --- | --- | --- | --- |
+| 约 2（空目录） | 0.17 至 0.22 秒 | 约 0.09 秒 | 约 0.05 秒 |
+| 约 1000 | 0.9 至 1.5 秒（首次调用更慢） | 约 0.4 至 0.5 秒 | 约 0.4 至 0.5 秒 |
+| 约 4000 | 约 3.2 秒 | 约 1.4 秒 | 约 1.6 秒 |
+| 约 9000 | 约 7 至 8 秒 | 约 3 秒 | 约 3.4 至 4.6 秒 |
+
+生产协调器（守护 keeper 加写入围栏）启动时多约 0.03 秒，关闭时在大目录上多至 0.2 秒。早先实现状态里记录的“单次约 1.4 秒”来自带 `-race` 的 CI 测试运行，该数字包含竞态检测器的开销，不代表发布二进制的耗时。
+
+主要成本在逐对象的系统调用：约 9000 个对象时，授权（读取并写回 DACL）约占准入的三分之一到四成，重新打开每个对象取得身份句柄和第二次扫描各约五分之一，回收阶段的普查、DACL 回写和二次核对合计占回收的八成以上。这些步骤是 [CON-SEC](constraints/security.md) 要求的证明本身，不能为速度省略。
+
+运行器因此不复用 profile，也不在两次调用之间保留已准入的执行：保留执行意味着工作目录在空闲期间一直被写入围栏冻结，用户自己的编辑会被判为外部写入者；复用 profile 则让并发的调用共享同一个沙箱身份，破坏调用之间的隔离。需要降低成本时缩小工作目录，而不是放宽证明。
+
+逐对象的日志追加、授权意图与释放确认的落盘和描述符校验已是线性，不随对象数平方增长；授权意图整批一次落盘，先于第一次描述符修改；释放确认在对应对象回收之后整批落盘。一次调用的各阶段耗时在节点日志的 debug 级别以 `sandbox_execution_timing` 输出（`objects`、`admit_ms`、`launch_ms`、`cleanup_ms` 和各阶段明细）。在 Windows 上复现表中数字：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_SANDBOX = "1"
+$env:XMESH_TEST_WINDOWS_ADMISSION_COST = "1"
+go test ./internal/winbox -run Test_WindowsAdmissionCost -v -count=1 -timeout=1500s
+```
+
+**对象上限。** 工作目录（含根、所有文件和子目录）最多 10000 个对象，这是运行器能为一次执行授权并逐个回收的上限。超过时调用返回 `policy_denied`，规则名 `sandbox.workspace_too_large`，附 `limit` 字段；检查在创建 profile、keeper 和围栏之前完成，不会留下状态。执行期间新增的对象使总数越界同样视为越界：监控终止这次执行，调用按 `sandbox.cleanup_pending` 报告。
+
+`agent.default_cwd` 的示例值 `~` 指向用户主目录，几乎一定超过上限。启用 `agent.policy.windows_appcontainer` 时请把 `default_cwd` 设为具体的项目目录，或在每次调用里传入较小的 `cwd`；`node_modules`、构建产物等大目录也计入对象数。
+
+`internal/winbox` 提供独立 AppContainer profile、能力为空的启动属性、profile 删除、工作目录绑定与回收原语。原语的原生核验使用临时 profile，在 Windows 会话中执行：
 
 ```powershell
 $env:XMESH_TEST_WINDOWS_SANDBOX = "1"
 go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
+```
+
+经 `xmesh serve` 的生产启动链核验（开关、运行器构建、启动恢复、每次调用挂接）需要先构建二进制：
+
+```powershell
+go build -o $env:TEMP\xmesh-l2.exe ./cmd/xmesh
+$env:XMESH_TEST_WINDOWS_SANDBOX = "1"
+$env:XMESH_TEST_WINDOWS_BINARY = "$env:TEMP\xmesh-l2.exe"
+go test ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s
 ```
 
 AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。环回网络拒绝核对 helper 的准确 AppContainer SID，通过 Windows 网络隔离 API 确认该 SID 在探测前后均没有环回豁免，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。
@@ -318,18 +362,18 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 受管 AppContainer 的内部 ConPTY 入口接受调用方持有的有效 HPCON，创建时同时应用 pseudoconsole、Job 和 AppContainer 属性；身份登记完成后才恢复进程。调用方负责输入、窗口调整和持续排空输出，保持 HPCON/管道至全部附着进程退出；关闭 HPCON 时仍须并发读取输出以完成 flush。受管回收先封闭准入并终止/确认全部 Job，再由调用方关闭终端资源，独立监督路径使用相同协议。该能力原语的原生验收和生产工具接入状态见实现状态及 Windows 验收记录，生产 Windows L2 门禁继续适用。
 
-内部 `workspaceExecution` 要求可信调用方在准备开始前取得并持续持有外部 namespace/reparse/ACL writer guard；该 guard 覆盖 journal、profile、授权、USN 追踪、进程与监视器的完整寿命。准备返回所有者及错误时，保留所有者并调用带 context 的关闭接口重试。关闭封闭新准入，确认全部 Job 与持久进程清单回执，停止监视器并释放进程所有者，再按身份回收 ACL、删除 profile、刷盘 complete、关闭 journal，最后释放 guard。取消或期限到达保留清理义务；guard 关闭失败保留重试状态，poisoned journal 保留供恢复。普通进程与 ConPTY 启动检查生命周期取消并串行准入。生产部署仍须完成外部 writer 及异常宿主后 guard 寿命、完整 census、未知导入和工具层 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
+内部 `workspaceExecution` 要求可信调用方在准备开始前取得并持续持有外部 namespace/reparse/ACL writer guard；该 guard 覆盖 journal、profile、授权、USN 追踪、进程与监视器的完整寿命。准备返回所有者及错误时，保留所有者并调用带 context 的关闭接口重试。关闭封闭新准入，确认全部 Job 与持久进程清单回执，停止监视器并释放进程所有者，再按身份回收 ACL、删除 profile、刷盘 complete、关闭 journal，最后释放 guard。取消或期限到达保留清理义务；guard 关闭失败保留重试状态，poisoned journal 保留供恢复。普通进程与 ConPTY 启动检查生命周期取消并串行准入。外部 writer 围栏、异常宿主后的 keeper、未知导入归并和工具层 exec/ConPTY 集成已由 `agent.policy.windows_appcontainer=true` 接入生产启动路径；该开关默认关闭，关闭时 Windows L2 保持 `sandbox.unavailable`。开启后仍有的限制：完整 census 不能证明子树完整，普通账号读取变更日志未做真机验收，整机重启或外层 Job 终止时失败关闭。
 
-协调导入由生命周期串行入口调用受信源协调器；协调器接收源、目标路径，在 census/移动前协调外部 namespace/reparse/ACL 写入者，并持续保护移动后的导入对象身份，覆盖完整清理期间直至 guard 成功释放。guard 随准备错误一并返回时仍由生命周期接管；最多保留 256 个。关闭完成进程回收、ACL 恢复及 profile/journal 持久化清理后，逆序释放源 guard，再释放原 workspace guard；失败时保留所有者并重试关闭。宿主故障后的保护须由独立存续的协调机制提供。生产外部协调及工具层 exec/ConPTY L2 集成仍待完成，Windows 生产 L2 保持 `sandbox.unavailable`。
+协调导入由生命周期串行入口调用受信源协调器；协调器接收源、目标路径，在 census/移动前协调外部 namespace/reparse/ACL 写入者，并持续保护移动后的导入对象身份，覆盖完整清理期间直至 guard 成功释放。guard 随准备错误一并返回时仍由生命周期接管；最多保留 256 个。关闭完成进程回收、ACL 恢复及 profile/journal 持久化清理后，逆序释放源 guard，再释放原 workspace guard；失败时保留所有者并重试关闭。宿主故障后的保护须由独立存续的协调机制提供。生产外部协调及工具层 exec/ConPTY L2 集成已装配在 `agent.policy.windows_appcontainer`（默认关闭）之后，默认情况下 Windows 生产 L2 仍保持 `sandbox.unavailable`。
 
 
 ### Windows 独立 guard keeper 与未知导入
 
-内部 `launchGuardKeeper` 在 journal 与 profile 创建前启动 `xmesh __sandbox-guard`，固定工作区根、祖先链与 journal 目录链并在宿主退出后保持；宿主死亡后恢复入口 `recoverJournalDirectoryWithKeepers` 通过仅当前用户与 SYSTEM 可访问的私有命名管道接管，keeper 仅在读到已绑定 journal 的持久 `complete` 记录后同意释放。缺少 keeper 时默认失败关闭。keeper 不冻结树内 ACL/reparse 写入，整机重启或外层 Job 的 kill-on-close 会连同 keeper 一起结束；该机制尚未接入生产启动路径。
+内部 `launchGuardKeeper` 在 journal 与 profile 创建前启动 `xmesh __sandbox-guard`，固定工作区根、祖先链与 journal 目录链并在宿主退出后保持；宿主死亡后恢复入口 `recoverJournalDirectoryWithKeepers` 通过仅当前用户与 SYSTEM 可访问的私有命名管道接管，keeper 仅在读到已绑定 journal 的持久 `complete` 记录后同意释放。缺少 keeper 时默认失败关闭。keeper 不冻结树内 ACL/reparse 写入，整机重启或外层 Job 的 kill-on-close 会连同 keeper 一起结束；该机制由 `agent.policy.windows_appcontainer`（默认关闭）装配进生产启动路径。
 
-活动执行观察到未知导入（未登记且无创建记录的对象，例如被外部移入的目录）时，监视器以 `errWorkspaceUnknownImport` 终止执行，journal 持久记录 `workspace-unknown-import`；关闭仍可完成回收并向调用方返回该错误，之后不再接受协调导入。含该记录的 journal 需要本版本或更新的恢复二进制。该归并不证明子树完整，Windows 生产 L2 保持 `sandbox.unavailable`。
+活动执行观察到未知导入（未登记且无创建记录的对象，例如被外部移入的目录）时，监视器以 `errWorkspaceUnknownImport` 终止执行，journal 持久记录 `workspace-unknown-import`；关闭仍可完成回收并向调用方返回该错误，之后不再接受协调导入。含该记录的 journal 需要本版本或更新的恢复二进制。该归并不证明子树完整；这是开启 `agent.policy.windows_appcontainer` 之后仍然存在的限制，开关默认关闭，关闭时 Windows 生产 L2 保持 `sandbox.unavailable`。
 
-内部 `workspaceWriterFence` 把工作区与 journal 私有目录的祖先链以无 delete 共享的句柄钉住，并核对身份、reparse、硬链接、DACL 指纹及 NTFS 变更日志；`RequireWriterFence` 开启后生命周期拒绝无法 Verify 的 guard，违规使监视器终止执行，清理仍完成并返回违规。读取变更日志需要卷设备访问，普通账号须在目标账号上验收；该围栏默认关闭、尚未接入生产，且不随宿主崩溃存活。
+内部 `workspaceWriterFence` 把工作区与 journal 私有目录的祖先链以无 delete 共享的句柄钉住，并核对身份、reparse、硬链接、DACL 指纹及 NTFS 变更日志；`RequireWriterFence` 开启后生命周期拒绝无法 Verify 的 guard，违规使监视器终止执行，清理仍完成并返回违规。读取变更日志需要卷设备访问，普通账号须在目标账号上验收；该围栏在生产路径上只随 `agent.policy.windows_appcontainer`（默认关闭）启用，且不随宿主崩溃存活。
 
 ## 本机控制通道
 
@@ -376,7 +420,7 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 
 - 配对、PAT、入口客户端与口令的接口（契约里的 `pair`、`pats`、`ingress` 能力）。
 - `install --system` 的服务以 SYSTEM 运行。不带 `--state-dir` 时安装命令默认补上 `--state-dir %ProgramData%\xmesh\<节点名>`（`Test_InstallStateDir`），UI 和 `xmesh ... --control` 会枚举这个位置（`Test_ControlDiscoverSystemServices`）；管道名里的 SID 是 SYSTEM 的，以 `control.json` 的 `endpoint` 为准。已有的 SYSTEM 服务若原来用了默认目录（SYSTEM 的用户配置目录），升级后会换到新目录，需要重新配对或重新注册，或在重新安装时显式传原来的 `--state-dir`。
-- Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`）；AppContainer 内真实连接被拒的原生验收未做。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，CI 不运行。
+- Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`），并在打开 `windows_appcontainer` 的 `serve` 里验证 AppContainer 内的命令打开该管道被拒、本账户可以打开（`Test_WindowsL2ServeSandboxCannotOpenControlPipe`）。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，由 `go.yml` 的 `l2-unix` 任务运行。
 
 ## 测试版发布
 

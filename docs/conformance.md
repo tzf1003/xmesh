@@ -22,6 +22,8 @@
 | 门 3 的 tailnet 互联（仅直连路径） | `headscale.yml`：一次性 Headscale、两个 tsnet 节点互调、`Test_TailnetPeerConnectivity` |
 | 门 4 的 OAuth 协议路径 | `headscale.yml` 里的 `scripts/oauth_client.py`：动态注册、PKCE、登录、`tools/list`、`exec.run`；证明协议，不证明 claude.ai 的展示 |
 | 发布门禁 | `release.yml` 先跑 vet、竞态测试、矩阵检查，并要求同一提交上 `go.yml`、`contracts.yml`、`headscale.yml` 都已成功 |
+| L2 沙箱的真实拒绝 | `go.yml` 的 `l2-unix`（ubuntu 装 bubblewrap 并放开 user namespace，macOS 用 sandbox-exec）：`XMESH_TEST_L2=1 go test -race ./internal/policy ./internal/pty ./internal/exec -run L2`，其中 `Test_L2CannotConnectToControlSocket` 证明沙箱连不上控制套接字 |
+| Windows L2 联合验证 | `windows-l2-joint.yml`：开关打开的 `serve`（`Test_WindowsL2Serve*`，含 `Test_WindowsL2ServeSandboxCannotOpenControlPipe`）、`Test_WindowsManagedRunner*` 与全部 `WindowsAppContainer` 反例连续三轮 |
 | 控制面管理 | `meshadmin.yml`：`go test -race ./meshadmin ./cmd/xmesh`，带校验过的 Headscale 0.29.5 二进制运行集成场景 |
 
 ## 门 1 · 阶段 1 工具基础

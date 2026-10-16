@@ -110,7 +110,7 @@ test("a second instance adds a switcher with the selection checked", () => {
 });
 
 test("the login item checkbox toggles to the opposite value", () => {
-  const on = buildMenu(connected({}, { settings: { loginItem: true } }), t);
+  const on = buildMenu(connected({}, { settings: { loginItem: true, locale: "zh" } }), t);
   assert.equal(findItem(on, "settings.loginItem")?.checked, true);
   assert.deepEqual(findItem(on, "settings.loginItem")?.action, { type: "set-login-item", enabled: false });
 });

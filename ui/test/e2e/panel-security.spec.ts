@@ -165,12 +165,12 @@ test("a window that is not the panel cannot call the control IPC", async () => {
 test("panel calls reach the kernel through the main process, with validated arguments", async () => {
   h = await launch();
   const page = await h.openPanel();
-  await expect(page.getByTestId("state")).toHaveText("connected");
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("node")).toHaveText("win-dev-01");
 
   await page.getByRole("button", { name: "暂停接收新调用" }).click();
   await expect.poll(() => h.kernel.requests.some((r) => r.path === "/v1/drain")).toBe(true);
-  await expect(page.getByTestId("state")).toHaveText("connected");
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");
   await expectIcon(h, "draining");
 
   const bad = await page.evaluate(async () => {
