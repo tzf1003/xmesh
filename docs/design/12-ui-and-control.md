@@ -80,6 +80,8 @@ flowchart LR
 
 ### API 范围（v1）
 
+契约已落在 [CTR-CTL-01 至 12](../contracts/control.md)，下表是设计时的草案；与契约不一致处以契约为准（例如事件流多了 `hello` 与 `reset`，`status.warnings` 是结构化数组，另有能力协商）。
+
 路径前缀 `/v1`，请求与响应是 JSON，错误沿用 [CTR-ERR-01](../contracts/errors.md#ctr-err-01) 的信封。变更使用 `ETag` / `If-Match` 防并发覆盖。
 
 | 端点 | 作用 | 内核侧状态 |

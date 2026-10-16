@@ -44,7 +44,6 @@ if "date-time" not in FormatChecker.checkers:
     "audit-event.json": "audit-event.schema.json",
     "xmesh.ingress-public.json": "config.schema.json",
     "xmesh.ingress-multihost.json": "config.schema.json",
-    "audit-control.json": "audit-event.schema.json",
 }
 
 # 反例同样按文件名选择模式。这些文件必须无法通过校验。
@@ -57,7 +56,6 @@ if "date-time" not in FormatChecker.checkers:
     "invalid/config-funnel-with-domain.json": "config.schema.json",
     "invalid/error-pty-limit-named-active.json": "error.schema.json",
     "invalid/config-pty-authority-bad-name.json": "config.schema.json",
-    "invalid/audit-control-bad-actor.json": "audit-event.schema.json",
 }
 
 
@@ -126,6 +124,13 @@ def 检查链接() -> int:
     if 失败 == 0:
         print("文档相对链接全部可解析")
     return 失败
+
+
+def 检查控制契约() -> int:
+    """本机控制通道契约（CTR-CTL-*）的检查在 check_control.py。"""
+    import check_control
+
+    return check_control.main()
 
 
 def main() -> int:

@@ -1,0 +1,23 @@
+{
+  "api_version": "1.0",
+  "kernel_version": "0.4.0",
+  "node": "win-dev-01",
+  "pid": 1180,
+  "boot_id": "0b7e44d1",
+  "transport": "pipe",
+  "endpoint": "\\\\.\\pipe\\xmesh-S-1-5-21-1004336348-1177238915-682003330-1001-win-dev-01",
+  "started_at": "2026-10-16T15:30:00.123Z",
+  "capabilities": [
+    "status",
+    "events",
+    "peers",
+    "sessions",
+    "drain",
+    "config.read",
+    "config.write",
+    "pair",
+    "pats",
+    "ingress",
+    "audit"
+  ]
+}

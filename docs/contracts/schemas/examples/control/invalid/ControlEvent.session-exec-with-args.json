@@ -1,0 +1,23 @@
+{
+  "id": "9f3c21aa.64",
+  "seq": 64,
+  "time": "2026-10-16T15:30:00.123Z",
+  "type": "session",
+  "data": {
+    "change": "opened",
+    "session": {
+      "kind": "exec",
+      "id": "e-12",
+      "caller": "node-abc/s7f",
+      "oauth_client": "claude",
+      "cmd": "cargo",
+      "mode": "shared",
+      "state": "running",
+      "started_at": "2026-10-16T15:30:00.123Z",
+      "args": [
+        "--token",
+        "x"
+      ]
+    }
+  }
+}
