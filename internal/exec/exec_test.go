@@ -34,6 +34,8 @@ func run(m *Manager, r *cwd.Resolver, p *policy.Engine, caller string, a Object)
 	b, _ := json.Marshal(a)
 	return m.Run(context.Background(), caller, r, p, b)
 }
+
+// conformance: CTR-EXEC-01 RUL-05
 func Test_CTREXEC01_ArgvAndExit(t *testing.T) {
 	m, r, p := fixture(t)
 	o, e := run(m, r, p, "n/a", Object{"cmd": "/usr/bin/printf", "args": []string{"%s", "a; echo WRONG"}})
@@ -49,6 +51,8 @@ func Test_CTREXEC01_ArgvAndExit(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// conformance: CON-CONC-09 RUL-04
 func Test_CONCONC09_IdempotencyAndIsolation(t *testing.T) {
 	m, r, p := fixture(t)
 	args := Object{"cmd": "/bin/sh", "args": []string{"-c", "printf x >> count; printf result; exit 4"}, "idempotency_key": "once"}
@@ -82,6 +86,8 @@ func Test_CONCONC09_IdempotencyAndIsolation(t *testing.T) {
 		t.Fatal("cached policy bypass", e)
 	}
 }
+
+// conformance: CTR-EXEC-02 RUL-05
 func Test_CTREXEC02_OutputPagingAndTimeout(t *testing.T) {
 	m, r, p := fixture(t)
 	o, e := run(m, r, p, "n/a", Object{"cmd": "/usr/bin/printf", "args": []string{"0123456789abcdefgh"}})
@@ -106,6 +112,8 @@ func Test_CTREXEC02_OutputPagingAndTimeout(t *testing.T) {
 		t.Fatal("timed out child survived")
 	}
 }
+
+// conformance: CON-CONC-10
 func Test_CONCONC10_ExclusiveBarrier(t *testing.T) {
 	s := newScheduler(2, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -162,6 +170,8 @@ func Test_CONCONC10_ExclusiveBarrier(t *testing.T) {
 		t.Fatal(v)
 	}
 }
+
+// conformance: RUL-01
 func Test_RUL01_Saturation(t *testing.T) {
 	s := newScheduler(1, 1)
 	release, _, _ := s.acquire(context.Background(), "a", "shared")
