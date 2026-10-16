@@ -44,9 +44,12 @@ type runnerFixture struct {
 	mu                    sync.Mutex
 	prepared, released    int
 	journals              []string
+	production            bool // real keeper plus kernel writer fence instead of the double
 }
 
-func newRunnerFixture(t *testing.T) *runnerFixture {
+func newRunnerFixture(t *testing.T) *runnerFixture { return newRunnerFixtureWith(t, false) }
+
+func newRunnerFixtureWith(t *testing.T, production bool) *runnerFixture {
 	t.Helper()
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
@@ -56,7 +59,7 @@ func newRunnerFixture(t *testing.T) *runnerFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &runnerFixture{root: filepath.Join(base, "workspace"), outside: filepath.Join(base, "outside")}
+	f := &runnerFixture{root: filepath.Join(base, "workspace"), outside: filepath.Join(base, "outside"), production: production}
 	for _, dir := range []string{f.root, f.outside} {
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -77,7 +80,7 @@ func newRunnerFixture(t *testing.T) *runnerFixture {
 		t.Fatal(err)
 	}
 	state := filepath.Join(base, "state")
-	f.runner, err = NewRunner(context.Background(), RunnerConfig{
+	runnerConfig := RunnerConfig{
 		StateDir: state, MaxObjects: 64, Interval: 20 * time.Millisecond,
 		SupervisorCommand: supervisorTestCommand(t, false),
 		Coordinator: func(_ context.Context, workspace, journal string) (io.Closer, error) {
@@ -95,7 +98,12 @@ func newRunnerFixture(t *testing.T) *runnerFixture {
 				return nil
 			}), nil
 		},
-	})
+	}
+	if production {
+		runnerConfig.Coordinator = NewWorkspaceCoordinator(keeperTestCommand(t, false))
+		runnerConfig.RequireWriterFence = true
+	}
+	f.runner, err = NewRunner(context.Background(), runnerConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +167,9 @@ func (f *runnerFixture) requireReclaimed(t *testing.T, before []byte, control wi
 	f.mu.Lock()
 	prepared, released := f.prepared, f.released
 	f.mu.Unlock()
+	if f.production {
+		prepared, released = executions, executions // the real guard keeps no counters
+	}
 	if active != 0 || pending != 0 || prepared != executions || released != executions {
 		t.Fatalf("runner state: active=%d pending=%d prepared=%d released=%d want %d", active, pending, prepared, released, executions)
 	}
@@ -540,4 +551,45 @@ func Test_WindowsManagedRunnerHelper(t *testing.T) {
 		os.Exit(0)
 	}
 	t.Fatal("unknown runner helper mode", mode)
+}
+
+// The production coordinator (independent keeper plus kernel writer fence)
+// admits and reclaims real executions exactly as the test double does, and the
+// runner refuses a coordinator whose guard cannot verify the writer boundary.
+func Test_WindowsManagedRunnerProductionCoordinator(t *testing.T) {
+	f := newRunnerFixtureWith(t, true)
+	before, control := kernelJournalState(t, f.root)
+	m := f.execManager(t, "60s")
+	for run := 1; run <= 2; run++ {
+		call := f.helperCall("proof", filepath.Join(f.outside, "secret.txt"))
+		call["stdin"] = "production"
+		result, err := f.run(m, call)
+		if err != nil {
+			t.Fatal(run, err)
+		}
+		var proof runnerProof
+		if err := json.Unmarshal([]byte(result["stdout"].(string)), &proof); err != nil {
+			t.Fatal(err, result["stdout"])
+		}
+		if result["exit_code"] != 37 || !proof.AppContainer || !proof.Wrote || proof.OutsideRead != "denied" {
+			t.Fatalf("run %d: %v %+v", run, result, proof)
+		}
+		f.requireReclaimed(t, before, control, run)
+	}
+}
+
+func Test_WindowsManagedRunnerRequiresVerifiableGuard(t *testing.T) {
+	f := newRunnerFixture(t)
+	f.runner.config.RequireWriterFence = true
+	m := f.execManager(t, "60s")
+	_, err := f.run(m, f.helperCall("proof", filepath.Join(f.outside, "secret.txt")))
+	if err == nil {
+		t.Fatal("a guard without a writer fence was admitted")
+	}
+	f.mu.Lock()
+	prepared, released := f.prepared, f.released
+	f.mu.Unlock()
+	if prepared != 1 || released != 1 {
+		t.Fatal("unverifiable guard was not released", prepared, released)
+	}
 }

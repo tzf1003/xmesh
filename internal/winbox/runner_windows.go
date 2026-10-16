@@ -31,6 +31,10 @@ type RunnerConfig struct {
 	StateDir string
 	// Coordinator freezes external writers for each execution. It is required.
 	Coordinator WorkspaceCoordinator
+	// RequireWriterFence refuses any coordinator guard that cannot verify the
+	// external writer boundary before each launch. Production use sets it with
+	// NewWorkspaceCoordinator.
+	RequireWriterFence bool
 	// SupervisorCommand starts the independent process supervisor. Nil runs the
 	// current executable with "__sandbox-supervisor".
 	SupervisorCommand []string
@@ -227,6 +231,7 @@ func (r *Runner) open(ctx context.Context, workspace string) (*managedExecution,
 	options := workspaceExecutionOptions{
 		Workspace: workspace, Journal: journal, MaxObjects: r.config.MaxObjects, MaxJobs: 1,
 		Interval: r.config.Interval, MaxEvents: maxWorkspaceChangeEvents, SupervisorCommand: r.config.SupervisorCommand,
+		RequireWriterFence: r.config.RequireWriterFence,
 	}
 	// The execution observes this context for as long as it lives. It must not
 	// end with the tool call that created it; only a call cancelled during

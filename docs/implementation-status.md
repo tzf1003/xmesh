@@ -448,3 +448,11 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 边界：这是进程内模拟（多个入口网关与 Agent 在同一进程，传输为内存），没有证明真实多主机、真实 tailnet 或 LAN 网络下的延迟、分区与时钟漂移行为；租约的安全性只依赖各持有者本地单调计时快于或等于权威计时，不依赖主机间时钟一致，但依赖进程时钟速率大致准确。权威 Agent 是单点：它离线时全部入口拒绝新增终端；它的内存记录不持久，重启前须确认没有结果不确定的调用。同一入口配置多个 OAuth client 时，同一进程内仍由本机 gate 串行。真实验收需要至少两台入口主机，见[验收清单](validation/2026-10-16-acceptance-checklist.md)。
 
 `c64857c`（含跨主机预算与真实环境验收步骤）的 [push 工作流 38877354733](https://github.com/tzf1003/xmesh/actions/runs/38877354733) 与 [PR 工作流 38877359493](https://github.com/tzf1003/xmesh/actions/runs/38877359493) 的 macOS、Ubuntu、Windows 与 windows-native 检查及契约检查全部通过。同一代码的上一个提交 `32e3e43` 在 PR 工作流的 windows-native 中失败过一次：`internal/winbox` 中所有使用 `XMESH_TEST_WINDOWS_BINARY` 的 `cli-true` 子用例报 `fork/exec D:\a\_temp\xmesh-service-test.exe: The system cannot find the file specified`，说明该次运行中测试二进制在构建后被移除，失败用例与本次改动（不涉及 winbox 与 Windows 启动路径）无关；未能下载完整日志确认移除原因（可能是 runner 清理或杀毒软件隔离），换到 `c64857c` 后同类用例通过。若再次出现，应让该步骤在运行前校验二进制存在并在缺失时重新构建。
+
+## 生产写入协调器（keeper 与内核围栏合成）
+
+新增 `winbox.NewWorkspaceCoordinator`（`internal/winbox/coordinator_windows.go`）：每次执行先启动独立 guard keeper（固定工作区与 journal 目录链并在宿主崩溃后存活），再获取内核写入围栏，二者作为一个 guard 返回。该 guard 实现 `writerVerifier`：每次启动与导入前 `Verify` 围栏，`bindJournal` 把 journal 身份交给 keeper；`Close` 先让 keeper 在读到 journal 持久完成记录后释放，keeper 拒绝时两者都保留以便重试，之后才释放围栏。`RunnerConfig.RequireWriterFence` 使 runner 拒绝任何无法验证写入边界的 guard。
+
+新增原生用例 `Test_WindowsManagedRunnerProductionCoordinator`（真实 keeper 加围栏，连续两次真实 AppContainer exec，核对 token、工作区内写入、工作区外读取被拒、根 descriptor 逐字节恢复、journal 无残留）与 `Test_WindowsManagedRunnerRequiresVerifiableGuard`（测试替身 guard 在要求围栏时被拒绝且已释放），随主门禁运行。
+
+边界：`cmd/xmesh` 仍不安装 runner，Windows 生产 L2 保持 `sandbox.unavailable`。该 guard 不冻结树内写入，围栏只检出而不能阻止持有 WRITE_DAC 的同用户修改 DACL，census 仍是事后归并，普通账号读取变更日志待真实验收；因此这一步使前述各部件在同一条生产代码路径上可组合验证，并不证明安全条件已满足。
