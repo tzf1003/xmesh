@@ -519,7 +519,11 @@ func Test_WindowsManagedRunnerHelper(t *testing.T) {
 		time.Sleep(10 * time.Minute)
 		os.Exit(0)
 	case "tree-timeout", "tree-exit":
-		child := osexec.Command(os.Args[0], "-test.run=^Test_WindowsManagedRunnerHelper$", "--", "--xmesh-runner-helper", "sleep")
+		self, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		child := osexec.Command(self, "-test.run=^Test_WindowsManagedRunnerHelper$", "--", "--xmesh-runner-helper", "sleep")
 		child.Env = os.Environ()
 		// AppContainer cannot open NUL, which os/exec would otherwise use.
 		child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
