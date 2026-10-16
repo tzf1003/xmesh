@@ -52,7 +52,11 @@ def headscale_config(work, port):
         "        ipv4: 127.0.0.1", "        stunport: -1", "        stunonly: true", ""]))
     (work / "policy.json").write_text(json.dumps({
         "tagOwners": {"tag:device": ["xmesh@"], "tag:peer": ["xmesh@"], "tag:ingress": ["xmesh@"]},
-        "acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}],
+        # Whole-range prefixes rather than "*": a wildcard is expanded per node, so a node that joins
+        # later (the probe) can have its first TCP packets dropped by peers whose filter has not caught
+        # up yet, while disco pings, which the filter does not see, already succeed.
+        "acls": [{"action": "accept", "src": ["100.64.0.0/10", "fd7a:115c:a1e0::/48"],
+                  "dst": ["100.64.0.0/10:*", "fd7a:115c:a1e0::/48:*"]}],
     }))
     (work / "headscale.yaml").write_text("\n".join([
         f"server_url: http://127.0.0.1:{port}",
