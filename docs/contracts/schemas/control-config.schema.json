@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-config:1",
+  "title": "ControlConfig",
+  "description": "CTR-CTL-07。GET/PUT /v1/config。ETag 是磁盘上配置文件字节的 SHA-256。",
+  "$defs": {
+    "ConfigLoadError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "line", "column"],
+      "properties": {
+        "message": { "type": "string", "minLength": 1 },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "column": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "ConfigResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["etag", "content", "parsed", "valid", "load_error", "effective_etag", "restart_required"],
+      "properties": {
+        "etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "磁盘上文件的 ETag，与响应头 ETag 相同。" },
+        "content": { "type": "string", "description": "文件原文（UTF-8，含注释）。" },
+        "parsed": {
+          "type": ["object", "null"],
+          "description": "content 按 YAML 1.2 转成 JSON 数据模型的结果，形状符合 config.schema.json。语法错误时是 null。"
+        },
+        "valid": { "type": "boolean", "description": "content 通过 config.Parse 的校验。" },
+        "load_error": {
+          "oneOf": [{ "$ref": "#/$defs/ConfigLoadError" }, { "type": "null" }],
+          "description": "valid 为 false 时给出第一条错误。"
+        },
+        "effective_etag": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag",
+          "description": "正在生效的那份配置所对应的文件 ETag。与 etag 不同表示磁盘上的新内容尚未生效：热加载失败，或属于需要重启的变更。"
+        },
+        "restart_required": { "type": "boolean" }
+      }
+    },
+    "ConfigChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pointer", "op", "restart_required", "weakens_security"],
+      "properties": {
+        "pointer": { "type": "string", "description": "RFC 6901 JSON Pointer，指向 parsed 里的位置。" },
+        "op": { "enum": ["add", "remove", "replace"] },
+        "before": { "description": "remove 与 replace 存在。取值是配置里的原值，配置不含密钥。" },
+        "after": { "description": "add 与 replace 存在。" },
+        "restart_required": { "type": "boolean", "description": "node、mesh、ingress、gateway.listen 下的变更为 true。" },
+        "weakens_security": {
+          "type": "boolean",
+          "description": "内核判定这条变更放宽了限制（allow_dangerous、cwd_policy、authz、PAT scope、ingress 监听）。仅供 UI 弹确认，不是内核的授权边界，见 CTR-CTL-07。"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "add" } }, "required": ["op"] },
+          "then": { "required": ["after"], "not": { "required": ["before"] } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "remove" } }, "required": ["op"] },
+          "then": { "required": ["before"], "not": { "required": ["after"] } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "replace" } }, "required": ["op"] },
+          "then": { "required": ["before", "after"] }
+        }
+      ]
+    },
+    "ConfigPutRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content"],
+      "properties": {
+        "content": { "type": "string", "maxLength": 1048576 },
+        "dry_run": { "type": "boolean", "default": false, "description": "只校验并计算 diff，不写文件。" }
+      }
+    },
+    "ConfigPutResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied", "etag", "diff", "restart_required"],
+      "properties": {
+        "applied": { "type": "boolean", "description": "dry_run 为 true 或没有任何变化时是 false。" },
+        "etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "写入后的 ETag；未写入时是磁盘上当前的 ETag。" },
+        "diff": { "type": "array", "items": { "$ref": "#/$defs/ConfigChange" } },
+        "restart_required": { "type": "boolean", "description": "写入后的配置是否有变更需要重启才生效。" }
+      }
+    }
+  }
+}

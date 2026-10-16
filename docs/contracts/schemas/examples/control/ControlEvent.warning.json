@@ -1,0 +1,14 @@
+{
+  "id": "9f3c21aa.48",
+  "seq": 48,
+  "time": "2026-10-16T15:30:00.123Z",
+  "type": "warning",
+  "data": {
+    "change": "raised",
+    "warning": {
+      "code": "tailnet_not_ready",
+      "severity": "warning",
+      "message": "tailnet 尚未就绪，节点只能本机访问"
+    }
+  }
+}

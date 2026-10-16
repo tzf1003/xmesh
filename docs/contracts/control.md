@@ -1,0 +1,280 @@
+# 本机控制通道
+
+本篇是 [桌面 UI 与本机控制通道](../design/12-ui-and-control.md) 的契约部分：内核向本机用户暴露的控制通道 v1。UI（Electron）、`xmesh` CLI 的 `--control` 读法、内核实现和假内核都以这里为准。方案与契约冲突时以契约为准。
+
+机器可读的部分是 JSON Schema，它是唯一来源：
+
+| 文件 | 内容 |
+| --- | --- |
+| [schemas/control-common.schema.json](schemas/control-common.schema.json) | 版本、时间戳、ETag、能力、警告等公共类型 |
+| [schemas/control-endpoint.schema.json](schemas/control-endpoint.schema.json) | `control.json` |
+| [schemas/control-error.schema.json](schemas/control-error.schema.json) | 错误体、错误码与 HTTP 状态 |
+| [schemas/control-status.schema.json](schemas/control-status.schema.json) | `GET /v1/status` |
+| [schemas/control-events.schema.json](schemas/control-events.schema.json) | `GET /v1/events` 的事件 |
+| [schemas/control-peers.schema.json](schemas/control-peers.schema.json)、[control-sessions](schemas/control-sessions.schema.json) | 对端与会话视图 |
+| [schemas/control-drain.schema.json](schemas/control-drain.schema.json) | drain 与 resume |
+| [schemas/control-config.schema.json](schemas/control-config.schema.json) | 配置读写 |
+| [schemas/control-pair.schema.json](schemas/control-pair.schema.json)、[control-pats](schemas/control-pats.schema.json)、[control-ingress](schemas/control-ingress.schema.json)、[control-audit](schemas/control-audit.schema.json) | 配对、PAT、入口、审计 |
+| [schemas/control-routes.json](schemas/control-routes.json) | 路由表：方法、路径、能力、请求与响应类型、错误码 |
+
+下文引用的类型名（如 `StatusResponse`）就是这些文件 `$defs` 里的定义名，全局唯一。
+
+## CTR-CTL-01
+
+### 传输与发现
+
+控制通道是 HTTP/1.1 over 本机流式套接字，不走 TCP。
+
+| 平台 | 端点 | 访问控制 |
+| --- | --- | --- |
+| macOS、Linux | 状态目录下 `control.sock`，目录 `0700`，套接字 `0600`。路径超过 UDS 长度上限时落到 `$TMPDIR/xmesh-<uid>/control.sock` | 每个连接用对端凭据（`LOCAL_PEERCRED` / `SO_PEERCRED`）核对 uid 等于内核运行用户，不符立即关闭连接 |
+| Windows | 命名管道 `\\.\pipe\xmesh-<sid>-<节点名>` | 创建时设置 DACL：运行用户 SID、`SYSTEM`、`Administrators`；`install --system` 时额外授权安装者的 SID；拒绝远程客户端（`PIPE_REJECT_REMOTE_CLIENTS`） |
+
+内核在开始监听之后写 `control.json`（`ControlEndpointFile`），位置是状态目录（[`app.StateDir`](../../internal/app/runtime.go)，即 `<UserConfigDir>/xmesh/<节点名>/`）。写法是同目录临时文件加重命名；正常退出时删除。`endpoint` 永远是实际使用的路径，因此 UDS 回退到 `$TMPDIR` 时 UI 也不需要猜。
+
+UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点实例。文件存在不代表内核还活着：以连接是否成功为准，`pid` 只作提示。连接被拒绝或文件缺失都按「未运行」处理，不删除文件。
+
+### 身份与边界
+
+- 访问控制全部在连接层，请求里没有令牌、没有 cookie。同一 OS 用户下的任何进程都能连接，这与它本来就能改 `xmesh.yaml`、读 PAT 文件相符，见 [CON-SEC-12](../constraints/security.md#con-sec-12)。
+- 服务端忽略 `Host`。带 `Origin` 头的请求返回 `forbidden`：浏览器不可能连到套接字，出现 `Origin` 说明有东西在转发。
+- 控制通道不监听 TCP，不挂在 Gateway、Ingress、tailnet 监听器上，也不是 MCP 工具，见 [CON-ARCH-09](../constraints/architecture.md#con-arch-09)。
+- L2 沙箱里的进程必须连不上它，见 CON-SEC-12。
+- 内核不依赖 UI 存在，UI 退出或崩溃不影响任何资源，见 [CON-ARCH-10](../constraints/architecture.md#con-arch-10)。
+
+### 请求限制
+
+| 项 | 限制 |
+| --- | --- |
+| 请求体 | `PUT /v1/config` 最大 1 MiB，其余最大 64 KiB，超过返回 `payload_too_large` |
+| 内容类型 | 有请求体时必须是 `application/json`，UTF-8 |
+| 并发 | 同一资源的写操作在内核内串行；读不被写阻塞 |
+
+## CTR-CTL-02
+
+### 约定
+
+- 路径前缀 `/v1`。成功响应体与请求体是对应路由的 JSON，字段见路由表。失败响应体是 `ControlError`，HTTP 状态取自 [control-error.schema.json](schemas/control-error.schema.json) 的 `x-http-status`。
+- 信封与 [CTR-ERR-01](errors.md#ctr-err-01) 相同（`error`、`message`、`retry_after_ms`），错误码集合不同，因为这里的错误不是工具错误。`message` 是中文一行，调用方不得据此分支。
+- 每个响应带头 `X-Xmesh-Control-Version: <主>.<次>`，值也在 `control.json` 与 `status.control.api_version`。
+- 服务端拒绝请求体里的未知字段（`invalid_args`，`field` 指出位置），因为请求模式是封闭的。客户端必须忽略响应里的未知字段，并把未知枚举值当作「未知」处理。
+- 所有时间戳都是 UTC、固定毫秒的 RFC3339，如 `2026-10-16T15:30:00.123Z`。
+
+### 版本与兼容
+
+- 只加不改。次版本增加字段、路由、枚举值与能力；删除、改名、改语义必须升主版本并换前缀，内核同时提供上一主版本至少一个发布周期。
+- 客户端遇到主版本不同的内核，进入「版本不匹配」状态，只保留打开日志目录与升级入口。
+- 同一主版本内，新旧内核与 UI 混用靠能力协商：内核在 `control.json` 与 `status.control.capabilities` 里声明已实现的能力（`Capability`），UI 只对已声明的能力启用入口。路由表里每条路由属于一个能力；未声明能力的路由返回 `not_implemented`（501）。
+- 客户端不得发送比内核 `api_version` 更新的请求字段。
+
+### 并发控制
+
+只有配置有 ETag。`GET /v1/config` 的响应头 `ETag: "sha256-<64 位十六进制>"`（强校验器）与体内 `etag` 相同，是磁盘上配置文件字节的 SHA-256。`PUT /v1/config` 必须带 `If-Match`：缺失返回 `precondition_required`（428），不匹配返回 `precondition_failed`（412）并在 `current_etag` 给出当前值。其他变更路由是幂等或按名字寻址的，不使用 ETag。
+
+### 审计
+
+经控制通道发生的每个非 `GET` 请求写一条审计，格式是 [CTR-AUD-01](audit.md#ctr-aud-01) 的事件：`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:<连接身份>`（Unix 为 `uid-<数字>`，Windows 为 SID），`tool` 为路由编号（如 `control.config.put`），`args_digest` 只含键名与字节数。成功与失败都记。读取类路由不写审计，避免 UI 轮询刷满磁盘。
+
+### 内容边界
+
+事件流、会话视图、审计视图沿用 [INV-10](../constraints/invariants.md#inv-10)：模式封闭，没有任何字段可以放 stdout、stderr、stdin、终端数据、文件正文、命令参数或环境变量值。令牌正文只出现在 `PatSecret`（见 [CTR-CTL-09](#ctr-ctl-09)），登录口令只出现在 `IngressPasswordRequest` 的请求体。
+
+## CTR-CTL-03
+
+### GET /v1/status
+
+响应 `StatusResponse`，也是 `status` 事件的 `data`。字段包含 [CTR-SYS-01](sys.md#ctr-sys-01) 的全部字段，语义相同，只有 `warnings` 不同，见 [RUL-15](rulings.md#rul-15)。新增字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `control` | `api_version`、`kernel_version`、`boot_id`、`capabilities` |
+| `lifecycle` | `starting`、`running`、`stopping` |
+| `started_at`、`pid` | 进程启动时间与进程号 |
+| `drain` | `DrainState`，见 [CTR-CTL-06](#ctr-ctl-06) |
+| `paths` | `config_file`、`state_dir`、`log_dir`、`audit_dir`（不可用时为 `null`），供「打开配置文件、日志目录、审计目录」 |
+| `gateway` | `roles` 含 `gateway` 时存在：`listen`、`url`（MCP 地址，UI 用它生成 Claude Code 与 Codex 的连接命令）、`auth`（`gateway.pats` 非空为 `pat`） |
+| `ingress` | `roles` 含 `ingress` 时存在：`listen`、`issuer` |
+| `peers` | 不含本机的对端总数与在线数 |
+
+### 警告
+
+`warnings` 的元素是 `{code, severity, message}`。`code` 稳定，`message` 给人看。
+
+| code | severity | 何时 |
+| --- | --- | --- |
+| `restart_required` | `info` | `restart_required` 为真 |
+| `policy_reload_failed` | `error` | 热加载失败，继续使用上一份有效配置 |
+| `allow_dangerous` | `info` | 配置启用了 `allow_dangerous`（[CON-SEC-10](../constraints/security.md#con-sec-10) 要求提示） |
+| `tailnet_not_ready` | `warning` | 模式是 tailnet 但尚未加入 |
+| `authkey_unreadable` | `warning` | tailnet 模式下 `authkey_file` 不可读 |
+| `peer_offline` | `warning` | 有已知对端离线（每个离线对端一条或合并为一条，由内核决定，UI 不依赖条数） |
+| `audit_dropped` | `warning` | 有审计记录因含正文被拒绝写入 |
+| `quota_exhausted` | `warning` | PTY 或 exec 配额已满 |
+| `unclassified` | 任意 | 客户端遇到不认识的 code 时的归类 |
+
+### 托盘状态判定
+
+托盘图标与状态由下列规则按顺序判定，取第一条命中的，见 [RUL-18](rulings.md#rul-18)：
+
+1. 找不到 `control.json` 或连接被拒绝：未运行。
+2. `X-Xmesh-Control-Version` 主版本与 UI 支持的不同：版本不匹配。
+3. `drain.draining` 为真：排空中。
+4. `restart_required` 为真：需重启。
+5. `warnings` 里存在 `severity` 为 `warning` 或 `error` 的项：降级。
+6. 其他：正常。
+
+## CTR-CTL-04
+
+### GET /v1/events
+
+`Content-Type: text/event-stream`，长连接。每个 SSE 事件是：
+
+```text
+id: 9f3c21aa.42
+event: peer
+data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"peer","data":{...}}
+
+```
+
+`data` 行是 `ControlEvent` 的紧凑 JSON（单行），`event` 与其中的 `type` 相同，`id` 与其中的 `id` 相同。客户端只需要解析 `data`。
+
+| type | data | 何时 |
+| --- | --- | --- |
+| `hello` | `HelloData` | 每次连接的第一条，不进环形缓存，没有 `id`/`seq` |
+| `reset` | `ResetData` | 见下，不进环形缓存 |
+| `status` | `StatusResponse` | 状态有变化。内核合并短时间内的连续变化，至多每秒 4 条 |
+| `peer` | `PeerEventData` | 对端加入、更新、移除、上线、下线 |
+| `call` | `CallEventData` | 一次工具调用结束：工具名、设备、调用方、状态、错误码、耗时。不含参数与输出 |
+| `session` | `SessionEventData` | PTY、exec、租约的建立、变化、结束、释放 |
+| `warning` | `WarningEventData` | 警告出现或消失 |
+| `config` | `ConfigEventData` | 配置重新加载、加载失败、经控制通道写入；只含变更位置（JSON Pointer），不含取值 |
+| `lifecycle` | `LifecycleEventData` | 启动完成、进入 drain、恢复、开始停止 |
+
+### 续传与重置
+
+- 事件 id 是 `<boot_id>.<seq>`。`boot_id` 在内核每次启动时随机生成；`seq` 在一次启动内从 1 单调递增。
+- 内核保留最近 1024 条事件。客户端带 `Last-Event-ID` 重连时，若该 id 属于当前启动且仍在缓存内，内核先补发其后的全部事件；否则先发 `reset`：`boot_changed`（id 属于上一次启动）或 `gap`（id 比缓存里最旧的更早）。
+- 客户端收到 `reset` 必须丢弃增量状态，重新读取 `/v1/status`、`/v1/peers`、`/v1/sessions`，再从 `reset.data.head` 之后继续。首次连接（无 `Last-Event-ID`）同样应该先读快照再订阅，用 `hello.data.head` 对齐。
+- 空闲时内核每 15 秒发一行 SSE 注释 `: ping`。客户端 45 秒收不到任何字节，应断开并带 `Last-Event-ID` 重连，退避重试。
+- 每个连接有有限的发送队列；消费者太慢时内核关闭该连接，不丢弃事件、不无限缓存。客户端重连即可续传或重置。
+
+## CTR-CTL-05
+
+### GET /v1/peers
+
+响应 `PeersResponse`。`self` 为真的恰有一项（本机）。`connection` 是 `direct`、`derp`、`unknown`（离线或尚未探测）、`local`（本机自己）。数据来自 mesh 层，不触发任何工具调用。
+
+### GET /v1/sessions
+
+响应 `SessionsResponse`：`pty`（[CTR-PTY-01](pty.md#ctr-pty-01) 里除 `released` 外的会话）、`exec`（排队中与运行中）、`leases`（后端租约，`token` 是 fencing 序号，不是密钥）。只读视图。PTY 的字段与 [`pty.list`](pty.md#ctr-pty-02) 对应，加上 `oauth_client` 与 `created_at`；`exec.cmd` 只有可执行文件基名。没有终端缓冲、参数、stdin、环境变量。
+
+## CTR-CTL-06
+
+### POST /v1/drain、POST /v1/resume
+
+请求 `DrainRequest`（`mode` 缺省 `keep`），响应 `DrainResponse`。语义与 [CTR-GW-05](gateway.md#ctr-gw-05) 的 drain 相同，作用于本进程的 Agent 与同进程的 Gateway：
+
+- 进入 drain 后拒绝新的 `exec.run`、`pty.open`、`backend.acquire` 与后端工具，错误码 `policy_denied`，规则 `mesh.draining`。
+- `keep`：现有 PTY 与租约按原超时结束。
+- `kill`：另按 `pty.close` 的顺序终止本机全部 PTY 并释放全部租约，数量返回在 `closed_pty` 与 `released_leases`。
+- `resume` 清除 drain，不恢复被 `kill` 终止的资源。
+- drain 状态只在内存，内核重启后复位。
+
+规则见 [RUL-16](rulings.md#rul-16)：对已在 drain 的进程重复 `keep` 是 no-op；`keep` 升级到 `kill` 允许，且 `since` 不重置；`kill` 降级到 `keep` 返回 `conflict`，`reason` 为 `drain_downgrade`；未在 drain 时 `resume` 是 no-op。两个路由都返回完整的 `DrainState`。
+
+## CTR-CTL-07
+
+### GET /v1/config
+
+响应 `ConfigResponse`：`content` 是文件原文（含注释），`parsed` 是 YAML 1.2 转 JSON 数据模型后的对象（形状见 [config.schema.json](schemas/config.schema.json)），`valid` 与 `load_error` 说明磁盘上的内容能否通过 `config.Parse`。`effective_etag` 是正在生效的那份配置对应的文件 ETag；与 `etag` 不同，说明磁盘上的新内容尚未生效（热加载失败，或属于需要重启的变更）。
+
+### PUT /v1/config
+
+请求 `ConfigPutRequest`，必须带 `If-Match`。`dry_run: true` 只校验并计算 diff，不写文件，供 UI 保存前展示。
+
+内核的处理顺序：
+
+1. 检查体积与 `If-Match`（对磁盘上当前文件字节算 ETag，在写锁内比较）。
+2. 用与启动相同的 `config.Parse` 校验 `content`。失败返回 `config_invalid`（422），`diagnostics` 逐条给出位置，不写任何东西。
+3. 与当前磁盘内容比较，得到 `diff`。没有变化时 `applied: false`，不写文件。
+4. 写同目录临时文件（保持原文件权限）、`fsync`、重命名覆盖。Windows 使用等价的原子替换。注释与格式由客户端提交的 `content` 原样保留，内核不重新序列化。
+5. 返回 `applied: true`、新 `etag`、`diff`、`restart_required`，发 `config` 事件（`actor: control`），写审计。
+
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的字段（`node`、`mesh`、`ingress`、`gateway.listen`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
+
+### diff 与 `weakens_security`
+
+`diff` 的每项是 `{pointer, op, before, after, restart_required, weakens_security}`，`pointer` 是对 `parsed` 的 RFC 6901 JSON Pointer。`weakens_security` 由内核按下列规则计算，仅供 UI 弹确认对话框：
+
+- `agent.allow_dangerous` 变为 `true`。
+- `agent.cwd_policy.allow` 增加条目，或 `deny` 减少条目。
+- `agent.authz` 放宽（增加 tag 的工具授权或后端授权）。
+- `gateway.pats` 里某个 PAT 的 `scopes` 变宽，或 PAT 被整体删除后 `gateway.pats` 为空（认证关闭）。
+- `ingress` 监听方式变化。
+
+这是 UI 的体验保护，**不是内核的授权边界**：内核不会因为 `weakens_security` 拒绝写入，文档与 UI 文案不得让用户误以为有这层拦截。
+
+## CTR-CTL-08
+
+### 配对
+
+`POST /v1/pair/export`（无请求体）返回本机公开配对文档 `PairDocument`，等价于 `xmesh pair --export`，只含节点名、证书指纹、公开证书与 `tags`（导出时为空数组）。
+
+`POST /v1/pair/import` 的请求是 `PairImportRequest`：对端的 `pair`，加上 UI 向用户展示并由用户确认过的 `fingerprint`。内核比较它与 `pair.fingerprint`（忽略冒号与大小写）以及证书本身算出的指纹，不一致返回 `fingerprint_mismatch`（422）。`tags` 只允许 `tag:peer`、`tag:device`、`tag:ingress`，缺省 `["tag:peer","tag:device"]`。成功后 `restart_required` 与 `xmesh pair --import` 一致。
+
+两个路由只在 `mesh.mode` 为 `lan` 时可用，否则返回 `unsupported_mode`（409）。导入的指纹必须来自用户，UI 不得自动填入。
+
+## CTR-CTL-09
+
+### PAT
+
+PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上令牌文件。控制通道修改它们时，对 `xmesh.yaml` 的改动走与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件；Gateway 逐请求读取凭据，所以创建、轮转、撤销立即生效。
+
+| 路由 | 作用 |
+| --- | --- |
+| `GET /v1/pats` | `PatList`：名字、scope、令牌文件路径、文件修改时间；`enforced` 表示 `gateway.pats` 非空。不含令牌 |
+| `POST /v1/pats` | 创建。`name` 同节点名字符集，`scopes` 用 [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) 的语法。内核生成至少 32 字符的 URL 安全随机令牌，写入 `0600` 文件，并在配置里加条目。名字已存在返回 `conflict`。响应 `201 PatSecret` |
+| `POST /v1/pats/{name}/rotate` | 生成新令牌并原子替换令牌文件，配置不变，旧令牌立即失效。响应 `PatSecret` |
+| `DELETE /v1/pats/{name}` | 删除配置条目与令牌文件，`204` |
+
+令牌正文**只**出现在 `PatSecret` 里，即创建与轮转的那一次响应；之后任何接口都读不回。UI 只能在内存里展示一次，不得写入日志、事件或磁盘。`PatSecret` 以外的类型不得出现 `token` 字段，由 Go 与 TS 两侧的测试把关。
+
+## CTR-CTL-10
+
+### 入口
+
+`roles` 不含 `ingress` 时本组路由返回 `role_disabled`（409）。
+
+| 路由 | 作用 |
+| --- | --- |
+| `GET /v1/ingress/clients` | `IngressClientsResponse`：issuer 与已注册的 OAuth 客户端（不含 `secret_hash`） |
+| `DELETE /v1/ingress/clients/{client_id}` | 撤销客户端，并使其已签发的 access / refresh token 失效。`204`；不存在返回 `not_found` |
+| `PUT /v1/ingress/password` | 轮转登录口令。只写不读：请求体是新口令，响应只有 `rotated_at`。口令写入内核启动参数 `--oauth-password-file` 指向的文件（`0600`，原子替换）并更新内存。口令不是来自文件时返回 `conflict`，`reason` 为 `password_source_not_file` |
+
+口令轮转不撤销已有 token；要让现有客户端全部失效，UI 对每个客户端调用 `DELETE`。口令长度 12 到 256 字符，不在响应、事件、审计、日志中出现。
+
+## CTR-CTL-11
+
+### GET /v1/audit
+
+查询串对应 `AuditQuery`（所有值都是字符串）；按时间从新到旧返回，`limit` 默认 100、最大 1000，`next_cursor` 是对客户端不透明的游标，没有更多时为 `null`。`events` 的元素就是 [CTR-AUD-01](audit.md#ctr-aud-01) 的事件，原样透传，不加字段，所以继续满足「不含正文」。审计未启用时 `enabled` 为 `false`、`events` 为空。内核只读 `audit/*.jsonl`，被保留期删除的记录读不到。
+
+## CTR-CTL-12
+
+### 路由表与生成物
+
+[control-routes.json](schemas/control-routes.json) 是路由的唯一来源。每条路由有编号、方法、路径、所属能力、引入版本、查询串/请求体/响应体类型、成功状态、是否事件流、`If-Match` 要求、可能返回的错误码。所有路由共有的 `internal`、`unavailable`（带 `retry_after_ms`）、`forbidden`、`not_implemented`、`payload_too_large` 不逐条列出。
+
+| 产物 | 位置 | 如何保持一致 |
+| --- | --- | --- |
+| 夹具 | `schemas/examples/control/<定义名>.<变体>.json` 与 `invalid/` | [`check_control.py`](schemas/check_control.py)（由 `check_examples.py` 调用，接入 `contracts.yml`）：正例通过同名定义，反例失败；路由表里出现的每个请求与响应定义至少有一个正例 |
+| Go 类型 | `api/control/v1`；校验辅助 `api/control/v1/schemacheck` | 测试把每个正例解码进 Go 类型（拒绝未知字段）再编码，结果必须与原文件语义相同；Go 常量必须覆盖模式里的枚举，错误码的 HTTP 状态必须与 `x-http-status` 相同 |
+| TypeScript 类型 | `api/control/v1/ts/control.ts` | `scripts/gen-control-ts` 从模式生成，含类型、`CONTROL_ROUTES`、`ControlRouteTypes`（路由编号到请求/响应类型）、`CONTROL_ERROR_STATUS`。`contracts.yml` 重新生成后要求工作区无变化，并过 `tsc --strict` |
+
+改契约的顺序：先改本文与模式，再改夹具，跑 `python3 docs/contracts/schemas/check_examples.py`、`go test ./api/...`、`node scripts/gen-control-ts/generate.mjs`，把生成物一并提交。加路由时必须同时：在路由表加一行、选一个已有或新增的能力、为请求与响应各补正例、在内核的路由注册测试里断言它出现。
+
+### 实现方的验收
+
+- 内核的路由注册必须与 `schemas.ControlRoutes`（`control-routes.json` 的嵌入）一一对应，路径与方法相同，未声明的能力返回 501。
+- 假内核（`ui/testserver`）按 `examples/control/` 的夹具回放，走与真实内核相同的传输。
+- 隐私：向事件流与视图注入含 stdout 的对象必须被编码器拒绝（沿用 INV-10 的测试方法）。

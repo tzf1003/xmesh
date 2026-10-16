@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-routes:1",
+  "title": "ControlRoutesFile",
+  "description": "CTR-CTL-12。control-routes.json 的形状。路由表是控制通道对外路由的唯一来源：内核的路由注册、UI 的客户端、假内核都以它为准。",
+  "$defs": {
+    "SchemaRef": {
+      "type": "string",
+      "pattern": "^urn:xmesh:schema:[a-z-]+:[0-9]+#/\\$defs/[A-Za-z0-9]+$"
+    },
+    "ControlRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "method", "path", "capability", "since", "query", "body", "response", "success", "stream", "if_match", "errors"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^control\\.[a-z]+(\\.[a-z]+)*$",
+          "description": "路由编号。审计记录的 tool 字段使用它。"
+        },
+        "method": { "enum": ["GET", "POST", "PUT", "DELETE"] },
+        "path": { "type": "string", "pattern": "^/v1/[a-z/{}_-]+$", "description": "{name} 形式的路径参数。" },
+        "capability": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Capability" },
+        "since": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/ApiVersion", "description": "引入该路由的控制 API 版本。" },
+        "query": { "oneOf": [{ "$ref": "#/$defs/SchemaRef" }, { "type": "null" }] },
+        "body": { "oneOf": [{ "$ref": "#/$defs/SchemaRef" }, { "type": "null" }] },
+        "response": {
+          "oneOf": [{ "$ref": "#/$defs/SchemaRef" }, { "type": "null" }],
+          "description": "成功响应体。null 表示没有响应体（204）或事件流。"
+        },
+        "success": { "enum": [200, 201, 204] },
+        "stream": { "type": "boolean", "description": "true 为 text/event-stream，每个事件符合 ControlEvent。" },
+        "if_match": {
+          "enum": ["none", "required"],
+          "description": "required 表示请求必须带 If-Match，缺失返回 precondition_required。"
+        },
+        "errors": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-error:1#/$defs/ControlErrorCode" },
+          "description": "除所有路由共有的 internal、unavailable、forbidden、not_implemented、payload_too_large 之外，该路由可能返回的错误码。"
+        }
+      }
+    },
+    "ControlRoutesFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "routes"],
+      "properties": {
+        "api_version": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/ApiVersion" },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/ControlRoute" }
+        }
+      }
+    }
+  }
+}

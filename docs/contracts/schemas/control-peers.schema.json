@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-peers:1",
+  "title": "ControlPeers",
+  "description": "CTR-CTL-05。GET /v1/peers。数据来自 mesh 层，不含任何工具调用内容。",
+  "$defs": {
+    "Peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "self", "node_id", "tags", "online", "connection", "derp_region", "addrs", "last_seen", "os", "version"],
+      "properties": {
+        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "self": { "type": "boolean", "description": "本机自己。恰有一项为 true。" },
+        "node_id": { "type": "string", "minLength": 1 },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" }
+        },
+        "online": { "type": "boolean" },
+        "connection": {
+          "enum": ["direct", "derp", "unknown", "local"],
+          "description": "direct 为点对点，derp 为经中继，unknown 为离线或尚未探测，local 为本机自己。"
+        },
+        "derp_region": { "type": ["string", "null"], "description": "connection 为 derp 时的区域名。" },
+        "addrs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "网络内地址，不含公网地址。"
+        },
+        "last_seen": {
+          "oneOf": [
+            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+            { "type": "null" }
+          ]
+        },
+        "os": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"], "description": "对端内核版本，未知为 null。" }
+      }
+    },
+    "PeersResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["peers"],
+      "properties": {
+        "peers": { "type": "array", "items": { "$ref": "#/$defs/Peer" } }
+      }
+    }
+  }
+}

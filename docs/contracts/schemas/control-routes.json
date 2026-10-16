@@ -1,0 +1,289 @@
+{
+  "api_version": "1.0",
+  "routes": [
+    {
+      "id": "control.status.get",
+      "method": "GET",
+      "path": "/v1/status",
+      "capability": "status",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-status:1#/$defs/StatusResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.events.stream",
+      "method": "GET",
+      "path": "/v1/events",
+      "capability": "events",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 200,
+      "stream": true,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.peers.list",
+      "method": "GET",
+      "path": "/v1/peers",
+      "capability": "peers",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-peers:1#/$defs/PeersResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.sessions.list",
+      "method": "GET",
+      "path": "/v1/sessions",
+      "capability": "sessions",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-sessions:1#/$defs/SessionsResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.drain.start",
+      "method": "POST",
+      "path": "/v1/drain",
+      "capability": "drain",
+      "since": "1.0",
+      "query": null,
+      "body": "urn:xmesh:schema:control-drain:1#/$defs/DrainRequest",
+      "response": "urn:xmesh:schema:control-drain:1#/$defs/DrainResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.drain.resume",
+      "method": "POST",
+      "path": "/v1/resume",
+      "capability": "drain",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-drain:1#/$defs/DrainResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.config.get",
+      "method": "GET",
+      "path": "/v1/config",
+      "capability": "config.read",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-config:1#/$defs/ConfigResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.config.put",
+      "method": "PUT",
+      "path": "/v1/config",
+      "capability": "config.write",
+      "since": "1.0",
+      "query": null,
+      "body": "urn:xmesh:schema:control-config:1#/$defs/ConfigPutRequest",
+      "response": "urn:xmesh:schema:control-config:1#/$defs/ConfigPutResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "required",
+      "errors": [
+        "invalid_args",
+        "config_invalid",
+        "precondition_failed",
+        "precondition_required"
+      ]
+    },
+    {
+      "id": "control.pair.export",
+      "method": "POST",
+      "path": "/v1/pair/export",
+      "capability": "pair",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pair:1#/$defs/PairExportResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.pair.import",
+      "method": "POST",
+      "path": "/v1/pair/import",
+      "capability": "pair",
+      "since": "1.0",
+      "query": null,
+      "body": "urn:xmesh:schema:control-pair:1#/$defs/PairImportRequest",
+      "response": "urn:xmesh:schema:control-pair:1#/$defs/PairImportResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "fingerprint_mismatch",
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.pats.list",
+      "method": "GET",
+      "path": "/v1/pats",
+      "capability": "pats",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pats:1#/$defs/PatList",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.pats.create",
+      "method": "POST",
+      "path": "/v1/pats",
+      "capability": "pats",
+      "since": "1.0",
+      "query": null,
+      "body": "urn:xmesh:schema:control-pats:1#/$defs/PatCreateRequest",
+      "response": "urn:xmesh:schema:control-pats:1#/$defs/PatSecret",
+      "success": 201,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.pats.rotate",
+      "method": "POST",
+      "path": "/v1/pats/{name}/rotate",
+      "capability": "pats",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pats:1#/$defs/PatSecret",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found"
+      ]
+    },
+    {
+      "id": "control.pats.delete",
+      "method": "DELETE",
+      "path": "/v1/pats/{name}",
+      "capability": "pats",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found"
+      ]
+    },
+    {
+      "id": "control.ingress.clients.list",
+      "method": "GET",
+      "path": "/v1/ingress/clients",
+      "capability": "ingress",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-ingress:1#/$defs/IngressClientsResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "role_disabled"
+      ]
+    },
+    {
+      "id": "control.ingress.clients.delete",
+      "method": "DELETE",
+      "path": "/v1/ingress/clients/{client_id}",
+      "capability": "ingress",
+      "since": "1.0",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found",
+        "role_disabled"
+      ]
+    },
+    {
+      "id": "control.ingress.password.put",
+      "method": "PUT",
+      "path": "/v1/ingress/password",
+      "capability": "ingress",
+      "since": "1.0",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ingress:1#/$defs/IngressPasswordRequest",
+      "response": "urn:xmesh:schema:control-ingress:1#/$defs/IngressPasswordResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "conflict",
+        "role_disabled"
+      ]
+    },
+    {
+      "id": "control.audit.list",
+      "method": "GET",
+      "path": "/v1/audit",
+      "capability": "audit",
+      "since": "1.0",
+      "query": "urn:xmesh:schema:control-audit:1#/$defs/AuditQuery",
+      "body": null,
+      "response": "urn:xmesh:schema:control-audit:1#/$defs/AuditResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args"
+      ]
+    }
+  ]
+}

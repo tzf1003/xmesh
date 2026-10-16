@@ -126,6 +126,13 @@ def 检查链接() -> int:
     return 失败
 
 
+def 检查控制契约() -> int:
+    """本机控制通道契约（CTR-CTL-*）的检查在 check_control.py。"""
+    import check_control
+
+    return check_control.main()
+
+
 def main() -> int:
     print("开始校验 xmesh 契约模式与文档链接")
     失败 = 检查正例() + 检查反例() + 检查链接()

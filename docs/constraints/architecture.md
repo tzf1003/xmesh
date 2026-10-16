@@ -49,3 +49,17 @@ tailnet 内的身份是节点与 MCP 会话，不是这个登录主体的子用�
 本机或已加入 tailnet 的客户端调用另一台设备时，路径是「本机 Gateway → 目标 Agent」。禁止为了鉴权或审计把这条路径强制绕到入口节点。入口的审计只覆盖经过入口的调用；节点本地审计覆盖到达本 Agent 的调用。
 
 验收：断开入口进程后，两台已入网设备之间的 `<peer>/<tool>` 仍然成功。
+
+## CON-ARCH-09
+
+内核可以提供一条仅限本机用户的控制通道（[CTR-CTL-01](../contracts/control.md#ctr-ctl-01)）：macOS 与 Linux 用 Unix 域套接字，Windows 用命名管道。禁止监听 TCP，禁止挂在 Gateway、Ingress、tailnet 监听器上，禁止作为 MCP 工具暴露。
+
+与 [CON-ARCH-01](#con-arch-01) 的关系：云端客户端只见 MCP。本通道不面向云端客户端，也不是 `api/xmesh/v1` 那类节点间控制。
+
+验收：枚举内核的所有监听器，控制通道不在 TCP 上、不在 Gateway 路由表里，`tools/list` 里没有它。
+
+## CON-ARCH-10
+
+内核不依赖 UI 存在。没有 UI 时，全部角色、drain、配置热加载与 CLI 状态读取照常工作。UI 退出、崩溃或升级不得改变 PTY owner、租约 token、进行中的 exec。
+
+验收：强杀并重启 UI 进程，已有 PTY owner、租约 token 与 exec 不变；内核重启后 UI 自动重连并重新订阅事件。

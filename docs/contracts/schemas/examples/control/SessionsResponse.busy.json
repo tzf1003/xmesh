@@ -1,0 +1,63 @@
+{
+  "pty": [
+    {
+      "kind": "pty",
+      "id": "p-3a9f01bc",
+      "name": "build",
+      "owner": "node-abc/s7f",
+      "oauth_client": "claude",
+      "pid": 8812,
+      "state": "active",
+      "idle_s": 12,
+      "cols": 120,
+      "rows": 30,
+      "cwd": "C:\\Users\\x\\repos\\foo",
+      "created_at": "2026-10-16T15:30:00.123Z"
+    },
+    {
+      "kind": "pty",
+      "id": "p-77d0aa21",
+      "name": null,
+      "owner": "",
+      "oauth_client": null,
+      "pid": 9001,
+      "state": "orphaned",
+      "idle_s": 340,
+      "cols": 120,
+      "rows": 30,
+      "cwd": "C:\\Users\\x\\repos\\foo",
+      "created_at": "2026-10-16T15:30:00.123Z"
+    }
+  ],
+  "exec": [
+    {
+      "kind": "exec",
+      "id": "e-12",
+      "caller": "node-abc/s7f",
+      "oauth_client": "claude",
+      "cmd": "cargo",
+      "mode": "shared",
+      "state": "running",
+      "started_at": "2026-10-16T15:30:00.123Z"
+    },
+    {
+      "kind": "exec",
+      "id": "e-13",
+      "caller": "node-abc/s7f",
+      "oauth_client": "claude",
+      "cmd": "make",
+      "mode": "exclusive",
+      "state": "queued",
+      "started_at": "2026-10-16T15:30:00.123Z"
+    }
+  ],
+  "leases": [
+    {
+      "kind": "lease",
+      "resource": "backend:ida",
+      "owner": "node-abc/s7f",
+      "token": 7,
+      "expires_at": "2026-10-16T15:33:00.000Z"
+    }
+  ]
+}
