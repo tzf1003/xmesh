@@ -67,11 +67,10 @@ func Test_ProtectPathReferenceCounted(t *testing.T) {
 // connect to a live control socket outside its workspace. Needs a host with
 // bubblewrap (Linux) or sandbox-exec (macOS).
 func Test_L2CannotConnectToControlSocket(t *testing.T) {
-	if os.Getenv("XMESH_TEST_L2") != "1" || (runtime.GOOS != "linux" && runtime.GOOS != "darwin") {
-		t.Skip("set XMESH_TEST_L2=1 on Linux with bubblewrap or macOS with sandbox-exec")
-	}
 	if socket := os.Getenv("XMESH_TEST_CONTROL_SOCKET"); socket != "" {
-		// Helper process, running inside the sandbox.
+		// Helper process, running inside the sandbox. The sandbox environment does
+		// not carry XMESH_TEST_L2, so this must come before the skip below; with
+		// the order reversed the helper skipped and the parent saw a clean exit.
 		c, err := net.Dial("unix", socket)
 		if err == nil {
 			c.Close()
@@ -79,7 +78,17 @@ func Test_L2CannotConnectToControlSocket(t *testing.T) {
 		}
 		os.Exit(3)
 	}
-	root, err := filepath.EvalSymlinks(t.TempDir())
+	if os.Getenv("XMESH_TEST_L2") != "1" || (runtime.GOOS != "linux" && runtime.GOOS != "darwin") {
+		t.Skip("set XMESH_TEST_L2=1 on Linux with bubblewrap or macOS with sandbox-exec")
+	}
+	// A unix socket path is limited to about 100 bytes and the macOS test
+	// temp directory is longer than that, so use a short one.
+	short, err := os.MkdirTemp("/tmp", "xl2-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	root, err := filepath.EvalSymlinks(short)
 	if err != nil {
 		t.Fatal(err)
 	}

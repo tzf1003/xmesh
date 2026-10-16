@@ -116,3 +116,32 @@ jobs:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_ADMISSION_COST: "1"
         run: go test ./internal/winbox -run Test_WindowsAdmissionCost -v -count=1 -timeout=1500s
+  l2-unix:
+    # L2 sandbox tests that need a real bubblewrap or sandbox-exec: they refuse
+    # connections to the kernel control socket, outside reads and the network, and
+    # keep a foreground job controllable. They are skipped without XMESH_TEST_L2.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/go.yml
+      - name: Install bubblewrap and allow its user namespaces
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep util-linux
+          # Ubuntu 24.04 runners confine unprivileged user namespaces with AppArmor.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: L2 sandbox tests, including the control socket refusal
+        env:
+          XMESH_TEST_L2: "1"
+        run: go test -race ./internal/policy ./internal/pty ./internal/exec -run L2 -v -count=1 -timeout=600s

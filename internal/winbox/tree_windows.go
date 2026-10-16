@@ -240,6 +240,10 @@ func openRelativeObject(parent windows.Handle, name string, shareDelete, caseIns
 	return handle, nil
 }
 
+// errNonOrdinaryObject marks an object that carries a reparse point or more than
+// one hard link, the two shapes the workspace tree refuses to admit or track.
+var errNonOrdinaryObject = errors.New("AppContainer workspace requires ordinary single-link objects")
+
 func inspectTreeObject(handle windows.Handle, relative string) (treeObject, error) {
 	var info windows.ByHandleFileInformation
 	if kind, err := windows.GetFileType(handle); err != nil || kind != windows.FILE_TYPE_DISK {
@@ -249,7 +253,7 @@ func inspectTreeObject(handle windows.Handle, relative string) (treeObject, erro
 		return treeObject{}, err
 	}
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.NumberOfLinks > 1 {
-		return treeObject{}, fmt.Errorf("AppContainer workspace requires ordinary single-link objects")
+		return treeObject{}, errNonOrdinaryObject
 	}
 	var id fileIdentity
 	if err := windows.GetFileInformationByHandleEx(handle, windows.FileIdInfo, (*byte)(unsafe.Pointer(&id)), uint32(unsafe.Sizeof(id))); err != nil {

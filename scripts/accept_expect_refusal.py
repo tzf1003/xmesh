@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Step F: a Windows node asked for L2 isolation must refuse, with rule sandbox.unavailable.
 
-Production Windows L2 is not wired into exec and PTY start yet, so with `agent.policy.isolation: L2`
-the node has to refuse `exec.run` and `pty.open` instead of running the command unisolated. PASS
+With `agent.policy.isolation: L2` and the AppContainer runner off (`agent.policy.windows_appcontainer`
+unset, the default) the node has to refuse `exec.run` and `pty.open` instead of running the command
+unisolated. With the runner on, use accept_windows_l2.py instead. PASS
 means both calls came back as policy_denied / sandbox.unavailable and no process was started. A
 successful exec or PTY is a FAIL (isolation was silently skipped).
 
