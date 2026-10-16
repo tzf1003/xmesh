@@ -266,4 +266,6 @@ journal-backed profile 的受管所有者在任何进程准入前刷盘唯一 `e
 
 已追踪工作区的 `workspaceGrant.Close` 在确认进程退出、核对持久身份所有权后，先释放本所有者持有的后代身份/安全句柄，再补读 USN 并回收。句柄移交后持续封闭新的进程和授权准入，包含清理失败后的重试期间。根、祖先和凭证绑定及所有 profile 引用保持到完整回收成功；最终删除由 close USN 和当前 NTFS 记录共同确认。外部句柄仍使删除不完整、身份无法重开或日志追加失败时，持久义务与根绑定保留，关闭外部句柄或重开日志后可按原 ID 重试。完成后统一释放各 grant 引用，重复关闭保持零引用与日志不变。
 
-Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer 原生用例验证 classic disposition 删除初始文件、未确认退出时句柄保持、正常关闭、外部数据句柄保留错误与重试、追加失败后重开日志重试、根绑定保持、准确 DACL/控制位/标签恢复和持久完成重放；原生结果待 CI。独立 checkpoint 在执行期间继续持有初始句柄时可保留最终 close 错误。生产执行协调器须接入该关闭协议，并继续完成导入子树证明、周期 checkpoint、外部 ACL/命名空间/reparse writer 协调及 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
+Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer 原生用例验证 classic disposition 删除初始文件、未确认退出时句柄保持、正常关闭、外部数据句柄保留错误与重试、追加失败后重开日志重试、根绑定保持、准确 DACL/控制位/标签恢复和持久完成重放；三个原生子场景均通过。独立 checkpoint 在执行期间继续持有初始句柄时可保留最终 close 错误。生产执行协调器须接入该关闭协议，并继续完成导入子树证明、周期 checkpoint、外部 ACL/命名空间/reparse writer 协调及 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
+
+`644d177` 的 [push 工作流 38835272980](https://github.com/tzf1003/xmesh/actions/runs/38835272980) 与 [PR 工作流 38835280980](https://github.com/tzf1003/xmesh/actions/runs/38835280980) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38835272987` / `38835281068` 通过。原生 job `116762888408` / `116762912424` 的完整日志各确认 153 个独立 Job/AppContainer PASS 标记，保留全部既有 149 项。三个新增子场景验证存活宿主的正常关闭、外部句柄阻塞后的重试，以及日志追加失败后重开恢复。真实 AppContainer 设置 classic disposition 后，未确认退出时保留初始句柄，确认后关闭本所有者的后代句柄；失败期间根绑定、profile 引用和准入封闭保持，成功后准确恢复存活对象 DACL/控制位/标签、清空 grant 引用，并持久重放完成状态。
