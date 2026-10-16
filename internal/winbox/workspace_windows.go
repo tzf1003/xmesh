@@ -52,7 +52,7 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 		return nil, err
 	}
 	p.mu.Lock()
-	if p.sid == nil || p.deleted || p.reclaiming || p.processes != nil || p.grants != 0 {
+	if p.sid == nil || p.deleted || p.reclaiming || p.workspaceClosing || p.processes != nil || p.grants != 0 {
 		p.mu.Unlock()
 		tree.Close()
 		closeCredentialHandles(credentials)
@@ -176,23 +176,60 @@ func (g *workspaceGrant) Close() error {
 	}()
 	if g.profile.journal != nil {
 		g.profile.mu.Lock()
+		j := g.profile.journal
+		if j.state.changeCursor != nil {
+			// The durable identity manifest takes ownership after process reaping.
+			// Release our descendant handles so classic delete-pending objects can
+			// reach final close before the USN checkpoint proves their deletion.
+			// Root/ancestor/credential guards and profile references remain owned
+			// across any failed checkpoint or cleanup, including append failures.
+			if err := validateWorkspaceJournal(j, g.profile.sid); err != nil {
+				g.profile.mu.Unlock()
+				return err
+			}
+			g.profile.workspaceClosing = true
+			for _, grant := range g.selected.grants {
+				if grant == nil || grant.id == g.tree.objects[0].id {
+					continue
+				}
+				if grant.aclHandle != 0 {
+					windows.CloseHandle(grant.aclHandle)
+					grant.aclHandle = 0
+				}
+				if grant.handle != 0 {
+					windows.CloseHandle(grant.handle)
+					grant.handle = 0
+				}
+			}
+			for index := 1; index < len(g.tree.objects); index++ {
+				if handle := g.tree.objects[index].handle; handle != 0 {
+					windows.CloseHandle(handle)
+					g.tree.objects[index].handle = 0
+				}
+			}
+		}
 		// Recovery owns the complete snapshot, including a write-ahead intent
 		// whose kernel edit failed before an objectGrant could be returned.
-		if err := releaseJournalWorkspace(g.profile.journal, g.profile.sid, g.maxObjects); err != nil {
+		if err := releaseJournalWorkspace(j, g.profile.sid, g.maxObjects); err != nil {
 			g.profile.mu.Unlock()
 			return err
 		}
 		// Descriptors and durable acknowledgements are already committed. Close
 		// each live reference without issuing a second release record.
 		for _, grant := range g.selected.grants {
-			if grant.handle == 0 {
+			if grant == nil {
 				continue
 			}
-			windows.CloseHandle(grant.aclHandle)
-			windows.CloseHandle(grant.handle)
+			if grant.aclHandle != 0 {
+				windows.CloseHandle(grant.aclHandle)
+			}
+			if grant.handle != 0 {
+				windows.CloseHandle(grant.handle)
+			}
 			grant.aclHandle, grant.handle = 0, 0
 			g.profile.grants--
 		}
+		g.selected.grants = nil
 		g.profile.mu.Unlock()
 	} else if err := g.closeUnjournaled(); err != nil {
 		return err

@@ -182,8 +182,9 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 
 // Checkpoint is serialized with journal access. Processes may be live; the
 // caller coordinates external writers and retries after transient open races.
-// Live pinned-object final-close coordination and imported-subtree proofs
-// remain required before production L2 use.
+// Retained initial handles may delay final close during execution. Live workspace
+// Close releases descendants only after reaping; import proofs and the production
+// coordinator remain required before production L2 use.
 func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int) error {
 	if err := validateWorkspaceJournalOwnership(j, sid); err != nil {
 		return err

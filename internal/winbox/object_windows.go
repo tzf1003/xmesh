@@ -63,7 +63,7 @@ func (p *Profile) grantSelectedObject(object treeObject) (*objectGrant, error) {
 func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren bool) (*objectGrant, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil || p.deleted || p.reclaiming {
+	if p.sid == nil || p.deleted || p.reclaiming || p.workspaceClosing {
 		return nil, fmt.Errorf("AppContainer profile unavailable")
 	}
 	if p.journal != nil {

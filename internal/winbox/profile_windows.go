@@ -44,6 +44,7 @@ type Profile struct {
 	standaloneProcessAttributes bool
 	processesConfirmed          bool // Protected by mu; includes durable exit confirmation.
 	reclaiming                  bool // Blocks launch admission throughout workspace reclamation.
+	workspaceClosing            bool // Keeps admission sealed after tracked handle handoff, including retries.
 }
 
 func hresult(operation string, result uintptr) error {
@@ -141,7 +142,7 @@ func (p *Profile) applyProcess(attributes *windows.ProcThreadAttributeListContai
 	if p.processes != owner {
 		return fmt.Errorf("AppContainer process launch belongs to another execution owner")
 	}
-	if p.sid == nil || p.deleted || p.reclaiming || attributes == nil {
+	if p.sid == nil || p.deleted || p.reclaiming || p.workspaceClosing || attributes == nil {
 		return fmt.Errorf("AppContainer profile or attribute list unavailable")
 	}
 	if p.journal != nil && (p.journal.file == nil || p.journal.blocked != nil || p.journal.state.workspaceReleased || p.journal.state.complete) {

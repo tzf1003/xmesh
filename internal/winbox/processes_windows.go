@@ -47,7 +47,7 @@ func newExecutionProcesses(p *Profile, maxJobs int) (*executionProcesses, error)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.sid == nil || p.deleted || p.reclaiming || p.processes != nil || p.standaloneProcessAttributes {
+	if p.sid == nil || p.deleted || p.reclaiming || p.workspaceClosing || p.processes != nil || p.standaloneProcessAttributes {
 		return nil, fmt.Errorf("AppContainer execution profile is unavailable or already owned")
 	}
 	owner := &executionProcesses{operation: make(chan struct{}, 1), profile: p, limit: maxJobs}
