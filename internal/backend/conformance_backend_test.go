@@ -709,10 +709,15 @@ func Test_CTRMUX04_CrashFailsAllWaitersAndFencesOldToken(t *testing.T) {
 		if time.Since(start) > 5*time.Second {
 			t.Fatal("upstreams were failed only at their own timeout")
 		}
-		waitRunning(t, m)
+		// The crash is noticed asynchronously: the state can still read "running" and the second
+		// trigger fires only once the restart is done, so wait for the triggers before the state.
+		for deadline := time.Now().Add(10 * time.Second); changes.Load()-baseline < 2 && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
 		if changes.Load()-baseline < 2 {
 			t.Fatalf("crash and restart produced %d tools/list_changed triggers", changes.Load()-baseline)
 		}
+		waitRunning(t, m)
 		if out, err := m.Call(ctx, "n/b", "ida.echo", raw(map[string]any{}), mcpmux.Progress{}); err != nil || out.IsError {
 			t.Fatalf("restarted backend unusable: %v", err)
 		}
