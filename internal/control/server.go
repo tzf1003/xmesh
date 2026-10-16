@@ -115,6 +115,9 @@ func Start(o Options) (*Server, error) {
 		_ = listener.Close()
 		return nil, err
 	}
+	// The baseline is the running state, so the first sample does not announce "starting" ->
+	// "running" a second time; the lifecycle event below is what tells subscribers.
+	s.lifecycle.Store("running")
 	base := s.baseline()
 	s.done.Add(2)
 	go func() {
@@ -125,7 +128,6 @@ func Start(o Options) (*Server, error) {
 		defer s.done.Done()
 		s.poll(base)
 	}()
-	s.lifecycle.Store("running")
 	s.lifecycleEvent("running")
 	return s, nil
 }

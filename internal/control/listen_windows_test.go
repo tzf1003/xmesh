@@ -5,6 +5,7 @@ package control
 import (
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -48,7 +49,15 @@ func Test_CONSEC12_LivePipeDACL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := windows.CreateFile(name, windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
+	// A pipe whose listening instance is between two accepts answers PIPE_BUSY for a moment.
+	var h windows.Handle
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		h, err = windows.CreateFile(name, windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
+		if err != windows.ERROR_PIPE_BUSY || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

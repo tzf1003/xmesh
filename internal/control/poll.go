@@ -32,6 +32,9 @@ func (s *Server) poll(b *baseline) {
 	status, warnings, sessions := b.status, b.warnings, b.sessions
 	s.refreshPeersQuietly()
 	peers := peerMap(s.cachedPeers())
+	// Filling the peer cache for the first time changes the status counters; that is not a
+	// change worth a status event, the peer list is the baseline for peer events.
+	status = statusKey(s.snapshot())
 	tick := 0
 	for {
 		select {
