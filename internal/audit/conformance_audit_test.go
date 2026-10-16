@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,10 @@ func Test_CTRAUD01_EventKindsTimeFormatAndFilePermissions(t *testing.T) {
 		if !seen[event] {
 			t.Errorf("event %q never written; saw %v", event, seen)
 		}
+	}
+	if runtime.GOOS == "windows" {
+		// POSIX permission bits are not meaningful on Windows (Stat reports 0666/0777).
+		return
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	for _, file := range files {
