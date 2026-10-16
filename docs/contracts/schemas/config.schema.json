@@ -23,6 +23,16 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,62}$"
     },
+    "quota": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "每个主体的调用预算。省略的字段取默认值：每小时 10000 次、并发 64、单次最长 10m。",
+      "properties": {
+        "calls_per_hour": { "type": "integer", "minimum": 1, "default": 10000 },
+        "max_concurrent": { "type": "integer", "minimum": 1, "default": 64 },
+        "max_call_duration": { "$ref": "#/$defs/duration", "default": "10m" }
+      }
+    },
     "scope": {
       "type": "string",
       "pattern": "^(devices:read|exec:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|pty:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(read|write):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|sys:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|backend:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}))$"
@@ -109,7 +119,8 @@
               "scopes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/scope" } }
             }
           }
-        }
+        },
+        "quota": { "$ref": "#/$defs/quota" }
       }
     },
     "ingress": {
@@ -149,6 +160,12 @@
                   }
                 }
               }
+            },
+            "dynamic_client_scopes": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/scope" },
+              "default": ["devices:read"],
+              "description": "动态注册客户端的 scope 上限。省略时只有 devices:read；空数组表示只能完成 OAuth。"
             }
           }
         }
@@ -287,6 +304,7 @@
             }
           }
         },
+        "quota": { "$ref": "#/$defs/quota" },
         "policy": {
           "type": "object",
           "additionalProperties": false,

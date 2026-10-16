@@ -425,3 +425,42 @@ func TestWorkspaceChangeUnknownImportPlan(t *testing.T) {
 		t.Fatal("typed unknown import error")
 	}
 }
+
+func TestWorkspaceChangeSecurityPlan(t *testing.T) {
+	root := journalObject{Volume: 17, ID: [16]byte{1}, Directory: true}
+	file := journalObject{Volume: 17, ID: [16]byte{2}}
+	known := map[[16]byte]journalObject{root.ID: root, file.ID: file}
+	created := journalObject{Volume: 17, ID: [16]byte{3}}
+	changes := []workspaceChange{
+		{ID: file.ID, Parent: root.ID, USN: 100, Reason: usnReasonSecurity},
+		// A repeated record for one identity is reported once, in first-seen order.
+		{ID: file.ID, Parent: root.ID, USN: 110, Reason: usnReasonSecurity | usnReasonClose},
+		{ID: root.ID, Parent: [16]byte{99}, USN: 120, Reason: usnReasonSecurity | usnReasonClose, Attributes: usnDirectory},
+		// A new object's own descriptor activity is an ordinary creation, not a
+		// change to a tracked identity's descriptor.
+		{ID: created.ID, Parent: root.ID, USN: 130, Reason: usnReasonCreate | usnReasonSecurity},
+		// Unrelated volume activity is outside the census.
+		{ID: [16]byte{88}, Parent: [16]byte{99}, USN: 140, Reason: usnReasonSecurity},
+		// Other reasons on a tracked identity are not security changes.
+		{ID: file.ID, Parent: root.ID, USN: 150, Reason: 0x1 | usnReasonClose},
+	}
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 4)
+	if err != nil || !slices.Equal(plan.Security, []journalObject{file, root}) || !slices.Equal(plan.Created, []journalObject{created}) {
+		t.Fatal("security classification", plan, err)
+	}
+	// Planning never mutates the caller's census, and replay is stable.
+	if len(known) != 2 {
+		t.Fatal("planner changed the known census")
+	}
+	again, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 4)
+	if err != nil || !slices.Equal(again.Security, plan.Security) {
+		t.Fatal("security replay", again, err)
+	}
+	quiet, err := planWorkspaceChanges(changes[3:], 17, root.ID, known, nil, nil, 4)
+	if err != nil || len(quiet.Security) != 0 {
+		t.Fatal("unrelated activity was reported as a security change", quiet, err)
+	}
+	if !errors.Is(errWorkspaceSecurityChanged, errWriterFenceViolated) {
+		t.Fatal("a descendant security change must be a writer-fence violation")
+	}
+}

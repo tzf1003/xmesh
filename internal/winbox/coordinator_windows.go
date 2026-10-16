@@ -66,6 +66,12 @@ func (g *productionGuard) sealRoot(ctx context.Context) error {
 	return g.fence.sealRoot(ctx)
 }
 
+func (g *productionGuard) unsealRoot() {
+	if g.fence != nil {
+		g.fence.unsealRoot()
+	}
+}
+
 func (g *productionGuard) bindChains(workspace, journal *workspaceTree) error {
 	if g.fence == nil {
 		return errors.New("AppContainer writer fence is unavailable")

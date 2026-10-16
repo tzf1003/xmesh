@@ -56,6 +56,11 @@ type workspaceExecution struct {
 	ready     bool
 	closed    bool
 	unknown   int // Uncoordinated imports recorded durably before the journal closed.
+	// checked and observed hold the one final descendant-security proof, taken
+	// after reaping and before the first descriptor edit of cleanup. Retries keep
+	// reporting its result without re-reading a stream that cleanup itself wrote.
+	checked  bool
+	observed error
 }
 
 func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOptions, prepare workspaceExecutionPrepare) (*workspaceExecution, error) {
@@ -171,6 +176,9 @@ func (e *workspaceExecution) start(ctx context.Context, args []string, directory
 	if err := e.verifyFence(ctx); err != nil {
 		return windows.ProcessInformation{}, err
 	}
+	if err := e.workspace.verifyDescendantSecurity(ctx, e.maxEvents, true); err != nil {
+		return windows.ProcessInformation{}, err
+	}
 	return e.processes.startWithIO(ctx, args, directory, environment, stdio, console)
 }
 
@@ -275,6 +283,16 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		}
 		e.monitor = nil
 	}
+	// Every process is gone and no cleanup edit has happened yet, so any further
+	// descriptor change on the admitted snapshot is an external writer's.
+	if e.workspace != nil && !e.checked {
+		err := e.workspace.finalSecurityCheck(ctx, e.maxEvents)
+		if err != nil && !errors.Is(err, errWriterFenceViolated) && !errors.Is(err, errWorkspaceUnknownImport) {
+			return errors.Join(observationErr, err)
+		}
+		e.checked, e.observed = true, err
+	}
+	observationErr = errors.Join(observationErr, e.observed)
 	// Finish observation before releasing its process owner. Cancellation can
 	// make a live monitor request reap; a stopped monitor cannot send a request
 	// to a supervisor that is already completing its close acknowledgement.
@@ -285,6 +303,11 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		e.processes = nil
 	}
 	if e.workspace != nil {
+		// Reclamation edits the root's descriptor; from here a retry must not
+		// read this package's own edit as a foreign one.
+		if e.fence != nil {
+			e.fence.unsealRoot()
+		}
 		if err := e.workspace.closeContext(ctx); err != nil {
 			return errors.Join(observationErr, err)
 		}

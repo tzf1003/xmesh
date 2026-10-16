@@ -35,11 +35,7 @@ func (a *Agent) upstream(caller string) *mcp.ServerSession {
 	return nil
 }
 func backendToolAllowed(cfg *config.Config, caller identity.Caller, name string) bool {
-	for _, tag := range caller.Tags {
-		g, ok := cfg.Agent.Authz[tag]
-		if !ok {
-			continue
-		}
+	for _, g := range grantsFor(cfg, caller) {
 		for _, p := range g.Tools {
 			if p == "*" || p == name+".*" || p == name+"." {
 				return true
