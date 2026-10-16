@@ -167,7 +167,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
             class="editor"
             value={draft}
             spellcheck={false}
-            readOnly={!writable}
+            readOnly={!writable || !loaded}
             aria-label={t("nav.config")}
             aria-invalid={tooBig}
             onInput={(e) => {

@@ -169,6 +169,7 @@ test("ingress: revoke a client and rotate the password", async () => {
 test("config: review shows the diff and the weakening warning, then saves with the etag", async () => {
   const page = await open({}, "config");
   const editor = page.getByTestId("config-editor");
+  await expect(editor).not.toHaveValue("");
   const original = await editor.inputValue();
   expect(original.length).toBeGreaterThan(0);
 
@@ -187,6 +188,7 @@ test("config: review shows the diff and the weakening warning, then saves with t
 test("config: a stale etag offers the latest version; an invalid config lists diagnostics", async () => {
   const page = await open({}, "config");
   const editor = page.getByTestId("config-editor");
+  await expect(editor).not.toHaveValue("");
   const original = await editor.inputValue();
 
   h.kernel.panel.setContent(`${original}# changed elsewhere\n`);
