@@ -3,11 +3,13 @@
 package control
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unsafe"
 
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"golang.org/x/sys/windows"
 )
 
@@ -101,5 +103,39 @@ func Test_ControlPipeNameIsExclusive(t *testing.T) {
 	f := newFixture(t)
 	if _, _, err := Listen(ListenOptions{StateDir: f.server.o.StateDir, Node: "ctl-node"}); err == nil {
 		t.Fatal("second listener on the same pipe name")
+	}
+}
+
+// The state directory is private, so the SIDs allowed on the pipe get read access to control.json
+// itself, and again after every rewrite.
+func Test_ControlEndpointFileIsReadableByAllowedSIDs(t *testing.T) {
+	const reader = "S-1-5-21-1-2-3-1001"
+	dir := t.TempDir()
+	e := v1.ControlEndpointFile{APIVersion: v1.APIVersion, Node: "n", Transport: v1.TransportPipe, Endpoint: `\\.\pipe\x`}
+	for i := 0; i < 2; i++ {
+		if err := WriteEndpoint(dir, e, reader); err != nil {
+			t.Fatal(err)
+		}
+		sd, err := windows.GetNamedSecurityInfo(filepath.Join(dir, FileName), windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acl, _, err := sd.DACL()
+		if err != nil || acl == nil {
+			t.Fatalf("DACL: %v %v", acl, err)
+		}
+		found := false
+		for n := uint32(0); n < uint32(acl.AceCount); n++ {
+			var ace *windows.ACCESS_ALLOWED_ACE
+			if err := windows.GetAce(acl, n, &ace); err != nil {
+				t.Fatal(err)
+			}
+			if (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String() == reader && ace.Header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("pass %d: %s has no allow entry on control.json", i, reader)
+		}
 	}
 }

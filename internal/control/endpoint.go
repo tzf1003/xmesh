@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	"github.com/tzf1003/xmesh/internal/privdir"
 )
 
 // FileName is written into the node's state directory while the channel is up.
@@ -26,8 +27,11 @@ type Endpoint struct {
 	Dir string `json:"-"`
 }
 
-// WriteEndpoint stores e atomically with owner-only permission.
-func WriteEndpoint(dir string, e v1.ControlEndpointFile) error {
+// WriteEndpoint stores e atomically with owner-only permission. On Windows each SID in readers is
+// granted read access to the written file (the state directory itself stays private), so the UI of
+// the user who installed a SYSTEM service can find the channel; the grant is repeated on every
+// write because the rename brings in a new file.
+func WriteEndpoint(dir string, e v1.ControlEndpointFile, readers ...string) error {
 	raw, err := json.MarshalIndent(e, "", "  ")
 	if err != nil {
 		return err
@@ -43,8 +47,15 @@ func WriteEndpoint(dir string, e v1.ControlEndpointFile) error {
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
+	final := filepath.Join(dir, FileName)
 	if err == nil {
-		err = os.Rename(name, filepath.Join(dir, FileName))
+		err = os.Rename(name, final)
+		if err == nil {
+			if err = privdir.GrantRead(final, readers...); err != nil {
+				_ = os.Remove(final)
+			}
+			return err
+		}
 	}
 	if err != nil {
 		_ = os.Remove(name)

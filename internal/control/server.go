@@ -111,7 +111,7 @@ func Start(o Options) (*Server, error) {
 		Transport: bound.Transport, Endpoint: bound.Address, StartedAt: s.started, Capabilities: s.caps,
 	}
 	s.srv = &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	if err = WriteEndpoint(o.StateDir, s.endpoint); err != nil {
+	if err = WriteEndpoint(o.StateDir, s.endpoint, o.Listen.AllowSIDs...); err != nil {
 		_ = listener.Close()
 		return nil, err
 	}
