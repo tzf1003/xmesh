@@ -331,7 +331,7 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 受管 AppContainer 的内部 ConPTY 入口接受调用方持有的有效 HPCON，创建时同时应用 pseudoconsole、Job 和 AppContainer 属性；身份登记完成后才恢复进程。调用方负责输入、窗口调整和持续排空输出，保持 HPCON/管道至全部附着进程退出；关闭 HPCON 时仍须并发读取输出以完成 flush。受管回收先封闭准入并终止/确认全部 Job，再由调用方关闭终端资源，独立监督路径使用相同协议。该能力原语的原生验收和生产工具接入状态见实现状态及 Windows 验收记录，生产 Windows L2 门禁继续适用。
 
-内部 `workspaceExecution` 要求可信调用方在准备开始前取得并持续持有外部 namespace/reparse/ACL writer guard；该 guard 覆盖 journal、profile、授权、USN 追踪、进程与监视器的完整寿命。准备返回所有者及错误时，保留所有者并调用带 context 的关闭接口重试。关闭封闭新准入，确认全部 Job 与持久进程清单回执，停止监视器并释放进程所有者，再按身份回收 ACL、删除 profile、刷盘 complete、关闭 journal，最后释放 guard。取消或期限到达保留清理义务；guard 关闭失败保留重试状态，poisoned journal 保留供恢复。普通进程与 ConPTY 启动检查生命周期取消并串行准入。生产部署仍须完成外部 writer 及异常宿主后 guard 寿命、完整 census、未知导入和工具层 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
+内部 `workspaceExecution` 要求可信调用方在准备开始前取得并持续持有外部 namespace/reparse/ACL writer guard；该 guard 覆盖 journal、profile、授权、USN 追踪、进程与监视器的完整寿命。准备返回所有者及错误时，保留所有者并调用带 context 的关闭接口重试。关闭封闭新准入，确认全部 Job 与持久进程清单回执，停止监视器并释放进程所有者，再按身份回收 ACL、删除 profile、刷盘 complete、关闭 journal，最后释放 guard。取消或期限到达保留清理义务；guard 关闭失败保留重试状态，poisoned journal 保留供恢复。普通进程与 ConPTY 启动检查生命周期取消并串行准入。外部 writer 围栏、异常宿主后的 keeper、未知导入归并和工具层 exec/ConPTY 集成已由 `agent.policy.windows_appcontainer=true` 接入生产启动路径；该开关默认关闭，关闭时 Windows L2 保持 `sandbox.unavailable`。开启后仍有的限制：完整 census 不能证明子树完整，普通账号读取变更日志未做真机验收，整机重启或外层 Job 终止时失败关闭。
 
 协调导入由生命周期串行入口调用受信源协调器；协调器接收源、目标路径，在 census/移动前协调外部 namespace/reparse/ACL 写入者，并持续保护移动后的导入对象身份，覆盖完整清理期间直至 guard 成功释放。guard 随准备错误一并返回时仍由生命周期接管；最多保留 256 个。关闭完成进程回收、ACL 恢复及 profile/journal 持久化清理后，逆序释放源 guard，再释放原 workspace guard；失败时保留所有者并重试关闭。宿主故障后的保护须由独立存续的协调机制提供。生产外部协调及工具层 exec/ConPTY L2 集成已装配在 `agent.policy.windows_appcontainer`（默认关闭）之后，默认情况下 Windows 生产 L2 仍保持 `sandbox.unavailable`。
 
