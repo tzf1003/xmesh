@@ -20,12 +20,14 @@ Gateway 与入口不保存设备资源，见 [INV-03](../constraints/invariants.
 
 1. 若本连接设置过默认 device，且工具名没有 `/`，则补上默认 device 的前缀。`session.set_defaults`、`devices.list`、`tools.search` 不加前缀。
 2. 鉴权，见 [CTR-AUTHZ-01](oauth-authz.md#ctr-authz-01)。
-3. 补全默认 `cwd` 与 `env`：仅当参数里没有这两个键。调用方显式传入的值，包括空字符串，都不覆盖。
+3. 补全默认 `cwd` 与 `env`：仅当参数里没有这两个键，且目标是 `sys.`、`exec.`、`pty.`、`fs.` 这类内置工具并在其输入模式里声明了该参数。后端工具（如 `ida.*`）的参数原样透传，哪怕它也有名为 `cwd` 或 `env` 的参数。调用方显式传入的值，包括空字符串，都不覆盖。
 4. 写审计开始记录。
 5. 把请求发给目标 Agent。
 6. 把 Agent 的结果原样返回，包括 `isError` 与 `structuredContent`。Gateway 不把 `resource_busy` 翻译成别的码。
 
 目标不在线：`not_found`，`name` 为节点名。
+
+Gateway 三个自有工具在 `tools/list` 里带完整的输入模式和说明，模型据此填写 `device`、`pattern`、`cwd`、`env`。
 
 ## CTR-GW-02
 
@@ -100,9 +102,18 @@ Agent 上不存在这个工具。若客户端直连 Agent 并调用它，得到 
 
 Agent 收到后拒绝新的 `exec.run`、`pty.open`、`backend.acquire` 和后端工具，错误码 `policy_denied`，规则名 `mesh.draining`。`drain: keep` 时已有 PTY 与租约按原超时结束。`drain: kill` 时按 `pty.close` 的顺序终止本机全部 PTY，并 release 全部租约。
 
-`scope=mesh` 只作用于收到请求的这一个进程：该进程的 Agent 与同进程内的 Gateway 进入 drain，不会向其他节点转发。要下线全网，控制器须向每个节点分别发送一次请求。drain 状态只在内存里，进程重启后重置。
+`scope=mesh` 只作用于收到请求的这一个进程：该进程的 Agent 与同进程内的 Gateway 进入 drain，不会向其他节点转发。要下线全网，由发起方向每个节点分别发送一次请求，`xmesh drain --scope mesh` 即做这件事（见下）。drain 状态只在内存里，进程重启后重置。
 
-Gateway 收到后对该设备（或全网）停止路由，并发送 `tools/list_changed`。
+Gateway 收到后对该设备（或全网）停止路由，并发送 `tools/list_changed`。Gateway 有两条途径得知：同一进程的 Agent 收到控制消息时直接通知；任何 Gateway 从目标 Agent 的响应里看到 `policy_denied`、`rule: mesh.draining` 时立刻对该设备停止路由，不要求控制消息到达该 Gateway。设备离开网络后再回来视为新进程，清除这条标记。
+
+### 命令行
+
+```text
+xmesh drain --scope device --device <节点名> [--mode keep|kill] --config xmesh.yaml
+xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
+```
+
+命令以管理员身份入网，向每台目标设备的 `POST /control/drain` 发送上述载荷：`scope: device` 只发给 `--device` 指定的设备；`scope: mesh` 向所有在线的 `tag:device` 设备逐台发送 `scope: mesh`，各设备据此让自己的 Agent 与本机 Gateway 进入 drain。逐台输出结果，任何一台失败都使命令以非零状态退出。tailnet 模式用 `--authkey-file` 指向带 `tag:admin` 的 auth key，命令以临时节点入网；LAN 模式使用本机的配对证书，对端须用 `xmesh pair --import ... --tags tag:admin` 导入本机公开配对文件。
 
 ## CTR-GW-06
 

@@ -77,6 +77,8 @@ func run(args []string) error {
 		return controlCommand(args[1:])
 	case "uninstall", "start", "stop", "restart":
 		return withJSON(args[0], args[1:], func(rest []string) error { return serviceCommand(args[0], rest) })
+	case "drain":
+		return drain(args[1:])
 	case "version", "--version":
 		fmt.Println("xmesh " + buildVersion)
 		return nil

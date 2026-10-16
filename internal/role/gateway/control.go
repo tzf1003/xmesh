@@ -10,6 +10,48 @@ import (
 	"strings"
 )
 
+// controlTools describes the three tools the Gateway itself serves, with the
+// parameters CTR-GW-02 and CTR-GW-03 define. Models only see these schemas.
+func controlTools() []*mcp.Tool {
+	nullable := func(kind string) []string { return []string{kind, "null"} }
+	return []*mcp.Tool{
+		{
+			Name:        "devices.list",
+			Description: "列出网络中的设备：id（节点名，也是其他工具的前缀）、os、online、tags、backends 与 load（终端和 exec 占用）。无参数。离线设备最多保留 24 小时，online 为 false；从未成功读取过信息的新设备带 stale: true。需要 devices:read。",
+			InputSchema: map[string]any{"type": "object", "additionalProperties": false},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		},
+		{
+			Name:        "tools.search",
+			Description: "在某台设备的完整工具表中按子串查找工具，包括默认 tools/list 没有列出的后端工具。返回带前缀的 name 与 description，最多 100 条，truncated 为 true 表示结果被截断。需要 devices:read。",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"required":             []string{"device", "pattern"},
+				"properties": map[string]any{
+					"device":  map[string]any{"type": "string", "description": "节点名，或 local（本机）。"},
+					"pattern": map[string]any{"type": "string", "minLength": 1, "description": "大小写不敏感的子串，不是正则；匹配工具名与描述。"},
+				},
+			},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		},
+		{
+			Name:        "session.set_defaults",
+			Description: "设置当前 MCP 连接的默认值，至少给出一项：device 让不带设备前缀的工具名走该设备；cwd 与 env 会补进带有这两个参数的内置工具（fs.*、exec.run、pty.open）的调用，调用方显式传入的值优先，后端工具不受影响。传 null 清除该项，未提交的项保持不变。cwd 只在目标设备上校验。只影响当前连接。",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"minProperties":        1,
+				"properties": map[string]any{
+					"device": map[string]any{"type": nullable("string"), "description": "默认设备：节点名或 local，必须在线。"},
+					"cwd":    map[string]any{"type": nullable("string"), "description": "默认工作目录，原样保存，由目标设备在调用时判定。"},
+					"env":    map[string]any{"type": nullable("object"), "additionalProperties": map[string]any{"type": "string"}, "description": "默认环境变量，值为字符串；整体替换先前提交的 env。"},
+				},
+			},
+		},
+	}
+}
+
 func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *mcp.CallToolResult {
 	if !v.allowed("", name, "") {
 		return agent.Result(nil, toolerr.New("unauthorized", "需要设备发现权限", "scope", "devices:read", "tool", name))

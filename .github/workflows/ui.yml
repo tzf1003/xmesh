@@ -1,0 +1,77 @@
+# Electron 托盘壳（ui/）：类型检查、单元测试，以及 Windows 与 macOS 上的 Playwright 端到端。
+# 端到端对着假内核（ui/testserver）跑，不依赖真实内核。
+name: Electron UI
+
+on:
+  push:
+    paths:
+      - "ui/**"
+      - ".github/workflows/ui.yml"
+      - "api/control/v1/ts/**"
+      - "docs/contracts/control.md"
+      - "docs/contracts/schemas/**"
+  pull_request:
+    paths:
+      - "ui/**"
+      - ".github/workflows/ui.yml"
+      - "api/control/v1/ts/**"
+      - "docs/contracts/control.md"
+      - "docs/contracts/schemas/**"
+
+defaults:
+  run:
+    working-directory: ui
+
+jobs:
+  unit:
+    # 单元测试里的假内核走 Unix 域套接字（ubuntu、macOS）和命名管道（Windows），与真实传输一致。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      # 契约的 TS 生成物（api/control/v1/ts/control.ts）变了而 UI 里的副本没跟上，这里会失败。
+      - run: npm run check-types
+      - run: npm run typecheck
+      - run: npm test
+      - name: Release fuse profile can be applied and verified
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          node scripts/flip-fuses.mjs --profile release
+          node scripts/flip-fuses.mjs --verify --profile release
+
+  e2e:
+    # 托盘与面板的真实 Electron 端到端。Linux 托盘不在本期范围，所以只跑 Windows 与 macOS。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      # 构建、给 node_modules 里的 Electron 写入 test 档位的 fuses（保留 Playwright 需要的 inspect），再跑 Playwright。
+      - run: npm run test:e2e
+      - name: Upload Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-${{ matrix.os }}
+          path: |
+            ui/playwright-report
+            ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7

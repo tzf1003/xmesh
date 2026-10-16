@@ -119,6 +119,12 @@ func Digest(raw json.RawMessage, resolved string) map[string]any {
 	return out
 }
 func (l *Logger) Record(caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
+	return l.RecordSession("", caller, client, device, tool, args, result, isError, duration)
+}
+
+// RecordSession is Record for entry layers that also know the OAuth session
+// behind the call (CTR-AUD-01 oauth_session). An empty session is omitted.
+func (l *Logger) RecordSession(oauthSession, caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
 	b, e := json.Marshal(result)
 	if e != nil {
 		return toolerr.Internal("audit.result", e)
@@ -149,6 +155,9 @@ func (l *Logger) Record(caller, client, device, tool string, args json.RawMessag
 	if client != "" {
 		record["oauth_client"] = client
 	}
+	if oauthSession != "" {
+		record["oauth_session"] = oauthSession
+	}
 	var params struct {
 		Session string `json:"session_id"`
 	}
@@ -175,6 +184,16 @@ func (l *Logger) Record(caller, client, device, tool string, args json.RawMessag
 		summary.record = record
 		l.io[key] = summary
 		return nil
+	}
+	return l.Write(record)
+}
+
+// Event writes a metadata-only record that is not a tool call, such as a
+// dropped progress notification (CTR-MUX-02). It carries no arguments.
+func (l *Logger) Event(event, caller, oauthSession, device, tool string) error {
+	record := map[string]any{"time": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "event": event, "caller": caller, "device": device, "tool": tool, "status": "ok", "error": nil, "duration_ms": 0}
+	if oauthSession != "" {
+		record["oauth_session"] = oauthSession
 	}
 	return l.Write(record)
 }

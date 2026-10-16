@@ -1,5 +1,6 @@
 name: 发布 beta
-# 推送形如 v0.2.0-beta.1 的标签时，为 Windows、Linux、macOS 构建二进制并发布 GitHub 预发布版。
+# 推送形如 v0.2.0-beta.1 或 v0.2.0-rc.1 的标签时，为 Windows、Linux、macOS 构建二进制并发布 GitHub 预发布版。
+# 发布说明取自 .github/release-notes/beta.md（英文，__TAG__ 替换为标签）。
 on:
   push:
     tags: ['v*-beta*', 'v*-rc*']
@@ -14,6 +15,12 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: 标签格式
+        run: |
+          case "$GITHUB_REF_NAME" in
+            v[0-9]*.[0-9]*.[0-9]*-beta.[0-9]*|v[0-9]*.[0-9]*.[0-9]*-rc.[0-9]*) ;;
+            *) echo "tag $GITHUB_REF_NAME must look like v0.1.0-beta.1 or v0.1.0-rc.1" >&2; exit 1 ;;
+          esac
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -55,7 +62,15 @@ jobs:
           mkdir -p "dist/$name"
           ext=""; [ "$GOOS" = windows ] && ext=".exe"
           go build -trimpath -ldflags "-s -w -X main.buildVersion=${GITHUB_REF_NAME}" -o "dist/$name/xmesh$ext" ./cmd/xmesh
+          # 能在 runner 上运行的那个二进制必须报告标签版本；其余平台只能构建。
+          if [ "$GOOS" = linux ] && [ "$GOARCH" = amd64 ]; then
+            test "$("dist/$name/xmesh" version)" = "xmesh ${GITHUB_REF_NAME}"
+          fi
           cp README.md "dist/$name/" 2>/dev/null || true
+          # 操作者只下载归档：验收脚本和手册随二进制一起带走。
+          mkdir -p "dist/$name/scripts" "dist/$name/docs/validation"
+          cp scripts/*.py scripts/*.ps1 "dist/$name/scripts/"
+          cp docs/validation/real-environment-runbook.md "dist/$name/docs/validation/"
           cd dist
           if [ "$GOOS" = windows ]; then zip -qr "$name.zip" "$name"; else tar -czf "$name.tar.gz" "$name"; fi
           rm -rf "$name"
@@ -67,6 +82,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -77,6 +93,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/beta.md > notes.md
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease --generate-notes \
-            --title "$GITHUB_REF_NAME" \
-            --notes "测试版：二进制未签名，Windows 生产 L2 仍返回 sandbox.unavailable。"
+            --title "$GITHUB_REF_NAME" --notes-file notes.md
