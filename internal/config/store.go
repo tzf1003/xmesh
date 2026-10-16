@@ -66,6 +66,11 @@ func (s *Store) Get() *Config {
 	c.Mesh = s.current.Mesh
 	c.Gateway.Listen = s.current.Gateway.Listen
 	c.Ingress = s.current.Ingress
+	// The Gateway reads gateway.expose_backends once at startup.
+	if c.Gateway.ExposeBackends != s.current.Gateway.ExposeBackends {
+		s.restart = true
+		c.Gateway.ExposeBackends = s.current.Gateway.ExposeBackends
+	}
 	s.current = c
 	s.digest = digest
 	return c

@@ -1,0 +1,12 @@
+{
+  "time": "2026-10-15T05:31:10.456Z",
+  "event": "progress_unrouted",
+  "caller": "node-abc/s7f",
+  "oauth_client": "claude",
+  "oauth_session": "9f2c4a61d0b3e785",
+  "device": "win-dev-01",
+  "tool": "notifications/progress",
+  "status": "ok",
+  "error": null,
+  "duration_ms": 0
+}
