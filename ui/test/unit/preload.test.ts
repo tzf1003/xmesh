@@ -1,0 +1,106 @@
+// Loads the compiled preload against a fake `electron` and inspects exactly what it hands to the page.
+
+import assert from "node:assert/strict";
+import Module from "node:module";
+import * as path from "node:path";
+import { test } from "node:test";
+import { CHANNELS, PANEL_API_GLOBAL, PANEL_API_METHODS, SNAPSHOT_EVENT } from "../../src/shared/ipc";
+
+interface Exposed {
+  name: string;
+  api: Record<string, (...a: unknown[]) => unknown>;
+}
+
+function loadPreload() {
+  const exposed: Exposed[] = [];
+  const invoked: { channel: string; args: unknown[] }[] = [];
+  const listeners = new Map<string, Set<(e: unknown, ...a: unknown[]) => void>>();
+  const fake = {
+    contextBridge: {
+      exposeInMainWorld: (name: string, api: Exposed["api"]) => exposed.push({ name, api }),
+    },
+    ipcRenderer: {
+      invoke: async (channel: string, ...args: unknown[]) => {
+        invoked.push({ channel, args });
+        return { ok: true };
+      },
+      on: (c: string, l: (e: unknown, ...a: unknown[]) => void) => {
+        if (!listeners.has(c)) listeners.set(c, new Set());
+        listeners.get(c)!.add(l);
+      },
+      removeListener: (c: string, l: (e: unknown, ...a: unknown[]) => void) => listeners.get(c)?.delete(l),
+    },
+  };
+  const M = Module as unknown as { _load: (req: string, ...rest: unknown[]) => unknown };
+  const orig = M._load;
+  M._load = (req, ...rest) => (req === "electron" ? fake : orig.call(M, req, ...rest));
+  const file = path.join(__dirname, "..", "..", "src", "preload", "index.js");
+  delete require.cache[require.resolve(file)];
+  try {
+    require(file);
+  } finally {
+    M._load = orig;
+  }
+  return { exposed, invoked, listeners };
+}
+
+test("the preload exposes one frozen object named xmesh with exactly the whitelisted methods", () => {
+  const { exposed } = loadPreload();
+  assert.equal(exposed.length, 1);
+  assert.equal(exposed[0]!.name, PANEL_API_GLOBAL);
+  assert.deepEqual(Object.keys(exposed[0]!.api).sort(), [...PANEL_API_METHODS].sort());
+  assert.ok(Object.isFrozen(exposed[0]!.api));
+  for (const v of Object.values(exposed[0]!.api)) assert.equal(typeof v, "function");
+});
+
+test("each method calls its own channel with only the caller's argument", async () => {
+  const { exposed, invoked } = loadPreload();
+  const api = exposed[0]!.api;
+  await api.getSnapshot!();
+  await api.drain!();
+  await api.resume!();
+  await api.selectInstance!("n1");
+  await api.copy!("gatewayUrl");
+  await api.openPath!("logs");
+  await api.setLoginItem!(true);
+  await api.openExternal!("docs");
+  assert.deepEqual(invoked, [
+    { channel: CHANNELS.getSnapshot, args: [] },
+    { channel: CHANNELS.drain, args: [] },
+    { channel: CHANNELS.resume, args: [] },
+    { channel: CHANNELS.selectInstance, args: ["n1"] },
+    { channel: CHANNELS.copy, args: ["gatewayUrl"] },
+    { channel: CHANNELS.openPath, args: ["logs"] },
+    { channel: CHANNELS.setLoginItem, args: [true] },
+    { channel: CHANNELS.openExternal, args: ["docs"] },
+  ]);
+});
+
+test("no method lets the page pick a channel", async () => {
+  const { exposed, invoked } = loadPreload();
+  const api = exposed[0]!.api;
+  // Extra arguments are never forwarded as a channel; the channel is fixed per method.
+  await api.drain!("xmesh:set-login-item", true);
+  assert.equal(invoked.at(-1)!.channel, CHANNELS.drain);
+});
+
+test("onSnapshot hands the page the snapshot only, never the IPC event, and unsubscribes", () => {
+  const { exposed, listeners } = loadPreload();
+  const got: unknown[][] = [];
+  const off = exposed[0]!.api.onSnapshot!((...a: unknown[]) => got.push(a)) as () => void;
+  const set = listeners.get(SNAPSHOT_EVENT)!;
+  assert.equal(set.size, 1);
+  for (const l of set) l({ sender: "secret" }, { connection: { kind: "offline" } });
+  assert.deepEqual(got, [[{ connection: { kind: "offline" } }]]);
+  off();
+  assert.equal(set.size, 0);
+  assert.throws(() => exposed[0]!.api.onSnapshot!("not a function"), TypeError);
+});
+
+test("the preload source mentions only the fixed channel literals", async () => {
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "src", "preload", "index.js"), "utf8");
+  const literals = new Set([...src.matchAll(/"(xmesh:[a-z-]+)"/g)].map((m) => m[1]));
+  assert.deepEqual([...literals].sort(), [...Object.values(CHANNELS), SNAPSHOT_EVENT].sort());
+  assert.doesNotMatch(src, /exposeInMainWorld\([^)]*ipcRenderer/);
+});
