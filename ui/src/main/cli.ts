@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { defaultLookup, resolveXmeshBinary } from "./system/binary";
 
 /** The only `xmesh` subcommands the UI ever runs. K1 adds them alongside `--json` output. */
 export const CLI_COMMANDS = ["restart", "stop"] as const;
@@ -13,13 +14,16 @@ export function bundledXmesh(resourcesPath: string | undefined, platform: NodeJS
   return fs.existsSync(file) ? file : undefined;
 }
 
-/** `XMESH_BIN` wins, then the kernel bundled with the installed app, then `xmesh` on PATH. */
+/**
+ * `XMESH_BIN` wins, then the kernel bundled with the installed app, then `PATH`
+ * and the usual install directories (a login item starts with a minimal PATH).
+ */
 export function xmeshBinary(
   env: NodeJS.ProcessEnv = process.env,
   resourcesPath: string | undefined = (process as { resourcesPath?: string }).resourcesPath,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  return env.XMESH_BIN || bundledXmesh(resourcesPath, platform) || "xmesh";
+  return env.XMESH_BIN || bundledXmesh(resourcesPath, platform) || resolveXmeshBinary({ ...defaultLookup(), env, platform });
 }
 
 export class CliError extends Error {
