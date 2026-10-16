@@ -5,11 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,9 +17,8 @@ import (
 )
 
 type stdioProof struct {
-	Input          string
-	AppContainer   bool
-	ExtraInherited bool
+	Input        string
+	AppContainer bool
 }
 
 func stdioHandleFlags(t *testing.T, handle windows.Handle) uint32 {
@@ -32,6 +29,37 @@ func stdioHandleFlags(t *testing.T, handle windows.Handle) uint32 {
 		t.Fatal("standard stream handle unavailable", err)
 	}
 	return flags
+}
+
+type stdioReadResult struct {
+	body []byte
+	err  error
+}
+
+func drainExecutionTestStream(file *os.File) <-chan stdioReadResult {
+	result := make(chan stdioReadResult, 1)
+	go func() {
+		body, err := io.ReadAll(io.LimitReader(file, 64*1024))
+		if err == nil {
+			_, err = io.Copy(io.Discard, file)
+		}
+		result <- stdioReadResult{body, err}
+	}()
+	return result
+}
+
+func awaitExecutionTestStream(t *testing.T, result <-chan stdioReadResult) []byte {
+	t.Helper()
+	select {
+	case read := <-result:
+		if read.err != nil {
+			t.Fatal("standard stream drain", read.err)
+		}
+		return read.body
+	case <-time.After(5 * time.Second):
+		t.Fatal("standard stream drain deadline")
+		return nil
+	}
 }
 
 func Test_WindowsAppContainerProcessStdio(t *testing.T) {
@@ -106,12 +134,6 @@ func Test_WindowsAppContainerProcessStdio(t *testing.T) {
 			defer input.Close()
 			defer writer.Close()
 			text := "stdin 日本 😀\nsecond line\x00binary"
-			if _, err := io.WriteString(writer, text); err != nil {
-				t.Fatal(err)
-			}
-			if err := writer.Close(); err != nil {
-				t.Fatal(err)
-			}
 			var output, errorOutput, reader, errorReader *os.File
 			if mode == "shared-file" {
 				output, err = os.Create(filepath.Join(base, "spool.txt"))
@@ -132,8 +154,11 @@ func Test_WindowsAppContainerProcessStdio(t *testing.T) {
 			}
 			stdio := &executionStdio{windows.Handle(input.Fd()), windows.Handle(output.Fd()), windows.Handle(errorOutput.Fd())}
 			flags := []uint32{stdioHandleFlags(t, stdio.stdin), stdioHandleFlags(t, stdio.stdout), stdioHandleFlags(t, stdio.stderr)}
-			environment := []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_STDIO_HELPER=1", "XMESH_STDIO_EXTRA=" + strconv.FormatUint(uint64(secretHandle), 10),
-				"XMESH_STDIO_EXTRA_ID=" + fmt.Sprintf("%d:%d:%d", secretInfo.VolumeSerialNumber, secretInfo.FileIndexHigh, secretInfo.FileIndexLow), "GORACE=log_path=stdio-race"}
+			var stdoutResult, stderrResult <-chan stdioReadResult
+			if mode != "shared-file" {
+				stdoutResult, stderrResult = drainExecutionTestStream(reader), drainExecutionTestStream(errorReader)
+			}
+			environment := []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_STDIO_HELPER=1", "GORACE=log_path=stdio-race"}
 			process, err := owner.startWithStdio(ctx, []string{helper, "-test.run=^Test_WindowsAppContainerStdioHelper$"}, p.Directory(), environment, stdio)
 			if err != nil {
 				t.Fatal("stdio launch", err)
@@ -144,6 +169,28 @@ func Test_WindowsAppContainerProcessStdio(t *testing.T) {
 				if stdioHandleFlags(t, handle) != flags[index] {
 					t.Fatal("stdio launch changed original handle flags")
 				}
+			}
+			// Probe from the unrestricted owner while the helper is waiting for
+			// stdin. Invalid handle probes in an AppContainer can raise a kernel
+			// exception instead of returning a Win32 error.
+			var probe windows.Handle
+			if err := windows.DuplicateHandle(process.Process, secretHandle, windows.CurrentProcess(), &probe, 0, false, windows.DUPLICATE_SAME_ACCESS); err == nil {
+				kind, kindErr := windows.GetFileType(probe)
+				var info windows.ByHandleFileInformation
+				inherited := kindErr == nil && kind == windows.FILE_TYPE_DISK && windows.GetFileInformationByHandle(probe, &info) == nil &&
+					info.VolumeSerialNumber == secretInfo.VolumeSerialNumber && info.FileIndexHigh == secretInfo.FileIndexHigh && info.FileIndexLow == secretInfo.FileIndexLow
+				_ = windows.CloseHandle(probe)
+				if inherited {
+					t.Fatal("unrelated file capability inherited")
+				}
+			} else if !errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+				t.Fatal("child handle isolation probe", err)
+			}
+			if _, err := io.WriteString(writer, text); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
 			}
 			if mode != "shared-file" {
 				_ = output.Close()
@@ -167,19 +214,13 @@ func Test_WindowsAppContainerProcessStdio(t *testing.T) {
 				}
 				stdout, stderr, _ = bytes.Cut(body, []byte("\n"))
 			} else {
-				stdout, err = io.ReadAll(reader)
-				if err == nil {
-					stderr, err = io.ReadAll(errorReader)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
+				stdout, stderr = awaitExecutionTestStream(t, stdoutResult), awaitExecutionTestStream(t, stderrResult)
 			}
 			if exit != 0 {
 				t.Fatalf("stdio process exit %d: stdout=%s stderr=%s", exit, stdout, stderr)
 			}
 			var proof stdioProof
-			if err := json.Unmarshal(stdout, &proof); err != nil || proof.Input != text || !proof.AppContainer || proof.ExtraInherited || string(stderr) != "stderr 日本 😀\n" {
+			if err := json.Unmarshal(stdout, &proof); err != nil || proof.Input != text || !proof.AppContainer || string(stderr) != "stderr 日本 😀\n" {
 				t.Fatal("stdio capability proof", proof, string(stdout), string(stderr), err)
 			}
 		})
@@ -198,13 +239,7 @@ func Test_WindowsAppContainerStdioHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	extra, err := strconv.ParseUint(os.Getenv("XMESH_STDIO_EXTRA"), 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var info windows.ByHandleFileInformation
-	inherited := windows.GetFileInformationByHandle(windows.Handle(extra), &info) == nil && fmt.Sprintf("%d:%d:%d", info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow) == os.Getenv("XMESH_STDIO_EXTRA_ID")
-	if err := json.NewEncoder(os.Stdout).Encode(stdioProof{string(body), container != 0, inherited}); err != nil {
+	if err := json.NewEncoder(os.Stdout).Encode(stdioProof{string(body), container != 0}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.WriteString(os.Stderr, "stderr 日本 😀\n"); err != nil {
