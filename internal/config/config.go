@@ -47,7 +47,38 @@ type Gateway struct {
 	Listen         string         `json:"listen"`
 	ExposeBackends string         `json:"expose_backends"`
 	PATs           map[string]PAT `json:"pats"`
+	Quota          Quota          `json:"quota"`
 }
+
+// Quota bounds the tool calls one principal may make. A zero field means the
+// built-in default, so hand-built configurations keep working.
+type Quota struct {
+	CallsPerHour    int    `json:"calls_per_hour"`
+	MaxConcurrent   int    `json:"max_concurrent"`
+	MaxCallDuration string `json:"max_call_duration"`
+}
+
+const (
+	DefaultCallsPerHour  = 10000
+	DefaultMaxConcurrent = 64
+	DefaultCallDuration  = 10 * time.Minute
+)
+
+// Limits returns the effective quota with defaults applied.
+func (q Quota) Limits() (hourly, concurrent int, duration time.Duration) {
+	hourly, concurrent, duration = q.CallsPerHour, q.MaxConcurrent, DefaultCallDuration
+	if hourly <= 0 {
+		hourly = DefaultCallsPerHour
+	}
+	if concurrent <= 0 {
+		concurrent = DefaultMaxConcurrent
+	}
+	if d, e := time.ParseDuration(q.MaxCallDuration); e == nil && d > 0 {
+		duration = d
+	}
+	return
+}
+
 type PAT struct {
 	TokenFile string   `json:"token_file"`
 	Scopes    []string `json:"scopes"`
@@ -70,6 +101,9 @@ type Ingress struct {
 		Clients map[string]struct {
 			Scopes []string `json:"scopes"`
 		} `json:"clients"`
+		// DynamicClientScopes caps what a dynamically registered client may hold.
+		// Absent means devices:read only; an empty list means none.
+		DynamicClientScopes []string `json:"dynamic_client_scopes"`
 	} `json:"oauth"`
 }
 type Agent struct {
@@ -81,6 +115,7 @@ type Agent struct {
 	Backends   map[string]Backend       `json:"backends"`
 	Authz      map[string]Grant         `json:"authz"`
 	Policy     Policy                   `json:"policy"`
+	Quota      Quota                    `json:"quota"`
 }
 type Exec struct {
 	MaxConcurrent     int    `json:"max_concurrent"`
@@ -195,6 +230,8 @@ func Parse(b []byte) (*Config, error) {
 	c.Gateway.ExposeBackends = "all"
 	c.Gateway.Listen = "127.0.0.1:8080"
 	c.Ingress.MaxPTYPerClient = 8
+	c.Agent.Quota = Quota{DefaultCallsPerHour, DefaultMaxConcurrent, DefaultCallDuration.String()}
+	c.Gateway.Quota = c.Agent.Quota
 	c.Audit.Retention = "720h"
 	if e = json.Unmarshal(raw, c); e != nil {
 		return nil, e
@@ -224,8 +261,24 @@ func (c *Config) Validate() error {
 		}
 		if c.Ingress.Listen == "funnel" {
 			u, e := url.Parse(c.Mesh.ControlURL)
-			if e != nil || u.Host != "controlplane.tailscale.com" {
+			if e != nil || !officialControlURL(u) {
 				return fail("/mesh/control_url: Funnel 要求官方控制面")
+			}
+		}
+		if e := c.validateIssuerOrigin(); e != nil {
+			return e
+		}
+	}
+	for _, q := range []struct {
+		path  string
+		quota Quota
+	}{{"/agent/quota", c.Agent.Quota}, {"/gateway/quota", c.Gateway.Quota}} {
+		if q.quota.CallsPerHour < 0 || q.quota.MaxConcurrent < 0 {
+			return fail(q.path)
+		}
+		if q.quota.MaxCallDuration != "" {
+			if d, e := time.ParseDuration(q.quota.MaxCallDuration); e != nil || d <= 0 {
+				return fail(q.path + "/max_call_duration")
 			}
 		}
 	}
@@ -255,6 +308,10 @@ func (c *Config) Validate() error {
 		if e != nil || v < 0 {
 			return fail(p)
 		}
+	}
+	// The call budget's deadline would silently cut a longer default short.
+	if _, _, limit := c.Agent.Quota.Limits(); Duration(c.Agent.Exec.DefaultTimeout) > limit {
+		return fail("/agent/exec/default_timeout: 不得超过 agent.quota.max_call_duration")
 	}
 	for p, s := range map[string]string{"/agent/exec/inline_output_bytes": c.Agent.Exec.InlineOutputBytes, "/agent/pty/scrollback_bytes": c.Agent.PTY.ScrollbackBytes} {
 		n, e := Size(s)
@@ -288,4 +345,46 @@ func Size(s string) (int, error) {
 		return 0, fmt.Errorf("尺寸溢出")
 	}
 	return int(n << shift), nil
+}
+
+// officialControlHosts are the control planes Funnel is allowed to talk to.
+// Anything else, including look-alike suffixes and self-hosted control planes, is refused.
+var officialControlHosts = map[string]bool{"controlplane.tailscale.com": true, "login.tailscale.com": true}
+
+func officialControlURL(u *url.URL) bool {
+	return u.Scheme == "https" && u.User == nil && officialControlHosts[strings.ToLower(u.Hostname())] && (u.Port() == "" || u.Port() == "443") && (u.Path == "" || u.Path == "/")
+}
+
+// IssuerHost returns the issuer's lower-case host without a default port.
+func IssuerHost(issuer string) string {
+	u, e := url.Parse(issuer)
+	if e != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if port := u.Port(); port != "" && port != "443" {
+		return host + ":" + port
+	}
+	return host
+}
+
+// validateIssuerOrigin ties the OAuth issuer to the origin clients really use.
+func (c *Config) validateIssuerOrigin() error {
+	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
+	issuer := c.Ingress.OAuth.Issuer
+	if issuer == "" {
+		return nil
+	}
+	host := IssuerHost(issuer)
+	switch c.Ingress.Listen {
+	case "public:443":
+		if host != strings.ToLower(c.Ingress.Domain) {
+			return fail("/ingress/oauth/issuer: 必须与 ingress.domain 一致")
+		}
+	case "funnel":
+		if !strings.HasSuffix(host, ".ts.net") {
+			return fail("/ingress/oauth/issuer: Funnel 的 issuer 必须是该节点的 ts.net 源")
+		}
+	}
+	return nil
 }

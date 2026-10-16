@@ -11,12 +11,14 @@
   },
   "gateway": {
     "listen": "127.0.0.1:8080",
-    "expose_backends": "all"
+    "expose_backends": "all",
+    "quota": { "calls_per_hour": 10000, "max_concurrent": 64, "max_call_duration": "10m" }
   },
   "ingress": {
     "listen": "funnel",
     "oauth": {
       "issuer": "https://win-dev-01.tailnet.ts.net",
+      "dynamic_client_scopes": ["devices:read"],
       "clients": {
         "codex": {
           "scopes": ["devices:read", "exec:*", "pty:*", "fs:*"]
@@ -37,6 +39,7 @@
       "allow": ["~/repos", "~/ida", "/tmp"],
       "deny": ["~/.ssh", "~/.config/gcloud"]
     },
+    "quota": { "calls_per_hour": 10000, "max_concurrent": 64, "max_call_duration": "10m" },
     "exec": {
       "max_concurrent": 4,
       "exclusive_slots": 1,

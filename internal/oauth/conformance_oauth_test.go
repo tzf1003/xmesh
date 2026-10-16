@@ -71,7 +71,8 @@ func Test_CTROAUTH01_DiscoveryDocuments(t *testing.T) {
 			}
 		}
 	}
-	// A request that arrives with another Host header still gets the configured issuer.
+	// A request that arrives with another Host header never sees another issuer:
+	// it is either refused outright (421) or answered with the configured issuer.
 	req, _ := http.NewRequest("GET", h.URL+"/.well-known/oauth-authorization-server", nil)
 	req.Host = "evil.example"
 	resp, err := http.DefaultClient.Do(req)
@@ -81,7 +82,11 @@ func Test_CTROAUTH01_DiscoveryDocuments(t *testing.T) {
 	var spoofed map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&spoofed)
 	resp.Body.Close()
-	if spoofed["issuer"] != issuer || spoofed["token_endpoint"] != issuer+"/oauth/token" {
+	if resp.StatusCode == http.StatusMisdirectedRequest {
+		if _, leaked := spoofed["issuer"]; leaked {
+			t.Fatalf("refused request still carries metadata: %v", spoofed)
+		}
+	} else if spoofed["issuer"] != issuer || spoofed["token_endpoint"] != issuer+"/oauth/token" {
 		t.Fatalf("issuer follows the Host header: %v", spoofed)
 	}
 	// Discovery is read-only.
