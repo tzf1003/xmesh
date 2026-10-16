@@ -12,6 +12,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 	"golang.org/x/crypto/acme/autocert"
@@ -57,10 +58,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return e
 		}
 	}
-	if e := os.MkdirAll(o.StateDir, 0700); e != nil {
-		return e
-	}
-	if e := os.Chmod(o.StateDir, 0700); e != nil {
+	if e := privdir.Ensure(o.StateDir); e != nil {
 		return e
 	}
 	auditDir := c.Audit.Dir

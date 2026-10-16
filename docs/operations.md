@@ -129,6 +129,15 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-
 
 两端分别导入对方，重启使配对生效。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。
 
+## 状态目录权限
+
+状态目录存放节点私钥、OAuth 凭据、PAT 计数与审计日志，只允许运行用户使用。启动（`serve`、`pair`）时由 `internal/privdir` 保证：
+
+- macOS、Linux：目录 `0700`，已存在的目录会收紧到 `0700`。
+- Windows：`os.MkdirAll` 不设置 ACL，目录只继承父目录，放在 `C:\` 根下新建的目录里时其他本地用户默认可读写。现在新目录创建时就带受保护 DACL（禁用继承），只授予运行用户、`SYSTEM`、`Administrators` 完全控制，并带对象/容器继承，之后创建的文件沿用。`install --system` 时运行用户就是 `SYSTEM`，实际只有 `SYSTEM` 与 `Administrators`。
+- Windows 已存在的目录：不是真实目录（符号链接、junction、文件）或属主不是运行用户、`SYSTEM`、`Administrators` 时拒绝启动，因为另一个属主可以改回 ACL；否则 DACL 不是上述受保护形态时直接改写并向已有子对象传播，随后扫描整棵树：遇到链接或其他属主的条目报错，显式授权给其他账户的子对象重置为私有。这不能撤销目录开放期间别人已经读走的内容，开放过的状态目录里的密钥应视为已泄露并轮换。
+- 状态目录的 ACL 不授予安装者或登录用户。`install --system` 后桌面 UI 以普通用户读取 `%ProgramData%\xmesh\<节点名>\control.json` 时，需要由写该文件的一方调用 `privdir.GrantRead(path, sid...)` 给文件单独加只读 ACE（Windows 允许任何账户穿越自己不能列目录的上级目录，按精确路径打开该文件即可）；目录本身与其他文件仍保持私有。内核控制通道落地后接入该调用，授权者与命名管道 DACL 的 `--control-allow-sid` 保持一致。
+
 ## 后端与入口
 
 后端启动命令、工作目录和策略配置在 `agent.backends`。exclusive 后端先 `backend.acquire`，后续请求以 `_lease_token` 携带返回的 fencing token；Agent 转发业务参数前剥离此字段。普通业务 `token` 字段照常转发。续期必须显式调用 `backend.renew`。只改策略时有效后端进程和租约保留，后端配置变更或故障会使旧租约失效。
