@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,9 +110,10 @@ func stressProfile(t *testing.T) (*Profile, string) {
 	return p, helper
 }
 
-// A child that really races must exit with 66 inside an AppContainer, leave a
-// report in its private directory and show the same status to its parent as any
-// other status-66 failure. This pins the mapping and proves the capture works.
+// Compare the same race-enabled child inside and outside an AppContainer. The
+// racing child must report a data race and exit 66 when run normally. Whatever
+// the AppContainer run does is recorded: the race runtime can instead abort with
+// an internal error that leaves the same exit status without a race report.
 func Test_WindowsAppContainerRaceDiagnosticsControl(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" || os.Getenv("XMESH_TEST_WINDOWS_RACE_STRESS") == "" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 and XMESH_TEST_WINDOWS_RACE_STRESS on Windows")
@@ -121,14 +124,61 @@ func Test_WindowsAppContainerRaceDiagnosticsControl(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	result := probeAppContainerHelper(t, p, helper, "Test_WindowsAppContainerRaceProbeHelper", "XMESH_RACE_PROBE_RACE")
-	t.Logf("racing child: exit=%d runtime=%q races=%d", result.exit, result.runtime, len(result.races))
-	if result.exit != 66 {
-		t.Fatalf("racing AppContainer child exited %d, want the race detector status 66", result.exit)
+	for _, mode := range []struct {
+		name, marker string
+		launches     int
+	}{{"race", "XMESH_RACE_PROBE_RACE", 3}, {"epoch", "XMESH_RACE_PROBE_EPOCH", 10}, {"alloc", "XMESH_RACE_PROBE_ALLOC", 10}} {
+		outside := probeOrdinaryHelper(t, mode.marker)
+		t.Logf("%s outside AppContainer: exit=%d report=%q", mode.name, outside.exit, firstLine(outside.races))
+		if mode.name == "race" && (outside.exit != 66 || len(outside.races) == 0 || !strings.Contains(outside.races[0], "DATA RACE")) {
+			t.Errorf("racing child outside AppContainer: exit=%d reports=%q", outside.exit, outside.races)
+		}
+		histogram := map[string]int{}
+		for i := 0; i < mode.launches; i++ {
+			inside := probeAppContainerHelper(t, p, helper, "Test_WindowsAppContainerRaceProbeHelper", mode.marker)
+			histogram[fmt.Sprintf("exit=%d report=%q runtime=%q", inside.exit, firstLine(inside.races), firstLine([]string{inside.runtime}))]++
+		}
+		for outcome, count := range histogram {
+			t.Logf("%s inside AppContainer: %d of %d launches: %s", mode.name, count, mode.launches, outcome)
+		}
 	}
-	if len(result.races) == 0 || !strings.Contains(result.races[0], "DATA RACE") {
-		t.Fatalf("race report was not captured: runtime=%q races=%q", result.runtime, result.races)
+}
+
+func firstLine(values []string) string {
+	if len(values) == 0 {
+		return ""
 	}
+	line, _, _ := strings.Cut(strings.TrimSpace(values[0]), "\n")
+	return line
+}
+
+// probeOrdinaryHelper runs the helper as the current user with the same race
+// log configuration.
+func probeOrdinaryHelper(t *testing.T, marker string) probeResult {
+	t.Helper()
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "probe-helper.exe")
+	body, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(helper, body, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := osexec.Command(helper, "-test.run=^Test_WindowsAppContainerRaceProbeHelper$")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), marker+"=1", "GORACE=log_path="+filepath.Join(dir, "probe-race"))
+	output, _ := cmd.CombinedOutput()
+	var result probeResult
+	result.exit = uint32(cmd.ProcessState.ExitCode())
+	result.runtime = string(output)
+	logs, _ := filepath.Glob(filepath.Join(dir, "probe-race.*"))
+	for _, path := range logs {
+		if body, err := os.ReadFile(path); err == nil {
+			result.races = append(result.races, string(body))
+		}
+	}
+	return result
 }
 
 // Launch trivial race-enabled children repeatedly, each in a fresh profile, and
@@ -166,10 +216,27 @@ func Test_WindowsAppContainerRaceHelperLaunchStress(t *testing.T) {
 }
 
 var racyCounter int
+var epochCounter atomic.Int64
 
 func Test_WindowsAppContainerRaceProbeHelper(t *testing.T) {
 	switch {
 	case os.Getenv("XMESH_RACE_PROBE_NOOP") == "1":
+		os.Exit(0)
+	case os.Getenv("XMESH_RACE_PROBE_EPOCH") == "1":
+		// Many synchronization events without any race, to exercise the race
+		// runtime's per-thread clock and shadow memory handling.
+		var mu sync.Mutex
+		for i := 0; i < 400000; i++ {
+			mu.Lock()
+			epochCounter.Add(1)
+			mu.Unlock()
+		}
+		os.Exit(0)
+	case os.Getenv("XMESH_RACE_PROBE_ALLOC") == "1":
+		block := make([]byte, 256<<20)
+		for i := 0; i < len(block); i += 4096 {
+			block[i] = 1
+		}
 		os.Exit(0)
 	case os.Getenv("XMESH_RACE_PROBE_RACE") == "1":
 		var wg sync.WaitGroup

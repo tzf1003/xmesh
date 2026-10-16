@@ -51,7 +51,11 @@ func newRunnerFixture(t *testing.T) *runnerFixture {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	base := t.TempDir()
+	// The cwd resolver reports the canonical long path, not an 8.3 form.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	f := &runnerFixture{root: filepath.Join(base, "workspace"), outside: filepath.Join(base, "outside")}
 	for _, dir := range []string{f.root, f.outside} {
 		if err := os.Mkdir(dir, 0700); err != nil {
@@ -77,7 +81,7 @@ func newRunnerFixture(t *testing.T) *runnerFixture {
 		StateDir: state, MaxObjects: 64, Interval: 20 * time.Millisecond,
 		SupervisorCommand: supervisorTestCommand(t, false),
 		Coordinator: func(_ context.Context, workspace, journal string) (io.Closer, error) {
-			if workspace != f.root {
+			if !strings.EqualFold(workspace, f.root) {
 				return nil, fmt.Errorf("unexpected workspace %q", workspace)
 			}
 			f.mu.Lock()
