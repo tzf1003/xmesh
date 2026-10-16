@@ -285,3 +285,6 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 追踪工作区的内部正常关闭路径先确认执行退出并验证持久所有权，再释放后代身份/安全句柄，补读最终 close 事件并按持久 ID 回收；根/祖先/凭证绑定和 profile 引用持续保持到成功。外部数据句柄、无法重开身份或追加失败使关闭保留义务，重试继续使用持久身份清单；句柄移交后的新进程和授权准入持续封闭，完成后所有 grant 引用只释放一次。执行期间的独立 checkpoint 仍可能等待最终 close，生产协调器须串行日志操作、保持外部 writer guard 并接入本关闭协议。
 
 内部 `workspaceChangeMonitor` 在追踪已启用、唯一执行所有者尚未准入 Job 时建立，先执行一次补读，再周期刷盘 USN 身份和游标。调用方须持续持有外部命名空间/reparse/ACL writer guard。后台错误或生命周期取消会封闭新准入并以独立期限终止/确认 Job，写盘失败保留执行回执义务；根与凭证 guards/profile 引用留到回收成功。仍受初始句柄阻塞的最终 close 和缺少导入/链接证明会触发该故障路径。正常 Stop 先要求持久退出确认，并等待在途 checkpoint；等待超时保留附着，完成后才可 Close 工作区。Wait 期限只影响观察，故障结果可重复读取。生产协调器仍待接入，Windows L2 保持 `sandbox.unavailable`。
+
+
+执行期 USN checkpoint 对尚未最终关闭的已登记删除对象，先持久记录 `workspace-delete-intent` 再推进游标。意图保持 live census 与回收义务，监视器继续有界追踪；进程退出确认前保留 ACL 和初始身份句柄。后续最终 `FILE_DELETE | CLOSE` 与准确 NTFS 不存在证明共同构成删除回执。撤销 disposition 后仍存活的对象按正常身份核实回收 ACL。意图历史保持在 journal 和独立恢复清单中，每个完整写盘前缀可重放；含此记录需本版本或更新恢复二进制。尚未登记且无法按 ID 核实的 delete-pending 对象、最终关闭时不存在证明不足及历史/导入/link/reparse 证明异常保留错误；生产协调器和 Windows L2 门禁继续按实现状态文档执行。

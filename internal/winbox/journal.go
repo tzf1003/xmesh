@@ -66,6 +66,7 @@ type journalRecord struct {
 	SID               string                 `json:"sid,omitempty"`
 	Workspace         *journalWorkspace      `json:"workspace,omitempty"`
 	CreatedObjects    []journalObject        `json:"created_objects,omitempty"`
+	DeleteIntents     []journalDeletion      `json:"delete_intents,omitempty"`
 	DeletedObjects    []journalDeletion      `json:"deleted_objects,omitempty"`
 	ChangeCursor      *workspaceChangeCursor `json:"change_cursor,omitempty"`
 	Grant             *journalGrant          `json:"grant,omitempty"`
@@ -84,6 +85,7 @@ type journalState struct {
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
 	created           map[journalObject]bool
+	deleteIntents     map[journalObject]int64
 	deleted           map[journalObject]int64
 	changeCursor      *workspaceChangeCursor
 	executions        map[uint64]bool
@@ -104,6 +106,9 @@ func (s *journalState) accept(r journalRecord) error {
 	}
 	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
 		return fmt.Errorf("unexpected journal created-object fields")
+	}
+	if r.DeleteIntents != nil && r.Kind != "workspace-delete-intent" {
+		return fmt.Errorf("unexpected journal delete-intent fields")
 	}
 	if r.DeletedObjects != nil && r.Kind != "workspace-deleted" {
 		return fmt.Errorf("unexpected journal deleted-object fields")
@@ -151,6 +156,7 @@ func (s *journalState) accept(r journalRecord) error {
 		s.objects = make(map[journalObject]bool, len(w.Objects))
 		s.granted = make(map[journalObject]bool)
 		s.created = make(map[journalObject]bool)
+		s.deleteIntents = make(map[journalObject]int64)
 		s.deleted = make(map[journalObject]int64)
 		for _, object := range w.Objects {
 			s.objects[object] = true
@@ -167,6 +173,11 @@ func (s *journalState) accept(r journalRecord) error {
 			return fmt.Errorf("invalid journal workspace tracking advance")
 		}
 		if r.Kind == "workspace-tracked" {
+			for _, usn := range s.deleteIntents {
+				if usn >= r.ChangeCursor.Next {
+					return fmt.Errorf("workspace cursor does not cover deletion intent")
+				}
+			}
 			for _, usn := range s.deleted {
 				if usn >= r.ChangeCursor.Next {
 					return fmt.Errorf("workspace cursor does not cover deletion receipt")
@@ -201,6 +212,24 @@ func (s *journalState) accept(r journalRecord) error {
 			s.created[object] = true
 		}
 
+	case "workspace-delete-intent":
+		if !s.workspace || s.workspaceReleased || s.changeCursor == nil || len(r.DeleteIntents) == 0 || profileFields || r.Workspace != nil || r.CreatedObjects != nil || r.DeletedObjects != nil || r.ChangeCursor != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace delete-intent batch")
+		}
+		seen := make(map[journalObject]bool, len(r.DeleteIntents))
+		for _, intent := range r.DeleteIntents {
+			object := intent.Object
+			_, recorded := s.deleteIntents[object]
+			_, deleted := s.deleted[object]
+			if (!s.objects[object] && !s.created[object]) || object == s.root || recorded || deleted || seen[object] || intent.USN < s.changeCursor.Next {
+				return fmt.Errorf("invalid or repeated journal deletion intent")
+			}
+			seen[object] = true
+		}
+		for _, intent := range r.DeleteIntents {
+			s.deleteIntents[intent.Object] = intent.USN
+		}
+
 	case "workspace-deleted":
 		if !s.workspace || s.workspaceReleased || s.changeCursor == nil || len(r.DeletedObjects) == 0 || profileFields || r.Workspace != nil || r.CreatedObjects != nil || r.ChangeCursor != nil || r.Grant != nil || r.GrantSequence != 0 {
 			return fmt.Errorf("invalid journal workspace deletion batch")
@@ -210,7 +239,7 @@ func (s *journalState) accept(r journalRecord) error {
 			object := deletion.Object
 			_, already := s.deleted[object]
 			// The workspace root remains bound throughout reclamation.
-			if (!s.objects[object] && !s.created[object]) || object == s.root || already || seen[object] || deletion.USN < s.changeCursor.Next {
+			if (!s.objects[object] && !s.created[object]) || object == s.root || already || seen[object] || deletion.USN < s.changeCursor.Next || s.deleteIntents[object] > deletion.USN {
 				return fmt.Errorf("invalid or repeated journal deletion identity")
 			}
 			seen[object] = true
@@ -371,6 +400,10 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.created = make(map[journalObject]bool, len(j.state.created))
 	for object := range j.state.created {
 		next.created[object] = true
+	}
+	next.deleteIntents = make(map[journalObject]int64, len(j.state.deleteIntents))
+	for object, usn := range j.state.deleteIntents {
+		next.deleteIntents[object] = usn
 	}
 	next.deleted = make(map[journalObject]int64, len(j.state.deleted))
 	for object, usn := range j.state.deleted {

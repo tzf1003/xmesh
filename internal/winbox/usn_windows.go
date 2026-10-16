@@ -182,6 +182,7 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 
 // Checkpoint is serialized with journal access. Processes may be live; the
 // caller coordinates external writers and retries after transient open races.
+// Unclosed deletion observations preserve identity obligations across cursors.
 // Retained initial handles may delay final close during execution. Live workspace
 // Close releases descendants only after reaping; import proofs and the production
 // coordinator remain required before production L2 use.
@@ -249,7 +250,7 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 	if len(known) > maxObjects {
 		return fmt.Errorf("AppContainer change checkpoint identity limit")
 	}
-	plan, err := planWorkspaceChanges(changes, w.Root.Volume, w.Root.ID, known, j.state.deleted, maxObjects)
+	plan, err := planWorkspaceChanges(changes, w.Root.Volume, w.Root.ID, known, j.state.deleted, j.state.deleteIntents, maxObjects)
 	if err != nil {
 		return err
 	}
@@ -287,9 +288,14 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 		return err
 	}
 	// Each prefix survives a crash. Replaying the old cursor deduplicates both
-	// discoveries and deletion receipts before advancing past their source USNs.
+	// discoveries, deletion intents and receipts before advancing past their source USNs.
 	if err := appendWorkspaceCreated(j, plan.Created); err != nil {
 		return err
+	}
+	if len(plan.DeleteIntents) != 0 {
+		if _, err := j.append(journalRecord{Kind: "workspace-delete-intent", DeleteIntents: plan.DeleteIntents}); err != nil {
+			return err
+		}
 	}
 	if len(plan.Deleted) != 0 {
 		if _, err := j.append(journalRecord{Kind: "workspace-deleted", DeletedObjects: plan.Deleted}); err != nil {

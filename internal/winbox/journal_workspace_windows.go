@@ -89,6 +89,27 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 			return fmt.Errorf("AppContainer journal created-object ownership mismatch")
 		}
 	}
+	intents := make(map[journalObject]int64)
+	for _, record := range j.records {
+		for _, intent := range record.DeleteIntents {
+			object := intent.Object
+			if (!objects[object] && !created[object]) || object == w.Root || intent.USN < 0 {
+				return fmt.Errorf("AppContainer journal delete-intent ownership mismatch")
+			}
+			if _, exists := intents[object]; exists {
+				return fmt.Errorf("AppContainer journal duplicate deletion intent")
+			}
+			intents[object] = intent.USN
+		}
+	}
+	if len(intents) != len(j.state.deleteIntents) {
+		return fmt.Errorf("AppContainer journal delete-intent manifest mismatch")
+	}
+	for object, usn := range intents {
+		if actual, exists := j.state.deleteIntents[object]; !exists || actual != usn {
+			return fmt.Errorf("AppContainer journal delete-intent receipt mismatch")
+		}
+	}
 	deletions := make(map[journalObject]int64)
 	for _, record := range j.records {
 		for _, deletion := range record.DeletedObjects {

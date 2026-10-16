@@ -18,7 +18,7 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	for _, stage := range []string{"periodic", "cancel", "history-loss", "append-failure"} {
+	for _, stage := range []string{"periodic", "cancel", "history-loss", "append-failure", "delayed-delete", "cancel-disposition"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
@@ -26,6 +26,13 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 			root := filepath.Join(base, "workspace")
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
+			}
+			initial := filepath.Join(root, "initial.txt")
+			delayed := stage == "delayed-delete" || stage == "cancel-disposition"
+			if delayed {
+				if err := os.WriteFile(initial, []byte("initial"), 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			setMediumLabel(t, root)
 			before, control := kernelJournalState(t, root)
@@ -137,7 +144,7 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 				t.Fatal(err)
 			}
 			proof := filepath.Join(p.Directory(), "monitor-ready")
-			process, err := owner.start(ctx, []string{helper, "-test.run=^Test_WindowsAppContainerWorkspaceChangeMonitorHelper$", "--", root, proof}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_CHANGE_MONITOR_HELPER=1"})
+			process, err := owner.start(ctx, []string{helper, "-test.run=^Test_WindowsAppContainerWorkspaceChangeMonitorHelper$", "--", root, proof, stage}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_CHANGE_MONITOR_HELPER=1"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,6 +164,43 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 			}
 			wait(func() bool { data, _ := os.ReadFile(proof); return string(data) == "ready" }, "sandbox readiness")
 			wait(func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(j.state.created) == 2 }, "periodic created identities")
+			if delayed {
+				wait(func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(j.state.deleteIntents) == 1 }, "periodic deletion intent")
+				p.mu.Lock()
+				for object, usn := range j.state.deleteIntents {
+					if _, deleted := j.state.deleted[object]; deleted || usn >= j.state.changeCursor.Next || j.state.workspaceReleased {
+						p.mu.Unlock()
+						t.Fatal("intent was treated as final deletion")
+					}
+				}
+				manifest := recoveryJournalInfo(j)
+				if len(manifest.DeleteIntents) != 1 {
+					p.mu.Unlock()
+					t.Fatal("missing recovery deletion intent")
+				}
+				manifest.DeleteIntents[0].USN++
+				manifest.DeleteIntents[0].Object.ID[0] ^= 1
+				if err := validateWorkspaceJournalOwnership(j, p.sid); err != nil {
+					p.mu.Unlock()
+					t.Fatal("detached intent manifest changed owner", err)
+				}
+				for object, usn := range j.state.deleteIntents {
+					j.state.deleteIntents[object]++
+					err := validateWorkspaceJournalOwnership(j, p.sid)
+					j.state.deleteIntents[object] = usn
+					if err == nil {
+						p.mu.Unlock()
+						t.Fatal("altered intent manifest accepted")
+					}
+				}
+				p.mu.Unlock()
+				if stage == "cancel-disposition" {
+					if err := os.WriteFile(proof+".clear", []byte("clear"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					wait(func() bool { data, _ := os.ReadFile(proof); return string(data) == "cleared" }, "cleared deletion disposition")
+				}
+			}
 			moved := root + ".moved"
 			if err := os.Rename(filepath.Join(root, "new-dir"), moved); err != nil {
 				t.Fatal(err)
@@ -189,7 +233,7 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 				}
 			}
 			p.mu.Unlock()
-			if stage == "periodic" {
+			if stage == "periodic" || delayed {
 				if err := owner.reap(ctx, 0); err != nil {
 					t.Fatal(err)
 				}
@@ -246,11 +290,24 @@ func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
 			if _, err := newExecutionProcesses(p, 1); err == nil {
 				t.Fatal("attached monitor allowed another owner")
 			}
-			if err := monitor.Stop(ctx); (stage == "periodic") != (err == nil) {
+			if err := monitor.Stop(ctx); (stage == "periodic" || delayed) != (err == nil) {
 				t.Fatal("monitor terminal handoff", err)
 			}
 			if err := g.Close(); err != nil {
 				t.Fatal("monitored workspace cleanup", err)
+			}
+			if delayed {
+				expected := 1
+				if stage == "cancel-disposition" {
+					expected = 0
+				}
+				if len(j.state.deleteIntents) != 1 || len(j.state.deleted) != expected {
+					t.Fatal("deletion intent resolution", j.state.deleteIntents, j.state.deleted)
+				}
+				_, err := os.Stat(initial)
+				if (stage == "delayed-delete" && !os.IsNotExist(err)) || (stage == "cancel-disposition" && err != nil) {
+					t.Fatal("initial identity disposition", err)
+				}
 			}
 			after, afterControl := kernelJournalState(t, root)
 			if !bytes.Equal(before, after) || control != afterControl || objectLabel(t, root) != label || p.grants != 0 || p.workspaceMonitor != nil {
@@ -289,7 +346,7 @@ func Test_WindowsAppContainerWorkspaceChangeMonitorHelper(t *testing.T) {
 	if err := windows.GetTokenInformation(windows.GetCurrentProcessToken(), 29, (*byte)(unsafe.Pointer(&container)), 4, &size); err != nil || container == 0 {
 		t.Fatal("monitor helper token", err)
 	}
-	args := os.Args[len(os.Args)-2:]
+	args := os.Args[len(os.Args)-3:]
 	directory := filepath.Join(args[0], "new-dir")
 	if err := os.Mkdir(directory, 0700); err != nil {
 		t.Fatal(err)
@@ -297,8 +354,46 @@ func Test_WindowsAppContainerWorkspaceChangeMonitorHelper(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "new.txt"), []byte("new"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	var pending windows.Handle
+	if args[2] == "delayed-delete" || args[2] == "cancel-disposition" {
+		name, _ := windows.UTF16PtrFromString(filepath.Join(args[0], "initial.txt"))
+		var err error
+		pending, err = windows.CreateFile(name, windows.DELETE|windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer windows.CloseHandle(pending)
+		remove := uint32(1)
+		if err := windows.SetFileInformationByHandle(pending, windows.FileDispositionInfo, (*byte)(unsafe.Pointer(&remove)), 4); err != nil {
+			t.Fatal(err)
+		}
+		// Emit a subsequent data change while the deleting handle remains open.
+		var written uint32
+		if err := windows.WriteFile(pending, []byte("pending"), &written, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(args[1], []byte("ready"), 0600); err != nil {
 		t.Fatal(err)
+	}
+	if args[2] == "cancel-disposition" {
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			if _, err := os.Stat(args[1] + ".clear"); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("disposition clear request timed out")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		remove := uint32(0)
+		if err := windows.SetFileInformationByHandle(pending, windows.FileDispositionInfo, (*byte)(unsafe.Pointer(&remove)), 4); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(args[1], []byte("cleared"), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	time.Sleep(30 * time.Second)
 	t.Fatal("monitor helper was not terminated")

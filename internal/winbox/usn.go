@@ -104,24 +104,26 @@ func parseWorkspaceChanges(buffer []byte, start int64) (int64, []workspaceChange
 	return next, changes, nil
 }
 
-// Deleted objects retain their original identity and final-close USN. A trusted
-// source and an independent by-ID absence check are both required before this
-// receipt is appended. The cursor advances only after the receipt is durable.
+// Deletion observations bind an original identity to a source USN. Intent records
+// keep that identity live in the recovery census. A final deletion receipt also
+// requires final-close and independent absence proofs before cursor advancement.
 type journalDeletion struct {
 	Object journalObject `json:"object"`
 	USN    int64         `json:"usn"`
 }
 
 type workspaceChangePlan struct {
-	Created []journalObject
-	Deleted []journalDeletion
+	Created       []journalObject
+	DeleteIntents []journalDeletion
+	Deleted       []journalDeletion
 }
 
 // Inherited directories remain scope roots after moving. A final delete/close
 // ends that identity's lifetime; later changes or children require investigation.
 // Planning spans the entire bounded checkpoint, including close records in a
-// later read buffer. Errors leave caller-owned maps unchanged.
-func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byte, known map[[16]byte]journalObject, retired map[journalObject]int64, maxObjects int) (workspaceChangePlan, error) {
+// later read buffer. Unclosed delete observations retain live identity obligations
+// across checkpoints. Errors leave caller-owned maps unchanged.
+func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byte, known map[[16]byte]journalObject, retired, intents map[journalObject]int64, maxObjects int) (workspaceChangePlan, error) {
 	var plan workspaceChangePlan
 	observed := make(map[[16]byte]journalObject, len(known))
 	for id, object := range known {
@@ -131,7 +133,8 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 	for object, usn := range retired {
 		closed[object.ID] = usn
 	}
-	pending := make(map[[16]byte]bool)
+	pending := make(map[[16]byte]journalDeletion)
+	var pendingOrder [][16]byte
 	for _, change := range changes {
 		object, exists := observed[change.ID]
 		parent, parentExists := observed[change.Parent]
@@ -169,7 +172,10 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 			if change.ID == root {
 				return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace root deletion")
 			}
-			pending[change.ID] = true
+			if _, exists := pending[change.ID]; !exists {
+				pending[change.ID] = journalDeletion{Object: object, USN: change.USN}
+				pendingOrder = append(pendingOrder, change.ID)
+			}
 			if change.Reason&usnReasonClose != 0 {
 				if death, ok := closed[change.ID]; ok {
 					if death != change.USN {
@@ -182,9 +188,13 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 			}
 		}
 	}
-	for id := range pending {
-		if _, ok := closed[id]; !ok {
-			return workspaceChangePlan{}, fmt.Errorf("AppContainer deletion requires final-close proof")
+	for _, id := range pendingOrder {
+		intent := pending[id]
+		if _, done := closed[id]; done {
+			continue
+		}
+		if _, recorded := intents[intent.Object]; !recorded {
+			plan.DeleteIntents = append(plan.DeleteIntents, intent)
 		}
 	}
 	return plan, nil

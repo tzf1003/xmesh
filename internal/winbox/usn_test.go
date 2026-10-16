@@ -139,7 +139,7 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 		{ID: [16]byte{88}, Parent: [16]byte{99}, Reason: usnReasonCreate},
 		{ID: [16]byte{3}, Parent: [16]byte{2}, Reason: usnReasonCreate},
 	}
-	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, 3)
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 3)
 	objects := plan.Created
 	if err != nil || len(objects) != 2 || objects[0].ID != [16]byte{2} || !objects[0].Directory || objects[1].ID != [16]byte{3} || len(known) != 1 {
 		t.Fatal("moved-directory descendants", objects, err)
@@ -148,10 +148,10 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 	for _, object := range objects {
 		known[object.ID] = object
 	}
-	if plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, 3); err != nil || len(plan.Created) != 0 {
+	if plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 3); err != nil || len(plan.Created) != 0 {
 		t.Fatal("cursor replay deduplication", plan, err)
 	}
-	for _, name := range []string{"limit", "delete", "hardlink", "reparse", "import", "missing-create", "type", "parent-type"} {
+	for _, name := range []string{"limit", "hardlink", "reparse", "import", "missing-create", "type", "parent-type"} {
 		t.Run(name, func(t *testing.T) {
 			original := map[[16]byte]journalObject{root.ID: root}
 			batch := []workspaceChange{{ID: [16]byte{2}, Parent: root.ID, Reason: usnReasonCreate, Attributes: usnDirectory}, {ID: [16]byte{3}, Parent: [16]byte{2}, Reason: usnReasonCreate}}
@@ -159,8 +159,6 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 			switch name {
 			case "limit":
 				limit = 2
-			case "delete":
-				batch[1].Reason |= usnReasonDelete
 			case "hardlink":
 				batch[1].Reason |= usnReasonHardLink
 			case "reparse":
@@ -174,7 +172,7 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 			case "parent-type":
 				batch[0].Attributes = 0
 			}
-			if _, err := planWorkspaceChanges(batch, 17, root.ID, original, nil, limit); err == nil || !reflect.DeepEqual(original, map[[16]byte]journalObject{root.ID: root}) {
+			if _, err := planWorkspaceChanges(batch, 17, root.ID, original, nil, nil, limit); err == nil || !reflect.DeepEqual(original, map[[16]byte]journalObject{root.ID: root}) {
 				t.Fatal("unsupported change discarded caller ownership", err)
 			}
 		})
@@ -191,7 +189,7 @@ func TestWorkspaceChangeDeletionPlan(t *testing.T) {
 		{ID: [16]byte{3}, Parent: [16]byte{2}, USN: 130, Reason: usnReasonDelete | usnReasonClose},
 		{ID: [16]byte{2}, Parent: root.ID, USN: 140, Reason: usnReasonDelete | usnReasonClose, Attributes: usnDirectory},
 	}
-	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, 3)
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 3)
 	if err != nil || len(plan.Created) != 2 || len(plan.Deleted) != 2 || plan.Deleted[0].USN != 130 || plan.Deleted[1].USN != 140 || len(known) != 1 {
 		t.Fatal("create/delete checkpoint", plan, err)
 	}
@@ -204,17 +202,15 @@ func TestWorkspaceChangeDeletionPlan(t *testing.T) {
 		for _, deletion := range plan.Deleted[:prefix] {
 			retired[deletion.Object] = deletion.USN
 		}
-		replay, err := planWorkspaceChanges(changes, 17, root.ID, known, retired, 3)
+		replay, err := planWorkspaceChanges(changes, 17, root.ID, known, retired, nil, 3)
 		if err != nil || len(replay.Created) != 0 || !slices.Equal(replay.Deleted, plan.Deleted[prefix:]) {
 			t.Fatal("deletion prefix replay", prefix, replay, err)
 		}
 	}
-	for _, name := range []string{"missing-close", "root", "after-delete", "child-after-parent", "conflicting-close", "hardlink-delete", "reparse-delete"} {
+	for _, name := range []string{"root", "after-delete", "child-after-parent", "conflicting-close", "hardlink-delete", "reparse-delete"} {
 		t.Run(name, func(t *testing.T) {
 			batch := append([]workspaceChange(nil), changes...)
 			switch name {
-			case "missing-close":
-				batch[3].Reason &^= usnReasonClose
 			case "root":
 				batch[4].ID = root.ID
 			case "after-delete":
@@ -228,7 +224,7 @@ func TestWorkspaceChangeDeletionPlan(t *testing.T) {
 			case "reparse-delete":
 				batch[3].Reason |= usnReasonReparse
 			}
-			if _, err := planWorkspaceChanges(batch, 17, root.ID, known, nil, 4); err == nil {
+			if _, err := planWorkspaceChanges(batch, 17, root.ID, known, nil, nil, 4); err == nil {
 				t.Fatal("unproved deletion accepted")
 			}
 		})
@@ -332,5 +328,42 @@ func TestNTFSDeletionGeometry(t *testing.T) {
 				t.Fatal("unsupported NTFS deletion geometry accepted")
 			}
 		})
+	}
+}
+
+func TestWorkspaceChangeDeleteIntentPlan(t *testing.T) {
+	root := journalObject{Volume: 17, ID: [16]byte{1}, Directory: true}
+	directory := journalObject{Volume: 17, ID: [16]byte{2}, Directory: true}
+	known := map[[16]byte]journalObject{root.ID: root, directory.ID: directory}
+	changes := []workspaceChange{
+		{ID: directory.ID, Parent: root.ID, USN: 100, Reason: usnReasonDelete, Attributes: usnDirectory},
+		{ID: directory.ID, Parent: root.ID, USN: 110, Reason: usnReasonDelete, Attributes: usnDirectory},
+		{ID: directory.ID, Parent: [16]byte{99}, USN: 120, Reason: usnReasonRenameNew, Attributes: usnDirectory},
+		{ID: [16]byte{3}, Parent: directory.ID, USN: 130, Reason: usnReasonCreate},
+	}
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, nil, 3)
+	want := journalDeletion{Object: directory, USN: 100}
+	if err != nil || !slices.Equal(plan.DeleteIntents, []journalDeletion{want}) || len(plan.Deleted) != 0 || len(plan.Created) != 1 || len(known) != 2 {
+		t.Fatal("pending directory retains scope and earliest observation", plan, err)
+	}
+	intents := map[journalObject]int64{directory: 100}
+	for _, object := range plan.Created {
+		known[object.ID] = object
+	}
+	replay, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, intents, 3)
+	if err != nil || len(replay.DeleteIntents) != 0 || len(replay.Created) != 0 || len(replay.Deleted) != 0 || intents[directory] != 100 {
+		t.Fatal("durable intent prefix replay", replay, err)
+	}
+	// A later final-close record resolves the original identity, while an
+	// unrelated later change (including a cleared disposition) keeps it live.
+	for _, close := range []bool{false, true} {
+		reason := uint32(1)
+		if close {
+			reason = usnReasonDelete | usnReasonClose
+		}
+		plan, err = planWorkspaceChanges([]workspaceChange{{ID: directory.ID, Parent: root.ID, USN: 200, Reason: reason, Attributes: usnDirectory}}, 17, root.ID, known, nil, intents, 3)
+		if err != nil || len(plan.DeleteIntents) != 0 || (len(plan.Deleted) == 1) != close || len(intents) != 1 || intents[directory] != 100 {
+			t.Fatal("later intent resolution", close, plan, err)
+		}
 	}
 }
