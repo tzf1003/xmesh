@@ -14,6 +14,18 @@ var errWorkspaceChangesLost = errors.New("AppContainer workspace change history 
 // never proved, so execution that observed one must not continue.
 var errWorkspaceUnknownImport = errors.New("AppContainer workspace received an uncoordinated import")
 
+// errWorkspaceSecurityChanged reports a security-descriptor change on an object
+// of the admitted workspace snapshot while the execution owned its descriptor.
+// This package edits those descriptors only before tracking starts and after the
+// processes are gone, so the writer is external. It is a writer-fence violation.
+var errWorkspaceSecurityChanged = fmt.Errorf("%w: workspace descendant security descriptor changed", errWriterFenceViolated)
+
+// errWorkspaceLinkChange reports a hard-link or reparse record beneath a tracked
+// directory. Neither kind is created by this package or by a sandbox that holds
+// only the granted rights, and a link can alias an object outside the workspace,
+// so the writer is external and the census cannot account for the alias.
+var errWorkspaceLinkChange = fmt.Errorf("%w: workspace link or reparse change requires proof", errWriterFenceViolated)
+
 const (
 	usnReasonCreate    = 0x00000100
 	usnReasonDelete    = 0x00000200
@@ -119,8 +131,15 @@ type journalDeletion struct {
 }
 
 type workspaceChangePlan struct {
-	Created       []journalObject
-	Unknown       []journalObject // Entered a tracked directory without creation or census proof.
+	Created []journalObject
+	Unknown []journalObject // Entered a tracked directory without creation or census proof.
+	// Security lists identities already tracked before this plan whose records
+	// carry the security reason. NTFS accumulates reasons for as long as a file
+	// stays open, and this package keeps every admitted object open, so a record
+	// for an untouched descriptor can still carry the bit from this package's
+	// own earlier grant. The bit is therefore only a trigger: the caller compares
+	// the descriptor itself.
+	Security      []journalObject
 	DeleteIntents []journalDeletion
 	Deleted       []journalDeletion
 }
@@ -142,6 +161,7 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 	}
 	pending := make(map[[16]byte]journalDeletion)
 	var pendingOrder [][16]byte
+	secured := make(map[[16]byte]bool)
 	for _, change := range changes {
 		object, exists := observed[change.ID]
 		parent, parentExists := observed[change.Parent]
@@ -162,7 +182,13 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 			return workspaceChangePlan{}, fmt.Errorf("AppContainer change parent is not a directory")
 		}
 		if change.Reason&(usnReasonHardLink|usnReasonReparse) != 0 {
-			return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires link or reparse proof")
+			return workspaceChangePlan{}, errWorkspaceLinkChange
+		}
+		if exists && change.Reason&usnReasonSecurity != 0 && !secured[change.ID] {
+			if _, tracked := known[change.ID]; tracked {
+				secured[change.ID] = true
+				plan.Security = append(plan.Security, known[change.ID])
+			}
 		}
 		if !exists {
 			if len(observed) >= maxObjects {

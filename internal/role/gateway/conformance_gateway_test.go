@@ -749,7 +749,7 @@ func oauthLogin(t *testing.T, base, client, scope string) string {
 // conformance: CON-ARCH-01 CON-SEC-02
 func Test_CONARCH01_IngressServesOnlyMCPAndOAuthAndNeverWithoutAuth(t *testing.T) {
 	g, _ := fixture(t, true)
-	authorization, err := oauth.New(oauth.Options{Issuer: "https://mesh.example", Password: "conformance-login", StateDir: t.TempDir(), Clients: map[string][]string{"full": {"devices:read", "fs:*"}, "empty": {}}})
+	authorization, err := oauth.New(oauth.Options{Issuer: "https://mesh.example", Password: "conformance-login", StateDir: t.TempDir(), Proxied: true, Clients: map[string][]string{"full": {"devices:read", "fs:*"}, "empty": {}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -264,6 +264,14 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 // first descriptor edit. Missing/deleted identities retain the journal rather
 // than infer deletion from an unavailable ID. Roots and ancestors stay pinned
 // for the complete operation; all handles and acknowledgements are retryable.
+// errWorkspaceReclaimRaced reports that, after every known object was reclaimed,
+// a final look found an identity or an access entry this release had not
+// accounted for. The journal stays open; the next release covers it.
+var errWorkspaceReclaimRaced = errors.New("AppContainer workspace changed while it was being reclaimed")
+
+// releaseObjectHook is a test seam called after each object's release is durable.
+var releaseObjectHook func(done, total int)
+
 func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) error {
 	return releaseJournalWorkspaceContext(context.Background(), j, sid, maxObjects)
 }
@@ -316,6 +324,9 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 				return err
 			}
 		}
+		if hook := releaseObjectHook; hook != nil {
+			hook(len(census.objects)-index, len(census.objects))
+		}
 	}
 	// Deleted initial identities have no remaining descriptor. Acknowledge their
 	// grant intents only after every live object passed census and reclamation.
@@ -332,8 +343,56 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 			}
 		}
 	}
+	if j.state.changeCursor != nil {
+		if err := proveWorkspaceReclaimed(ctx, j, sid, maxObjects); err != nil {
+			return err
+		}
+	}
 	_, err = j.append(journalRecord{Kind: "workspace-released"})
 	return err
+}
+
+// proveWorkspaceReclaimed is the completeness proof for a tracked workspace. The
+// census at the start of a release is a snapshot, and an identity created while
+// the release edits descriptors inherits access from a directory not yet
+// reclaimed. After the last edit this reads the change stream once more and
+// rescans, and it accepts the release only if no identity was added and no
+// object, known or present, still carries an entry for this profile. Because
+// every directory has been reclaimed by then, nothing can inherit access later.
+// Any gap leaves the journal open and the next release reclaims it.
+func proveWorkspaceReclaimed(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects int) error {
+	created, unknown := len(j.state.created), len(j.state.unknown)
+	if err := checkpointWorkspaceChanges(ctx, j, sid, maxObjects, maxWorkspaceChangeEvents); err != nil {
+		return err
+	}
+	if len(j.state.created) != created || len(j.state.unknown) != unknown {
+		return fmt.Errorf("%w: identities recorded after the last descriptor edit", errWorkspaceReclaimRaced)
+	}
+	census, err := censusJournalWorkspaceContext(ctx, j, sid, maxObjects)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errWorkspaceReclaimRaced, err)
+	}
+	defer census.Close()
+	if len(census.discovered) != 0 || len(census.adopted) != 0 {
+		return fmt.Errorf("%w: unrecorded objects in the tree", errWorkspaceReclaimRaced)
+	}
+	for _, object := range census.objects {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		sd, err := readObjectSecurity(object.handle)
+		if err != nil {
+			return err
+		}
+		acl, _, err := sd.DACL()
+		if err != nil {
+			return err
+		}
+		if _, residual, err := editJournalWorkspaceACL(acl, sid, object, !census.initial[object.id], journalRecord{}); err != nil || residual {
+			return fmt.Errorf("%w: profile access remains on a reclaimed object: %v", errWorkspaceReclaimRaced, err)
+		}
+	}
+	return nil
 }
 
 // Checkpoint records verified observed identities while the trusted caller holds
