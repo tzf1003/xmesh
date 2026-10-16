@@ -22,6 +22,34 @@ jobs:
         if: ${{ !cancelled() }}
       - run: go build ./cmd/xmesh
         if: ${{ !cancelled() }}
+      - name: Cross-compile every release target
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        env:
+          XMESH_TEST_CROSSBUILD: "1"
+        run: go test ./cmd/xmesh -run 'Test_CONARCH02' -v -count=1 -timeout=900s
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.12"
+      - name: Build smoke test binary
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
+          go build -o "$RUNNER_TEMP/xmesh-smoke$ext" ./cmd/xmesh
+          echo "SMOKE_BIN=$RUNNER_TEMP/xmesh-smoke$ext" >> "$GITHUB_ENV"
+      - name: Smoke test, local Agent and Gateway (L1)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python scripts/smoke_local.py --binary "$SMOKE_BIN"
+      - name: Smoke test, Gateway personal access token
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python scripts/smoke_local.py --pat --binary "$SMOKE_BIN"
+      - name: Smoke test, gate 2 exclusive backend lease and external kill
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python scripts/smoke_backend.py --binary "$SMOKE_BIN"
   windows-native:
     runs-on: windows-latest
     steps:

@@ -1,0 +1,23 @@
+{
+  "api_version": "1.0",
+  "kernel_version": "0.4.0",
+  "node": "win-dev-01",
+  "pid": 1180,
+  "boot_id": "0b7e44d1",
+  "transport": "pipe",
+  "endpoint": "/tmp/control.sock",
+  "started_at": "2026-10-16T15:30:00.123Z",
+  "capabilities": [
+    "status",
+    "events",
+    "peers",
+    "sessions",
+    "drain",
+    "config.read",
+    "config.write",
+    "pair",
+    "pats",
+    "ingress",
+    "audit"
+  ]
+}

@@ -5,9 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
@@ -737,8 +735,8 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 		out, e = invoke(ctx, d.bridge)
 	}
 	if e != nil {
-		var rpc *jsonrpc.Error
-		if errors.As(e, &rpc) || ctx.Err() != nil && alive(d.bridge) {
+		protocol, answered := mcpmux.ProtocolError(e)
+		if answered || ctx.Err() != nil && alive(d.bridge) {
 			// The Agent answered, or only this call was cancelled: the
 			// connection is alive. A protocol error usually means the tool
 			// vanished (for example its backend was killed), so refresh the
@@ -747,8 +745,8 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 			d.updated = time.Time{}
 			v.mu.Unlock()
 			go v.refresh()
-			if rpc != nil {
-				return agent.Result(nil, toolerr.New("not_found", "设备上没有此工具，或其后端不可用", "name", deviceName, "tool", tool, "reason", rpc.Message)), nil
+			if answered {
+				return agent.Result(nil, toolerr.New("not_found", "设备上没有此工具，或其后端不可用", "name", deviceName, "tool", tool, "reason", protocol)), nil
 			}
 			return agent.Result(nil, toolerr.New("timeout", "调用已取消或超时", "name", deviceName, "tool", tool)), nil
 		}

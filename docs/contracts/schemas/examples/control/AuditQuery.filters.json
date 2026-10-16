@@ -1,0 +1,7 @@
+{
+  "since": "2026-10-16T00:00:00.000Z",
+  "limit": "200",
+  "tool": "exec.run",
+  "status": "error",
+  "device": "win-dev-01"
+}

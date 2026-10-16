@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-audit:1",
+  "title": "ControlAudit",
+  "description": "CTR-CTL-11。GET /v1/audit。元素就是 CTR-AUD-01 的事件，不加字段，因此继续禁止正文。",
+  "$defs": {
+    "AuditQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "查询串参数。所有值都是字符串，数字与时间在服务端解析。多个条件取交集。",
+      "properties": {
+        "since": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "until": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "limit": { "type": "string", "pattern": "^([1-9][0-9]{0,2}|1000)$", "description": "默认 100，最大 1000。" },
+        "cursor": { "type": "string", "minLength": 1, "description": "上一页返回的 next_cursor，对客户端不透明。" },
+        "event": { "type": "string", "minLength": 1, "description": "CTR-AUD-01 的 event 取值之一。" },
+        "tool": { "type": "string", "minLength": 1 },
+        "device": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "caller": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["ok", "error"] }
+      }
+    },
+    "AuditResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "events", "next_cursor"],
+      "properties": {
+        "enabled": { "type": "boolean", "description": "审计未启用时是 false，events 为空。" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "urn:xmesh:schema:audit-event:1" },
+          "description": "按 time 从新到旧。"
+        },
+        "next_cursor": { "type": ["string", "null"], "description": "没有更多时是 null。" }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "type": "reset",
+  "time": "2026-10-16T15:30:00.123Z",
+  "data": {
+    "reason": "boot_changed",
+    "head": "9f3c21aa.1"
+  }
+}

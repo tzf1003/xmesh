@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// conformance: INV-01 CON-CONC-07
 func Test_INV01_MonotonicOwnerAndExpiry(t *testing.T) {
 	m := New()
 	defer m.Close()
@@ -51,6 +52,8 @@ func Test_INV01_MonotonicOwnerAndExpiry(t *testing.T) {
 		t.Fatal("restart token reused")
 	}
 }
+
+// conformance: CTR-LEASE-01 INV-01
 func Test_CTRLEASE01_Concurrent(t *testing.T) {
 	m := New()
 	defer m.Close()
@@ -73,6 +76,8 @@ func Test_CTRLEASE01_Concurrent(t *testing.T) {
 		t.Fatal(owners)
 	}
 }
+
+// conformance: RUL-06
 func Test_RUL06_ExactUint64(t *testing.T) {
 	for _, raw := range []string{`"18446744073709551615"`, `18446744073709551615`} {
 		v, e := ParseToken(json.RawMessage(raw))

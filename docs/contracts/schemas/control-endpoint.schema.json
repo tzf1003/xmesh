@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-endpoint:1",
+  "title": "ControlEndpointFile",
+  "description": "CTR-CTL-01。状态目录里的 control.json。内核在控制通道开始监听之后写入（临时文件加重命名），正常退出时删除。UI 用它发现本机的节点实例。",
+  "$defs": {
+    "ControlEndpointFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api_version",
+        "kernel_version",
+        "node",
+        "pid",
+        "boot_id",
+        "transport",
+        "endpoint",
+        "started_at",
+        "capabilities"
+      ],
+      "properties": {
+        "api_version": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/ApiVersion" },
+        "kernel_version": { "type": "string", "minLength": 1 },
+        "node": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "pid": { "type": "integer", "minimum": 1 },
+        "boot_id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/BootId" },
+        "transport": { "enum": ["unix", "pipe"] },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "unix：套接字绝对路径。pipe：完整的命名管道路径，形如 \\\\.\\pipe\\xmesh-<sid>-<node>。"
+        },
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Capability" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "transport": { "const": "pipe" } }, "required": ["transport"] },
+          "then": { "properties": { "endpoint": { "pattern": "^\\\\\\\\\\.\\\\pipe\\\\xmesh-.+" } } }
+        },
+        {
+          "if": { "properties": { "transport": { "const": "unix" } }, "required": ["transport"] },
+          "then": { "properties": { "endpoint": { "pattern": "^/.+" } } }
+        }
+      ]
+    }
+  }
+}

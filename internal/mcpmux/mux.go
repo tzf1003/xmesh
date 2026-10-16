@@ -4,6 +4,7 @@ package mcpmux
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -293,5 +294,15 @@ func (b *Bridge) Tools(ctx context.Context) ([]*mcp.Tool, error) {
 		tools = append(tools, tool)
 	}
 	return tools, nil
+}
+
+// ProtocolError reports whether err is a JSON-RPC error answered by the peer,
+// which proves the connection itself is alive, and returns the peer's message.
+func ProtocolError(err error) (string, bool) {
+	var rpc *jsonrpc.Error
+	if errors.As(err, &rpc) {
+		return rpc.Message, true
+	}
+	return "", false
 }
 func (b *Bridge) Close() error { return b.Session.Close() }

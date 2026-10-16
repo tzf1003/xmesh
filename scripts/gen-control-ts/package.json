@@ -1,0 +1,15 @@
+{
+  "name": "xmesh-gen-control-ts",
+  "private": true,
+  "description": "Generates TypeScript types from the control channel JSON Schemas (CTR-CTL-12).",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "check": "node generate.mjs --check",
+    "typecheck": "tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler ../../api/control/v1/ts/control.ts"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "15.0.4",
+    "typescript": "5.9.3"
+  }
+}

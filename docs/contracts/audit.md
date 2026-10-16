@@ -33,7 +33,8 @@ PTY 的 `read` 默认不写每条记录，只在 `pty.read` 返回非空数据�
 | 字段 | 规则 |
 | --- | --- |
 | `time` | RFC3339，毫秒，UTC |
-| `event` | `tool_call`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`progress_unrouted`、`audit_dropped` |
+| `event` | `tool_call`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`progress_unrouted`、`audit_dropped`、`control_call` |
+| `actor` | 可选，`mcp`（缺省）或 `control`。`control` 表示本机控制通道（[CTR-CTL-02](control.md#ctr-ctl-02)），此时 `event` 为 `control_call`，`caller` 形如 `control:uid-1000`，`tool` 是路由编号，见 [RUL-17](rulings.md#rul-17) |
 | `caller` | `caller_id`。Gateway 与入口写入本节点的网络身份加到目标 Agent 的下游会话，与该 Agent 自己审计里的 `caller` 一致；Gateway 自己的工具（`devices.list` 等）和还没有下游会话的调用，填本节点身份加上游 MCP 会话 |
 | `oauth_client` | 仅入口层。预注册名或动态 `client_id` |
 | `oauth_session` | 仅入口层。该请求所属 OAuth 授权的摘要（授权标识的 SHA-256 前 8 字节，十六进制），用于关联同一授权的调用，不是可用凭据 |

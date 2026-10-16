@@ -4,6 +4,25 @@
 
 建议测试名用 `Test_<编号去横线>`，例如 `Test_CONCONC03_并发打开不超过上限`。表里只写编号和观察点，避免与契约正文漂移。
 
+### 编号引用与机械核对
+
+每个编号至少要有一处测试声明覆盖它，声明方式二选一：
+
+- 测试函数名以 `Test_<编号去横线>` 开头；`Test_CTRFS02_03_...` 同时声明 CTR-FS-02 与 CTR-FS-03。
+- `_test.go` 里写一行注释 `// conformance: CON-TOOL-04 CON-TOOL-05`（脚本里用 `# conformance: ...`），放在测试函数上方或函数体内。
+
+`python3 scripts/conformance_check.py` 对照本表与测试代码：表里有编号却没有声明、或注释里引用了表里没有的编号，都会失败（契约夹具工作流每次都跑；`--list` 列出每个编号对应的位置）。它只证明“有人声明了”，不证明断言足够，所以声明只能写在真正断言了观察点的测试上。环境变量才开启的测试（如 `XMESH_TEST_TAILNET_*`）同样要声明，并在下面注明由哪条工作流运行。
+
+自动化与环境覆盖：
+
+| 内容 | 位置 |
+| --- | --- |
+| CON-ARCH-02：六个发布目标交叉编译 | `Test_CONARCH02_*`，`XMESH_TEST_CROSSBUILD=1`，在 `go.yml` 的 ubuntu 步骤运行；`release.yml` 打包时再构建一次 |
+| 门 1、门 2 的进程级冒烟 | `scripts/smoke_local.py`（L1 与 `--pat`）、`scripts/smoke_backend.py`，在 `go.yml` 三个系统的矩阵里运行 |
+| 门 3 的 tailnet 互联（仅直连路径） | `headscale.yml`：一次性 Headscale、两个 tsnet 节点互调、`Test_TailnetPeerConnectivity` |
+| 门 4 的 OAuth 协议路径 | `headscale.yml` 里的 `scripts/oauth_client.py`：动态注册、PKCE、登录、`tools/list`、`exec.run`；证明协议，不证明 claude.ai 的展示 |
+| 发布门禁 | `release.yml` 先跑 vet、竞态测试、矩阵检查，并要求同一提交上 `go.yml`、`contracts.yml`、`headscale.yml` 都已成功 |
+
 ## 门 1 · 阶段 1 工具基础
 
 本机 MCP，不依赖 tailnet。节点还没有 tailnet 身份时，`caller_id` 使用 `local/<session>`。已有身份后的环回改用本节点 ID，见 RUL-02。
@@ -44,7 +63,7 @@ Windows Server 2025 的原生进程、ConPTY、文件及 HTTP MCP 测试已通�
 | CTR-MUX-01 CTR-MUX-02 CTR-MUX-03 CTR-MUX-04 | 相同上游 id 不串线；进度不广播；无持有者拒绝 sampling；崩溃后旧 token 失效且两端都收到 `backend_unavailable` |
 | RUL-03 RUL-06 | acquire 不自动续期；renew 与 release 的参数名也是 `_lease_token` |
 
-门 2 的场景固定为：后端用一个脚本模拟 IDA，记录收到的参数里没有 `_lease_token`。杀掉脚本后，旧 token 的下一次调用失败，新 acquire 得到更大的 token。
+门 2 的场景固定为：后端用一个脚本模拟 IDA，记录收到的参数里没有 `_lease_token`。杀掉脚本后，旧 token 的下一次调用失败，新 acquire 得到更大的 token。这个场景由 `scripts/fake_ida.py` 与 `scripts/smoke_backend.py` 实现：两个 MCP 会话、从外部杀掉后端进程、旧 token 失败、新 token 更大。
 
 ## 门 3 · 阶段 3 互联
 
@@ -59,6 +78,8 @@ Windows Server 2025 的原生进程、ConPTY、文件及 HTTP MCP 测试已通�
 | CTR-AUTHZ-01 | 入口 scope 通过后，Agent 仍可按 `tag:ingress` 拒绝后端 |
 
 官方 Tailscale 与 Headscale 各跑通一次三台设备。至少一台路径是 DERP 而不是直接打洞，用控制面的连接状态确认，而不是只看 ping 成功。
+
+`headscale.yml` 只在单台 runner 上证明加入、互调和直连连通；DERP 兜底（`XMESH_TEST_TAILNET_REQUIRE_DERP=1`）和三台物理设备仍按[验收记录](validation/2026-10-15-headscale.md)多机进行。
 
 ## 门 4 · 阶段 4 Gateway 与 OAuth
 
@@ -86,6 +107,18 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CON-SEC-10 | L2 沙箱在 Linux 上用 bwrap 或 nsjail 跑一条被允许的命令，并挡住网络与凭证目录 |
 
 云沙箱加入 tailnet 是实验：Codex Cloud 与 Claude Code 云沙箱至少一家用 ephemeral pre-auth key 连上并调用一次对端工具。失败时写下出站限制，主路径（公网入口）的门 4 结果仍然有效。
+
+## 阶段 6 · 桌面 UI 与本机控制通道（U0 契约）
+
+契约先行：模式、夹具、Go 类型、TS 生成物。内核实现（U1、U2）与 UI（U3 起）各自追加自己的行，不改下表。
+
+| 编号 | 观察点 |
+| --- | --- |
+| CTR-CTL-02 CTR-CTL-03 | 状态与错误体：每个夹具通过模式，解码进 Go 类型再编码后语义不变；反例（未知字段、字符串形式的警告、缺毫秒的时间戳）失败；Go 枚举与错误码到 HTTP 状态的映射和模式相同 |
+| CTR-CTL-04 | 事件：九种类型的夹具各有一个；载荷解码进类型化结构；SSE 帧是 `id`、`event`、`data`；含 stdout 的调用事件、含终端数据的会话事件被拒绝 |
+| CTR-CTL-05 CTR-CTL-06 CTR-CTL-07 | 对端、会话、drain、配置读写的请求与响应夹具；终端缓冲字段被拒绝；`replace` 缺 `before` 被拒绝 |
+| CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 CTR-CTL-11 | 配对、PAT、入口、审计夹具；令牌与 `secret_hash` 泄漏的反例失败；`PatSecret` 之外的类型没有令牌字段；审计元素含 stdout 的反例失败 |
+| CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`contracts.yml`） |
 
 ## 模式夹具
 

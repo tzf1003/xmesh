@@ -23,3 +23,42 @@ jobs:
 
       - name: 校验正例、反例和文档链接
         run: python3 docs/contracts/schemas/check_examples.py
+
+      - name: 符合性矩阵每条编号都有测试
+        run: python3 scripts/conformance_check.py
+
+      - name: 脚本自测
+        run: python3 scripts/test_scripts.py
+
+  # 控制通道的 TypeScript 类型由 JSON Schema 生成（CTR-CTL-12）。
+  # 重新生成后与提交的生成物逐字相同，并且能通过 strict 类型检查。
+  check-control-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scripts/gen-control-ts/package-lock.json
+
+      - name: 安装生成器依赖
+        run: npm ci --prefix scripts/gen-control-ts
+
+      - name: 重新生成 TypeScript 类型
+        run: node scripts/gen-control-ts/generate.mjs
+
+      - name: 生成物必须与提交一致
+        run: |
+          if [ -n "$(git status --porcelain -- api/control/v1/ts)" ]; then
+            git status --porcelain -- api/control/v1/ts
+            git diff -- api/control/v1/ts | head -80
+            echo "api/control/v1/ts 与 JSON Schema 不一致，请运行 node scripts/gen-control-ts/generate.mjs 后提交" >&2
+            exit 1
+          fi
+
+      - name: 生成物通过 strict 类型检查
+        run: npm run typecheck --prefix scripts/gen-control-ts

@@ -1,0 +1,46 @@
+{
+  "enabled": true,
+  "events": [
+    {
+      "time": "2026-10-16T15:30:00.123Z",
+      "event": "control_call",
+      "actor": "control",
+      "caller": "control:uid-1000",
+      "device": "win-dev-01",
+      "tool": "control.config.put",
+      "args_digest": {
+        "keys": [
+          "content"
+        ],
+        "bytes": 812
+      },
+      "status": "ok",
+      "error": null,
+      "duration_ms": 14
+    },
+    {
+      "time": "2026-10-16T15:30:00.123Z",
+      "event": "tool_call",
+      "caller": "node-abc/s7f",
+      "oauth_client": "claude",
+      "device": "win-dev-01",
+      "tool": "exec.run",
+      "args_digest": {
+        "keys": [
+          "cmd",
+          "args",
+          "cwd"
+        ],
+        "resolved_path": "C:\\Users\\x\\repos\\foo",
+        "cmd": "cargo",
+        "args_len": 2,
+        "stdin_sha256": null
+      },
+      "status": "ok",
+      "error": null,
+      "duration_ms": 842,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "next_cursor": "MjAyNi0xMC0xNlQxNTozMDowMC4xMjNa"
+}
