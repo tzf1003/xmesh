@@ -14,6 +14,7 @@ import (
 )
 
 // This opt-in test takes exclusive ownership of the supplied node state.
+// conformance: CON-NET-02 CON-NET-03 CON-NET-05 CON-NET-07 CON-ARCH-08
 func Test_TailnetPeerConnectivity(t *testing.T) {
 	path, state, target := os.Getenv("XMESH_TEST_TAILNET_CONFIG"), os.Getenv("XMESH_TEST_TAILNET_STATE"), os.Getenv("XMESH_TEST_TAILNET_PEER")
 	if path == "" || state == "" || target == "" {
