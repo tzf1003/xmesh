@@ -26,7 +26,6 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 	cases := []struct {
 		name    string
 		require string // executable that must be on the host PATH, if any
-		eol     string // line ending the started program expects; cmd takes CRLF
 		start   string // typed into the AppContainer cmd shell
 		ready   string // output proving the program started
 		busy    string // typed into the program to leave it running a command
@@ -36,12 +35,12 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 		answer  string
 		exit    string // typed to leave a program that survived the interrupt
 	}{
-		{name: "cmd", eol: "\r\n", start: "cmd /k echo NES^TED-READY", ready: `NESTED-READY`, busy: helperCommand + "--xmesh-interrupt-sleep", running: `SLEEPER_RUNNING`,
+		{name: "cmd", start: "cmd /k echo NES^TED-READY", ready: `NESTED-READY`, busy: helperCommand + "--xmesh-interrupt-sleep", running: `SLEEPER_RUNNING`,
 			probe: "echo NES^TED-ALIVE", answer: `NESTED-ALIVE`, exit: "exit"},
 		{name: "sleeper", start: helperCommand + "--xmesh-interrupt-sleep", ready: `SLEEPER_RUNNING`},
-		{name: "powershell", eol: "\r", start: "powershell" + quiet, ready: `PS_READY`,
+		{name: "powershell", start: "powershell" + quiet, ready: `PS_READY`,
 			busy: sleeper, running: `SLEEP_READY`, probe: "Write-Output ('INTERRUPT_'+'SURVIVED')", answer: `INTERRUPT_SURVIVED`, exit: "exit"},
-		{name: "pwsh", require: "pwsh", eol: "\r", start: "pwsh" + quiet, ready: `PS_READY`,
+		{name: "pwsh", require: "pwsh", start: "pwsh" + quiet, ready: `PS_READY`,
 			busy: sleeper, running: `SLEEP_READY`, probe: "Write-Output ('INTERRUPT_'+'SURVIVED')", answer: `INTERRUPT_SURVIVED`, exit: "exit"},
 		{name: "loop", start: helperCommand + "--xmesh-interrupt-loop", ready: `LOOP_READY`,
 			stopped: `LOOP_INTERRUPTED-1`, probe: "first", answer: `LOOP_ECHO-first`, exit: "quit"},
@@ -57,14 +56,12 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			before, control := kernelJournalState(t, f.root)
 			m, reg := newTerminalManager(t)
 			o := f.openTerminal(t, m, reg, "interrupt-"+c.name)
-			eol := "\r\n"
-			write := func(data string) { o.call("pty.write", map[string]any{"session_id": o.session, "data": data + eol}) }
+			// Enter is a lone CR; a following LF would stay in the input queue and
+			// reach a program started from the shell as a stray line feed.
+			write := func(data string) { o.call("pty.write", map[string]any{"session_id": o.session, "data": data + "\r"}) }
 			write("echo REA^DY")
 			o.until(`\r\nREADY`)
 			write(c.start)
-			if c.eol != "" {
-				eol = c.eol
-			}
 			o.until(c.ready)
 			if c.busy != "" {
 				write(c.busy)
@@ -83,8 +80,10 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			}
 			if c.exit != "" {
 				write(c.exit)
+				// Input typed while the program is still leaving may be read ahead
+				// by it; let the shell take the console back first.
+				time.Sleep(time.Second)
 			}
-			eol = "\r\n"
 			write("echo SURV^IVED-" + c.name)
 			o.until(`SURVIVED-` + c.name)
 			write("exit")
@@ -144,6 +143,7 @@ func Test_WindowsManagedRunnerInterruptHelper(t *testing.T) {
 			fmt.Printf("LOOP_INTERRUPTED-%d\n", count)
 		case line, ok := <-lines:
 			if !ok || line == "quit" {
+				fmt.Println("LOOP_DONE")
 				os.Exit(0)
 			}
 			fmt.Printf("LOOP_ECHO-%s\n", line)
