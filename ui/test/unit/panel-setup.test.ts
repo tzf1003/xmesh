@@ -53,12 +53,22 @@ test("parseSetup refuses bad input and names the first offending field", () => {
   assert.equal(problem({ ...tailnet, authkeyFile: undefined }), "authkey_file");
 });
 
-test("a gateway-only node needs no workspace and gets none", () => {
-  const v = must({ nodeName: "gw", mode: "lan", roles: ["gateway"], workspace: "" });
-  assert.equal(v.workspace, "");
-  const text = generateConfig(v);
-  assert.doesNotMatch(text, /agent:/);
+test("a gateway-only node still gets the agent section the config schema requires", () => {
+  const bad = parseSetup({ nodeName: "gw", mode: "lan", roles: ["gateway"], workspace: "" });
+  assert.ok(!bad.ok && bad.problem === "workspace");
+  const text = generateConfig(must({ nodeName: "gw", mode: "lan", roles: ["gateway"], workspace: "/home/me/work" }));
+  assert.match(text, /roles: \[gateway\]/);
   assert.match(text, /gateway:/);
+  assert.match(text, /^agent:\n/m);
+  assert.match(text, /allow: \["\/home\/me\/work"\]/);
+});
+
+test("trusted callers: LAN peers by pairing tag, tailnet devices by the tag the control plane grants", () => {
+  assert.match(generateConfig(must(lan)), /^ {4}"tag:peer":/m);
+  assert.doesNotMatch(generateConfig(must(lan)), /tag:device/);
+  const tn = generateConfig(must({ ...lan, mode: "tailnet", authkeyFile: "/k" }));
+  assert.match(tn, /^ {4}"tag:device":/m);
+  assert.doesNotMatch(tn, /tag:peer/);
 });
 
 test("generated config carries the values and the safe defaults", () => {
@@ -85,13 +95,14 @@ test("quoting keeps hostile paths inside their scalar", () => {
   assert.equal(parseSetup({ ...lan, workspace: "/w\ndeny: []" }).ok, false, "a newline never reaches the generator");
 });
 
-function recordingHost(stateRoot: string, opts: { exists?: boolean; failOn?: string } = {}) {
+function recordingHost(stateRoot: string, opts: { exists?: boolean; existing?: string; failOn?: string } = {}) {
   const calls: string[] = [];
   const written: Record<string, string> = {};
   const host: SetupHost = {
     stateRoot,
+    readText: () => opts.existing,
     writeNew: (file, content) => {
-      if (opts.exists) throw Object.assign(new Error("exists"), { code: "EEXIST" });
+      if (opts.exists || opts.existing !== undefined) throw Object.assign(new Error("exists"), { code: "EEXIST" });
       written[file] = content;
     },
     runCli: async (args) => {
@@ -130,6 +141,22 @@ test("runSetup never overwrites an existing config and runs nothing", async () =
   assert.deepEqual(calls, []);
 });
 
+test("runSetup retries after a failed install: the identical file it wrote before is reused, anything else is not", async () => {
+  const same = recordingHost("/state", { existing: generateConfig(must(lan)) });
+  const r = await runSetup(lan, same.host);
+  assert.ok(r.ok);
+  const cfg = path.join("/state", "dev-1", "xmesh.yaml");
+  assert.deepEqual(r.data.steps.map((s) => [s.id, s.ok]), [["write-config", true], ["install", true], ["start", true]]);
+  assert.deepEqual(same.calls, [`install --config ${cfg}`, `start --config ${cfg}`]);
+  assert.deepEqual(same.written, {}, "nothing was rewritten");
+
+  const other = recordingHost("/state", { existing: "node: {name: dev-1}\n# edited by hand\n" });
+  const c = await runSetup(lan, other.host);
+  assert.ok(!c.ok);
+  assert.equal(c.error.code, "conflict");
+  assert.deepEqual(other.calls, []);
+});
+
 test("runSetup rejects invalid parameters before touching anything", async () => {
   const { host, calls, written } = recordingHost("/state");
   const r = await runSetup({ ...lan, nodeName: "../../etc" }, host);
@@ -149,6 +176,8 @@ test("fsSetupHost writes 0600 and refuses to replace a file", () => {
     assert.equal(fs.readFileSync(file, "utf8"), "a: 1\n");
     if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.throws(() => host.writeNew(file, "b: 2\n"), { code: "EEXIST" });
+    assert.equal(host.readText(file), "a: 1\n");
+    assert.equal(host.readText(path.join(root, "missing")), undefined);
     assert.equal(fs.readFileSync(file, "utf8"), "a: 1\n");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

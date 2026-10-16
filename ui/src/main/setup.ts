@@ -14,6 +14,8 @@ export interface SetupHost {
   stateRoot: string;
   /** Creates `file` with `content` (mode 0600), failing if it already exists. */
   writeNew(file: string, content: string): void;
+  /** The current text of `file`, or undefined when it cannot be read. */
+  readText(file: string): string | undefined;
   runCli(args: SetupCliArgs): Promise<string>;
 }
 
@@ -21,6 +23,13 @@ export function fsSetupHost(stateRoot: string, runCli: SetupHost["runCli"]): Set
   return {
     stateRoot,
     runCli,
+    readText: (file) => {
+      try {
+        return fs.readFileSync(file, "utf8");
+      } catch {
+        return undefined;
+      }
+    },
     writeNew: (file, content) => {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
       fs.writeFileSync(file, content, { flag: "wx", mode: 0o600 });
@@ -47,14 +56,20 @@ export async function runSetup(raw: unknown, host: SetupHost): Promise<DataResul
   const steps: SetupStep[] = [];
   const report = (): DataResult<SetupReport> => ({ ok: true, data: { configPath, steps } });
 
+  const text = generateConfig(params);
   try {
-    host.writeNew(configPath, generateConfig(params));
+    host.writeNew(configPath, text);
     steps.push({ id: "write-config", ok: true, detail: configPath });
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+    const exists = (e as NodeJS.ErrnoException).code === "EEXIST";
+    if (exists && host.readText(configPath) === text) {
+      // A retry after install or start failed: the file is exactly what this wizard would write, so go on.
+      steps.push({ id: "write-config", ok: true, detail: configPath });
+    } else if (exists) {
       return { ok: false, error: { code: "conflict", message: "这个节点名已有配置文件，不会覆盖。请换一个名字，或在「配置」页修改。", field: "node_name" } };
+    } else {
+      return { ok: false, error: { code: "internal", message: `无法写入配置：${e instanceof Error ? e.message : String(e)}` } };
     }
-    return { ok: false, error: { code: "internal", message: `无法写入配置：${e instanceof Error ? e.message : String(e)}` } };
   }
 
   for (const id of ["install", "start"] as const) {

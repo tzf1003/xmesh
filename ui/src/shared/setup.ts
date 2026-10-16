@@ -51,16 +51,9 @@ export function parseSetup(v: unknown): { ok: true; value: SetupParams } | { ok:
     if ((role !== "agent" && role !== "gateway") || roles.includes(role)) return bad("roles");
     roles.push(role);
   }
-  if (typeof r.workspace !== "string" || !isAbsolutePath(r.workspace)) {
-    // The workspace only matters when the agent role is on.
-    if (roles.includes("agent")) return bad("workspace");
-  }
-  const value: SetupParams = {
-    nodeName: r.nodeName,
-    mode: r.mode,
-    roles,
-    workspace: roles.includes("agent") ? (r.workspace as string) : "",
-  };
+  // The config schema requires `agent.cwd_policy.allow` even on a gateway-only node, so the workspace is always needed.
+  if (typeof r.workspace !== "string" || !isAbsolutePath(r.workspace)) return bad("workspace");
+  const value: SetupParams = { nodeName: r.nodeName, mode: r.mode, roles, workspace: r.workspace };
   if (r.mode === "tailnet") {
     const url = r.controlUrl === undefined ? DEFAULT_CONTROL_URL : r.controlUrl;
     if (typeof url !== "string" || !isHttpsUrl(url)) return bad("control_url");
@@ -99,18 +92,18 @@ export function generateConfig(p: SetupParams): string {
   if (p.roles.includes("gateway")) {
     lines.push("gateway:", '  listen: "127.0.0.1:8080"');
   }
-  if (p.roles.includes("agent")) {
-    lines.push(
-      "agent:",
-      `  default_cwd: ${q(p.workspace)}`,
-      "  cwd_policy:",
-      `    allow: [${q(p.workspace)}]`,
-      '    deny: ["~/.ssh", "~/.config/gcloud", "~/.azure"]',
-      "  authz:",
-      '    "tag:peer":',
-      '      tools: ["*"]',
-      '      backends: ["*"]',
-    );
-  }
+  // Always present: the schema requires it even when the agent role is off. LAN peers are trusted as
+  // `tag:peer` (pairing); tailnet devices authenticate with the `tag:device` tag the control plane grants.
+  lines.push(
+    "agent:",
+    `  default_cwd: ${q(p.workspace)}`,
+    "  cwd_policy:",
+    `    allow: [${q(p.workspace)}]`,
+    '    deny: ["~/.ssh", "~/.config/gcloud", "~/.azure"]',
+    "  authz:",
+    `    "${p.mode === "tailnet" ? "tag:device" : "tag:peer"}":`,
+    '      tools: ["*"]',
+    '      backends: ["*"]',
+  );
   return `${lines.join("\n")}\n`;
 }

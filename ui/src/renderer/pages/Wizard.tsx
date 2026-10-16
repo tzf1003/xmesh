@@ -109,16 +109,14 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
 
       {step === 1 && (
         <section class="card" data-testid="wizard-where">
-          {form.agent && (
-            <Field label={t("wizard.workspace")} hint={t("wizard.workspaceHint")}>
-              <div class="row">
-                <input type="text" value={form.workspace} onInput={(e) => set("workspace", (e.currentTarget as HTMLInputElement).value)} aria-invalid={form.workspace !== "" && problem === "workspace"} data-testid="wizard-workspace" />
-                <button type="button" class="btn" onClick={() => void pick("workspace", "workspace")} data-testid="wizard-pick-workspace">
-                  {t("wizard.choose")}
-                </button>
-              </div>
-            </Field>
-          )}
+          <Field label={t("wizard.workspace")} hint={form.agent ? t("wizard.workspaceHint") : t("wizard.workspaceUnused")}>
+            <div class="row">
+              <input type="text" value={form.workspace} onInput={(e) => set("workspace", (e.currentTarget as HTMLInputElement).value)} aria-invalid={form.workspace !== "" && problem === "workspace"} data-testid="wizard-workspace" />
+              <button type="button" class="btn" onClick={() => void pick("workspace", "workspace")} data-testid="wizard-pick-workspace">
+                {t("wizard.choose")}
+              </button>
+            </div>
+          </Field>
           {form.mode === "tailnet" && (
             <>
               <Field label={t("wizard.controlUrl")} hint={t("wizard.controlUrlHint")}>

@@ -276,7 +276,7 @@ test("wizard: a failing install is shown and start is not attempted; an existing
       nodeName: "lab-2",
       mode: "lan",
       roles: ["gateway"],
-      workspace: "",
+      workspace: "/home/me/w",
     }),
   );
   expect(second.error?.code).toBe("conflict");
