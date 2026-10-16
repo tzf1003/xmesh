@@ -298,3 +298,6 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 内部 Windows 工作区操作以卷序列号协调参与协议的 namespace writer。`grantWorkspace` 在完整扫描前取得 Global mutex；活动对象的顺序固定为 operation gate、卷级 mutex、profile mutex，覆盖导入、监视 checkpoint 和回收。同一 goroutine 在操作结束释放 mutex；等待可取消且最长 30 秒。持锁进程退出会返回错误，须完成原有 journal/对象身份恢复条件再继续。该协议只约束参与的操作，部署仍须冻结其他 namespace/reparse/ACL writer，并在进程退出及完整 ACL 回收前保留外部 guard；生产 Windows L2 继续返回 `sandbox.unavailable`。跨用户或服务 session 的 mutex 访问权限仍须在目标环境验收。
 
 工作区 journal 恢复同样先核对并固定原始根身份，再取得卷级 namespace lease，持有至 ACL 回收和 profile 完成记录刷盘。目录恢复 sweep 的 context 用于 namespace、USN、身份清单与 ACL 锁等待；取消后 journal 保留尚未完成的义务，调用方继续保留外部 guard 并重试。已持久 workspace-released 的日志可直接继续 profile 收尾。参与协议的互斥不能替代外部 writer 协调和完整 census 证明；生产 Windows L2 的门禁条件继续适用。
+
+
+受管 AppContainer 的内部标准流入口要求可信调用方显式提供三个有效文件/管道句柄。启动使用私有可继承副本及创建时句柄白名单；调用方负责选择流的权限、管理原句柄和排空输出。输出流可能访问工作区 ACL 以外的对象，应作为执行能力一并审查。stdout/stderr 可共用文件；原句柄的继承标记和寿命保持。无效流在新建 Job 前拒绝，创建进程失败后的 Job 仍须回收。该原语支持独立监督路径；ConPTY 与生产 L2 执行准入继续按实现状态文档推进。

@@ -345,3 +345,10 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 
 
 `f52fb1f` 的 [push 工作流 38853397328](https://github.com/tzf1003/xmesh/actions/runs/38853397328) 与 [PR 工作流 38853403336](https://github.com/tzf1003/xmesh/actions/runs/38853403336) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38853397594` / `38853403345` 通过。原生 job `116819403285` / `116819420476` 的完整日志各确认 248 个独立测试 PASS 标识，其中 Job/AppContainer 为 202 个，保留全部既有 245/199 项。强退宿主后的 namespace 争用取消、abandoned 所有权拒绝、释放后 sweep 重试和 ACL 锁取消三个新增场景均通过；原始/移出/新增身份安全状态准确回收，完成记录可持久重放。失败前 journal 和根 ACL 保持，取消的 ACL 等待恢复后可立即再取得锁。完整 winbox 用时分别为 89.341 秒和 75.290 秒，CI 总超时扩至 180 秒；各原语自身的等待上限保持。两轮均未重现 `e747cb8` 的子进程退出码 66，其原因仍未确认，失败诊断采集继续保留。外部 writer/完整 census/异常宿主后 guard 生命周期和生产 L2 集成条件继续适用。
+
+
+### 受管 AppContainer 标准流
+
+内部 `executionProcesses.startWithStdio` 接受可信调用方显式提供的 stdin/stdout/stderr 文件或管道句柄。入口验证三项句柄，创建可继承的私有副本，并通过 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` 与 `STARTF_USESTDHANDLES` 传入子进程；原句柄继承标记及寿命保持，启动返回时关闭副本。显式流是调用方授予的访问能力，可承载工作区 ACL 范围以外的对象。创建时 Job 绑定、挂起准入、身份清单登记后恢复及独立监督路径继续适用。
+
+新增原生回归覆盖管道、stdout/stderr 共用文件和受监督启动，核实 Unicode/换行/NUL 输入、双输出、实际 AppContainer token、其他可继承文件句柄隔离、原句柄保持，以及无效句柄/取消/启动失败的清理义务。工作区测试 helper 使用 NUL 输入与 profile 私有运行日志，失败时有界采集标准输出、标准错误及 race sidecar。本地全量 race 390 项/22 包、vet、Windows amd64/arm64 vet 和 amd64 测试编译通过；新增场景的 Windows 原生验收等待 CI。ConPTY、生产执行协调器和外部 writer 生命周期继续实现；Windows L2 保持 `sandbox.unavailable`。

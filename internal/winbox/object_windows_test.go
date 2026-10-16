@@ -242,9 +242,18 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 			t.Fatal("AppContainer helper process owner close", err)
 		}
 	}()
-	// Restricted helpers have no inherited standard handles. Preserve the race
-	// runtime's diagnostics in their private working directory for CI failures.
-	process, err := owner.start(context.Background(), []string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1", "GORACE=log_path=object-race"})
+	input, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	diagnostics, err := os.Create(filepath.Join(p.Directory(), "object-runtime.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer diagnostics.Close()
+	stdio := &executionStdio{windows.Handle(input.Fd()), windows.Handle(diagnostics.Fd()), windows.Handle(diagnostics.Fd())}
+	process, err := owner.startWithStdio(context.Background(), []string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1", "GORACE=log_path=object-race"}, stdio)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +264,10 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	}
 	var exit uint32
 	if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 0 {
+		if _, seekErr := diagnostics.Seek(0, io.SeekStart); seekErr == nil {
+			body, readErr := io.ReadAll(io.LimitReader(diagnostics, 64*1024))
+			t.Logf("sandbox runtime diagnostic: %s (read error: %v)", body, readErr)
+		}
 		logs, _ := filepath.Glob(filepath.Join(p.Directory(), "object-race.*"))
 		for _, path := range logs {
 			file, openErr := os.Open(path)

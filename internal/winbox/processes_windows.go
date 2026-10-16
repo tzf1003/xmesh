@@ -88,9 +88,16 @@ func (e *executionProcesses) acquire(ctx context.Context) (func(), error) {
 
 // start returns caller-owned process/thread handles. It always creates the root
 // suspended, pins its verified Job identity, then resumes it under the admission
-// gate. Standard/ConPTY handle inheritance has a separate integration gate.
+// gate. ConPTY integration and production L2 admission have separate gates.
 // A failed launch can retain a Job obligation until reap and Close.
 func (e *executionProcesses) start(ctx context.Context, args []string, directory string, environment []string) (windows.ProcessInformation, error) {
+	return e.startWithStdio(ctx, args, directory, environment, nil)
+}
+
+// startWithStdio transfers only private duplicates of the three explicit stream
+// handles. The caller retains its originals and supplies only capabilities that
+// the child may use; inherited streams can access objects outside workspace ACLs.
+func (e *executionProcesses) startWithStdio(ctx context.Context, args []string, directory string, environment []string, stdio *executionStdio) (windows.ProcessInformation, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var process windows.ProcessInformation
@@ -123,6 +130,11 @@ func (e *executionProcesses) start(ctx context.Context, args []string, directory
 		return process, err
 	}
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
+	handles, err := duplicateExecutionStdio(stdio)
+	if err != nil {
+		return process, err
+	}
+	defer closeExecutionStdio(handles)
 	var entry executionJob
 	if e.supervisor != nil {
 		reply, callErr := e.supervisor.call(ctx, supervisorRequest{Operation: "new-job"})
@@ -144,7 +156,11 @@ func (e *executionProcesses) start(ctx context.Context, args []string, directory
 	}
 	e.jobs = append(e.jobs, entry)
 	job := entry.handle
-	attrs, err := windows.NewProcThreadAttributeList(2)
+	attributeCount := uint32(2)
+	if handles != nil {
+		attributeCount++
+	}
+	attrs, err := windows.NewProcThreadAttributeList(attributeCount)
 	if err != nil {
 		return process, err
 	}
@@ -159,8 +175,15 @@ func (e *executionProcesses) start(ctx context.Context, args []string, directory
 		return process, err
 	}
 	startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{}))}, ProcThreadAttributeList: attrs.List()}
+	if handles != nil {
+		if err := attrs.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&handles[0]), uintptr(len(handles))*unsafe.Sizeof(handles[0])); err != nil {
+			return process, err
+		}
+		startup.Flags = windows.STARTF_USESTDHANDLES
+		startup.StdInput, startup.StdOutput, startup.StdErr = handles[0], handles[1], handles[2]
+	}
 	flags := uint32(windows.CREATE_SUSPENDED | windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_NO_WINDOW | windows.CREATE_UNICODE_ENVIRONMENT)
-	if err := windows.CreateProcess(nil, command, nil, nil, false, flags, &block[0], dir, &startup.StartupInfo, &process); err != nil {
+	if err := windows.CreateProcess(nil, command, nil, nil, handles != nil, flags, &block[0], dir, &startup.StartupInfo, &process); err != nil {
 		return windows.ProcessInformation{}, err
 	}
 	if e.supervisor != nil {
