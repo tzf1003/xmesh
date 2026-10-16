@@ -3,6 +3,7 @@ package winbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -273,5 +274,55 @@ func Test_WindowsAppContainerObjectIdentityReopen(t *testing.T) {
 	guard.Close()
 	if err := os.Rename(root, root+".moved"); err != nil {
 		t.Fatal("identity recovery retained child handles", err)
+	}
+}
+
+// An object that was an ordinary directory when it was recorded and became a
+// reparse point afterwards must be reported as a link change, so the monitor
+// faults with the same cause whether it sees the reparse record or the converted
+// object first. The change monitor reopens created identities on each cycle; this
+// is the deterministic form of the race between those two observations.
+func Test_WindowsAppContainerIdentityReopenReportsLinkChange(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	root := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := openWorkspaceTree(context.Background(), root, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	ext := filepath.Join(root, "ext")
+	if err := os.Mkdir(ext, 0700); err != nil {
+		t.Fatal(err)
+	}
+	name, err := windows.UTF16PtrFromString(ext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := windows.CreateFile(name, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := inspectTreeObject(h, "")
+	windows.CloseHandle(h)
+	if err != nil || !recorded.directory {
+		t.Fatal("recorded identity", err)
+	}
+	reopened, err := openIdentityObject(tree.ancestors[0], recorded)
+	if err != nil {
+		t.Fatal("ordinary object did not reopen", err)
+	}
+	windows.CloseHandle(reopened)
+	makeJunction(t, ext, filepath.Dir(root))
+	if reopened, err = openIdentityObject(tree.ancestors[0], recorded); err == nil {
+		windows.CloseHandle(reopened)
+		t.Fatal("a converted reparse point reopened as the recorded object")
+	} else if !errors.Is(err, errNonOrdinaryObject) {
+		t.Fatal("reopen cause", err)
 	}
 }
