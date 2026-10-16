@@ -278,7 +278,11 @@ func (e *executionProcesses) reap(ctx context.Context, exitCode uint32) error {
 // Close releases the live process owner only after successful reap. Callers
 // retain separate ACL/journal/writer guards through resource reclamation.
 func (e *executionProcesses) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	return e.closeContext(context.Background())
+}
+
+func (e *executionProcesses) closeContext(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	release, err := e.acquire(ctx)
 	if err != nil {

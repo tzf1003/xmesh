@@ -169,7 +169,11 @@ func (g *workspaceGrant) retainIdentityHandles(ctx context.Context) error {
 // root and removes this profile's inherited ACEs by object identity. Any failed
 // or incomplete scan retains the profile reference and namespace guard for retry.
 func (g *workspaceGrant) Close() error {
-	release, err := g.acquire(context.Background())
+	return g.closeContext(context.Background())
+}
+
+func (g *workspaceGrant) closeContext(ctx context.Context) error {
+	release, err := g.acquire(ctx)
 	if err != nil {
 		return err
 	}
@@ -230,7 +234,7 @@ func (g *workspaceGrant) Close() error {
 		}
 		// Recovery owns the complete snapshot, including a write-ahead intent
 		// whose kernel edit failed before an objectGrant could be returned.
-		if err := releaseJournalWorkspace(j, g.profile.sid, g.maxObjects); err != nil {
+		if err := releaseJournalWorkspaceContext(ctx, j, g.profile.sid, g.maxObjects); err != nil {
 			g.profile.mu.Unlock()
 			return err
 		}
@@ -251,7 +255,7 @@ func (g *workspaceGrant) Close() error {
 		}
 		g.selected.grants = nil
 		g.profile.mu.Unlock()
-	} else if err := g.closeUnjournaled(); err != nil {
+	} else if err := g.closeUnjournaled(ctx); err != nil {
 		return err
 	}
 	g.tree.Close()
@@ -294,11 +298,11 @@ func (g *workspaceGrant) acquire(ctx context.Context) (func(), error) {
 	}
 }
 
-func (g *workspaceGrant) closeUnjournaled() error {
+func (g *workspaceGrant) closeUnjournaled(ctx context.Context) error {
 	if err := g.selected.Close(); err != nil {
 		return err
 	}
-	current, err := openWorkspaceTree(context.Background(), g.path, g.maxObjects)
+	current, err := openWorkspaceTree(ctx, g.path, g.maxObjects)
 	if err != nil {
 		return fmt.Errorf("inspect inherited AppContainer grants: %w", err)
 	}
@@ -312,6 +316,9 @@ func (g *workspaceGrant) closeUnjournaled() error {
 		existing[object.id] = true
 	}
 	for index := len(current.objects) - 1; index >= 0; index-- {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(result, err)
+		}
 		object := current.objects[index]
 		if err := g.profile.removeInheritedGrant(object, !existing[object.id]); err != nil {
 			result = errors.Join(result, fmt.Errorf("release inherited AppContainer object %d: %w", index, err))
