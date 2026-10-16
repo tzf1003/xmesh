@@ -158,6 +158,9 @@ type Policy struct {
 		DenyNames          []string `json:"deny_names"`
 		DenyPathSubstrings []string `json:"deny_path_substrings"`
 	} `json:"env"`
+	// WindowsAppContainer opts a Windows node into the managed AppContainer runner
+	// for L2. It is read at startup; changing it requires a restart.
+	WindowsAppContainer bool `json:"windows_appcontainer"`
 }
 type Audit struct {
 	Retention string `json:"retention"`

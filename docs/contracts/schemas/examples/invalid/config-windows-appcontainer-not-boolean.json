@@ -1,0 +1,9 @@
+{
+  "node": {"name": "win-l2", "roles": ["agent"]},
+  "mesh": {"mode": "lan", "lan": {"mdns": true}},
+  "agent": {
+    "default_cwd": "C:\\Work",
+    "cwd_policy": {"allow": ["C:\\Work"]},
+    "policy": {"isolation": "L2", "windows_appcontainer": "yes"}
+  }
+}

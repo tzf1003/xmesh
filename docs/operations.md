@@ -167,15 +167,28 @@ python3 scripts/smoke_local.py --binary bin/xmesh --isolation L2 --pat --shell /
 
 `sandbox-exec` 已被 Apple 标记为废弃，系统升级后应重新执行上述验收。系统缺少启动器时拒绝 L2 启动。当前实现允许读取 `/bin`、`/sbin`、`/usr`、`/System`、`/opt/homebrew`，以及必要的设备与目录元数据。
 
-Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检查 `.ssh`、`.config/gcloud`、`.azure` 和 `.aws`，包括已存在的符号链接目标。工作目录中的既有硬链接仍共享主机 inode；部署时应使用独立工作目录。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要额外的生命周期约束。Windows 当前配置 L2 时拒绝命令和终端启动。
+Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检查 `.ssh`、`.config/gcloud`、`.azure` 和 `.aws`，包括已存在的符号链接目标。工作目录中的既有硬链接仍共享主机 inode；部署时应使用独立工作目录。Unix PTY 关闭会清理同一终端会话的进程组；主动创建独立会话的守护进程需要额外的生命周期约束。Windows 默认配置 L2 时拒绝命令和终端启动，只有显式开启实验开关才会使用 AppContainer，见下节。
 
 ## Windows L2
 
-当前 Windows exec 与 PTY 的 L2 请求返回 `sandbox.unavailable`。`internal/winbox` 提供独立 AppContainer profile、能力为空的启动属性和 profile 删除原语；真实工作目录绑定、exec/ConPTY 接入及异常退出回收仍在实现。其原生核验使用临时 profile，在 Windows 会话中执行：
+默认情况下 Windows exec 与 PTY 的 L2 请求返回 `sandbox.unavailable`。设置 `agent.policy.windows_appcontainer: true`（实验性，改动后需重启）后，`xmesh serve` 在状态目录的 `sandbox` 子目录建立 AppContainer 运行器，`isolation: L2` 的 exec 与 PTY 经它在独立 profile、工作目录授权和变更日志下执行。运行器使用守护 keeper 加内核写入围栏，并在启动时先回收上一次异常退出遗留的日志、授权与 profile：keeper 仍在时由它接管，keeper 已不存在（重启、注销或被终止）时用新围栏冻结工作目录后再回收。运行器创建或恢复失败时节点照常启动，L2 继续返回 `sandbox.unavailable`，`sys.info` 的 `warnings` 给出提示，原因写入节点日志。运行器失败的单次调用返回 `policy_denied`，规则名 `sandbox.runner_failed` 或 `sandbox.cleanup_pending`。stdio 后端的 L2 不经过托管运行器，仍然失败关闭。停止服务时先排空工具调用，再最多等待两分钟回收沙箱，服务停止等待相应延长。
+
+该开关不代表安全条件已经满足：工作目录树内写入冻结、同用户 WRITE_DAC 阻断、后代安全描述符变更纳入围栏与完整对象普查仍在 [实现状态](implementation-status.md) 列出，普通账户和真实环境验收也尚未完成。
+
+`internal/winbox` 提供独立 AppContainer profile、能力为空的启动属性、profile 删除、工作目录绑定与回收原语。原语的原生核验使用临时 profile，在 Windows 会话中执行：
 
 ```powershell
 $env:XMESH_TEST_WINDOWS_SANDBOX = "1"
 go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
+```
+
+经 `xmesh serve` 的生产启动链核验（开关、运行器构建、启动恢复、每次调用挂接）需要先构建二进制：
+
+```powershell
+go build -o $env:TEMP\xmesh-l2.exe ./cmd/xmesh
+$env:XMESH_TEST_WINDOWS_SANDBOX = "1"
+$env:XMESH_TEST_WINDOWS_BINARY = "$env:TEMP\xmesh-l2.exe"
+go test ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s
 ```
 
 AppContainer 启动环境通过 `winbox.Environment` 从 Windows Known Folder 补全 `LOCALAPPDATA`；调用方继续提供经过策略过滤的其他变量。该用例验证父进程环境哨兵未继承、profile 内目录写入、目录外文件读写拒绝、父进程内存读取拒绝、已知可达的环回监听访问拒绝，以及进程 token 的 AppContainer 身份与空 capability 集合。环回网络拒绝核对 helper 的准确 AppContainer SID，通过 Windows 网络隔离 API 确认该 SID 在探测前后均没有环回豁免，并验证宿主在探测前后均能连接、监听端未接受沙箱连接；单独的连接超时不作为通过证据。清理后检查 profile 目录已删除。原语的原生结果见 [Windows 验收记录](validation/2026-10-15-windows.md)。

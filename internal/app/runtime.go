@@ -15,6 +15,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/privdir"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
+	"github.com/tzf1003/xmesh/internal/sandbox"
 	"golang.org/x/crypto/acme/autocert"
 	"net"
 	"net/http"
@@ -95,11 +96,18 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	var a *agent.Agent
 	if c.HasRole("agent") {
+		// Registered before the agent's own Close, so the runner is released
+		// only after exec and PTY executions have drained.
+		runner, notes := startSandbox(ctx, c, o.StateDir)
+		if runner != nil {
+			defer func() { runErr = errors.Join(runErr, closeSandbox(runner)) }()
+		}
 		a, e = agent.New(store)
 		if e != nil {
 			return e
 		}
 		a.SetAudit(log)
+		a.SetSandbox(runnerOrNil(runner), notes...)
 		mode := c.Mesh.Mode
 		if o.Local {
 			mode = "local"
@@ -362,4 +370,12 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	case e := <-errc:
 		return e
 	}
+}
+
+// runnerOrNil converts an absent runner to a nil interface value, never a typed nil.
+func runnerOrNil(r l2Runner) sandbox.Runner {
+	if r == nil {
+		return nil
+	}
+	return r
 }

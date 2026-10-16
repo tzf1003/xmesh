@@ -311,6 +311,7 @@
           "properties": {
             "isolation": { "enum": ["L0", "L1", "L2"] },
             "allow_dangerous": { "type": "boolean", "default": false },
+            "windows_appcontainer": { "type": "boolean", "default": false },
             "exec": {
               "type": "object",
               "additionalProperties": false,
