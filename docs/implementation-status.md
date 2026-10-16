@@ -278,4 +278,6 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 
 正常 `Stop` 要求持久进程退出确认，故障后可收取已终止监视器的结果；停止会等待在途 checkpoint 结束后才解除工作区/profile 附着，超时继续保留所有权。观察 `Wait` 的取消或超时只影响观察者。附着期间禁止第二监视器、新执行所有者和新授权，工作区关闭须先完成监视器交接。后续工作区关闭继续执行最终 USN 补读及按 ID 回收。
 
-本地全量 race 共 300 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。新增四个真实 AppContainer 原生场景覆盖周期持久化、已移出目录的后续子对象、生命周期取消、历史连续性故障和写盘失败后的终止/恢复；并检查重复准入、停止前退出门禁、等待/停止期限、准确安全恢复与持久重放。Windows 原生结果待 CI。导入子树证明、执行期延迟 close 协调、外部 writer 协调、生产执行协调器和 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。
+本地全量 race 共 300 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。新增四个真实 AppContainer 原生场景覆盖周期持久化、已移出目录的后续子对象、生命周期取消、历史连续性故障和写盘失败后的终止/恢复；并检查重复准入、停止前退出门禁、等待/停止期限、准确安全恢复与持久重放。四个原生子场景均通过。导入子树证明、执行期延迟 close 协调、外部 writer 协调、生产执行协调器和 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。
+
+`20df0c0` 的 [push 工作流 38837835870](https://github.com/tzf1003/xmesh/actions/runs/38837835870) 与 [PR 工作流 38837840099](https://github.com/tzf1003/xmesh/actions/runs/38837840099) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38837835871` / `38837840086` 通过。原生 job `116770827835` / `116770840522` 的完整日志各确认 158 个独立 Job/AppContainer PASS 标记，保留全部既有 153 项。四个新增子场景验证真实 AppContainer 存活期间周期登记新增 ID，目录移出根后继续登记其新增子对象，以及取消、历史连续性故障和写盘失败后的封闭准入、进程终止与重试恢复。等待/停止期限保留附着，正常停止要求持久退出确认，写盘失败保持执行未确认；恢复完成后根描述符/控制位/标签准确、树外对象 profile ACE 清空，完成状态可持久重放。
