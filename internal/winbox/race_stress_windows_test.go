@@ -131,11 +131,12 @@ func Test_WindowsAppContainerRaceDiagnosticsControl(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	outsideHelper := ordinaryHelper(t)
 	for _, mode := range []struct {
 		name, marker string
 		launches     int
 	}{{"race", "XMESH_RACE_PROBE_RACE", 3}, {"epoch", "XMESH_RACE_PROBE_EPOCH", 10}, {"alloc", "XMESH_RACE_PROBE_ALLOC", 10}} {
-		outside := probeOrdinaryHelper(t, mode.marker)
+		outside := probeOrdinaryHelper(t, outsideHelper, mode.marker)
 		t.Logf("%s outside AppContainer: exit=%d report=%q output=%q", mode.name, outside.exit, firstLine(outside.races), truncate(outside.runtime, 600))
 		histogram := map[string]int{}
 		for i := 0; i < mode.launches; i++ {
@@ -146,6 +147,16 @@ func Test_WindowsAppContainerRaceDiagnosticsControl(t *testing.T) {
 			t.Logf("%s inside AppContainer: %d of %d launches: %s", mode.name, count, mode.launches, outcome)
 		}
 	}
+}
+
+// raceRuntimeStartFailure recognises exit 66 produced by the race runtime's own
+// memory mapping failing instead of by a reported data race.
+func raceRuntimeStartFailure(r probeResult) bool {
+	if r.exit != 66 {
+		return false
+	}
+	text := strings.Join(r.races, "\n") + r.runtime
+	return strings.Contains(text, "ThreadSanitizer failed to allocate") || strings.Contains(text, "ThreadSanitizer: failed to restore")
 }
 
 func truncate(text string, limit int) string {
@@ -163,12 +174,10 @@ func firstLine(values []string) string {
 	return line
 }
 
-// probeOrdinaryHelper runs the helper as the current user with the same race
-// log configuration.
-func probeOrdinaryHelper(t *testing.T, marker string) probeResult {
+// ordinaryHelper copies the test binary once so repeated outside launches share it.
+func ordinaryHelper(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	helper := filepath.Join(dir, "probe-helper.exe")
+	helper := filepath.Join(t.TempDir(), "probe-helper.exe")
 	body, err := os.ReadFile(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
@@ -176,9 +185,22 @@ func probeOrdinaryHelper(t *testing.T, marker string) probeResult {
 	if err := os.WriteFile(helper, body, 0700); err != nil {
 		t.Fatal(err)
 	}
+	return helper
+}
+
+// probeOrdinaryHelper runs the helper as the current user with the same race
+// log configuration, in a fresh working directory.
+func probeOrdinaryHelper(t *testing.T, helper, marker string) probeResult {
+	t.Helper()
+	dir, err := os.MkdirTemp(t.TempDir(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd := osexec.Command(helper, "-test.run=^Test_WindowsAppContainerRaceProbeHelper$")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), marker+"=1", "GORACE=log_path="+filepath.Join(dir, "probe-race"))
+	// The sanitizer option parser splits on ':', so a drive-letter path is not a
+	// valid log_path; the child runs in dir and names the log relatively.
+	cmd.Env = append(os.Environ(), marker+"=1", "GORACE=log_path=probe-race")
 	output, _ := cmd.CombinedOutput()
 	var result probeResult
 	result.exit = uint32(cmd.ProcessState.ExitCode())
@@ -202,6 +224,7 @@ func Test_WindowsAppContainerRaceHelperLaunchStress(t *testing.T) {
 	}
 	histogram := map[uint32]int{}
 	var failures []string
+	startFailures := 0
 	for i := 0; i < count; i++ {
 		p, helper := stressProfile(t)
 		result := probeAppContainerHelper(t, p, helper, "Test_WindowsAppContainerRaceProbeHelper", "XMESH_RACE_PROBE_NOOP")
@@ -210,9 +233,33 @@ func Test_WindowsAppContainerRaceHelperLaunchStress(t *testing.T) {
 		}
 		histogram[result.exit]++
 		if result.exit != 0 {
-			failures = append(failures, fmt.Sprintf("launch %d: exit=%d runtime=%q races=%q", i, result.exit, result.runtime, result.races))
+			line := fmt.Sprintf("launch %d: exit=%d runtime=%q races=%q", i, result.exit, result.runtime, result.races)
+			if raceRuntimeStartFailure(result) {
+				// The race runtime failed to map its own memory before any test code
+				// ran. Recorded, not a product failure.
+				t.Log("race runtime start failure:", line)
+				startFailures++
+			} else {
+				failures = append(failures, line)
+			}
 		}
 	}
+	// The same launches outside an AppContainer give the baseline rate of the
+	// race runtime's own start failures.
+	outsideStartFailures, outsideOther := 0, 0
+	outsideHelper := ordinaryHelper(t)
+	for i := 0; i < count; i++ {
+		outside := probeOrdinaryHelper(t, outsideHelper, "XMESH_RACE_PROBE_NOOP")
+		if outside.exit != 0 {
+			if raceRuntimeStartFailure(outside) {
+				t.Log("outside race runtime start failure:", truncate(strings.Join(outside.races, "|")+outside.runtime, 300))
+				outsideStartFailures++
+			} else {
+				outsideOther++
+			}
+		}
+	}
+	t.Logf("race runtime start failures: inside AppContainer %d of %d, outside %d of %d (other outside failures %d)", startFailures, count, outsideStartFailures, count, outsideOther)
 	var keys []int
 	for exit := range histogram {
 		keys = append(keys, int(exit))
