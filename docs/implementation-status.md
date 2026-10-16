@@ -314,8 +314,10 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 
 返回值单独报告移动是否已经发生。移动后的取消、ACL 或 checkpoint 错误永久封闭该 profile 的准入，以独立期限终止并确认受管 Job；确认写盘失败继续保留执行义务。后续按完整清单回收 ACL，保留已经发生的 namespace 移动。调用方仍须在入口前冻结全部源和目标 namespace/reparse/ACL writer，并持续持有工作区外部 writer guard；生产 writer 生命周期、未知导入处理和 exec/ConPTY 接入继续实现，Windows L2 保持 `sandbox.unavailable`。
 
-本地全量 race 390 项、vet、Windows amd64/arm64 vet 及 amd64 测试编译通过。新增原生场景覆盖目录、单文件、嵌套目标、重复导入、日志重开、真实 AppContainer 后续写入、准确安全回收和完成重放；拒绝覆盖、越界、reparse、hardlink、预存 profile ACE、追加失败、取消、移动被占用及限额。移动后 ACL 边界的取消和日志关闭故障同时验证真实受管进程终止、持久执行确认与恢复重试。本阶段提交时等待 Windows 原生 CI 验收。
+本地全量 race 390 项、vet、Windows amd64/arm64 vet 及 amd64 测试编译通过。新增原生场景覆盖目录、单文件、嵌套目标、重复导入、日志重开、真实 AppContainer 后续写入、准确安全回收和完成重放；拒绝覆盖、越界、reparse、hardlink、预存 profile ACE、追加失败、取消、移动被占用及限额。移动后 ACL 边界的取消和日志关闭故障同时验证真实受管进程终止、持久执行确认与恢复重试。本阶段移动/授权、准入拒绝及移动后故障场景已通过双轮 Windows 原生 CI 验收。
 
 原生首轮 `4996819` 的 [push 38846510170](https://github.com/tzf1003/xmesh/actions/runs/38846510170) 与 [PR 38846513723](https://github.com/tzf1003/xmesh/actions/runs/38846513723) 中，三平台常规检查及契约通过，九个导入拒绝子场景通过；五个移动场景及两个移动后故障场景在 namespace 调用处返回参数错误。绑定目标父目录的相对重命名现通过 `NtSetInformationFile(FileRenameInformation)` 执行；Win32 `FileRenameInfoEx` 接口要求 `RootDirectory` 为空，不能承接该绑定。双架构 vet 与 amd64 测试编译通过，修复后等待原生复验。
 
 `42c9b35` 的 push `38847064551` 与 PR `38847069438` 中，原生直接调用仍在使用按 ID 打开的源句柄时返回参数错误；其他三平台检查和契约通过。移动源句柄现从仍绑定的原父目录按单个名称相对打开，并在获得 DELETE 权限后核对完整卷/ID/类型；安全编辑和回收继续使用按 ID 句柄。新增原路径替换拒绝用例验证替代对象不能取得原身份的移动权限。原生复验待 CI。
+
+`8b31320` 的 [push 工作流 38848057826](https://github.com/tzf1003/xmesh/actions/runs/38848057826) 与 [PR 工作流 38848061817](https://github.com/tzf1003/xmesh/actions/runs/38848061817) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38848057944` / `38848061875` 通过。原生 job `116802934885` / `116802947514` 完整日志各确认 193 个独立 Job/AppContainer PASS 标记，保留全部既有 173 项。五个移动/授权子场景、九个准入拒绝子场景、原路径替换拒绝，以及两个移动后故障子场景均通过。真实 AppContainer 对导入目录/文件后续写入、重复导入和日志重开、准确 DACL/控制位/标签回收及持久完成重放均已执行；移动后取消和日志关闭故障确认受管进程已终止，执行回执仅在持久写入后确认，重开后可按完整身份清单重试回收。生产外部 writer 冻结生命周期、未知导入处理和 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。
