@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	for _, stage := range []string{"admitted", "explicit-released", "workspace-released", "created-checkpointed", "created-partial-released", "usn-catchup", "usn-checkpointed"} {
+	for _, stage := range []string{"admitted", "explicit-released", "workspace-released", "created-checkpointed", "created-partial-released", "usn-catchup", "usn-checkpointed", "namespace-contended", "namespace-abandoned"} {
 		t.Run(stage, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "workspace")
 			child := filepath.Join(root, "existing-child")
@@ -108,6 +109,60 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				}
 				j.Close()
 			}()
+			if stage == "namespace-contended" || stage == "namespace-abandoned" {
+				tree, err := openWorkspaceRoot(ctx, root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tree.Close()
+				count := len(j.records)
+				admitted, control := kernelJournalState(t, root)
+				if stage == "namespace-contended" {
+					lease, err := acquireNamespaceWriters(ctx, tree)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer lease.Close()
+					done := make(chan error, 1)
+					go func() {
+						call, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+						defer cancel()
+						done <- recoverWorkspaceJournalContext(call, j, 64)
+					}()
+					select {
+					case err := <-done:
+						if !errors.Is(err, context.DeadlineExceeded) {
+							t.Fatal("recovery bypassed namespace owner", err)
+						}
+					case <-ctx.Done():
+						t.Fatal("recovery ignored namespace wait cancellation", ctx.Err())
+					}
+					if err := lease.Close(); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					id, err := namespaceWriterIdentity(tree)
+					if err != nil {
+						t.Fatal(err)
+					}
+					handle, err := openNamespaceWriterMutex(id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer windows.CloseHandle(handle)
+					namespaceWriterHelper(t, root, "abandon")
+					if err := recoverWorkspaceJournalContext(ctx, j, 64); !errors.Is(err, errNamespaceWriterAbandoned) {
+						t.Fatal("recovery admitted abandoned namespace", err)
+					}
+				}
+				after, afterControl := kernelJournalState(t, root)
+				if len(j.records) != count || !bytes.Equal(admitted, after) || control != afterControl || j.state.workspaceReleased || j.state.complete {
+					t.Fatal("failed namespace admission changed recovery state")
+				}
+				// The ordinary sweep below retries after contention or abandonment
+				// and verifies every original/moved/new descriptor and durable receipt.
+				tree.Close()
+			}
 			createdRoot := filepath.Join(root, "new-tree")
 			movedCreated := stage == "created-checkpointed" || stage == "created-partial-released" || stage == "usn-catchup" || stage == "usn-checkpointed"
 			if movedCreated {

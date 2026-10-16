@@ -171,6 +171,50 @@ func Test_WindowsAppContainerACLConcurrentProcesses(t *testing.T) {
 	}
 }
 
+func Test_WindowsAppContainerACLMutexCancellation(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "selected.txt")
+	if err := os.WriteFile(path, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	id := aclLockFileIdentity(t, path)
+	before := readObjectACL(t, path)
+	lock, err := acquireObjectACL(id, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		other, err := acquireObjectACLContext(ctx, id, 30000)
+		if other != nil {
+			other.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("ACL mutex ignored cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ACL mutex cancellation waited for its full lock deadline")
+	}
+	lock.Close()
+	other, err := acquireObjectACLContext(context.Background(), id, 0)
+	if err != nil {
+		t.Fatal("ACL mutex unavailable after cancelled wait", err)
+	}
+	other.Close()
+	if !bytes.Equal(before, readObjectACL(t, path)) {
+		t.Fatal("ACL coordination changed the descriptor")
+	}
+}
+
 func Test_WindowsAppContainerACLMutexHelper(t *testing.T) {
 	mode := os.Getenv("XMESH_ACL_LOCK_MODE")
 	if mode == "" {

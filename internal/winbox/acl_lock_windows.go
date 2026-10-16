@@ -1,9 +1,11 @@
 package winbox
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -42,21 +44,51 @@ type objectACLLock struct {
 // An abandoned mutex is acquired normally: descriptor writes are atomic and
 // every edit rereads the current descriptor. Profile/crash recovery is separate.
 func acquireObjectACL(id fileIdentity, timeoutMillis uint32) (*objectACLLock, error) {
+	return acquireObjectACLContext(context.Background(), id, timeoutMillis)
+}
+
+func acquireObjectACLContext(ctx context.Context, id fileIdentity, timeoutMillis uint32) (*objectACLLock, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	h, err := openObjectACLMutex(id)
 	if err != nil {
 		return nil, err
 	}
 	runtime.LockOSThread()
-	result, err := windows.WaitForSingleObject(h, timeoutMillis)
-	if err == nil && (result == windows.WAIT_OBJECT_0 || result == windows.WAIT_ABANDONED) {
-		return &objectACLLock{handle: h, abandoned: result == windows.WAIT_ABANDONED}, nil
+	retained := false
+	defer func() {
+		if !retained {
+			windows.CloseHandle(h)
+			runtime.UnlockOSThread()
+		}
+	}()
+	deadline := time.Now().Add(time.Duration(timeoutMillis) * time.Millisecond)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		waitMillis := uint32(0)
+		if remaining := time.Until(deadline); remaining > 0 {
+			waitMillis = uint32(min((remaining+time.Millisecond-1)/time.Millisecond, 25))
+		}
+		result, err := windows.WaitForSingleObject(h, waitMillis)
+		if err == nil && (result == windows.WAIT_OBJECT_0 || result == windows.WAIT_ABANDONED) {
+			lock := &objectACLLock{handle: h, abandoned: result == windows.WAIT_ABANDONED}
+			retained = true
+			if err := ctx.Err(); err != nil {
+				lock.Close()
+				return nil, err
+			}
+			return lock, nil
+		}
+		if result != uint32(windows.WAIT_TIMEOUT) || err != nil {
+			return nil, fmt.Errorf("wait for AppContainer ACL coordination: result=%#x error=%v", result, err)
+		}
+		if !time.Now().Before(deadline) {
+			return nil, errObjectACLTimeout
+		}
 	}
-	runtime.UnlockOSThread()
-	windows.CloseHandle(h)
-	if result == uint32(windows.WAIT_TIMEOUT) && err == nil {
-		return nil, errObjectACLTimeout
-	}
-	return nil, fmt.Errorf("wait for AppContainer ACL coordination: result=%#x error=%v", result, err)
 }
 
 // Close must run in the acquiring goroutine. The handle remains private to the

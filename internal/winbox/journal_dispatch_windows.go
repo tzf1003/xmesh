@@ -176,7 +176,7 @@ func recoverJournalDirectory(ctx context.Context, path string, maxJournals, maxO
 		}
 		if err == nil {
 			if j.state.workspace {
-				err = recoverWorkspaceJournal(j, maxObjects)
+				err = recoverWorkspaceJournalContext(ctx, j, maxObjects)
 			} else {
 				err = recoverSelectedJournalVolumes(j, lease.Volumes)
 			}

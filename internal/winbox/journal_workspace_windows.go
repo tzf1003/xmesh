@@ -3,6 +3,7 @@ package winbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -15,6 +16,17 @@ import (
 // Runtime tracking of new objects moved outside that tree is a separate admission
 // requirement. Production exec/ConPTY keep Windows L2 gated until it is supplied.
 func recoverWorkspaceJournal(j *grantJournal, maxObjects int) error {
+	return recoverWorkspaceJournalContext(context.Background(), j, maxObjects)
+}
+
+// Recovery joins the same volume protocol as live workspace operations. The
+// journal is exclusively owned before entry; no live profile mutex is acquired.
+// Root bindings and namespace ownership remain held through profile completion.
+// The coordinator independently retains all external writer and census guards.
+func recoverWorkspaceJournalContext(ctx context.Context, j *grantJournal, maxObjects int) (resultErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sid, name, err := journalRecoveryIdentity(j)
 	if err != nil {
 		return err
@@ -26,7 +38,26 @@ func recoverWorkspaceJournal(j *grantJournal, maxObjects int) error {
 	if j.state.complete {
 		return nil
 	}
-	if err := releaseJournalWorkspace(j, sid, maxObjects); err != nil {
+	if !j.state.workspaceReleased {
+		w := j.records[1].Workspace
+		tree, err := openWorkspaceRoot(ctx, w.Path)
+		if err != nil {
+			return err
+		}
+		defer tree.Close()
+		if tree.objects[0].id != (fileIdentity{Volume: w.Root.Volume, ID: w.Root.ID}) {
+			return fmt.Errorf("AppContainer recovery workspace root identity changed")
+		}
+		writers, err := acquireNamespaceWriters(ctx, tree)
+		if err != nil {
+			return err
+		}
+		defer func() { resultErr = errors.Join(resultErr, writers.Close()) }()
+	}
+	if err := releaseJournalWorkspaceContext(ctx, j, sid, maxObjects); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return finishJournalProfile(j, name)
@@ -216,6 +247,13 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 // than infer deletion from an unavailable ID. Roots and ancestors stay pinned
 // for the complete operation; all handles and acknowledgements are retryable.
 func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) error {
+	return releaseJournalWorkspaceContext(context.Background(), j, sid, maxObjects)
+}
+
+func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateWorkspaceJournal(j, sid); err != nil {
 		return err
 	}
@@ -223,11 +261,11 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 		return nil
 	}
 	if j.state.changeCursor != nil {
-		if err := checkpointWorkspaceChanges(context.Background(), j, sid, maxObjects, maxWorkspaceChangeEvents); err != nil {
+		if err := checkpointWorkspaceChanges(ctx, j, sid, maxObjects, maxWorkspaceChangeEvents); err != nil {
 			return err
 		}
 	}
-	census, err := censusJournalWorkspace(j, sid, maxObjects)
+	census, err := censusJournalWorkspaceContext(ctx, j, sid, maxObjects)
 	if err != nil {
 		return err
 	}
@@ -235,15 +273,21 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 	if j.state.changeCursor != nil && len(census.discovered) != 0 {
 		return errWorkspaceChangesLost
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Flush every newly observed identity before the first ACL mutation. A
 	// crash or failed release may otherwise lose an object later moved out.
 	if err := appendWorkspaceCreated(j, census.discovered); err != nil {
 		return err
 	}
 	for index := len(census.objects) - 1; index >= 0; index-- {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		object := census.objects[index]
 		intent := census.intents[object.id]
-		if err := releaseJournalWorkspaceObject(object, sid, !census.initial[object.id], intent); err != nil {
+		if err := releaseJournalWorkspaceObjectContext(ctx, object, sid, !census.initial[object.id], intent); err != nil {
 			return err
 		}
 		if intent.Grant != nil {
@@ -255,6 +299,9 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 	// Deleted initial identities have no remaining descriptor. Acknowledge their
 	// grant intents only after every live object passed census and reclamation.
 	for _, record := range j.records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if record.Grant == nil || !j.state.pending[record.Sequence] {
 			continue
 		}
@@ -326,11 +373,15 @@ func (c *journalWorkspaceCensus) Close() {
 // The caller validates journal ownership and holds external writers quiescent.
 // Every known ID and current descriptor is verified before returning handles.
 func censusJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) (*journalWorkspaceCensus, error) {
+	return censusJournalWorkspaceContext(context.Background(), j, sid, maxObjects)
+}
+
+func censusJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects int) (*journalWorkspaceCensus, error) {
 	w := j.records[1].Workspace
 	if maxObjects < len(w.Objects)+len(j.state.created) || maxObjects > 10000 {
 		return nil, fmt.Errorf("AppContainer recovery census limit excludes workspace snapshot")
 	}
-	current, err := openWorkspaceTree(context.Background(), w.Path, maxObjects)
+	current, err := openWorkspaceTree(ctx, w.Path, maxObjects)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +410,9 @@ func censusJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) (
 		}
 	}()
 	retain := func(object treeObject) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		key := journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory}
 		if _, deleted := j.state.deleted[key]; deleted {
 			return confirmWorkspaceDeletion(current.ancestors[0], key)
@@ -416,6 +470,9 @@ func censusJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) (
 	// Validate every current descriptor too. Re-read and merge under each object
 	// mutex for the actual write, preserving unrelated concurrent profiles.
 	for _, object := range objects {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		sd, err := readObjectSecurity(object.handle)
 		if err != nil {
 			return nil, err
@@ -433,7 +490,11 @@ func censusJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) (
 }
 
 func releaseJournalWorkspaceObject(object treeObject, sid *windows.SID, created bool, intent journalRecord) error {
-	lock, err := acquireObjectACL(object.id, 30000)
+	return releaseJournalWorkspaceObjectContext(context.Background(), object, sid, created, intent)
+}
+
+func releaseJournalWorkspaceObjectContext(ctx context.Context, object treeObject, sid *windows.SID, created bool, intent journalRecord) error {
+	lock, err := acquireObjectACLContext(ctx, object.id, 30000)
 	if err != nil {
 		return err
 	}

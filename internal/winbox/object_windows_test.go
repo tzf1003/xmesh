@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -241,7 +242,9 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 			t.Fatal("AppContainer helper process owner close", err)
 		}
 	}()
-	process, err := owner.start(context.Background(), []string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1"})
+	// Restricted helpers have no inherited standard handles. Preserve the race
+	// runtime's diagnostics in their private working directory for CI failures.
+	process, err := owner.start(context.Background(), []string{helper, "-test.run=^" + testName + "$", "--", workspace, outside, output}, p.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), marker + "=1", "GORACE=log_path=object-race"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,6 +255,17 @@ func runAppContainerHelper(t *testing.T, p *Profile, helper, testName, marker, w
 	}
 	var exit uint32
 	if err := windows.GetExitCodeProcess(process.Process, &exit); err != nil || exit != 0 {
+		logs, _ := filepath.Glob(filepath.Join(p.Directory(), "object-race.*"))
+		for _, path := range logs {
+			file, openErr := os.Open(path)
+			if openErr != nil {
+				t.Log("open sandbox race diagnostic", openErr)
+				continue
+			}
+			diagnostic, readErr := io.ReadAll(io.LimitReader(file, 64*1024))
+			_ = file.Close()
+			t.Logf("sandbox race diagnostic: %s (read error: %v)", diagnostic, readErr)
+		}
 		t.Fatal("object helper exit", exit, err)
 	}
 	body, err := os.ReadFile(output)
