@@ -67,4 +67,4 @@ jobs:
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
-        run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=90s
+        run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=180s

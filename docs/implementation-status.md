@@ -339,6 +339,9 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 
 内部 `recoverWorkspaceJournalContext` 在独占 journal 与进程退出证明核实后，绑定记录中的准确工作区根，取得同一卷级 namespace lease，再执行 USN 补读、完整身份清单与 ACL 回收；根/祖先绑定和 lease 保持到 profile 完成记录刷盘。已持久 `workspace-released` 的日志可继续完成 profile 清理，完成日志保持幂等。目录 sweep 将调用方 context 传入该恢复路径；取消贯穿 namespace 等待、USN、清单扫描、ACL 锁等待及回收边界。ACL mutex 采用有界轮询并在取消后释放取得的所有权与线程绑定，保留原有对象锁/abandoned 描述符重读语义。
 
-新增原生场景在强退宿主后制造卷锁争用和 abandoned 所有权，要求失败前 journal、根 ACL 与完成义务保持，再由正常 sweep 重试并核实全部原始、移出和新增身份的准确安全状态与持久完成。另有 ACL 锁取消和释放后立即取得的原生验证。本地 390 项/22 包 race、vet、Windows amd64/arm64 vet 与 amd64 测试交叉编译通过。新恢复场景等待 Windows 原生 CI。参与协议的锁持续独立于协调器的外部 namespace/reparse/ACL writer、完整 census 和异常宿主后 guard 寿命条件；生产 Windows L2 保持 `sandbox.unavailable`。
+新增原生场景在强退宿主后制造卷锁争用和 abandoned 所有权，要求失败前 journal、根 ACL 与完成义务保持，再由正常 sweep 重试并核实全部原始、移出和新增身份的准确安全状态与持久完成。另有 ACL 锁取消和释放后立即取得的原生验证。本地 390 项/22 包 race、vet、Windows amd64/arm64 vet 与 amd64 测试交叉编译通过。新恢复场景已通过双轮 Windows 原生 CI。参与协议的锁持续独立于协调器的外部 namespace/reparse/ACL writer、完整 census 和异常宿主后 guard 寿命条件；生产 Windows L2 保持 `sandbox.unavailable`。
 
 验收文档提交 `e747cb8` 的 [push 38852203973](https://github.com/tzf1003/xmesh/actions/runs/38852203973) 在原生删除恢复 catchup 用例的 AppContainer 子进程返回退出码 66；[PR 38852208479](https://github.com/tzf1003/xmesh/actions/runs/38852208479) 的三平台检查与完整原生任务通过。两轮三平台常规检查和契约均通过；失败原生日志保留，退出原因尚待定位。受限测试 helper 现将 race 诊断写入私有工作目录，并在失败时有界读取到测试日志；退出码与失败判定保持。新的 CI 将验证该诊断及恢复实现。
+
+
+`f52fb1f` 的 [push 工作流 38853397328](https://github.com/tzf1003/xmesh/actions/runs/38853397328) 与 [PR 工作流 38853403336](https://github.com/tzf1003/xmesh/actions/runs/38853403336) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38853397594` / `38853403345` 通过。原生 job `116819403285` / `116819420476` 的完整日志各确认 248 个独立测试 PASS 标识，其中 Job/AppContainer 为 202 个，保留全部既有 245/199 项。强退宿主后的 namespace 争用取消、abandoned 所有权拒绝、释放后 sweep 重试和 ACL 锁取消三个新增场景均通过；原始/移出/新增身份安全状态准确回收，完成记录可持久重放。失败前 journal 和根 ACL 保持，取消的 ACL 等待恢复后可立即再取得锁。完整 winbox 用时分别为 89.341 秒和 75.290 秒，CI 总超时扩至 180 秒；各原语自身的等待上限保持。两轮均未重现 `e747cb8` 的子进程退出码 66，其原因仍未确认，失败诊断采集继续保留。外部 writer/完整 census/异常宿主后 guard 生命周期和生产 L2 集成条件继续适用。
