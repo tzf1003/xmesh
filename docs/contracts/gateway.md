@@ -92,7 +92,7 @@ Agent 上不存在这个工具。若客户端直连 Agent 并调用它，得到 
 
 ## CTR-GW-05
 
-控制面下线不是云端 MCP 工具。它是 tailnet 内的控制消息，阶段 5 实现。最小载荷：
+控制面下线不是云端 MCP 工具。它是 tailnet 内的控制消息：每台 Agent 在设备网络监听上提供 `POST /control/drain`，请求体为下表的 JSON。端点只接受可信身份带 `tag:admin` 的调用（认证失败 401，缺少 tag 403），请求体最大 4096 字节，字段无效返回 400（`invalid_args`），`scope=device` 而 `device` 不是本节点名返回 404；成功返回 `{"ok": true}`。`--local` 开发模式不提供该端点。最小载荷：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -101,6 +101,8 @@ Agent 上不存在这个工具。若客户端直连 Agent 并调用它，得到 
 | `drain` | `keep`（默认）或 `kill` |
 
 Agent 收到后拒绝新的 `exec.run`、`pty.open`、`backend.acquire` 和后端工具，错误码 `policy_denied`，规则名 `mesh.draining`。`drain: keep` 时已有 PTY 与租约按原超时结束。`drain: kill` 时按 `pty.close` 的顺序终止本机全部 PTY，并 release 全部租约。
+
+`scope=mesh` 只作用于收到请求的这一个进程：该进程的 Agent 与同进程内的 Gateway 进入 drain，不会向其他节点转发。要下线全网，由发起方向每个节点分别发送一次请求，`xmesh drain --scope mesh` 即做这件事（见下）。drain 状态只在内存里，进程重启后重置。
 
 Gateway 收到后对该设备（或全网）停止路由，并发送 `tools/list_changed`。Gateway 有两条途径得知：同一进程的 Agent 收到控制消息时直接通知；任何 Gateway 从目标 Agent 的响应里看到 `policy_denied`、`rule: mesh.draining` 时立刻对该设备停止路由，不要求控制消息到达该 Gateway。设备离开网络后再回来视为新进程，清除这条标记。
 

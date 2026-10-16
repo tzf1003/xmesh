@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
@@ -418,5 +419,34 @@ func Test_CTRGW05_AgentDrainingStopsRouting(t *testing.T) {
 	g.Update([]mesh.Peer{{ID: "peer-1", Name: "remote", Address: "http://unused", Online: true}})
 	if o := call(t, client, "remote/exec.run", map[string]any{}); o.IsError {
 		t.Fatal("drain mark outlived the device's restart", object(t, o))
+	}
+}
+
+func Test_CTRGW01_ProtocolErrorKeepsDeviceConnected(t *testing.T) {
+	device := newScripted()
+	device.tool("ida.gone", map[string]any{"type": "object"}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return nil, fmt.Errorf("unknown tool")
+	})
+	device.tool("ida.fine", map[string]any{"type": "object"}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return agent.Result(map[string]any{"ok": true}, nil), nil
+	})
+	g, client := device.gateway(t, Options{})
+	o := call(t, client, "local/ida.gone", map[string]any{})
+	if !o.IsError || object(t, o)["error"] != "not_found" || object(t, o)["message"] == "设备连接已断开" {
+		t.Fatal("a protocol error is not a lost connection", object(t, o))
+	}
+	g.mu.Lock()
+	var dead bool
+	for v := range g.views {
+		v.mu.Lock()
+		dead = v.down["test-node"] == nil || v.down["test-node"].dead
+		v.mu.Unlock()
+	}
+	g.mu.Unlock()
+	if dead {
+		t.Fatal("device connection dropped after a protocol error")
+	}
+	if o = call(t, client, "local/ida.fine", map[string]any{}); o.IsError {
+		t.Fatal("device unusable after one failed call", object(t, o))
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
@@ -735,6 +737,21 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 		out, e = invoke(ctx, d.bridge)
 	}
 	if e != nil {
+		var rpc *jsonrpc.Error
+		if errors.As(e, &rpc) || ctx.Err() != nil && alive(d.bridge) {
+			// The Agent answered, or only this call was cancelled: the
+			// connection is alive. A protocol error usually means the tool
+			// vanished (for example its backend was killed), so refresh the
+			// catalogue instead of dropping the whole device.
+			v.mu.Lock()
+			d.updated = time.Time{}
+			v.mu.Unlock()
+			go v.refresh()
+			if rpc != nil {
+				return agent.Result(nil, toolerr.New("not_found", "设备上没有此工具，或其后端不可用", "name", deviceName, "tool", tool, "reason", rpc.Message)), nil
+			}
+			return agent.Result(nil, toolerr.New("timeout", "调用已取消或超时", "name", deviceName, "tool", tool)), nil
+		}
 		v.mu.Lock()
 		d.dead = true
 		v.mu.Unlock()
@@ -754,6 +771,13 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 		}
 	}
 	return out, nil
+}
+
+// alive probes a downstream connection after a cancelled call.
+func alive(b *mcpmux.Bridge) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return b.Session.Ping(ctx, nil) == nil
 }
 func (g *Gateway) Drain(name string) {
 	g.mu.Lock()

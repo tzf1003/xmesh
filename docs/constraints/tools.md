@@ -40,7 +40,7 @@ deny 优先于 allow。路径同时匹配两边时拒绝。
 
 ## CON-TOOL-09
 
-`fs.edit` 在 `replace_all` 不为 `true` 时，`old_string` 必须恰好匹配一处。零处匹配返回 `conflict` 或专用的 `edit_not_found`（见 [CTR-FS-03](../contracts/fs.md#ctr-fs-03)），多处匹配返回 `edit_ambiguous`，并带匹配行号。两种情况都不得修改文件。
+`fs.edit` 在 `replace_all` 不为 `true` 时，`old_string` 必须恰好匹配一处。零处匹配返回 `edit_not_found`（见 [CTR-FS-03](../contracts/fs.md#ctr-fs-03)；`conflict` 只表示 `expected_sha256` 不一致或移动目标已存在），多处匹配返回 `edit_ambiguous`，并带匹配行号。两种情况都不得修改文件。
 
 ## CON-TOOL-10
 

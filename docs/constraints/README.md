@@ -11,7 +11,7 @@
 | [INV-01](invariants.md#inv-01) | 同一资源的有效 fencing token 至多一个持有者 |
 | [INV-02](invariants.md#inv-02) | PTY 会话数不超过设备上限，且不超过单调用方上限 |
 | [INV-03](invariants.md#inv-03) | Gateway 与入口不持久化设备资源状态 |
-| [INV-04](invariants.md#inv-04) | `lease_token` 不会出现在发往后端进程的请求里 |
+| [INV-04](invariants.md#inv-04) | `_lease_token` 不会出现在发往后端进程的请求里 |
 | [INV-05](invariants.md#inv-05) | 授权或策略拒绝的调用没有副作用 |
 | [INV-06](invariants.md#inv-06) | 文件写对读者要么完整可见，要么不可见 |
 | [INV-07](invariants.md#inv-07) | PTY cursor 单调；覆写只通过 `truncated` 表达 |
@@ -60,7 +60,7 @@
 | [CON-TOOL-08](tools.md#con-tool-08) | 必须 | `fs.write` / `fs.edit` 用临时文件 + rename |
 | [CON-TOOL-09](tools.md#con-tool-09) | 必须 | `fs.edit` 的 `old_string` 不唯一则不修改 |
 | [CON-TOOL-10](tools.md#con-tool-10) | 必须 | 后端工具参数与返回原样透传 |
-| [CON-TOOL-11](tools.md#con-tool-11) | 必须 | exclusive 调用携带 `lease_token`，转发前剥离 |
+| [CON-TOOL-11](tools.md#con-tool-11) | 必须 | exclusive 调用携带 `_lease_token`，转发前剥离 |
 
 ## 并发与资源
 
@@ -92,7 +92,7 @@
 | [CON-SEC-07](security.md#con-sec-07) | 禁止 | 录制 PTY 字节流 |
 | [CON-SEC-08](security.md#con-sec-08) | 禁止 | 审计日志记录文件内容或命令输出正文 |
 | [CON-SEC-09](security.md#con-sec-09) | 必须 | 入口实现 OAuth 2.1、动态客户端注册和 PKCE |
-| [CON-SEC-10](security.md#con-sec-10) | 必须 | 默认拦截递归删除、越界写、命令黑名单和超配额。黑名单匹配规范化命令行 |
+| [CON-SEC-10](security.md#con-sec-10) | 必须 | 默认拦截递归删除、命令黑名单和超配额；越界写由路径解析以 `invalid_cwd` 拒绝。黑名单匹配规范化命令行 |
 | [CON-SEC-11](security.md#con-sec-11) | 必须 | 入口的动态注册和登录口令必须限速 |
 
 ## 实现

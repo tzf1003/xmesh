@@ -129,7 +129,7 @@ ingress:
 
 | 平台 | 常驻 | 说明 |
 | --- | --- | --- |
-| Windows | Windows Service（`kardianos/service`） | 需要用户会话的后端以用户级服务运行 |
+| Windows | 当前用户的登录计划任务（默认）；`install --system` 注册 Windows Service（`kardianos/service`，LocalSystem，Session 0） | 需要用户会话的后端使用默认的用户任务；SCM 服务只适用于系统服务场景 |
 | macOS | launchd LaunchAgent | GUI 类后端（IDA）需要用户级服务，设备保持登录 |
 | Linux | systemd user service | 沙箱用 bwrap / nsjail，见安全一节的 L2 |
 
