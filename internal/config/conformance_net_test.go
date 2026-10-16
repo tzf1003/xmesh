@@ -104,7 +104,9 @@ func Test_CONNET04_NoControlPlaneSpecificBranchesInCode(t *testing.T) {
 			}
 			b, _ := os.ReadFile(path)
 			text := strings.ToLower(string(b))
-			if strings.Contains(text, "headscale") {
+			// The tailnet administration CLI manages either control plane by design and
+			// is not part of the data path (CON-MESH-01), so it is the one exception.
+			if strings.Contains(text, "headscale") && filepath.ToSlash(path) != "../../cmd/xmesh/mesh.go" {
 				hits = append(hits, path+": headscale")
 			}
 			if strings.Contains(text, "controlplane.tailscale.com") && !strings.HasSuffix(filepath.ToSlash(path), "internal/config/config.go") {

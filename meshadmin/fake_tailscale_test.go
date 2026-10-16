@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeTailscale is a minimal Tailscale API v2 server: OAuth client credentials,
@@ -134,7 +135,7 @@ func (f *fakeTailscale) api(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.lastKey = body
 		f.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "k1", "key": "tskey-auth-NEWKEY", "expires": "2026-10-16T16:00:00Z"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "k1", "key": "tskey-auth-NEWKEY", "expires": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
 	case p == "tailnet/-/acl" && r.Method == http.MethodGet:
 		if !f.has(r, "policy_file:read") && !f.has(r, "policy_file") {
 			deny(w, "policy_file:read")
