@@ -188,13 +188,21 @@ func Test_WindowsAppContainerWorkspaceDeletionCrashHelper(t *testing.T) {
 	}
 	if stage == "pending-close" {
 		name, _ := windows.UTF16PtrFromString(filepath.Join(root, "pending.txt"))
-		h, err := windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.CREATE_NEW, 0, 0)
+		h, err := windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.CREATE_NEW, 0, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(filepath.Join(root, "pending.txt")); err != nil {
+		// Explicit classic disposition retains the named delete-pending object
+		// until this handle closes. Go's Remove may instead use POSIX unlink.
+		remove := uint32(1)
+		if err := windows.SetFileInformationByHandle(h, windows.FileDispositionInfo, (*byte)(unsafe.Pointer(&remove)), 4); err != nil {
 			windows.CloseHandle(h)
 			t.Fatal(err)
+		}
+		var standard [3]uint64
+		if err := windows.GetFileInformationByHandleEx(h, windows.FileStandardInfo, (*byte)(unsafe.Pointer(&standard[0])), 24); err != nil || unsafe.Slice((*byte)(unsafe.Pointer(&standard[0])), 24)[20] == 0 {
+			windows.CloseHandle(h)
+			t.Fatal("classic delete-pending fixture", err)
 		}
 		count, cursor := len(j.records), *j.state.changeCursor
 		if err := checkpointWorkspaceChanges(ctx, j, p.sid, 32, maxWorkspaceChangeEvents); err == nil || len(j.records) != count || *j.state.changeCursor != cursor {
