@@ -47,7 +47,7 @@ Gateway 自身的工具（不带设备前缀，因为它们描述的是聚合视
 
 每个 OAuth client 绑定一组 scope：`devices:read`、`exec:<device>`、`pty:<device>`、`fs:write:<device>`、`backend:<device>:<name>`。配置示例里的 `exec:*`、`fs:*` 是通配写法，语法见 [CTR-OAUTH-02](../contracts/oauth-authz.md#ctr-oauth-02)。
 
-`tailnet` 模式下可以改用 PAT + 节点身份，不走浏览器登录。单租户：授权服务器只有一个账号和一个登录页。Codex 与 Claude 各注册为一个 client。不做租户隔离，也不做用户管理。
+入口只接受 OAuth access token，没有 PAT 通道。PAT 与节点身份只用于绑定在 `127.0.0.1` 的本机 Gateway（来自回环以外地址的请求一律拒绝），不走浏览器登录，也不限定 `mesh.mode`。单租户：授权服务器只有一个账号和一个登录页。Codex 与 Claude 各注册为一个 client。不做租户隔离，也不做用户管理。
 
 端点、PKCE、动态注册的字段级契约见 [CTR-OAUTH-01](../contracts/oauth-authz.md#ctr-oauth-01)。
 

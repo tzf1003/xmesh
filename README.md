@@ -24,8 +24,30 @@ XmeSh（X mesh，也是 X me sh：我的 sh）让 Codex Cloud、Claude Cloud 等
 
 ```bash
 go run ./cmd/xmesh serve --local --config xmesh.local.yaml
-go run ./cmd/xmesh status --json
+go run ./cmd/xmesh status
+go run ./cmd/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool local/sys.info
 go test -race ./...
 ```
 
-本机 MCP 地址为 `http://127.0.0.1:7433/mcp`，提供 `sys.info`、`fs.*`、`pty.*`、`exec.*`。客户端使用有会话的 Streamable HTTP MCP。`--local` 是显式开发模式；当前实现进度和外部验收状态见 [实现记录](docs/implementation-status.md)。
+`xmesh.local.yaml` 启用 Agent 与 Gateway 两个角色，各占一个本机地址：
+
+| 角色 | 地址 | 工具 |
+| --- | --- | --- |
+| Agent | `http://127.0.0.1:7433/mcp` | `sys.info`、`fs.*`、`pty.*`、`exec.*` |
+| Gateway | `http://127.0.0.1:8080/mcp` | 同一批工具，名字带 `local/` 前缀（`local/exec.run`），并聚合已入网的其他设备（`<设备名>/exec.run`）以及 `devices.list` 等 |
+
+客户端使用有会话的 Streamable HTTP MCP。`--local` 是显式开发模式；当前实现进度和外部验收状态见 [实现记录](docs/implementation-status.md)。
+
+## 命令
+
+同一个 `xmesh` 二进制提供以下子命令，参数运行 `xmesh help` 查看：
+
+| 命令 | 作用 |
+| --- | --- |
+| `xmesh serve --config xmesh.yaml` | 按配置启动已启用的角色（`agent`、`gateway`、`ingress`）。`--local` 为本机开发模式，`--ingress` 临时加上入口角色 |
+| `xmesh install --config xmesh.yaml` | 安装为用户级常驻服务：macOS LaunchAgent、Linux systemd 用户服务、Windows 当前用户的登录计划任务。Windows 加 `--system` 改为注册管理员 SCM 服务 |
+| `xmesh pair --config xmesh.yaml --export 文件`<br>`xmesh pair ... --import 文件 --fingerprint 指纹` | `lan` 模式下导出本节点证书、导入并核对对端证书 |
+| `xmesh status` | 读取运行中节点的 `sys.info`（不读配置文件）。`--endpoint` 指向 Gateway 时要加 `--tool local/sys.info`；`--json` 输出原始 JSON |
+| `xmesh version` | 打印版本号 |
+
+构建、配对、入网和运行的完整步骤见 [运行手册](docs/operations.md)；测试版（pre-release）的发布方式见运行手册的“测试版发布”。

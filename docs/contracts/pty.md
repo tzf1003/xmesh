@@ -11,6 +11,8 @@
 | `closed` | 进程已退出且缓冲仍保留 | 保留期结束，默认 `closed_retain: 5m`；或 `closed` 数量超过 `closed_retain_max` 时被提前释放 | 否 | 否 |
 | `released` | 保留期结束 | 终态，表项删除 | 否 | 否 |
 
+上表的 `max_per_caller` 列针对 `caller_id`（单个 MCP 会话）计数，对应 `pty_limit` 的 `scope: caller`。此外还有按主体的预算：同一 OAuth client（无 client 时为同一节点）名下 `active` 与 `orphaned` 合计达到 `max_per_caller` 时，`open` 与向该主体的 `transfer` 返回 `policy_denied`、规则 `quota.exceeded`，见 [INV-02](../constraints/invariants.md#inv-02)。
+
 关闭顺序必须是：请求终止 → 等待 PTY 读循环遇到 EOF → 进入 `closed` → 广播，使阻塞中的 `read` 返回 `eof: true` → 定时进入 `released`。禁止在读循环仍可能写缓冲时删除会话。
 
 reaper 至少每 30 秒运行一次，也允许在状态变更时提早运行。扫描对象是 idle 的 `active`（`idle_timeout`）、超过 `orphan_grace` 的 `orphaned`、超过保留期的 `closed`，以及使 `closed` 数量回到 `closed_retain_max` 以内。配额语义见 [RUL-12](rulings.md#rul-12)。
