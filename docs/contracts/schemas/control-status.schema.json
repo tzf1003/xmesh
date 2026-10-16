@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-status:1",
+  "title": "ControlStatus",
+  "description": "CTR-CTL-03。GET /v1/status，以及 status 事件的 data。字段包含 CTR-SYS-01 的全部字段，只有 warnings 换成结构化数组。",
+  "$defs": {
+    "ControlInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_version", "kernel_version", "boot_id", "capabilities"],
+      "properties": {
+        "api_version": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/ApiVersion" },
+        "kernel_version": { "type": "string", "minLength": 1 },
+        "boot_id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/BootId" },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Capability" }
+        }
+      }
+    },
+    "NetworkIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "node_id", "tags"],
+      "properties": {
+        "mode": { "enum": ["tailnet", "lan", "local"] },
+        "node_id": { "type": "string", "minLength": 1 },
+        "tags": {
+          "type": "array",
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" }
+        }
+      }
+    },
+    "Workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alias", "path", "desc"],
+      "properties": {
+        "alias": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" },
+        "desc": { "type": "string" },
+        "error": { "type": "string", "description": "别名解析失败时存在。" }
+      }
+    },
+    "Backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "policy", "state", "favorite"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,62}$" },
+        "policy": { "enum": ["shared", "exclusive"] },
+        "state": { "enum": ["stopped", "running", "crashed"] },
+        "favorite": { "type": "boolean" }
+      }
+    },
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exec_shared",
+        "exec_exclusive",
+        "exec_shared_in_use",
+        "exec_exclusive_in_use",
+        "pty_max_sessions",
+        "pty_max_per_caller",
+        "pty_in_use",
+        "pty_active",
+        "pty_closed",
+        "pty_closed_retain_max"
+      ],
+      "properties": {
+        "exec_shared": { "type": "integer", "minimum": 0 },
+        "exec_exclusive": { "type": "integer", "minimum": 0 },
+        "exec_shared_in_use": { "type": "integer", "minimum": 0 },
+        "exec_exclusive_in_use": { "type": "integer", "minimum": 0 },
+        "pty_max_sessions": { "type": "integer", "minimum": 0 },
+        "pty_max_per_caller": { "type": "integer", "minimum": 0 },
+        "pty_in_use": { "type": "integer", "minimum": 0, "description": "active 与 orphaned 之和。" },
+        "pty_active": { "type": "integer", "minimum": 0 },
+        "pty_closed": { "type": "integer", "minimum": 0 },
+        "pty_closed_retain_max": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_file", "state_dir", "log_dir", "audit_dir"],
+      "properties": {
+        "config_file": { "type": "string", "minLength": 1 },
+        "state_dir": { "type": "string", "minLength": 1 },
+        "log_dir": { "type": ["string", "null"], "description": "日志不落文件（例如由服务管理器收集）时是 null。" },
+        "audit_dir": { "type": ["string", "null"], "description": "审计未启用时是 null。" }
+      }
+    },
+    "GatewayInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen", "url", "auth"],
+      "properties": {
+        "listen": { "type": "string", "pattern": "^127\\.0\\.0\\.1:[0-9]{1,5}$" },
+        "url": { "type": "string", "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}/mcp$", "description": "UI 生成 MCP 连接命令用的地址。" },
+        "auth": { "enum": ["pat", "none"], "description": "gateway.pats 非空为 pat。" }
+      }
+    },
+    "IngressInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen", "issuer"],
+      "properties": {
+        "listen": { "enum": ["funnel", "public:443", "tunnel"] },
+        "issuer": { "type": ["string", "null"], "description": "OAuth issuer。尚未就绪时是 null。" }
+      }
+    },
+    "PeerSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "online"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0, "description": "不含本机。" },
+        "online": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "StatusResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "control",
+        "lifecycle",
+        "started_at",
+        "pid",
+        "drain",
+        "os",
+        "arch",
+        "hostname",
+        "home",
+        "roles",
+        "network",
+        "restart_required",
+        "policy_reload_failures",
+        "authkey_readable",
+        "warnings",
+        "path_sep",
+        "shells",
+        "workspaces",
+        "backends",
+        "limits",
+        "paths",
+        "peers"
+      ],
+      "properties": {
+        "control": { "$ref": "#/$defs/ControlInfo" },
+        "lifecycle": { "enum": ["starting", "running", "stopping"] },
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "pid": { "type": "integer", "minimum": 1 },
+        "drain": { "$ref": "urn:xmesh:schema:control-drain:1#/$defs/DrainState" },
+        "os": { "enum": ["windows", "darwin", "linux"] },
+        "arch": { "type": "string", "minLength": 1 },
+        "hostname": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName", "description": "配置的 node.name，与 sys.info 一致。" },
+        "home": { "type": "string" },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Role" }
+        },
+        "network": { "$ref": "#/$defs/NetworkIdentity" },
+        "restart_required": { "type": "boolean" },
+        "policy_reload_failures": { "type": "integer", "minimum": 0 },
+        "authkey_readable": { "type": "boolean" },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Warning" },
+          "description": "与 sys.info 的唯一差别：元素是带稳定 code 的对象，不是字符串。"
+        },
+        "path_sep": { "enum": ["\\", "/"] },
+        "shells": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "workspaces": { "type": "array", "items": { "$ref": "#/$defs/Workspace" } },
+        "backends": { "type": "array", "items": { "$ref": "#/$defs/Backend" } },
+        "limits": { "$ref": "#/$defs/Limits" },
+        "paths": { "$ref": "#/$defs/Paths" },
+        "gateway": { "$ref": "#/$defs/GatewayInfo", "description": "roles 含 gateway 时存在。" },
+        "ingress": { "$ref": "#/$defs/IngressInfo", "description": "roles 含 ingress 时存在。" },
+        "peers": { "$ref": "#/$defs/PeerSummary" }
+      }
+    }
+  }
+}

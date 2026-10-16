@@ -1,0 +1,29 @@
+{
+  "issuer": "https://win-dev-01.tail1234.ts.net",
+  "clients": [
+    {
+      "client_id": "c_7f1a",
+      "client_name": "Claude",
+      "redirect_uris": [
+        "https://claude.ai/api/mcp/auth_callback"
+      ],
+      "scopes": [
+        "devices:read",
+        "exec:*",
+        "pty:*"
+      ],
+      "token_endpoint_auth_method": "none"
+    },
+    {
+      "client_id": "c_91bc",
+      "client_name": "Codex",
+      "redirect_uris": [
+        "http://127.0.0.1:1455/callback"
+      ],
+      "scopes": [
+        "devices:read"
+      ],
+      "token_endpoint_auth_method": "none"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "error": "config_invalid",
+  "message": "示例错误",
+  "diagnostics": [
+    {
+      "pointer": "/agent/pty/max_sessions",
+      "message": "必须是正整数"
+    },
+    {
+      "line": 3,
+      "column": 1,
+      "message": "yaml: 缩进错误"
+    }
+  ]
+}

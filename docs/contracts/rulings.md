@@ -126,6 +126,26 @@ argv 里出现恰好等于 `-EncodedCommand` 的参数时，直接 `policy_denie
 
 `active` 会话的 `pty.transfer` 不套用上面的 `oauth_client` 限制。调用方必须是当前 owner，这一步是 owner 自愿把终端交给 `to_caller`，允许交给另一个 OAuth client 的会话。接收方仍须是 Agent 已经见过、并且仍然连接着的 `caller_id`，同时不能超过对方的 `max_per_caller`。限制只加在没有 owner 的 `orphaned` 接管上，避免另一个云端会话在无人同意时接走终端。
 
+## RUL-14
+
+发布物有两个：`xmesh`（内核，纯 Go，单一二进制）和 `xmesh-ui`（可选，Electron 托盘加面板）。[CON-ARCH-02](../constraints/architecture.md#con-arch-02) 的「单一二进制」指内核；UI 是可选的第二发布物，不属于必须同时部署的服务，内核没有它必须完整可用（[CON-ARCH-10](../constraints/architecture.md#con-arch-10)）。
+
+## RUL-15
+
+`status.warnings` 与 `sys.info.warnings` 的差别：`sys.info` 的 `warnings` 是字符串数组，措辞可变，调用方不得依赖。控制通道的 `status.warnings` 是 `{code, severity, message}` 对象数组，`code` 稳定，因为托盘图标要靠它区分「需要重启」「热加载失败」「对端离线」。除此之外 `StatusResponse` 包含 `sys.info` 的全部字段，语义相同。两处的警告来源是同一份内核状态，文字可以相同。
+
+## RUL-16
+
+drain 经控制通道重复调用的结果是确定的，不报错：已在 `keep` 时再发 `keep` 是 no-op；`keep` 升级为 `kill` 允许并立即终止 PTY 与租约，`since` 保持首次进入 drain 的时间；`kill` 降级为 `keep` 返回 `conflict`（`reason: drain_downgrade`），因为被终止的资源回不来，要降级必须先 `resume`；未在 drain 时 `resume` 是 no-op。
+
+## RUL-17
+
+经控制通道的审计记录用 `event: control_call`、`actor: control`。`caller` 为 `control:<连接身份>`（Unix 为 `uid-<数字>`，Windows 为 SID），`tool` 为路由编号，`device` 为本节点名。只记非 `GET` 请求，`args_digest` 只含键名与字节数。`actor` 缺省等于 `mcp`，已有记录不需要迁移。
+
+## RUL-18
+
+托盘状态的优先级是：未运行，版本不匹配，排空中，需重启，降级，正常，取第一条命中的（[CTR-CTL-03](control.md#ctr-ctl-03)）。降级只看 `severity` 为 `warning` 或 `error` 的警告；`restart_required` 与 `allow_dangerous` 是 `info`，不使图标变黄。理由：排空是用户主动动作，应该比被动告警更显眼；需重启已有专门图标，不重复变黄。
+
 ## RUL-20
 
 `meshadmin` 的 `Provider` 接口是两个控制面的唯一分界。调用方只通过 `Capabilities()` 判断某个控制面能不能做某件事（例如 `policy_write`、`atomic_policy_write`），不按 `Kind()` 分支，也不拼控制面各自的路径。Headscale 以文件模式运行时策略只读，`policy_write` 为假，写入返回 `ErrUnsupported`，预览里 `writable` 为假。

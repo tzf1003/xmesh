@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-pats:1",
+  "title": "ControlPats",
+  "description": "CTR-CTL-09。本机 Gateway PAT。令牌正文只出现在 PatSecret，且只在创建或轮转的那一次响应里；内核同时把它写入 0600 文件。",
+  "$defs": {
+    "PatInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scopes", "token_file", "modified_at"],
+      "properties": {
+        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Scope" }
+        },
+        "token_file": { "type": "string", "minLength": 1 },
+        "modified_at": {
+          "oneOf": [
+            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+            { "type": "null" }
+          ],
+          "description": "令牌文件的修改时间。文件缺失为 null。"
+        }
+      }
+    },
+    "PatList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pats", "enforced"],
+      "properties": {
+        "pats": { "type": "array", "items": { "$ref": "#/$defs/PatInfo" } },
+        "enforced": { "type": "boolean", "description": "gateway.pats 非空，Gateway 对所有请求要求 Bearer。" }
+      }
+    },
+    "PatCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scopes"],
+      "properties": {
+        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Scope" }
+        }
+      }
+    },
+    "PatSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pat", "token"],
+      "properties": {
+        "pat": { "$ref": "#/$defs/PatInfo" },
+        "token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{32,}$",
+          "description": "令牌正文。之后任何接口都读不回。UI 只在内存里展示一次，不写入日志、事件或磁盘。"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "etag": "abc",
+  "content": "",
+  "parsed": null,
+  "valid": true,
+  "load_error": null,
+  "effective_etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "restart_required": false
+}

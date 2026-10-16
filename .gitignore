@@ -3,3 +3,4 @@
 /.xmesh/
 *.test
 __pycache__/
+/scripts/gen-control-ts/node_modules/

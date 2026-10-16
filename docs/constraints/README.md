@@ -31,6 +31,8 @@
 | [CON-ARCH-06](architecture.md#con-arch-06) | 禁止 | Agent 管理工作区或 worktree |
 | [CON-ARCH-07](architecture.md#con-arch-07) | 必须 | 单租户，授权服务器不做用户目录 |
 | [CON-ARCH-08](architecture.md#con-arch-08) | 必须 | tailnet 内对等调用不经过入口节点 |
+| [CON-ARCH-09](architecture.md#con-arch-09) | 必须 | 本机控制通道只走 UDS 或命名管道，不走 TCP、Gateway、Ingress，也不是 MCP 工具 |
+| [CON-ARCH-10](architecture.md#con-arch-10) | 必须 | 内核不依赖 UI；UI 退出或崩溃不改变 PTY、租约、exec |
 
 ## 网络
 
@@ -94,6 +96,7 @@
 | [CON-SEC-09](security.md#con-sec-09) | 必须 | 入口实现 OAuth 2.1、动态客户端注册和 PKCE |
 | [CON-SEC-10](security.md#con-sec-10) | 必须 | 默认拦截递归删除、命令黑名单和超配额；越界写由路径解析以 `invalid_cwd` 拒绝。黑名单匹配规范化命令行 |
 | [CON-SEC-11](security.md#con-sec-11) | 必须 | 入口的动态注册和登录口令必须限速 |
+| [CON-SEC-12](security.md#con-sec-12) | 必须 | 控制通道只接受内核运行用户；L2 沙箱不可达；变更写 `actor=control` 审计 |
 
 ## 实现
 

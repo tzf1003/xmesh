@@ -1,0 +1,15 @@
+{
+  "pats": [
+    {
+      "name": "claude-code",
+      "scopes": [
+        "devices:read",
+        "exec:*",
+        "fs:read:*"
+      ],
+      "token_file": "C:\\Users\\x\\.xmesh\\claude-code.pat",
+      "modified_at": "2026-10-16T15:30:00.123Z"
+    }
+  ],
+  "enforced": true
+}

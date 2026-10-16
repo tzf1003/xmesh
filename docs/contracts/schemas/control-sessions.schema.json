@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-sessions:1",
+  "title": "ControlSessions",
+  "description": "CTR-CTL-05。GET /v1/sessions 的只读视图。只有元数据：没有终端缓冲、命令行参数、stdin、环境变量。",
+  "$defs": {
+    "PtySession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "name", "owner", "oauth_client", "pid", "state", "idle_s", "cols", "rows", "cwd", "created_at"],
+      "properties": {
+        "kind": { "const": "pty" },
+        "id": { "type": "string", "pattern": "^p-[0-9a-z]{8,}$" },
+        "name": { "type": ["string", "null"], "maxLength": 64 },
+        "owner": { "type": "string", "description": "caller_id。orphaned 时为空字符串，与 pty.list 一致。" },
+        "oauth_client": { "type": ["string", "null"] },
+        "pid": { "type": "integer", "minimum": 0, "description": "进程已退出则为 0。" },
+        "state": { "enum": ["active", "orphaned", "closed"] },
+        "idle_s": { "type": "integer", "minimum": 0 },
+        "cols": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "rows": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "cwd": { "type": "string", "description": "启动时的 resolved_path。" },
+        "created_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+      }
+    },
+    "ExecRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "caller", "oauth_client", "cmd", "mode", "state", "started_at"],
+      "properties": {
+        "kind": { "const": "exec" },
+        "id": { "type": "string", "minLength": 1, "description": "本进程内唯一的运行编号，不是 output_ref。" },
+        "caller": { "type": "string", "minLength": 1 },
+        "oauth_client": { "type": ["string", "null"] },
+        "cmd": { "type": "string", "minLength": 1, "description": "可执行文件基名，不含参数，与 CTR-AUD-01 的 args_digest.cmd 一致。" },
+        "mode": { "enum": ["shared", "exclusive"] },
+        "state": { "enum": ["queued", "running"] },
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+      }
+    },
+    "BackendLease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "resource", "owner", "token", "expires_at"],
+      "properties": {
+        "kind": { "const": "lease" },
+        "resource": { "type": "string", "pattern": "^backend:[A-Za-z0-9-]{1,63}$" },
+        "owner": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}/[A-Za-z0-9._:-]{1,128}$" },
+        "token": { "type": "integer", "minimum": 1, "description": "fencing 序号，不是密钥，CTR-LEASE-01。" },
+        "expires_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+      }
+    },
+    "Session": {
+      "oneOf": [
+        { "$ref": "#/$defs/PtySession" },
+        { "$ref": "#/$defs/ExecRun" },
+        { "$ref": "#/$defs/BackendLease" }
+      ]
+    },
+    "SessionsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pty", "exec", "leases"],
+      "properties": {
+        "pty": { "type": "array", "items": { "$ref": "#/$defs/PtySession" } },
+        "exec": { "type": "array", "items": { "$ref": "#/$defs/ExecRun" } },
+        "leases": { "type": "array", "items": { "$ref": "#/$defs/BackendLease" } }
+      }
+    }
+  }
+}

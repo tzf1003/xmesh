@@ -9,6 +9,7 @@ import (
 	"io"
 	"path/filepath"
 	"sync"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -155,6 +156,42 @@ func (f *workspaceWriterFence) watchVolume(anchor windows.Handle, volume uint64)
 // descriptorFingerprint is the owner-independent kernel DACL, control bits and
 // header bytes. It is compared byte-for-byte; no normalization is applied.
 func descriptorFingerprint(handle windows.Handle) ([]byte, error) {
+	return fingerprintDescriptor(handle, false, nil)
+}
+
+// workspaceDescriptorFingerprint is the descriptor view for a workspace object
+// that other executions of the same user may legitimately grant in parallel. It
+// leaves out the ACL size and count and every allow or deny ACE of an
+// AppContainer package SID other than own: such an ACE cannot affect this
+// execution's token, while any ACE for own, for the shared all-application
+// package SIDs or for any other principal stays part of the comparison.
+func workspaceDescriptorFingerprint(handle windows.Handle, own *windows.SID) ([]byte, error) {
+	var raw []byte
+	if own != nil {
+		raw = unsafe.Slice((*byte)(unsafe.Pointer(own)), own.Len())
+	}
+	return fingerprintDescriptor(handle, true, raw)
+}
+
+// foreignPackageACE reports whether the ACE is an access-allowed or -denied
+// entry for an AppContainer package SID (S-1-15-2 with seven sub-authorities
+// after the group) that is not own.
+func foreignPackageACE(ace, own []byte) bool {
+	if len(ace) < 12 || (ace[0] != windows.ACCESS_ALLOWED_ACE_TYPE && ace[0] != windows.ACCESS_DENIED_ACE_TYPE) {
+		return false
+	}
+	sid := ace[8:]
+	if sid[0] != 1 || int(sid[1]) != 8 || len(sid) < 8+4*8 {
+		return false
+	}
+	authority := []byte{0, 0, 0, 0, 0, 15}
+	if !bytes.Equal(sid[2:8], authority) || binary.LittleEndian.Uint32(sid[8:12]) != 2 {
+		return false
+	}
+	return !bytes.Equal(sid[:8+4*8], own)
+}
+
+func fingerprintDescriptor(handle windows.Handle, tolerateForeign bool, own []byte) ([]byte, error) {
 	sd, err := readObjectSecurity(handle)
 	if err != nil {
 		return nil, err
@@ -177,8 +214,15 @@ func descriptorFingerprint(handle windows.Handle) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out.Write(header)
+	if tolerateForeign {
+		out.Write(header[:2])
+	} else {
+		out.Write(header)
+	}
 	for _, ace := range aces {
+		if tolerateForeign && foreignPackageACE(ace, own) {
+			continue
+		}
 		_ = binary.Write(&out, binary.LittleEndian, uint32(len(ace)))
 		out.Write(ace)
 	}
@@ -311,6 +355,25 @@ func (f *workspaceWriterFence) sealRoot(ctx context.Context) error {
 	return nil
 }
 
+// unsealRoot ends the protection of the workspace root's own descriptor. Cleanup
+// is about to edit it, so later verification must not mistake this package's
+// reclamation, including a retried one, for a foreign writer. Everything else
+// stays pinned and verified.
+func (f *workspaceWriterFence) unsealRoot() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed || len(f.trees) == 0 || len(f.trees[0].objects) == 0 {
+		return
+	}
+	root := f.trees[0].objects[0].id
+	for index := range f.objects {
+		if pin := &f.objects[index]; pin.id == root && pin.role == fenceAncestor {
+			pin.fingerprint, pin.role = nil, fenceWorkspaceRoot
+			f.pinned[root.ID] = fenceWorkspaceRoot
+		}
+	}
+}
+
 // bindChains requires the lifecycle's own workspace and journal-directory
 // chains to be the pinned objects, directory by directory.
 func (f *workspaceWriterFence) bindChains(workspace, journal *workspaceTree) error {
@@ -376,6 +439,7 @@ type writerVerifier interface {
 	io.Closer
 	Verify(context.Context) error
 	sealRoot(context.Context) error
+	unsealRoot()
 	bindChains(workspace, journal *workspaceTree) error
 }
 
