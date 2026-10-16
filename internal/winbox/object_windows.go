@@ -29,6 +29,11 @@ type objectGrant struct {
 	id        fileIdentity
 	intent    uint64
 	removed   bool
+	// baseline is the descriptor (control bits and DACL) read back right after
+	// the grant edit, under the object's ACL mutex. While an execution runs,
+	// nothing in this package edits it again, so any other value is an external
+	// writer's.
+	baseline []byte
 }
 
 func (p *Profile) grantObject(path string) (*objectGrant, error) {
@@ -169,9 +174,13 @@ func (p *Profile) grantSelectedObjectMode(object treeObject, inheritChildren boo
 	if err := setObjectGrant(aclHandle, ace, true); err != nil {
 		return nil, err
 	}
+	baseline, err := workspaceDescriptorFingerprint(aclHandle, p.sid)
+	if err != nil {
+		return nil, fmt.Errorf("read back AppContainer grant descriptor: %w", err)
+	}
 	p.grants++
 	retained = true
-	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace, id: actual.id, intent: intent}, nil
+	return &objectGrant{profile: p, handle: h, aclHandle: aclHandle, ace: ace, id: actual.id, intent: intent, baseline: baseline}, nil
 }
 
 // Close removes exactly the acquired ACE from the current ACL. Failed releases

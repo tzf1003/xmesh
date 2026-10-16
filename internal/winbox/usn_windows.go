@@ -3,8 +3,10 @@ package winbox
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -156,15 +158,16 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 	if j.state.changeCursor != nil || len(j.state.executionIDs) != 0 || len(j.state.created) != 0 || len(j.state.granted) != len(j.state.objects) || len(j.state.pending) != len(j.state.granted) || j.state.workspaceReleased || j.state.complete {
 		return fmt.Errorf("AppContainer change tracking requires complete initial admission")
 	}
-	census, err := censusJournalWorkspace(j, sid, maxObjects)
+	// The cursor is taken before the baseline census. A change made after the
+	// query is then in the replayed stream even if the census also saw it, so no
+	// change can fall between the scan and the first checkpoint.
+	w := j.records[1].Workspace
+	anchor, err := openWorkspaceRoot(ctx, w.Path)
 	if err != nil {
 		return err
 	}
-	defer census.Close()
-	if len(census.discovered) != 0 || len(census.tree.objects) != len(j.state.objects) {
-		return fmt.Errorf("AppContainer workspace changed before tracking admission")
-	}
-	source, err := openWorkspaceChangeSource(census.tree.ancestors[0], j.records[1].Workspace.Root.Volume)
+	defer anchor.Close()
+	source, err := openWorkspaceChangeSource(anchor.ancestors[0], w.Root.Volume)
 	if err != nil {
 		return err
 	}
@@ -172,6 +175,14 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 	span, err := source.query()
 	if err != nil {
 		return err
+	}
+	census, err := censusJournalWorkspace(j, sid, maxObjects)
+	if err != nil {
+		return err
+	}
+	defer census.Close()
+	if len(census.discovered) != 0 || len(census.tree.objects) != len(j.state.objects) {
+		return fmt.Errorf("AppContainer workspace changed before tracking admission")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -187,6 +198,43 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 // Close releases descendants only after reaping; import proofs and the production
 // coordinator remain required before production L2 use.
 func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int) error {
+	return checkpointWorkspaceChangesPolicy(ctx, j, sid, maxObjects, maxEvents, nil)
+}
+
+// verifySecurity, when set, receives the admitted-snapshot identities whose
+// change records carry the security reason and fails the checkpoint before
+// anything is persisted, so the unchanged cursor still lets cleanup replay the
+// window. Live monitoring supplies it because this package edits those
+// descriptors only before tracking starts and after every process is reaped;
+// release and recovery do not, since their own earlier, partially completed
+// edits legitimately appear in the stream.
+func checkpointWorkspaceChangesPolicy(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, verifySecurity func([]journalObject) error) error {
+	// An identity named by a create record can be deleted before it is reopened,
+	// with its delete record still beyond the span read. Nothing is persisted
+	// before that point, so re-reading from the same cursor sees the delete.
+	for attempt := 0; ; attempt++ {
+		err := checkpointWorkspaceChangesOnce(ctx, j, sid, maxObjects, maxEvents, verifySecurity)
+		if !errors.Is(err, errWorkspaceObjectVanished) || attempt >= vanishedRetryLimit {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(vanishedRetryDelay):
+		}
+	}
+}
+
+const (
+	vanishedRetryLimit = 40
+	vanishedRetryDelay = 50 * time.Millisecond
+)
+
+// errWorkspaceObjectVanished marks an identity that could not be reopened
+// because it no longer exists; it is retried before it fails the checkpoint.
+var errWorkspaceObjectVanished = errors.New("AppContainer workspace object vanished before it could be reopened")
+
+func checkpointWorkspaceChangesOnce(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int, verifySecurity func([]journalObject) error) error {
 	if err := validateWorkspaceJournalOwnership(j, sid); err != nil {
 		return err
 	}
@@ -254,6 +302,19 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 	if err != nil {
 		return err
 	}
+	if verifySecurity != nil && len(plan.Security) != 0 {
+		var admitted []journalObject
+		for _, object := range plan.Security {
+			if j.state.objects[object] {
+				admitted = append(admitted, object)
+			}
+		}
+		if len(admitted) != 0 {
+			if err := verifySecurity(admitted); err != nil {
+				return err
+			}
+		}
+	}
 	deleted := make(map[journalObject]bool, len(j.state.deleted)+len(plan.Deleted))
 	for object := range j.state.deleted {
 		deleted[object] = true
@@ -280,6 +341,9 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 		}
 		h, err := openIdentityObject(tree.ancestors[0], treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
 		if err != nil {
+			if errors.Is(err, windows.STATUS_INVALID_PARAMETER) || errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) || errors.Is(err, windows.STATUS_OBJECT_PATH_NOT_FOUND) {
+				return fmt.Errorf("%w: %v", errWorkspaceObjectVanished, err)
+			}
 			return err
 		}
 		windows.CloseHandle(h)
@@ -372,7 +436,10 @@ func (g *workspaceGrant) checkpointChanges(ctx context.Context, maxEvents int) e
 	if err := g.observePendingDeletes(ctx); err != nil {
 		return err
 	}
-	if err := checkpointWorkspaceChanges(ctx, j, p.sid, g.maxObjects, maxEvents); err != nil {
+	if err := g.verifyAllDescriptors(); err != nil {
+		return err
+	}
+	if err := checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, g.verifyDescriptors); err != nil {
 		return err
 	}
 	// Recorded unknown imports own reclamation, but no live execution may continue
