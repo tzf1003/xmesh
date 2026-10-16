@@ -225,6 +225,37 @@ func Test_WindowsAppContainerWorkspaceMoveImportHelper(t *testing.T) {
 	}
 }
 
+func Test_WindowsAppContainerWorkspaceMoveImportSourceBinding(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	f := newImportMoveFixture(t, false)
+	tree, err := openImportTree(context.Background(), f.source, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tree.Close()
+	expected := tree.objects[0]
+	for index := range tree.objects {
+		windows.CloseHandle(tree.objects[index].handle)
+		tree.objects[index].handle = 0
+	}
+	moved := f.source + ".original"
+	if err := os.Rename(f.source, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(f.source, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := openImportMoveRoot(tree.ancestors[len(tree.ancestors)-1], filepath.Base(f.source), expected); err == nil || h != 0 {
+		if h != 0 {
+			windows.CloseHandle(h)
+		}
+		t.Fatal("substituted source acquired original move authority", err)
+	}
+	f.assertSecurity(t, moved)
+}
+
 func Test_WindowsAppContainerWorkspaceMoveImportGuards(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")

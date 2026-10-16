@@ -13,10 +13,6 @@ import (
 // and coordinate external writers; this primitive does not provide a recovery
 // journal or track the lifetime of objects created during execution.
 func openIdentityObject(volume windows.Handle, expected treeObject) (windows.Handle, error) {
-	return openIdentityObjectAccess(volume, expected, windows.READ_CONTROL|windows.WRITE_DAC|windows.FILE_READ_ATTRIBUTES)
-}
-
-func openIdentityObjectAccess(volume windows.Handle, expected treeObject, access uint32) (windows.Handle, error) {
 	var anchor fileIdentity
 	if err := windows.GetFileInformationByHandleEx(volume, windows.FileIdInfo, (*byte)(unsafe.Pointer(&anchor)), uint32(unsafe.Sizeof(anchor))); err != nil {
 		return 0, err
@@ -35,7 +31,7 @@ func openIdentityObjectAccess(volume windows.Handle, expected treeObject, access
 	}
 	var handle windows.Handle
 	var status windows.IO_STATUS_BLOCK
-	err := windows.NtCreateFile(&handle, access,
+	err := windows.NtCreateFile(&handle, windows.READ_CONTROL|windows.WRITE_DAC|windows.FILE_READ_ATTRIBUTES,
 		&attributes, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		windows.FILE_OPEN, windows.FILE_OPEN_BY_FILE_ID|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0)
 	runtime.KeepAlive(expected)

@@ -90,7 +90,7 @@ func (g *workspaceGrant) moveImport(ctx context.Context, sourcePath, destination
 		windows.CloseHandle(source.objects[index].handle)
 		source.objects[index].handle = 0
 	}
-	handle, err := openIdentityObjectAccess(source.ancestors[0], root, windows.DELETE|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES)
+	handle, err := openImportMoveRoot(source.ancestors[len(source.ancestors)-1], filepath.Base(sourcePath), root)
 	if err != nil {
 		return false, err
 	}
@@ -137,6 +137,38 @@ func (g *workspaceGrant) moveImport(ctx context.Context, sourcePath, destination
 		return true, err
 	}
 	return true, nil
+}
+
+// A rename requires a namespace-aware file object. Security-only recovery opens
+// by ID can outlive names, but NTFS rejects renaming those file objects. Reopen
+// relative to the still-bound original parent, then verify the entire identity
+// and type before using DELETE access. External source writers remain frozen.
+func openImportMoveRoot(parent windows.Handle, name string, expected treeObject) (windows.Handle, error) {
+	if err := ordinaryComponent(name); err != nil {
+		return 0, err
+	}
+	encoded, err := windows.NewNTUnicodeString(name)
+	if err != nil {
+		return 0, err
+	}
+	attributes := windows.OBJECT_ATTRIBUTES{
+		Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: parent,
+		ObjectName: encoded, Attributes: windows.OBJ_DONT_REPARSE | windows.OBJ_CASE_INSENSITIVE,
+	}
+	var handle windows.Handle
+	var status windows.IO_STATUS_BLOCK
+	err = windows.NtCreateFile(&handle, windows.DELETE|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE,
+		&attributes, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		windows.FILE_OPEN, windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("open bound AppContainer import root for move: %w", err)
+	}
+	actual, err := inspectTreeObject(handle, "")
+	if err != nil || actual.id != expected.id || actual.directory != expected.directory {
+		windows.CloseHandle(handle)
+		return 0, fmt.Errorf("AppContainer import move source identity mismatch: %v", err)
+	}
+	return handle, nil
 }
 
 // Lexical containment and the pinned physical workspace identity must agree.
