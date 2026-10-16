@@ -59,17 +59,18 @@ type journalBoundary struct {
 }
 
 type journalRecord struct {
-	Version           int               `json:"version"`
-	Sequence          uint64            `json:"sequence"`
-	Kind              string            `json:"kind"`
-	Profile           string            `json:"profile,omitempty"`
-	SID               string            `json:"sid,omitempty"`
-	Workspace         *journalWorkspace `json:"workspace,omitempty"`
-	CreatedObjects    []journalObject   `json:"created_objects,omitempty"`
-	Grant             *journalGrant     `json:"grant,omitempty"`
-	GrantSequence     uint64            `json:"grant_sequence,omitempty"`
-	ExecutionID       string            `json:"execution_id,omitempty"`
-	ExecutionSequence uint64            `json:"execution_sequence,omitempty"`
+	Version           int                    `json:"version"`
+	Sequence          uint64                 `json:"sequence"`
+	Kind              string                 `json:"kind"`
+	Profile           string                 `json:"profile,omitempty"`
+	SID               string                 `json:"sid,omitempty"`
+	Workspace         *journalWorkspace      `json:"workspace,omitempty"`
+	CreatedObjects    []journalObject        `json:"created_objects,omitempty"`
+	ChangeCursor      *workspaceChangeCursor `json:"change_cursor,omitempty"`
+	Grant             *journalGrant          `json:"grant,omitempty"`
+	GrantSequence     uint64                 `json:"grant_sequence,omitempty"`
+	ExecutionID       string                 `json:"execution_id,omitempty"`
+	ExecutionSequence uint64                 `json:"execution_sequence,omitempty"`
 }
 
 type journalState struct {
@@ -81,6 +82,7 @@ type journalState struct {
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
 	created           map[journalObject]bool
+	changeCursor      *workspaceChangeCursor
 	executions        map[uint64]bool
 	executionIDs      map[string]bool
 }
@@ -99,6 +101,9 @@ func (s *journalState) accept(r journalRecord) error {
 	}
 	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
 		return fmt.Errorf("unexpected journal created-object fields")
+	}
+	if r.ChangeCursor != nil && r.Kind != "workspace-tracking" && r.Kind != "workspace-tracked" {
+		return fmt.Errorf("unexpected journal change cursor")
 	}
 	switch r.Kind {
 	case "profile":
@@ -142,6 +147,20 @@ func (s *journalState) accept(r journalRecord) error {
 		for _, object := range w.Objects {
 			s.objects[object] = true
 		}
+	case "workspace-tracking", "workspace-tracked":
+		if !s.workspace || s.workspaceReleased || r.ChangeCursor == nil || r.ChangeCursor.JournalID == 0 || r.ChangeCursor.Next < 0 || profileFields || r.Workspace != nil || r.CreatedObjects != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace tracking cursor")
+		}
+		if r.Kind == "workspace-tracking" {
+			if s.changeCursor != nil || len(s.executionIDs) != 0 || len(s.created) != 0 || len(s.granted) != len(s.objects) || len(s.pending) != len(s.granted) {
+				return fmt.Errorf("workspace tracking requires complete initial admission before execution")
+			}
+		} else if s.changeCursor == nil || r.ChangeCursor.JournalID != s.changeCursor.JournalID || r.ChangeCursor.Next <= s.changeCursor.Next {
+			return fmt.Errorf("invalid journal workspace tracking advance")
+		}
+		cursor := *r.ChangeCursor
+		s.changeCursor = &cursor
+
 	case "workspace-created":
 		if !s.workspace || s.workspaceReleased || len(r.CreatedObjects) == 0 || len(s.objects)+len(s.created)+len(r.CreatedObjects) > 10000 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
 			return fmt.Errorf("invalid journal workspace created-object batch")

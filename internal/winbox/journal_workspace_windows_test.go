@@ -20,7 +20,7 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	for _, stage := range []string{"admitted", "explicit-released", "workspace-released", "created-checkpointed", "created-partial-released"} {
+	for _, stage := range []string{"admitted", "explicit-released", "workspace-released", "created-checkpointed", "created-partial-released", "usn-catchup", "usn-checkpointed"} {
 		t.Run(stage, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "workspace")
 			child := filepath.Join(root, "existing-child")
@@ -109,10 +109,17 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				j.Close()
 			}()
 			createdRoot := filepath.Join(root, "new-tree")
-			movedCreated := stage == "created-checkpointed" || stage == "created-partial-released"
+			movedCreated := stage == "created-checkpointed" || stage == "created-partial-released" || stage == "usn-catchup" || stage == "usn-checkpointed"
 			if movedCreated {
 				createdRoot = root + ".moved-created"
-				if len(j.state.created) != 6 {
+				expectedCreated := 6
+				if stage == "usn-catchup" {
+					expectedCreated = 0
+				}
+				if stage == "usn-checkpointed" {
+					expectedCreated = 8
+				}
+				if len(j.state.created) != expectedCreated {
 					t.Fatal("created-object checkpoint was not durably restored", len(j.state.created))
 				}
 			}
@@ -238,6 +245,9 @@ func Test_WindowsAppContainerWorkspaceJournalCrashRecovery(t *testing.T) {
 				if len(info.CreatedObjects) != 0 {
 					info.CreatedObjects[0].ID[0] ^= 1
 				}
+				if info.ChangeCursor != nil {
+					info.ChangeCursor.Next++
+				}
 				info.Volumes[0]++
 				return &journalRecoveryLease{Guard: recoveryTestGuard(func() error { closed++; return nil })}, nil
 			})
@@ -320,6 +330,12 @@ func Test_WindowsAppContainerWorkspaceJournalCrashHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stage := os.Getenv("XMESH_WORKSPACE_STAGE")
+	if stage == "usn-catchup" || stage == "usn-checkpointed" {
+		if err := beginWorkspaceChangeTracking(context.Background(), j, p.sid, 64); err != nil {
+			t.Fatal(err)
+		}
+	}
 	helper := filepath.Join(p.Directory(), "journal-workspace-helper.exe")
 	source, err := os.Executable()
 	if err != nil {
@@ -352,42 +368,43 @@ func Test_WindowsAppContainerWorkspaceJournalCrashHelper(t *testing.T) {
 	if p.Close() == nil {
 		t.Fatal("profile closed before workspace cleanup")
 	}
-	stage := os.Getenv("XMESH_WORKSPACE_STAGE")
-	if stage == "created-checkpointed" || stage == "created-partial-released" {
-		if err := checkpointJournalWorkspace(j, p.sid, 64); err != nil {
-			t.Fatal(err)
-		}
-		count := len(j.records)
-		if err := checkpointJournalWorkspace(j, p.sid, 64); err != nil || len(j.records) != count {
-			t.Fatal("repeat observation", err)
-		}
-		if stage == "created-partial-released" {
-			census, err := censusJournalWorkspace(j, p.sid, 64)
-			if err != nil {
+	if stage == "created-checkpointed" || stage == "created-partial-released" || stage == "usn-catchup" || stage == "usn-checkpointed" {
+		if stage == "created-checkpointed" || stage == "created-partial-released" {
+			if err := checkpointJournalWorkspace(j, p.sid, 64); err != nil {
 				t.Fatal(err)
 			}
-			defer census.Close()
-			released := false
-			var createdID fileIdentity
-			for _, object := range census.tree.objects {
-				if filepath.Base(object.relative) == "created.txt" {
-					createdID = object.id
-				}
+			count := len(j.records)
+			if err := checkpointJournalWorkspace(j, p.sid, 64); err != nil || len(j.records) != count {
+				t.Fatal("repeat observation", err)
 			}
-			for _, object := range census.objects {
-				if object.id == createdID && !census.initial[object.id] && !object.directory {
-					if err := releaseJournalWorkspaceObject(object, p.sid, true, journalRecord{}); err != nil {
-						t.Fatal(err)
+			if stage == "created-partial-released" {
+				census, err := censusJournalWorkspace(j, p.sid, 64)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer census.Close()
+				released := false
+				var createdID fileIdentity
+				for _, object := range census.tree.objects {
+					if filepath.Base(object.relative) == "created.txt" {
+						createdID = object.id
 					}
-					released = true
-					break
 				}
+				for _, object := range census.objects {
+					if object.id == createdID && !census.initial[object.id] && !object.directory {
+						if err := releaseJournalWorkspaceObject(object, p.sid, true, journalRecord{}); err != nil {
+							t.Fatal(err)
+						}
+						released = true
+						break
+					}
+				}
+				if !released {
+					t.Fatal("partial-created release fixture has no file")
+				}
+				// Release path handles before moving the populated directory.
+				census.Close()
 			}
-			if !released {
-				t.Fatal("partial-created release fixture has no file")
-			}
-			// Release path handles before moving the populated directory.
-			census.Close()
 		}
 		if err := os.Rename(filepath.Join(root, "new-tree"), root+".moved-created"); err != nil {
 			t.Fatal(err)
@@ -396,6 +413,11 @@ func Test_WindowsAppContainerWorkspaceJournalCrashHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(root, "new-tree", "replacement.txt"), []byte("replacement"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if stage == "usn-checkpointed" {
+		if err := checkpointWorkspaceChanges(context.Background(), j, p.sid, 64, maxWorkspaceChangeEvents); err != nil {
 			t.Fatal(err)
 		}
 	}

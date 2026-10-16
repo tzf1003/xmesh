@@ -29,6 +29,7 @@ type journalRecoveryInfo struct {
 	Workspace      *journalWorkspace
 	Objects        []journalObject
 	CreatedObjects []journalObject
+	ChangeCursor   *workspaceChangeCursor
 	Volumes        []uint64
 }
 
@@ -189,6 +190,10 @@ func recoverJournalDirectory(ctx context.Context, path string, maxJournals, maxO
 
 func recoveryJournalInfo(j *grantJournal) journalRecoveryInfo {
 	info := journalRecoveryInfo{Profile: j.records[0].Profile, SID: j.records[0].SID}
+	if j.state.changeCursor != nil {
+		cursor := *j.state.changeCursor
+		info.ChangeCursor = &cursor
+	}
 	volumes := make(map[uint64]bool)
 	if j.state.workspace {
 		w := *j.records[1].Workspace

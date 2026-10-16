@@ -274,3 +274,8 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 ### Windows 活动执行进程所有者
 
 内部 `executionProcesses` 为一个活动 profile 管理有界启动 Job 集合，串行化创建与准入封闭。根进程创建时绑定 Job/AppContainer，并在恢复前固定身份句柄；回收先向全部 Job 请求终止，再确认完整清单与所有退出信号。部分失败继续保留所有者及 profile 引用，须重试成功后释放句柄；`Profile.Close` 会拒绝尚有进程所有者的 profile。使用过独立启动属性的 profile 不能转入该受管模式。ACL/journal 与外部 writer guards 须由调用方保持到回收完成。该入口已用于 AppContainer 工作区 helper；异常宿主恢复、完整新对象追踪、外部 ACL/命名空间/reparse 写入协调及 exec/ConPTY 接入仍待完成，生产 Windows L2 继续返回 `sandbox.unavailable`。
+
+
+内部 NTFS 变更追踪在初始工作树授权完整且尚未执行时调用 `beginWorkspaceChangeTracking`；调用方自初始快照起协调外部 writer，并串行日志操作。入口核对精确初始清单，通过保留卷根的 GUID 打开既有可读 USN 日志，刷盘日志 ID/起始游标。`checkpointWorkspaceChanges` 可在执行期间有界消费流，持久登记按 ID 核实的新增对象后推进游标；每次至多 65536 条事件，累计身份上限 10000。读取前后验证日志身份及保留区间，日志重建、截断、格式异常、限额和不可打开身份保留错误。该路径要求 NTFS 与相应卷读取权限，并不创建 USN 日志或启用特权。
+
+启用追踪后，目录观察和清理先消费到当前 USN 水位，扫描发现流未覆盖的身份会拒绝，恢复可找回两次扫描间移出根的已创建对象；历史目录移出根后仍是继承源。恢复回调收到复制的游标。删除、硬链接/reparse 变更和未知导入对象当前保留错误，须继续实现删除与导入子树证明、周期 checkpoint 及生产执行协调。外部 writer guard 和进程退出回执仍是 ACL 回收前提。含追踪记录的日志需保留本版本或更新恢复二进制；已有日志可继续读取。Windows L2 生产门禁保持 `sandbox.unavailable`。

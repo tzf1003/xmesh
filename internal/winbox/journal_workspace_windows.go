@@ -52,6 +52,16 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 	if len(w.Objects) == 0 || w.Root != w.Objects[0] || !w.Root.Directory {
 		return fmt.Errorf("AppContainer journal workspace root mismatch")
 	}
+	var cursor *workspaceChangeCursor
+	for _, record := range j.records {
+		if record.ChangeCursor != nil {
+			copy := *record.ChangeCursor
+			cursor = &copy
+		}
+	}
+	if (cursor == nil) != (j.state.changeCursor == nil) || (cursor != nil && *cursor != *j.state.changeCursor) {
+		return fmt.Errorf("AppContainer journal change cursor ownership mismatch")
+	}
 	objects := make(map[journalObject]bool, len(w.Objects))
 	identities := make(map[[16]byte]bool, len(w.Objects))
 	for _, object := range w.Objects {
@@ -120,11 +130,19 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 	if j.state.workspaceReleased {
 		return nil
 	}
+	if j.state.changeCursor != nil {
+		if err := checkpointWorkspaceChanges(context.Background(), j, sid, maxObjects, maxWorkspaceChangeEvents); err != nil {
+			return err
+		}
+	}
 	census, err := censusJournalWorkspace(j, sid, maxObjects)
 	if err != nil {
 		return err
 	}
 	defer census.Close()
+	if j.state.changeCursor != nil && len(census.discovered) != 0 {
+		return errWorkspaceChangesLost
+	}
 	// Flush every newly observed identity before the first ACL mutation. A
 	// crash or failed release may otherwise lose an object later moved out.
 	if err := appendWorkspaceCreated(j, census.discovered); err != nil {
@@ -158,11 +176,19 @@ func checkpointJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects in
 	if j.state.workspaceReleased || j.state.complete {
 		return fmt.Errorf("AppContainer workspace observation requires active ownership")
 	}
+	if j.state.changeCursor != nil {
+		if err := checkpointWorkspaceChanges(context.Background(), j, sid, maxObjects, maxWorkspaceChangeEvents); err != nil {
+			return err
+		}
+	}
 	census, err := censusJournalWorkspace(j, sid, maxObjects)
 	if err != nil {
 		return err
 	}
 	defer census.Close()
+	if j.state.changeCursor != nil && len(census.discovered) != 0 {
+		return errWorkspaceChangesLost
+	}
 	return appendWorkspaceCreated(j, census.discovered)
 }
 
