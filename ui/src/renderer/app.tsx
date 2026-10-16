@@ -13,11 +13,12 @@ import { Authorization } from "./pages/Authorization";
 import { Config } from "./pages/Config";
 import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
+import { Mesh } from "./pages/Mesh";
 import { Overview } from "./pages/Overview";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 
-export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "config" | "audit" | "setup";
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "config" | "audit" | "mesh" | "setup";
 
 const NAV: { id: PageId; label: Key }[] = [
   { id: "overview", label: "nav.overview" },
@@ -27,6 +28,7 @@ const NAV: { id: PageId; label: Key }[] = [
   { id: "ingress", label: "nav.ingress" },
   { id: "config", label: "nav.config" },
   { id: "audit", label: "nav.audit" },
+  { id: "mesh", label: "nav.mesh" },
   { id: "setup", label: "nav.setup" },
 ];
 
@@ -105,7 +107,7 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
           class="nav-item"
           data-testid={`nav-${n.id}`}
           aria-current={current === n.id ? "page" : undefined}
-          disabled={!connected && n.id !== "setup" && n.id !== "overview"}
+          disabled={!connected && n.id !== "setup" && n.id !== "overview" && n.id !== "mesh"}
           onClick={() => onSelect(n.id)}
         >
           {t(n.label)}
@@ -156,6 +158,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
   const t = useT();
   const c = ctx.snapshot.connection;
   if (page === "setup") return <Wizard ctx={ctx} />;
+  // The tailnet is administered through the control plane, so this page does not need a running kernel.
+  if (page === "mesh") return <Mesh ctx={ctx} />;
   if (c.kind === "offline") return <Unavailable ctx={ctx} t={t} kind="offline" />;
   if (c.kind === "mismatch") return <Unavailable ctx={ctx} t={t} kind="mismatch" />;
   switch (page) {

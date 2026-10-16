@@ -47,10 +47,12 @@ export interface IpcDeps {
   service: PanelService;
   /** Validates and runs first-run setup; `params` is whatever the renderer sent. */
   setup: (params: unknown) => Promise<DataResult<SetupReport>>;
+  /** Validates and runs one tailnet-administration request; `request` is whatever the renderer sent. */
+  mesh: (request: unknown) => Promise<DataResult<unknown>>;
   panel: () => WebContents | undefined;
 }
 
-export function registerIpc({ controller, actions, service, setup, panel }: IpcDeps): () => void {
+export function registerIpc({ controller, actions, service, setup, mesh, panel }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -134,6 +136,8 @@ export function registerIpc({ controller, actions, service, setup, panel }: IpcD
     const v = parsePickKind(kind);
     return v === undefined ? bad("path kind") : actions.pickPath(v);
   });
+
+  handle(CHANNELS.mesh, (request: unknown) => mesh(request));
 
   const push = (snap: Snapshot): void => {
     const target = panel();

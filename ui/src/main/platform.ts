@@ -25,6 +25,11 @@ export function electronPlatform(showPanel: () => void, notifyError: (message: s
     runCli: (command) => runXmesh(command),
     notifyError,
     pickPath: async (kind) => {
+      if (kind === "authkeySave") {
+        // A file to be created: the pre-auth key is written there (0600) by the CLI, never shown or kept here.
+        const r = await dialog.showSaveDialog({ defaultPath: "xmesh-authkey.txt", properties: ["createDirectory", "showOverwriteConfirmation"] });
+        return r.canceled ? undefined : r.filePath;
+      }
       const r = await dialog.showOpenDialog({
         properties: kind === "workspace" ? ["openDirectory", "createDirectory"] : ["openFile"],
       });

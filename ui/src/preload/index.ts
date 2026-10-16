@@ -54,6 +54,7 @@ const api: PanelApi = {
   },
   runSetup: (params) => invoke("xmesh:run-setup", params),
   pickPath: (kind) => invoke("xmesh:pick-path", kind),
+  mesh: (request) => invoke("xmesh:mesh", request),
 };
 
 contextBridge.exposeInMainWorld("xmesh", Object.freeze(api));

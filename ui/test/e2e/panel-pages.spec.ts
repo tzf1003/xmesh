@@ -41,7 +41,7 @@ async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
 test("every page renders under the CSP without violations", async () => {
   const page = await open({ kernel: { status: LAN_STATUS } });
   const violations = await watchCsp(page);
-  for (const id of ["overview", "devices", "sessions", "authz", "ingress", "config", "audit"]) {
+  for (const id of ["overview", "devices", "sessions", "authz", "ingress", "config", "audit", "mesh"]) {
     await page.getByTestId(`nav-${id}`).click();
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }

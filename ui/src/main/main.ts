@@ -6,6 +6,8 @@ import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
+import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
+import { MeshService, execMeshRunner } from "./mesh-service";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, runSetup } from "./setup";
 import { runXmeshSetup } from "./cli";
@@ -114,11 +116,19 @@ async function start(): Promise<void> {
     }
     return runXmeshSetup(args);
   });
+  // Tailnet administration shells out to `xmesh mesh --json`; the credential lives in that CLI's keychain profile.
+  const fakeMesh = TEST_MODE ? freshFakeMesh() : undefined;
+  const meshService = new MeshService(fakeMesh ? fakeMeshRunner(fakeMesh) : execMeshRunner(), () => {
+    const c = controller.snapshot.connection;
+    const file = c.kind === "connected" ? c.status.paths?.config_file : undefined;
+    return typeof file === "string" && file !== "" ? file : undefined;
+  });
   registerIpc({
     controller,
     actions,
     service: new PanelService(controller),
     setup: (params) => runSetup(params, setupHost),
+    mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
   });
 
@@ -154,6 +164,7 @@ async function start(): Promise<void> {
       calls: () => calls.slice(),
       notices: () => notified.slice(),
       answers,
+      mesh: fakeMesh,
       showPanel,
       panelWebContents: () => panel?.window.webContents,
       panelPreferences: () => panel?.webPreferences,
