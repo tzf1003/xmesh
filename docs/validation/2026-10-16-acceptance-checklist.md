@@ -38,8 +38,8 @@
 | 受管标准流与 ConPTY 启动 | 完成（内部原语） | 原生通过 | 工具层 `exec`/`pty` 接入 |
 | 生命周期所有者与协调导入（start/import/close 串行，来源 guard 上限 256） | 完成（内部） | 原生通过，291 个 `Test_` PASS 标识 | 接入生产路径 |
 | **外部 namespace/reparse/ACL 写入者强制约束** | 未实现 | 无 | 子讨论串 1 |
-| **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | 未实现 | 无 | 子讨论串 2 |
-| **完整对象 census 与未知导入识别** | 部分 | 无 | 子讨论串 3 |
+| **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | keeper 进程已实现（`1f2616b`） | Windows 原生通过：强杀宿主后 keeper 存活、接管、恢复完成后释放 | 接入生产启动路径；不冻结树内写入；整机重启/外层 Job 终止时失败关闭 |
+| **完整对象 census 与未知导入识别** | 未知导入归并与 `workspace-unknown-import` 已实现（`37645b5`） | Windows 原生通过（五个子场景加生命周期场景） | 事后归并不证明子树完整，仍需完整 census 证明 |
 | **exec/ConPTY 工具层接入** | 未实现 | 无 | 子讨论串 4 |
 | 普通用户登录任务、服务联网、跨用户/会话 ACL 与 mutex | 登录任务与可选 SCM 安装已实现 | 本机模式通过 | 需要真实 Windows 普通账户会话 |
 | `e747cb8` 的 helper exit 66 原因 | — | 之后各轮未复现；helper 已保留私有 race 诊断 | 子讨论串 4 调查 |
@@ -59,9 +59,9 @@
 
 | 子任务 | 内容 | 集成方式 |
 | --- | --- | --- |
-| 1 | 外部 namespace/reparse/ACL 写入者强制约束 | 子分支完成后由集成者合并到工作分支，Windows 原生结果以 GitHub CI 为准 |
-| 2 | 宿主崩溃后独立存活的外部 guard | 同上；与子任务 1 同改 `lifecycle_windows.go`，由集成者解决冲突 |
-| 3 | 完整 census 与未知导入识别 | 同上 |
+| 1 | 外部 namespace/reparse/ACL 写入者强制约束（进行中） | 子分支完成后由集成者合并到工作分支，Windows 原生结果以 GitHub CI 为准 |
+| 2 | 宿主崩溃后独立存活的外部 guard（已合入 `1f2616b`） | 同上；与子任务 1 同改 `lifecycle_windows.go`，由集成者解决冲突 |
+| 3 | 完整 census 与未知导入识别（已合入 `37645b5`） | 同上 |
 | 4 | exec/ConPTY 工具层接入；exit 66 调查 | 同上 |
 
 `docs/implementation-status.md` 只由集成者修改；子任务把文档更新内容交给集成者。

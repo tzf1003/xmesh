@@ -393,3 +393,22 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 原生测试已补充文件与目录的受监督子进程访问、准备错误、缺失 guard、取消、目标冲突、释放重试、顺序与上限、移动后取消、并发启动/关闭等待，以及 DACL/control/label 恢复和 guard 释放前的 durable complete 断言。本地 22 个包、390 项 race 测试、go vet、Windows amd64/arm64 vet、amd64 测试编译及契约/链接检查通过；协调导入及测试观察同步已在 `f121709` 通过 push/PR 双轮完整 Windows 原生 CI，证据见下。源 guard 的生产协调与宿主故障后持续保护仍待接入，Windows 生产 L2 保持 `sandbox.unavailable`。
 
 `7bbc1c8` 的 [push 38861711672](https://github.com/tzf1003/xmesh/actions/runs/38861711672) 与 [PR 38861715771](https://github.com/tzf1003/xmesh/actions/runs/38861715771) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 [38861711640](https://github.com/tzf1003/xmesh/actions/runs/38861711640) / [38861715890](https://github.com/tzf1003/xmesh/actions/runs/38861715890) 通过，原生 job 为 [116845248205](https://github.com/tzf1003/xmesh/actions/runs/38861711672/job/116845248205) / [116845261313](https://github.com/tzf1003/xmesh/actions/runs/38861715771/job/116845261313)。`f121709`（`f12170989d8b873a7562632b8513bf40498ffdc8`）将测试中的活动 journal 导入计数与进程确认观察置于 `profile.mu` 下，与监视器写入同步；其 [push 38862020090](https://github.com/tzf1003/xmesh/actions/runs/38862020090) 与 [PR 38862024942](https://github.com/tzf1003/xmesh/actions/runs/38862024942) 同样通过三平台全量 race、vet、构建和完整 Windows 原生任务，契约 [38862020058](https://github.com/tzf1003/xmesh/actions/runs/38862020058) / [38862024953](https://github.com/tzf1003/xmesh/actions/runs/38862024953) 通过。原生 job [116846229468](https://github.com/tzf1003/xmesh/actions/runs/38862020090/job/116846229468) / [116846244701](https://github.com/tzf1003/xmesh/actions/runs/38862024942/job/116846244701) 的完整日志各含 291 个独立 `Test_` PASS 标识、360 个 PASS 行、245 个 WindowsJob/AppContainer 标识和全部 17 个 WorkspaceExecutionImport 标识，零失败及 data race；准确 PASS 集合与 `7bbc1c8` 双轮一致，保留 `8235e92` 的全部 274/228 项基线。历史 `e747cb8` helper 退出码 66 的原因仍未确认。生产源 namespace/reparse/ACL writer 协调、导入身份在完整清理期间的保护、宿主故障后的 guard 存续及工具层 L2 集成仍待完成；Windows 生产 L2 保持 `sandbox.unavailable`。
+
+
+## 独立 guard keeper（宿主崩溃后保持目录绑定）
+
+新增 `internal/winbox/keeper_*.go` 与隐藏子命令 `__sandbox-guard`，在 journal 与 profile 创建前启动独立 keeper 进程。keeper 以共享模式固定工作区根、祖先链和 journal 目录链，并在宿主退出后继续持有。宿主死亡后，keeper 通过仅当前用户与 SYSTEM 可访问的单实例私有命名管道允许一个恢复方接管；恢复入口为 `recoverJournalDirectoryWithKeepers`，释放入口为 `releaseCompletedKeepers`，`Hold(handle)` 可追加来源 guard。keeper 只在自行读到已绑定 journal 的持久 `complete` 记录后同意释放；同一 workspace 只允许一个 keeper；缺少 keeper 时默认失败关闭，可传入 fallback。`lifecycle_windows.go` 仅在 journal 打开后增加绑定调用。
+
+`1f2616b` 的 [CI 38865833738](https://github.com/tzf1003/xmesh/actions/runs/38865833738) 三平台检查与 windows-native 通过。原生场景 `Test_WindowsAppContainerGuardKeeper*` 在真实 `workspaceExecution` 与 AppContainer 进程运行中强杀宿主：supervisor 回收并退出后 keeper 仍存活，工作区、祖先和 state 目录改名被拒；活动宿主期间不可接管，第二恢复方被拒，恢复方断开后可重新接管；journal 未完成时释放被拒；恢复在 keeper 保护下完成，根与文件的 DACL、控制位和标签与原值一致，journal 为 complete；恢复后 keeper 退出码为 0 且目录可改名。另覆盖 absent/complete/incomplete/unbound 释放判定、重复 keeper 拒绝、`Hold`、无 keeper 失败关闭及协议单测。
+
+边界：keeper 只固定目录绑定，不冻结树内 ACL/reparse 写入，该约束仍属外部写入者强制约束，可通过 `Hold` 挂接；整机重启、登出或外层 Job 的 kill-on-close 会连同 keeper 一起结束，此时走 fallback 或保持失败关闭；同用户恶意进程可终止 keeper 或占用唯一接管连接；选择性对象 journal（无 workspace）不在覆盖范围；尚未接入生产启动路径（prepare 中的 `launchGuardKeeper` 与启动恢复中的 `recoverJournalDirectoryWithKeepers`）。这是真实 Windows runner 上的原生验证，生产 Windows L2 保持 `sandbox.unavailable`。
+
+## 未知导入记录与 census 归并
+
+此前，目录中出现未预先登记且无创建记录的对象（例如被外部移入的目录）时，USN 规划器返回无类型错误，此后每次 checkpoint（含关闭回收）均失败，已知对象的 ACL 无法回收。现在规划器把这类对象归为未知导入，journal 新增 `workspace-unknown-import` 记录并持久拥有这些身份；关闭时按当前目录树把落在未知导入目录下的剩余成员纳入。活动执行中的 checkpoint 仍以 `errWorkspaceUnknownImport` 报错，监视器照旧终止执行，重放旧游标不会使该标记消失；关闭完成后，生命周期把该类型错误返回调用方。硬链接、reparse、类型或父目录不符等证明不足的情形仍然报错；出现未知导入后不再接受新的协调导入。改动位于 `usn.go`、`usn_windows.go`、`journal.go`、`journal_import.go`、`journal_workspace_windows.go`，`lifecycle_windows.go` 仅调整 `closeContext`。
+
+`37645b5` 的 [CI 38866014846](https://github.com/tzf1003/xmesh/actions/runs/38866014846) 中 windows-native、ubuntu 与 windows-latest 检查通过：`Test_WindowsAppContainerWorkspaceUnknownImport` 的 directory、file、replay、deleted、created-inside 五个子场景（含 ACE 回收与完成重放）和 `Test_WindowsAppContainerWorkspaceExecutionUnknownImport`（监视器报错、关闭后 journal 完成、类型错误返回）通过；另有规划器分类/重放/上限/删除回执及 journal 重放、19 种非法转换和写盘失败的平台无关单测。
+
+边界：这是事后归并，不证明子树完整；未知导入目录内原有子对象若在被观察前已移出工作区，仍无法找回；回收沿用严格 ACE 格式规则，带非工作区格式 profile ACE 的导入对象仍回收失败并保留。这是代码实现加 GitHub Windows runner 的模拟验证，不是真实生产环境验收，生产 Windows L2 保持 `sandbox.unavailable`。
+
+两个子任务分支合入集成分支后的整树结果：本地全量 race、vet、Windows amd64/arm64 vet 与 `internal/winbox` 测试交叉编译通过；push CI 结果见下一节记录。

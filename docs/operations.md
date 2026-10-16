@@ -308,3 +308,10 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 内部 `workspaceExecution` 要求可信调用方在准备开始前取得并持续持有外部 namespace/reparse/ACL writer guard；该 guard 覆盖 journal、profile、授权、USN 追踪、进程与监视器的完整寿命。准备返回所有者及错误时，保留所有者并调用带 context 的关闭接口重试。关闭封闭新准入，确认全部 Job 与持久进程清单回执，停止监视器并释放进程所有者，再按身份回收 ACL、删除 profile、刷盘 complete、关闭 journal，最后释放 guard。取消或期限到达保留清理义务；guard 关闭失败保留重试状态，poisoned journal 保留供恢复。普通进程与 ConPTY 启动检查生命周期取消并串行准入。生产部署仍须完成外部 writer 及异常宿主后 guard 寿命、完整 census、未知导入和工具层 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。
 
 协调导入由生命周期串行入口调用受信源协调器；协调器接收源、目标路径，在 census/移动前协调外部 namespace/reparse/ACL 写入者，并持续保护移动后的导入对象身份，覆盖完整清理期间直至 guard 成功释放。guard 随准备错误一并返回时仍由生命周期接管；最多保留 256 个。关闭完成进程回收、ACL 恢复及 profile/journal 持久化清理后，逆序释放源 guard，再释放原 workspace guard；失败时保留所有者并重试关闭。宿主故障后的保护须由独立存续的协调机制提供。生产外部协调及工具层 exec/ConPTY L2 集成仍待完成，Windows 生产 L2 保持 `sandbox.unavailable`。
+
+
+### Windows 独立 guard keeper 与未知导入
+
+内部 `launchGuardKeeper` 在 journal 与 profile 创建前启动 `xmesh __sandbox-guard`，固定工作区根、祖先链与 journal 目录链并在宿主退出后保持；宿主死亡后恢复入口 `recoverJournalDirectoryWithKeepers` 通过仅当前用户与 SYSTEM 可访问的私有命名管道接管，keeper 仅在读到已绑定 journal 的持久 `complete` 记录后同意释放。缺少 keeper 时默认失败关闭。keeper 不冻结树内 ACL/reparse 写入，整机重启或外层 Job 的 kill-on-close 会连同 keeper 一起结束；该机制尚未接入生产启动路径。
+
+活动执行观察到未知导入（未登记且无创建记录的对象，例如被外部移入的目录）时，监视器以 `errWorkspaceUnknownImport` 终止执行，journal 持久记录 `workspace-unknown-import`；关闭仍可完成回收并向调用方返回该错误，之后不再接受协调导入。含该记录的 journal 需要本版本或更新的恢复二进制。该归并不证明子树完整，Windows 生产 L2 保持 `sandbox.unavailable`。
