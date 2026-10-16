@@ -195,7 +195,8 @@ func Test_Gate1_MCPRealHTTP(t *testing.T) {
 			args["path"] = "test.txt"
 		case "exec.run":
 			if os.PathSeparator == '\\' {
-				args = map[string]any{"cmd": "powershell", "args": []string{"-NoProfile", "-Command", "Write-Output hello"}}
+				// cmd starts in milliseconds; a cold PowerShell took over the 30 s call budget on a loaded runner.
+				args = map[string]any{"cmd": "cmd", "args": []string{"/c", "echo hello"}}
 			} else {
 				args = map[string]any{"cmd": "printf", "args": []string{"hello"}}
 			}
