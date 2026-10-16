@@ -72,13 +72,46 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 		identities[object.ID] = true
 	}
 	created := make(map[journalObject]bool)
+	var importCursor *workspaceChangeCursor
+	retired := make(map[journalObject]int64)
 	for _, record := range j.records {
-		for _, object := range record.CreatedObjects {
-			if !validJournalObject(object) || object.Volume != w.Root.Volume || identities[object.ID] {
-				return fmt.Errorf("AppContainer journal created-object identity mismatch")
+		if record.ChangeCursor != nil {
+			value := *record.ChangeCursor
+			importCursor = &value
+		}
+		if record.Import != nil {
+			if record.Kind != "workspace-import" || importCursor == nil || record.Import.Cursor != *importCursor {
+				return fmt.Errorf("AppContainer journal import cursor ownership mismatch")
+			}
+			known := make(map[journalObject]bool, len(objects)+len(created))
+			for object := range objects {
+				known[object] = true
+			}
+			for object := range created {
+				known[object] = true
+			}
+			added, err := planWorkspaceImport(*record.Import, w.Root, known, retired, 10000)
+			if err != nil || len(added) == 0 {
+				return fmt.Errorf("AppContainer journal import census ownership mismatch: %v", err)
+			}
+		}
+		batch := make(map[[16]byte]bool)
+		for _, object := range record.discoveredObjects() {
+			if !validJournalObject(object) || object.Volume != w.Root.Volume || batch[object.ID] {
+				return fmt.Errorf("AppContainer journal discovered-object identity mismatch")
+			}
+			batch[object.ID] = true
+			if identities[object.ID] {
+				if record.Import == nil || (!objects[object] && !created[object]) {
+					return fmt.Errorf("AppContainer journal discovered-object identity conflict")
+				}
+				continue
 			}
 			created[object] = true
 			identities[object.ID] = true
+		}
+		for _, deletion := range record.DeletedObjects {
+			retired[deletion.Object] = deletion.USN
 		}
 	}
 	if len(identities) > 10000 || len(created) != len(j.state.created) {
@@ -357,7 +390,7 @@ func censusJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) (
 		}
 	}
 	for _, record := range j.records {
-		for _, expected := range record.CreatedObjects {
+		for _, expected := range record.discoveredObjects() {
 			object := treeObject{id: fileIdentity{Volume: expected.Volume, ID: expected.ID}, directory: expected.Directory}
 			known[object.id] = true
 			if err := retain(object); err != nil {

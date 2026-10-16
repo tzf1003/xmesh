@@ -65,6 +65,7 @@ type journalRecord struct {
 	Profile           string                 `json:"profile,omitempty"`
 	SID               string                 `json:"sid,omitempty"`
 	Workspace         *journalWorkspace      `json:"workspace,omitempty"`
+	Import            *journalImport         `json:"import,omitempty"`
 	CreatedObjects    []journalObject        `json:"created_objects,omitempty"`
 	PendingDeletes    []journalObject        `json:"pending_deletes,omitempty"`
 	DeleteIntents     []journalDeletion      `json:"delete_intents,omitempty"`
@@ -105,6 +106,9 @@ func (s *journalState) accept(r journalRecord) error {
 	executionFields := r.ExecutionID != "" || r.ExecutionSequence != 0
 	if executionFields && r.Kind != "execution" && r.Kind != "execution-reaped" {
 		return fmt.Errorf("unexpected journal execution fields")
+	}
+	if r.Import != nil && r.Kind != "workspace-import" {
+		return fmt.Errorf("unexpected journal import fields")
 	}
 	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
 		return fmt.Errorf("unexpected journal created-object fields")
@@ -192,6 +196,28 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 		cursor := *r.ChangeCursor
 		s.changeCursor = &cursor
+
+	case "workspace-import":
+		if !s.workspace || s.workspaceReleased || s.changeCursor == nil || r.Import == nil || r.Import.Cursor != *s.changeCursor || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace import admission")
+		}
+		known := make(map[journalObject]bool, len(s.objects)+len(s.created))
+		for object := range s.objects {
+			known[object] = true
+		}
+		for object := range s.created {
+			known[object] = true
+		}
+		added, err := planWorkspaceImport(*r.Import, s.root, known, s.deleted, 10000)
+		if err != nil {
+			return err
+		}
+		if len(added) == 0 {
+			return fmt.Errorf("journal import adds no identity")
+		}
+		for _, object := range added {
+			s.created[object] = true
+		}
 
 	case "workspace-created":
 		if !s.workspace || s.workspaceReleased || len(r.CreatedObjects) == 0 || len(s.objects)+len(s.created)+len(r.CreatedObjects) > 10000 || profileFields || r.Workspace != nil || r.Grant != nil || r.GrantSequence != 0 {

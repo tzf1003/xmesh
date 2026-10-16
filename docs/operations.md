@@ -288,3 +288,6 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 
 监视器先核实保留的初始身份句柄，读取内核 `DeletePending`，将观测刷盘为 `workspace-delete-pending`；NTFS 可延迟发出删除事件。执行期 USN checkpoint 对尚未最终关闭的已登记删除对象，先持久记录 `workspace-delete-intent` 再推进游标。意图保持 live census 与回收义务，监视器继续有界追踪；进程退出确认前保留 ACL 和初始身份句柄。后续最终 `FILE_DELETE | CLOSE` 与准确 NTFS 不存在证明共同构成删除回执。撤销 disposition 后仍存活的对象按正常身份核实回收 ACL。两类观测历史保持在 journal 和独立恢复清单中，每个完整写盘前缀可重放；含此记录需本版本或更新恢复二进制。尚未登记且无法按 ID 核实的 delete-pending 对象、最终关闭时不存在证明不足及历史/导入/link/reparse 证明异常保留错误；生产协调器和 Windows L2 门禁继续按实现状态文档执行。
+
+
+受协调导入先调用内部 `admitImport`，完整扫描同卷源目录子树或单文件，核对 namespace/journal/凭证边界并刷盘 `workspace-import`；成功后由可信协调器执行移动与授权。协调器须从扫描前冻结所有源 namespace/reparse/ACL writer 并保持到移动结束，以及保持工作区外部 writer guard。已持久准入的源及其后代在移动取消、再次移出或宿主退出后仍按卷/ID 保留回收义务。原语不修改命名空间或权限。完整导入证明包含源根、全部身份和准确 USN 游标，恢复清单独立复制；重叠身份只计一次，累计限额含导入和删除对象。未知的未经协调导入继续保留错误。新记录需本版本或更新恢复二进制；生产协调事务、writer 生命周期与 exec/ConPTY 接入完成前，Windows L2 继续按实现状态文档保持门禁。

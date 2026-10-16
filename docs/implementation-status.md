@@ -292,3 +292,12 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 本地全量 race 共 358 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。原生监视器新增延迟删除和撤销 disposition 两个场景，覆盖执行期内核待删除观测持久化、独立恢复清单、所有权校验、最终删除或存活回收和完成重放；两个新增原生场景均通过。含 `workspace-delete-intent` / `workspace-delete-pending` 的日志须由本版本或更新恢复二进制处理。外部 writer 协调、导入子树证明和生产执行协调器及 exec/ConPTY 集成继续推进，Windows L2 保持 `sandbox.unavailable`。
 
 `2876bb4` 的 [push 工作流 38840835541](https://github.com/tzf1003/xmesh/actions/runs/38840835541) 与 [PR 工作流 38840840124](https://github.com/tzf1003/xmesh/actions/runs/38840840124) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38840835501` / `38840840015` 通过。原生 job `116780285725` / `116780300698` 的完整日志各确认 160 个独立 Job/AppContainer PASS 标记，保留全部既有 158 项。两个新增场景验证保留身份句柄上的内核待删除状态被周期刷盘、存活执行继续、独立恢复清单和所有权校验；退出后分别确认最终删除或撤销 disposition 后的存活回收，根安全状态和树外 ACE 回收准确，完成状态可重放。
+
+
+### 受协调的导入源子树准入
+
+内部 `workspaceGrant.admitImport` 在命名空间变更前，按准确卷/对象身份扫描整个目录子树或单文件，核对工作区、journal 和凭证目录边界。可信协调器须从扫描前开始冻结全部源 namespace/reparse/ACL writer，并保持到移动结束，同时继续保持工作区所需的外部 writer guard。该原语补齐既有 USN checkpoint，将源根、完整身份清单和准确游标一次刷盘为 `workspace-import`，随后才允许调用方移动源。原语本身只记录身份，命名空间移动及访问授权由生产协调器承接。
+
+已准入源及其原有后代参与后续连续 USN 追踪，即使移动被取消、源目录或后代在下一 checkpoint 前再次移出工作区，仍保留完整回收义务。重叠已登记身份只计一次；重复完整准入复用既有记录，累计 10000 身份上限包括导入和删除身份。恢复清单深复制完整导入证明，日志重放及编辑前核对游标绑定、物理身份、类型、重复和退休状态。回收通过原身份核实当前对象，保留其他 ACL 字节，并处理后续新增或删除的子对象。
+
+本地全量 race 390 项、vet、Windows amd64/arm64 vet 与 amd64 测试编译通过。新增 Windows 原生场景覆盖后代在 checkpoint 前移出并删除、取消移动、单文件、写盘失败后重开重试、完整准入重放和限额，以及根/journal/祖先/reparse/hardlink 拒绝；本阶段提交时等待 Windows CI 验收。含 `workspace-import` 的日志需本版本或更新恢复二进制。生产协调器仍须实现源 writer 冻结、移动与授权的完整事务、未知导入的处理、外部 writer 生命周期和 exec/ConPTY 集成；Windows L2 保持 `sandbox.unavailable`。

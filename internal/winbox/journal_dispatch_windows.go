@@ -28,6 +28,7 @@ type journalRecoveryInfo struct {
 	SID            string
 	Workspace      *journalWorkspace
 	Objects        []journalObject
+	Imports        []journalImport
 	CreatedObjects []journalObject
 	PendingDeletes []journalObject
 	DeleteIntents  []journalDeletion
@@ -204,8 +205,24 @@ func recoveryJournalInfo(j *grantJournal) journalRecoveryInfo {
 		info.Workspace = &w
 		volumes[w.Root.Volume] = true
 	}
+	seen := make(map[journalObject]bool)
+	if info.Workspace != nil {
+		for _, object := range info.Workspace.Objects {
+			seen[object] = true
+		}
+	}
 	for _, r := range j.records {
-		info.CreatedObjects = append(info.CreatedObjects, r.CreatedObjects...)
+		if r.Import != nil {
+			proof := *r.Import
+			proof.Objects = append([]journalObject(nil), proof.Objects...)
+			info.Imports = append(info.Imports, proof)
+		}
+		for _, object := range r.discoveredObjects() {
+			if !seen[object] {
+				info.CreatedObjects = append(info.CreatedObjects, object)
+				seen[object] = true
+			}
+		}
 		info.PendingDeletes = append(info.PendingDeletes, r.PendingDeletes...)
 		info.DeleteIntents = append(info.DeleteIntents, r.DeleteIntents...)
 		info.DeletedObjects = append(info.DeletedObjects, r.DeletedObjects...)
