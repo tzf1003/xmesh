@@ -60,3 +60,16 @@ export function cwdPolicy(parsed: unknown): { allow: string[]; deny: string[] } 
 export function isDirty(original: string, draft: string): boolean {
   return original !== draft;
 }
+
+/** Character offsets of the start and end of a 1-based line, for selecting it in a textarea. */
+export function lineRange(text: string, line: number): { start: number; end: number } | undefined {
+  if (!Number.isInteger(line) || line < 1) return undefined;
+  let start = 0;
+  for (let i = 1; i < line; i++) {
+    const nl = text.indexOf("\n", start);
+    if (nl === -1) return undefined;
+    start = nl + 1;
+  }
+  const nl = text.indexOf("\n", start);
+  return { start, end: nl === -1 ? text.length : nl };
+}

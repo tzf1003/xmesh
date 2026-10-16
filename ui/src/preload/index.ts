@@ -53,6 +53,7 @@ const api: PanelApi = {
     };
   },
   runSetup: (params) => invoke("xmesh:run-setup", params),
+  pickPath: (kind) => invoke("xmesh:pick-path", kind),
 };
 
 contextBridge.exposeInMainWorld("xmesh", Object.freeze(api));

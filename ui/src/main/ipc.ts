@@ -17,6 +17,7 @@ import {
   parsePassword,
   parsePatCreate,
   parsePathKind,
+  parsePickKind,
 } from "../shared/ipc";
 import type { CallEventData } from "../shared/control";
 import type { PanelService } from "./panel-service";
@@ -129,6 +130,10 @@ export function registerIpc({ controller, actions, service, setup, panel }: IpcD
   });
   handle(CHANNELS.getRecentCalls, (): CallEventData[] => service.recentCalls());
   handle(CHANNELS.runSetup, (params: unknown) => setup(params));
+  handle(CHANNELS.pickPath, (kind: unknown) => {
+    const v = parsePickKind(kind);
+    return v === undefined ? bad("path kind") : actions.pickPath(v);
+  });
 
   const push = (snap: Snapshot): void => {
     const target = panel();

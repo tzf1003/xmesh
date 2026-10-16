@@ -207,3 +207,13 @@ export function Meter({ used, max, label }: { used: number; max: number; label: 
     </div>
   );
 }
+
+/** For a page whose route the connected kernel does not declare (CTR-CTL-02 capability negotiation). */
+export function NotSupported({ what }: { what: string }): JSX.Element {
+  const t = useT();
+  return (
+    <Banner kind="warn" testid="not-supported">
+      {t("common.notSupported", { what })}
+    </Banner>
+  );
+}

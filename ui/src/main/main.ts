@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { Notification, app } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
@@ -20,10 +19,9 @@ import { type PanelWindow, createPanelWindow, installSessionHardening, installWe
 const UI_ROOT = path.join(__dirname, "..", "..", "..");
 const TEST_MODE = process.env.XMESH_UI_TEST === "1" && !app.isPackaged;
 
-/** `dist/renderer` is the panel build (W1); until it exists the placeholder page is served. */
+/** `dist/renderer` is the esbuild bundle of src/renderer (scripts/build-renderer.mjs). */
 function rendererRoot(): string {
-  const built = path.join(UI_ROOT, "dist", "renderer");
-  return fs.existsSync(path.join(built, "index.html")) ? built : path.join(UI_ROOT, "static", "placeholder-panel");
+  return path.join(UI_ROOT, "dist", "renderer");
 }
 
 registerPanelScheme();
@@ -66,7 +64,7 @@ async function start(): Promise<void> {
   });
 
   const calls: RecordedCall[] = [];
-  const answers = { confirm: true, cliFails: false };
+  const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
   const notified: string[] = [];
   const notifyError = (message: string): void => notify(message);
   const platform = TEST_MODE

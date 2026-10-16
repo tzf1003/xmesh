@@ -48,6 +48,7 @@ export const CHANNELS = {
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
   runSetup: "xmesh:run-setup",
+  pickPath: "xmesh:pick-path",
 } as const;
 
 /** Main -> renderer push channel. */
@@ -66,6 +67,10 @@ export const EXTERNAL_LINKS = {
   docs: "https://github.com/tzf1003/xmesh#readme",
 } as const;
 export type ExternalKey = keyof typeof EXTERNAL_LINKS;
+
+/** What the native chooser selects: the workspace is a directory, the auth key a file. */
+export const PICK_KINDS = ["workspace", "authkeyFile"] as const;
+export type PickKind = (typeof PICK_KINDS)[number];
 
 /** What the renderer learns about a failed operation. `diagnostics` and `current_etag` come from the kernel's error body (CTR-CTL-02). */
 export interface ActionError {
@@ -153,6 +158,8 @@ export interface PanelApi {
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
+  /** Opens the system file chooser; `path` is null when the user cancels. */
+  pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -181,6 +188,7 @@ export const PANEL_API_METHODS = [
   "getRecentCalls",
   "onCalls",
   "runSetup",
+  "pickPath",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";
@@ -205,6 +213,10 @@ export function parseExternalKey(v: unknown): ExternalKey | undefined {
   return typeof v === "string" && Object.prototype.hasOwnProperty.call(EXTERNAL_LINKS, v)
     ? (v as ExternalKey)
     : undefined;
+}
+
+export function parsePickKind(v: unknown): PickKind | undefined {
+  return (PICK_KINDS as readonly unknown[]).includes(v) ? (v as PickKind) : undefined;
 }
 
 export function parseBoolean(v: unknown): boolean | undefined {

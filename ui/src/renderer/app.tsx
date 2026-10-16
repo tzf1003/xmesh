@@ -1,0 +1,206 @@
+import type { JSX } from "preact";
+import { useEffect, useMemo, useState } from "preact/hooks";
+import type { Capability } from "../shared/control";
+import { hasCapability } from "../shared/control";
+import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
+import { getApi } from "./api";
+import { Badge, Banner, Toasts, useToasts } from "./components";
+import { useSnapshot } from "./hooks";
+import { I18nContext, makeT, useT, type T } from "./i18n";
+import type { Key } from "./messages";
+import { Audit } from "./pages/Audit";
+import { Authorization } from "./pages/Authorization";
+import { Config } from "./pages/Config";
+import { Devices } from "./pages/Devices";
+import { Ingress } from "./pages/Ingress";
+import { Overview } from "./pages/Overview";
+import { Sessions } from "./pages/Sessions";
+import { Wizard } from "./pages/Wizard";
+
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "config" | "audit" | "setup";
+
+const NAV: { id: PageId; label: Key }[] = [
+  { id: "overview", label: "nav.overview" },
+  { id: "devices", label: "nav.devices" },
+  { id: "sessions", label: "nav.sessions" },
+  { id: "authz", label: "nav.authz" },
+  { id: "ingress", label: "nav.ingress" },
+  { id: "config", label: "nav.config" },
+  { id: "audit", label: "nav.audit" },
+  { id: "setup", label: "nav.setup" },
+];
+
+const STATUS_KEY: Record<TrayIcon, Key> = {
+  offline: "status.offline",
+  mismatch: "status.mismatch",
+  ok: "status.ok",
+  degraded: "status.degraded",
+  draining: "status.draining",
+  restart: "status.restart",
+};
+const STATUS_KIND: Record<TrayIcon, "" | "ok" | "warn" | "danger"> = {
+  offline: "",
+  mismatch: "danger",
+  ok: "ok",
+  degraded: "warn",
+  draining: "warn",
+  restart: "warn",
+};
+
+/** What a page needs from the kernel before it is worth showing. */
+export interface PageContext {
+  snapshot: Snapshot;
+  /** `undefined` while the kernel is not connected. */
+  can(capability: Capability): boolean;
+  toast(text: string, error?: boolean): void;
+  go(page: PageId): void;
+}
+
+export function App(): JSX.Element {
+  const snapshot = useSnapshot();
+  const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
+  const [page, setPage] = useState<PageId | undefined>(undefined);
+  const { toasts, push } = useToasts();
+
+  useEffect(() => {
+    document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
+  }, [snapshot.settings.locale]);
+
+  const connected = snapshot.connection.kind === "connected";
+  // With no node found at all, the first thing worth showing is the setup wizard.
+  const current: PageId = page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 ? "setup" : "overview");
+
+  const ctx: PageContext = {
+    snapshot,
+    can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
+    toast: push,
+    go: setPage,
+  };
+
+  return (
+    <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
+      <div class="shell">
+        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={setPage} />
+        <div class="main">
+          <TopBar snapshot={snapshot} />
+          <main class="content" id="content" tabIndex={-1}>
+            <PageSwitch page={current} ctx={ctx} />
+          </main>
+        </div>
+      </div>
+      <Toasts toasts={toasts} />
+    </I18nContext.Provider>
+  );
+}
+
+function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; connected: boolean; snapshot: Snapshot; onSelect: (p: PageId) => void }): JSX.Element {
+  const t = useT();
+  return (
+    <nav class="sidebar" aria-label={t("nav.label")}>
+      <div class="brand">xmesh</div>
+      {NAV.map((n) => (
+        <button
+          key={n.id}
+          type="button"
+          class="nav-item"
+          data-testid={`nav-${n.id}`}
+          aria-current={current === n.id ? "page" : undefined}
+          disabled={!connected && n.id !== "setup" && n.id !== "overview"}
+          onClick={() => onSelect(n.id)}
+        >
+          {t(n.label)}
+        </button>
+      ))}
+      <div class="spacer" />
+      {snapshot.instances.length > 1 && (
+        <div class="node-switch">
+          <label>
+            <span class="hint">{t("nav.node")}</span>
+            <select
+              data-testid="instance-select"
+              value={snapshot.selectedInstance}
+              onChange={(e) => void getApi().selectInstance((e.currentTarget as HTMLSelectElement).value)}
+            >
+              {snapshot.instances.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+    </nav>
+  );
+}
+
+function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
+  const t = useT();
+  const icon = deriveIcon(snapshot.connection);
+  const c = snapshot.connection;
+  return (
+    <header class="topbar">
+      <div class="title">
+        <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
+      </div>
+      <Badge kind={STATUS_KIND[icon]}>
+        <span data-testid="state" data-state={icon}>
+          {t(STATUS_KEY[icon])}
+        </span>
+      </Badge>
+    </header>
+  );
+}
+
+function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Element {
+  const t = useT();
+  const c = ctx.snapshot.connection;
+  if (page === "setup") return <Wizard ctx={ctx} />;
+  if (c.kind === "offline") return <Unavailable ctx={ctx} t={t} kind="offline" />;
+  if (c.kind === "mismatch") return <Unavailable ctx={ctx} t={t} kind="mismatch" />;
+  switch (page) {
+    case "overview":
+      return <Overview ctx={ctx} />;
+    case "devices":
+      return <Devices ctx={ctx} />;
+    case "sessions":
+      return <Sessions ctx={ctx} />;
+    case "authz":
+      return <Authorization ctx={ctx} />;
+    case "ingress":
+      return <Ingress ctx={ctx} />;
+    case "config":
+      return <Config ctx={ctx} />;
+    case "audit":
+      return <Audit ctx={ctx} />;
+  }
+}
+
+function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
+  const c = ctx.snapshot.connection;
+  return (
+    <div class="page">
+      <h1>{kind === "offline" ? t("offline.title") : t("mismatch.title")}</h1>
+      {kind === "offline" ? (
+        <Banner testid="offline">
+          <p>{t("offline.body")}</p>
+          <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
+            {t("offline.setup")}
+          </button>
+        </Banner>
+      ) : (
+        <Banner kind="danger" testid="mismatch">
+          <p>{c.kind === "mismatch" ? t("mismatch.body", { kernel: c.kernelVersion || "?", api: c.apiVersion || "?" }) : ""}</p>
+          <div class="row">
+            <button type="button" class="btn" onClick={() => void getApi().openExternal("docs")}>
+              {t("mismatch.upgrade")}
+            </button>
+            <button type="button" class="btn" onClick={() => void getApi().openPath("logs")}>
+              {t("overview.openLogs")}
+            </button>
+          </div>
+        </Banner>
+      )}
+    </div>
+  );
+}
