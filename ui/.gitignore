@@ -2,3 +2,5 @@ node_modules/
 dist/
 test-results/
 playwright-report/
+release/
+build/kernel/
