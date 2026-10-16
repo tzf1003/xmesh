@@ -42,6 +42,8 @@ func TestAgentBackendProcess(t *testing.T) {
 	}
 	os.Exit(0)
 }
+
+// conformance: CTR-BE-01 CTR-LEASE-01 CTR-MUX-04 CON-CONC-07 INV-04
 func Test_Gate2_TwoMCPClients(t *testing.T) {
 	path, _ := configuration(t)
 	b, _ := os.ReadFile(path)

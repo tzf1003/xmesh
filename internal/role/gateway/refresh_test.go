@@ -14,6 +14,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/mesh"
 )
 
+// conformance: CTR-GW-04
 func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	g, _ := fixture(t, false)
 	original := g.opts.Dial
@@ -65,6 +66,7 @@ func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	}
 }
 
+// conformance: CTR-GW-04
 func Test_PeerRetryBackoffAndReplacement(t *testing.T) {
 	g, _ := fixture(t, false)
 	original := g.opts.Dial

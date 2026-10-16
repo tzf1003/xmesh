@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// conformance: CTR-CWD-01 CON-TOOL-02
 func Test_CTRCWD01(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

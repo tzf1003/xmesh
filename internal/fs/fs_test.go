@@ -43,6 +43,8 @@ func code(t *testing.T, s *Service, name string, a Object, want string) {
 		t.Fatalf("%s got %v want %s", name, e, want)
 	}
 }
+
+// conformance: CTR-FS-01 CON-TOOL-04 CON-TOOL-07
 func Test_CTRFS01_ReadBytes(t *testing.T) {
 	s, root := fixture(t)
 	call(t, s, "fs.write", Object{"path": "a", "content": "one\r\ntwo\r\nthree"})
@@ -64,6 +66,8 @@ func Test_CTRFS01_ReadBytes(t *testing.T) {
 	_ = f.Close()
 	code(t, s, "fs.read", Object{"path": "huge"}, "too_large")
 }
+
+// conformance: CTR-FS-02 CTR-FS-03 INV-06 CON-TOOL-09 RUL-10
 func Test_CTRFS02_03_OptimisticAtomicEdit(t *testing.T) {
 	s, root := fixture(t)
 	a := call(t, s, "fs.write", Object{"path": "a", "content": "a\r\na\r\n"})
@@ -109,6 +113,8 @@ func Test_CTRFS02_03_OptimisticAtomicEdit(t *testing.T) {
 	close(done)
 	wg.Wait()
 }
+
+// conformance: CTR-FS-06 CTR-FS-07 CON-TOOL-06
 func Test_CTRFS06_07_MetadataAndDelete(t *testing.T) {
 	s, root := fixture(t)
 	if call(t, s, "fs.stat", Object{"path": "missing/deeper"})["exists"] != false {
@@ -138,6 +144,8 @@ func Test_CTRFS06_07_MetadataAndDelete(t *testing.T) {
 		t.Fatal("preflight changed file", e)
 	}
 }
+
+// conformance: CTR-FS-05 CON-IMPL-05
 func Test_CTRFS05_SearchEngineParity(t *testing.T) {
 	s, root := fixture(t)
 	if e := os.Mkdir(filepath.Join(root, "ignored"), 0700); e != nil {
@@ -177,6 +185,7 @@ func Test_CTRFS05_SearchEngineParity(t *testing.T) {
 	}
 }
 
+// conformance: CTR-FS-05 CON-TOOL-05
 func Test_SearchLimitsAndNestedNegation(t *testing.T) {
 	s, root := fixture(t)
 	if e := os.Mkdir(filepath.Join(root, "child"), 0700); e != nil {
