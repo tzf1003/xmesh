@@ -203,6 +203,24 @@ func (g *workspaceGrant) verifyDescriptors(objects []journalObject) error {
 	return nil
 }
 
+// verifyAllDescriptors compares every admitted object's descriptor, not only the
+// ones a change record names. NTFS folds reasons into one record per open file
+// and writes no new record for a reason already accumulated, and this execution
+// keeps every admitted object open, so a repeated descriptor edit may leave no
+// record. The caller holds the operation gate and the profile mutex.
+func (g *workspaceGrant) verifyAllDescriptors() error {
+	if g.selected == nil {
+		return nil
+	}
+	objects := make([]journalObject, 0, len(g.selected.grants))
+	for _, grant := range g.selected.grants {
+		if grant != nil && !grant.removed && (grant.handle != 0 || grant.aclHandle != 0) {
+			objects = append(objects, journalObject{Volume: grant.id.Volume, ID: grant.id.ID})
+		}
+	}
+	return g.verifyDescriptors(objects)
+}
+
 // Close first removes explicit inheritance sources, then scans the still-bound
 // root and removes this profile's inherited ACEs by object identity. Any failed
 // or incomplete scan retains the profile reference and namespace guard for retry.

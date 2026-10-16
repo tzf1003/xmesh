@@ -211,5 +211,8 @@ func (g *workspaceGrant) verifyDescendantSecurity(ctx context.Context, maxEvents
 	if err := validateWorkspaceJournalOwnership(j, p.sid); err != nil {
 		return err
 	}
+	if err := g.verifyAllDescriptors(); err != nil {
+		return err
+	}
 	return checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, g.verifyDescriptors)
 }

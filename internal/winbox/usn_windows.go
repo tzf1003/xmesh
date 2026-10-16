@@ -405,6 +405,9 @@ func (g *workspaceGrant) checkpointChanges(ctx context.Context, maxEvents int) e
 	if err := g.observePendingDeletes(ctx); err != nil {
 		return err
 	}
+	if err := g.verifyAllDescriptors(); err != nil {
+		return err
+	}
 	if err := checkpointWorkspaceChangesPolicy(ctx, j, p.sid, g.maxObjects, maxEvents, g.verifyDescriptors); err != nil {
 		return err
 	}
