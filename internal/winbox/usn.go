@@ -8,6 +8,12 @@ import (
 
 var errWorkspaceChangesLost = errors.New("AppContainer workspace change history is incomplete")
 
+// errWorkspaceUnknownImport reports that identities entered the tracked
+// workspace without a coordinated pre-move census. Their lifetimes are recorded
+// for reclamation, but their original subtree contents and previous parents were
+// never proved, so execution that observed one must not continue.
+var errWorkspaceUnknownImport = errors.New("AppContainer workspace received an uncoordinated import")
+
 const (
 	usnReasonCreate    = 0x00000100
 	usnReasonDelete    = 0x00000200
@@ -114,6 +120,7 @@ type journalDeletion struct {
 
 type workspaceChangePlan struct {
 	Created       []journalObject
+	Unknown       []journalObject // Entered a tracked directory without creation or census proof.
 	DeleteIntents []journalDeletion
 	Deleted       []journalDeletion
 }
@@ -158,15 +165,21 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 			return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires link or reparse proof")
 		}
 		if !exists {
-			if change.Reason&usnReasonRenameNew != 0 || change.Reason&usnReasonCreate == 0 {
-				return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires imported-object proof")
-			}
 			if len(observed) >= maxObjects {
 				return workspaceChangePlan{}, fmt.Errorf("AppContainer change census exceeds %d objects", maxObjects)
 			}
 			object = journalObject{Volume: volume, ID: change.ID, Directory: directory}
 			observed[object.ID] = object
-			plan.Created = append(plan.Created, object)
+			// A pure creation is a tracked lifetime. Any other first sighting under a
+			// tracked directory (a rename-in, or activity on an identity with no
+			// observed creation) is an uncoordinated import. Its identity is retained
+			// so descendants and deletion receipts stay attributable; completeness
+			// of its previous subtree is not claimed.
+			if change.Reason&usnReasonRenameNew != 0 || change.Reason&usnReasonCreate == 0 {
+				plan.Unknown = append(plan.Unknown, object)
+			} else {
+				plan.Created = append(plan.Created, object)
+			}
 		}
 		if change.Reason&usnReasonDelete != 0 {
 			if change.ID == root {

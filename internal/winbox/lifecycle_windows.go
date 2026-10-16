@@ -50,6 +50,7 @@ type workspaceExecution struct {
 	monitor   *workspaceChangeMonitor
 	ready     bool
 	closed    bool
+	unknown   int // Uncoordinated imports recorded durably before the journal closed.
 }
 
 func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOptions, prepare workspaceExecutionPrepare) (*workspaceExecution, error) {
@@ -281,6 +282,7 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 				return errors.Join(observationErr, err)
 			}
 		}
+		e.unknown = len(e.journal.state.unknown)
 		if err := e.journal.Close(); err != nil {
 			return errors.Join(observationErr, err)
 		}
@@ -304,5 +306,10 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		e.guard = nil
 	}
 	e.closed = true
+	// Recorded imports were reclaimed by identity, but their prior subtree and
+	// writers were never proved. Report them even after durable completion.
+	if e.unknown != 0 && !errors.Is(observationErr, errWorkspaceUnknownImport) {
+		observationErr = errors.Join(observationErr, fmt.Errorf("%w: %d recorded identities", errWorkspaceUnknownImport, e.unknown))
+	}
 	return observationErr
 }

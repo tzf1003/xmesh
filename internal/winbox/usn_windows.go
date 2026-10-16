@@ -271,7 +271,7 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 			return err
 		}
 	}
-	for _, object := range plan.Created {
+	for _, object := range append(append([]journalObject(nil), plan.Created...), plan.Unknown...) {
 		if deleted[object] {
 			continue
 		}
@@ -290,6 +290,9 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 	// Each prefix survives a crash. Replaying the old cursor deduplicates both
 	// discoveries, deletion intents and receipts before advancing past their source USNs.
 	if err := appendWorkspaceCreated(j, plan.Created); err != nil {
+		return err
+	}
+	if err := appendWorkspaceUnknown(j, plan.Unknown); err != nil {
 		return err
 	}
 	if len(plan.DeleteIntents) != 0 {
@@ -369,7 +372,16 @@ func (g *workspaceGrant) checkpointChanges(ctx context.Context, maxEvents int) e
 	if err := g.observePendingDeletes(ctx); err != nil {
 		return err
 	}
-	return checkpointWorkspaceChanges(ctx, j, p.sid, g.maxObjects, maxEvents)
+	if err := checkpointWorkspaceChanges(ctx, j, p.sid, g.maxObjects, maxEvents); err != nil {
+		return err
+	}
+	// Recorded unknown imports own reclamation, but no live execution may continue
+	// after one: its source subtree and prior writers were never census-proved.
+	// The persistent mark also fails a replayed checkpoint whose cursor write was lost.
+	if len(j.state.unknown) != 0 {
+		return fmt.Errorf("%w: %d recorded identities", errWorkspaceUnknownImport, len(j.state.unknown))
+	}
+	return nil
 }
 
 func (g *workspaceGrant) observePendingDeletes(ctx context.Context) error {

@@ -50,5 +50,8 @@ func (r journalRecord) discoveredObjects() []journalObject {
 	if r.Import != nil {
 		return r.Import.Objects
 	}
+	if r.UnknownImports != nil {
+		return r.UnknownImports
+	}
 	return r.CreatedObjects
 }
