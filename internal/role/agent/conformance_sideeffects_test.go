@@ -214,7 +214,7 @@ func Test_INV05_RejectionsLeaveNoSideEffects(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the narrowed grant to apply", func() bool {
+	eventually(t, "the narrowed grant to apply", func() bool {
 		return tool(t, owner, "fs.stat", map[string]any{"path": "keep.txt"}).IsError
 	})
 	reject("fs.write without authorization", "unauthorized", nil, func() *mcp.CallToolResult {

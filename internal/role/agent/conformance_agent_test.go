@@ -498,7 +498,7 @@ func ingressAuth(r *http.Request) (Principal, error) {
 	return identity.FromPeer("stable-node", strings.Split(r.Header.Get("X-Test-Tag"), ","), r.Header.Get("X-Xmesh-Oauth-Client"))
 }
 
-func connectAs(t *testing.T, url, tag, client string) (*mcp.ClientSession, error) {
+func connectWithTag(t *testing.T, url, tag, client string) (*mcp.ClientSession, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -520,16 +520,16 @@ func Test_RUL02_RUL13_IngressSessionsAndOrphanTakeoverByOAuthClient(t *testing.T
 	url := server.URL + "/mcp"
 
 	// RUL-02: an ingress tag without the oauth client header is refused.
-	if _, err := connectAs(t, url, "tag:ingress", ""); err == nil {
+	if _, err := connectWithTag(t, url, "tag:ingress", ""); err == nil {
 		t.Fatal("ingress session without X-Xmesh-Oauth-Client was accepted")
 	}
-	claudeA, err := connectAs(t, url, "tag:ingress", "claude")
+	claudeA, err := connectWithTag(t, url, "tag:ingress", "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	claudeC, _ := connectAs(t, url, "tag:ingress", "claude")
-	codex, _ := connectAs(t, url, "tag:ingress", "codex")
-	peer, _ := connectAs(t, url, "tag:peer", "")
+	claudeC, _ := connectWithTag(t, url, "tag:ingress", "claude")
+	codex, _ := connectWithTag(t, url, "tag:ingress", "codex")
+	peer, _ := connectWithTag(t, url, "tag:peer", "")
 	for name, s := range map[string]*mcp.ClientSession{"claudeC": claudeC, "codex": codex, "peer": peer} {
 		if s == nil {
 			t.Fatalf("%s could not connect", name)
@@ -591,7 +591,7 @@ func Test_RUL02_RUL13_IngressSessionsAndOrphanTakeoverByOAuthClient(t *testing.T
 	// A terminal opened without an OAuth client (local or tailnet) is taken over by
 	// node id only: another session on the same node can pick it up.
 	owner(peer)
-	peer2, err := connectAs(t, url, "tag:peer", "")
+	peer2, err := connectWithTag(t, url, "tag:peer", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -70,8 +70,8 @@ func callWithin(t *testing.T, s *mcp.ClientSession, bound time.Duration, name st
 	return out
 }
 
-// waitFor polls until cond holds, failing with what after a generous bound.
-func waitFor(t *testing.T, what string, cond func() bool) {
+// eventually polls until cond holds, failing with what after a generous bound.
+func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if cond() {

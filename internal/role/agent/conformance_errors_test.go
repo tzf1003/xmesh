@@ -141,7 +141,7 @@ func Test_CTRERR01_EnvelopeAndSchema(t *testing.T) {
 	// The exec slot is taken by a command that waits for a file.
 	release := filepath.Join(root, "release-exec")
 	running := startBlocked(owner, "exec.run", map[string]any{"cmd": "sh", "args": []string{"-c", "while [ ! -f release-exec ]; do sleep 0.02; done"}, "timeout": "50s"})
-	waitFor(t, "the blocking command to hold the slot", func() bool {
+	eventually(t, "the blocking command to hold the slot", func() bool {
 		return object(t, tool(t, owner, "sys.info", map[string]any{}))["limits"].(map[string]any)["exec_shared_in_use"] == float64(1)
 	})
 	t.Cleanup(func() { _ = os.WriteFile(release, []byte("x"), 0o600) })
@@ -256,7 +256,7 @@ func Test_CTRERR01_EnvelopeAndSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	var denied *mcp.CallToolResult
-	waitFor(t, "the narrowed grant to apply", func() bool {
+	eventually(t, "the narrowed grant to apply", func() bool {
 		denied = tool(t, owner, "fs.read", map[string]any{"path": "a.txt"})
 		return denied.IsError
 	})

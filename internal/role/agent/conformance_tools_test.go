@@ -241,14 +241,14 @@ func Test_CTRSYS01_FieldsMatchContractAndConfiguration(t *testing.T) {
 		if err := other.Close(); err != nil {
 			t.Fatal(err)
 		}
-		waitFor(t, "the disconnected session's terminal to be orphaned", func() bool {
+		eventually(t, "the disconnected session's terminal to be orphaned", func() bool {
 			return limits()["pty_in_use"] == float64(4) && limits()["pty_active"] == float64(3)
 		})
 		// A terminal whose shell exits becomes closed: kept, but in neither count.
 		if out := tool(t, client, "pty.write", map[string]any{"session_id": firstActive(t, client), "data": "exit\n"}); out.IsError {
 			t.Fatal(object(t, out))
 		}
-		waitFor(t, "the exited terminal to be closed", func() bool {
+		eventually(t, "the exited terminal to be closed", func() bool {
 			l := limits()
 			return l["pty_closed"] == float64(1) && l["pty_in_use"] == float64(3) && l["pty_active"] == float64(2)
 		})
@@ -264,6 +264,6 @@ func Test_CTRSYS01_FieldsMatchContractAndConfiguration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "limits to follow the reloaded configuration", func() bool { return limits()["pty_max_sessions"] == float64(5) })
+	eventually(t, "limits to follow the reloaded configuration", func() bool { return limits()["pty_max_sessions"] == float64(5) })
 	_ = a
 }

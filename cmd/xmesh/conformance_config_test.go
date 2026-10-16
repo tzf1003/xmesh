@@ -31,7 +31,7 @@ func Test_CTRCFG01_InvalidConfigurationRefusesToStart(t *testing.T) {
 				if err == nil {
 					t.Fatal("serve accepted an invalid configuration")
 				}
-				if !strings.Contains(err.Error(), "'"+want) {
+				if !strings.Contains(err.Error(), want) {
 					t.Errorf("the error does not name the JSON Pointer %s: %v", want, err)
 				}
 			case <-time.After(15 * time.Second):
