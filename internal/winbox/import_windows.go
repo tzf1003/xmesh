@@ -23,6 +23,20 @@ func (g *workspaceGrant) admitImport(ctx context.Context, path string, maxEvents
 	p := g.profile
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if err := g.importReady(maxEvents); err != nil {
+		return err
+	}
+	source, err := openImportTree(ctx, path, g.maxObjects)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	return g.admitImportTree(ctx, source, maxEvents)
+}
+
+// The workspace operation gate and profile mutex cover these helpers.
+func (g *workspaceGrant) importReady(maxEvents int) error {
+	p := g.profile
 	j := p.journal
 	if g.tree == nil || p.workspaceClosing || p.reclaiming || maxEvents < 1 || maxEvents > maxWorkspaceChangeEvents {
 		return fmt.Errorf("AppContainer import requires an active bounded workspace")
@@ -33,11 +47,11 @@ func (g *workspaceGrant) admitImport(ctx context.Context, path string, maxEvents
 	if j.state.changeCursor == nil || j.state.workspaceReleased || j.state.complete {
 		return fmt.Errorf("AppContainer import requires active change tracking")
 	}
-	source, err := openImportTree(ctx, path, g.maxObjects)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
+	return nil
+}
+
+func (g *workspaceGrant) admitImportTree(ctx context.Context, source *workspaceTree, maxEvents int) error {
+	j := g.profile.journal
 	if source.objects[0].id.Volume != j.state.root.Volume {
 		return fmt.Errorf("AppContainer import requires the tracked volume")
 	}

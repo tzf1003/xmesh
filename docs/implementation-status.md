@@ -304,3 +304,14 @@ Windows amd64/arm64 vet 与 amd64 测试编译通过。新增真实 AppContainer
 
 
 `9797ddc` 的 [push 工作流 38843909295](https://github.com/tzf1003/xmesh/actions/runs/38843909295) 与 [PR 工作流 38843915406](https://github.com/tzf1003/xmesh/actions/runs/38843915406) 均通过三平台全量 race、vet、构建及完整 Windows 原生任务；契约 `38843909297` / `38843915387` 通过。原生 job `116789955052` / `116789973291` 完整日志各确认 173 个独立 Job/AppContainer PASS 标记，保留全部既有 160 项。六个导入子场景和五个边界拒绝子场景均通过：完整导入清单在移动前持久化，取消或后代提前移出后仍按原 ID 回收；单文件、追加失败重开、重复准入、限额、独立清单及篡改拒绝、实际 AppContainer 后续写入、准确安全状态和完成重放均已执行。测试访问授权由专用 fixture 写入，生产移动/授权事务及源 writer 生命周期继续实现。
+
+
+### 导入源的身份绑定移动与访问授权
+
+内部 `workspaceGrant.moveImport` 在工作区操作门和 profile 互斥锁下，补齐 USN 水位，按词法范围及实际根身份绑定已追踪目标父目录，拒绝覆盖现有目标。全部源身份和可写安全句柄完成预检后，先刷盘完整 `workspace-import` 清单，再释放阻止目录移动的路径句柄，按文件 ID 重开源根并以目标父目录句柄执行同卷移动。原始源父目录、工作区根及目标父链持续绑定。
+
+移动后核对实际目标身份，逐对象在跨进程 ACL 锁内重新读取并添加准确 workspace 格式 ACE；已登记身份上的相同显式或继承权限可复用，未知身份已有 profile 权限、重复或非预期 SID 项在变更前拒绝。其他 DACL 字节、控制位及完整性标签保持。事务局部句柄关闭后完成最终 USN checkpoint；导入清单独立承担每个身份的回收义务，包括尚未授权或仅部分授权的对象。
+
+返回值单独报告移动是否已经发生。移动后的取消、ACL 或 checkpoint 错误永久封闭该 profile 的准入，以独立期限终止并确认受管 Job；确认写盘失败继续保留执行义务。后续按完整清单回收 ACL，保留已经发生的 namespace 移动。调用方仍须在入口前冻结全部源和目标 namespace/reparse/ACL writer，并持续持有工作区外部 writer guard；生产 writer 生命周期、未知导入处理和 exec/ConPTY 接入继续实现，Windows L2 保持 `sandbox.unavailable`。
+
+本地全量 race 390 项、vet、Windows amd64/arm64 vet 及 amd64 测试编译通过。新增原生场景覆盖目录、单文件、嵌套目标、重复导入、日志重开、真实 AppContainer 后续写入、准确安全回收和完成重放；拒绝覆盖、越界、reparse、hardlink、预存 profile ACE、追加失败、取消、移动被占用及限额。移动后 ACL 边界的取消和日志关闭故障同时验证真实受管进程终止、持久执行确认与恢复重试。本阶段提交时等待 Windows 原生 CI 验收。
