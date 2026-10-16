@@ -29,7 +29,7 @@ func Test_CONSEC12_PipeSDDL(t *testing.T) {
 		}
 	}
 	// Anything that is not a SID must not reach the descriptor string.
-	for _, bad := range []string{"", "WD", "S-1-5-18)(A;;GA;;;WD", "x"} {
+	for _, bad := range []string{"", "WD", "S-1-5-18)(A;;GA;;;WD", "x", "BA", "S-1-1-0", "S-1-5-11", "S-1-15-2-1"} {
 		if _, err = PipeSDDL(sid, []string{bad}); err == nil {
 			t.Errorf("accepted %q", bad)
 		}

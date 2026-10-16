@@ -52,9 +52,14 @@ func PipeSDDL(own string, extra []string) (string, error) {
 	b.WriteString("D:P")
 	seen := map[string]bool{}
 	for _, s := range append([]string{own, "S-1-5-18", "S-1-5-32-544"}, extra...) {
+		// StringToSid also accepts SDDL aliases such as WD (Everyone) or AU, so only the
+		// numeric form is let through, and it must round-trip unchanged.
 		sid, err := windows.StringToSid(s)
-		if err != nil {
-			return "", fmt.Errorf("SID 无效: %w", err)
+		if err != nil || !strings.HasPrefix(s, "S-1-") || !strings.EqualFold(sid.String(), s) {
+			return "", fmt.Errorf("SID 无效: %q", s)
+		}
+		if broadSID(sid.String()) {
+			return "", fmt.Errorf("不允许把控制通道开放给宽泛的主体: %s", s)
 		}
 		if canonical := sid.String(); !seen[canonical] {
 			seen[canonical] = true
@@ -62,6 +67,16 @@ func PipeSDDL(own string, extra []string) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// broadSID reports principals that stand for many users or for sandboxed code: Everyone,
+// anonymous, Authenticated Users, Users, and AppContainer packages and capabilities.
+func broadSID(s string) bool {
+	switch s {
+	case "S-1-1-0", "S-1-5-7", "S-1-5-11", "S-1-5-32-545", "S-1-5-32-546":
+		return true
+	}
+	return strings.HasPrefix(s, "S-1-15-")
 }
 
 // connectionIdentity names the pipe's user in the audit record. A pipe does not tell the server
