@@ -180,11 +180,12 @@ func Test_WindowsAppContainerWorkspaceExecutionFailure(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	for _, stage := range []string{"prepare", "journal", "workspace", "supervisor", "guard-retry", "cancel-close", "busy-close", "concurrent-close"} {
+	for _, stage := range []string{"prepare", "journal", "workspace", "supervisor", "guard-retry", "cancel-close", "busy-close", "supervisor-close", "concurrent-close"} {
 		t.Run(stage, func(t *testing.T) {
 			options := workspaceExecutionTestOptions(t)
 			before, control := kernelJournalState(t, options.Workspace)
 			original := options.Workspace
+			exitRelease := filepath.Join(filepath.Dir(options.Workspace), "supervisor-exit")
 			switch stage {
 			case "journal":
 				options.Journal = filepath.Join(filepath.Dir(options.Journal), "absent", "execution.journal")
@@ -192,6 +193,8 @@ func Test_WindowsAppContainerWorkspaceExecutionFailure(t *testing.T) {
 				options.Workspace = filepath.Join(options.Workspace, "absent")
 			case "supervisor":
 				options.SupervisorCommand = []string{filepath.Join(options.Workspace, "absent.exe")}
+			case "supervisor-close":
+				options.SupervisorCommand = []string{os.Args[0], "-test.run=^Test_WindowsAppContainerWorkspaceExecutionSupervisorHelper$", "--", exitRelease, "lifecycle-supervisor"}
 			}
 			closes := 0
 			sentinel := errors.New("coordinator test failure")
@@ -256,6 +259,45 @@ func Test_WindowsAppContainerWorkspaceExecutionFailure(t *testing.T) {
 					t.Fatal("guard close failure lost retry ownership", err)
 				}
 			}
+			if stage == "supervisor-close" {
+				// The helper holds its actual process alive after acknowledging
+				// close. Cancel precisely that wait; retry must resume release
+				// while preserving the durable receipt instead of sending reap.
+				defer func() { _ = os.WriteFile(exitRelease, []byte("exit"), 0600) }()
+				s := e.processes.supervisor
+				ctx, stop := context.WithCancel(context.Background())
+				defer stop()
+				done := make(chan error, 1)
+				go func() { done <- e.closeContext(ctx, 1) }()
+				deadline := time.After(5 * time.Second)
+				for {
+					s.mu.Lock()
+					acknowledged := s.closeAcknowledged
+					s.mu.Unlock()
+					if acknowledged {
+						break
+					}
+					select {
+					case err := <-done:
+						t.Fatal("supervisor close completed before exit release", err)
+					case <-deadline:
+						stop()
+						<-done
+						t.Fatal("supervisor close acknowledgement timed out")
+					case <-time.After(5 * time.Millisecond):
+					}
+				}
+				stop()
+				if err := <-done; !errors.Is(err, context.Canceled) || e.processes == nil || e.monitor != nil || !e.processes.closing || closes != 0 {
+					t.Fatal("supervisor close cancellation lost phase ownership", err)
+				}
+				if len(e.journal.state.executions) != 0 || !e.profile.processesConfirmed {
+					t.Fatal("supervisor close cancellation lost durable confirmation")
+				}
+				if err := os.WriteFile(exitRelease, []byte("exit"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if stage == "concurrent-close" {
 				var wg sync.WaitGroup
 				results := make(chan error, 4)
@@ -297,6 +339,23 @@ func Test_WindowsAppContainerWorkspaceExecutionFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_WindowsAppContainerWorkspaceExecutionSupervisorHelper(t *testing.T) {
+	if len(os.Args) < 5 || os.Args[len(os.Args)-4] != "lifecycle-supervisor" {
+		t.Skip("workspace lifecycle supervisor helper")
+	}
+	if err := RunProcessSupervisor(os.Args[len(os.Args)-3:]); err != nil {
+		t.Fatal(err)
+	}
+	release := os.Args[len(os.Args)-5]
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		if _, err := os.Stat(release); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("workspace lifecycle supervisor exit release timed out")
 }
 
 func Test_WindowsAppContainerWorkspaceExecutionAdmission(t *testing.T) {

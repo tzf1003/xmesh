@@ -35,6 +35,7 @@ type executionProcesses struct {
 	limit        int
 	sealed       bool
 	reaped       bool
+	closing      bool
 	closed       bool
 	intent       uint64
 	acknowledged bool
@@ -233,6 +234,21 @@ func (e *executionProcesses) reap(ctx context.Context, exitCode uint32) error {
 	if e.closed {
 		return windows.ERROR_INVALID_HANDLE
 	}
+	if e.closing {
+		// Close starts only after complete durable reaping, with admission
+		// sealed. Its retry may retain a supervisor that has acknowledged close
+		// and already exited, or a partially released local handle table.
+		// Keep the verified receipt while resuming that release transaction.
+		e.profile.mu.Lock()
+		defer e.profile.mu.Unlock()
+		if !e.reaped || e.profile.processes != e || !e.profile.processesConfirmed {
+			return fmt.Errorf("AppContainer closing execution lost process confirmation")
+		}
+		if e.profile.journal != nil {
+			return requireJournalProcessesReaped(e.profile.journal)
+		}
+		return nil
+	}
 	e.sealed = true
 	e.reaped = false
 	var result error
@@ -295,6 +311,7 @@ func (e *executionProcesses) closeContext(ctx context.Context) error {
 	if !e.reaped {
 		return fmt.Errorf("AppContainer execution owner requires complete process reaping")
 	}
+	e.closing = true
 	var result error
 	if e.supervisor != nil {
 		result = e.supervisor.close(ctx)

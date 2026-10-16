@@ -157,10 +157,6 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 		if err := e.processes.reap(ctx, exitCode); err != nil {
 			return err
 		}
-		if err := e.processes.closeContext(ctx); err != nil {
-			return err
-		}
-		e.processes = nil
 	}
 	var observationErr error
 	if e.monitor != nil {
@@ -173,6 +169,15 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 			return observationErr
 		}
 		e.monitor = nil
+	}
+	// Finish observation before releasing its process owner. Cancellation can
+	// make a live monitor request reap; a stopped monitor cannot send a request
+	// to a supervisor that is already completing its close acknowledgement.
+	if e.processes != nil {
+		if err := e.processes.closeContext(ctx); err != nil {
+			return errors.Join(observationErr, err)
+		}
+		e.processes = nil
 	}
 	if e.workspace != nil {
 		if err := e.workspace.closeContext(ctx); err != nil {
