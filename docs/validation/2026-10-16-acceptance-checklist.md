@@ -35,14 +35,14 @@
 | 持久 journal、USN 补读与 checkpoint、删除回执、恢复调度 | 完成 | 原生通过 | 无 |
 | 独立进程 supervisor 与持久退出回执 | 完成 | 原生通过 | 无 |
 | 卷级 namespace lease（参与协议的操作互斥） | 完成 | 原生通过 | 只约束参与协议的操作 |
-| 受管标准流与 ConPTY 启动 | 完成（内部原语） | 原生通过 | 工具层 `exec`/`pty` 接入 |
+| 受管标准流与 ConPTY 启动 | 完成（内部原语） | 原生通过 | 无 |
 | 生命周期所有者与协调导入（start/import/close 串行，来源 guard 上限 256） | 完成（内部） | 原生通过，291 个 `Test_` PASS 标识 | 接入生产路径 |
 | **外部 namespace/reparse/ACL 写入者强制约束** | 内核写入围栏已实现（`3bea72f`、`99ced05`） | Windows 原生通过（钉住、六类违规检测、绑定、生命周期 clean/violation） | 默认关闭、未接入生产；不阻止持有 WRITE_DAC 的同用户修改 DACL（仅检出）；后代 SECURITY_CHANGE 未纳入；普通账号读取变更日志待验收；与 keeper 尚未组合 |
 | **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | keeper 进程已实现（`1f2616b`） | Windows 原生通过：强杀宿主后 keeper 存活、接管、恢复完成后释放 | 接入生产启动路径；不冻结树内写入；整机重启/外层 Job 终止时失败关闭 |
 | **完整对象 census 与未知导入识别** | 未知导入归并与 `workspace-unknown-import` 已实现（`37645b5`） | Windows 原生通过（五个子场景加生命周期场景） | 事后归并不证明子树完整，仍需完整 census 证明 |
-| **exec/ConPTY 工具层接入** | 未实现 | 无 | 子讨论串 4 |
+| **exec/ConPTY 工具层接入** | `sandbox.Runner` 与 `winbox.Runner` 已实现（`2632168`） | 7 项 `Test_WindowsManagedRunner*` 原生通过（压测工作流 `runner` 作业）；已并入主门禁 | `cmd/xmesh` 未安装 runner，无生产 `WorkspaceCoordinator`；与 keeper、写入围栏、未知导入的组合须重新验证 |
 | 普通用户登录任务、服务联网、跨用户/会话 ACL 与 mutex | 登录任务与可选 SCM 安装已实现 | 本机模式通过 | 需要真实 Windows 普通账户会话 |
-| `e747cb8` 的 helper exit 66 原因 | — | 之后各轮未复现；helper 已保留私有 race 诊断 | 子讨论串 4 调查 |
+| `e747cb8` 的 helper exit 66 原因 | — | 压测定位到两种机制（race 运行时启动期映射失败约 1/600，或容器内真实竞争的报告被中止吞掉），无法确定属于哪一种；无证据指向产品逻辑 | 建议 helper 保留 TSan 日志并对启动期映射失败至多重试一次 |
 
 ## 三、跨主机与外部环境
 
@@ -62,6 +62,6 @@
 | 1 | 外部 namespace/reparse/ACL 写入者强制约束（已合入 `99ced05`） | 子分支完成后由集成者合并到工作分支，Windows 原生结果以 GitHub CI 为准 |
 | 2 | 宿主崩溃后独立存活的外部 guard（已合入 `1f2616b`） | 同上；与子任务 1 同改 `lifecycle_windows.go`，由集成者解决冲突 |
 | 3 | 完整 census 与未知导入识别（已合入 `37645b5`） | 同上 |
-| 4 | exec/ConPTY 工具层接入；exit 66 调查 | 同上 |
+| 4 | exec/ConPTY 工具层接入；exit 66 调查（已合入 `62e11fc`） | 同上 |
 
 `docs/implementation-status.md` 只由集成者修改；子任务把文档更新内容交给集成者。

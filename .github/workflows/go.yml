@@ -67,4 +67,9 @@ jobs:
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
-        run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=180s
+        run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=300s
+      - name: Windows managed runner exec and ConPTY acceptance
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run Test_WindowsManagedRunner -v -count=1 -timeout=600s
