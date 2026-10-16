@@ -20,6 +20,12 @@ var errWorkspaceUnknownImport = errors.New("AppContainer workspace received an u
 // processes are gone, so the writer is external. It is a writer-fence violation.
 var errWorkspaceSecurityChanged = fmt.Errorf("%w: workspace descendant security descriptor changed", errWriterFenceViolated)
 
+// errWorkspaceLinkChange reports a hard-link or reparse record beneath a tracked
+// directory. Neither kind is created by this package or by a sandbox that holds
+// only the granted rights, and a link can alias an object outside the workspace,
+// so the writer is external and the census cannot account for the alias.
+var errWorkspaceLinkChange = fmt.Errorf("%w: workspace link or reparse change requires proof", errWriterFenceViolated)
+
 const (
 	usnReasonCreate    = 0x00000100
 	usnReasonDelete    = 0x00000200
@@ -173,7 +179,7 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 			return workspaceChangePlan{}, fmt.Errorf("AppContainer change parent is not a directory")
 		}
 		if change.Reason&(usnReasonHardLink|usnReasonReparse) != 0 {
-			return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires link or reparse proof")
+			return workspaceChangePlan{}, errWorkspaceLinkChange
 		}
 		if exists && change.Reason&usnReasonSecurity != 0 && !secured[change.ID] {
 			if _, tracked := known[change.ID]; tracked {

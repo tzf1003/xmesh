@@ -198,6 +198,166 @@ func Test_WindowsAppContainerSandboxCannotWriteDACL(t *testing.T) {
 	}
 }
 
+// A change made between monitor cycles must not be followed by a launch.
+func Test_WindowsAppContainerStartRefusesDescendantChange(t *testing.T) {
+	skipUnlessWindowsSandbox(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	options := descendantSecurityFixture(t, time.Minute)
+	e, err := newWorkspaceExecution(ctx, options, kernelWriterFencePrepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = e.closeContext(context.Background(), 91) }()
+	tamperDACL(t, filepath.Join(options.Workspace, "sub", "initial.txt"))
+	if _, err := e.start(ctx, []string{"unused.exe"}, e.profile.Directory(), nil, nil, 0); !errors.Is(err, errWorkspaceSecurityChanged) {
+		t.Fatal("launch was admitted after a descriptor change", err)
+	}
+	if err := e.closeContext(ctx, 91); !errors.Is(err, errWorkspaceSecurityChanged) || !e.closed {
+		t.Fatal("close", err, e.closed)
+	}
+}
+
+// Writers outside the sandbox can still change the tree's namespace. Ordinary
+// creation, rename and deletion are tracked and reclaimed without a violation; a
+// reparse point is not something this package or the granted rights can create,
+// so it fails the execution and kills its processes.
+func Test_WindowsAppContainerTreeExternalWriters(t *testing.T) {
+	skipUnlessWindowsSandbox(t)
+	for _, mode := range []string{"namespace-activity", "junction"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			options := descendantSecurityFixture(t, 20*time.Millisecond)
+			before, control := kernelJournalState(t, options.Workspace)
+			e, err := newWorkspaceExecution(ctx, options, kernelWriterFencePrepare)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = e.closeContext(context.Background(), 91) }()
+			monitor, journal := e.monitor, e.journal
+			process, proof := startDescendantHelper(t, ctx, e, options.Workspace, "plain")
+			if got := waitDescendantProof(t, ctx, e, proof); got != "ready" {
+				t.Fatal("helper", got)
+			}
+			ext := filepath.Join(options.Workspace, "ext")
+			if mode == "junction" {
+				if err := os.Mkdir(ext, 0700); err != nil {
+					t.Fatal(err)
+				}
+				makeJunction(t, ext, filepath.Dir(options.Workspace))
+				select {
+				case <-monitor.done:
+				case <-ctx.Done():
+					t.Fatal("an external reparse point did not fault the monitor")
+				}
+				if !errors.Is(monitor.err, errWorkspaceLinkChange) || !errors.Is(monitor.err, errWriterFenceViolated) {
+					t.Fatal("monitor fault cause", monitor.err)
+				}
+				if result, err := windows.WaitForSingleObject(process.Process, 5000); err != nil || result != windows.WAIT_OBJECT_0 {
+					t.Fatal("violation left the sandbox process running", result, err)
+				}
+				// Reclamation is withheld while the unproved link exists.
+				if err := e.closeContext(ctx, 91); !errors.Is(err, errWriterFenceViolated) {
+					t.Fatal("close did not report the violation", err)
+				}
+				return
+			}
+			if err := os.Mkdir(ext, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(ext, "a.txt"), []byte("a"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(ext, "b.txt"), []byte("b"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(ext, ext+"2"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(ext+"2", "a.txt")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(options.Workspace, "sub", "initial.txt"), []byte("edited"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(500 * time.Millisecond)
+			select {
+			case <-monitor.done:
+				t.Fatal("ordinary external namespace activity faulted the monitor", monitor.err)
+			default:
+			}
+			if err := e.closeContext(ctx, 91); err != nil {
+				t.Fatal("close", err)
+			}
+			if after, afterControl := kernelJournalState(t, options.Workspace); string(before) != string(after) || control != afterControl {
+				t.Fatal("workspace descriptor changed after the lifecycle")
+			}
+			sid, err := windows.StringToSid(journal.records[0].SID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"ext2", `ext2\b.txt`, `sub\initial.txt`} {
+				state, _ := kernelJournalState(t, filepath.Join(options.Workspace, name))
+				if bytes.Contains(state, unsafe.Slice((*byte)(unsafe.Pointer(sid)), sid.Len())) {
+					t.Fatalf("%q retained the profile ACE", name)
+				}
+			}
+		})
+	}
+}
+
+// An identity created while a release is still editing descriptors inherits
+// access from a directory that is not reclaimed yet. The release must notice it
+// before declaring the workspace released, and the next release reclaims it.
+func Test_WindowsAppContainerReclaimProof(t *testing.T) {
+	skipUnlessWindowsSandbox(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	options := descendantSecurityFixture(t, 20*time.Millisecond)
+	e, err := newWorkspaceExecution(ctx, options, kernelWriterFencePrepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = e.closeContext(context.Background(), 91) }()
+	journal := e.journal
+	sid, err := windows.StringToSid(journal.records[0].SID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := filepath.Join(options.Workspace, "late.txt")
+	fired := 0
+	releaseObjectHook = func(done, total int) {
+		if done == 1 && fired == 0 {
+			fired++
+			if err := os.WriteFile(late, []byte("late"), 0600); err != nil {
+				t.Error("late creation", err)
+			}
+		}
+	}
+	defer func() { releaseObjectHook = nil }()
+	if err := e.closeContext(ctx, 91); !errors.Is(err, errWorkspaceReclaimRaced) {
+		t.Fatal("a release that raced a creation was accepted", err)
+	}
+	if fired != 1 || journal.state.workspaceReleased || e.closed {
+		t.Fatal("racing release state", fired, journal.state.workspaceReleased, e.closed)
+	}
+	// The object created during the release inherited the profile entry.
+	if state, _ := kernelJournalState(t, late); !bytes.Contains(state, unsafe.Slice((*byte)(unsafe.Pointer(sid)), sid.Len())) {
+		t.Fatal("the racing creation did not inherit access; the scenario proved nothing")
+	}
+	releaseObjectHook = nil
+	if err := e.closeContext(ctx, 91); err != nil {
+		t.Fatal("second release", err)
+	}
+	if !e.closed || !journal.state.complete {
+		t.Fatal("cleanup did not complete")
+	}
+	if state, _ := kernelJournalState(t, late); bytes.Contains(state, unsafe.Slice((*byte)(unsafe.Pointer(sid)), sid.Len())) {
+		t.Fatal("the racing creation kept the profile ACE")
+	}
+}
+
 func Test_WindowsAppContainerDescendantSecurityHelper(t *testing.T) {
 	if os.Getenv("XMESH_DESCENDANT_SECURITY_HELPER") != "1" {
 		t.Skip("AppContainer descendant security helper")

@@ -156,15 +156,16 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 	if j.state.changeCursor != nil || len(j.state.executionIDs) != 0 || len(j.state.created) != 0 || len(j.state.granted) != len(j.state.objects) || len(j.state.pending) != len(j.state.granted) || j.state.workspaceReleased || j.state.complete {
 		return fmt.Errorf("AppContainer change tracking requires complete initial admission")
 	}
-	census, err := censusJournalWorkspace(j, sid, maxObjects)
+	// The cursor is taken before the baseline census. A change made after the
+	// query is then in the replayed stream even if the census also saw it, so no
+	// change can fall between the scan and the first checkpoint.
+	w := j.records[1].Workspace
+	anchor, err := openWorkspaceRoot(ctx, w.Path)
 	if err != nil {
 		return err
 	}
-	defer census.Close()
-	if len(census.discovered) != 0 || len(census.tree.objects) != len(j.state.objects) {
-		return fmt.Errorf("AppContainer workspace changed before tracking admission")
-	}
-	source, err := openWorkspaceChangeSource(census.tree.ancestors[0], j.records[1].Workspace.Root.Volume)
+	defer anchor.Close()
+	source, err := openWorkspaceChangeSource(anchor.ancestors[0], w.Root.Volume)
 	if err != nil {
 		return err
 	}
@@ -172,6 +173,14 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 	span, err := source.query()
 	if err != nil {
 		return err
+	}
+	census, err := censusJournalWorkspace(j, sid, maxObjects)
+	if err != nil {
+		return err
+	}
+	defer census.Close()
+	if len(census.discovered) != 0 || len(census.tree.objects) != len(j.state.objects) {
+		return fmt.Errorf("AppContainer workspace changed before tracking admission")
 	}
 	if err := ctx.Err(); err != nil {
 		return err

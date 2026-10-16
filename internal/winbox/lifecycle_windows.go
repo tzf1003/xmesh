@@ -176,6 +176,9 @@ func (e *workspaceExecution) start(ctx context.Context, args []string, directory
 	if err := e.verifyFence(ctx); err != nil {
 		return windows.ProcessInformation{}, err
 	}
+	if err := e.workspace.verifyDescendantSecurity(ctx, e.maxEvents, true); err != nil {
+		return windows.ProcessInformation{}, err
+	}
 	return e.processes.startWithIO(ctx, args, directory, environment, stdio, console)
 }
 
