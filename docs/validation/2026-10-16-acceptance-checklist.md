@@ -71,5 +71,6 @@
 | 4 | exec/ConPTY 工具层接入；exit 66 调查（已合入 `62e11fc`） | 同上 |
 | T0 | 第一波并行实现收尾（T1 至 T8、T11、状态目录 ACL、桌面 UI 控制通道与面板）全部合入 master | 集成者按到达顺序合并，`windows-native` 与 UI 工作流绿灯为前提 |
 | T9 | L2 联合原生验证：`windows-l2-joint` 三轮、两个 winbox 偶发测试、控制管道拒绝用例（#31，已合入） | 集成者按到达顺序合并 |
+| T10 | 准入成本与大工作区：授权日志批量写入、对象数超 10000 以 `sandbox.workspace_too_large` 拒绝（#30，已合入） | 集成者按到达顺序合并 |
 
 `docs/implementation-status.md` 只由集成者修改；子任务把文档更新内容交给集成者。
