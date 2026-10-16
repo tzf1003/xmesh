@@ -6,6 +6,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 		busy    string // typed into the program to leave it running a command
 		running string // output proving that command runs
 		stopped string // output proving the interrupt stopped the program
+		prompt  string // prompt the program shows again once the interrupt is handled
 		probe   string // typed afterwards; the program must still answer it
 		answer  string
 		exit    string // typed to leave a program that survived the interrupt
@@ -39,9 +41,9 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			probe: "echo NES^TED-ALIVE", answer: `NESTED-ALIVE`, exit: "exit"},
 		{name: "sleeper", start: helperCommand + "--xmesh-interrupt-sleep", ready: `SLEEPER_RUNNING`},
 		{name: "powershell", start: "powershell" + quiet, ready: `PS_READY`,
-			busy: sleeper, running: `SLEEP_READY`, probe: "Write-Output ('INTERRUPT_'+'SURVIVED')", answer: `INTERRUPT_SURVIVED`, exit: "exit"},
+			busy: sleeper, running: `SLEEP_READY`, prompt: `PS [^\r\n]*>`, probe: "Write-Output ('INTERRUPT_'+'SURVIVED')", answer: `INTERRUPT_SURVIVED`, exit: "exit"},
 		{name: "pwsh", require: "pwsh", start: "pwsh" + quiet, ready: `PS_READY`,
-			busy: sleeper, running: `SLEEP_READY`, probe: "Write-Output ('INTERRUPT_'+'SURVIVED')", answer: `INTERRUPT_SURVIVED`, exit: "exit"},
+			busy: sleeper, running: `SLEEP_READY`, prompt: `PS [^\r\n]*>`, probe: "Write-Output ('INTERRUPT_'+'SURVIVED')", answer: `INTERRUPT_SURVIVED`, exit: "exit"},
 		{name: "loop", start: helperCommand + "--xmesh-interrupt-loop", ready: `LOOP_READY`,
 			stopped: `LOOP_INTERRUPTED-1`, probe: "first", answer: `LOOP_ECHO-first`, exit: "quit"},
 	}
@@ -70,19 +72,27 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			} else {
 				time.Sleep(500 * time.Millisecond)
 			}
+			// Console programs flush pending input when Ctrl-C arrives, so nothing
+			// further is typed until the interrupt has visibly been handled.
+			interrupted := o.text.Len()
 			o.call("pty.signal", map[string]any{"session_id": o.session, "signal": "INT"})
 			if c.stopped != "" {
 				o.until(c.stopped)
+			}
+			if c.prompt != "" {
+				o.untilAfter(interrupted, c.prompt)
 			}
 			if c.probe != "" {
 				write(c.probe)
 				o.until(c.answer)
 			}
 			if c.exit != "" {
-				write(c.exit)
 				// Input typed while the program is still leaving may be read ahead
-				// by it; let the shell take the console back first.
-				time.Sleep(time.Second)
+				// by it; wait for the shell's own prompt before typing again.
+				time.Sleep(500 * time.Millisecond)
+				leaving := o.text.Len()
+				write(c.exit)
+				o.untilAfter(leaving, `workspace>`)
 			}
 			write("echo SURV^IVED-" + c.name)
 			o.until(`SURVIVED-` + c.name)
@@ -92,6 +102,25 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			f.requireReclaimed(t, before, control, 1)
 		})
 	}
+}
+
+// untilAfter waits for expression in the output that arrived after offset.
+func (o *ptyOutput) untilAfter(offset int, expression string) {
+	o.t.Helper()
+	re := regexp.MustCompile(expression)
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+		if re.MatchString(o.text.String()[offset:]) {
+			return
+		}
+		if o.eof {
+			break
+		}
+		result := o.call("pty.read", map[string]any{"session_id": o.session, "cursor": o.cursor, "wait_ms": 100})
+		o.text.WriteString(result["data"].(string))
+		o.cursor = result["next_cursor"].(uint64)
+		o.eof = result["eof"] == true
+	}
+	o.t.Fatalf("terminal output did not match %q after the interrupt (eof=%v): %q", expression, o.eof, o.text.String()[offset:])
 }
 
 // Test_WindowsManagedRunnerInterruptHelper runs inside the AppContainer. With
