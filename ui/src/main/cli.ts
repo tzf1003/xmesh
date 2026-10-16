@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
+import { defaultLookup, resolveXmeshBinary } from "./system/binary";
 
 /** The only `xmesh` subcommands the UI ever runs. K1 adds them alongside `--json` output. */
 export const CLI_COMMANDS = ["restart", "stop"] as const;
 export type CliCommand = (typeof CLI_COMMANDS)[number];
 
 export function xmeshBinary(env: NodeJS.ProcessEnv = process.env): string {
-  return env.XMESH_BIN || "xmesh";
+  return resolveXmeshBinary({ ...defaultLookup(), env });
 }
 
 export class CliError extends Error {

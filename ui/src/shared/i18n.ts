@@ -46,6 +46,11 @@ const zh = {
   "notice.quota.pty": "终端",
   "notice.quota.exec": "执行",
   "notice.title": "xmesh",
+  "notice.burst": "xmesh 有 {count} 条状态变化，打开菜单查看",
+  "hint.trayOverflow": "xmesh 在通知区域运行。看不到图标时，点任务栏的 ^，把 xmesh 拖到任务栏上固定。",
+  "hint.loginItem.requiresApproval": "请在「系统设置 > 通用 > 登录项」中允许 xmesh。",
+  "hint.loginItem.disabledByUser": "已在任务管理器的「启动应用」中关闭，请在那里重新启用。",
+  "hint.loginItem.unavailable": "只有安装后的 xmesh 才能设置登录时启动。",
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -95,6 +100,11 @@ const en: Record<MessageKey, string> = {
   "notice.quota.pty": "Terminal",
   "notice.quota.exec": "Exec",
   "notice.title": "xmesh",
+  "notice.burst": "xmesh has {count} status changes, open the menu for details",
+  "hint.trayOverflow": "xmesh runs in the notification area. If the icon is hidden, click ^ on the taskbar and drag xmesh onto the taskbar to pin it.",
+  "hint.loginItem.requiresApproval": "Allow xmesh in System Settings > General > Login Items.",
+  "hint.loginItem.disabledByUser": "It is turned off in Task Manager > Startup apps; turn it back on there.",
+  "hint.loginItem.unavailable": "Starting at login only works for the installed xmesh.",
 };
 
 export type Locale = "zh" | "en";
