@@ -66,6 +66,8 @@ func run(args []string) error {
 		return pair(args[1:])
 	case "status":
 		return status(args[1:])
+	case "drain":
+		return drain(args[1:])
 	case "version", "--version":
 		fmt.Println("xmesh " + buildVersion)
 		return nil
