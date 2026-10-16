@@ -144,7 +144,7 @@ func describeToolError(err error) error {
 }
 
 func (f *runnerFixture) helperCall(mode string, paths ...string) map[string]any {
-	args := append([]string{"-test.run=^Test_WindowsAppContainerRunnerHelper$", "--", "--xmesh-runner-helper", mode}, paths...)
+	args := append([]string{"-test.run=^Test_WindowsManagedRunnerHelper$", "--", "--xmesh-runner-helper", mode}, paths...)
 	return map[string]any{"cmd": `.\helper`, "args": args, "env": map[string]string{"GORACE": "log_path=runner-race"}}
 }
 
@@ -181,7 +181,7 @@ type runnerProof struct {
 	Environment  string
 }
 
-func Test_WindowsAppContainerRunnerExec(t *testing.T) {
+func Test_WindowsManagedRunnerExec(t *testing.T) {
 	f := newRunnerFixture(t)
 	before, control := kernelJournalState(t, f.root)
 	m := f.execManager(t, "60s")
@@ -212,7 +212,7 @@ func Test_WindowsAppContainerRunnerExec(t *testing.T) {
 	f.requireReclaimed(t, before, control, 1)
 }
 
-func Test_WindowsAppContainerRunnerExecTree(t *testing.T) {
+func Test_WindowsManagedRunnerExecTree(t *testing.T) {
 	for _, mode := range []string{"tree-timeout", "tree-exit"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newRunnerFixture(t)
@@ -268,7 +268,7 @@ func requireProcessGone(t *testing.T, pid uint32) {
 	}
 }
 
-func Test_WindowsAppContainerRunnerExecConcurrent(t *testing.T) {
+func Test_WindowsManagedRunnerExecConcurrent(t *testing.T) {
 	f := newRunnerFixture(t)
 	before, control := kernelJournalState(t, f.root)
 	m := f.execManager(t, "90s")
@@ -291,7 +291,7 @@ func Test_WindowsAppContainerRunnerExecConcurrent(t *testing.T) {
 	f.requireReclaimed(t, before, control, 2)
 }
 
-func Test_WindowsAppContainerRunnerFailures(t *testing.T) {
+func Test_WindowsManagedRunnerFailures(t *testing.T) {
 	f := newRunnerFixture(t)
 	m := f.execManager(t, "60s")
 	if _, err := f.run(m, map[string]any{"cmd": "xmesh-command-that-does-not-exist"}); err == nil {
@@ -399,7 +399,7 @@ func newTerminalManager(t *testing.T) (*pty.Manager, *identity.Registry) {
 	return m, reg
 }
 
-func Test_WindowsAppContainerRunnerTerminal(t *testing.T) {
+func Test_WindowsManagedRunnerTerminal(t *testing.T) {
 	f := newRunnerFixture(t)
 	before, control := kernelJournalState(t, f.root)
 	m, reg := newTerminalManager(t)
@@ -408,7 +408,7 @@ func Test_WindowsAppContainerRunnerTerminal(t *testing.T) {
 	write("set MARK=OK\r\n")
 	write("echo MARK-%MARK%-END\r\n")
 	o.until(`MARK-OK-END`)
-	write(`helper.exe -test.run=Test_WindowsAppContainerRunnerHelper -- --xmesh-runner-helper conpty` + "\r\n")
+	write(`helper.exe -test.run=Test_WindowsManagedRunnerHelper -- --xmesh-runner-helper conpty` + "\r\n")
 	o.until(`CONPTY-APPCONTAINER-1`)
 	o.call("pty.resize", map[string]any{"session_id": o.session, "cols": 137, "rows": 43})
 	write("mode con\r\n")
@@ -419,16 +419,16 @@ func Test_WindowsAppContainerRunnerTerminal(t *testing.T) {
 	f.requireReclaimed(t, before, control, 1)
 }
 
-func Test_WindowsAppContainerRunnerTerminalKill(t *testing.T) {
+func Test_WindowsManagedRunnerTerminalKill(t *testing.T) {
 	f := newRunnerFixture(t)
 	before, control := kernelJournalState(t, f.root)
 	m, reg := newTerminalManager(t)
 	o := f.openTerminal(t, m, reg, "kill")
-	o.call("pty.write", map[string]any{"session_id": o.session, "data": "echo READY-%OS%\r\n"})
-	o.until(`READY-Windows_NT`)
+	o.call("pty.write", map[string]any{"session_id": o.session, "data": "echo REA^DY\r\n"})
+	o.until(`\r\nREADY`)
 	// A descendant that would outlive the shell keeps running until the
 	// execution is reclaimed.
-	o.call("pty.write", map[string]any{"session_id": o.session, "data": "start /b helper.exe -test.run=Test_WindowsAppContainerRunnerHelper -- --xmesh-runner-helper tree-exit " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
+	o.call("pty.write", map[string]any{"session_id": o.session, "data": "start /b helper.exe -test.run=Test_WindowsManagedRunnerHelper -- --xmesh-runner-helper tree-exit " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
 	for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(100 * time.Millisecond) {
 		if body, err := os.ReadFile(filepath.Join(f.root, "terminal-pids.txt")); err == nil && len(strings.Fields(string(body))) == 2 {
 			break
@@ -469,7 +469,7 @@ func waitRunnerIdle(t *testing.T, f *runnerFixture, executions int) {
 	t.Fatal("sandbox execution was not reclaimed after the terminal ended")
 }
 
-func Test_WindowsAppContainerRunnerHelper(t *testing.T) {
+func Test_WindowsManagedRunnerHelper(t *testing.T) {
 	// Policy withholds XMESH_* variables from commands, so the helper is
 	// selected by its arguments.
 	var mode string
@@ -516,8 +516,10 @@ func Test_WindowsAppContainerRunnerHelper(t *testing.T) {
 		time.Sleep(10 * time.Minute)
 		os.Exit(0)
 	case "tree-timeout", "tree-exit":
-		child := osexec.Command(os.Args[0], "-test.run=^Test_WindowsAppContainerRunnerHelper$", "--", "--xmesh-runner-helper", "sleep")
+		child := osexec.Command(os.Args[0], "-test.run=^Test_WindowsManagedRunnerHelper$", "--", "--xmesh-runner-helper", "sleep")
 		child.Env = os.Environ()
+		// AppContainer cannot open NUL, which os/exec would otherwise use.
+		child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := child.Start(); err != nil {
 			t.Fatal(err)
 		}

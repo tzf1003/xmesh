@@ -56,4 +56,4 @@ jobs:
       - name: Managed runner exec and ConPTY acceptance
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
-        run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerRunner' -v -count=1 -timeout=900s
+        run: go test -race ./internal/winbox -run 'Test_WindowsManagedRunner' -v -count=1 -timeout=900s
