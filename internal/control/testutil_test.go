@@ -229,7 +229,7 @@ func (f *fixture) stream(lastID string) *stream {
 		defer close(s.events)
 		sc := bufio.NewScanner(res.Body)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
-		var id, kind string
+		var id, kind, data string
 		for sc.Scan() {
 			line := sc.Text()
 			switch {
@@ -238,7 +238,10 @@ func (f *fixture) stream(lastID string) *stream {
 			case strings.HasPrefix(line, "event: "):
 				kind = strings.TrimPrefix(line, "event: ")
 			case strings.HasPrefix(line, "data: "):
-				data := strings.TrimPrefix(line, "data: ")
+				data = strings.TrimPrefix(line, "data: ")
+			case line == "" && data != "":
+				// an event counts once its blank line has arrived; a line cut off by the
+				// connection closing is never dispatched
 				var e v1.Event
 				if err := json.Unmarshal([]byte(data), &e); err != nil {
 					f.t.Errorf("bad event %q: %v", data, err)
@@ -248,7 +251,7 @@ func (f *fixture) stream(lastID string) *stream {
 					f.t.Errorf("SSE fields id=%q event=%q do not match data %s", id, kind, data)
 				}
 				s.events <- e
-				id, kind = "", ""
+				id, kind, data = "", "", ""
 			}
 		}
 	}()

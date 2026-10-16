@@ -133,7 +133,9 @@ func Test_ControlAuditDisabled(t *testing.T) {
 	if got.Enabled || len(got.Events) != 0 || got.NextCursor != nil {
 		t.Fatalf("%+v", got)
 	}
-	// a directory that nothing has written to yet is enabled and empty
+	// a directory that nothing has written to yet is enabled and empty (the first node must be
+	// gone: the channel's address is derived from the node name)
+	f.server.Close()
 	f2 := newFixture(t)
 	decodeAs(t, f2.ok("GET", "/v1/audit", nil, "AuditResponse"), &got)
 	if !got.Enabled || len(got.Events) != 0 {
