@@ -184,3 +184,28 @@ func TestEnvironmentRejectsAmbiguousWindowsNames(t *testing.T) {
 		}
 	}
 }
+
+// L0 is documented as "same as L1" until the user decides otherwise (08-security).
+func Test_L0EqualsL1(t *testing.T) {
+	var launchers [2][]string
+	for i, level := range []string{"L0", "L1"} {
+		e, err := New(config.Policy{Isolation: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Command("rm", []string{"-rf", "/"}); err == nil {
+			t.Fatal(level, "skipped the command policy")
+		}
+		if e.SandboxRunner() != nil {
+			t.Fatal(level, "selected a managed runner")
+		}
+		cmd, args, env, err := e.Sandbox("printf", []string{"x"}, t.TempDir(), []string{"A=1"})
+		if err != nil {
+			t.Fatal(level, err)
+		}
+		launchers[i] = append(append([]string{cmd}, args...), env...)
+	}
+	if !reflect.DeepEqual(launchers[0], launchers[1]) {
+		t.Fatal(launchers)
+	}
+}

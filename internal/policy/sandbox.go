@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+// Isolation levels L0 and L1 are deliberately identical in this release: both
+// run the command directly under the cwd and command policy, and only L2 changes
+// how the process is launched. L0 ("run in the user environment, no policy")
+// remains undecided with the user, so the weaker reading is not implemented and
+// the tests pin the equivalence (Test_L0EqualsL1).
+
 // UseSandboxRunner installs a managed isolation runner for L2 execution. It
 // must be called before the engine is shared. No runner is installed by default:
 // platforms without a native launcher then fail closed in Sandbox and SandboxPTY.

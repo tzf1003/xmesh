@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -153,5 +154,23 @@ func TestIngressPTYBudgetAuthorityConfiguration(t *testing.T) {
 		if !valid && err == nil {
 			t.Fatal("invalid authority accepted", authority)
 		}
+	}
+}
+
+func Test_CONNET08_RelayMessage(t *testing.T) {
+	_, e := Load(filepath.Join("../../docs/contracts/schemas/examples/invalid/config-relay.json"))
+	if e == nil {
+		t.Fatal("relay accepted")
+	}
+	if msg := e.Error(); !strings.Contains(msg, "relay") || !strings.Contains(msg, "未实现") {
+		t.Fatal("error does not say relay is not implemented:", msg)
+	}
+	// Other unknown modes remain ordinary schema failures.
+	path := filepath.Join(t.TempDir(), "config.json")
+	if e = os.WriteFile(path, []byte(`{"node":{"name":"n","roles":["agent"]},"mesh":{"mode":"mesh9"},"agent":{"cwd_policy":{"allow":["/tmp"]}}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = Load(path); e == nil || strings.Contains(e.Error(), "未实现") {
+		t.Fatal(e)
 	}
 }

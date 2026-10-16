@@ -29,3 +29,10 @@ type Network interface {
 	Self(context.Context) (identity.Principal, error)
 	Close() error
 }
+
+// Presence is implemented by networks that can say which nodes are online now.
+// authoritative is true when every node on the network is listed, so a missing
+// node has left; otherwise a missing node is only unobserved (CTR-ID-01).
+type Presence interface {
+	Online(context.Context) (online map[string]bool, authoritative bool, err error)
+}
