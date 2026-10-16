@@ -337,6 +337,7 @@ const AUDIT_EVENTS = [
   "pty_io",
   "authz_deny",
   "policy_reload_failed",
+  "progress_unrouted",
   "audit_dropped",
   "control_call",
 ] as const;

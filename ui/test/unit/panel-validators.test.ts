@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  AUDIT_EVENTS,
   CONFIG_MAX_BYTES,
   parseAuditQuery,
   parseClientId,
@@ -138,4 +139,14 @@ test("audit queries accept only the documented filters", () => {
 test("pick kinds are a closed set", () => {
   assert.ok(parsePickKind("workspace"));
   assert.equal(parsePickKind("/etc"), undefined);
+});
+
+test("the audit event filter lists every event type of the contract", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "..", "src", "shared", "generated", "control.ts"), "utf8");
+  const block = /export interface AuditEvent \{[\s\S]*?event:([\s\S]*?);/.exec(src)?.[1] ?? "";
+  const types = [...block.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+  assert.ok(types.length > 5, "found the event enum");
+  assert.deepEqual([...AUDIT_EVENTS].sort(), types.sort());
 });
