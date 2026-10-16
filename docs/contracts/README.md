@@ -42,6 +42,11 @@
 | [CTR-AUTHZ-01](oauth-authz.md#ctr-authz-01) | 授权 | 双层判定 |
 | [CTR-AUD-01](audit.md#ctr-aud-01) | 审计 | 事件字段 |
 | [CTR-CFG-01](config.md#ctr-cfg-01) | 配置 | `xmesh.yaml` |
+| [CTR-MESH-01](meshadmin.md#ctr-mesh-01) | meshadmin | Provider 与两个控制面的差异 |
+| [CTR-MESH-02](meshadmin.md#ctr-mesh-02) | meshadmin | 凭据、策略写入协议、模板 |
+| [CTR-MESH-03](meshadmin.md#ctr-mesh-03) | meshadmin | 设备与 tag、接入、权限矩阵 |
+| [CTR-MESH-04](meshadmin.md#ctr-mesh-04) | meshadmin | 第三方 DERP 与探测 |
+| [CTR-MESH-05](meshadmin.md#ctr-mesh-05) | meshadmin | DERP 准入与放行名单同步 |
 
 ## 模式文件
 

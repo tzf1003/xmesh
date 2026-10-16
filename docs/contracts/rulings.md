@@ -125,3 +125,26 @@ argv 里出现恰好等于 `-EncodedCommand` 的参数时，直接 `policy_denie
 `oauth_client` 来自 [RUL-02](#rul-02) 的请求头，在 `pty.open` 时复制到会话上，不从工具参数读取。这不是「单租户下可以放宽」的默认行为。
 
 `active` 会话的 `pty.transfer` 不套用上面的 `oauth_client` 限制。调用方必须是当前 owner，这一步是 owner 自愿把终端交给 `to_caller`，允许交给另一个 OAuth client 的会话。接收方仍须是 Agent 已经见过、并且仍然连接着的 `caller_id`，同时不能超过对方的 `max_per_caller`。限制只加在没有 owner 的 `orphaned` 接管上，避免另一个云端会话在无人同意时接走终端。
+
+## RUL-20
+
+`meshadmin` 的 `Provider` 接口是两个控制面的唯一分界。调用方只通过 `Capabilities()` 判断某个控制面能不能做某件事（例如 `policy_write`、`atomic_policy_write`），不按 `Kind()` 分支，也不拼控制面各自的路径。Headscale 以文件模式运行时策略只读，`policy_write` 为假，写入返回 `ErrUnsupported`，预览里 `writable` 为假。
+
+编号 RUL-14 到 RUL-18 已由桌面 UI 与本机控制通道的设计占用，本篇从 RUL-20 起。
+
+## RUL-21
+
+写策略的统一路径是：读版本、生成新文本、控制面校验、预览、快照、带版本写入。其中版本检查的强度取决于控制面：
+
+- Tailscale 用 `If-Match`（ETag），由服务器原子判断。
+- Headscale 的 `PUT /api/v1/policy` 不接受版本条件，`meshadmin` 在写前重新读取并与 `base_version` 比较，再发 PUT。这一步读与写之间有很小的窗口，不是原子的；`Capabilities().atomic_policy_write` 为假，调用方传 `--expect-version` 把窗口缩到「预览与写入之间」之外，并在文档里把它记为已知限制。
+
+`updatedAt` 在 Headscale 文件模式下为 `null`，据此判定策略不可写。数据库模式下从没存过策略时 `GET` 返回 500 `acl policy not found`，当作没有策略。
+
+xmesh 只修改带 `// xmesh:managed <section>` 标记的元素，见 [CON-MESH-04](../constraints/meshadmin.md#con-mesh-04)。
+
+## RUL-22
+
+管理凭据有 `read` 与 `write` 两份。读操作优先 `read`，没有时才用 `write`；写操作只用 `write`。Tailscale 的 OAuth client 的 scope 在签发时固定，`read` 凭据发起写请求时控制面返回 403，`meshadmin` 把它映射成 `ErrUnauthorized`（带所需 scope 的 `ScopeError`），不重试、不换凭据。
+
+OAuth client 的 token 由 `meshadmin` 用 client credentials 换取并缓存在内存，进程退出即丢弃，不落盘。`Credential` 的 `String()`、`GoString()` 与错误信息都不含密钥。

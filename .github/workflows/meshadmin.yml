@@ -1,0 +1,35 @@
+name: meshadmin
+# meshadmin 库与 xmesh mesh 子命令的测试。Headscale 一侧用真实 v0.29.5 二进制跑集成场景
+# （数据库策略模式、tag、预授权 key、生成的 DERP 文件）；Tailscale 一侧只有夹具测试。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+env:
+  HEADSCALE_VERSION: "0.29.5"
+  # linux/amd64 发布资产的 SHA-256，取自 https://github.com/juanfont/headscale/releases/tag/v0.29.5 的 checksums.txt。
+  HEADSCALE_SHA256: e979d27fe17d924d33bb6ab7504f6338d0635989a0cfdcfbc0ceb637dbcbe980
+jobs:
+  meshadmin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/meshadmin.yml
+      - name: 下载并校验 Headscale
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/headscale" "https://github.com/juanfont/headscale/releases/download/v${HEADSCALE_VERSION}/headscale_${HEADSCALE_VERSION}_linux_amd64"
+          echo "${HEADSCALE_SHA256}  $RUNNER_TEMP/headscale" | sha256sum --check -
+          chmod +x "$RUNNER_TEMP/headscale"
+      - name: 单元与集成测试（含竞态检测）
+        env:
+          XMESH_TEST_HEADSCALE_BIN: ${{ runner.temp }}/headscale
+        run: |
+          go test -race -count=1 ./meshadmin
+          go test -race -count=1 ./cmd/xmesh -run 'Test_Mesh'

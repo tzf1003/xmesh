@@ -44,6 +44,7 @@ const usage = `用法: xmesh <子命令> [参数]
            --export 文件，或 --import 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
   status   读取运行中节点的状态（不读配置文件，没有 --config）
            --endpoint 地址  --tool 工具名  --pat-file 文件  --json
+  mesh     管理控制面（Tailscale 或 Headscale）：tag、权限矩阵、策略、DERP；见 xmesh mesh help
   version  打印版本号（也可写作 --version）`
 
 func run(args []string) error {
@@ -66,6 +67,8 @@ func run(args []string) error {
 		return pair(args[1:])
 	case "status":
 		return status(args[1:])
+	case "mesh":
+		return meshCmd(args[1:])
 	case "version", "--version":
 		fmt.Println("xmesh " + buildVersion)
 		return nil
