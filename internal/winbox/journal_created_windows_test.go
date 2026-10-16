@@ -14,7 +14,7 @@ func Test_WindowsAppContainerWorkspaceCreatedPreflight(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
-	for _, stage := range []string{"union-limit", "unavailable-observed-id", "failed-append", "execution-pending"} {
+	for _, stage := range []string{"union-limit", "recorded-hardlink", "failed-append", "execution-pending"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx := context.Background()
 			base := t.TempDir()
@@ -45,11 +45,13 @@ func Test_WindowsAppContainerWorkspaceCreatedPreflight(t *testing.T) {
 				j.Close()
 				t.Fatal(err)
 			}
-			var exclusive windows.Handle
+			var extraLink string
 			var execution uint64
 			defer func() {
-				if exclusive != 0 {
-					windows.CloseHandle(exclusive)
+				if extraLink != "" {
+					if err := os.Remove(extraLink); err != nil {
+						t.Error(err)
+					}
 				}
 				if j.blocked != nil {
 					_ = j.Close()
@@ -99,7 +101,7 @@ func Test_WindowsAppContainerWorkspaceCreatedPreflight(t *testing.T) {
 					t.Fatal("checkpoint lost created identities")
 				}
 			}
-			if stage == "union-limit" || stage == "unavailable-observed-id" {
+			if stage == "union-limit" || stage == "recorded-hardlink" {
 				moved := filepath.Join(base, "moved-created")
 				if err := os.Rename(dir, moved); err != nil {
 					t.Fatal(err)
@@ -115,12 +117,8 @@ func Test_WindowsAppContainerWorkspaceCreatedPreflight(t *testing.T) {
 					// Current tree and recorded identities each fit; their union does not.
 					limit = 4
 				} else {
-					name, err := windows.UTF16PtrFromString(file)
-					if err != nil {
-						t.Fatal(err)
-					}
-					exclusive, err = windows.CreateFile(name, windows.READ_CONTROL, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
-					if err != nil {
+					extraLink = filepath.Join(base, "extra-link.txt")
+					if err := os.Link(file, extraLink); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -131,11 +129,7 @@ func Test_WindowsAppContainerWorkspaceCreatedPreflight(t *testing.T) {
 				label   string
 			}
 			before := make(map[string]descriptor)
-			// The exclusive file is covered by its parent and retained journal ID.
-			paths := []string{root, dir}
-			if exclusive == 0 {
-				paths = append(paths, file)
-			}
+			paths := []string{root, dir, file}
 			for _, objectPath := range paths {
 				acl, control := kernelJournalState(t, objectPath)
 				before[objectPath] = descriptor{acl, control, objectLabel(t, objectPath)}
