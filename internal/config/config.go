@@ -52,15 +52,20 @@ type PAT struct {
 	TokenFile string   `json:"token_file"`
 	Scopes    []string `json:"scopes"`
 }
+
+var nodeNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,62}$`)
+
 type Ingress struct {
 	MaxPTYPerClient int    `json:"max_pty_per_client"`
 	PTYBudgetFile   string `json:"pty_budget_file"`
-	Listen          string `json:"listen"`
-	Domain          string `json:"domain"`
-	TLS             string `json:"tls"`
-	CertFile        string `json:"cert_file"`
-	KeyFile         string `json:"key_file"`
-	OAuth           struct {
+	// PTYBudgetAuthority names the Agent that hosts the cross-host admission lease.
+	PTYBudgetAuthority string `json:"pty_budget_authority"`
+	Listen             string `json:"listen"`
+	Domain             string `json:"domain"`
+	TLS                string `json:"tls"`
+	CertFile           string `json:"cert_file"`
+	KeyFile            string `json:"key_file"`
+	OAuth              struct {
 		Issuer  string `json:"issuer"`
 		Clients map[string]struct {
 			Scopes []string `json:"scopes"`
@@ -196,6 +201,9 @@ func (c *Config) Validate() error {
 	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
+	}
+	if c.Ingress.PTYBudgetAuthority != "" && !nodeNamePattern.MatchString(c.Ingress.PTYBudgetAuthority) {
+		return fail("/ingress/pty_budget_authority")
 	}
 	if c.Gateway.Listen != "" {
 		host, _, e := net.SplitHostPort(c.Gateway.Listen)

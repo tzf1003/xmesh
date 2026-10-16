@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -33,13 +35,31 @@ type budgetState struct {
 
 // PTYBudget serializes admissions across clients and processes sharing a journal
 // on one host. The journal retains Agents with live OAuth terminals and fences
-// calls with uncertain results.
+// calls with uncertain results. With an authority Agent configured it also
+// serializes admissions across ingress hosts through a fenced lease hosted by
+// that Agent.
 type PTYBudget struct {
 	limit int
 	path  string
 	gate  chan struct{}
 	state budgetState
 	fault bool
+
+	authority string
+	owner     string
+	wait      time.Duration
+	unsettled *pty.AuthoritySettle
+}
+
+// UseAuthority makes every admission take the cross-host lease hosted by the
+// named Agent. Without a reachable authority admissions fail closed.
+func (b *PTYBudget) UseAuthority(device string) error {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return err
+	}
+	b.authority, b.owner, b.wait = device, hex.EncodeToString(raw[:]), 10*time.Second
+	return nil
 }
 
 func NewPTYBudget(limit int, path string) (*PTYBudget, error) {
@@ -156,21 +176,28 @@ type peerBudget struct {
 	err      error
 }
 
+// readyBridge returns the live connection for exactly this peer identity.
+func (v *view) readyBridge(ctx context.Context, peer mesh.Peer) *mcpmux.Bridge {
+	v.waitReady(ctx, peer.Name)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	d := v.down[peer.Name]
+	if d == nil || d.dead || d.peerID != peer.ID || d.peerAddress != peer.Address {
+		return nil
+	}
+	return d.bridge
+}
+
 func (v *view) readPTYBudget(ctx context.Context, peer mesh.Peer) peerBudget {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	v.waitReady(ctx, peer.Name)
-	v.mu.Lock()
-	d := v.down[peer.Name]
-	ready := d != nil && !d.dead && d.peerID == peer.ID && d.peerAddress == peer.Address
-	v.mu.Unlock()
 	out := peerBudget{peer: peer}
-	if !ready {
+	out.bridge = v.readyBridge(ctx, peer)
+	if out.bridge == nil {
 		out.err = budgetUnavailable()
 		return out
 	}
-	out.bridge = d.bridge
-	result, err := d.bridge.Session.ReadResource(ctx, &mcp.ReadResourceParams{URI: pty.BudgetURI})
+	result, err := out.bridge.Session.ReadResource(ctx, &mcp.ReadResourceParams{URI: pty.BudgetURI})
 	if err != nil {
 		out.err = err
 		return out
@@ -186,7 +213,7 @@ func (v *view) readPTYBudget(ctx context.Context, peer mesh.Peer) peerBudget {
 	return out
 }
 
-func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool string, args map[string]json.RawMessage, invoke func(*mcpmux.Bridge) (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
+func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool string, args map[string]json.RawMessage, invoke func(context.Context, *mcpmux.Bridge) (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
 	select {
 	case b.gate <- struct{}{}:
 		defer func() { <-b.gate }()
@@ -195,6 +222,24 @@ func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool st
 	}
 	if ctx.Err() != nil || b.fault || v.p.ClientID == "" {
 		return agent.Result(nil, budgetUnavailable()), nil
+	}
+	var lease *authorityLease
+	if b.authority != "" {
+		devices, _ := v.g.snapshot()
+		online := map[string]mesh.Peer{}
+		for _, device := range devices {
+			if device.online && device.peer.ID != "" {
+				online[device.peer.ID] = device.peer
+			}
+		}
+		var err error
+		if lease, err = b.acquireAuthority(ctx, v, online); err != nil {
+			return agent.Result(nil, err), nil
+		}
+		defer b.releaseAuthority(v, lease)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, lease.deadline)
+		defer cancel()
 	}
 	if b.path != "" {
 		lock, err := b.lock(ctx)
@@ -224,6 +269,15 @@ func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool st
 			return agent.Result(nil, budgetUnavailable()), nil
 		}
 	}
+	if lease != nil {
+		// A pending record from another ingress host is an uncertain call whose
+		// target has not restarted since; it blocks admission like a local one.
+		for id := range lease.pending {
+			if _, ok := peers[id]; !ok {
+				return agent.Result(nil, budgetUnavailable()), nil
+			}
+		}
+	}
 	results := make(chan peerBudget, len(peers))
 	for _, peer := range peers {
 		go func() { results <- v.readPTYBudget(ctx, peer) }()
@@ -239,6 +293,14 @@ func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool st
 		old := b.state.Peers[result.peer.ID]
 		if old.Pending && old.Epoch == result.snapshot.Epoch {
 			return agent.Result(nil, budgetUnavailable()), nil
+		}
+		if lease != nil {
+			if epoch, ok := lease.pending[result.peer.ID]; ok {
+				if epoch == result.snapshot.Epoch {
+					return agent.Result(nil, budgetUnavailable()), nil
+				}
+				lease.stale[result.peer.ID] = epoch
+			}
 		}
 		if len(result.snapshot.Sessions) > 0 {
 			next.Peers[result.peer.ID] = budgetPeer{Name: result.peer.Name, Epoch: result.snapshot.Epoch}
@@ -278,11 +340,19 @@ func (b *PTYBudget) call(ctx context.Context, v *view, target mesh.Peer, tool st
 			inUse += count
 		}
 	}
+	if lease != nil {
+		if err := b.markAuthority(ctx, v, lease, target, snapshots[target.ID].snapshot.Epoch); err != nil {
+			return agent.Result(nil, err), nil
+		}
+	}
 	next.Peers[target.ID] = budgetPeer{Name: target.Name, Epoch: snapshots[target.ID].snapshot.Epoch, Pending: true}
 	if err := b.save(next); err != nil {
 		return agent.Result(nil, budgetUnavailable()), nil
 	}
-	out, err := invoke(snapshots[target.ID].bridge)
+	out, err := invoke(ctx, snapshots[target.ID].bridge)
+	if lease != nil && (err != nil || out == nil) {
+		lease.outcome = "uncertain"
+	}
 	if err == nil && out != nil {
 		finished := budgetState{Version: 1, Peers: map[string]budgetPeer{}}
 		for id, peer := range b.state.Peers {

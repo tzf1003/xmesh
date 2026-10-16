@@ -30,6 +30,9 @@ type budgetFixture struct {
 	g       *Gateway
 	limit   int
 	configs map[string]*config.Config
+	// authority names the Agent hosting the cross-host lease; empty keeps
+	// admission local to this ingress.
+	authority string
 }
 
 func newBudgetFixture(t *testing.T, limit int) *budgetFixture {
@@ -79,6 +82,11 @@ func (f *budgetFixture) restart() {
 	f.opts.PTYBudget, err = NewPTYBudget(f.limit, f.path)
 	if err != nil {
 		f.t.Fatal(err)
+	}
+	if f.authority != "" {
+		if err := f.opts.PTYBudget.UseAuthority(f.authority); err != nil {
+			f.t.Fatal(err)
+		}
 	}
 	f.g = New(f.opts)
 	f.g.Update(f.peers[1:])
@@ -265,7 +273,7 @@ func Test_IngressPTYUncertainCallFencesUntilAgentRestart(t *testing.T) {
 	}
 	f.g.mu.Unlock()
 	budget := f.g.opts.PTYBudget
-	_, err := budget.call(context.Background(), view, f.peers[0], "pty.open", nil, func(*mcpmux.Bridge) (*mcp.CallToolResult, error) {
+	_, err := budget.call(context.Background(), view, f.peers[0], "pty.open", nil, func(context.Context, *mcpmux.Bridge) (*mcp.CallToolResult, error) {
 		return nil, errors.New("transport ended before result")
 	})
 	if err == nil {
@@ -318,7 +326,7 @@ func Test_IngressPTYAdmissionUsesSnapshotConnection(t *testing.T) {
 	connection := current.down["device-a"].bridge
 	current.mu.Unlock()
 	invoked := false
-	out, err := f.g.opts.PTYBudget.call(context.Background(), current, f.peers[0], "pty.open", nil, func(bridge *mcpmux.Bridge) (*mcp.CallToolResult, error) {
+	out, err := f.g.opts.PTYBudget.call(context.Background(), current, f.peers[0], "pty.open", nil, func(_ context.Context, bridge *mcpmux.Bridge) (*mcp.CallToolResult, error) {
 		invoked = true
 		if bridge != connection {
 			t.Fatal("invoked a different connection from the snapshot")
@@ -332,7 +340,7 @@ func Test_IngressPTYAdmissionUsesSnapshotConnection(t *testing.T) {
 	stale := f.peers[0]
 	stale.Address = "http://stale.invalid/mcp"
 	invoked = false
-	out, err = f.g.opts.PTYBudget.call(context.Background(), current, stale, "pty.open", nil, func(*mcpmux.Bridge) (*mcp.CallToolResult, error) {
+	out, err = f.g.opts.PTYBudget.call(context.Background(), current, stale, "pty.open", nil, func(context.Context, *mcpmux.Bridge) (*mcp.CallToolResult, error) {
 		invoked = true
 		return nil, nil
 	})

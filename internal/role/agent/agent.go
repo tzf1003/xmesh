@@ -33,27 +33,29 @@ import (
 type Principal = identity.Principal
 type Authenticate func(*http.Request) (Principal, error)
 type Agent struct {
-	store          *config.Store
-	PTY            *pty.Manager
-	Exec           *runexec.Manager
-	Callers        *identity.Registry
-	Backends       *backend.Manager
-	Leases         *lease.Manager
-	quota          *quota.Limiter
-	mu             sync.Mutex
-	sessions       map[string]identity.Caller
-	servers        map[*mcp.ServerSession]bool
-	fileMu         sync.Mutex
-	closeOnce      sync.Once
-	views          map[string]*mcp.Server
-	viewMu         sync.Mutex
-	backendNames   map[*mcp.Server][]string
-	auditLog       atomic.Pointer[audit.Logger]
-	networkInfo    atomic.Pointer[NetworkInfo]
-	draining       atomic.Bool
-	backendChanged chan struct{}
-	stop           chan struct{}
-	done           chan struct{}
+	store *config.Store
+	PTY   *pty.Manager
+	// BudgetAuthority hosts the cross-host PTY admission lease for ingress nodes.
+	BudgetAuthority *pty.BudgetAuthority
+	Exec            *runexec.Manager
+	Callers         *identity.Registry
+	Backends        *backend.Manager
+	Leases          *lease.Manager
+	quota           *quota.Limiter
+	mu              sync.Mutex
+	sessions        map[string]identity.Caller
+	servers         map[*mcp.ServerSession]bool
+	fileMu          sync.Mutex
+	closeOnce       sync.Once
+	views           map[string]*mcp.Server
+	viewMu          sync.Mutex
+	backendNames    map[*mcp.Server][]string
+	auditLog        atomic.Pointer[audit.Logger]
+	networkInfo     atomic.Pointer[NetworkInfo]
+	draining        atomic.Bool
+	backendChanged  chan struct{}
+	stop            chan struct{}
+	done            chan struct{}
 }
 type NetworkInfo struct {
 	Mode string   `json:"mode"`
@@ -74,7 +76,7 @@ func New(store *config.Store) (*Agent, error) {
 		return nil, e
 	}
 	reg := identity.NewRegistry()
-	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
+	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
 	a.quota = quota.New(10000, 64, 10*time.Minute)
 	a.Backends = backend.New(c, a.Leases, a.upstream, func() {

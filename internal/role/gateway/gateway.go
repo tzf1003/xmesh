@@ -708,14 +708,14 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 	if dead {
 		return agent.Result(nil, toolerr.New("not_found", "设备连接已关闭", "name", deviceName)), nil
 	}
-	invoke := func(bridge *mcpmux.Bridge) (*mcp.CallToolResult, error) {
+	invoke := func(ctx context.Context, bridge *mcpmux.Bridge) (*mcp.CallToolResult, error) {
 		return bridge.Call(ctx, tool, args, mcpmux.Progress{Original: r.Params.GetProgressToken(), Send: r.Session.NotifyProgress})
 	}
 	var out *mcp.CallToolResult
 	if v.g.opts.Ingress && (tool == "pty.open" || tool == "pty.transfer") {
 		out, e = v.g.opts.PTYBudget.call(ctx, v, device.peer, tool, args, invoke)
 	} else {
-		out, e = invoke(d.bridge)
+		out, e = invoke(ctx, d.bridge)
 	}
 	if e != nil {
 		v.mu.Lock()

@@ -187,6 +187,8 @@ Agent 与 Gateway 的工具调用预算为每主体每小时 10000 次、并发 
 
 同一主机运行多个入口时，各入口可设置相同的 `ingress.pty_budget_file` 绝对路径，例如 `/var/lib/xmesh/ingress-pty.json`。使用独立的入口状态目录、相同的 `max_pty_per_client`、同一 OAuth client 身份域和支持文件锁的版本；预算目录须仅允许受信任的入口进程写入，并位于本地文件系统。运行期间保留该文件及相邻的 `.lock` 文件。升级多个入口时先全部停止，升级完成后再启动。等待预算锁可随请求取消；退出进程自动释放锁，预算记录继续参与恢复核对。
 
+多台主机各运行入口时，在每台入口的配置里设置相同的 `ingress.pty_budget_authority`，值为一台长期在线、所有入口都能连到的 Agent 的设备名（例如 `"pty_budget_authority": "home-server"`）。该 Agent 无需额外配置；入口须是 `tag:ingress` 并获得 `pty.open`/`pty.transfer` 授权。各入口仍须使用相同的 `max_pty_per_client` 和同一 OAuth client 身份域。权威 Agent 离线时所有入口的新增与转移返回 `quota.unavailable`；重启权威 Agent 前先确认没有结果不确定的终端调用，重启后约 30 秒内不会发放租约。续见 [CTR-GW-06](contracts/gateway.md#ctr-gw-06)。
+
 审计写入状态目录的 `audit`，默认保留 720 小时；记录工具、路径、状态、耗时等元数据。PTY 读操作按分钟汇总字节量，审计编码器限制可写字段。
 
 `/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使当前进程的 Agent 与 Gateway 进入 drain，控制器须向其他节点分别发送控制消息。重启重置内存 drain 状态。

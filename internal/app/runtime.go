@@ -265,6 +265,11 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if e != nil {
 			return e
 		}
+		if c.Ingress.PTYBudgetAuthority != "" {
+			if e = ptyBudget.UseAuthority(c.Ingress.PTYBudgetAuthority); e != nil {
+				return e
+			}
+		}
 		g := gateway.New(gateway.Options{NodeName: c.Node.Name, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
 		addGateway(g)
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {

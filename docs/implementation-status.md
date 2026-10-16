@@ -134,7 +134,7 @@ AppContainer helper 和存活后代用例已接入该追踪器，系统 console 
 
 | 项目 | 当前边界 |
 | --- | --- |
-| 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过，跨主机入口协调待实现 |
+| 入口 PTY 总预算 | 单入口跨设备及同机共享预算文件的多入口准入已实现；macOS、Ubuntu、Windows 原生多入口与文件锁通过；跨主机入口协调（`ingress.pty_budget_authority`）已实现并通过进程内两入口测试，真实多主机验收待执行 |
 | Windows L2 | 当前请求 L2 会拒绝执行；profile、启动属性、工作树继承授权与准确回收、凭证目录身份准入、按卷/ID 重开和跨进程 ACL 更新已验收；journal 存储、显式对象异常退出恢复及工作区持久快照/继承回收原语通过原生验收；私有状态目录绑定已通过原生验收；内部恢复调度、独立执行监督与持久退出回执原语已通过原生验收；完整新对象持久追踪、外部写入协调、生产执行协调器及 exec/ConPTY 接入继续实现 |
 | 原生 Windows | Server 2025 的 ConPTY、进程清理、文件、PowerShell 5.1/7、HTTP MCP 及本机模式 SCM 生命周期已验证；用户任务的登录触发、目标会话与生产服务设备网络待验收，其他 Windows 版本待验证 |
 | 三设备互联 | 官方 Tailscale 与 Headscale 的双主机及隔离沙箱、DERP 路由已验证；三台物理设备与真实 LAN 多播待验收 |
@@ -436,3 +436,13 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 退出码 66 调查（`e747cb8` 的 helper 失败）：66 是 Go race 检测器的默认退出码，数据竞争报告与运行时自身中止都返回 66。在 windows-latest 真实 AppContainer 中，含真实数据竞争的子进程容器外退出 66 并写出 `DATA RACE` 报告，容器内 3 次均退出 66 但只留下 `ThreadSanitizer: failed to restore address` 的内部中止；不含竞争的 race 构建子进程容器内 600 次中 1 次 66（`failed to allocate … error code: 487`，发生在测试代码运行之前），容器外 300 次均为 0；40 万次加锁与 256 MiB 分配各 10/10 通过；`Test_WindowsAppContainerWorkspaceDeletionRecovery` 在 race 构建下重复 25 次、两轮均通过。结论：存在两种与 `e747cb8` 一致的“66 且无可读原因”机制（race 运行时启动期固定地址映射失败，以及容器内真实竞争的报告路径被运行时中止吞掉），因 `e747cb8` 的失败日志未保留 TSan 输出，无法确定属于哪一种，也没有证据指向产品逻辑；产品二进制不使用 `-race`，只影响测试 helper。建议 helper 将 `GORACE=log_path=<相对名>` 写入已授权工作目录并在失败时输出，对“启动期映射失败”签名至多重试一次，其余 66 仍判失败（带盘符的绝对路径是非法 TSan 选项，会直接退出 66）。
 
 四个子任务（guard keeper、未知导入归并、内核写入围栏、exec/ConPTY 托管 runner）及 PTY 测试修复全部合入后，`c9957a6` 的 [push 工作流 38874155582](https://github.com/tzf1003/xmesh/actions/runs/38874155582) 与 [PR 工作流 38874161580](https://github.com/tzf1003/xmesh/actions/runs/38874161580) 的 macOS、Ubuntu、Windows 全量 race/vet/build 以及 windows-native 任务（含新并入的 `Test_WindowsManagedRunner` 步骤）全部通过，契约工作流 [38874155547](https://github.com/tzf1003/xmesh/actions/runs/38874155547) 通过；windows-native 用时约 8 至 9 分钟。这里记录的是任务结论，运行环境无法下载原生日志存储主机，逐项 PASS 标识计数仍待补。四条线的组合仍只在各自夹具内验证：生产启动路径未把 keeper、写入围栏、未知导入归并与 runner 接成一条链，`cmd/xmesh` 不安装 runner，Windows 生产 L2 保持 `sandbox.unavailable`。
+
+## 跨主机入口 PTY 总预算（权威 Agent 租约）
+
+此前总额只在同一主机的入口之间原子：入口把各 Agent 的快照相加，再在本机文件锁内准入，两台主机上的入口可能同时读到“还差一个”并各自创建，导致超发。现在新增可选配置 `ingress.pty_budget_authority`（一台 Agent 的设备名）。所有入口在每次 `pty.open`/`pty.transfer` 的查询、准入和调用期间持有该 Agent 托管的带围栏令牌互斥租约；总额仍由各 Agent 的实时快照得出，权威 Agent 不保存账本。
+
+实现：`internal/pty/authority.go` 为内存互斥租约与待完成记录（`acquire`、`mark`、`release`）；`internal/role/agent/budget.go` 以 `xmesh://control/pty-budget-authority{?q}` 资源模板暴露，只对 `tag:ingress`、带 OAuth client 且获 `pty.open`/`pty.transfer` 授权者开放，所有者由认证的节点身份加进程随机数组成，策略重载立即撤销；`internal/role/gateway/pty_budget*.go` 在本机 gate 之后、文件锁之前取得租约，调用上下文截止于租约到期前 5 秒，不依赖主机间时钟，不新增对云端可见的工具。失败语义：权威离线、不可达、10 秒取不到租约或响应无效返回 `policy_denied`/`quota.unavailable`；结果不确定的调用（含持有者崩溃、租约过期）在权威侧保留待完成记录，其他入口在同一目标 Agent epoch 上拒绝新增，直到该 Agent 重启；权威 Agent 重启后一个有效期（30 秒）内不发放租约，使上一进程的租约必然失效。契约见 [CTR-GW-06](contracts/gateway.md#ctr-gw-06)，配置见 [CTR-CFG-01](contracts/config.md)，运行说明见[运维手册](operations.md)。
+
+验证：`internal/pty` 的 6 个权威状态机用例（启动静默期、互斥与围栏令牌、待完成记录、已确认但未送达的释放、过期后晚到的释放、非法请求）；`internal/role/agent` 的授权与节点绑定用例；`internal/role/gateway` 的两个入口共享一个权威 Agent 的 5 个用例（16 个并发 open 在限额 3 下恰好准入 3 个；权威离线不创建终端；不确定调用跨入口生效且 Agent 重启后恢复；调用上下文受租约截止时间约束；未配置时保持原行为）。对照实验：临时关闭租约后同一并发用例多次出现超发（观察到准入 4 个，限额 3），带租约时 10 次 `-race` 运行通过。三平台 vet、`go test -race ./...`、契约夹具检查通过。
+
+边界：这是进程内模拟（多个入口网关与 Agent 在同一进程，传输为内存），没有证明真实多主机、真实 tailnet 或 LAN 网络下的延迟、分区与时钟漂移行为；租约的安全性只依赖各持有者本地单调计时快于或等于权威计时，不依赖主机间时钟一致，但依赖进程时钟速率大致准确。权威 Agent 是单点：它离线时全部入口拒绝新增终端；它的内存记录不持久，重启前须确认没有结果不确定的调用。同一入口配置多个 OAuth client 时，同一进程内仍由本机 gate 串行。真实验收需要至少两台入口主机，见[验收清单](validation/2026-10-16-acceptance-checklist.md)。

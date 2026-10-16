@@ -131,3 +131,27 @@ func TestIngressPTYBudgetFileConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressPTYBudgetAuthorityConfiguration(t *testing.T) {
+	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for authority, valid := range map[string]bool{"": true, "home-server": true, "a": true, "bad/name": false, "-x": false, "with space": false, "under_score": false} {
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if authority != "" {
+			doc["ingress"].(map[string]any)["pty_budget_authority"] = authority
+		}
+		data, _ := json.Marshal(doc)
+		cfg, err := Parse(data)
+		if valid && (err != nil || cfg.Ingress.PTYBudgetAuthority != authority) {
+			t.Fatal("valid authority rejected", authority, err)
+		}
+		if !valid && err == nil {
+			t.Fatal("invalid authority accepted", authority)
+		}
+	}
+}
