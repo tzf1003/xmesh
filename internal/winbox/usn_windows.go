@@ -49,7 +49,7 @@ func openWorkspaceChangeSource(anchor windows.Handle, volume uint64) (*workspace
 	if err != nil {
 		return nil, err
 	}
-	h, err := openChangeSourceHandle(ptr, path)
+	h, err := openChangeSourceHandle(ptr)
 	if err != nil {
 		return nil, err
 	}

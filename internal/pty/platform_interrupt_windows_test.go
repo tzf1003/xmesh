@@ -27,10 +27,12 @@ func Test_WindowsPTYInterruptForegroundPrograms(t *testing.T) {
 				windowsWrite(t, term, "ping -t 127.0.0.1")
 				output.until(t, `Pinging 127\.0\.0\.1`)
 				time.Sleep(500 * time.Millisecond)
+				interrupted := output.mark()
 				if err := term.Signal("INT"); err != nil {
 					t.Fatal(err)
 				}
 				output.until(t, `Ping statistics for 127\.0\.0\.1`)
+				output.untilAfter(t, interrupted, `PS [^\r\n]*>`)
 			case "python":
 				windowsWrite(t, term, `python -q -i -c "print('PY_'+'READY')"`)
 				output.until(t, `PY_READY`)
@@ -44,7 +46,9 @@ func Test_WindowsPTYInterruptForegroundPrograms(t *testing.T) {
 				output.until(t, `KeyboardInterrupt`)
 				windowsWrite(t, term, "print('PY_'+'ALIVE')")
 				output.until(t, `PY_ALIVE`)
+				exited := output.mark()
 				windowsWrite(t, term, "exit()")
+				output.untilAfter(t, exited, `PS [^\r\n]*>`)
 			}
 			windowsWrite(t, term, "Write-Output ('SHELL_'+'BACK')")
 			output.until(t, `SHELL_BACK`)
