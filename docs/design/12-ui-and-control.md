@@ -191,6 +191,7 @@ Linux 托盘不在本期范围。控制通道和 CLI 对 Linux 同样可用，�
 | U4 面板 | 本机面板服务、前端七个页面、首次运行向导 | U3，写页面依赖 U2 |
 | U5 平台集成与分发 | Windows：管道 DACL 原生测试、自启、安装包与签名。macOS：登录项、`.app`、签名与公证。`release.yml` 增加 UI 构建，输出到同一个 beta 预发布 | U3 |
 | U6 硬化 | L2 沙箱拒绝连接控制端点的验收、可访问性、高 DPI、英文资源、升级与回滚 | U2、U5 |
+| U7 到 U10 tailnet 管理 | UI 端管理主机 tag、权限划分与第三方 DERP，并为 DERP 提供商集成打基础。见 [13 tailnet 管理与 DERP 提供商路径](13-mesh-admin-and-derp.md) | U0 到 U3 |
 
 ### 并行子任务与文件归属
 

@@ -41,5 +41,6 @@ flowchart LR
 | U4 | 本机 web 面板与首次运行向导 |
 | U5 | Windows 与 macOS 的自启、签名、安装包，并入 beta 预发布 |
 | U6 | 沙箱隔离验收、可访问性、英文资源、升级回滚 |
+| U7 到 U10 | UI 端 tailnet 管理：主机 tag、权限划分、第三方 DERP 设置，以及 DERP 提供商集成的客户端基础。见 [13 tailnet 管理与 DERP 提供商路径](13-mesh-admin-and-derp.md) |
 
 U0、U1、U3 不依赖网络环境，可以与阶段 5 并行。方案、控制通道与拆分见 [12 桌面 UI 与本机控制通道](12-ui-and-control.md)。
