@@ -234,3 +234,103 @@ func TestWorkspaceChangeDeletionPlan(t *testing.T) {
 		})
 	}
 }
+
+func TestNTFSDeletionRecordProof(t *testing.T) {
+	buffer := make([]byte, 12+1024)
+	binary.LittleEndian.PutUint64(buffer, 77)
+	binary.LittleEndian.PutUint32(buffer[8:], 1024)
+	copy(buffer[12:], "FILE")
+	binary.LittleEndian.PutUint16(buffer[28:], 3)
+	binary.LittleEndian.PutUint16(buffer[34:], 1)
+	for _, test := range []struct {
+		name string
+		ref  uint64
+		gone bool
+	}{
+		{"live", 3<<48 | 77, false},
+		{"reused", 2<<48 | 77, true},
+		{"unoccupied", 3<<48 | 78, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gone, err := ntfsDeletionRecord(buffer, test.ref, 1024)
+			if err != nil || gone != test.gone {
+				t.Fatal("NTFS occupied-record proof", gone, err)
+			}
+		})
+	}
+	for _, name := range []string{"short", "geometry-small", "geometry-large", "geometry-unaligned", "length", "truncated", "tail", "magic", "zero-sequence", "unused", "future-slot", "sequence-conflict"} {
+		t.Run(name, func(t *testing.T) {
+			data := append([]byte(nil), buffer...)
+			size := uint32(1024)
+			switch name {
+			case "short":
+				data = data[:11]
+			case "geometry-small":
+				size = 256
+			case "geometry-large":
+				size = 131072
+			case "geometry-unaligned":
+				size = 1000
+			case "length":
+				binary.LittleEndian.PutUint32(data[8:], 512)
+			case "truncated":
+				data = data[:len(data)-1]
+			case "tail":
+				data = append(data, 0)
+			case "magic":
+				data[12] = 0
+			case "zero-sequence":
+				binary.LittleEndian.PutUint16(data[28:], 0)
+			case "unused":
+				binary.LittleEndian.PutUint16(data[34:], 0)
+			case "future-slot":
+				binary.LittleEndian.PutUint64(data, 79)
+			case "sequence-conflict":
+				binary.LittleEndian.PutUint64(data, 2<<48|77)
+			}
+			if _, err := ntfsDeletionRecord(data, 3<<48|78, size); err == nil {
+				t.Fatal("malformed deletion evidence accepted")
+			}
+		})
+	}
+}
+
+func TestNTFSDeletionGeometry(t *testing.T) {
+	good := make([]byte, 128)
+	binary.LittleEndian.PutUint64(good, 17)
+	binary.LittleEndian.PutUint32(good[48:], 1024)
+	binary.LittleEndian.PutUint32(good[96:], 32)
+	binary.LittleEndian.PutUint16(good[100:], 3)
+	binary.LittleEndian.PutUint16(good[102:], 1)
+	if size, err := ntfsDeletionGeometry(good, 17); err != nil || size != 1024 {
+		t.Fatal("NTFS deletion geometry", size, err)
+	}
+	for _, name := range []string{"short", "volume", "major", "minor", "small", "large", "unaligned", "extension-short", "extension-long"} {
+		t.Run(name, func(t *testing.T) {
+			b := append([]byte(nil), good...)
+			switch name {
+			case "short":
+				b = b[:103]
+			case "volume":
+				b[0]++
+			case "major":
+				binary.LittleEndian.PutUint16(b[100:], 4)
+			case "minor":
+				binary.LittleEndian.PutUint16(b[102:], 2)
+			case "small":
+				binary.LittleEndian.PutUint32(b[48:], 256)
+			case "large":
+				binary.LittleEndian.PutUint32(b[48:], 131072)
+			case "unaligned":
+				binary.LittleEndian.PutUint32(b[48:], 1000)
+			case "extension-short":
+				binary.LittleEndian.PutUint32(b[96:], 7)
+			case "extension-long":
+				binary.LittleEndian.PutUint32(b[96:], 33)
+			}
+			if _, err := ntfsDeletionGeometry(b, 17); err == nil {
+				t.Fatal("unsupported NTFS deletion geometry accepted")
+			}
+		})
+	}
+}

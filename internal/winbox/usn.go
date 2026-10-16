@@ -189,3 +189,43 @@ func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byt
 	}
 	return plan, nil
 }
+
+const ntfsReferenceOrdinalMask = uint64(0x0000ffffffffffff)
+
+// Microsoft's FILE_RECORD_SEGMENT_HEADER layout is defined for NTFS 3.0/3.1.
+// Geometry and the extended version header must both be present and bounded.
+func ntfsDeletionGeometry(buffer []byte, volume uint64) (uint32, error) {
+	if len(buffer) < 104 || binary.LittleEndian.Uint64(buffer) != volume {
+		return 0, fmt.Errorf("AppContainer NTFS deletion geometry binding mismatch")
+	}
+	extended := binary.LittleEndian.Uint32(buffer[96:])
+	size := binary.LittleEndian.Uint32(buffer[48:])
+	if extended < 8 || int(extended) > len(buffer)-96 || binary.LittleEndian.Uint16(buffer[100:]) != 3 || binary.LittleEndian.Uint16(buffer[102:]) > 1 || size < 512 || size > 65536 || size&(size-1) != 0 {
+		return 0, fmt.Errorf("AppContainer NTFS deletion geometry or version unsupported")
+	}
+	return size, nil
+}
+
+// FSCTL_GET_NTFS_FILE_RECORD returns the first occupied slot at or below the
+// requested ordinal. A lower slot proves that the requested slot is unused;
+// the same slot with another sequence belongs to another file lifetime. FILE
+// record header sequence/flags are at offsets 16/22, as defined by Microsoft's
+// FILE_RECORD_SEGMENT_HEADER documentation for NTFS 3.0/3.1.
+func ntfsDeletionRecord(buffer []byte, reference uint64, segmentSize uint32) (bool, error) {
+	if len(buffer) < 12 || segmentSize < 512 || segmentSize > 65536 || segmentSize&(segmentSize-1) != 0 {
+		return false, fmt.Errorf("invalid AppContainer NTFS deletion record")
+	}
+	returnedReference := binary.LittleEndian.Uint64(buffer)
+	size := binary.LittleEndian.Uint32(buffer[8:])
+	if size != segmentSize || int(size) != len(buffer)-12 {
+		return false, fmt.Errorf("invalid AppContainer NTFS deletion record boundary")
+	}
+	record := buffer[12:]
+	sequence := binary.LittleEndian.Uint16(record[16:])
+	ordinal := returnedReference & ntfsReferenceOrdinalMask
+	requested := reference & ntfsReferenceOrdinalMask
+	if string(record[:4]) != "FILE" || sequence == 0 || binary.LittleEndian.Uint16(record[22:])&1 == 0 || ordinal > requested || (returnedReference>>48 != 0 && uint16(returnedReference>>48) != sequence) {
+		return false, fmt.Errorf("invalid AppContainer occupied NTFS deletion record")
+	}
+	return ordinal < requested || sequence != uint16(reference>>48), nil
+}

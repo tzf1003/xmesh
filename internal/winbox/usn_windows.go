@@ -3,9 +3,7 @@ package winbox
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"runtime"
 	"strings"
 	"unsafe"
 
@@ -261,8 +259,8 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 	for _, deletion := range plan.Deleted {
 		deleted[deletion.Object] = true
 	}
-	// Final delete/close records and exact by-ID absence are independent proofs.
-	// Permission, sharing, pending-delete and other open failures retain an error.
+	// Final delete/close records and current occupied-slot/sequence enumeration
+	// are independent proofs. Query failures and live identities retain an error.
 	for object := range deleted {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -302,37 +300,51 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 }
 
 func confirmWorkspaceDeletion(volume windows.Handle, object journalObject) error {
-	anchor, err := inspectTreeObject(volume, "")
-	if err != nil || !anchor.directory || anchor.id.Volume != object.Volume || object.ID == [16]byte{} || [8]byte(object.ID[8:]) != [8]byte{} {
-		return fmt.Errorf("AppContainer deletion probe volume or NTFS reference mismatch: %v", err)
+	if object.ID == [16]byte{} || [8]byte(object.ID[8:]) != [8]byte{} {
+		return fmt.Errorf("AppContainer deletion probe requires a zero-extended NTFS reference")
 	}
-	var filesystem [64]uint16
-	if err := windows.GetVolumeInformationByHandle(volume, nil, 0, nil, nil, nil, &filesystem[0], uint32(len(filesystem))); err != nil {
+	source, err := openWorkspaceChangeSource(volume, object.Volume)
+	if err != nil {
 		return err
 	}
-	if windows.UTF16ToString(filesystem[:]) != "NTFS" {
-		return fmt.Errorf("AppContainer deletion proof requires an NTFS reference")
+	defer source.Close()
+	// NTFS_VOLUME_DATA_BUFFER supplies BytesPerFileRecordSegment at offset 48.
+	var data [16]uint64
+	var returned uint32
+	err = windows.DeviceIoControl(source.handle, windows.FSCTL_GET_NTFS_VOLUME_DATA, nil, 0,
+		(*byte)(unsafe.Pointer(&data[0])), uint32(unsafe.Sizeof(data)), &returned, nil)
+	if err != nil {
+		return fmt.Errorf("query AppContainer NTFS record geometry: %w", err)
 	}
-	// NTFS's 128-bit file reference is its 64-bit reference padded with zeros.
-	// Use the 8-byte reference form for absence probing: the extended-ID open
-	// can return INVALID_PARAMETER for deleted references, which proves no absence.
-	name := windows.NTUnicodeString{Length: 8, MaximumLength: 8, Buffer: (*uint16)(unsafe.Pointer(&object.ID[0]))}
-	attributes := windows.OBJECT_ATTRIBUTES{
-		Length: uint32(unsafe.Sizeof(windows.OBJECT_ATTRIBUTES{})), RootDirectory: volume,
-		ObjectName: &name, Attributes: windows.OBJ_DONT_REPARSE,
+	if returned > uint32(unsafe.Sizeof(data)) {
+		return fmt.Errorf("AppContainer NTFS record geometry binding mismatch")
 	}
-	var h windows.Handle
-	var status windows.IO_STATUS_BLOCK
-	err = windows.NtCreateFile(&h, windows.FILE_READ_ATTRIBUTES, &attributes, &status, nil, 0,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, windows.FILE_OPEN,
-		windows.FILE_OPEN_BY_FILE_ID|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_OPEN_FOR_BACKUP_INTENT, 0, 0)
-	runtime.KeepAlive(object)
-	if err == nil {
-		windows.CloseHandle(h)
+	geometry := unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), int(returned))
+	size, err := ntfsDeletionGeometry(geometry, object.Volume)
+	if err != nil {
+		return err
+	}
+	reference := binary.LittleEndian.Uint64(object.ID[:8])
+	// GET_NTFS_FILE_RECORD enumerates occupied slots downwards. Request the
+	// ordinal; compare its returned slot and record sequence with the full ID.
+	ordinal := reference & ntfsReferenceOrdinalMask
+	storage := make([]uint64, (12+int(size)+7)/8)
+	defer clear(storage) // File-record payloads are transient and never recorded.
+	buffer := unsafe.Slice((*byte)(unsafe.Pointer(&storage[0])), len(storage)*8)
+	err = windows.DeviceIoControl(source.handle, 0x00090068, (*byte)(unsafe.Pointer(&ordinal)), 8,
+		&buffer[0], uint32(len(buffer)), &returned, nil)
+	if err != nil {
+		return fmt.Errorf("query AppContainer NTFS deletion record: %w", err)
+	}
+	if returned > uint32(len(buffer)) {
+		return fmt.Errorf("AppContainer NTFS deletion record length")
+	}
+	absent, err := ntfsDeletionRecord(buffer[:returned], reference, size)
+	if err != nil {
+		return err
+	}
+	if !absent {
 		return fmt.Errorf("AppContainer deletion receipt still has a live identity")
-	}
-	if !errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) && !errors.Is(err, windows.STATUS_FILE_DELETED) {
-		return fmt.Errorf("AppContainer deletion identity absence unconfirmed: %w", err)
 	}
 	return nil
 }
