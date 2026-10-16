@@ -428,13 +428,16 @@ func Test_WindowsManagedRunnerTerminalKill(t *testing.T) {
 	o.until(`\r\nREADY`)
 	// A descendant that would outlive the shell keeps running until the
 	// execution is reclaimed.
-	o.call("pty.write", map[string]any{"session_id": o.session, "data": "start /b helper.exe -test.run=Test_WindowsManagedRunnerHelper -- --xmesh-runner-helper tree-exit " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
+	o.call("pty.write", map[string]any{"session_id": o.session, "data": "helper.exe -test.run=Test_WindowsManagedRunnerHelper -- --xmesh-runner-helper tree-timeout " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
 	for deadline := time.Now().Add(60 * time.Second); ; time.Sleep(100 * time.Millisecond) {
 		if body, err := os.ReadFile(filepath.Join(f.root, "terminal-pids.txt")); err == nil && len(strings.Fields(string(body))) == 2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("descendant did not start")
+			if result := o.call("pty.read", map[string]any{"session_id": o.session, "cursor": o.cursor, "wait_ms": 500}); result != nil {
+				o.text.WriteString(result["data"].(string))
+			}
+			t.Fatalf("descendant did not start; terminal output: %q", o.text.String())
 		}
 	}
 	o.call("pty.signal", map[string]any{"session_id": o.session, "signal": "KILL"})
