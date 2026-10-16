@@ -171,6 +171,21 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	if err != nil || string(proof) != "SCM runtime proof" {
 		t.Fatal("SCM file side effect", string(proof), err)
 	}
+	// The kernel runs as SYSTEM: its state directory must be private to SYSTEM and
+	// Administrators, not whatever the parent directory grants.
+	stateSD, err := windows.GetNamedSecurityInfo(stateDir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal("SCM state directory security", err)
+	}
+	stateACL := stateSD.String()
+	if !strings.HasPrefix(stateACL, "D:P") || !strings.Contains(stateACL, ";;;SY)") || !strings.Contains(stateACL, ";;;BA)") {
+		t.Fatal("SCM state directory is not protected for SYSTEM and Administrators", stateACL)
+	}
+	for _, broad := range []string{";;;WD)", ";;;BU)", ";;;AU)", ";;;IU)", ";;;CO)"} {
+		if strings.Contains(stateACL, broad) {
+			t.Fatal("SCM state directory grants a broad group", broad, stateACL)
+		}
+	}
 	read := scmTool(t, ctx, client, "fs.read", map[string]any{"path": "service-proof.txt"})
 	content, _ := read["content"].(string)
 	if !strings.Contains(content, "SCM runtime proof") {
