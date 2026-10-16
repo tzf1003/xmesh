@@ -33,9 +33,23 @@ func (p *Profile) grantWorkspace(ctx context.Context, path string, maxObjects in
 	if p.journal != nil && maxObjects > 10000 {
 		return nil, fmt.Errorf("AppContainer journaled workspace object limit exceeds 10000")
 	}
+	bound, err := openWorkspaceRoot(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer bound.Close()
+	writers, err := acquireNamespaceWriters(ctx, bound)
+	if err != nil {
+		return nil, err
+	}
+	defer writers.Close()
 	tree, err := openWorkspaceTree(ctx, path, maxObjects)
 	if err != nil {
 		return nil, err
+	}
+	if tree.objects[0].id != bound.objects[0].id {
+		tree.Close()
+		return nil, fmt.Errorf("AppContainer workspace admission identity changed")
 	}
 	if err := checkJournalBoundary(p.journal, tree); err != nil {
 		tree.Close()
@@ -250,6 +264,9 @@ func (g *workspaceGrant) Close() error {
 	return nil
 }
 
+// acquire orders the operation gate and volume namespace lease before callers
+// take profile.mu. The release must run in the acquiring goroutine. Same-volume
+// imports use this lease through census, rename, ACL admission and checkpoint.
 func (g *workspaceGrant) acquire(ctx context.Context) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -263,7 +280,15 @@ func (g *workspaceGrant) acquire(ctx context.Context) (func(), error) {
 			<-g.operation
 			return nil, err
 		}
-		return func() { <-g.operation }, nil
+		if g.tree == nil {
+			return func() { <-g.operation }, nil
+		}
+		writers, err := acquireNamespaceWriters(ctx, g.tree)
+		if err != nil {
+			<-g.operation
+			return nil, err
+		}
+		return func() { _ = writers.Close(); <-g.operation }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

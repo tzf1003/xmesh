@@ -293,3 +293,6 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 受协调导入先调用内部 `admitImport`，完整扫描同卷源目录子树或单文件，核对 namespace/journal/凭证边界并刷盘 `workspace-import`；成功后由可信协调器执行移动与授权。协调器须从扫描前冻结所有源 namespace/reparse/ACL writer 并保持到移动结束，以及保持工作区外部 writer guard。已持久准入的源及其后代在移动取消、再次移出或宿主退出后仍按卷/ID 保留回收义务。原语不修改命名空间或权限。完整导入证明包含源根、全部身份和准确 USN 游标，恢复清单独立复制；重叠身份只计一次，累计限额含导入和删除对象。未知的未经协调导入继续保留错误。新记录需本版本或更新恢复二进制；生产协调事务、writer 生命周期与 exec/ConPTY 接入完成前，Windows L2 继续按实现状态文档保持门禁。
 
 内部 `moveImport` 组合完整源清单、目标父身份绑定、同卷句柄移动和逐对象访问授权。调用方从进入前到返回后持续冻结源和目标 namespace/reparse/ACL writer，并保留工作区外部 writer guard。目标必须是实际工作区内已追踪目录的空闲名称；现有目标保留。返回的 moved 标志反映实际移动；移动后的错误封闭执行并终止受管 Job，清单保留回收义务，ACL 回收保留 namespace 移动。生产外部 writer 生命周期与 exec/ConPTY 接入仍待完成。
+
+
+内部 Windows 工作区操作以卷序列号协调参与协议的 namespace writer。`grantWorkspace` 在完整扫描前取得 Global mutex；活动对象的顺序固定为 operation gate、卷级 mutex、profile mutex，覆盖导入、监视 checkpoint 和回收。同一 goroutine 在操作结束释放 mutex；等待可取消且最长 30 秒。持锁进程退出会返回错误，须完成原有 journal/对象身份恢复条件再继续。该协议只约束参与的操作，部署仍须冻结其他 namespace/reparse/ACL writer，并在进程退出及完整 ACL 回收前保留外部 guard；生产 Windows L2 继续返回 `sandbox.unavailable`。跨用户或服务 session 的 mutex 访问权限仍须在目标环境验收。
