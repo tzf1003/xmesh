@@ -124,6 +124,7 @@ func Discover() ([]Endpoint, error) {
 		return nil, userErr
 	}
 	out := []Endpoint{}
+	seen := map[string]bool{}
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
 		if err != nil {
@@ -136,7 +137,12 @@ func Discover() ([]Endpoint, error) {
 			if !ent.IsDir() {
 				continue
 			}
-			if e, err := ReadEndpoint(filepath.Join(root, ent.Name())); err == nil {
+			dir := filepath.Join(root, ent.Name())
+			if seen[strings.ToLower(dir)] {
+				continue // the same directory reached through two roots
+			}
+			seen[strings.ToLower(dir)] = true
+			if e, err := ReadEndpoint(dir); err == nil {
 				out = append(out, e)
 			}
 		}
