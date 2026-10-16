@@ -25,6 +25,9 @@ func (s spec) validate(raw json.RawMessage) error {
 	return nil
 }
 
+// ignoredArguments are accepted and then ignored on every built-in tool.
+var ignoredArguments = []string{"caller_id", "owner", "node_id", "cwd", "env"}
+
 var builtinSpecs = sync.OnceValue(buildSpecs)
 
 func buildSpecs() map[string]spec {
@@ -55,12 +58,30 @@ func buildSpecs() map[string]spec {
 		for _, k := range strings.Fields(d[2]) {
 			properties[k] = props[k]
 		}
-		schema := map[string]any{"type": "object", "properties": properties}
+		// Unknown arguments are rejected rather than silently dropped, so a typo in an
+		// optional parameter surfaces as invalid_args instead of a changed meaning.
+		schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
 		if d[1] != "" {
 			schema["required"] = strings.Fields(d[1])
 		}
+		// Validation also tolerates keys that are deliberately ignored without being
+		// advertised: forged identity fields (CTR-ID-01 says they are ignored, never
+		// trusted) and the session defaults a Gateway adds to every forwarded call.
+		accepted := map[string]any{}
+		for k, v := range properties {
+			accepted[k] = v
+		}
+		for _, k := range ignoredArguments {
+			if _, declared := accepted[k]; !declared {
+				accepted[k] = map[string]any{}
+			}
+		}
+		validation := map[string]any{"type": "object", "properties": accepted, "additionalProperties": false}
+		if d[1] != "" {
+			validation["required"] = strings.Fields(d[1])
+		}
 		compiler := jsonschema.NewCompiler()
-		b, _ := json.Marshal(schema)
+		b, _ := json.Marshal(validation)
 		var normalized any
 		_ = json.Unmarshal(b, &normalized)
 		if e := compiler.AddResource("urn:xmesh:"+name, normalized); e != nil {

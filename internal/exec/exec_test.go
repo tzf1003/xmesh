@@ -173,6 +173,50 @@ func Test_RUL01_Saturation(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+func Test_RUL01_EarlySaturation(t *testing.T) {
+	s := newScheduler(1, 1)
+	holder, cancelHolder := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelHolder()
+	release, _, e := s.acquire(holder, "a", "shared")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer release()
+	// The running call may hold the slot for 5s; a 300ms waiter cannot reach the front.
+	short, cancelShort := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancelShort()
+	started := time.Now()
+	_, _, e = s.acquire(short, "b", "shared")
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatal("waited instead of returning early", elapsed)
+	}
+	failure, ok := e.(*toolerr.Error)
+	if !ok || failure.Code != "exec_saturated" || failure.Fields["queue_position"] != 1 || failure.Fields["retry_after_ms"].(int64) < 1000 {
+		t.Fatal(e)
+	}
+	s.mu.Lock()
+	queued := len(s.queue)
+	s.mu.Unlock()
+	if queued != 0 {
+		t.Fatal("early return left the waiter queued")
+	}
+	// A waiter whose deadline outlasts the running call keeps waiting and is served.
+	long, cancelLong := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelLong()
+	granted := make(chan error, 1)
+	go func() {
+		release, _, e := s.acquire(long, "c", "shared")
+		if e == nil {
+			release()
+		}
+		granted <- e
+	}()
+	time.Sleep(50 * time.Millisecond)
+	release()
+	if e := <-granted; e != nil {
+		t.Fatal(e)
+	}
+}
 func Test_EnvironmentIsMinimal(t *testing.T) {
 	m, r, p := fixture(t)
 	t.Setenv("XMESH_INTERNAL_TEST", "private")
