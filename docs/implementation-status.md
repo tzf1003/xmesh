@@ -469,12 +469,20 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 - **跨主机入口 PTY 预算测试稳定性（#18）**：权威租约测试使用 4 秒租约，消除 1 秒租约在高负载 Windows runner 上的偶发失败，并避免该失败连带跳过 `windows-native` 后续步骤；生产有效期（30 秒，余量 5 秒）不变。
 - **网关、mcpmux 与 drain（T4，#9）**：网关三个工具发布真实 JSON schema；会话默认 `cwd`/`env` 只注入声明了这些参数的内置工具；网关为已获取的 lease 做心跳续约；未知进度令牌写入 `progress_unrouted` 审计事件；审计 `caller` 为 `<节点>/<会话>` 并记录 `oauth_session`；`gateway.expose_backends` 变化报告 `restart_required`；新增 `xmesh drain --scope device|mesh --mode keep|kill`；在线 Agent 返回的协议错误不再把设备标记为断开。真实 tailnet 与 LAN 下的 `drain --scope mesh` 待真实环境验收。
 - **发布流水线与验收步骤（T11，#20）**：推送 `v*-beta*` 标签生成预发布，带六个二进制与 `SHA256SUMS`，归档包含验收脚本；真实环境验收按[验收步骤](validation/real-environment-runbook.md)逐步执行。
-- **桌面 UI（阶段 6）**：本机控制通道契约 v1（#14）、Electron 托盘壳与 Control API 客户端（#17）、electron-builder 的 Windows/macOS 打包（#21）已合入；内核本机控制通道（#16）、meshadmin 库与 `xmesh mesh` CLI（#15）、平台集成（#19）仍为草稿。
+- **Windows 生产 L2 接入（T1，#7）**：`agent.policy.windows_appcontainer`（默认关闭，改动需重启）打开后，Windows 节点启动时用「keeper 加内核写入围栏」的生产协调器构建 AppContainer runner，并执行启动恢复（keeper 仍在则接管；没有 keeper 时先用新的内核围栏冻结工作区再回收）；runner 无法启动或恢复时 L2 保持失败关闭并在 `sys.info.warnings` 留下说明。runner 的启动与清理失败映射为 `policy_denied`（规则 `sandbox.runner_failed`、`sandbox.cleanup_pending`），原因写入节点日志。stdio 后端的 L2 仍然失败关闭；服务停止时为 runner 清理额外等待最多 2 分钟。五个 `Test_WindowsL2Serve*` 原生用例驱动真实二进制验证（exec、PTY、宿主崩溃恢复、无 keeper 恢复、不可恢复 journal 保持失败关闭），合并前在 `windows-native` 通过。该开关仍是实验性的：四项安全条件在代码层面已具备，但默认值保持关闭，普通账号下的真实验收仍欠。
+- **winbox 小项（T3，#4）**：非管理员账号读取 NTFS 变更日志时返回 `ErrChangeJournalAccess` 并拒绝，给出明确原因；helper 退出码 66 遇到启动期映射失败时至多重试一次；补全 Ctrl-C 兼容矩阵（cmd、PowerShell、pwsh 与循环、休眠进程）。
+- **Windows 状态目录 ACL（#24）**：`serve`、审计目录与 `pair` 通过 `privdir.Ensure` 创建状态目录：新建目录带受保护的 DACL（关闭继承），只授予运行用户、`SYSTEM`、`Administrators` 完全控制并带对象/容器继承；已有目录按句柄检查，拒绝符号链接或联接、普通文件和属主不是运行用户、`SYSTEM`、`Administrators` 的目录，必要时重写 DACL 并扫描整棵树，遇到链接或外来属主条目失败关闭。局限：无法撤销目录曾经开放期间已经发生的读取，之前开放过的目录里的密钥应视为已暴露（见 `operations.md`「状态目录权限」）。`Test_WindowsSystemServiceRuntime` 同时断言 SYSTEM 服务的状态目录 DACL 受保护。`install --system` 下登录用户读不了状态目录，因此 `privdir.GrantRead` 只对 `control.json` 这一个文件追加只读授权（#16 在每次写入时对 `--control-allow-sid` 的账户调用）。
+- **桌面 UI（阶段 6）**：本机控制通道契约 v1（#14）、Electron 托盘壳与 Control API 客户端（#17）、electron-builder 的 Windows/macOS 打包（#21）、Windows/macOS 平台集成（#19，Windows 上除用户配置目录外还读取 `%ProgramData%\xmesh\*\control.json` 以发现系统服务内核，契约文档已同步）、内核本机控制通道（#16，UDS 与命名管道，SSE 事件、审计视图、drain/resume、整文件配置读写）、meshadmin 库与 `xmesh mesh` CLI（#15，含内部 DERP 准入服务）、面板八页与首次向导（#25）、tailnet 管理页面（#28）均已合入。UI 侧已知缺口：只支持 `default` 凭据档案、不传 `--credential-file`；tailnet 管理只在 Headscale 上做过集成测试，Tailscale 仅有按官方客户端请求形状写的夹具测试；内核缺少关闭终端的接口，面板只能列出孤儿终端；`xmesh control` 子命令尚未覆盖 pair、PAT、ingress 路由，这三类路由由 #27（草稿）补齐，在它合入前面板上对应页面按 `not_implemented` 显示「不支持」。
+- **仓库卫生**：#16 把一个 50 MB 的 `xmesh` 二进制带进了 master 历史；#7 的 squash 合并把它从树中删除，并在 `.gitignore` 加入 `/xmesh` 与 `/xmesh.exe`，历史中的 blob 无法撤回。
 
 ### 新增待办
 
 | 项目 | 说明 |
 | --- | --- |
-| Windows 状态目录 ACL | 状态目录目前只用 `os.MkdirAll(0700)` 创建，Windows 上不设 ACL，完全依赖父目录继承；在 `C:\` 根下新建目录时，其他本地用户可读写。应显式设置仅当前用户、SYSTEM、Administrators 可访问（T11 发现），作为下一轮独立闭环修复。 |
-| 普通账号不能使用 Windows L2 | 非管理员账号无法读取 NTFS 变更日志，应被拒绝并给出明确原因（T3，#4，待合并）；真实验收中普通账号步骤应预期该拒绝，而不是成功。 |
-| Windows 代码签名与 Apple 开发者证书 | 桌面 UI 正式发布前需要。 |
+| 状态目录 ACL 真实验收 | 代码已合入（#24）；需要在真实普通账号上验证 `install --system` 之后登录用户的 UI 能读取 `%ProgramData%\xmesh\<节点>\control.json`，而状态目录其余内容不可读。#16 写入 `control.json` 时的只读授权由 #16 实现，真机行为仍待验证。 |
+| 普通账号使用 Windows L2 | 非管理员账号读不了变更日志，已被明确拒绝（T3，#4）；真实验收中普通账号步骤应预期该拒绝，而不是成功。 |
+| winbox 偶发原生测试 | `internal/winbox` 里 `Test_WindowsAppContainerWorkspaceChangeMonitor/delayed-delete`（沙箱就绪 20 秒超时）与 `Test_WindowsAppContainerTreeExternalWriters/junction`（monitor fault cause 比对）在高负载 runner 上各偶发失败过一次，master 上通过，重跑即过；T9 顺手加固。 |
+| T9、T10 | L2 联合原生验证，以及准入成本与大工作区，在 #7 与 #4 合入后启动。 |
+| 控制通道 pair、PAT、ingress 路由 | #27（草稿）。 |
+| beta 标签 | 会话代理拒绝推送 git 标签，需要用户在 GitHub 上创建 `v0.1.0-beta.1` 预发布；`release.yml` 加入 UI 打包的前提是用户在对应线程确认。 |
+| Windows 代码签名与 Apple 开发者证书 | 桌面 UI 正式发布前需要；在此之前 beta 为未签名构建。 |
