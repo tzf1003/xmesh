@@ -14,11 +14,13 @@ def main():
     parser.add_argument("--gateway", default="127.0.0.1:8080")
     parser.add_argument("--device", required=True)
     parser.add_argument("--expected-os", required=True, choices=["darwin", "linux", "windows"])
+    parser.add_argument("--expected-mode", default="tailnet", choices=["tailnet", "lan"],
+                        help="network.mode the peer reports; lan for peers paired with `xmesh pair`")
     options = parser.parse_args()
-    print(json.dumps(verify_peer(options.gateway, options.device, options.expected_os)))
+    print(json.dumps(verify_peer(options.gateway, options.device, options.expected_os, options.expected_mode)))
 
 
-def verify_peer(gateway, device, expected_os):
+def verify_peer(gateway, device, expected_os, expected_mode="tailnet"):
     assert gateway.startswith("127.0.0.1:"), "Gateway must use loopback"
     assert device != "local", "Choose the peer node name"
     client = MCP(gateway)
@@ -45,7 +47,7 @@ def verify_peer(gateway, device, expected_os):
             assert (result.get("structuredContent") or {}).get("error") == "not_found" and time.monotonic() < deadline, result
             time.sleep(0.5)
         assert peer["hostname"] == device and peer["os"] == expected_os, peer
-        assert peer["network"]["mode"] == "tailnet", peer["network"]
+        assert peer["network"]["mode"] == expected_mode, peer["network"]
         assert not call("fs.stat", {"path": filename})["exists"]
         call("fs.write", {"path": filename, "content": "XMESH_PEER_FILE"})
         created = True
