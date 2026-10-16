@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// conformance: CON-ARCH-09 the control channel answers over a local socket or pipe only
+// Rule CON-ARCH-09 (its matrix entry arrives with the control contract): the control channel answers over a local socket or pipe only
 func Test_ControlStatus(t *testing.T) {
 	f := newFixture(t)
 	r := f.do("GET", "/v1/status", nil, nil)

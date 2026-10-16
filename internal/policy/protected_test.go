@@ -12,7 +12,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
-// conformance: CON-SEC-12 an L2 workspace may not expose the control channel's socket
+// Rule CON-SEC-12 (its matrix entry arrives with the control contract): an L2 workspace may not expose the control channel's socket
 func Test_CONSEC12_L2WorkspaceMustNotContainControlSocket(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

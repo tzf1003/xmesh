@@ -122,7 +122,7 @@ func call(t *testing.T, s *mcp.ClientSession, name string, args any) (map[string
 	return v, o.IsError
 }
 
-// conformance: CON-ARCH-09 the channel is not on TCP, not behind the Gateway, and not an MCP tool
+// Rule CON-ARCH-09 (its matrix entry arrives with the control contract): the channel is not on TCP, not behind the Gateway, and not an MCP tool
 func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 	n := startNode(t)
 	ep, err := control.ReadEndpoint(n.stateDir)

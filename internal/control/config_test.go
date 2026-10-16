@@ -194,7 +194,7 @@ func Test_ControlConfigFileEditAnnounced(t *testing.T) {
 	}
 }
 
-// conformance: CON-SEC-12 changes made through the channel are audited with actor=control, metadata only
+// Rule CON-SEC-12 (its matrix entry arrives with the control contract): changes made through the channel are audited with actor=control, metadata only
 func Test_CONSEC12_ConfigChangeAuditedAsControl(t *testing.T) {
 	var log *audit.Logger
 	f := newFixture(t, func(o *Options) {
