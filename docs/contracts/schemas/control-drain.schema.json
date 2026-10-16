@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-drain:1",
+  "title": "ControlDrain",
+  "description": "CTR-CTL-06。POST /v1/drain 与 POST /v1/resume。drain 状态只在内存，内核重启后复位。",
+  "$defs": {
+    "DrainState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["draining", "mode", "since"],
+      "properties": {
+        "draining": { "type": "boolean" },
+        "mode": {
+          "oneOf": [
+            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/DrainMode" },
+            { "type": "null" }
+          ],
+          "description": "draining 为 false 时是 null。"
+        },
+        "since": {
+          "oneOf": [
+            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+            { "type": "null" }
+          ],
+          "description": "进入当前 drain 的时间。keep 升级为 kill 时不重置。draining 为 false 时是 null。"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "draining": { "const": true } }, "required": ["draining"] },
+          "then": { "properties": { "mode": { "type": "string" }, "since": { "type": "string" } } },
+          "else": { "properties": { "mode": { "type": "null" }, "since": { "type": "null" } } }
+        }
+      ]
+    },
+    "DrainRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/DrainMode",
+          "default": "keep"
+        }
+      }
+    },
+    "DrainResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drain", "closed_pty", "released_leases"],
+      "properties": {
+        "drain": { "$ref": "#/$defs/DrainState" },
+        "closed_pty": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "这次请求新终止的 PTY 数。keep 与 resume 恒为 0。"
+        },
+        "released_leases": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "这次请求新释放的租约数。keep 与 resume 恒为 0。"
+        }
+      }
+    }
+  }
+}

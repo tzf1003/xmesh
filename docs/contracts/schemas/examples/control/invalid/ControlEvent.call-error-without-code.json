@@ -1,0 +1,15 @@
+{
+  "id": "9f3c21aa.62",
+  "seq": 62,
+  "time": "2026-10-16T15:30:00.123Z",
+  "type": "call",
+  "data": {
+    "tool": "exec.run",
+    "device": "win-dev-01",
+    "caller": "a/b",
+    "oauth_client": null,
+    "status": "error",
+    "error": null,
+    "duration_ms": 1
+  }
+}

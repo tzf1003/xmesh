@@ -14,6 +14,7 @@ import (
 )
 
 // This opt-in test takes exclusive ownership of the supplied node state.
+// conformance: CON-NET-02 CON-NET-03 CON-NET-05 CON-NET-07 CON-ARCH-08
 func Test_TailnetPeerConnectivity(t *testing.T) {
 	path, state, target := os.Getenv("XMESH_TEST_TAILNET_CONFIG"), os.Getenv("XMESH_TEST_TAILNET_STATE"), os.Getenv("XMESH_TEST_TAILNET_PEER")
 	if path == "" || state == "" || target == "" {
@@ -93,16 +94,48 @@ func Test_TailnetPeerConnectivity(t *testing.T) {
 		if os.Getenv("XMESH_TEST_TAILNET_REQUIRE_DERP") == "1" && (ping.Endpoint != "" || ping.DERPRegionID == 0) {
 			t.Fatal("expected a DERP route")
 		}
-		request, err := http.NewRequestWithContext(ctx, "GET", peer.Address, nil)
-		if err != nil {
-			t.Fatal(err)
+		// A node that has just joined can have its first TCP dial swallowed until the peer has the
+		// new WireGuard key, so dial again with a short per-attempt deadline instead of waiting
+		// the whole test deadline on one connection.
+		var response *http.Response
+		for attempt := 1; ; attempt++ {
+			attemptCtx, stop := context.WithTimeout(ctx, 8*time.Second)
+			request, err := http.NewRequestWithContext(attemptCtx, "GET", peer.Address, nil)
+			if err != nil {
+				stop()
+				t.Fatal(err)
+			}
+			response, err = network.HTTPClient(peer).Do(request)
+			if err == nil {
+				io.Copy(io.Discard, response.Body)
+				response.Body.Close()
+				stop()
+				break
+			}
+			stop()
+			t.Logf("Agent request attempt %d: %v", attempt, err)
+			if attempt >= 2 && ctx.Err() == nil {
+				// Evidence for a stalled dial: the WireGuard layer (TSMP) and the peer's counters.
+				pingCtx, stopPing := context.WithTimeout(ctx, 5*time.Second)
+				tsmp, perr := lc.Ping(pingCtx, ip, tailcfg.PingTSMP)
+				stopPing()
+				if perr != nil {
+					t.Logf("TSMP ping error: %v", perr)
+				} else {
+					t.Logf("TSMP ping err=%q endpoint=%s latency=%fs", tsmp.Err, tsmp.Endpoint, tsmp.LatencySeconds)
+				}
+				if st, serr := lc.Status(ctx); serr == nil {
+					for _, p := range st.Peer {
+						if len(p.TailscaleIPs) > 0 && p.TailscaleIPs[0] == ip {
+							t.Logf("peer status: online=%t active=%t curaddr=%q relay=%q handshake=%s rx=%d tx=%d inNetworkMap=%t", p.Online, p.Active, p.CurAddr, p.Relay, p.LastHandshake, p.RxBytes, p.TxBytes, p.InNetworkMap)
+						}
+					}
+				}
+			}
+			if ctx.Err() != nil {
+				t.Fatal(err)
+			}
 		}
-		response, err := network.HTTPClient(peer).Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.Copy(io.Discard, response.Body)
-		response.Body.Close()
 		// GET without an initialized MCP session is rejected by the live Agent.
 		if response.StatusCode != http.StatusBadRequest && response.StatusCode != http.StatusMethodNotAllowed {
 			t.Fatalf("Agent response: %d", response.StatusCode)

@@ -12,8 +12,7 @@ xmesh/
 ├── internal/
 │   ├── role/
 │   │   ├── agent/        # MCP server：内置工具 + 后端挂载，监听 tailnet
-│   │   ├── gateway/      # 本机 localhost:8080/mcp，聚合 local/* 与 <peer>/*
-│   │   └── ingress/      # 公网或 Funnel 监听 + OAuth 授权服务器 + 前缀换名
+│   │   └── gateway/      # 本机 localhost:8080/mcp，聚合 local/* 与 <peer>/*；Options.Ingress 时作为公网入口（前缀换名、PTY 总预算）
 │   ├── mesh/             # tsnet 封装、WhoIs、tag → 权限；lan 的 mDNS + mTLS 配对
 │   ├── mcpmux/           # id / progressToken 重映射、前缀、list_changed 聚合
 │   ├── backend/          # stdio/http 后端生命周期、actor 串行、policy
@@ -23,6 +22,7 @@ xmesh/
 │   ├── pty/              # Manager、ring buffer；pty_unix.go / pty_windows.go
 │   ├── fs/               # read/write/edit/glob/grep/list/stat
 │   ├── oauth/            # OAuth 2.1 + 动态注册 + PKCE，仅 ingress 使用
+│   ├── app/              # 按 roles 装配 agent / gateway / ingress：监听、网络、优雅关闭（runtime.go）
 │   ├── policy/           # 命令策略、自动拦截规则、热加载
 │   └── audit/
 ├── api/xmesh/v1/         # 内部 RPC。仅当 MCP 不够表达控制通道时使用
@@ -111,7 +111,7 @@ type Lease struct {
 
 | 平台 | PTY | 常驻 | 默认 shell | 注意 |
 | --- | --- | --- | --- | --- |
-| Windows | ConPTY，build tag `windows` | Windows Service | `pwsh` | 不用 cmd。WSL 作为独立设备注册 |
+| Windows | ConPTY，build tag `windows` | 当前用户登录计划任务（默认）；`install --system` 为 Windows Service | `pwsh` | 不用 cmd。WSL 作为独立设备注册 |
 | macOS | `forkpty` | launchd LaunchAgent（需用户会话时） | `$SHELL` | GUI 类后端（IDA）需用户级服务 |
 | Linux | `forkpty` | systemd user service | `$SHELL` | 沙箱用 bwrap / nsjail |
 
@@ -122,8 +122,9 @@ type Lease struct {
 | 子命令 | 作用 |
 | --- | --- |
 | `xmesh serve` | 按配置启动已启用的角色 |
-| `xmesh install` | 安装为本平台的用户级服务 |
-| `xmesh status` | 打印本节点角色、tailnet 身份、后端与配额 |
-| `xmesh pair` | `lan` 模式下首次配对，交换节点证书 |
+| `xmesh install` | 安装为本平台的用户级服务；Windows 默认注册当前用户的登录计划任务，`--system` 改为管理员 SCM 服务 |
+| `xmesh status` | 读取运行中节点的 `sys.info`，打印角色、网络身份、后端与配额。通过 `--endpoint` 访问 MCP，不读配置文件；打 Gateway 时用 `--tool local/sys.info` |
+| `xmesh pair` | `lan` 模式下首次配对：`--export` 导出本节点证书，`--import` 加 `--fingerprint` 导入对端证书 |
+| `xmesh version` | 打印版本号 |
 
 `status` 的人类可读输出使用中文标签，并同时给出机器可解析的 `--json`。

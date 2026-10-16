@@ -14,7 +14,7 @@ python3 scripts/smoke_local.py --binary bin/xmesh
 
 模式检查脚本需要 Python `jsonschema`。冒烟脚本仅用标准库，创建临时工作目录，启动 Agent 与 Gateway，验证文件、exec、PTY、审计和退出后清理。
 
-先修改 `xmesh.local.yaml` 的允许目录，再启动：
+先修改 `xmesh.local.yaml` 的允许目录，再启动。该文件启用 `agent` 与 `gateway` 两个角色，所以同时有 Agent（`127.0.0.1:7433`）和本机 Gateway（`127.0.0.1:8080`）；只写 `roles: [agent]` 时不会启动 Gateway，下面第三条 `8080` 的命令会连不上：
 
 ```bash
 bin/xmesh serve --local --config xmesh.local.yaml
@@ -22,7 +22,9 @@ bin/xmesh status --json
 bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool local/sys.info --json
 ```
 
-开发 Agent 默认 `127.0.0.1:7433/mcp`；Gateway 默认 `127.0.0.1:8080/mcp`。客户端使用带会话的 Streamable HTTP MCP，协议版本 `2025-11-25` 或 `2025-06-18`。PTY owner 与租约属于对应 MCP 会话。
+开发 Agent 默认 `127.0.0.1:7433/mcp`（可用 `--listen` 改，必须在 `127.0.0.1` 上）；Gateway 默认 `127.0.0.1:8080/mcp`（`gateway.listen`），经它调用本机工具时工具名带 `local/` 前缀，所以 `status` 打 Gateway 要加 `--tool local/sys.info`。客户端使用带会话的 Streamable HTTP MCP，协议版本 `2025-11-25` 或 `2025-06-18`。PTY owner 与租约属于对应 MCP 会话。
+
+配置文件顶层的 `node`、`mesh`、`agent` 三段对所有角色都必填：只启用 `gateway` 或 `ingress` 的节点也要写 `agent` 段，且 `agent.cwd_policy.allow` 至少一条（模式校验的要求）；未启用 `agent` 角色时这一段不会被使用。
 
 ## tailnet 节点
 
@@ -335,4 +337,4 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 ## 测试版发布
 
-向仓库推送形如 `v0.2.0-beta.1`（或 `-rc`）的标签，`.github/workflows/release.yml` 会为 Linux、macOS（amd64、arm64）和 Windows 构建二进制，生成 `SHA256SUMS.txt`，并创建 GitHub 预发布版。`xmesh version` 输出标签名。二进制未签名；该工作流只在标签推送时运行，不属于常规 CI。例如：`git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1`。
+向仓库推送形如 `v0.2.0-beta.1`（或 `-rc`）的标签，`.github/workflows/release.yml` 会为 linux/amd64、linux/arm64、darwin/amd64、darwin/arm64、windows/amd64 和 windows/arm64 六个目标构建二进制（Windows 为 `.zip`，其余为 `.tar.gz`），生成 `SHA256SUMS.txt`，并创建 GitHub 预发布版。`xmesh version` 输出标签名。二进制未签名；该工作流只在标签推送时运行，不属于常规 CI。例如：`git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1`。

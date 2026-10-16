@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"sort"
 	"sync"
 	"time"
 )
@@ -109,20 +110,20 @@ func (s *scheduler) acquire(ctx context.Context, caller, mode string) (func(), t
 	}
 	s.queue = append(s.queue, w)
 	s.dispatch()
+	if !w.granted && s.cannotReachFront(w, now) {
+		position := s.remove(w)
+		e := s.saturated(mode, position)
+		s.dispatch()
+		s.mu.Unlock()
+		return nil, 0, e
+	}
 	s.mu.Unlock()
 	select {
 	case <-w.ready:
 	case <-ctx.Done():
 		s.mu.Lock()
 		if !w.granted {
-			position := 1
-			for i, v := range s.queue {
-				if v == w {
-					position = i + 1
-					s.queue = append(s.queue[:i], s.queue[i+1:]...)
-					break
-				}
-			}
+			position := s.remove(w)
 			e := s.saturated(mode, position)
 			s.dispatch()
 			s.mu.Unlock()
@@ -133,6 +134,78 @@ func (s *scheduler) acquire(ctx context.Context, caller, mode string) (func(), t
 		return nil, 0, toolerr.New("exec_saturated", "等待执行槽超时", "queue_position", 1, "mode", mode, "retry_after_ms", 1000)
 	}
 	return func() { s.mu.Lock(); s.releaseLocked(w); s.mu.Unlock() }, time.Since(now), nil
+}
+
+// remove takes w out of the queue and returns the 1-based position it held.
+func (s *scheduler) remove(w *waiter) int {
+	for i, v := range s.queue {
+		if v == w {
+			s.queue = append(s.queue[:i], s.queue[i+1:]...)
+			return i + 1
+		}
+	}
+	return 1
+}
+
+// cannotReachFront implements the early-return half of RUL-01: a waiter whose
+// own deadline falls before the slot it needs is guaranteed to be free (the
+// deadline of the running calls blocking it) gets exec_saturated now instead of
+// sleeping through its whole timeout. A blocking call without a deadline makes
+// the estimate unknown, so the waiter keeps waiting.
+func (s *scheduler) cannotReachFront(w *waiter, now time.Time) bool {
+	if w.deadline.IsZero() {
+		return false
+	}
+	if !w.deadline.After(now) {
+		return true
+	}
+	position := 1
+	for i, v := range s.queue {
+		if v == w {
+			position = i + 1
+		}
+	}
+	var shared, exclusive []time.Time
+	for r := range s.running {
+		if r.deadline.IsZero() {
+			return false
+		}
+		if r.mode == "exclusive" {
+			exclusive = append(exclusive, r.deadline)
+		} else {
+			shared = append(shared, r.deadline)
+		}
+	}
+	var estimate time.Time
+	switch {
+	case w.mode == "exclusive":
+		// An exclusive call needs every shared call finished and an exclusive slot.
+		for _, d := range shared {
+			if d.After(estimate) {
+				estimate = d
+			}
+		}
+		if s.exclusive >= s.maxExclusive {
+			if d := kth(exclusive, position); d.After(estimate) {
+				estimate = d
+			}
+		}
+	case s.exclusive > 0:
+		estimate = kth(exclusive, position)
+	default:
+		estimate = kth(shared, position)
+	}
+	return !estimate.IsZero() && estimate.After(w.deadline)
+}
+
+// kth returns the k-th earliest of deadlines, clamped to the last one.
+func kth(deadlines []time.Time, k int) time.Time {
+	if len(deadlines) == 0 {
+		return time.Time{}
+	}
+	sorted := append([]time.Time(nil), deadlines...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Before(sorted[j]) })
+	return sorted[min(max(k, 1), len(sorted))-1]
 }
 func (s *scheduler) releaseLocked(w *waiter) {
 	if !s.running[w] {

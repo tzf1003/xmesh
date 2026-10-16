@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-common:1",
+  "title": "ControlCommon",
+  "description": "CTR-CTL-02。本机控制通道各模式共用的基础类型。本文件只含 $defs，没有根类型。",
+  "$defs": {
+    "ApiVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "控制 API 版本，主版本.次版本。响应头 X-Xmesh-Control-Version 与 control.json 使用同一写法。"
+    },
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "RFC3339，UTC，固定毫秒。比 date-time 更严，让两端的序列化结果逐字相同。"
+    },
+    "BootId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}$",
+      "description": "内核进程每次启动随机生成。事件 id 的前半段。"
+    },
+    "EventId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}\\.[0-9]+$",
+      "description": "<boot_id>.<seq>。SSE 的 id 字段与 Last-Event-ID 使用它。"
+    },
+    "Etag": {
+      "type": "string",
+      "pattern": "^sha256-[0-9a-f]{64}$",
+      "description": "配置文件字节的 SHA-256。作为 HTTP ETag 时两侧加双引号，强校验器。"
+    },
+    "NodeName": { "$ref": "urn:xmesh:schema:config:1#/$defs/nodeName" },
+    "Scope": { "$ref": "urn:xmesh:schema:config:1#/$defs/scope" },
+    "Tag": {
+      "type": "string",
+      "pattern": "^tag:[A-Za-z0-9][A-Za-z0-9-]{0,62}$"
+    },
+    "Role": { "enum": ["agent", "gateway", "ingress"] },
+    "Capability": {
+      "enum": [
+        "status",
+        "events",
+        "peers",
+        "sessions",
+        "drain",
+        "config.read",
+        "config.write",
+        "pair",
+        "pats",
+        "ingress",
+        "audit"
+      ],
+      "description": "内核在 control.json 与 status.control.capabilities 里公布自己已实现的能力。路由表里每条路由属于一个能力。UI 只对已公布的能力启用对应入口。"
+    },
+    "Severity": { "enum": ["info", "warning", "error"] },
+    "WarningCode": {
+      "enum": [
+        "restart_required",
+        "policy_reload_failed",
+        "allow_dangerous",
+        "tailnet_not_ready",
+        "authkey_unreadable",
+        "peer_offline",
+        "audit_dropped",
+        "quota_exhausted",
+        "unclassified"
+      ],
+      "description": "次版本可以增加取值。客户端遇到未知取值按 unclassified 处理。"
+    },
+    "Warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/WarningCode" },
+        "severity": { "$ref": "#/$defs/Severity" },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "中文，一行。给人读，客户端不得据此分支。"
+        }
+      }
+    },
+    "Actor": {
+      "enum": ["file", "control"],
+      "description": "配置变更的来源。file 是直接改了配置文件（含热加载），control 是经控制通道写入。"
+    },
+    "DrainMode": {
+      "enum": ["keep", "kill"],
+      "description": "与 CTR-GW-05 的 drain 载荷同义。keep 拒绝新调用并保留现有资源，kill 另外终止本机全部 PTY 并释放全部租约。"
+    }
+  }
+}

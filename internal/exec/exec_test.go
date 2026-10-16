@@ -34,6 +34,8 @@ func run(m *Manager, r *cwd.Resolver, p *policy.Engine, caller string, a Object)
 	b, _ := json.Marshal(a)
 	return m.Run(context.Background(), caller, r, p, b)
 }
+
+// conformance: CTR-EXEC-01 RUL-05
 func Test_CTREXEC01_ArgvAndExit(t *testing.T) {
 	m, r, p := fixture(t)
 	o, e := run(m, r, p, "n/a", Object{"cmd": "/usr/bin/printf", "args": []string{"%s", "a; echo WRONG"}})
@@ -49,6 +51,8 @@ func Test_CTREXEC01_ArgvAndExit(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+// conformance: CON-CONC-09 RUL-04
 func Test_CONCONC09_IdempotencyAndIsolation(t *testing.T) {
 	m, r, p := fixture(t)
 	args := Object{"cmd": "/bin/sh", "args": []string{"-c", "printf x >> count; printf result; exit 4"}, "idempotency_key": "once"}
@@ -82,6 +86,8 @@ func Test_CONCONC09_IdempotencyAndIsolation(t *testing.T) {
 		t.Fatal("cached policy bypass", e)
 	}
 }
+
+// conformance: CTR-EXEC-02 RUL-05
 func Test_CTREXEC02_OutputPagingAndTimeout(t *testing.T) {
 	m, r, p := fixture(t)
 	o, e := run(m, r, p, "n/a", Object{"cmd": "/usr/bin/printf", "args": []string{"0123456789abcdefgh"}})
@@ -106,6 +112,8 @@ func Test_CTREXEC02_OutputPagingAndTimeout(t *testing.T) {
 		t.Fatal("timed out child survived")
 	}
 }
+
+// conformance: CON-CONC-10
 func Test_CONCONC10_ExclusiveBarrier(t *testing.T) {
 	s := newScheduler(2, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -162,6 +170,8 @@ func Test_CONCONC10_ExclusiveBarrier(t *testing.T) {
 		t.Fatal(v)
 	}
 }
+
+// conformance: RUL-01
 func Test_RUL01_Saturation(t *testing.T) {
 	s := newScheduler(1, 1)
 	release, _, _ := s.acquire(context.Background(), "a", "shared")
@@ -170,6 +180,50 @@ func Test_RUL01_Saturation(t *testing.T) {
 	defer cancel()
 	_, _, e := s.acquire(ctx, "b", "shared")
 	if e == nil || e.(*toolerr.Error).Code != "exec_saturated" || e.(*toolerr.Error).Fields["retry_after_ms"] == nil {
+		t.Fatal(e)
+	}
+}
+func Test_RUL01_EarlySaturation(t *testing.T) {
+	s := newScheduler(1, 1)
+	holder, cancelHolder := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelHolder()
+	release, _, e := s.acquire(holder, "a", "shared")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer release()
+	// The running call may hold the slot for 5s; a 300ms waiter cannot reach the front.
+	short, cancelShort := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancelShort()
+	started := time.Now()
+	_, _, e = s.acquire(short, "b", "shared")
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatal("waited instead of returning early", elapsed)
+	}
+	failure, ok := e.(*toolerr.Error)
+	if !ok || failure.Code != "exec_saturated" || failure.Fields["queue_position"] != 1 || failure.Fields["retry_after_ms"].(int64) < 1000 {
+		t.Fatal(e)
+	}
+	s.mu.Lock()
+	queued := len(s.queue)
+	s.mu.Unlock()
+	if queued != 0 {
+		t.Fatal("early return left the waiter queued")
+	}
+	// A waiter whose deadline outlasts the running call keeps waiting and is served.
+	long, cancelLong := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelLong()
+	granted := make(chan error, 1)
+	go func() {
+		release, _, e := s.acquire(long, "c", "shared")
+		if e == nil {
+			release()
+		}
+		granted <- e
+	}()
+	time.Sleep(50 * time.Millisecond)
+	release()
+	if e := <-granted; e != nil {
 		t.Fatal(e)
 	}
 }

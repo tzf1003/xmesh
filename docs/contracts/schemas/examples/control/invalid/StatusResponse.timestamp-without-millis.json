@@ -1,0 +1,87 @@
+{
+  "control": {
+    "api_version": "1.0",
+    "kernel_version": "0.4.0",
+    "boot_id": "9f3c21aa",
+    "capabilities": [
+      "status",
+      "events",
+      "peers",
+      "sessions",
+      "drain"
+    ]
+  },
+  "lifecycle": "running",
+  "started_at": "2026-10-16T09:00:00Z",
+  "pid": 4242,
+  "drain": {
+    "draining": false,
+    "mode": null,
+    "since": null
+  },
+  "os": "windows",
+  "arch": "amd64",
+  "hostname": "win-dev-01",
+  "home": "C:\\Users\\x",
+  "roles": [
+    "agent",
+    "gateway"
+  ],
+  "network": {
+    "mode": "tailnet",
+    "node_id": "win-dev-01",
+    "tags": [
+      "tag:device"
+    ]
+  },
+  "restart_required": false,
+  "policy_reload_failures": 0,
+  "authkey_readable": true,
+  "warnings": [],
+  "path_sep": "\\",
+  "shells": [
+    "pwsh"
+  ],
+  "workspaces": [
+    {
+      "alias": "foo",
+      "path": "C:\\Users\\x\\repos\\foo",
+      "desc": "主项目 (Rust)"
+    }
+  ],
+  "backends": [
+    {
+      "name": "ida",
+      "policy": "exclusive",
+      "state": "running",
+      "favorite": true
+    }
+  ],
+  "limits": {
+    "exec_shared": 4,
+    "exec_exclusive": 1,
+    "exec_shared_in_use": 0,
+    "exec_exclusive_in_use": 0,
+    "pty_max_sessions": 20,
+    "pty_max_per_caller": 8,
+    "pty_in_use": 1,
+    "pty_active": 1,
+    "pty_closed": 0,
+    "pty_closed_retain_max": 20
+  },
+  "paths": {
+    "config_file": "C:\\Users\\x\\xmesh.yaml",
+    "state_dir": "C:\\Users\\x\\AppData\\Roaming\\xmesh\\win-dev-01",
+    "log_dir": null,
+    "audit_dir": "C:\\Users\\x\\AppData\\Roaming\\xmesh\\win-dev-01\\audit"
+  },
+  "gateway": {
+    "listen": "127.0.0.1:8080",
+    "url": "http://127.0.0.1:8080/mcp",
+    "auth": "pat"
+  },
+  "peers": {
+    "total": 2,
+    "online": 1
+  }
+}

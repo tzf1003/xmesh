@@ -126,6 +126,8 @@ func Test_CONCONC03_20Concurrent(t *testing.T) {
 		t.Fatal(in, active)
 	}
 }
+
+// conformance: CTR-PTY-02 INV-07
 func Test_CTRPTY02_RingAndLongPoll(t *testing.T) {
 	s := &Session{capacity: 8, changed: make(chan struct{})}
 	s.touch()
@@ -145,6 +147,8 @@ func Test_CTRPTY02_RingAndLongPoll(t *testing.T) {
 		t.Fatal(o, e)
 	}
 }
+
+// conformance: CTR-PTY-01 RUL-12 RUL-07 INV-02
 func Test_CTRPTY01_ExitDrainAndQuota(t *testing.T) {
 	m, r, p, _ := fixture(t)
 	c := identity.Caller{ID: "node/session"}

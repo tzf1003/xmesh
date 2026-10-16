@@ -1,0 +1,25 @@
+{
+  "id": "9f3c21aa.43",
+  "seq": 43,
+  "time": "2026-10-16T15:30:00.123Z",
+  "type": "peer",
+  "data": {
+    "change": "offline",
+    "peer": {
+      "name": "linux-box",
+      "self": false,
+      "node_id": "linux-box",
+      "tags": [
+        "tag:device",
+        "tag:ingress"
+      ],
+      "online": false,
+      "connection": "unknown",
+      "derp_region": null,
+      "addrs": [],
+      "last_seen": "2026-10-16T08:12:44.500Z",
+      "os": "linux",
+      "version": null
+    }
+  }
+}

