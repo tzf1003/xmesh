@@ -48,6 +48,7 @@
 - 为 `true` 时，启动流程在状态目录的 `sandbox` 子目录建立运行器，并先完成一次启动恢复，回收上一次进程异常退出遗留的日志、ACL 授权与 AppContainer profile。运行器创建或恢复失败时服务照常启动，L2 继续失败关闭，`sys.info` 的 `warnings` 给出原因，细节写入节点日志。
 - 运行器只在 `isolation: L2` 的调用中使用，`isolation` 仍可热加载。L1 与 L2 之间的切换从下一次工具调用起生效。
 - stdio 后端的 L2 不经过托管运行器，仍然失败关闭。
+- 运行器为工作目录里的每个对象授权并回收，所以工作目录（根、文件和子目录合计）最多 10000 个对象。超过时该次调用返回 `policy_denied`，规则名 `sandbox.workspace_too_large`，字段 `limit` 为上限；检查先于 profile 与围栏的创建，不留下状态。`agent.default_cwd: ~` 之类指向用户主目录的取值通常超限，应改为具体的项目目录或在调用中指定 `cwd`。
 - 非 Windows 节点配置为 `true` 不会报错，`sys.info` 的 `warnings` 提示该开关不生效。
 
 ### 密钥

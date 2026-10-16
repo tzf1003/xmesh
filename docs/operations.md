@@ -175,6 +175,37 @@ Linux 与 macOS 均拒绝把凭证目录或其祖先用作 L2 工作目录，检
 
 该开关不代表安全条件已经满足：工作目录树内写入冻结、同用户 WRITE_DAC 阻断、后代安全描述符变更纳入围栏与完整对象普查仍在 [实现状态](implementation-status.md) 列出，普通账户和真实环境验收也尚未完成。
 
+### Windows L2 的准入成本与工作目录规模
+
+每次 `isolation: L2` 的 exec 或 PTY 调用都重新做完整准入与回收：建立独立 AppContainer profile，为工作目录里的每个对象授权并记入日志，读取一遍 USN 基线，启动监督进程和监控；结束时核对、回收每个对象的授权并删除 profile。成本随工作目录的对象数（目录、文件和根本身）近似线性增长，与命令本身无关。
+
+GitHub `windows-latest` 上、不带竞态检测器、使用测试替身协调器的单次调用实测：
+
+| 工作目录对象数 | 单次调用总耗时 | 其中准入 | 其中回收 |
+| --- | --- | --- | --- |
+| 约 2（空目录） | 0.17 至 0.22 秒 | 约 0.09 秒 | 约 0.05 秒 |
+| 约 1000 | 0.9 至 1.5 秒（首次调用更慢） | 约 0.4 至 0.5 秒 | 约 0.4 至 0.5 秒 |
+| 约 4000 | 约 3.2 秒 | 约 1.4 秒 | 约 1.6 秒 |
+| 约 9000 | 约 7 至 8 秒 | 约 3 秒 | 约 3.4 至 4.6 秒 |
+
+生产协调器（守护 keeper 加写入围栏）启动时多约 0.03 秒，关闭时在大目录上多至 0.2 秒。早先实现状态里记录的“单次约 1.4 秒”来自带 `-race` 的 CI 测试运行，该数字包含竞态检测器的开销，不代表发布二进制的耗时。
+
+主要成本在逐对象的系统调用：约 9000 个对象时，授权（读取并写回 DACL）约占准入的三分之一到四成，重新打开每个对象取得身份句柄和第二次扫描各约五分之一，回收阶段的普查、DACL 回写和二次核对合计占回收的八成以上。这些步骤是 [CON-SEC](constraints/security.md) 要求的证明本身，不能为速度省略。
+
+运行器因此不复用 profile，也不在两次调用之间保留已准入的执行：保留执行意味着工作目录在空闲期间一直被写入围栏冻结，用户自己的编辑会被判为外部写入者；复用 profile 则让并发的调用共享同一个沙箱身份，破坏调用之间的隔离。需要降低成本时缩小工作目录，而不是放宽证明。
+
+逐对象的日志追加、授权意图与释放确认的落盘和描述符校验已是线性，不随对象数平方增长；授权意图整批一次落盘，先于第一次描述符修改；释放确认在对应对象回收之后整批落盘。一次调用的各阶段耗时在节点日志的 debug 级别以 `sandbox_execution_timing` 输出（`objects`、`admit_ms`、`launch_ms`、`cleanup_ms` 和各阶段明细）。在 Windows 上复现表中数字：
+
+```powershell
+$env:XMESH_TEST_WINDOWS_SANDBOX = "1"
+$env:XMESH_TEST_WINDOWS_ADMISSION_COST = "1"
+go test ./internal/winbox -run Test_WindowsAdmissionCost -v -count=1 -timeout=1500s
+```
+
+**对象上限。** 工作目录（含根、所有文件和子目录）最多 10000 个对象，这是运行器能为一次执行授权并逐个回收的上限。超过时调用返回 `policy_denied`，规则名 `sandbox.workspace_too_large`，附 `limit` 字段；检查在创建 profile、keeper 和围栏之前完成，不会留下状态。执行期间新增的对象使总数越界同样视为越界：监控终止这次执行，调用按 `sandbox.cleanup_pending` 报告。
+
+`agent.default_cwd` 的示例值 `~` 指向用户主目录，几乎一定超过上限。启用 `agent.policy.windows_appcontainer` 时请把 `default_cwd` 设为具体的项目目录，或在每次调用里传入较小的 `cwd`；`node_modules`、构建产物等大目录也计入对象数。
+
 `internal/winbox` 提供独立 AppContainer profile、能力为空的启动属性、profile 删除、工作目录绑定与回收原语。原语的原生核验使用临时 profile，在 Windows 会话中执行：
 
 ```powershell
