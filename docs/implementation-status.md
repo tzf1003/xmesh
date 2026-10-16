@@ -412,3 +412,13 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 边界：这是事后归并，不证明子树完整；未知导入目录内原有子对象若在被观察前已移出工作区，仍无法找回；回收沿用严格 ACE 格式规则，带非工作区格式 profile ACE 的导入对象仍回收失败并保留。这是代码实现加 GitHub Windows runner 的模拟验证，不是真实生产环境验收，生产 Windows L2 保持 `sandbox.unavailable`。
 
 两个子任务分支合入集成分支后的整树结果：本地全量 race、vet、Windows amd64/arm64 vet 与 `internal/winbox` 测试交叉编译通过；push CI 结果见下一节记录。
+
+## 内核写入围栏（workspaceWriterFence）
+
+新增 `internal/winbox/fence*.go`，以内核强制的 `workspaceWriterFence` 替代“非空 closer 即视为外部写入者已冻结”的假设。卷根到工作区、卷根到 journal 私有目录两条目录链以无 delete 共享的目录数据句柄钉住，外部 rename/delete 被内核拒绝；并对钉住的目录复核身份、类型、reparse、单链接和 DACL 字节指纹，同时读取 NTFS 变更日志——钉住对象上出现删除、改名、reparse、硬链接或安全描述符记录即判违规，改后改回原样也会被发现。违规与“无法证明未变”（日志丢失、描述符不可读）均为永久状态，仅取消不算违规。
+
+生命周期接入：`RequireWriterFence` 选项在创建任何 journal 之前拒绝无法 Verify 的不透明 guard；准备阶段先把生命周期自己打开的目录链与围栏钉住的对象绑定为同一批，再封存工作区根描述符；准入、每个 monitor 周期、启动/导入前与清理前都会 Verify。违规时 monitor 终止全部 Job，清理仍按身份完成并把违规一并返回。改动位于 `fence.go`、`fence_windows.go`、`fence_lifecycle_windows.go`，并小幅调整 `lifecycle_windows.go`、`workspace_windows.go`（`writerCheck`）与 `usn_monitor_windows.go`（checkpoint 开头调用）。
+
+`99ced05`（实现 `3bea72f`）的 [push 工作流 38866545510](https://github.com/tzf1003/xmesh/actions/runs/38866545510) 三平台与 windows-native 通过，契约 [38866545471](https://github.com/tzf1003/xmesh/actions/runs/38866545471) 通过。原生用例 `WriterFencePins`、`WriterFenceDetection`（六个子场景）、`WriterFenceBinding`、`WorkspaceExecutionWriterFence`（opaque-guard-rejected、clean、violation）通过；clean 场景覆盖沙箱自身创建、本包授权与清理且无误报。首轮 `3bea72f` 的两处失败均为测试夹具问题，已在 `99ced05` 修复。
+
+边界：围栏不能阻止持有 WRITE_DAC 的同用户写入者修改 DACL，只保证其被发现，Win32 API 的 ACL 改动还可能经继承传播到子对象；工作区后代的 SECURITY_CHANGE 尚未纳入，目前只覆盖钉住的目录链与工作区根；读取 NTFS 变更日志需打开卷设备，普通非管理员账号可能无法使用，须在目标账号上验收；`RequireWriterFence` 默认关闭，围栏尚未接入生产工具层，且宿主崩溃后围栏随进程消失，崩溃存活由 guard keeper 负责，二者尚未组合。生产 Windows L2 保持 `sandbox.unavailable`。

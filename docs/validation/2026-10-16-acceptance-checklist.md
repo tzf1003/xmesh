@@ -37,7 +37,7 @@
 | 卷级 namespace lease（参与协议的操作互斥） | 完成 | 原生通过 | 只约束参与协议的操作 |
 | 受管标准流与 ConPTY 启动 | 完成（内部原语） | 原生通过 | 工具层 `exec`/`pty` 接入 |
 | 生命周期所有者与协调导入（start/import/close 串行，来源 guard 上限 256） | 完成（内部） | 原生通过，291 个 `Test_` PASS 标识 | 接入生产路径 |
-| **外部 namespace/reparse/ACL 写入者强制约束** | 未实现 | 无 | 子讨论串 1 |
+| **外部 namespace/reparse/ACL 写入者强制约束** | 内核写入围栏已实现（`3bea72f`、`99ced05`） | Windows 原生通过（钉住、六类违规检测、绑定、生命周期 clean/violation） | 默认关闭、未接入生产；不阻止持有 WRITE_DAC 的同用户修改 DACL（仅检出）；后代 SECURITY_CHANGE 未纳入；普通账号读取变更日志待验收；与 keeper 尚未组合 |
 | **宿主崩溃后仍存活、覆盖恢复阶段的外部 guard** | keeper 进程已实现（`1f2616b`） | Windows 原生通过：强杀宿主后 keeper 存活、接管、恢复完成后释放 | 接入生产启动路径；不冻结树内写入；整机重启/外层 Job 终止时失败关闭 |
 | **完整对象 census 与未知导入识别** | 未知导入归并与 `workspace-unknown-import` 已实现（`37645b5`） | Windows 原生通过（五个子场景加生命周期场景） | 事后归并不证明子树完整，仍需完整 census 证明 |
 | **exec/ConPTY 工具层接入** | 未实现 | 无 | 子讨论串 4 |
@@ -59,7 +59,7 @@
 
 | 子任务 | 内容 | 集成方式 |
 | --- | --- | --- |
-| 1 | 外部 namespace/reparse/ACL 写入者强制约束（进行中） | 子分支完成后由集成者合并到工作分支，Windows 原生结果以 GitHub CI 为准 |
+| 1 | 外部 namespace/reparse/ACL 写入者强制约束（已合入 `99ced05`） | 子分支完成后由集成者合并到工作分支，Windows 原生结果以 GitHub CI 为准 |
 | 2 | 宿主崩溃后独立存活的外部 guard（已合入 `1f2616b`） | 同上；与子任务 1 同改 `lifecycle_windows.go`，由集成者解决冲突 |
 | 3 | 完整 census 与未知导入识别（已合入 `37645b5`） | 同上 |
 | 4 | exec/ConPTY 工具层接入；exit 66 调查 | 同上 |
