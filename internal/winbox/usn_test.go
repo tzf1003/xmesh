@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -138,7 +139,8 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 		{ID: [16]byte{88}, Parent: [16]byte{99}, Reason: usnReasonCreate},
 		{ID: [16]byte{3}, Parent: [16]byte{2}, Reason: usnReasonCreate},
 	}
-	objects, err := collectWorkspaceChanges(changes, 17, known, 3)
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, 3)
+	objects := plan.Created
 	if err != nil || len(objects) != 2 || objects[0].ID != [16]byte{2} || !objects[0].Directory || objects[1].ID != [16]byte{3} || len(known) != 1 {
 		t.Fatal("moved-directory descendants", objects, err)
 	}
@@ -146,8 +148,8 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 	for _, object := range objects {
 		known[object.ID] = object
 	}
-	if objects, err := collectWorkspaceChanges(changes, 17, known, 3); err != nil || len(objects) != 0 {
-		t.Fatal("cursor replay deduplication", objects, err)
+	if plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, 3); err != nil || len(plan.Created) != 0 {
+		t.Fatal("cursor replay deduplication", plan, err)
 	}
 	for _, name := range []string{"limit", "delete", "hardlink", "reparse", "import", "missing-create", "type", "parent-type"} {
 		t.Run(name, func(t *testing.T) {
@@ -172,8 +174,62 @@ func TestWorkspaceChangeIdentityCollection(t *testing.T) {
 			case "parent-type":
 				batch[0].Attributes = 0
 			}
-			if _, err := collectWorkspaceChanges(batch, 17, original, limit); err == nil || !reflect.DeepEqual(original, map[[16]byte]journalObject{root.ID: root}) {
+			if _, err := planWorkspaceChanges(batch, 17, root.ID, original, nil, limit); err == nil || !reflect.DeepEqual(original, map[[16]byte]journalObject{root.ID: root}) {
 				t.Fatal("unsupported change discarded caller ownership", err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceChangeDeletionPlan(t *testing.T) {
+	root := journalObject{Volume: 17, ID: [16]byte{1}, Directory: true}
+	known := map[[16]byte]journalObject{root.ID: root}
+	changes := []workspaceChange{
+		{ID: [16]byte{2}, Parent: root.ID, USN: 100, Reason: usnReasonCreate, Attributes: usnDirectory},
+		{ID: [16]byte{3}, Parent: [16]byte{2}, USN: 110, Reason: usnReasonCreate},
+		{ID: [16]byte{3}, Parent: [16]byte{2}, USN: 120, Reason: usnReasonDelete},
+		{ID: [16]byte{3}, Parent: [16]byte{2}, USN: 130, Reason: usnReasonDelete | usnReasonClose},
+		{ID: [16]byte{2}, Parent: root.ID, USN: 140, Reason: usnReasonDelete | usnReasonClose, Attributes: usnDirectory},
+	}
+	plan, err := planWorkspaceChanges(changes, 17, root.ID, known, nil, 3)
+	if err != nil || len(plan.Created) != 2 || len(plan.Deleted) != 2 || plan.Deleted[0].USN != 130 || plan.Deleted[1].USN != 140 || len(known) != 1 {
+		t.Fatal("create/delete checkpoint", plan, err)
+	}
+	for _, object := range plan.Created {
+		known[object.ID] = object
+	}
+	// Every durable prefix can replay an older source cursor.
+	for prefix := 0; prefix <= len(plan.Deleted); prefix++ {
+		retired := make(map[journalObject]int64)
+		for _, deletion := range plan.Deleted[:prefix] {
+			retired[deletion.Object] = deletion.USN
+		}
+		replay, err := planWorkspaceChanges(changes, 17, root.ID, known, retired, 3)
+		if err != nil || len(replay.Created) != 0 || !slices.Equal(replay.Deleted, plan.Deleted[prefix:]) {
+			t.Fatal("deletion prefix replay", prefix, replay, err)
+		}
+	}
+	for _, name := range []string{"missing-close", "root", "after-delete", "child-after-parent", "conflicting-close", "hardlink-delete", "reparse-delete"} {
+		t.Run(name, func(t *testing.T) {
+			batch := append([]workspaceChange(nil), changes...)
+			switch name {
+			case "missing-close":
+				batch[3].Reason &^= usnReasonClose
+			case "root":
+				batch[4].ID = root.ID
+			case "after-delete":
+				batch = append(batch, workspaceChange{ID: [16]byte{3}, Parent: root.ID, USN: 150, Reason: 1})
+			case "child-after-parent":
+				batch = append(batch, workspaceChange{ID: [16]byte{4}, Parent: [16]byte{2}, USN: 150, Reason: usnReasonCreate})
+			case "conflicting-close":
+				batch = append(batch, workspaceChange{ID: [16]byte{3}, Parent: root.ID, USN: 150, Reason: usnReasonDelete | usnReasonClose})
+			case "hardlink-delete":
+				batch[3].Reason |= usnReasonHardLink
+			case "reparse-delete":
+				batch[3].Reason |= usnReasonReparse
+			}
+			if _, err := planWorkspaceChanges(batch, 17, root.ID, known, nil, 4); err == nil {
+				t.Fatal("unproved deletion accepted")
 			}
 		})
 	}

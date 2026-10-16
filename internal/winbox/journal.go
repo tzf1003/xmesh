@@ -66,6 +66,7 @@ type journalRecord struct {
 	SID               string                 `json:"sid,omitempty"`
 	Workspace         *journalWorkspace      `json:"workspace,omitempty"`
 	CreatedObjects    []journalObject        `json:"created_objects,omitempty"`
+	DeletedObjects    []journalDeletion      `json:"deleted_objects,omitempty"`
 	ChangeCursor      *workspaceChangeCursor `json:"change_cursor,omitempty"`
 	Grant             *journalGrant          `json:"grant,omitempty"`
 	GrantSequence     uint64                 `json:"grant_sequence,omitempty"`
@@ -76,12 +77,14 @@ type journalRecord struct {
 type journalState struct {
 	profile           bool
 	workspace         bool
+	root              journalObject
 	workspaceReleased bool
 	complete          bool
 	pending           map[uint64]bool
 	objects           map[journalObject]bool
 	granted           map[journalObject]bool
 	created           map[journalObject]bool
+	deleted           map[journalObject]int64
 	changeCursor      *workspaceChangeCursor
 	executions        map[uint64]bool
 	executionIDs      map[string]bool
@@ -101,6 +104,9 @@ func (s *journalState) accept(r journalRecord) error {
 	}
 	if r.CreatedObjects != nil && r.Kind != "workspace-created" {
 		return fmt.Errorf("unexpected journal created-object fields")
+	}
+	if r.DeletedObjects != nil && r.Kind != "workspace-deleted" {
+		return fmt.Errorf("unexpected journal deleted-object fields")
 	}
 	if r.ChangeCursor != nil && r.Kind != "workspace-tracking" && r.Kind != "workspace-tracked" {
 		return fmt.Errorf("unexpected journal change cursor")
@@ -141,9 +147,11 @@ func (s *journalState) accept(r journalRecord) error {
 			seen[object.ID] = true
 		}
 		s.workspace = true
+		s.root = w.Root
 		s.objects = make(map[journalObject]bool, len(w.Objects))
 		s.granted = make(map[journalObject]bool)
 		s.created = make(map[journalObject]bool)
+		s.deleted = make(map[journalObject]int64)
 		for _, object := range w.Objects {
 			s.objects[object] = true
 		}
@@ -157,6 +165,13 @@ func (s *journalState) accept(r journalRecord) error {
 			}
 		} else if s.changeCursor == nil || r.ChangeCursor.JournalID != s.changeCursor.JournalID || r.ChangeCursor.Next <= s.changeCursor.Next {
 			return fmt.Errorf("invalid journal workspace tracking advance")
+		}
+		if r.Kind == "workspace-tracked" {
+			for _, usn := range s.deleted {
+				if usn >= r.ChangeCursor.Next {
+					return fmt.Errorf("workspace cursor does not cover deletion receipt")
+				}
+			}
 		}
 		cursor := *r.ChangeCursor
 		s.changeCursor = &cursor
@@ -184,6 +199,24 @@ func (s *journalState) accept(r journalRecord) error {
 		}
 		for _, object := range r.CreatedObjects {
 			s.created[object] = true
+		}
+
+	case "workspace-deleted":
+		if !s.workspace || s.workspaceReleased || s.changeCursor == nil || len(r.DeletedObjects) == 0 || profileFields || r.Workspace != nil || r.CreatedObjects != nil || r.ChangeCursor != nil || r.Grant != nil || r.GrantSequence != 0 {
+			return fmt.Errorf("invalid journal workspace deletion batch")
+		}
+		seen := make(map[journalObject]bool, len(r.DeletedObjects))
+		for _, deletion := range r.DeletedObjects {
+			object := deletion.Object
+			_, already := s.deleted[object]
+			// The workspace root remains bound throughout reclamation.
+			if (!s.objects[object] && !s.created[object]) || object == s.root || already || seen[object] || deletion.USN < s.changeCursor.Next {
+				return fmt.Errorf("invalid or repeated journal deletion identity")
+			}
+			seen[object] = true
+		}
+		for _, deletion := range r.DeletedObjects {
+			s.deleted[deletion.Object] = deletion.USN
 		}
 
 	case "grant":
@@ -338,6 +371,10 @@ func (j *grantJournal) append(record journalRecord) (uint64, error) {
 	next.created = make(map[journalObject]bool, len(j.state.created))
 	for object := range j.state.created {
 		next.created[object] = true
+	}
+	next.deleted = make(map[journalObject]int64, len(j.state.deleted))
+	for object, usn := range j.state.deleted {
+		next.deleted[object] = usn
 	}
 	next.executions = make(map[uint64]bool, len(j.state.executions))
 	for sequence := range j.state.executions {

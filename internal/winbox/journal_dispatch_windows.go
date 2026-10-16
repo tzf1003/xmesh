@@ -29,6 +29,7 @@ type journalRecoveryInfo struct {
 	Workspace      *journalWorkspace
 	Objects        []journalObject
 	CreatedObjects []journalObject
+	DeletedObjects []journalDeletion
 	ChangeCursor   *workspaceChangeCursor
 	Volumes        []uint64
 }
@@ -203,6 +204,7 @@ func recoveryJournalInfo(j *grantJournal) journalRecoveryInfo {
 	}
 	for _, r := range j.records {
 		info.CreatedObjects = append(info.CreatedObjects, r.CreatedObjects...)
+		info.DeletedObjects = append(info.DeletedObjects, r.DeletedObjects...)
 		if r.Grant != nil {
 			info.Objects = append(info.Objects, r.Grant.Object)
 			volumes[r.Grant.Object.Volume] = true

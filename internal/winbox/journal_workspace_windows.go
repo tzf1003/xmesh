@@ -89,6 +89,27 @@ func validateWorkspaceJournalOwnership(j *grantJournal, sid *windows.SID) error 
 			return fmt.Errorf("AppContainer journal created-object ownership mismatch")
 		}
 	}
+	deletions := make(map[journalObject]int64)
+	for _, record := range j.records {
+		for _, deletion := range record.DeletedObjects {
+			object := deletion.Object
+			if (!objects[object] && !created[object]) || object == w.Root || deletion.USN < 0 {
+				return fmt.Errorf("AppContainer journal deletion ownership mismatch")
+			}
+			if _, exists := deletions[object]; exists {
+				return fmt.Errorf("AppContainer journal duplicate deletion receipt")
+			}
+			deletions[object] = deletion.USN
+		}
+	}
+	if len(deletions) != len(j.state.deleted) {
+		return fmt.Errorf("AppContainer journal deletion manifest mismatch")
+	}
+	for object, usn := range deletions {
+		if actual, exists := j.state.deleted[object]; !exists || actual != usn {
+			return fmt.Errorf("AppContainer journal deletion receipt mismatch")
+		}
+	}
 	granted := make(map[journalObject]bool)
 	for _, record := range j.records {
 		if record.Grant == nil {
@@ -156,6 +177,18 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 		}
 		if intent.Grant != nil {
 			if _, err := j.append(journalRecord{Kind: "released", GrantSequence: intent.Sequence}); err != nil {
+				return err
+			}
+		}
+	}
+	// Deleted initial identities have no remaining descriptor. Acknowledge their
+	// grant intents only after every live object passed census and reclamation.
+	for _, record := range j.records {
+		if record.Grant == nil || !j.state.pending[record.Sequence] {
+			continue
+		}
+		if _, deleted := j.state.deleted[record.Grant.Object]; deleted {
+			if _, err := j.append(journalRecord{Kind: "released", GrantSequence: record.Sequence}); err != nil {
 				return err
 			}
 		}
@@ -255,6 +288,10 @@ func censusJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) (
 		}
 	}()
 	retain := func(object treeObject) error {
+		key := journalObject{Volume: object.id.Volume, ID: object.id.ID, Directory: object.directory}
+		if _, deleted := j.state.deleted[key]; deleted {
+			return confirmWorkspaceDeletion(current.ancestors[0], key)
+		}
 		if directory, exists := seen[object.id]; exists {
 			if directory != object.directory {
 				return fmt.Errorf("AppContainer recovery object type changed")

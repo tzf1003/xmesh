@@ -14,6 +14,7 @@ const (
 	usnReasonRenameNew = 0x00002000
 	usnReasonHardLink  = 0x00010000
 	usnReasonReparse   = 0x00100000
+	usnReasonClose     = 0x80000000
 	usnDirectory       = 0x10
 )
 
@@ -103,44 +104,88 @@ func parseWorkspaceChanges(buffer []byte, start int64) (int64, []workspaceChange
 	return next, changes, nil
 }
 
-// All inherited directories remain scope roots after moving: children created
-// under them may still inherit this profile's ACE. External directory imports
-// and deletion need independent subtree/deletion proofs before admission.
-func collectWorkspaceChanges(changes []workspaceChange, volume uint64, known map[[16]byte]journalObject, maxObjects int) ([]journalObject, error) {
-	var created []journalObject
-	// The caller's map is a snapshot; errors must not add partial ownership.
+// Deleted objects retain their original identity and final-close USN. A trusted
+// source and an independent by-ID absence check are both required before this
+// receipt is appended. The cursor advances only after the receipt is durable.
+type journalDeletion struct {
+	Object journalObject `json:"object"`
+	USN    int64         `json:"usn"`
+}
+
+type workspaceChangePlan struct {
+	Created []journalObject
+	Deleted []journalDeletion
+}
+
+// Inherited directories remain scope roots after moving. A final delete/close
+// ends that identity's lifetime; later changes or children require investigation.
+// Planning spans the entire bounded checkpoint, including close records in a
+// later read buffer. Errors leave caller-owned maps unchanged.
+func planWorkspaceChanges(changes []workspaceChange, volume uint64, root [16]byte, known map[[16]byte]journalObject, retired map[journalObject]int64, maxObjects int) (workspaceChangePlan, error) {
+	var plan workspaceChangePlan
 	observed := make(map[[16]byte]journalObject, len(known))
 	for id, object := range known {
 		observed[id] = object
 	}
+	closed := make(map[[16]byte]int64, len(retired))
+	for object, usn := range retired {
+		closed[object.ID] = usn
+	}
+	pending := make(map[[16]byte]bool)
 	for _, change := range changes {
 		object, exists := observed[change.ID]
 		parent, parentExists := observed[change.Parent]
 		if !exists && !parentExists {
 			continue
 		}
+		if death, ok := closed[change.ID]; ok && change.USN > death {
+			return workspaceChangePlan{}, fmt.Errorf("AppContainer change follows final deletion")
+		}
+		if death, ok := closed[change.Parent]; ok && change.USN > death {
+			return workspaceChangePlan{}, fmt.Errorf("AppContainer change follows parent deletion")
+		}
 		directory := change.Attributes&usnDirectory != 0
 		if exists && object.Directory != directory {
-			return nil, fmt.Errorf("AppContainer change object type mismatch")
+			return workspaceChangePlan{}, fmt.Errorf("AppContainer change object type mismatch")
 		}
 		if parentExists && !parent.Directory {
-			return nil, fmt.Errorf("AppContainer change parent is not a directory")
+			return workspaceChangePlan{}, fmt.Errorf("AppContainer change parent is not a directory")
 		}
-		if change.Reason&(usnReasonDelete|usnReasonHardLink|usnReasonReparse) != 0 {
-			return nil, fmt.Errorf("AppContainer workspace change requires deletion, link or reparse proof")
+		if change.Reason&(usnReasonHardLink|usnReasonReparse) != 0 {
+			return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires link or reparse proof")
 		}
-		if exists {
-			continue
+		if !exists {
+			if change.Reason&usnReasonRenameNew != 0 || change.Reason&usnReasonCreate == 0 {
+				return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace change requires imported-object proof")
+			}
+			if len(observed) >= maxObjects {
+				return workspaceChangePlan{}, fmt.Errorf("AppContainer change census exceeds %d objects", maxObjects)
+			}
+			object = journalObject{Volume: volume, ID: change.ID, Directory: directory}
+			observed[object.ID] = object
+			plan.Created = append(plan.Created, object)
 		}
-		if change.Reason&usnReasonRenameNew != 0 || change.Reason&usnReasonCreate == 0 {
-			return nil, fmt.Errorf("AppContainer workspace change requires imported-object proof")
+		if change.Reason&usnReasonDelete != 0 {
+			if change.ID == root {
+				return workspaceChangePlan{}, fmt.Errorf("AppContainer workspace root deletion")
+			}
+			pending[change.ID] = true
+			if change.Reason&usnReasonClose != 0 {
+				if death, ok := closed[change.ID]; ok {
+					if death != change.USN {
+						return workspaceChangePlan{}, fmt.Errorf("AppContainer conflicting deletion receipt")
+					}
+				} else {
+					closed[change.ID] = change.USN
+					plan.Deleted = append(plan.Deleted, journalDeletion{Object: object, USN: change.USN})
+				}
+			}
 		}
-		if len(observed) >= maxObjects {
-			return nil, fmt.Errorf("AppContainer change census exceeds %d objects", maxObjects)
-		}
-		object = journalObject{Volume: volume, ID: change.ID, Directory: directory}
-		observed[object.ID] = object
-		created = append(created, object)
 	}
-	return created, nil
+	for id := range pending {
+		if _, ok := closed[id]; !ok {
+			return workspaceChangePlan{}, fmt.Errorf("AppContainer deletion requires final-close proof")
+		}
+	}
+	return plan, nil
 }

@@ -3,6 +3,7 @@ package winbox
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 	"unsafe"
@@ -182,7 +183,8 @@ func beginWorkspaceChangeTracking(ctx context.Context, j *grantJournal, sid *win
 
 // Checkpoint is serialized with journal access. Processes may be live; the
 // caller coordinates external writers and retries after transient open races.
-// Complete deletion/import proofs remain required before production L2 use.
+// Live pinned-object final-close coordination and imported-subtree proofs
+// remain required before production L2 use.
 func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects, maxEvents int) error {
 	if err := validateWorkspaceJournalOwnership(j, sid); err != nil {
 		return err
@@ -215,60 +217,97 @@ func checkpointWorkspaceChanges(ctx context.Context, j *grantJournal, sid *windo
 		return err
 	}
 	target := span.Next
-	count := 0
-	for j.state.changeCursor.Next < target {
+	cursor := *j.state.changeCursor
+	var changes []workspaceChange
+	for cursor.Next < target {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		start := *j.state.changeCursor
-		next, changes, err := source.read(start)
+		next, batch, err := source.read(cursor)
 		if err != nil {
 			return err
 		}
-		if next.Next <= start.Next {
+		if next.Next <= cursor.Next {
 			return errWorkspaceChangesLost
 		}
-		count += len(changes)
-		if count > maxEvents {
+		if len(changes)+len(batch) > maxEvents {
 			return fmt.Errorf("AppContainer change checkpoint exceeds %d events", maxEvents)
 		}
-		known := make(map[[16]byte]journalObject, len(j.state.objects)+len(j.state.created))
-		for object := range j.state.objects {
-			known[object.ID] = object
-		}
-		for object := range j.state.created {
-			known[object.ID] = object
-		}
-		if len(known) > maxObjects {
-			return fmt.Errorf("AppContainer change checkpoint identity limit")
-		}
-		created, err := collectWorkspaceChanges(changes, w.Root.Volume, known, maxObjects)
-		if err != nil {
+		changes = append(changes, batch...)
+		cursor = next
+	}
+	if cursor == *j.state.changeCursor {
+		return nil
+	}
+	known := make(map[[16]byte]journalObject, len(j.state.objects)+len(j.state.created))
+	for object := range j.state.objects {
+		known[object.ID] = object
+	}
+	for object := range j.state.created {
+		known[object.ID] = object
+	}
+	if len(known) > maxObjects {
+		return fmt.Errorf("AppContainer change checkpoint identity limit")
+	}
+	plan, err := planWorkspaceChanges(changes, w.Root.Volume, w.Root.ID, known, j.state.deleted, maxObjects)
+	if err != nil {
+		return err
+	}
+	deleted := make(map[journalObject]bool, len(j.state.deleted)+len(plan.Deleted))
+	for object := range j.state.deleted {
+		deleted[object] = true
+	}
+	for _, deletion := range plan.Deleted {
+		deleted[deletion.Object] = true
+	}
+	// Final delete/close records and exact by-ID absence are independent proofs.
+	// Permission, sharing, pending-delete and other open failures retain an error.
+	for object := range deleted {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// Confirm live IDs before recording them. No cursor advances past a missing,
-		// deleted, multiply linked, reparse or type-mismatched new object.
-		for _, object := range created {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			h, err := openIdentityObject(tree.ancestors[0], treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
-			if err != nil {
-				return err
-			}
-			windows.CloseHandle(h)
+		if err := confirmWorkspaceDeletion(tree.ancestors[0], object); err != nil {
+			return err
+		}
+	}
+	for _, object := range plan.Created {
+		if deleted[object] {
+			continue
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// A crash between these frames safely replays the earlier cursor: already
-		// recorded identities deduplicate by ID when their events are read again.
-		if err := appendWorkspaceCreated(j, created); err != nil {
+		h, err := openIdentityObject(tree.ancestors[0], treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
+		if err != nil {
 			return err
 		}
-		if _, err := j.append(journalRecord{Kind: "workspace-tracked", ChangeCursor: &next}); err != nil {
+		windows.CloseHandle(h)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Each prefix survives a crash. Replaying the old cursor deduplicates both
+	// discoveries and deletion receipts before advancing past their source USNs.
+	if err := appendWorkspaceCreated(j, plan.Created); err != nil {
+		return err
+	}
+	if len(plan.Deleted) != 0 {
+		if _, err := j.append(journalRecord{Kind: "workspace-deleted", DeletedObjects: plan.Deleted}); err != nil {
 			return err
 		}
+	}
+	_, err = j.append(journalRecord{Kind: "workspace-tracked", ChangeCursor: &cursor})
+	return err
+}
+
+func confirmWorkspaceDeletion(volume windows.Handle, object journalObject) error {
+	h, err := openIdentityObject(volume, treeObject{id: fileIdentity{Volume: object.Volume, ID: object.ID}, directory: object.Directory})
+	if err == nil {
+		windows.CloseHandle(h)
+		return fmt.Errorf("AppContainer deletion receipt still has a live identity")
+	}
+	if !errors.Is(err, windows.STATUS_OBJECT_NAME_NOT_FOUND) && !errors.Is(err, windows.STATUS_FILE_DELETED) {
+		return fmt.Errorf("AppContainer deletion identity absence unconfirmed: %w", err)
 	}
 	return nil
 }
