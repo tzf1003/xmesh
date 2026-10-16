@@ -1,6 +1,7 @@
 package winbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -37,7 +39,11 @@ func fenceFixture(t *testing.T) (outer, workspace, state string) {
 }
 
 // tamperDACL adds an Everyone read ACE as an external ACL writer would.
-func tamperDACL(t *testing.T, path string) {
+func tamperDACL(t *testing.T, path string) { tamperDACLFor(t, path, windows.WinWorldSid) }
+
+// tamperDACLFor adds a distinct read ACE per well-known SID, so a second change
+// to one object is a real descriptor change.
+func tamperDACLFor(t *testing.T, path string, kind windows.WELL_KNOWN_SID_TYPE) {
 	t.Helper()
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
@@ -47,7 +53,7 @@ func tamperDACL(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	everyone, err := windows.CreateWellKnownSid(windows.WinWorldSid)
+	everyone, err := windows.CreateWellKnownSid(kind)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +179,7 @@ func Test_WindowsAppContainerWriterFenceDetection(t *testing.T) {
 				if err := f.Verify(ctx); err != nil {
 					t.Fatal("sealed root reported without a change", err)
 				}
-				tamperDACL(t, workspace)
+				tamperDACLFor(t, workspace, windows.WinBuiltinUsersSid)
 			case "root-reparse":
 				makeJunction(t, workspace, state)
 			case "volume-journal-lost":
@@ -377,8 +383,17 @@ func Test_WindowsAppContainerWorkspaceExecutionWriterFence(t *testing.T) {
 				t.Fatal("cleanup did not complete", e.closed)
 			}
 			after, afterControl := kernelJournalState(t, options.Workspace)
-			if string(before) != string(after) || control != afterControl {
+			if mode == "clean" && (string(before) != string(after) || control != afterControl) {
 				t.Fatal("workspace descriptor changed after fenced lifecycle")
+			}
+			// The external ACL write re-propagated inheritance through the Win32
+			// API, so the violated run only requires the profile ACE to be gone.
+			sid, err := windows.StringToSid(journal.records[0].SID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(after, unsafe.Slice((*byte)(unsafe.Pointer(sid)), sid.Len())) {
+				t.Fatal("workspace retained the profile ACE after fenced lifecycle")
 			}
 		})
 	}
