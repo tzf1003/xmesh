@@ -49,6 +49,12 @@ type userTask struct {
 	} `xml:"Actions"`
 }
 
+// userTaskName is the scheduled task name for a service installed by one user.
+func userTaskName(service, sid string) string {
+	suffix := sha256.Sum256([]byte(sid))
+	return fmt.Sprintf(`\%s-%x`, service, suffix[:6])
+}
+
 // createUserTask registers a current-user logon task. Registration is exclusive:
 // schtasks reports an existing task instead of replacing its configuration.
 func createUserTask(c *service.Config, sid, arguments string, register func(string, string) error) (string, error) {
@@ -86,8 +92,7 @@ func createUserTask(c *service.Config, sid, arguments string, register func(stri
 	}
 	// Task names are machine-wide; include a stable current-user suffix so
 	// separate Windows accounts can install the same node name independently.
-	suffix := sha256.Sum256([]byte(sid))
-	name := fmt.Sprintf(`\%s-%x`, c.Name, suffix[:6])
+	name := userTaskName(c.Name, sid)
 	if err := register(name, path); err != nil {
 		return "", err
 	}

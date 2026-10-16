@@ -105,7 +105,12 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, err := windows.DecomposeCommandLine(installed.BinaryPathName)
-	wantArgs := []string{binary, "serve", "--service", "--config", configFile, "--state-dir", stateDir}
+	// the installing user is allowed to reach the SYSTEM service's control pipe
+	wantArgs := []string{binary, "serve", "--service", "--config", configFile}
+	if sid := installerSID(); sid != "" {
+		wantArgs = append(wantArgs, "--control-allow-sid", sid)
+	}
+	wantArgs = append(wantArgs, "--state-dir", stateDir)
 	if err != nil || !reflect.DeepEqual(args, wantArgs) || installed.StartType != mgr.StartAutomatic || !strings.EqualFold(installed.ServiceStartName, "LocalSystem") {
 		t.Fatal("installed SCM configuration", installed, args, err)
 	}

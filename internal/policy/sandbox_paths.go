@@ -32,5 +32,5 @@ func credentialWorkspace(root string) error {
 			}
 		}
 	}
-	return nil
+	return protectedWorkspace(root)
 }

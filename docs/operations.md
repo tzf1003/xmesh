@@ -136,7 +136,7 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-
 - macOS、Linux：目录 `0700`，已存在的目录会收紧到 `0700`。
 - Windows：`os.MkdirAll` 不设置 ACL，目录只继承父目录，放在 `C:\` 根下新建的目录里时其他本地用户默认可读写。现在新目录创建时就带受保护 DACL（禁用继承），只授予运行用户、`SYSTEM`、`Administrators` 完全控制，并带对象/容器继承，之后创建的文件沿用。`install --system` 时运行用户就是 `SYSTEM`，实际只有 `SYSTEM` 与 `Administrators`。
 - Windows 已存在的目录：不是真实目录（符号链接、junction、文件）或属主不是运行用户、`SYSTEM`、`Administrators` 时拒绝启动，因为另一个属主可以改回 ACL；否则 DACL 不是上述受保护形态时直接改写并向已有子对象传播，随后扫描整棵树：遇到链接或其他属主的条目报错，显式授权给其他账户的子对象重置为私有。这不能撤销目录开放期间别人已经读走的内容，开放过的状态目录里的密钥应视为已泄露并轮换。
-- 状态目录的 ACL 不授予安装者或登录用户。`install --system` 后桌面 UI 以普通用户读取 `%ProgramData%\xmesh\<节点名>\control.json` 时，需要由写该文件的一方调用 `privdir.GrantRead(path, sid...)` 给文件单独加只读 ACE（Windows 允许任何账户穿越自己不能列目录的上级目录，按精确路径打开该文件即可）；目录本身与其他文件仍保持私有。内核控制通道落地后接入该调用，授权者与命名管道 DACL 的 `--control-allow-sid` 保持一致。
+- 状态目录的 ACL 不授予安装者或登录用户。`install --system` 后桌面 UI 以普通用户读取 `%ProgramData%\xmesh\<节点名>\control.json` 时，需要由写该文件的一方调用 `privdir.GrantRead(path, sid...)` 给文件单独加只读 ACE（Windows 允许任何账户穿越自己不能列目录的上级目录，按精确路径打开该文件即可）；目录本身与其他文件仍保持私有。内核控制通道每次写 `control.json`（临时文件改名之后）都会调用它，授权者就是命名管道 DACL 的 `--control-allow-sid`（`Test_ControlEndpointFileIsReadableByAllowedSIDs`）。
 
 ## 后端与入口
 
@@ -330,6 +330,50 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 活动执行观察到未知导入（未登记且无创建记录的对象，例如被外部移入的目录）时，监视器以 `errWorkspaceUnknownImport` 终止执行，journal 持久记录 `workspace-unknown-import`；关闭仍可完成回收并向调用方返回该错误，之后不再接受协调导入。含该记录的 journal 需要本版本或更新的恢复二进制。该归并不证明子树完整，Windows 生产 L2 保持 `sandbox.unavailable`。
 
 内部 `workspaceWriterFence` 把工作区与 journal 私有目录的祖先链以无 delete 共享的句柄钉住，并核对身份、reparse、硬链接、DACL 指纹及 NTFS 变更日志；`RequireWriterFence` 开启后生命周期拒绝无法 Verify 的 guard，违规使监视器终止执行，清理仍完成并返回违规。读取变更日志需要卷设备访问，普通账号须在目标账号上验收；该围栏默认关闭、尚未接入生产，且不随宿主崩溃存活。
+
+## 本机控制通道
+
+内核启动后在状态目录旁开一条只给本机用户的控制通道，供桌面 UI 和 `xmesh control` 使用。设计见 [12 桌面 UI 与本机控制通道](design/12-ui-and-control.md)。它不是 TCP 监听，不挂在 Gateway、入口或 MCP 上，`tools/list` 里没有它。通道起不来时节点照常运行，只在 stderr 打印「控制通道未启动」。
+
+| 平台 | 端点 | 谁能连 |
+| --- | --- | --- |
+| macOS、Linux | 状态目录下 `control.sock`（`0600`，目录 `0700`）；路径超过 100 字节时落到 `$TMPDIR/xmesh-<uid>/<节点名>.sock`（契约写作 `control.sock`；加上节点名是为了同一用户的多个节点不互相占用） | 对端 uid 必须等于内核运行用户（`SO_PEERCRED` / `LOCAL_PEERCRED`），其他用户的连接直接断开 |
+| Windows | 命名管道 `\\.\pipe\xmesh-<SID>-<节点名>`，创建时拒绝远程客户端，名字不可被抢占 | DACL 只含运行用户、`SYSTEM`、`Administrators`；`install --system` 额外加入安装者的 SID（`serve --control-allow-sid`）。AppContainer 不在其中 |
+
+状态目录里的 `control.json` 记录端点、PID、内核版本和 `control_api`，节点退出时删除。UI 与 CLI 按 `<用户配置目录>/xmesh/*/control.json` 找到本机所有节点；自定义了 `--state-dir` 的节点用 `--state-dir` 指定。
+
+L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目录或它的上级设为工作目录），exec 和 PTY 以 `policy_denied`、规则 `sandbox.control_channel` 拒绝。macOS 的 Seatbelt 本来就拒绝连接工作目录之外的套接字，Linux 的 bwrap 只绑定工作目录。
+
+### 接口
+
+接口、字段、错误码和事件格式以 [控制通道契约](contracts/control.md) 为准，内核的路由注册与它的路由表一一对应（`Test_ControlRegistersEveryContractRoute`），每个响应和事件在测试里都过契约模式。这里只写运维上需要知道的。
+
+内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`audit`，以及有配置文件时的 `config.read`、`config.write`。`pair`、`pats`、`ingress` 的路由已注册，但内核还没有声明这些能力，请求返回 `not_implemented`（501）。
+
+- `GET /v1/status`：`sys.info` 的超集，不按调用方 tag 过滤，另含 `control`、`lifecycle`、`drain`、`paths`、`gateway`、`peers`。`warnings` 是 `{code, severity, message}`。
+- `GET /v1/events`：SSE，首条 `hello`；`Last-Event-ID`（`<boot_id>.<seq>`）续传，保留最近 1024 条，id 属于上一次启动或已滚出缓存时先发 `reset`。事件由每秒一次的状态采样推导，短于一个采样周期的 exec 可能不会出现，`call` 事件来自审计记录，不受此限。字段是白名单，带 stdout 等内容的事件被拒绝（INV-10）。
+- `GET /v1/sessions`：PTY、排队和运行中的 exec（只有可执行文件基名）、后端租约（`token` 是 fencing 序号）。
+- `POST /v1/drain`、`POST /v1/resume`：`keep` 重复是 no-op，`keep` 可升级为 `kill`，`kill` 降级返回 `conflict`（`drain_downgrade`）。恢复只让本节点重新接受新调用，`kill` 已结束的终端和租约不会回来；同一进程里的 Gateway 一并恢复，其他节点上的 Gateway 自己的排空标记不由这里清除。
+- `GET /v1/config`、`PUT /v1/config`：整文件读写。`PUT` 必须带 `If-Match`（缺少 428，过期 412 并附 `current_etag`），内容经 `config.Parse` 校验（失败 422 `config_invalid`，带逐条诊断），临时文件加重命名原子替换，注释与格式由提交的内容决定。响应的 `diff` 是 JSON Pointer 操作列表，`weakens_security` 只是给 UI 弹确认的提示，内核不拦截，因为同一用户的进程本来就能直接改配置文件。`xmesh control config set --set/--delete` 在客户端读当前文件、改好再整体提交。
+- `GET /v1/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
+
+经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 时只能按路径前缀（`/node`、`/mesh`、`/gateway/listen`、`/ingress`）估计。
+
+### 命令行
+
+```
+xmesh status --control [--node 名 | --state-dir 目录] [--json]
+xmesh control status|peers|sessions|events|audit|drain|resume|config get|config set ...
+xmesh install|pair|uninstall|start|stop|restart ... --json
+```
+
+`xmesh control` 的输出都是 JSON；`events` 每行一个事件（首条为 `hello`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。
+
+### 尚未提供
+
+- 配对、PAT、入口客户端与口令的接口（契约里的 `pair`、`pats`、`ingress` 能力）。
+- `install --system` 的服务以 SYSTEM 运行，它的状态目录不在用户配置目录下，UI 自动发现不到；管道名里的 SID 是 SYSTEM 的，需要显式指定。
+- Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`）；AppContainer 内真实连接被拒的原生验收未做。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，CI 不运行。
 
 ## 测试版发布
 
