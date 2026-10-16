@@ -11,7 +11,9 @@ import (
 	"testing"
 )
 
-func journalFixture(t *testing.T) (*grantJournal, string) {
+func journalFixture(t *testing.T) (*grantJournal, string) { return journalFixtureTB(t) }
+
+func journalFixtureTB(t testing.TB) (*grantJournal, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "recovery.journal")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
