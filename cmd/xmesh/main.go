@@ -32,6 +32,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "__sandbox-supervisor":
 		return winbox.RunProcessSupervisor(args[1:])
+	case "__sandbox-guard":
+		return winbox.RunGuardKeeper(args[1:])
 	case "serve":
 		return serve(args[1:])
 	case "install":

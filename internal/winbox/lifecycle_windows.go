@@ -84,6 +84,15 @@ func newWorkspaceExecution(ctx context.Context, options workspaceExecutionOption
 	if err != nil {
 		return e, err
 	}
+	// An independent keeper verifies this exact journal's completion before it
+	// agrees to release, so it must learn the journal's identity once.
+	if binder, ok := guard.(interface {
+		bindJournal(context.Context, *grantJournal) error
+	}); ok {
+		if err := binder.bindJournal(ctx, e.journal); err != nil {
+			return e, err
+		}
+	}
 	e.profile, err = newProfile(e.journal)
 	if err != nil {
 		return e, err
