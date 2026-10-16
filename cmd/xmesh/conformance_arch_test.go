@@ -36,7 +36,7 @@ func sourceFiles(t *testing.T, root string) []string {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules") {
+		if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules") {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && strings.HasSuffix(path, ".go") {
@@ -62,7 +62,7 @@ func Test_CONARCH02_SingleModuleSingleBinary(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && d.Name() == ".git" {
+		if d.IsDir() && path != root && strings.HasPrefix(d.Name(), ".") {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() && d.Name() == "go.mod" {
