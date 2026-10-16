@@ -69,3 +69,28 @@ func callWithin(t *testing.T, s *mcp.ClientSession, bound time.Duration, name st
 	}
 	return out
 }
+
+// waitFor polls until cond holds, failing with what after a generous bound.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// firstActive returns the id of the first active terminal in pty.list.
+func firstActive(t *testing.T, s *mcp.ClientSession) string {
+	t.Helper()
+	rows := object(t, tool(t, s, "pty.list", map[string]any{}))["sessions"].([]any)
+	for _, row := range rows {
+		m := row.(map[string]any)
+		if m["state"] == "active" {
+			return m["id"].(string)
+		}
+	}
+	t.Fatal("no active terminal", rows)
+	return ""
+}
