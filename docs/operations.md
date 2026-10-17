@@ -417,13 +417,13 @@ xmesh control ingress clients | revoke 客户端ID | password [--password-file �
 xmesh install|pair|uninstall|start|stop|restart ... --json
 ```
 
-`xmesh control` 的输出都是 JSON；`events` 每行一个事件（首条为 `hello`）。
+`xmesh control` 的输出都是 JSON；`events` 每行一个事件（首条为 `hello`）。`--count N` 把 `hello` 也算在内；空闲节点除 `hello` 外没有事件（心跳是不计数的 SSE 注释），要在有限时间内退出请加 `--timeout 5s`，到时正常退出。
 
 `pair`、`pats`、`ingress` 三组命令调用上面同名的接口，节点不需要停：
 
 - `pair export` 打印本机公开配对文档（`{"pair": {...}}`）；加 `--out 文件` 则把文档写成 `0600` 的文件，stdout 只给出节点名与指纹，该文件可直接交给对端的 `xmesh pair --import` 或 `xmesh control pair import`。`pair import --file 文件 --fingerprint 指纹` 导入对端文件，`--fingerprint` 必须是从对端另行拿到的值（冒号与大小写不限），不能从配对文件里抄；`--tags` 缺省为 `tag:peer,tag:device`。两者都只在 `lan` 模式可用，导入后要重启节点才生效。`pair import` 也接受 `pair export` 的完整输出作文件。
 - `pats create` 的 `--scope` 可重复或用逗号分隔（语法见 [CTR-OAUTH-02](contracts/oauth-authz.md#ctr-oauth-02)，如 `devices:read`、`exec:<设备>`、`fs:read:<设备>`）；`pats rotate`、`pats delete` 的名字写在子命令后面或用 `--name`。令牌正文只在 `create` 和 `rotate` 的输出里出现一次，`list` 不含令牌，请在拿到时保存。删除成功输出 `{"deleted": true, "name": …}`。
-- `ingress clients` 列出 issuer 和已注册的 OAuth 客户端，`ingress revoke 客户端ID` 撤销并使其令牌失效，输出 `{"revoked": true, "client_id": …}`。`ingress password` 从 `--password-file` 或标准输入读新登录口令（交互终端下不回显），口令不接受命令行参数，以免进入 shell 历史和进程列表；长度 12 到 256 个字符，首尾空白会被去掉。口令不是来自文件时节点返回 `conflict`（`password_source_not_file`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。
+- `ingress clients` 列出 issuer 和已注册的 OAuth 客户端，`ingress revoke 客户端ID` 撤销并使其令牌失效，输出 `{"revoked": true, "client_id": …}`。`ingress password` 从 `--password-file` 或标准输入读新登录口令（交互终端下不回显），口令不接受命令行参数，以免进入 shell 历史和进程列表；长度 12 到 256 个字符，首尾空白会被去掉。口令不是来自文件时节点返回 `conflict`（`password_source_not_file`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。服务或登录任务没安装时，`start`、`stop`、`restart`、`uninstall` 返回 `error: "not_found"`、`reason: "not_installed"` 和 `name`，不转述 `schtasks` 等系统工具的原文（它们按系统语言输出）。
 
 ### 尚未提供
 

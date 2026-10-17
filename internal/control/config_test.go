@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	"github.com/tzf1003/xmesh/internal/config"
 )
 
 func (f *fixture) config() v1.ConfigResponse {
@@ -346,5 +347,32 @@ func Test_ApplyEditsKeepsComments(t *testing.T) {
 		if _, err = ApplyEdits([]byte(testConfig), []Edit{bad}); err == nil {
 			t.Errorf("accepted %+v", bad)
 		}
+	}
+}
+
+// A JSON configuration stays JSON after a control-channel edit, so other tools can still read it.
+func Test_ApplyEditsKeepsJSON(t *testing.T) {
+	src := `{"node": {"name": "n1", "roles": ["agent", "gateway"]}, "mesh": {"mode": "lan", "lan": {"mdns": true}}, "gateway": {"listen": "127.0.0.1:18080"}, "agent": {"cwd_policy": {"allow": ["."]}}}`
+	out, err := ApplyEdits([]byte(src), []Edit{
+		{Path: "/gateway/pats/ci", Value: map[string]any{"token_file": "pats/ci.token", "scopes": []string{"devices:read"}}},
+		{Path: "/gateway/pats/ci", Delete: true},
+		{Path: "/agent/exec/max_concurrent", Value: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	gateway, _ := got["gateway"].(map[string]any)
+	if gateway["listen"] != "127.0.0.1:18080" || len(gateway["pats"].(map[string]any)) != 0 {
+		t.Fatalf("%v", got)
+	}
+	if exec, _ := got["agent"].(map[string]any)["exec"].(map[string]any); exec["max_concurrent"] != float64(2) {
+		t.Fatalf("%v", got)
+	}
+	if _, err = config.Parse(out); err != nil {
+		t.Fatalf("the kernel cannot read its own edit: %v\n%s", err, out)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kardianos/service"
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
@@ -129,6 +130,13 @@ func Test_CLIControlSubcommands(t *testing.T) {
 		return controlCommand([]string{"events", "--last-event-id", "0", "--count", "1", "--state-dir", state})
 	}); err != nil || !strings.Contains(events, `"type":"`) {
 		t.Fatalf("events: %v %q", err, events)
+	}
+	// an idle node sends only hello: --count 2 alone would wait for ever, --timeout ends it
+	started := time.Now()
+	if events, err := output(t, func() error {
+		return controlCommand([]string{"events", "--count", "2", "--timeout", "400ms", "--state-dir", state})
+	}); err != nil || !strings.Contains(events, `"type":"hello"`) || time.Since(started) > 5*time.Second {
+		t.Fatalf("events --timeout: %v %q after %v", err, events, time.Since(started))
 	}
 	if _, err := output(t, func() error { return controlCommand([]string{"bogus"}) }); err == nil {
 		t.Fatal("unknown verb")

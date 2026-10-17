@@ -4,6 +4,7 @@
   "private": true,
   "description": "xmesh desktop tray shell (Electron)",
   "author": "xmesh authors",
+  "repository": "https://github.com/tzf1003/xmesh",
   "main": "dist/src/main/main.js",
   "type": "commonjs",
   "scripts": {

@@ -69,7 +69,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "mdns": { "type": "boolean" }
+            "mdns": { "type": "boolean" },
+            "interface": { "type": "string", "minLength": 1, "maxLength": 256, "description": "监听和 mDNS 通告使用的网卡名（如 WLAN、en0、eth0）。缺省时选第一块带私有 IPv4 的启用网卡，并跳过虚拟机、容器、WSL、Hyper-V、VPN 隧道等虚拟网卡；指定的网卡不存在或没有私有 IPv4 时拒绝启动。" }
           }
         }
       },

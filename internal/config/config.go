@@ -41,6 +41,8 @@ type Mesh struct {
 	Ephemeral   bool   `json:"ephemeral"`
 	LAN         struct {
 		MDNS bool `json:"mdns"`
+		// Interface pins the network interface the LAN node listens and advertises on.
+		Interface string `json:"interface"`
 	} `json:"lan"`
 }
 type Gateway struct {

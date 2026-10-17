@@ -30,6 +30,7 @@ type LAN struct {
 	peers         map[string]lanPeer
 	presence      map[string]lanPeer // every paired node seen over mDNS, keyed by node id
 	mdns          bool
+	iface         string
 	listener      net.Listener
 	advertisement *zeroconf.Server
 	cancel        context.CancelFunc
@@ -47,6 +48,89 @@ type LANOptions struct {
 	// announces itself nor browses, so it can only be reached by a peer that
 	// already knows its address.
 	MDNS bool
+	// Interface names the network interface to listen and advertise on. Empty picks the first
+	// up interface with a private IPv4 address that does not look virtual (VM host-only
+	// adapters, container bridges, WSL, Hyper-V switches, VPN tunnels); virtual ones are used only
+	// when nothing else qualifies.
+	Interface string
+}
+
+// lanCandidate is what pickLANInterface needs to know about one interface.
+type lanCandidate struct {
+	Name     string
+	Up       bool
+	Loopback bool
+	IPs      []net.IP
+	index    int
+}
+
+// virtualNameParts and virtualNamePrefixes recognise adapters that exist for VMs, containers and
+// tunnels, which are the wrong place to announce a LAN node on a machine that also has a real NIC.
+var (
+	virtualNameParts    = strings.Fields("vmnet vmware virtualbox vboxnet vethernet hyper-v docker wsl tailscale zerotier podman virbr flannel")
+	virtualNamePrefixes = []string{"veth", "br-", "tun", "tap", "utun", "cni"}
+)
+
+func looksVirtual(name string) bool {
+	lower := strings.ToLower(name)
+	for _, part := range virtualNameParts {
+		if strings.Contains(lower, part) {
+			return true
+		}
+	}
+	for _, prefix := range virtualNamePrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// pickLANInterface chooses the interface and its first private IPv4 address. A configured name
+// must exist, be up and have such an address, otherwise it is an error rather than a silent
+// fallback to another network.
+func pickLANInterface(candidates []lanCandidate, want string) (lanCandidate, net.IP, error) {
+	private := func(c lanCandidate) net.IP {
+		if !c.Up || c.Loopback {
+			return nil
+		}
+		for _, ip := range c.IPs {
+			if ip.To4() != nil && ip.IsPrivate() {
+				return ip
+			}
+		}
+		return nil
+	}
+	if want != "" {
+		for _, c := range candidates {
+			if c.Name != want {
+				continue
+			}
+			if ip := private(c); ip != nil {
+				return c, ip, nil
+			}
+			return lanCandidate{}, nil, fmt.Errorf("mesh.lan.interface %q 没有启用或没有私有 IPv4 地址", want)
+		}
+		return lanCandidate{}, nil, fmt.Errorf("mesh.lan.interface %q 不存在", want)
+	}
+	var fallback *lanCandidate
+	var fallbackIP net.IP
+	for i := range candidates {
+		ip := private(candidates[i])
+		if ip == nil {
+			continue
+		}
+		if !looksVirtual(candidates[i].Name) {
+			return candidates[i], ip, nil
+		}
+		if fallback == nil {
+			fallback, fallbackIP = &candidates[i], ip
+		}
+	}
+	if fallback == nil {
+		return lanCandidate{}, nil, fmt.Errorf("LAN 模式需要私有网络接口")
+	}
+	return *fallback, fallbackIP, nil
 }
 
 func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*LAN, error) {
@@ -59,7 +143,7 @@ func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*L
 		return nil, e
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, presence: map[string]lanPeer{}, mdns: options.MDNS, cancel: cancel, done: make(chan struct{})}
+	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, presence: map[string]lanPeer{}, mdns: options.MDNS, iface: options.Interface, cancel: cancel, done: make(chan struct{})}
 	if !options.MDNS {
 		close(l.done)
 		return l, nil
@@ -190,29 +274,23 @@ func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
 	if e != nil {
 		return nil, e
 	}
-	var ip net.IP
-	var selected *net.Interface
+	candidates := make([]lanCandidate, 0, len(interfaces))
 	for i := range interfaces {
 		iface := &interfaces[i]
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
 		addresses, _ := iface.Addrs()
+		candidate := lanCandidate{Name: iface.Name, Up: iface.Flags&net.FlagUp != 0, Loopback: iface.Flags&net.FlagLoopback != 0, index: i}
 		for _, address := range addresses {
-			candidate, _, _ := net.ParseCIDR(address.String())
-			if candidate.To4() != nil && candidate.IsPrivate() {
-				ip = candidate
-				selected = iface
-				break
+			if ip, _, err := net.ParseCIDR(address.String()); err == nil {
+				candidate.IPs = append(candidate.IPs, ip)
 			}
 		}
-		if ip != nil {
-			break
-		}
+		candidates = append(candidates, candidate)
 	}
-	if ip == nil {
-		return nil, fmt.Errorf("LAN 模式需要私有网络接口")
+	picked, ip, e := pickLANInterface(candidates, l.iface)
+	if e != nil {
+		return nil, e
 	}
+	selected := &interfaces[picked.index]
 	raw, e := net.Listen("tcp", net.JoinHostPort(ip.String(), strconv.Itoa(AgentPort)))
 	if e != nil {
 		return nil, e

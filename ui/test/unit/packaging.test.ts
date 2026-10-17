@@ -34,6 +34,11 @@ async function loadConfig(env: Record<string, string | undefined>): Promise<{ de
   }
 }
 
+test("package.json names the repository, or electron-builder fails after packaging when the git root is not ui/", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(UI, "package.json"), "utf8")) as { repository?: unknown };
+  assert.equal(typeof pkg.repository === "string" && pkg.repository.startsWith("https://github.com/"), true);
+});
+
 test("package config: release fuses come from scripts/fuses.config.mjs", async () => {
   const { default: cfg } = await loadConfig({});
   const profiles = (await import(pathToFileURL(path.join(UI, "scripts", "fuses.config.mjs")).href)) as {
