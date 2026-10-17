@@ -16,7 +16,7 @@ export interface Platform {
   confirm(opts: { title: string; detail: string; confirmLabel: string; cancelLabel: string }): Promise<boolean>;
   showPanel(): void;
   quit(): void;
-  runCli(command: CliCommand): Promise<unknown>;
+  runCli(command: CliCommand, node?: string): Promise<unknown>;
   notifyError(message: string): void;
   /** Native chooser; resolves to the chosen absolute path or undefined on cancel. */
   pickPath(kind: PickKind): Promise<string | undefined>;
@@ -57,7 +57,7 @@ export class Actions {
       case "select-instance":
         return this.selectInstance(a.id);
       case "restart-kernel":
-        return this.runCli("restart");
+        return this.runCli("restart", this.selectedNode());
       case "stop-kernel":
         return this.stopKernel();
       case "quit":
@@ -127,12 +127,17 @@ export class Actions {
       confirmLabel: this.t("dialog.stopKernel.confirm"),
       cancelLabel: this.t("dialog.cancel"),
     });
-    return yes ? this.runCli("stop") : ok;
+    return yes ? this.runCli("stop", this.selectedNode()) : ok;
   }
 
-  private async runCli(command: CliCommand): Promise<ActionResult> {
+  /** The node whose kernel the panel or tray is showing: its state directory is named after it. */
+  private selectedNode(): string | undefined {
+    return this.controller.snapshot.selectedInstance || undefined;
+  }
+
+  private async runCli(command: CliCommand, node?: string): Promise<ActionResult> {
     try {
-      await this.platform.runCli(command);
+      await this.platform.runCli(command, node);
       return ok;
     } catch (e) {
       this.platform.notifyError(this.t("dialog.cliFailed", { command: `xmesh ${command}` }));

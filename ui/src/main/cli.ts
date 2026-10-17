@@ -36,10 +36,19 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * Arguments for `xmesh <command> [--name xmesh-<node>] --json`. Without `--name` the CLI reads
+ * `./xmesh.yaml`, which a tray app does not have, so the service is named whenever it is known.
+ */
+export function cliArgs(command: CliCommand, node?: string): string[] {
+  const service = node && /^[A-Za-z0-9._-]+$/.test(node) ? ["--name", `xmesh-${node}`] : [];
+  return [command, ...service, "--json"];
+}
+
 /** Runs `xmesh <command> --json` without a shell and resolves on exit code 0. */
-export function runXmesh(command: CliCommand, bin: string = xmeshBinary()): Promise<string> {
+export function runXmesh(command: CliCommand, node?: string, bin: string = xmeshBinary()): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(bin, [command, "--json"], { timeout: 120_000, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(bin, cliArgs(command, node), { timeout: 120_000, windowsHide: true }, (err, stdout, stderr) => {
       if (err) reject(new CliError(command, String(stderr || err.message).trim()));
       else resolve(stdout);
     });

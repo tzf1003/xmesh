@@ -154,6 +154,19 @@ test("restart runs the CLI without asking, and a CLI failure is reported not thr
   assert.deepEqual(log, ["err:命令执行失败：xmesh restart"]);
 });
 
+test("restart and stop name the selected node's service, so the CLI does not read ./xmesh.yaml", async () => {
+  const seen: (string | undefined)[] = [];
+  const { controller } = fakeController({ ...connected(), selectedInstance: "office-pc" });
+  const { platform } = fakePlatform();
+  platform.runCli = async (_command, node) => {
+    seen.push(node);
+  };
+  const actions = new Actions(controller, platform, t);
+  await actions.dispatch({ type: "restart-kernel" });
+  await actions.dispatch({ type: "stop-kernel" });
+  assert.deepEqual(seen, ["office-pc", "office-pc"]);
+});
+
 test("kernel errors become results with the kernel's code", async () => {
   const { controller } = fakeController(connected(), {
     drain: async () => {

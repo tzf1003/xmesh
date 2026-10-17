@@ -22,7 +22,7 @@ export function electronPlatform(showPanel: () => void, notifyError: (message: s
     },
     showPanel,
     quit: () => app.quit(),
-    runCli: (command) => runXmesh(command),
+    runCli: (command, node) => runXmesh(command, node),
     notifyError,
     pickPath: async (kind) => {
       if (kind === "authkeySave") {
