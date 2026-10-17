@@ -221,23 +221,28 @@ func Test_ControlPipeListenerCloseAfterClientDrops(t *testing.T) {
 	}
 }
 
-// stuckListener never stops, like go-winio's loop after it has lost a close request.
+// stuckListener never stops, like go-winio's loop after it has lost a close request. Each Close
+// blocks until release is closed; a nil release blocks for good.
 type stuckListener struct {
 	net.Listener
-	closes chan struct{}
+	closes  chan struct{}
+	release chan struct{}
 }
 
 func (l *stuckListener) Close() error {
 	l.closes <- struct{}{}
-	select {} // blocks for good
+	<-l.release
+	return nil
 }
 
 // A listener that never stops must make pipeListener.Close return an error after the wait, and a
-// later Close must not wait again.
+// later Close must not wait again. The slow retry is an hour away, so only the fast phase retries.
 func Test_ControlPipeListenerCloseGivesUp(t *testing.T) {
-	oldRetry, oldAttempts, oldWait := pipeCloseRetry, pipeCloseAttempts, pipeCloseWait
-	pipeCloseRetry, pipeCloseAttempts, pipeCloseWait = time.Millisecond, 5, 50*time.Millisecond
-	defer func() { pipeCloseRetry, pipeCloseAttempts, pipeCloseWait = oldRetry, oldAttempts, oldWait }()
+	oldRetry, oldAttempts, oldSlow, oldWait := pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry, pipeCloseWait
+	pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry, pipeCloseWait = time.Millisecond, 5, time.Hour, 50*time.Millisecond
+	defer func() {
+		pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry, pipeCloseWait = oldRetry, oldAttempts, oldSlow, oldWait
+	}()
 	inner := &stuckListener{closes: make(chan struct{}, 100)}
 	l := &pipeListener{Listener: inner}
 	result := make(chan error, 1)
@@ -259,5 +264,31 @@ func Test_ControlPipeListenerCloseGivesUp(t *testing.T) {
 	}
 	if waited := time.Since(start); waited > pipeCloseWait {
 		t.Fatalf("a second Close waited %s, want none", waited)
+	}
+}
+
+// Retries must go on after the fast budget runs out. A close request lost near the end of that
+// budget is answered only by a later one, so a listener that stops only after more retries must
+// still be released. The listener here stops when the test releases it.
+func Test_ControlPipeListenerKeepsRetrying(t *testing.T) {
+	oldRetry, oldAttempts, oldSlow, oldWait := pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry, pipeCloseWait
+	pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry, pipeCloseWait = time.Millisecond, 2, time.Millisecond, 300*time.Millisecond
+	defer func() {
+		pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry, pipeCloseWait = oldRetry, oldAttempts, oldSlow, oldWait
+	}()
+	release := make(chan struct{})
+	inner := &stuckListener{closes: make(chan struct{}, 1000), release: release}
+	l := &pipeListener{Listener: inner}
+	if err := l.Close(); err == nil {
+		t.Fatal("Close of a listener that has not stopped returned nil")
+	}
+	if n := len(inner.closes); n <= pipeCloseAttempts+1 {
+		t.Fatalf("Close was requested %d times, want retries past the %d fast attempts", n, pipeCloseAttempts)
+	}
+	close(release)
+	select {
+	case <-l.stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the retries did not stop once the listener was released")
 	}
 }

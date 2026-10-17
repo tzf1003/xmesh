@@ -46,7 +46,8 @@ func Listen(o ListenOptions) (net.Listener, Bound, error) {
 //
 // The wait is bounded. When the loop still has not stopped after pipeCloseWait, Close reports it
 // and every later Close returns at once, so one stuck listener costs one wait, not one per call.
-// The retries go on in the background until the loop stops or they run out.
+// The retries go on in the background until the loop stops. A lost request is only answered by a
+// later one, so they must not run out while the loop is still running.
 type pipeListener struct {
 	net.Listener
 	once    sync.Once
@@ -54,9 +55,10 @@ type pipeListener struct {
 }
 
 var (
-	pipeCloseRetry    = 25 * time.Millisecond
-	pipeCloseAttempts = 400
-	pipeCloseWait     = 2 * time.Second
+	pipeCloseRetry     = 25 * time.Millisecond
+	pipeCloseAttempts  = 400
+	pipeCloseSlowRetry = time.Second
+	pipeCloseWait      = 2 * time.Second
 )
 
 var errPipeNotStopped = errors.New("the control pipe listener did not stop")
@@ -66,7 +68,7 @@ func (l *pipeListener) Close() error {
 	l.once.Do(func() {
 		first = true
 		l.stopped = make(chan struct{})
-		go l.stop(pipeCloseRetry, pipeCloseAttempts)
+		go l.stop(pipeCloseRetry, pipeCloseAttempts, pipeCloseSlowRetry)
 	})
 	if !first {
 		select {
@@ -86,18 +88,22 @@ func (l *pipeListener) Close() error {
 
 // stop sends close requests until the loop has stopped. Each request runs on its own goroutine,
 // because a request that is lost inside go-winio leaves its own call blocked until a later request
-// releases it. Withholding requests would leave a lost one unanswered for good, so every retry is
-// sent. The goroutines return once the loop stops, and there are at most attempts+1 of them. The
-// retry settings are passed in: this loop can outlive Close, and it must not read package
-// variables that a later test or caller may change.
-func (l *pipeListener) stop(retry time.Duration, attempts int) {
+// releases it. Capping the requests in flight would leave a lost one unanswered for good, so every
+// retry is sent. The first attempts retries are retry apart, then the rest are slow apart. The
+// goroutines return once the loop stops; a listener that never stops keeps one blocked goroutine
+// per retry, a second apart after the fast phase. The retry settings are passed in: this loop can
+// outlive Close, and it must not read package variables that a later test or caller may change.
+func (l *pipeListener) stop(retry time.Duration, attempts int, slow time.Duration) {
 	var once sync.Once
 	request := func() {
 		_ = l.Listener.Close()
 		once.Do(func() { close(l.stopped) })
 	}
 	go request()
-	for attempt := 0; attempt < attempts; attempt++ {
+	for attempt := 1; ; attempt++ {
+		if attempt > attempts {
+			retry = slow
+		}
 		select {
 		case <-l.stopped:
 			return
