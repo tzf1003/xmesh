@@ -20,7 +20,7 @@ xmesh 用 tsnet 以用户态加入 tailnet，不需要安装 Tailscale，不需�
 | 模式 | 发现与传输 | 适用 |
 | --- | --- | --- |
 | `tailnet`（默认） | tsnet + 控制面（官方 Tailscale 或 Headscale）。打洞失败走 DERP（官方或自建） | 跨网络、跨 NAT |
-| `lan` | mDNS / DNS-SD 发现 + mTLS 直连。首次配对交换节点证书 | 同网段、零基础设施的兜底 |
+| `lan` | mDNS / DNS-SD 发现（`internal/mdns`，单网卡 IPv4；查询走临时端口以便对端单播应答，并周期性通告）+ mTLS 直连。首次配对交换节点证书 | 同网段、零基础设施的兜底 |
 | `relay`（本期不做） | 脱离 Tailscale 协议时的替代。候选 go-libp2p（Circuit Relay v2 + DCUtR） | 未来如需去掉 Tailscale 依赖 |
 
 `relay` 在本期禁止出现在实现和默认配置中，见 [CON-NET-08](../constraints/network.md#con-net-08)。
