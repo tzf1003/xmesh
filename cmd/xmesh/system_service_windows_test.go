@@ -30,6 +30,9 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	if !filepath.IsAbs(binary) {
 		t.Fatal("XMESH_TEST_WINDOWS_BINARY must name the built xmesh executable")
 	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatal("the built xmesh executable is missing:", err)
+	}
 	root := filepath.Join(t.TempDir(), "service space & 中文")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
