@@ -98,7 +98,7 @@ func Test_WindowsAppContainerWorkspaceExecution(t *testing.T) {
 				console = c.handle
 			}
 			process, err := e.start(ctx, []string{helper, "-test.run=^Test_WindowsAppContainerWorkspaceChangeMonitorHelper$", "--", options.Workspace, proof, "delayed-delete"},
-				profile.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_CHANGE_MONITOR_HELPER=1"}, nil, console)
+				profile.Directory(), []string{"SystemRoot=" + os.Getenv("SystemRoot"), "XMESH_CHANGE_MONITOR_HELPER=1", "GORACE=log_path=lifecycle-race"}, nil, console)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,6 +111,13 @@ func Test_WindowsAppContainerWorkspaceExecution(t *testing.T) {
 				data, _ := os.ReadFile(proof)
 				if observed && string(data) == "ready" {
 					break
+				}
+				// A helper that exits before it reports ready can never recover;
+				// say why at once instead of waiting for the deadline.
+				if string(data) != "ready" {
+					if status, _ := windows.WaitForSingleObject(process.Process, 0); status == windows.WAIT_OBJECT_0 {
+						t.Fatal("lifecycle helper exited before it was ready: " + describeHelperExit(process.Process, profile.Directory(), "lifecycle-race", proof))
+					}
 				}
 				select {
 				case <-ctx.Done():

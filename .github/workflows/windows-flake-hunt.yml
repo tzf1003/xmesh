@@ -1,0 +1,52 @@
+name: Windows 偶发 winbox 测试复现
+# 反复运行 Test_WindowsManagedRunnerExecConcurrent、Test_WindowsAppContainerWorkspaceExecution
+# 和 Test_WindowsManagedRunnerTerminalKill，失败时测试会带出 race 运行时日志与 helper 退出原因，
+# 用来确认这些偶发失败是否都来自 race 运行时启动期映射失败。
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - '.github/workflows/windows-flake-hunt.yml'
+jobs:
+  hunt:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/windows-flake-hunt.yml
+      - name: Repeat the flaky tests
+        shell: pwsh
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: |
+          $failed = 0
+          $runs = @(
+            @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 50 },
+            @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 30 },
+            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 25 }
+          )
+          foreach ($run in $runs) {
+            $out = "hunt-$($run.Name).txt"
+            $elapsed = Measure-Command {
+              go test -race ./internal/winbox -run $run.Pattern -count=$($run.Count) -timeout=2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
+            }
+            "{0}: {1:n0}s for {2} iterations" -f $run.Name, $elapsed.TotalSeconds, $run.Count
+            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          }
+          "==== failures ===="
+          foreach ($run in $runs) {
+            "---- $($run.Name)"
+            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
+          }
+          if ($failed -ne 0) { exit 1 }
