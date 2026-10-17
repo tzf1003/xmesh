@@ -7,6 +7,7 @@ import {
   parseAuditQuery,
   parseBoolean,
   parseClientId,
+  parseConfigPatch,
   parseConfigSave,
   parseCopyKind,
   parseDrainMode,
@@ -98,6 +99,10 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
   handle(CHANNELS.putConfig, (req: unknown) => {
     const v = parseConfigSave(req);
     return v === undefined ? bad("config request") : service.putConfig(v);
+  });
+  handle(CHANNELS.patchConfig, (req: unknown) => {
+    const v = parseConfigPatch(req);
+    return v === undefined ? bad("config edit request") : service.patchConfig(v);
   });
   handle(CHANNELS.listPats, () => service.listPats());
   handle(CHANNELS.createPat, (args: unknown) => {

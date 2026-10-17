@@ -103,6 +103,26 @@
       "errors": []
     },
     {
+      "id": "control.config.patch",
+      "method": "PATCH",
+      "path": "/v1/config",
+      "capability": "config.write",
+      "since": "1.2",
+      "query": null,
+      "body": "urn:xmesh:schema:control-config:1#/$defs/ConfigEditRequest",
+      "response": "urn:xmesh:schema:control-config:1#/$defs/ConfigPutResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "required",
+      "errors": [
+        "invalid_args",
+        "config_invalid",
+        "precondition_failed",
+        "precondition_required",
+        "conflict"
+      ]
+    },
+    {
       "id": "control.config.put",
       "method": "PUT",
       "path": "/v1/config",

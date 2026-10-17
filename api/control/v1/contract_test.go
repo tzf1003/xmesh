@@ -30,6 +30,7 @@ var typeFor = map[string]func() any{
 	"ConfigResponse":          func() any { return new(v1.ConfigResponse) },
 	"ConfigPutRequest":        func() any { return new(v1.ConfigPutRequest) },
 	"ConfigPutResponse":       func() any { return new(v1.ConfigPutResponse) },
+	"ConfigEditRequest":       func() any { return new(v1.ConfigEditRequest) },
 	"PairExportResponse":      func() any { return new(v1.PairExportResponse) },
 	"PairImportRequest":       func() any { return new(v1.PairImportRequest) },
 	"PairImportResponse":      func() any { return new(v1.PairImportResponse) },

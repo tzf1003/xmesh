@@ -273,6 +273,37 @@ export interface ConfigChange {
    */
   weakens_security: boolean;
 }
+/**
+ * 对配置文件的一处修改，按 JSON Pointer 定位；数组整体替换，映射不存在时自动创建。
+ */
+export interface ConfigEdit {
+  /**
+   * JSON Pointer，例如 /agent/backends/fs。
+   */
+  path: string;
+  /**
+   * 新值，任意 JSON；delete 为 true 时忽略。
+   */
+  value?: {} | unknown[] | string | number | boolean | null;
+  /**
+   * 删除该路径。
+   */
+  delete?: boolean;
+}
+/**
+ * PATCH /v1/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。
+ */
+export interface ConfigEditRequest {
+  /**
+   * @minItems 1
+   * @maxItems 64
+   */
+  edits: [ConfigEdit, ...ConfigEdit[]];
+  /**
+   * 只校验并计算 diff，不写文件。
+   */
+  dry_run?: boolean;
+}
 export interface ConfigPutRequest {
   content: string;
   /**
@@ -864,7 +895,7 @@ export const CONTROL_ERROR_STATUS = {
 
 export interface ControlRouteInfo {
   id: keyof ControlRouteTypes;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   capability: Capability;
   since: string;
@@ -980,6 +1011,26 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "stream": false,
     "if_match": "none",
     "errors": []
+  },
+  {
+    "id": "control.config.patch",
+    "method": "PATCH",
+    "path": "/v1/config",
+    "capability": "config.write",
+    "since": "1.2",
+    "query": null,
+    "body": "ConfigEditRequest",
+    "response": "ConfigPutResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "required",
+    "errors": [
+      "invalid_args",
+      "config_invalid",
+      "precondition_failed",
+      "precondition_required",
+      "conflict"
+    ]
   },
   {
     "id": "control.config.put",
@@ -1175,6 +1226,7 @@ export interface ControlRouteTypes {
   "control.drain.start": { query: undefined; body: DrainRequest; response: DrainResponse };
   "control.drain.resume": { query: undefined; body: undefined; response: DrainResponse };
   "control.config.get": { query: undefined; body: undefined; response: ConfigResponse };
+  "control.config.patch": { query: undefined; body: ConfigEditRequest; response: ConfigPutResponse };
   "control.config.put": { query: undefined; body: ConfigPutRequest; response: ConfigPutResponse };
   "control.pair.export": { query: undefined; body: undefined; response: PairExportResponse };
   "control.pair.import": { query: undefined; body: PairImportRequest; response: PairImportResponse };

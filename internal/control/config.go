@@ -50,11 +50,39 @@ func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
 	writeJSON(w, 200, out)
 }
 
-func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
-	path := s.o.Store.Path()
+// maxConfigEdits bounds one PATCH /v1/config; a form edit needs a handful, a whole file goes through PUT.
+const maxConfigEdits = 64
+
+// ifMatch returns the ETag a write names, or reports the missing precondition.
+func ifMatch(w http.ResponseWriter, r *http.Request) (string, bool) {
 	match := r.Header.Get("If-Match")
 	if strings.TrimSpace(match) == "" {
 		failWith(w, newError(v1.ErrPreconditionNeeded, "修改配置必须带 If-Match"))
+		return "", false
+	}
+	return strings.Trim(strings.TrimSpace(match), `"`), true
+}
+
+// readMatchedLocked returns the configuration file bytes when they still carry the ETag match. The
+// caller holds configMu. A failure is reported to w and returns false.
+func (s *Server) readMatchedLocked(w http.ResponseWriter, match string) ([]byte, bool) {
+	old, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		return nil, false
+	}
+	if current := etagOf(old); match != current {
+		e := newError(v1.ErrPreconditionFailed, "配置文件已被修改，请重新读取后再保存")
+		e.CurrentETag = current
+		failWith(w, e)
+		return nil, false
+	}
+	return old, true
+}
+
+func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
+	match, ok := ifMatch(w, r)
+	if !ok {
 		return
 	}
 	var req v1.ConfigPutRequest
@@ -64,19 +92,57 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
-	old, err := os.ReadFile(path)
-	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+	old, ok := s.readMatchedLocked(w, match)
+	if !ok {
 		return
 	}
-	if current := etagOf(old); strings.Trim(strings.TrimSpace(match), `"`) != current {
-		e := newError(v1.ErrPreconditionFailed, "配置文件已被修改，请重新读取后再保存")
-		e.CurrentETag = current
+	s.saveLocked(w, old, []byte(req.Content), req.DryRun)
+}
+
+// patchConfig applies the edits to the file on disk and saves the result like PUT. Either every edit
+// applies and the result validates, or nothing is written.
+func (s *Server) patchConfig(w http.ResponseWriter, r *http.Request, _ *call) {
+	match, ok := ifMatch(w, r)
+	if !ok {
+		return
+	}
+	var req v1.ConfigEditRequest
+	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
 	}
-	next := []byte(req.Content)
-	if _, err = config.Parse(next); err != nil {
+	if len(req.Edits) == 0 || len(req.Edits) > maxConfigEdits {
+		failWith(w, argError("edits", "edits 需要 1 到 64 项"))
+		return
+	}
+	edits := make([]Edit, len(req.Edits))
+	for i, item := range req.Edits {
+		if _, err := pointer(item.Path); err != nil {
+			failWith(w, argError("path", "path 必须是 JSON Pointer，例如 /agent/backends/name"))
+			return
+		}
+		edits[i] = Edit{Path: item.Path, Value: item.Value, Delete: item.Delete}
+	}
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	old, ok := s.readMatchedLocked(w, match)
+	if !ok {
+		return
+	}
+	next, err := ApplyEdits(old, edits)
+	if err != nil {
+		failWith(w, newError(v1.ErrConflict, "配置结构不允许这项修改"))
+		return
+	}
+	// An edit that changes nothing in the parsed document, such as removing an absent key, writes nothing.
+	dryRun := req.DryRun || len(diffConfigs(parsedOf(old), parsedOf(next))) == 0
+	s.saveLocked(w, old, next, dryRun)
+}
+
+// saveLocked validates next like a whole-file write and, unless it is a dry run or changes nothing,
+// stores it. The caller holds configMu and has matched old against If-Match.
+func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool) {
+	if _, err := config.Parse(next); err != nil {
 		e := newError(v1.ErrConfigInvalid, "配置未通过校验，没有写入")
 		e.Diagnostics = diagnostics(err)
 		failWith(w, e)
@@ -87,7 +153,7 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	for _, c := range diff {
 		restart = restart || c.RestartRequired
 	}
-	applied := !req.DryRun && !bytes.Equal(old, next)
+	applied := !dryRun && !bytes.Equal(old, next)
 	if !applied {
 		writeJSON(w, 200, v1.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
 		return
