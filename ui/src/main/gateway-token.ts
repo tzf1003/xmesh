@@ -30,11 +30,19 @@ export const realTokenFiles: TokenFiles = {
 /** A token is a few dozen characters; anything much larger is not a token file. */
 const MAX_TOKEN_FILE_BYTES = 4096;
 
-/** The PAT the copied commands use: the first one by name, compared as plain strings. */
+/** The PAT rotation and the upgrade notice follow. The copied commands carry its token too, so rotating it updates them. */
+export const DEFAULT_PAT_NAME = "default";
+
+/** The first PAT by name, compared as plain strings. */
 export function firstPatByName(pats: readonly PatInfo[]): PatInfo | undefined {
   let first: PatInfo | undefined;
   for (const p of pats) if (first === undefined || p.name < first.name) first = p;
   return first;
+}
+
+/** The PAT the copied commands use: "default" when it exists, otherwise the first PAT by name. */
+export function copyPat(pats: readonly PatInfo[]): PatInfo | undefined {
+  return pats.find((p) => p.name === DEFAULT_PAT_NAME) ?? firstPatByName(pats);
 }
 
 /** The token in `file`, trimmed. Refuses anything that is not a regular file holding one safe token. */
@@ -75,7 +83,7 @@ export class GatewayCredentials {
       throw new TokenUnavailableError(e instanceof Error ? e.message : String(e));
     }
     const pats = (list as Partial<PatList> | null)?.pats;
-    const pat = Array.isArray(pats) ? firstPatByName(pats) : undefined;
+    const pat = Array.isArray(pats) ? copyPat(pats) : undefined;
     if (pat === undefined) throw new TokenUnavailableError("the kernel has no PAT");
     return readTokenFile(pat.token_file, this.files);
   }

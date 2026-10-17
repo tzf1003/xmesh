@@ -232,10 +232,10 @@ test("without a default PAT, rotation is refused and nothing is rotated", async 
   assert.equal(last(k, "POST", "/v1/pats/default/rotate"), undefined);
 });
 
-test("the copy path reads the first PAT's token from its file, the same one the kernel stores", async () => {
+test("the copy path reads the default PAT's token from its file, the same one the kernel stores", async () => {
   const { k, c } = await setup();
   const token = await new GatewayCredentials(c).read();
-  assert.equal(token, k.panel.tokenOf("claude-code"));
+  assert.equal(token, k.panel.tokenOf("default"));
   assert.ok(token.length >= 32, "the kernel's tokens are long");
 });
 

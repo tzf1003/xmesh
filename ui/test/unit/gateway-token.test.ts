@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { GatewayCredentials, TokenUnavailableError, firstPatByName, readTokenFile } from "../../src/main/gateway-token";
+import { GatewayCredentials, TokenUnavailableError, copyPat, firstPatByName, readTokenFile } from "../../src/main/gateway-token";
 import type { ShellController } from "../../src/main/controller";
 import type { PatInfo } from "../../src/shared/control";
 
@@ -37,6 +37,13 @@ test("the first PAT by name is the one whose token the commands carry", () => {
   assert.equal(firstPatByName(list)?.name, "Zed", "plain code-unit order: uppercase sorts before lowercase");
   assert.equal(firstPatByName([patAt("ci", "/a"), patAt("claude-code", "/b")])?.name, "ci");
   assert.equal(firstPatByName([]), undefined);
+});
+
+test("the copied commands carry the default PAT's token, and fall back to the first PAT by name without one", () => {
+  const list = [patAt("claude-code", "/x/cc.pat"), patAt("default", "/x/default.pat"), patAt("Zed", "/x/z.pat")];
+  assert.equal(copyPat(list)?.name, "default", "rotation targets default, so the commands must carry its token");
+  assert.equal(copyPat([patAt("claude-code", "/x/cc.pat"), patAt("ci", "/x/ci.pat")])?.name, "ci");
+  assert.equal(copyPat([]), undefined);
 });
 
 test("a token file yields its trimmed token", () => {
@@ -75,10 +82,10 @@ test("a token file holding characters a connect command cannot carry is refused"
   assert.throws(() => readTokenFile(file), /cannot carry/);
 });
 
-test("the credential reader takes the first PAT's token file from the kernel", async () => {
-  const file = path.join(dir, "claude-code.pat");
+test("the credential reader takes the default PAT's token file from the kernel", async () => {
+  const file = path.join(dir, "default.pat");
   fs.writeFileSync(file, `${TOKEN}\n`);
-  const creds = new GatewayCredentials(controllerWith({ enforced: true, pats: [patAt("default", path.join(dir, "default.pat")), patAt("claude-code", file)] }));
+  const creds = new GatewayCredentials(controllerWith({ enforced: true, pats: [patAt("claude-code", path.join(dir, "claude-code.pat")), patAt("default", file)] }));
   assert.equal(await creds.read(), TOKEN);
 });
 

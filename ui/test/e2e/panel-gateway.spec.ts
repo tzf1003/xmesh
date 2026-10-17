@@ -8,8 +8,8 @@ import { FAKE_LAN_IP, FAKE_TAILNET_IP, FAKE_TAILNET_NAME } from "../../testserve
 import { type Harness, launch } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit", "gateway"];
-/** The PAT the copied commands carry: the first one by name (the fixture's "claude-code"). */
-const COPIED_PAT = "claude-code";
+/** The PAT the copied commands carry: "default", the one rotation targets. */
+const COPIED_PAT = "default";
 /** The PAT rotation targets and the upgrade notice are about. */
 const GATEWAY_PAT = "default";
 const LOOPBACK: GatewayInfo = {
@@ -86,7 +86,7 @@ test("each copy carries the token, which is read in main; the page never holds i
   expect((await clipboard())[2]).toBe(
     `claude mcp add --transport http xmesh http://${FAKE_LAN_IP}:8080/mcp --header "Authorization: Bearer ${token}"`,
   );
-  await expect(page.getByTestId("toast").first()).toContainText("已复制");
+  await expect(page.getByTestId("toast").last()).toContainText("已复制");
 
   expect(await page.content()).not.toContain(token);
 });
