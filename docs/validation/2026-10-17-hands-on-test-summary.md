@@ -29,8 +29,8 @@
 
 | 编号 | 现象 | 状态 |
 | --- | --- | --- |
-| P1 | 商店版 `pwsh`（App Execution Alias）带 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 创建进程时 `ERROR_ACCESS_DENIED`，`exec.run` 和 `pty.open`（`default_shell` 为 auto）返回 `internal`；`powershell.exe` 与 `cmd.exe` 正常 | 未修复，在「Windows 进程启动与终端恢复」线处理 |
-| P2 | `drain --mode kill` 之后 `resume`，`pty.open` 一直返回“终端管理器正在关闭”，直到重启节点；`exec.run` 与 `drain --mode keep` 不受影响 | 未修复，同上 |
+| P1 | 商店版 `pwsh`（App Execution Alias）带 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 创建进程时 `ERROR_ACCESS_DENIED`，`exec.run` 和 `pty.open`（`default_shell` 为 auto）返回 `internal`；`powershell.exe` 与 `cmd.exe` 正常 | 已修（#42），待用户 Windows 机用真实商店别名复测 |
+| P2 | `drain --mode kill` 之后 `resume`，`pty.open` 一直返回“终端管理器正在关闭”，直到重启节点；`exec.run` 与 `drain --mode keep` 不受影响 | 已修（#42），待复测 |
 | P3 | 面板配对页拒绝 `pair --export` 导出的 `tags: null` | 已由 #41 修复 |
 | P4 | 未提权账户打开 `agent.policy.windows_appcontainer` 后，运行器“启动成功”，之后每次 exec 都是 `policy_denied`（`sandbox.runner_failed`）且没有原因，原因只在节点日志里 | 已由 #43 修复：启动前探测，走 `sandbox.unavailable` 并带原因，验收页改为普通账户预期被拒 |
 | P5 | 控制通道 `status.warnings` 没有沙箱不可用告警，托盘与面板仍显示正常 | 已由 #43 修复：新增 `sandbox_unavailable` 告警 |
@@ -39,7 +39,7 @@
 | S2 | 导入对端证书后 `restart_required` 不进 status，托盘不显示需要重启 | 已由 #41 修复 |
 | S3 | `policy_reload_failed` 告警在配置恢复合法后一直保留到重启 | 已由 #43 修复 |
 | S4 | `xmesh control events --count 2` 在空闲节点上收到 hello 后无限阻塞 | 已由 #44 修复：增加 `--timeout`，文档写明 `--count` 把 hello 也算在内 |
-| S5 | `Test_ControlAuditView` 在 UTC+8 失败（#41 已修）；无符号链接权限账户上 `Test_WindowsPrivdirRefusesLinks`、`Test_CTRCWD01` 失败而不是跳过 | 已由 #41、#44 修复 |
+| S5 | `Test_ControlAuditView` 在 UTC+8 失败（#41 已修）；无符号链接权限账户上 `Test_WindowsPrivdirRefusesLinks`、`Test_CTRCWD01` 失败而不是跳过；`Test_CTRFS06_07_MetadataAndDelete` 同类 | 已由 #41、#44、#46 修复（符号链接段按权限跳过，其余检查照常）|
 | S6 | LAN 监听和 mDNS 取第一块私有网卡，多网卡或虚拟网卡机器可能选错 | 已由 #44 修复：新增 `mesh.lan.interface`，缺省跳过虚拟网卡 |
 | S7 | 中文代码页输出 | 未修复，在「Windows 进程启动与终端恢复」线处理 |
 
