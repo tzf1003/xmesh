@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/grandcat/zeroconf"
 	"github.com/tzf1003/xmesh/internal/identity"
+	"github.com/tzf1003/xmesh/internal/mdns"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,7 +33,7 @@ type LAN struct {
 	mdns          bool
 	iface         string
 	listener      net.Listener
-	advertisement *zeroconf.Server
+	advertisement *mdns.Responder
 	cancel        context.CancelFunc
 	done          chan struct{}
 }
@@ -148,16 +149,14 @@ func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*L
 		close(l.done)
 		return l, nil
 	}
-	if e = l.startDiscovery(ctx, 10*time.Second, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
-		resolver, err := zeroconf.NewResolver(nil)
-		if err != nil {
-			return nil, err
-		}
-		entries := make(chan *zeroconf.ServiceEntry, 32)
-		if err = resolver.Browse(ctx, lanService, "local.", entries); err != nil {
-			return nil, err
-		}
-		return entries, nil
+	iface, ip, e := selectLANInterface(options.Interface)
+	if e != nil {
+		cancel()
+		return nil, e
+	}
+	slog.Info("lan_mdns_browse", "interface", iface.Name, "address", ip.String())
+	if e = l.startDiscovery(ctx, 10*time.Second, func(ctx context.Context) (<-chan *mdns.Entry, error) {
+		return mdns.Browse(ctx, lanService, "local", iface, ip)
 	}); e != nil {
 		cancel()
 		return nil, e
@@ -165,9 +164,44 @@ func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*L
 	return l, nil
 }
 
-// zeroconf emits each service once per Browse. Fresh rounds renew liveness
+// lanCandidates lists the interfaces of this host in the form pickLANInterface chooses from; the
+// candidate's index points into the returned interface list.
+func lanCandidates() ([]net.Interface, []lanCandidate, error) {
+	interfaces, e := net.Interfaces()
+	if e != nil {
+		return nil, nil, e
+	}
+	candidates := make([]lanCandidate, 0, len(interfaces))
+	for i := range interfaces {
+		iface := &interfaces[i]
+		addresses, _ := iface.Addrs()
+		candidate := lanCandidate{Name: iface.Name, Up: iface.Flags&net.FlagUp != 0, Loopback: iface.Flags&net.FlagLoopback != 0, index: i}
+		for _, address := range addresses {
+			if ip, _, err := net.ParseCIDR(address.String()); err == nil {
+				candidate.IPs = append(candidate.IPs, ip)
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	return interfaces, candidates, nil
+}
+
+// selectLANInterface resolves the interface the node listens, advertises and browses on.
+func selectLANInterface(want string) (net.Interface, net.IP, error) {
+	interfaces, candidates, e := lanCandidates()
+	if e != nil {
+		return net.Interface{}, nil, e
+	}
+	picked, ip, e := pickLANInterface(candidates, want)
+	if e != nil {
+		return net.Interface{}, nil, e
+	}
+	return interfaces[picked.index], ip, nil
+}
+
+// A browse delivers each service once. Fresh rounds renew liveness
 // from new replies instead of treating the resolver's cached entry as a heartbeat.
-func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse func(context.Context) (<-chan *zeroconf.ServiceEntry, error)) error {
+func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse func(context.Context) (<-chan *mdns.Entry, error)) error {
 	round, cancel := context.WithTimeout(ctx, period)
 	entries, err := browse(round)
 	if err != nil {
@@ -176,6 +210,7 @@ func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse f
 	}
 	go func() {
 		defer close(l.done)
+		lastErr := ""
 		for {
 			l.discover(round, entries)
 			<-round.Done()
@@ -188,12 +223,20 @@ func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse f
 				return
 			}
 			round, cancel = context.WithTimeout(ctx, period)
-			entries, _ = browse(round)
+			var err error
+			if entries, err = browse(round); err != nil {
+				if err.Error() != lastErr {
+					slog.Warn("lan_mdns_browse_failed", "error", err)
+				}
+				lastErr = err.Error()
+			} else {
+				lastErr = ""
+			}
 		}
 	}()
 	return nil
 }
-func (l *LAN) discover(ctx context.Context, entries <-chan *zeroconf.ServiceEntry) {
+func (l *LAN) discover(ctx context.Context, entries <-chan *mdns.Entry) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -237,7 +280,7 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *zeroconf.ServiceEntr
 				continue
 			}
 			address := ""
-			for _, ip := range append(ent.AddrIPv4, ent.AddrIPv6...) {
+			for _, ip := range ent.AddrIPv4 {
 				if ip.IsPrivate() || ip.IsLoopback() {
 					address = net.JoinHostPort(ip.String(), strconv.Itoa(ent.Port))
 					break
@@ -270,27 +313,10 @@ func (l *LAN) Online(context.Context) (map[string]bool, bool, error) {
 	return online, false, nil
 }
 func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
-	interfaces, e := net.Interfaces()
+	selected, ip, e := selectLANInterface(l.iface)
 	if e != nil {
 		return nil, e
 	}
-	candidates := make([]lanCandidate, 0, len(interfaces))
-	for i := range interfaces {
-		iface := &interfaces[i]
-		addresses, _ := iface.Addrs()
-		candidate := lanCandidate{Name: iface.Name, Up: iface.Flags&net.FlagUp != 0, Loopback: iface.Flags&net.FlagLoopback != 0, index: i}
-		for _, address := range addresses {
-			if ip, _, err := net.ParseCIDR(address.String()); err == nil {
-				candidate.IPs = append(candidate.IPs, ip)
-			}
-		}
-		candidates = append(candidates, candidate)
-	}
-	picked, ip, e := pickLANInterface(candidates, l.iface)
-	if e != nil {
-		return nil, e
-	}
-	selected := &interfaces[picked.index]
 	raw, e := net.Listen("tcp", net.JoinHostPort(ip.String(), strconv.Itoa(AgentPort)))
 	if e != nil {
 		return nil, e
@@ -299,12 +325,12 @@ func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
 	if !l.mdns {
 		return l.listener, nil
 	}
-	host := l.name + ".local."
-	advertisement, e := zeroconf.RegisterProxy(l.name, lanService, "local.", AgentPort, host, []string{ip.String()}, []string{"fingerprint=" + l.cert.Fingerprint}, []net.Interface{*selected})
+	advertisement, e := mdns.Advertise(mdns.Service{Instance: l.name, Type: lanService, Domain: "local", Host: l.name, Port: AgentPort, Text: []string{"fingerprint=" + l.cert.Fingerprint}, IP: ip}, selected)
 	if e != nil {
 		raw.Close()
 		return nil, e
 	}
+	slog.Info("lan_mdns_advertise", "interface", selected.Name, "address", ip.String(), "host", mdns.Label(l.name)+".local")
 	l.advertisement = advertisement
 	return l.listener, nil
 }
@@ -364,7 +390,7 @@ func (l *LAN) Close() error {
 	l.cancel()
 	<-l.done
 	if l.advertisement != nil {
-		l.advertisement.Shutdown()
+		l.advertisement.Close()
 	}
 	if l.listener != nil {
 		return l.listener.Close()

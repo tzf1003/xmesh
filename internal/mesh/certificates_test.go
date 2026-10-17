@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"github.com/grandcat/zeroconf"
 	"github.com/tzf1003/xmesh/internal/identity"
+	"github.com/tzf1003/xmesh/internal/mdns"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -133,9 +133,9 @@ func Test_LANDiscoveryRenewsOneShotEntries(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); <-l.done }()
 	var rounds atomic.Int32
-	if e := l.startDiscovery(ctx, 20*time.Millisecond, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
-		entries := make(chan *zeroconf.ServiceEntry, 1)
-		ent := zeroconf.NewServiceEntry("device", lanService, "local.")
+	if e := l.startDiscovery(ctx, 20*time.Millisecond, func(ctx context.Context) (<-chan *mdns.Entry, error) {
+		entries := make(chan *mdns.Entry, 1)
+		ent := &mdns.Entry{Instance: "device"}
 		ent.Text, ent.TTL, ent.Port, ent.AddrIPv4 = []string{"fingerprint=" + cert.Fingerprint}, 120, AgentPort, []net.IP{net.ParseIP("192.168.1.2")}
 		entries <- ent
 		rounds.Add(1)
@@ -251,9 +251,9 @@ func Test_LANPresenceFollowsAnnouncements(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); <-l.done }()
 	var rounds atomic.Int32
-	if e := l.startDiscovery(ctx, 20*time.Millisecond, func(ctx context.Context) (<-chan *zeroconf.ServiceEntry, error) {
-		entries := make(chan *zeroconf.ServiceEntry, 1)
-		ent := zeroconf.NewServiceEntry("laptop", lanService, "local.")
+	if e := l.startDiscovery(ctx, 20*time.Millisecond, func(ctx context.Context) (<-chan *mdns.Entry, error) {
+		entries := make(chan *mdns.Entry, 1)
+		ent := &mdns.Entry{Instance: "laptop"}
 		ent.Text, ent.Port, ent.AddrIPv4 = []string{"fingerprint=" + cert.Fingerprint}, AgentPort, []net.IP{net.ParseIP("192.168.1.9")}
 		if rounds.Add(1) <= 2 {
 			ent.TTL = 120

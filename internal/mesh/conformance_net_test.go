@@ -122,7 +122,7 @@ func Test_CONNET01_LANListenerBindsOnlyAPrivateInterfaceAddress(t *testing.T) {
 	}
 	defer func() {
 		if l.advertisement != nil {
-			l.advertisement.Shutdown()
+			l.advertisement.Close()
 		}
 		listener.Close()
 	}()

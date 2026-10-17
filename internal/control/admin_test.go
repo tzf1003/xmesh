@@ -63,7 +63,12 @@ func Test_ControlPairExportImport(t *testing.T) {
 	peer := v1.PairDocument{Name: "peer-b", Fingerprint: other.Fingerprint, CertificatePEM: string(other.PEM), Tags: []string{}}
 	colon := strings.ToUpper(other.Fingerprint[:2] + ":" + other.Fingerprint[2:])
 
-	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: "00" + other.Fingerprint[2:]}, nil), v1.ErrFingerprintMismatch)
+	// a wrong fingerprint that differs from the real one in its first digit, whatever that digit is
+	wrong := "0" + other.Fingerprint[1:]
+	if other.Fingerprint[0] == '0' {
+		wrong = "1" + other.Fingerprint[1:]
+	}
+	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: wrong}, nil), v1.ErrFingerprintMismatch)
 	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer}, nil), v1.ErrFingerprintMismatch)
 	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: other.Fingerprint, Tags: []string{"tag:admin"}}, nil), v1.ErrInvalidArgs)
 	// a document whose own fingerprint field lies is refused even when the user confirmed the real one
