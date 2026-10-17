@@ -5,8 +5,8 @@ go 1.27.1
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/creack/pty v1.1.24
-	github.com/grandcat/zeroconf v1.0.0
 	github.com/kardianos/service v1.3.0
+	github.com/miekg/dns v1.1.73
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
@@ -15,6 +15,7 @@ require (
 	github.com/zalando/go-keyring v0.2.8
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
+	golang.org/x/net v0.60.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
@@ -26,7 +27,6 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e // indirect
 	github.com/axiomhq/hyperloglog v0.2.6 // indirect
-	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creachadair/msync v0.10.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
@@ -48,7 +48,6 @@ require (
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.7.0 // indirect
-	github.com/miekg/dns v1.1.73 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/safchain/ethtool v0.7.0 // indirect
@@ -63,7 +62,6 @@ require (
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
-	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect

@@ -260,6 +260,9 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	if e != nil {
 		return nil, toolerr.Args("shell")
 	}
+	if e = unsupportedShell(shell); e != nil {
+		return nil, e
+	}
 	if e = p.Command(shell, nil); e != nil {
 		return nil, e
 	}

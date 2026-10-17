@@ -79,7 +79,7 @@ func Test_CLIControlPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	// a fingerprint that is not the certificate's is refused and nothing is stored
-	if _, err = runControl(t, state, "pair", "import", "--file", peerFile, "--fingerprint", "00"+other.Fingerprint[2:]); err == nil || !strings.Contains(err.Error(), "fingerprint_mismatch") && !strings.Contains(err.Error(), "指纹") {
+	if _, err = runControl(t, state, "pair", "import", "--file", peerFile, "--fingerprint", differentFingerprint(other.Fingerprint)); err == nil || !strings.Contains(err.Error(), "fingerprint_mismatch") && !strings.Contains(err.Error(), "指纹") {
 		t.Fatalf("wrong fingerprint: %v", err)
 	}
 	if _, err = os.Stat(filepath.Join(state, "lan", "peers.json")); err == nil {
@@ -243,4 +243,14 @@ func Test_CLIControlIngressNeedsRole(t *testing.T) {
 	if _, err := runControl(t, state, "ingress", "clients"); err == nil || !strings.Contains(err.Error(), "ingress") {
 		t.Fatalf("%v", err)
 	}
+}
+
+// differentFingerprint changes the first hex digit, so the result never equals
+// the input (swapping in a fixed prefix does for one fingerprint in 256).
+func differentFingerprint(fingerprint string) string {
+	first := byte('0')
+	if fingerprint[0] == first {
+		first = '1'
+	}
+	return string(first) + fingerprint[1:]
 }

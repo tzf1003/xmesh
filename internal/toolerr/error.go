@@ -37,6 +37,13 @@ func Args(field string) *Error { return New("invalid_args", "参数无效", "fie
 func Path(path, reason string) *Error {
 	return New("invalid_cwd", "路径不可用或不在允许范围内", "path", path, "reason", reason)
 }
+
+// AppExecAlias reports a Windows Microsoft Store application execution alias
+// as the command or shell: a packaged app's descendants run in the package's
+// own Job, outside the one that bounds their lifetime here.
+func AppExecAlias(field, path string) *Error {
+	return New("invalid_args", "命令是 Microsoft Store 应用执行别名，其后代进程会脱离本节点的进程组管理，不能启动", "field", field, "reason", "app_execution_alias", "path", path)
+}
 func Internal(op string, err error) *Error {
 	var e *Error
 	if errors.As(err, &e) {

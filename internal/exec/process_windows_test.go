@@ -18,6 +18,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"github.com/tzf1003/xmesh/internal/winjob/winjobtest"
 	"golang.org/x/sys/windows"
 )
 
@@ -440,4 +441,32 @@ func Test_WindowsExecHelper(t *testing.T) {
 		os.Exit(5)
 	}
 	os.Exit(0)
+}
+
+// A Store application execution alias puts its descendants in the package's
+// own Job, so they would outlive the command: it is refused with the reason.
+// (The alias fixture only carries the reparse tag; the live descendant check
+// needs a real Store pwsh and is verified on a machine that has one.)
+func Test_WindowsExecRefusesAppExecAlias(t *testing.T) {
+	root := t.TempDir()
+	winjobtest.AppExecLink(t, filepath.Join(root, "alias.exe"))
+	r, err := cwd.New(root, nil, cwd.Policy{Allow: []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.New(config.Policy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(config.Exec{MaxConcurrent: 1, ExclusiveSlots: 1, DefaultTimeout: "15s", IdempotencyCache: 10, InlineOutputBytes: "64KiB"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	raw, _ := json.Marshal(Object{"cmd": filepath.Join(root, "alias.exe")})
+	_, err = m.Run(context.Background(), "test", r, p, raw)
+	failure, ok := err.(*toolerr.Error)
+	if !ok || failure.Code != "invalid_args" || failure.Fields["reason"] != "app_execution_alias" {
+		t.Fatalf("%#v", err)
+	}
 }

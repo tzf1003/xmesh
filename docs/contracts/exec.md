@@ -27,7 +27,7 @@
 4. 用当前策略匹配 [RUL-11](rulings.md#rul-11) 的规范化命令行，以及其中识别出的 shell 脚本原文。命中拒绝则 `policy_denied`，进程未创建。
 5. 若带 `idempotency_key` 且 `(caller_id, key)` 命中缓存：在授权与策略仍通过的前提下返回缓存，见 [RUL-04](rulings.md#rul-04)。
 6. 按 [RUL-01](rulings.md#rul-01) 获取槽位。`exclusive` 还要满足 [CON-CONC-10](../constraints/concurrency.md#con-conc-10)。
-7. 启动进程。启动失败返回 `internal` 或 `invalid_args`（找不到可执行文件时用 `invalid_args`，`field` 为 `cmd`），并释放槽位。
+7. 启动进程。启动失败返回 `internal` 或 `invalid_args`（找不到可执行文件时用 `invalid_args`，`field` 为 `cmd`；Windows 上 `cmd` 解析到 Microsoft Store 应用执行别名时同样用 `invalid_args`，另带 `reason: "app_execution_alias"` 和 `path`，因为包激活会把后代放进不属于本节点的 Job，exec 结束时无法清理它们），并释放槽位。
 8. 等待退出或超时。超时向进程组发终止信号，等待短暂宽限后强制结束，返回 `timeout`。此时进程已启动过，错误里带 `duration_ms`，不带不完整的大段输出；已产生的输出仍可通过 `output_ref` 读取。
 9. 截断内联输出，见 [RUL-05](rulings.md#rul-05)。写入幂等缓存。释放槽位。
 
@@ -36,7 +36,7 @@
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `exit_code` | 整数 | 进程退出码。被信号杀死时 Unix 使用 128+信号号，Windows 使用进程退出码 |
-| `stdout` | 字符串 | 内联部分。非法 UTF-8 用替换字符，原始字节仍在 `output_ref` |
+| `stdout` | 字符串 | 内联部分。非法 UTF-8 用替换字符，原始字节仍在 `output_ref`。Windows 上整段输出不是合法 UTF-8 时（例如简体中文系统的 cmd.exe、Windows PowerShell 5.1 写出的 GBK），改按系统 OEM 代码页转成 UTF-8，不产生替换字符；合法 UTF-8 不转换 |
 | `stderr` | 字符串 | 同上 |
 | `duration_ms` | 整数 | 从进程启动到退出 |
 | `truncated` | 布尔 | 任一流发生了内联截断则为 true |
@@ -71,7 +71,7 @@
 
 | 字段 | 含义 |
 | --- | --- |
-| `stdout` / `stderr` | 本次分页的字节解码成 UTF-8 |
+| `stdout` / `stderr` | 本次分页的字节解码成 UTF-8，规则同上（Windows 上非 UTF-8 的分页按 OEM 代码页转换）。分页边界落在多字节字符中间时，该字符不能完整还原 |
 | `next_offset` | 下一次 `offset` |
 | `eof` | 该流已读完 |
 
