@@ -64,7 +64,7 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --json
 两端运行后，可在各自 Gateway 验证对端：
 
 ```bash
-python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux
+python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux --token-file <state-dir>/pats/default.token
 ```
 
 脚本检查发现、身份、文件、exec 和 PTY，最后关闭会话并清理测试文件。配置 PAT 的 Gateway 应使用具备对应 scope 的 MCP 客户端执行同等调用；此脚本面向默认本机访问。
@@ -91,10 +91,10 @@ go test ./internal/mesh -run Test_TailnetPeerConnectivity -v -timeout=60s
 python3 scripts/smoke_sandbox.py --binary /opt/xmesh \
   --auth-key-file /run/secrets/xmesh-authkey \
   --peer mac-dev:darwin --peer linux-dev:linux \
-  --observer-gateway 127.0.0.1:8080
+  --observer-gateway 127.0.0.1:8080 --observer-token-file /path/to/observer-state/pats/default.token
 ```
 
-`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
+`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
 
 ## 本机 Gateway PAT
 
