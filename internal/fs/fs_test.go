@@ -3,12 +3,14 @@ package fs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/tzf1003/xmesh/internal/cwd"
@@ -114,6 +116,9 @@ func Test_CTRFS02_03_OptimisticAtomicEdit(t *testing.T) {
 	wg.Wait()
 }
 
+// errPrivilegeNotHeld is ERROR_PRIVILEGE_NOT_HELD: a standard Windows account may not create symbolic links.
+const errPrivilegeNotHeld = syscall.Errno(1314)
+
 // conformance: CTR-FS-06 CTR-FS-07 CON-TOOL-06
 func Test_CTRFS06_07_MetadataAndDelete(t *testing.T) {
 	s, root := fixture(t)
@@ -125,9 +130,12 @@ func Test_CTRFS06_07_MetadataAndDelete(t *testing.T) {
 	call(t, s, "fs.write", Object{"path": "nested/deep/a", "content": "a"})
 	code(t, s, "fs.delete", Object{"path": "nested"}, "policy_denied")
 	// Creating a symlink needs a privilege on Windows that a standard account may lack; the
-	// rest of the test does not depend on it.
+	// rest of the test does not depend on it. Any other error is a failure.
 	if e := os.Symlink(filepath.Join(root, "nested"), filepath.Join(root, "link")); e != nil {
-		t.Logf("symlinks are not available, symlink checks skipped: %v", e)
+		if !errors.Is(e, errPrivilegeNotHeld) {
+			t.Fatal("symlink:", e)
+		}
+		t.Logf("symlink privilege not held, symlink checks skipped: %v", e)
 	} else {
 		if call(t, s, "fs.stat", Object{"path": "link"})["symlink"] != true {
 			t.Fatal("symlink metadata lost")
