@@ -13,9 +13,7 @@ import (
 )
 
 func Test_WindowsAppContainerWorkspaceChangeGuards(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, stage := range []string{"history-identity", "history-future", "event-limit", "identity-limit", "cancel", "append-failure", "source-binding"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx := context.Background()

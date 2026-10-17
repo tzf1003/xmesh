@@ -24,6 +24,8 @@ type Engine struct {
 	config config.Policy
 	rules  []Rule
 	runner sandbox.Runner
+	// unavailable is why an opted-in managed runner is absent; see UseSandboxUnavailable.
+	unavailable string
 }
 
 var safe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)

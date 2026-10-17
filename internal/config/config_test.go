@@ -78,6 +78,72 @@ func Test_CTRCFG02_ReloadState(t *testing.T) {
 	}
 }
 
+// A rejected edit is reported only while the file on disk still fails to load
+// (the failure count stays cumulative for sys.info).
+func Test_ReloadFailureClearsWhenFileLoadsAgain(t *testing.T) {
+	b, e := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if e = os.WriteFile(path, b, 0600); e != nil {
+		t.Fatal(e)
+	}
+	s, e := NewStore(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	s.Get()
+	if s.Failing() {
+		t.Fatal("a fresh store reports a failure")
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(b, &doc)
+	doc["agent"].(map[string]any)["policy"].(map[string]any)["allow_dangerous"] = true
+	valid, _ := json.Marshal(doc)
+	for _, step := range []struct {
+		name     string
+		contents []byte
+	}{{"back to the original", b}, {"a new valid edit", valid}, {"the same invalid text again", b}} {
+		name, contents := step.name, step.contents
+		if e = os.WriteFile(path, []byte("invalid: ["), 0600); e != nil {
+			t.Fatal(e)
+		}
+		s.Get()
+		if !s.Failing() {
+			t.Fatal(name, "an invalid file is not reported")
+		}
+		s.Get()
+		if !s.Failing() {
+			t.Fatal(name, "the failure was forgotten while the file is still invalid")
+		}
+		if e = os.WriteFile(path, contents, 0600); e != nil {
+			t.Fatal(e)
+		}
+		s.Get()
+		if s.Failing() {
+			t.Fatal(name, "the failure stayed after the file loaded again")
+		}
+	}
+	if _, failures := s.State(); failures != 1 {
+		t.Fatal("the same rejected text is counted once", failures)
+	}
+	if e = os.Remove(path); e != nil {
+		t.Fatal(e)
+	}
+	s.Get()
+	if !s.Failing() {
+		t.Fatal("an unreadable file is not reported")
+	}
+	if e = os.WriteFile(path, valid, 0600); e != nil {
+		t.Fatal(e)
+	}
+	s.Get()
+	if s.Failing() {
+		t.Fatal("the failure stayed after the file was restored")
+	}
+}
+
 func TestIngressPTYBudgetConfiguration(t *testing.T) {
 	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")
 	if err != nil {

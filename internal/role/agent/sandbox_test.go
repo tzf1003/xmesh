@@ -13,6 +13,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/sandbox"
+	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
 // recordingRunner stands in for a managed runner. It never starts a process: it
@@ -173,5 +174,38 @@ func Test_SandboxWarningsReachSysInfo(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("startup note missing from sys.info", info["warnings"])
+	}
+}
+
+func Test_SandboxUnavailableReasonReachesRefusedCalls(t *testing.T) {
+	_, store := configuration(t)
+	a, e := New(store)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(a.Close)
+	if a.SandboxUnavailable() != "" {
+		t.Fatal("an unconfigured agent reports L2 unavailable")
+	}
+	a.SetSandbox(nil, "note")
+	a.SetSandboxUnavailable("账户不是管理员")
+	if a.SandboxUnavailable() != "账户不是管理员" {
+		t.Fatal("reason not recorded")
+	}
+	engine, e := policy.New(config.Policy{Isolation: "L2"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	a.attachSandbox(engine)
+	_, _, _, err := engine.Sandbox("cmd", nil, t.TempDir(), nil)
+	var refused *toolerr.Error
+	if !errors.As(err, &refused) || refused.Object()["rule"] != "sandbox.unavailable" || refused.Object()["reason"] != "账户不是管理员" {
+		t.Fatalf("refusal does not carry the reason: %v", err)
+	}
+	// A later runner takes over; the reason no longer applies.
+	a.SetSandbox(&recordingRunner{})
+	a.attachSandbox(engine)
+	if engine.SandboxRunner() == nil {
+		t.Fatal("the runner was not attached")
 	}
 }

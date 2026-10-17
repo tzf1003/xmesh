@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	"github.com/tzf1003/xmesh/api/control/v1/schemacheck"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/sandbox"
 )
 
@@ -147,9 +150,9 @@ func Test_Runtime_WindowsL2RequiresOptIn(t *testing.T) {
 		return nil, nil
 	})
 	store, root := l2Config(t, false)
-	runner, notes := startSandbox(context.Background(), store.Get(), filepath.Join(root, "state"))
-	if runner != nil || len(notes) != 0 {
-		t.Fatal("an unconfigured node installed a runner or a note", runner, notes)
+	runner, notes, unavailable := startSandbox(context.Background(), store.Get(), filepath.Join(root, "state"))
+	if runner != nil || len(notes) != 0 || unavailable != "" {
+		t.Fatal("an unconfigured node installed a runner or a note", runner, notes, unavailable)
 	}
 	client, _ := serve(t, store, root)
 	if note := warningsOf(callTool(t, client, "sys.info", map[string]any{})); strings.Contains(note, "L2") {
@@ -177,6 +180,53 @@ func Test_Runtime_WindowsL2RunnerUnavailableFailsClosed(t *testing.T) {
 		if out["error"] != "policy_denied" || out["rule"] != "sandbox.unavailable" {
 			t.Fatal("L2 exec was not refused without a runner", out)
 		}
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const accountReason = "当前账户无法读取 NTFS 变更日志，Windows L2 需要以管理员（提权）或 LocalSystem 服务运行节点"
+
+// A runner refused for an account-level reason is not started, and the reason
+// reaches the caller, sys.info and the control status; the log-only cause does not.
+func Test_Runtime_WindowsL2AccountRefusalIsExplained(t *testing.T) {
+	stubOpener(t, func(context.Context, string) (l2Runner, error) {
+		return nil, &sandbox.UnavailableError{Reason: accountReason, Cause: errors.New("volume device open: Access is denied.")}
+	})
+	store, root := l2Config(t, true)
+	client, stop := serve(t, store, root)
+	out := callTool(t, client, "exec.run", map[string]any{"cmd": os.Args[0], "args": []string{"-test.run=^$"}})
+	if out["error"] != "policy_denied" || out["rule"] != "sandbox.unavailable" || out["reason"] != accountReason {
+		t.Fatal("L2 exec was not refused with the reason", out)
+	}
+	note := warningsOf(callTool(t, client, "sys.info", map[string]any{}))
+	if !strings.Contains(note, "sandbox.unavailable") || !strings.Contains(note, accountReason) || strings.Contains(note, "Access is denied") {
+		t.Fatalf("sys.info note: %q", note)
+	}
+	endpoint, err := control.ReadEndpoint(filepath.Join(root, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := control.NewClient(endpoint).Do(context.Background(), "GET", "/v1/status", nil, nil)
+	if err != nil || reply.Status != 200 {
+		t.Fatal(reply, err)
+	}
+	if err := schemacheck.Validate("StatusResponse", reply.Body); err != nil {
+		t.Fatal(err)
+	}
+	var st v1.StatusResponse
+	if err := json.Unmarshal(reply.Body, &st); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, w := range st.Warnings {
+		if w.Code == v1.WarnSandboxUnavailable {
+			found = w.Severity == v1.SeverityWarning && strings.Contains(w.Message, accountReason) && !strings.Contains(w.Message, "Access is denied")
+		}
+	}
+	if !found {
+		t.Fatalf("control status lacks sandbox_unavailable: %+v", st.Warnings)
 	}
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -217,8 +267,8 @@ func Test_Runtime_WindowsL2IgnoredOffWindows(t *testing.T) {
 		t.Skip("the switch is effective on Windows")
 	}
 	store, root := l2Config(t, true)
-	runner, notes := startSandbox(context.Background(), store.Get(), filepath.Join(root, "state"))
-	if runner != nil || len(notes) != 1 || !strings.Contains(notes[0], "仅在 Windows") {
-		t.Fatal("the switch must be ignored with a note off Windows", runner, notes)
+	runner, notes, unavailable := startSandbox(context.Background(), store.Get(), filepath.Join(root, "state"))
+	if runner != nil || len(notes) != 1 || !strings.Contains(notes[0], "仅在 Windows") || unavailable != "" {
+		t.Fatal("the switch must be ignored with a note off Windows", runner, notes, unavailable)
 	}
 }

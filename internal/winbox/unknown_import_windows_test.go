@@ -34,9 +34,7 @@ func profileACEPresent(t *testing.T, sid []byte, path string) bool {
 // durably own the identity, adopt the remaining present subtree during cleanup,
 // and reclaim every workspace-format ACE it carries.
 func Test_WindowsAppContainerWorkspaceUnknownImport(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, stage := range []string{"directory", "file", "replay", "deleted", "created-inside"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx := context.Background()
@@ -182,9 +180,7 @@ func Test_WindowsAppContainerWorkspaceUnknownImport(t *testing.T) {
 // Through the lifecycle owner an uncoordinated import stops execution, cleanup
 // still reaches durable completion, and the caller sees the typed condition.
 func Test_WindowsAppContainerWorkspaceExecutionUnknownImport(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	options := workspaceExecutionTestOptions(t)

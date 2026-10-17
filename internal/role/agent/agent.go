@@ -132,6 +132,9 @@ func (a *Agent) SetAudit(log *audit.Logger) { a.auditLog.Store(log) }
 type sandboxState struct {
 	runner   sandbox.Runner
 	warnings []string
+	// unavailable is why L2 is refused on a node that opted in but has no runner;
+	// empty when L2 is served or not requested.
+	unavailable string
 }
 
 // SetSandbox installs the managed isolation runner used for L2 execution and the
@@ -142,11 +145,36 @@ func (a *Agent) SetSandbox(runner sandbox.Runner, warnings ...string) {
 	a.sandbox.Store(&sandboxState{runner: runner, warnings: append([]string{}, warnings...)})
 }
 
+// SetSandboxUnavailable records why a node that opted in to the managed runner
+// cannot offer L2. Callers refused with sandbox.unavailable are told this reason
+// and the control status reports it. Call it after SetSandbox.
+func (a *Agent) SetSandboxUnavailable(reason string) {
+	state := &sandboxState{}
+	if previous := a.sandbox.Load(); previous != nil {
+		*state = *previous
+	}
+	state.unavailable = reason
+	a.sandbox.Store(state)
+}
+
+// SandboxUnavailable is the reason L2 is refused, or "" when it is served or was
+// not requested.
+func (a *Agent) SandboxUnavailable() string {
+	if state := a.sandbox.Load(); state != nil {
+		return state.unavailable
+	}
+	return ""
+}
+
 // attachSandbox gives a freshly built policy engine the managed runner. Only a
 // non-nil interface value is installed, so an absent runner is never a typed nil.
 func (a *Agent) attachSandbox(engine *policy.Engine) {
-	if state := a.sandbox.Load(); state != nil && state.runner != nil {
-		engine.UseSandboxRunner(state.runner)
+	if state := a.sandbox.Load(); state != nil {
+		if state.runner != nil {
+			engine.UseSandboxRunner(state.runner)
+		} else if state.unavailable != "" {
+			engine.UseSandboxUnavailable(state.unavailable)
+		}
 	}
 }
 func (a *Agent) SetNetwork(mode string, p Principal) {
@@ -450,8 +478,8 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	if restart {
 		warnings = append(warnings, "节点、网络或监听配置已变更，需要重启")
 	}
-	if failures > 0 {
-		warnings = append(warnings, "配置热加载曾失败，继续使用最近有效配置")
+	if a.store.Failing() {
+		warnings = append(warnings, "配置文件当前无法加载，继续使用最近有效配置")
 	}
 	if c.Agent.Policy.AllowDangerous {
 		warnings = append(warnings, "allow_dangerous 已启用")

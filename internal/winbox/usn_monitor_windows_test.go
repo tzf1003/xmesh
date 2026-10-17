@@ -15,9 +15,7 @@ import (
 )
 
 func Test_WindowsAppContainerWorkspaceChangeMonitor(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, stage := range []string{"periodic", "cancel", "history-loss", "append-failure", "delayed-delete", "cancel-disposition"} {
 		t.Run(stage, func(t *testing.T) {
 			// A sandbox helper whose race runtime cannot map its memory dies before

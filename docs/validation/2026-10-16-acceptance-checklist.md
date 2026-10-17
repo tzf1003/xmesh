@@ -47,7 +47,7 @@ T9（#31）与 T10（#30）同样晚于基线：T9 的合并提交 `0cb514d` 的
 | **exec/ConPTY 工具层接入** | `sandbox.Runner` 与 `winbox.Runner` 已实现（`2632168`）；`agent.policy.windows_appcontainer` 在生产启动链安装 runner（T1，#7，默认关闭） | 7 项 `Test_WindowsManagedRunner*` 与 5 项 `Test_WindowsL2Serve*` 原生通过 | 开关打开后的整体行为由 T9（#31）联合验证：`windows-l2-joint` 三轮全绿，沙箱内打不开控制管道已有原生用例；真实普通账户验收见 [windows-l2-acceptance.md](windows-l2-acceptance.md)，`sandbox.unavailable` 仍是默认 |
 | 普通用户登录任务、服务联网、跨用户/会话 ACL 与 mutex | 登录任务与可选 SCM 安装已实现 | 本机模式通过 | 需要真实 Windows 普通账户会话 |
 | Windows 状态目录私有 ACL | `privdir.Ensure` 与 `control.json` 只读授权已实现（#24、#16） | Windows 原生通过（含 SCM 服务 DACL 断言） | 真实普通账号下 UI 读取系统服务的 `control.json`；曾经开放过的目录里的密钥按已暴露处理 |
-| 非管理员账号的变更日志读取 | `ErrChangeJournalAccess` 明确拒绝（T3，#4） | Windows 原生通过 | 普通账号下 L2 被拒绝并给出该原因 |
+| 非管理员账号的变更日志读取 | `ErrChangeJournalAccess` 明确拒绝（T3，#4）；运行器启动前探测，失败走 `sandbox.unavailable`，原因进入调用错误、`sys.info.warnings` 与控制通道 `sandbox_unavailable` 告警 | Windows 原生通过（探测与 `Test_WindowsAppContainerChangeSourceAccess`）；原因的传递由跨平台用例覆盖 | 普通账号下 L2 被拒绝并给出该原因，托盘与面板显示告警（见 [windows-l2-acceptance.md](windows-l2-acceptance.md)） |
 | `e747cb8` 的 helper exit 66 原因 | — | 压测定位到两种机制（race 运行时启动期映射失败约 1/600，或容器内真实竞争的报告被中止吞掉），无法确定属于哪一种；无证据指向产品逻辑 | 建议 helper 保留 TSan 日志并对启动期映射失败至多重试一次 |
 
 ## 三、跨主机与外部环境

@@ -99,7 +99,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if c.HasRole("agent") {
 		// Registered before the agent's own Close, so the runner is released
 		// only after exec and PTY executions have drained.
-		runner, notes := startSandbox(ctx, c, o.StateDir)
+		runner, notes, unavailable := startSandbox(ctx, c, o.StateDir)
 		if runner != nil {
 			defer func() { runErr = errors.Join(runErr, closeSandbox(runner)) }()
 		}
@@ -109,6 +109,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		a.SetAudit(log)
 		a.SetSandbox(runnerOrNil(runner), notes...)
+		a.SetSandboxUnavailable(unavailable)
 		mode := c.Mesh.Mode
 		if o.Local {
 			mode = "local"

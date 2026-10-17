@@ -111,11 +111,16 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 	if st.RestartRequired {
 		add(v1.WarnRestartRequired, v1.SeverityInfo, "节点、网络或监听配置已变更，需要重启")
 	}
-	if st.PolicyReloadFailures > 0 {
-		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "配置热加载曾失败，继续使用最近有效配置")
+	if h.d.store.Failing() {
+		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "配置文件当前无法加载，继续使用最近有效配置")
 	}
 	if h.d.agent != nil && cfg.Agent.Policy.AllowDangerous {
 		add(v1.WarnAllowDangerous, v1.SeverityInfo, "allow_dangerous 已启用")
+	}
+	if h.d.agent != nil {
+		if reason := h.d.agent.SandboxUnavailable(); reason != "" {
+			add(v1.WarnSandboxUnavailable, v1.SeverityWarning, "Windows L2 不可用，L2 的 exec 与 PTY 一律被拒绝（sandbox.unavailable）："+reason)
+		}
 	}
 	if cfg.Mesh.Mode == "tailnet" {
 		if h.d.network == nil {

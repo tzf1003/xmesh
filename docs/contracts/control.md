@@ -103,13 +103,14 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | code | severity | 何时 |
 | --- | --- | --- |
 | `restart_required` | `info` | `restart_required` 为真 |
-| `policy_reload_failed` | `error` | 热加载失败，继续使用上一份有效配置 |
+| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
 | `allow_dangerous` | `info` | 配置启用了 `allow_dangerous`（[CON-SEC-10](../constraints/security.md#con-sec-10) 要求提示） |
 | `tailnet_not_ready` | `warning` | 模式是 tailnet 但尚未加入 |
 | `authkey_unreadable` | `warning` | tailnet 模式下 `authkey_file` 不可读 |
 | `peer_offline` | `warning` | 有已知对端离线（每个离线对端一条或合并为一条，由内核决定，UI 不依赖条数） |
 | `audit_dropped` | `warning` | 有审计记录因含正文被拒绝写入 |
 | `quota_exhausted` | `warning` | PTY 或 exec 配额已满 |
+| `sandbox_unavailable` | `warning` | 配置打开了 Windows L2（`agent.policy.windows_appcontainer`），但运行器不可用，L2 的 exec 与 PTY 一律以 `sandbox.unavailable` 拒绝。`message` 带原因（例如账户不是管理员或 LocalSystem，读不了 NTFS 变更日志）；原因只含可对用户说的内容，细节在节点日志。不设置该开关或运行器正常时不出现 |
 | `unclassified` | 任意 | 客户端遇到不认识的 code 时的归类 |
 
 ### 托盘状态判定

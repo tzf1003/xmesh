@@ -85,6 +85,8 @@ test("only warning and error severities degrade", () => {
   assert.equal(isDegrading(warningOf("restart_required", "info")), false);
   assert.equal(isDegrading(warningOf("peer_offline", "warning")), true);
   assert.equal(isDegrading(warningOf("policy_reload_failed", "error")), true);
+  // Windows L2 refused for the account: the tray must not read "ok".
+  assert.equal(isDegrading(warningOf("sandbox_unavailable", "warning")), true);
 });
 
 test("icon priority (RUL-18): offline > mismatch > draining > restart > degraded > ok", () => {
