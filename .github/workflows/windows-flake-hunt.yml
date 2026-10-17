@@ -31,6 +31,7 @@ jobs:
         shell: pwsh
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
+          SHARD: ${{ matrix.shard }}
         run: |
           $failed = 0
           $runs = @(
@@ -39,6 +40,8 @@ jobs:
             @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 },
             @{ Name = 'TerminalInterrupt'; Pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$'; Count = 40 }
           )
+          # Each shard repeats one test, so the four run in parallel instead of four times over.
+          $runs = @($runs[([int]$env:SHARD - 1)])
           foreach ($run in $runs) {
             $out = "hunt-$($run.Name).txt"
             $pattern = $run.Pattern
