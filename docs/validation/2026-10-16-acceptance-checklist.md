@@ -26,7 +26,7 @@ T9（#31）与 T10（#30）同样晚于基线：T9 的合并提交 `0cb514d` 的
 | --- | --- | --- | --- | --- |
 | 门 1 工具基础 | 25 个内置工具、PTY 配额、策略 | 三平台 race；Windows Server 2025 原生进程、ConPTY、文件、HTTP MCP | 完成 | Claude Code 人工连接观察待执行 |
 | 门 2 后端与并发 | mcpmux、backend、lease | 三平台 race；macOS 与 Ubuntu 的 HTTP 集成覆盖后端与多路复用 | 仓库中没有门 2 固定场景（脚本模拟 IDA、杀后端后旧 token 失效）的独立验收记录 | 核对并补记该场景 |
-| 门 3 互联 | tsnet、LAN mTLS、mDNS | 官方 Tailscale 与 Headscale 的两台物理主机、隔离 Linux 沙箱、DERP | 两主机加沙箱通过 | 三台物理设备与真实 LAN 多播待验收 |
+| 门 3 互联 | tsnet、LAN mTLS、mDNS | 官方 Tailscale 与 Headscale 的两台物理主机、隔离 Linux 沙箱、DERP | 两主机加沙箱通过；2026-10-17 Mac 与 Windows 两台物理机在同一局域网的 mDNS 互相发现通过（见下） | 三台物理设备互联待验收 |
 | 门 4 Gateway 与 OAuth | 元数据、动态注册、PKCE、PAT、三种监听 | 本机与 Ubuntu 流程通过 | 未完成 | claude.ai 与 Codex 真实 OAuth、模型工具表可见性、一次真实 `exec.run`；公共域名、Funnel 或隧道 |
 | 阶段 5 治理 | 审计、预算、drain、策略热加载 | 三平台 race；Linux bwrap L2 在甲骨文环境通过 | 部分 | Codex Cloud 与 Claude 云沙箱的真实出站与入网记录 |
 
@@ -59,7 +59,7 @@ T9（#31）与 T10（#30）同样晚于基线：T9 的合并提交 `0cb514d` 的
 | 项目 | 状态 | 需要的外部条件 |
 | --- | --- | --- |
 | 跨主机 ingress/PTY 预算 | 已实现：`ingress.pty_budget_authority` 权威 Agent 租约（见实现状态）；进程内两入口 5 个用例与状态机 6 个用例通过，对照实验证明无租约会超发 | 真实验收：两台入口主机配置同一权威设备，各自并发创建终端，核对总数不超过限额；关停权威设备时新增被拒绝 |
-| 三台物理设备互联、真实 LAN 多播 | 待验收 | 三台物理设备与同一局域网 |
+| 三台物理设备互联 | 待验收 | 三台物理设备与同一局域网；其中 Mac 与 Windows 两台的真实 LAN 多播发现已通过：2026-10-17 在 `5ca58c9`（#50 合入）上两端同一提交，`smoke_peer` 与 10 项跨机探测双向通过，审计记录逐条对得上（协调线转述，Windows 终报在项目共享文件，不在仓库） |
 | claude.ai 与 Codex 真实 OAuth 及工具可见性 | 待验收 | 公共可达的 ingress、真实账号授权；凭据只经配置好的安全环境提供 |
 | 公共域名、隧道或 Funnel | 三种监听已装配，待验收 | 域名、Funnel 或隧道账号 |
 | 云沙箱入网与出站 | bwrap（甲骨文）已通过；云厂商沙箱待验收 | Codex Cloud 与 Claude 云沙箱实例 |
