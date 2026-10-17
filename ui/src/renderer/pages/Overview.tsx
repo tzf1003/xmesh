@@ -7,7 +7,7 @@ import { errorText, useLocale, useT } from "../i18n";
 import { useRecentCalls } from "../hooks";
 import { formatDuration, formatTime } from "../lib/format";
 import { isDegrading } from "../../shared/control";
-import type { ActionResult, CopyKind, PathKind } from "../../shared/ipc";
+import { CODEX_PAT_ENV, type ActionResult, type CopyKind, type PathKind } from "../../shared/ipc";
 
 export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
   const t = useT();
@@ -124,6 +124,11 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
               {t("overview.copyCodex")}
             </button>
           </div>
+          {s.gateway.auth === "pat" && (
+            <p class="hint" style={{ marginTop: "8px" }} data-testid="copy-pat-hint">
+              {t("overview.copyPatHint", { env: CODEX_PAT_ENV })}
+            </p>
+          )}
         </section>
       )}
 

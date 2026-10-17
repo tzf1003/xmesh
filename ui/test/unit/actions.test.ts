@@ -56,7 +56,7 @@ const connected = (patch: Partial<StatusResponse> = {}): Snapshot => ({
 });
 
 test("copy writes the gateway address and ready-made connect text", async () => {
-  const { controller } = fakeController(connected());
+  const { controller } = fakeController(connected({ gateway: { listen: "x", auth: "none", url: "http://127.0.0.1:8080/mcp" } }));
   const { platform, log } = fakePlatform();
   const a = new Actions(controller, platform, t);
   assert.deepEqual(await a.copy("gatewayUrl"), { ok: true });
@@ -66,6 +66,20 @@ test("copy writes the gateway address and ready-made connect text", async () => 
     "clip:http://127.0.0.1:8080/mcp",
     "clip:claude mcp add --transport http xmesh http://127.0.0.1:8080/mcp",
     'clip:[mcp_servers.xmesh]\nurl = "http://127.0.0.1:8080/mcp"\n',
+  ]);
+});
+
+test("copy of connect text leaves a token placeholder when the gateway requires a PAT", async () => {
+  const { controller } = fakeController(connected({ gateway: { listen: "x", auth: "pat", url: "http://127.0.0.1:8080/mcp" } }));
+  const { platform, log } = fakePlatform();
+  const a = new Actions(controller, platform, t);
+  assert.deepEqual(await a.copy("gatewayUrl"), { ok: true });
+  assert.deepEqual(await a.copy("claudeCodeCommand"), { ok: true });
+  assert.deepEqual(await a.copy("codexConfig"), { ok: true });
+  assert.deepEqual(log, [
+    "clip:http://127.0.0.1:8080/mcp",
+    'clip:claude mcp add --transport http xmesh http://127.0.0.1:8080/mcp --header "Authorization: Bearer <PAT>"',
+    'clip:[mcp_servers.xmesh]\nurl = "http://127.0.0.1:8080/mcp"\nbearer_token_env_var = "XMESH_PAT"\n',
   ]);
 });
 

@@ -298,7 +298,7 @@ func ExportPair(stateDir, name, path string) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	data, e := json.MarshalIndent(Trusted{Name: name, Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM)}, "", "  ")
+	data, e := json.MarshalIndent(Trusted{Name: name, Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM), Tags: []string{}}, "", "  ")
 	if e != nil {
 		return "", e
 	}

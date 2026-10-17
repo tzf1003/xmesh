@@ -113,7 +113,7 @@ export class PanelData {
     }
     // The generated type says before/after are objects, but the schema allows any JSON value.
     const diff: ConfigChange[] = (
-      b.content === this.diskContent
+      semantic(b.content) === semantic(this.diskContent)
         ? []
         : [
             {
@@ -129,7 +129,8 @@ export class PanelData {
               : []),
           ]) as unknown as ConfigChange[];
     const restart = diff.some((d) => d.restart_required);
-    const apply = b.dry_run !== true && diff.length > 0;
+    // Like the kernel, a change that only touches comments or blank lines has an empty diff but is still written.
+    const apply = b.dry_run !== true && b.content !== this.diskContent;
     if (apply) {
       this.writes.push(b.content);
       this.diskContent = b.content;
@@ -220,4 +221,12 @@ export class PanelData {
     const limit = Number(q.get("limit") ?? 100);
     return ok({ enabled: true, events: events.slice(0, limit), next_cursor: null } satisfies AuditResponse);
   }
+}
+
+/** The YAML without comments and blank lines: what the fake treats as the configuration itself. */
+function semantic(content: string): string {
+  return content
+    .split("\n")
+    .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"))
+    .join("\n");
 }

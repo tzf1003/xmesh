@@ -92,7 +92,8 @@ export class Actions {
 
   async copy(kind: CopyKind): Promise<ActionResult> {
     const c = this.controller.snapshot.connection;
-    const text = clipboardText(kind, c.kind === "connected" ? c.status.gateway?.url : undefined);
+    const gateway = c.kind === "connected" ? c.status.gateway : undefined;
+    const text = clipboardText(kind, gateway?.url, gateway?.auth);
     if (text === undefined) return fail("unavailable", "no gateway address");
     this.platform.writeClipboard(text);
     return ok;

@@ -1,4 +1,4 @@
-import type { CopyKind } from "../shared/ipc";
+import { CODEX_PAT_ENV, type CopyKind } from "../shared/ipc";
 import { MESH_LOGIN_COMMANDS } from "../shared/mesh";
 
 // The gateway URL comes from the kernel and ends up in text the user pastes
@@ -9,8 +9,12 @@ export function isSafeGatewayUrl(url: string): boolean {
   return SAFE_URL.test(url);
 }
 
-/** Text to put on the clipboard, or undefined when there is nothing safe to copy. */
-export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined): string | undefined {
+/**
+ * Text to put on the clipboard, or undefined when there is nothing safe to copy. With `auth` "pat" the
+ * gateway rejects a request without a bearer token, so the text carries a placeholder where the token
+ * goes: the token files are the user's to read, and the UI never holds the secret.
+ */
+export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined, auth?: string): string | undefined {
   // Terminal commands for the tailnet admin login; the secret is typed into the CLI, never into this app.
   if (kind === "meshLoginRead") return MESH_LOGIN_COMMANDS.read;
   if (kind === "meshLoginWrite") return MESH_LOGIN_COMMANDS.write;
@@ -21,9 +25,9 @@ export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined): s
     case "gatewayUrl":
       return gatewayUrl;
     case "claudeCodeCommand":
-      return `claude mcp add --transport http xmesh ${gatewayUrl}`;
+      return `claude mcp add --transport http xmesh ${gatewayUrl}` + (auth === "pat" ? ` --header "Authorization: Bearer <PAT>"` : "");
     case "codexConfig":
-      return `[mcp_servers.xmesh]\nurl = "${gatewayUrl}"\n`;
+      return `[mcp_servers.xmesh]\nurl = "${gatewayUrl}"\n` + (auth === "pat" ? `bearer_token_env_var = "${CODEX_PAT_ENV}"\n` : "");
     default:
       return undefined;
   }

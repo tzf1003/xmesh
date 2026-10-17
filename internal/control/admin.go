@@ -121,6 +121,7 @@ func (s *Server) pairImport(w http.ResponseWriter, r *http.Request, _ *call) {
 		}
 		return
 	}
+	s.pairPending.Store(true)
 	writeJSON(w, 200, v1.PairImportResponse{Name: peer.Name, Fingerprint: computed, Tags: tags, RestartRequired: true})
 }
 

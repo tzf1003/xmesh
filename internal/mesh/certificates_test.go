@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -164,6 +166,14 @@ func Test_PairFingerprintAndPermissions(t *testing.T) {
 	fp, e := ExportPair(a, "one", path)
 	if e != nil {
 		t.Fatal(e)
+	}
+	raw, e := os.ReadFile(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	// the document is consumed by the UI, whose schema has no null arrays
+	if !strings.Contains(string(raw), `"tags": []`) {
+		t.Fatalf("exported tags must be an empty array: %s", raw)
 	}
 	if e = ImportPair(b, path, "wrong", []string{"tag:device"}); e == nil {
 		t.Fatal("unconfirmed fingerprint accepted")
