@@ -82,6 +82,9 @@ test("ingress password length is counted in characters, 12 to 256", () => {
   assert.equal(parsePassword(12), undefined);
   assert.equal(parsePassword(" " + "a".repeat(12)), undefined, "the kernel refuses edge whitespace");
   assert.equal(parsePassword("a".repeat(12) + "\n"), undefined);
+  assert.equal(parsePassword("\u0085" + "a".repeat(12)), undefined, "U+0085 is space to Go, not to ECMAScript");
+  assert.equal(parsePassword("a".repeat(12) + "\u3000"), undefined);
+  assert.equal(parsePassword("\ufeff" + "a".repeat(12)), "\ufeff" + "a".repeat(12), "Go does not trim a BOM");
   assert.equal(parsePassword("a b c d e f g h"), "a b c d e f g h", "inner spaces are fine");
 });
 
