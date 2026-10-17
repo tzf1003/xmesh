@@ -190,6 +190,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.updateInstances(found);
     const candidates = this.explicit ? found.filter((i) => i.id === this.explicit) : found;
     let mismatch: Connection | undefined;
+    const unresponsive: string[] = [];
     for (const inst of candidates) {
       if (!isSupportedApiVersion(inst.manifest.api_version)) {
         mismatch = {
@@ -210,6 +211,9 @@ export class ShellController extends EventEmitter<ControllerEvents> {
         this.current = undefined;
         if (e instanceof VersionMismatchError) {
           mismatch = { kind: "mismatch", kernelVersion: inst.manifest.kernel_version, apiVersion: e.apiVersion };
+        } else if (!(e instanceof ControlRequestError)) {
+          // No HTTP reply at all (timeout, refused connection): the manifest is there but nothing answers.
+          unresponsive.push(inst.id);
         }
         continue;
       }
@@ -235,7 +239,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
       this.current = undefined;
       return true;
     }
-    this.update({ connection: mismatch ?? { kind: "offline" } });
+    this.update({ connection: mismatch ?? { kind: "offline" }, unresponsiveNodes: unresponsive });
     return false;
   }
 

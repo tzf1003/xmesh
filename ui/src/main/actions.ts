@@ -60,6 +60,8 @@ export class Actions {
         return this.runCli("restart", this.selectedNode());
       case "start-kernel":
         return this.startKernel(a.node);
+      case "restart-unresponsive":
+        return this.restartUnresponsive(a.node);
       case "stop-kernel":
         return this.stopKernel();
       case "quit":
@@ -136,6 +138,12 @@ export class Actions {
   async startKernel(node: string): Promise<ActionResult> {
     if (!this.controller.snapshot.stoppedNodes.includes(node)) return fail("not_found", "no stopped node with that name");
     return this.runCli("start", node);
+  }
+
+  /** Restarts the service of a node whose manifest is there but whose kernel does not answer. */
+  async restartUnresponsive(node: string): Promise<ActionResult> {
+    if (!this.controller.snapshot.unresponsiveNodes.includes(node)) return fail("not_found", "no unresponsive node with that name");
+    return this.runCli("restart", node);
   }
 
   /** The node whose kernel the panel or tray is showing: its state directory is named after it. */

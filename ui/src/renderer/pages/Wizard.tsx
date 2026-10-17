@@ -41,6 +41,8 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
 
   const run = async (): Promise<void> => {
     if (!check.ok) return;
+    // The config written here shows up as a stopped node, which would move the default page away from the wizard mid-run.
+    ctx.go("setup");
     setBusy(true);
     setErr(undefined);
     const r = await getApi().runSetup(check.params);

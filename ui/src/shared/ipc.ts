@@ -35,6 +35,7 @@ export const CHANNELS = {
   reloadConfig: "xmesh:reload-config",
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
+  restartUnresponsive: "xmesh:restart-unresponsive",
   selectInstance: "xmesh:select-instance",
   copy: "xmesh:copy",
   openPath: "xmesh:open-path",
@@ -161,6 +162,8 @@ export interface PanelApi {
   startKernel(node: string): Promise<ActionResult>;
   /** Restarts the kernel of the selected node, as the tray menu does. Asks nothing: the caller confirms first. */
   restartKernel(): Promise<ActionResult>;
+  /** Restarts the service of a node whose kernel does not answer. */
+  restartUnresponsive(node: string): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
   copy(kind: CopyKind): Promise<ActionResult>;
   openPath(kind: PathKind): Promise<ActionResult>;
@@ -207,6 +210,7 @@ export const PANEL_API_METHODS = [
   "writeDenyFile",
   "createDenyFile",
   "reloadConfig",
+  "restartUnresponsive",
   "selectInstance",
   "copy",
   "openPath",
