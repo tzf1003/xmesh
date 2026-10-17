@@ -40,6 +40,7 @@ const api: PanelApi = {
   getSessions: () => invoke("xmesh:get-sessions"),
   getConfig: () => invoke("xmesh:get-config"),
   putConfig: (request) => invoke("xmesh:put-config", request),
+  patchConfig: (request) => invoke("xmesh:patch-config", request),
   listPats: () => invoke("xmesh:list-pats"),
   createPat: (args) => invoke("xmesh:create-pat", args),
   rotatePat: (name) => invoke("xmesh:rotate-pat", name),

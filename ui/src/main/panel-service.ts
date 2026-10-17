@@ -27,6 +27,7 @@ import {
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
+  type ConfigPatchRequest,
   type ConfigReloadResponse,
   type ConfigSaveRequest,
   type DataResult,
@@ -119,6 +120,13 @@ export class PanelService {
   putConfig(req: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>> {
     return this.data("config.write", (c) =>
       c.call("PUT", "/v1/config", { body: { content: req.content, dry_run: req.dryRun }, ifMatch: req.etag }),
+    );
+  }
+
+  /** `PATCH /v1/config` through the generic client call: If-Match from the etag, the same error mapping as PUT. */
+  patchConfig(req: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>> {
+    return this.data("config.write", (c) =>
+      c.call("PATCH", "/v1/config", { body: { edits: req.edits, dry_run: req.dryRun }, ifMatch: req.etag }),
     );
   }
 

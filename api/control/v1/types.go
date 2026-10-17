@@ -286,6 +286,19 @@ type ConfigPutResponse struct {
 	RestartRequired bool           `json:"restart_required"`
 }
 
+// ConfigEdit is one JSON Pointer edit of the configuration file (ConfigEdit in control-config.schema.json).
+type ConfigEdit struct {
+	Path   string `json:"path"`
+	Value  any    `json:"value,omitempty"`
+	Delete bool   `json:"delete,omitempty"`
+}
+
+// ConfigEditRequest is PATCH /v1/config: the edits apply in order, all or none.
+type ConfigEditRequest struct {
+	Edits  []ConfigEdit `json:"edits"`
+	DryRun bool         `json:"dry_run,omitempty"`
+}
+
 // PairDocument is the public pairing file; it matches mesh.Trusted.
 type PairDocument struct {
 	Name           string   `json:"name"`

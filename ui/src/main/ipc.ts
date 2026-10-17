@@ -7,6 +7,7 @@ import {
   parseAuditQuery,
   parseBoolean,
   parseClientId,
+  parseConfigPatch,
   parseConfigSave,
   parseDenyFileCreate,
   parseDenyFileSave,
@@ -111,6 +112,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.putConfig, (req: unknown) => {
     const v = parseConfigSave(req);
     return v === undefined ? bad("config request") : service.putConfig(v);
+  });
+  handle(CHANNELS.patchConfig, (req: unknown) => {
+    const v = parseConfigPatch(req);
+    return v === undefined ? bad("config edit request") : service.patchConfig(v);
   });
   handle(CHANNELS.readDenyFile, () => service.readDenyFile());
   handle(CHANNELS.writeDenyFile, (req: unknown) => {

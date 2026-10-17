@@ -84,9 +84,11 @@ test("panel data methods use their own fixed channels and forward only the calle
   const { exposed, invoked } = loadPreload();
   const api = exposed[0]!.api;
   const cfg = { content: "x", etag: "e", dry_run: true };
+  const patch = { edits: [{ path: "/agent/disabled_tools", delete: true }], etag: "e", dryRun: false };
   await api.getSessions!();
   await api.getConfig!();
   await api.putConfig!(cfg);
+  await api.patchConfig!(patch);
   await api.listPats!();
   await api.createPat!({ name: "ci" });
   await api.rotatePat!("ci");
@@ -104,14 +106,15 @@ test("panel data methods use their own fixed channels and forward only the calle
   assert.deepEqual(
     invoked.map((i) => i.channel),
     [
-      CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.listPats, CHANNELS.createPat,
+      CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.patchConfig, CHANNELS.listPats, CHANNELS.createPat,
       CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
       CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.queryAudit,
       CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
     ],
   );
   assert.deepEqual(invoked[2]!.args, [cfg]);
-  assert.deepEqual(invoked[5]!.args, ["ci"]);
+  assert.deepEqual(invoked[3]!.args, [patch]);
+  assert.deepEqual(invoked[6]!.args, ["ci"]);
 });
 
 test("onCalls hands the page the calls only and unsubscribes", () => {

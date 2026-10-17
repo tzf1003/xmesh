@@ -44,6 +44,7 @@ export const CHANNELS = {
   getSessions: "xmesh:get-sessions",
   getConfig: "xmesh:get-config",
   putConfig: "xmesh:put-config",
+  patchConfig: "xmesh:patch-config",
   listPats: "xmesh:list-pats",
   createPat: "xmesh:create-pat",
   rotatePat: "xmesh:rotate-pat",
@@ -102,6 +103,27 @@ export interface ConfigSaveRequest {
   /** Complete file text, at most 1 MiB. */
   content: string;
   /** The `etag` of the `ConfigResponse` the edit started from; sent as `If-Match`. */
+  etag: string;
+  /** Validate and diff only; nothing is written. */
+  dryRun: boolean;
+}
+
+/**
+ * One edit of `PATCH /v1/config`. `value` is any JSON value (the schema does not constrain it), so it is
+ * typed `unknown` here; the generated `ConfigEdit` narrows it to an object, which arrays and strings are not.
+ */
+export interface ConfigPatchEdit {
+  /** JSON Pointer that starts with "/" and names at least one key. */
+  path: string;
+  value?: unknown;
+  delete?: boolean;
+}
+
+/** Generic write helper: edits in, the kernel's diff out. Callers never see the HTTP details. */
+export interface ConfigPatchRequest {
+  /** 1 to 64 edits, applied in order to the file on disk; all or nothing. */
+  edits: ConfigPatchEdit[];
+  /** The `etag` of the `ConfigResponse` the edits were computed from; sent as `If-Match`. */
   etag: string;
   /** Validate and diff only; nothing is written. */
   dryRun: boolean;
@@ -172,6 +194,8 @@ export interface PanelApi {
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** Applies JSON Pointer edits to the config on disk (`PATCH /v1/config`); the form-style settings write through here. */
+  patchConfig(request: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>>;
   /** The deny list file the config names; the renderer never supplies its path. */
   readDenyFile(): Promise<DataResult<DenyFileResponse>>;
   writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
@@ -219,6 +243,7 @@ export const PANEL_API_METHODS = [
   "getSessions",
   "getConfig",
   "putConfig",
+  "patchConfig",
   "listPats",
   "createPat",
   "rotatePat",
@@ -374,6 +399,54 @@ export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {
   if (typeof etag !== "string" || !ETAG.test(etag)) return undefined;
   if (typeof dryRun !== "boolean") return undefined;
   return { content, etag, dryRun };
+}
+
+/** The contract's limit on edits per PATCH. */
+export const CONFIG_PATCH_MAX_EDITS = 64;
+const POINTER_MAX = 512;
+
+/** A JSON value with finite numbers only, nested at most 64 levels deep. Only arrays and plain objects count as containers. */
+export function isJsonValue(v: unknown, depth = 0): boolean {
+  if (depth > 64) return false;
+  if (v === null || typeof v === "string" || typeof v === "boolean") return true;
+  if (typeof v === "number") return Number.isFinite(v);
+  if (Array.isArray(v)) return v.every((x) => isJsonValue(x, depth + 1));
+  if (!isRecord(v)) return false;
+  const proto = Object.getPrototypeOf(v) as unknown;
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.values(v).every((x) => isJsonValue(x, depth + 1));
+}
+
+/** One edit: a pointer with at least one segment, then either `value` or `delete: true`, never both. */
+function parsePatchEdit(v: unknown): ConfigPatchEdit | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["path", "value", "delete"])) return undefined;
+  const { path } = v;
+  if (typeof path !== "string" || !path.startsWith("/") || path.length < 2 || path.length > POINTER_MAX) return undefined;
+  if (/[\x00-\x1f\x7f]/.test(path)) return undefined;
+  if (v.delete !== undefined && typeof v.delete !== "boolean") return undefined;
+  const remove = v.delete === true;
+  if (remove) return "value" in v ? undefined : { path, delete: true };
+  if (!("value" in v) || !isJsonValue(v.value)) return undefined;
+  return { path, value: v.value };
+}
+
+/** Structural check only: the kernel validates the resulting configuration and answers 422 when it is wrong. */
+export function parseConfigPatch(v: unknown): ConfigPatchRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["edits", "etag", "dryRun"])) return undefined;
+  const { edits, etag, dryRun } = v;
+  if (!Array.isArray(edits) || edits.length === 0 || edits.length > CONFIG_PATCH_MAX_EDITS) return undefined;
+  const parsed: ConfigPatchEdit[] = [];
+  for (const e of edits) {
+    const edit = parsePatchEdit(e);
+    if (edit === undefined) return undefined;
+    parsed.push(edit);
+  }
+  if (typeof etag !== "string" || !ETAG.test(etag)) return undefined;
+  if (typeof dryRun !== "boolean") return undefined;
+  const out: ConfigPatchRequest = { edits: parsed, etag, dryRun };
+  // The body is sent as JSON, so the same byte limit as a whole-file save applies.
+  if (new TextEncoder().encode(JSON.stringify(out)).length > CONFIG_MAX_BYTES) return undefined;
+  return out;
 }
 
 export function parsePatCreate(v: unknown): PatCreateArgs | undefined {
