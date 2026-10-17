@@ -5,7 +5,7 @@ import { getApi } from "../api";
 import { Badge, Banner, Confirm, Empty, ErrorBanner, Field, NotSupported, PageHead } from "../components";
 import { useT } from "../i18n";
 import { ago, formatTime } from "../lib/format";
-import { lacksDeviceTag, relayStats, sortPeers } from "../lib/devices";
+import { deviceInfoState, lacksDeviceTag, relayStats, sortPeers } from "../lib/devices";
 import { PAIR_TAG_CHOICES, fingerprintMatches, groupFingerprint, parsePairText } from "../lib/pair";
 import type { ActionError } from "../../shared/ipc";
 import type { Peer, PairDocument } from "../../shared/control";
@@ -59,13 +59,19 @@ export function Devices({ ctx }: { ctx: PageContext }): JSX.Element | null {
 function PeerRow({ peer: p }: { peer: Peer }): JSX.Element {
   const t = useT();
   const when = ago(p.last_seen);
+  const info = deviceInfoState(p);
   return (
     <tr data-testid={`peer-${p.name}`}>
       <td>
         <strong>{p.name}</strong> {p.self && <Badge kind="info">{t("devices.self")}</Badge>}
         <div class="hint">{[p.os, p.version].filter(Boolean).join(" · ")}</div>
+        {info === "pending" && <div class="hint" data-testid={`peer-info-${p.name}`}>{t("devices.infoPending")}</div>}
+        {info === "failed" && <div class="hint mono" data-testid={`peer-info-${p.name}`}>{p.info?.error}</div>}
       </td>
-      <td>{p.online ? <Badge kind="ok">{t("devices.online")}</Badge> : <Badge>{t("devices.offline")}</Badge>}</td>
+      <td>
+        {p.online ? <Badge kind="ok">{t("devices.online")}</Badge> : <Badge>{t("devices.offline")}</Badge>}
+        {info === "failed" && <> <Badge kind="warn">{t("devices.infoFailed")}</Badge></>}
+      </td>
       <td>
         <div class="row">
           {p.tags.map((tag) => (

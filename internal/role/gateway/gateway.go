@@ -68,6 +68,9 @@ type Gateway struct {
 	draining     map[string]bool
 	meshDraining bool
 	quota        *quota.Limiter
+	// info holds the background sys.info readings behind the control channel's device state.
+	info        map[string]*infoRecord
+	infoWorkers sync.WaitGroup
 }
 type downstream struct {
 	bridge      *mcpmux.Bridge
@@ -114,7 +117,7 @@ func New(o Options) *Gateway {
 		o.PTYBudget, _ = NewPTYBudget(8, "")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, quota: quota.New(o.Quota.Limits())}
+	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, info: map[string]*infoRecord{}, quota: quota.New(o.Quota.Limits())}
 	if o.LocalPeer.Name != "" {
 		g.devices[o.LocalPeer.Name] = device{o.LocalPeer, true, time.Now()}
 	}
@@ -126,6 +129,10 @@ func (g *Gateway) discover() {
 	g.poll()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+	info := time.NewTicker(infoTick)
+	defer info.Stop()
+	// Registered last, so it runs first: Close waits for the reads before it reports the loop done.
+	defer g.infoWorkers.Wait()
 	for {
 		select {
 		case <-g.ctx.Done():
@@ -135,6 +142,8 @@ func (g *Gateway) discover() {
 		case <-ticker.C:
 			g.poll()
 			g.refreshViews()
+		case now := <-info.C:
+			g.pollInfo(now)
 		}
 	}
 }

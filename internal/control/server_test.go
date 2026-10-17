@@ -132,6 +132,26 @@ func Test_ControlRequestValidation(t *testing.T) {
 	apiError(t, f.do("POST", "/v1/drain", big, nil), v1.ErrPayloadTooLarge)
 }
 
+// The device reading is optional: a peer that has one validates against the schema, and a peer without
+// one has no info key at all.
+func Test_ControlPeerInfoShape(t *testing.T) {
+	f := newFixture(t)
+	read := peer("read", true)
+	at := v1.Now()
+	read.Info = &v1.PeerInfo{RefreshedAt: &at}
+	failed := peer("failed", true)
+	why := "sys.info 暂不可用"
+	failed.Info = &v1.PeerInfo{Error: &why}
+	f.host.mutate(func(h *fakeHost) { h.peers = []v1.Peer{read, failed, peer("plain", true)} })
+	body := string(f.ok("GET", "/v1/peers", nil, "PeersResponse").Body)
+	if !strings.Contains(body, `"info":{"refreshed_at":"`) || !strings.Contains(body, `"error":"sys.info 暂不可用"`) {
+		t.Fatalf("readings missing:\n%s", body)
+	}
+	if strings.Count(body, `"info"`) != 2 {
+		t.Fatalf("a peer without a reading carries info:\n%s", body)
+	}
+}
+
 func Test_ControlPeersAndSessions(t *testing.T) {
 	f := newFixture(t)
 	f.host.mutate(func(h *fakeHost) {

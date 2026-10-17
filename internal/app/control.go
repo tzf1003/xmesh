@@ -15,6 +15,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/role/agent"
+	"github.com/tzf1003/xmesh/internal/role/gateway"
 )
 
 // Version is the kernel version reported through the control channel. The main
@@ -36,6 +37,8 @@ type controlDeps struct {
 	ingress   control.IngressAdmin // nil on a node without the ingress role
 	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume    func()
+	// peerInfo is the gateways' sys.info readings by device; nil on a node without a gateway.
+	peerInfo func() map[string]gateway.DeviceInfo
 }
 
 // startControl opens the channel. A failure is reported and otherwise ignored:
@@ -177,6 +180,10 @@ func (h *controlHost) Peers(ctx context.Context) ([]v1.Peer, error) {
 	if e != nil {
 		return nil, e
 	}
+	var readings map[string]gateway.DeviceInfo
+	if h.d.peerInfo != nil {
+		readings = h.d.peerInfo()
+	}
 	for _, p := range peers {
 		if p.Name == cfg.Node.Name || (p.ID != "" && p.ID == h.d.self.Node) {
 			continue
@@ -200,9 +207,51 @@ func (h *controlHost) Peers(ctx context.Context) ([]v1.Peer, error) {
 			system := p.OS
 			row.OS = &system
 		}
+		if p.Online && h.d.peerInfo != nil {
+			row.Info = deviceInfoView(readings[p.Name])
+		}
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// deviceInfoView is the control view of one device's sys.info reading. A device nobody has read yet
+// has null in both fields.
+func deviceInfoView(r gateway.DeviceInfo) *v1.PeerInfo {
+	out := &v1.PeerInfo{}
+	if !r.RefreshedAt.IsZero() {
+		at := v1.At(r.RefreshedAt)
+		out.RefreshedAt = &at
+	}
+	if r.Error != "" {
+		msg := r.Error
+		out.Error = &msg
+	}
+	return out
+}
+
+// readings merges the readings of every gateway on this node.
+func readings(gateways []*gateway.Gateway) map[string]gateway.DeviceInfo {
+	sets := make([]map[string]gateway.DeviceInfo, 0, len(gateways))
+	for _, g := range gateways {
+		sets = append(sets, g.DeviceInfo())
+	}
+	return mergeReadings(sets...)
+}
+
+// mergeReadings keeps, per device, the latest successful read; without one, a failure is kept in
+// preference to no read at all.
+func mergeReadings(sets ...map[string]gateway.DeviceInfo) map[string]gateway.DeviceInfo {
+	out := map[string]gateway.DeviceInfo{}
+	for _, set := range sets {
+		for name, r := range set {
+			cur, seen := out[name]
+			if !seen || r.RefreshedAt.After(cur.RefreshedAt) || (r.RefreshedAt.Equal(cur.RefreshedAt) && cur.Error == "" && r.Error != "") {
+				out[name] = r
+			}
+		}
+	}
+	return out
 }
 func (h *controlHost) Sessions() v1.SessionsResponse {
 	if h.d.agent == nil {

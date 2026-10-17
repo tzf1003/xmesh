@@ -35,7 +35,28 @@
           ]
         },
         "os": { "type": ["string", "null"] },
-        "version": { "type": ["string", "null"], "description": "对端内核版本，未知为 null。" }
+        "version": { "type": ["string", "null"], "description": "对端内核版本，未知为 null。" },
+        "info": { "$ref": "#/$defs/PeerInfo" }
+      }
+    },
+    "PeerInfo": {
+      "type": "object",
+      "description": "网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。",
+      "additionalProperties": false,
+      "required": ["refreshed_at", "error"],
+      "properties": {
+        "refreshed_at": {
+          "oneOf": [
+            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+            { "type": "null" }
+          ],
+          "description": "最近一次成功读取的时间；第一次读取完成前为 null。"
+        },
+        "error": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "最近一次读取失败的原因；成功之后以及读取完成前为 null。"
+        }
       }
     },
     "PeersResponse": {

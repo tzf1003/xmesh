@@ -11,6 +11,19 @@ export function sortPeers(peers: readonly Peer[]): Peer[] {
   });
 }
 
+/**
+ * Where the gateway's sys.info reading of a device stands (CTR-CTL-05). Undefined when it is not tracked:
+ * this node, an offline device, or a node without a gateway.
+ */
+export type DeviceInfoState = "pending" | "failed" | "ok";
+
+export function deviceInfoState(p: Peer): DeviceInfoState | undefined {
+  if (p.self || !p.online || !p.info) return undefined;
+  if (p.info.error != null) return "failed";
+  if (p.info.refreshed_at == null) return "pending";
+  return "ok";
+}
+
 /** A peer without `tag:device` cannot be discovered as a device (CTR-AUTHZ-01); worth saying so. */
 export function lacksDeviceTag(p: Peer): boolean {
   return !p.self && !p.tags.includes("tag:device");

@@ -351,7 +351,16 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if o.Local {
 		mode = "local"
 	}
-	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress,
+	var peerInfo func() map[string]gateway.DeviceInfo
+	if c.HasRole("gateway") {
+		peerInfo = func() map[string]gateway.DeviceInfo {
+			gatewaysMu.Lock()
+			current := append([]*gateway.Gateway{}, gateways...)
+			gatewaysMu.Unlock()
+			return readings(current)
+		}
+	}
+	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, peerInfo: peerInfo,
 		drain: func(kill bool) {
 			gatewaysMu.Lock()
 			pendingDrain[c.Node.Name] = true

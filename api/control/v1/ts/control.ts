@@ -427,6 +427,20 @@ export interface Peer {
    * 对端内核版本，未知为 null。
    */
   version: string | null;
+  info?: PeerInfo;
+}
+/**
+ * 网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。
+ */
+export interface PeerInfo {
+  /**
+   * 最近一次成功读取的时间；第一次读取完成前为 null。
+   */
+  refreshed_at: Timestamp | null;
+  /**
+   * 最近一次读取失败的原因；成功之后以及读取完成前为 null。
+   */
+  error: string | null;
 }
 export interface CallEventData {
   /**
@@ -797,7 +811,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.0" as const;
+export const CONTROL_API_VERSION = "1.1" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
