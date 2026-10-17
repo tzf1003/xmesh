@@ -3,6 +3,7 @@
 
 import { type Page, expect, test } from "@playwright/test";
 import type { Capability } from "../../src/shared/control";
+import type { FakeKernelOptions } from "../../testserver/server";
 import { type Harness, launch } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
@@ -34,7 +35,7 @@ test.afterEach(async () => {
   await h?.close();
 });
 
-async function open(kernel: Parameters<typeof launch>[0]["kernel"] = {}): Promise<Page> {
+async function open(kernel: FakeKernelOptions = {}): Promise<Page> {
   h = await launch({ kernel: { capabilities: ALL, ...kernel } });
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);

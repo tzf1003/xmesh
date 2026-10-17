@@ -115,10 +115,12 @@ export function App(): JSX.Element {
 
 function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; connected: boolean; snapshot: Snapshot; onSelect: (p: PageId) => void }): JSX.Element {
   const t = useT();
+  // The wizard is for a node that has no config yet; once one exists, its settings live on the settings page.
+  const configured = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0;
   return (
     <nav class="sidebar" aria-label={t("nav.label")}>
       <div class="brand">xmesh</div>
-      {NAV.map((n) => (
+      {NAV.filter((n) => n.id !== "setup" || !configured).map((n) => (
         <button
           key={n.id}
           type="button"
