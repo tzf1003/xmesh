@@ -6,7 +6,7 @@ import { Badge, Banner, Confirm, Dialog, Empty, ErrorBanner, Field, NotSupported
 import { useResource } from "../hooks";
 import { type Key } from "../messages";
 import { errorText, useLocale, useT, type T } from "../i18n";
-import { applyConfigEdits } from "../lib/apply-config";
+import { MAX_CONFIG_EDITS, applyConfigEdits } from "../lib/apply-config";
 import { type AuthzRow, authzRows, cwdPolicy } from "../lib/config";
 import {
   BACKEND_POLICIES,
@@ -274,6 +274,7 @@ function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
 
   /** One PATCH per action. Success reloads the config; a stale etag also reloads, so the next try starts from the file on disk. */
   const write = async (cfg: ConfigResponse, edits: ConfigPatchEdit[]): Promise<ActionError | undefined> => {
+    if (edits.length > MAX_CONFIG_EDITS) return { code: "too_many_edits", message: t("config.tooManyEdits", { count: edits.length, max: MAX_CONFIG_EDITS }) };
     const r = await applyConfigEdits(cfg.etag, edits);
     if (!r.ok) {
       if (r.error.code === "precondition_failed") reload();

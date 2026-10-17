@@ -163,6 +163,19 @@ test("pattern matching: * is a wildcard and every other character is literal", (
   assert.ok(matchesPattern("docs", "docs"));
   assert.ok(!matchesPattern("docs", "docs2"));
   assert.ok(matchesPattern("a.b*", "a.bc"));
+  // the same reading as the kernel's path.Match: ?, [...] with ^ and ranges, \ escapes, malformed patterns match nothing
+  assert.ok(matchesPattern("docs-?", "docs-a"));
+  assert.ok(!matchesPattern("docs-?", "docs-ab"));
+  assert.ok(matchesPattern("docs-[ab]", "docs-b"));
+  assert.ok(!matchesPattern("docs-[ab]", "docs-c"));
+  assert.ok(matchesPattern("docs-[^ab]", "docs-c"));
+  assert.ok(matchesPattern("docs-[a-c]", "docs-b"));
+  assert.ok(matchesPattern("a\\*b", "a*b"));
+  assert.ok(!matchesPattern("a\\*b", "axb"));
+  assert.ok(matchesPattern("x.y", "x.y"));
+  assert.ok(!matchesPattern("x.y", "xzy"));
+  assert.ok(!matchesPattern("docs-[", "docs-["));
+  assert.ok(!matchesPattern("docs-\\", "docs-\\"));
   assert.ok(!matchesPattern("a.b*", "axbc"), "the dot is not a wildcard");
   assert.ok(matchesPattern("*", "anything"));
 });

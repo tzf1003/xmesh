@@ -28,7 +28,8 @@ export interface ImportResult {
 
 /** Fields the kernel's backend shape (and this importer) understands, outside the transport-specific ones. */
 const COMMON_KEYS = ["type", "transport", "cwd", "policy", "idle_timeout", "favorite", "env"];
-const HTTP_TYPES = ["http", "sse", "streamable-http"];
+// The kernel has no SSE client, so an `sse` entry is refused rather than written as a backend that cannot connect.
+const HTTP_TYPES = ["http", "streamable-http"];
 
 export function parseMcpImport(text: string): ImportResult {
   if (new TextEncoder().encode(text).length > IMPORT_MAX_BYTES) return { entries: [], problems: [{ name: "", code: "tooBig" }] };

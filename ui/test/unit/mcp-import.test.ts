@@ -21,10 +21,9 @@ test("env is dropped with a warning that names the variables, never their values
   assert.ok(!JSON.stringify(r).includes(secret), "the value must not reach the preview");
 });
 
-test("type and url choose the transport: sse and streamable-http map to http", () => {
+test("type and url choose the transport: streamable-http and http map to http", () => {
   const r = one(
     JSON.stringify({
-      a: { type: "sse", url: "http://localhost:9000/sse" },
       b: { type: "streamable-http", url: "http://127.0.0.1:9001/mcp" },
       c: { type: "http", url: "https://[::1]:9002/mcp" },
       d: { url: "http://localhost:9003/mcp" },
@@ -33,7 +32,6 @@ test("type and url choose the transport: sse and streamable-http map to http", (
   assert.deepEqual(
     r.entries.map((e) => [e.name, e.value]),
     [
-      ["a", { transport: "http", url: "http://localhost:9000/sse", policy: "shared" }],
       ["b", { transport: "http", url: "http://127.0.0.1:9001/mcp", policy: "shared" }],
       ["c", { transport: "http", url: "https://[::1]:9002/mcp", policy: "shared" }],
       ["d", { transport: "http", url: "http://localhost:9003/mcp", policy: "shared" }],
@@ -115,4 +113,10 @@ test("text that is not an import is reported as a whole", () => {
   // A backend that happens to be named "url" is still a name.
   assert.deepEqual(one(JSON.stringify({ url: { command: "npx" } })).entries.map((e) => e.name), ["url"]);
   assert.deepEqual(one("x".repeat(IMPORT_MAX_BYTES + 1)).problems, [{ name: "", code: "tooBig" }]);
+});
+
+test("an sse entry is refused, since the kernel cannot connect to it", () => {
+  const r = one(JSON.stringify({ legacy: { type: "sse", url: "http://100.64.0.1:8080/sse" } }));
+  assert.deepEqual(r.entries, []);
+  assert.deepEqual(r.problems, [{ name: "legacy", code: "transport", detail: "sse" }]);
 });

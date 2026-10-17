@@ -91,10 +91,71 @@ export function disabledTools(parsed: unknown): string[] {
   return strings(agentOf(parsed)?.disabled_tools);
 }
 
-/** A pattern as the authz lists use them: `*` matches any run of characters, everything else is literal. */
+/**
+ * A pattern as the kernel's `path.Match` reads it: `*` and `?` match a run or one character, `[...]` is a
+ * class whose leading `^` negates it, and `\` escapes the next character. A malformed pattern matches nothing.
+ */
 export function matchesPattern(pattern: string, name: string): boolean {
-  const body = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
-  return new RegExp(`^${body}$`).test(name);
+  const re = globRegExp(pattern);
+  return re !== undefined && re.test(name);
+}
+
+/** Only letters and digits stay bare, so an escape never turns a literal into a regex class like `\d`. */
+const lit = (c: string): string => (/[A-Za-z0-9]/.test(c) ? c : `\\${c}`);
+
+function globRegExp(pattern: string): RegExp | undefined {
+  let body = "";
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!;
+    if (c === "*") body += "[^/]*";
+    else if (c === "?") body += "[^/]";
+    else if (c === "\\") {
+      if (i + 1 >= pattern.length) return undefined;
+      body += lit(pattern[++i]!);
+    } else if (c === "[") {
+      const close = classEnd(pattern, i);
+      if (close === undefined) return undefined;
+      body += classRegExp(pattern.slice(i + 1, close));
+      i = close;
+    } else body += lit(c);
+  }
+  try {
+    return new RegExp(`^${body}$`);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The members of a `[...]` class (brackets excluded) as a regex class. A range whose ends are out of order matches nothing, as in the kernel. */
+function classRegExp(inner: string): string {
+  let out = "[";
+  let i = 0;
+  if (inner[0] === "^") {
+    out += "^";
+    i = 1;
+  }
+  for (; i < inner.length; i++) {
+    let lo = inner[i]!;
+    if (lo === "\\") lo = inner[++i] ?? "";
+    if (inner[i + 1] === "-" && i + 2 < inner.length) {
+      i += 2;
+      let hi = inner[i]!;
+      if (hi === "\\") hi = inner[++i] ?? "";
+      if (lo <= hi) out += `${lit(lo)}-${lit(hi)}`;
+    } else out += lit(lo);
+  }
+  return `${out}]`;
+}
+
+/** Index of the `]` that closes the class opened at `start`, or undefined when it never closes. */
+function classEnd(pattern: string, start: number): number | undefined {
+  let i = start + 1;
+  if (pattern[i] === "^") i++;
+  for (let first = true; i < pattern.length; i++, first = false) {
+    if (pattern[i] === "]" && !first) return i;
+    if (pattern[i] === "\\") i++;
+  }
+  return undefined;
 }
 
 /** Tags whose backend list grants `name`, by exact name or by a pattern. Shown in the MCP table. */
