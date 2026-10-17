@@ -18,6 +18,8 @@ export interface ControllerOptions {
   discover: () => Instance[];
   /** Node directories that have a config file, running or not (see discoverConfigured). */
   configured?: () => string[];
+  /** The CLI as typed in a terminal, for the copied commands (see cliCommandText). */
+  cliCommand?: string;
   getLoginItem: () => boolean;
   /** Tray and panel language; default Chinese. */
   locale?: Locale;
@@ -77,7 +79,11 @@ export class ShellController extends EventEmitter<ControllerEvents> {
 
   constructor(private readonly opts: ControllerOptions) {
     super();
-    this.snap = { ...EMPTY_SNAPSHOT, settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh" } };
+    this.snap = {
+      ...EMPTY_SNAPSHOT,
+      cliCommand: opts.cliCommand ?? EMPTY_SNAPSHOT.cliCommand,
+      settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh" },
+    };
   }
 
   get snapshot(): Snapshot {
