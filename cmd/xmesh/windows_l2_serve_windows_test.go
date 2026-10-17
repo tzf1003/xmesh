@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/winbox"
 	"golang.org/x/sys/windows"
 )
 
@@ -49,6 +50,9 @@ func newL2Node(t *testing.T) *l2Node {
 	t.Helper()
 	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	if err := winbox.ProbeChangeJournalAccess(t.TempDir()); err != nil {
+		t.Skip("this account cannot read the NTFS change journal (needs an elevated Administrator or LocalSystem): ", err)
 	}
 	binary := os.Getenv("XMESH_TEST_WINDOWS_BINARY")
 	if !filepath.IsAbs(binary) {

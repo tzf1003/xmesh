@@ -15,9 +15,7 @@ import (
 
 func namespaceWriterRoot(t *testing.T) (string, *workspaceTree) {
 	t.Helper()
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	path := filepath.Join(t.TempDir(), "workspace")
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
@@ -198,9 +196,7 @@ func Test_WindowsAppContainerNamespaceWriterHelper(t *testing.T) {
 }
 
 func Test_WindowsAppContainerNamespaceMonitorAdmission(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	f := newImportMoveFixture(t, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

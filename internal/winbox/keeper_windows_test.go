@@ -129,9 +129,7 @@ func openDirectoryHold(t *testing.T, path string) windows.Handle {
 }
 
 func Test_WindowsAppContainerGuardKeeperLifecycle(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, cli := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cli-%t", cli), func(t *testing.T) {
 			command := keeperTestCommand(t, cli)
@@ -310,9 +308,7 @@ type keeperCrashProof struct {
 // the keeper survives it, and a recovery owner adopts the same keeper, recovers
 // under it, and only then releases it after the keeper verifies the journal.
 func Test_WindowsAppContainerGuardKeeperHostCrash(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	supervisorCommand := supervisorTestCommand(t, true)
 	keeperCommand := keeperTestCommand(t, true)
 	f := newKeeperFixture(t)

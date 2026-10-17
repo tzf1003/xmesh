@@ -23,6 +23,18 @@ func skipUnlessWindowsSandbox(t *testing.T) {
 	}
 }
 
+// skipUnlessChangeJournal skips a test that needs the NTFS change journal when
+// the account cannot read it (an ordinary account or an unelevated token). L2
+// does not run there by design: the node refuses it and says why, which
+// Test_WindowsAppContainerChangeSourceAccess and the probe test assert.
+func skipUnlessChangeJournal(t *testing.T) {
+	t.Helper()
+	skipUnlessWindowsSandbox(t)
+	if err := ProbeChangeJournalAccess(t.TempDir()); err != nil {
+		t.Skip("this account cannot read the NTFS change journal (needs an elevated Administrator or LocalSystem): ", err)
+	}
+}
+
 // fenceFixture creates base\outer\workspace and a private base\state journal
 // directory, all on the local test volume.
 func fenceFixture(t *testing.T) (outer, workspace, state string) {
@@ -99,7 +111,7 @@ func makeJunction(t *testing.T, directory, target string) {
 }
 
 func Test_WindowsAppContainerWriterFencePins(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	ctx := context.Background()
 	outer, workspace, state := fenceFixture(t)
 	f, err := acquireWorkspaceWriterFence(ctx, workspace, state)
@@ -152,7 +164,7 @@ func Test_WindowsAppContainerWriterFencePins(t *testing.T) {
 }
 
 func Test_WindowsAppContainerWriterFenceDetection(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	ctx := context.Background()
 	for _, mode := range []string{"ancestor-acl", "journal-acl", "root-acl-sealed", "root-reparse", "volume-journal-lost"} {
 		t.Run(mode, func(t *testing.T) {
@@ -229,7 +241,7 @@ func Test_WindowsAppContainerWriterFenceDetection(t *testing.T) {
 }
 
 func Test_WindowsAppContainerWriterFenceBinding(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	ctx := context.Background()
 	_, workspace, state := fenceFixture(t)
 	f, err := acquireWorkspaceWriterFence(ctx, workspace, state)
@@ -269,7 +281,7 @@ func Test_WindowsAppContainerWriterFenceBinding(t *testing.T) {
 }
 
 func Test_WindowsAppContainerWorkspaceExecutionWriterFence(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	t.Run("opaque-guard-rejected", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()

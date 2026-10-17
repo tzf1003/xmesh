@@ -78,6 +78,7 @@ func Test_WindowsAdmissionCost(t *testing.T) {
 	if os.Getenv("XMESH_TEST_WINDOWS_ADMISSION_COST") != "1" {
 		t.Skip("set XMESH_TEST_WINDOWS_ADMISSION_COST=1 and XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
 	}
+	skipUnlessChangeJournal(t)
 	capture := &timingCapture{}
 	previous := slog.Default()
 	slog.SetDefault(slog.New(capture))

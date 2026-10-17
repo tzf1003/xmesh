@@ -51,9 +51,7 @@ func newRunnerFixture(t *testing.T) *runnerFixture { return newRunnerFixtureWith
 
 func newRunnerFixtureWith(t *testing.T, production bool) *runnerFixture {
 	t.Helper()
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	// The cwd resolver reports the canonical long path, not an 8.3 form.
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {

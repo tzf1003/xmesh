@@ -15,9 +15,7 @@ import (
 )
 
 func Test_WindowsAppContainerWorkspaceExecutionImport(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, stage := range []string{"directory", "file", "prepare-error", "missing-guard", "cancel-prepared", "collision", "guard-retry"} {
 		t.Run(stage, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -211,9 +209,7 @@ func Test_WindowsAppContainerWorkspaceExecutionImportAdmission(t *testing.T) {
 }
 
 func Test_WindowsAppContainerWorkspaceExecutionImportFault(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	options := workspaceExecutionTestOptions(t)

@@ -31,9 +31,7 @@ func workspaceExecutionTestOptions(t *testing.T) workspaceExecutionOptions {
 }
 
 func Test_WindowsAppContainerWorkspaceExecution(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, mode := range []string{"process", "console", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -177,9 +175,7 @@ func Test_WindowsAppContainerWorkspaceExecution(t *testing.T) {
 }
 
 func Test_WindowsAppContainerWorkspaceExecutionFailure(t *testing.T) {
-	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
-		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
-	}
+	skipUnlessChangeJournal(t)
 	for _, stage := range []string{"prepare", "journal", "workspace", "supervisor", "guard-retry", "cancel-close", "busy-close", "supervisor-close", "concurrent-close"} {
 		t.Run(stage, func(t *testing.T) {
 			options := workspaceExecutionTestOptions(t)

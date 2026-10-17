@@ -101,7 +101,7 @@ func waitDescendantProof(t *testing.T, ctx context.Context, e *workspaceExecutio
 }
 
 func Test_WindowsAppContainerDescendantSecurity(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	type scenario struct {
 		name     string
 		interval time.Duration
@@ -200,7 +200,7 @@ func Test_WindowsAppContainerDescendantSecurity(t *testing.T) {
 // does not give it WRITE_DAC. This proves the kernel refuses a descriptor edit
 // by the sandbox itself, on admitted and on self-created objects.
 func Test_WindowsAppContainerSandboxCannotWriteDACL(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	options := descendantSecurityFixture(t, 20*time.Millisecond)
@@ -229,7 +229,7 @@ func Test_WindowsAppContainerSandboxCannotWriteDACL(t *testing.T) {
 
 // A change made between monitor cycles must not be followed by a launch.
 func Test_WindowsAppContainerStartRefusesDescendantChange(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	options := descendantSecurityFixture(t, time.Minute)
@@ -267,7 +267,7 @@ func Test_WindowsAppContainerStartRefusesDescendantChange(t *testing.T) {
 // reparse point is not something this package or the granted rights can create,
 // so it fails the execution and kills its processes.
 func Test_WindowsAppContainerTreeExternalWriters(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	for _, mode := range []string{"namespace-activity", "junction"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -364,7 +364,7 @@ func Test_WindowsAppContainerTreeExternalWriters(t *testing.T) {
 // access from a directory that is not reclaimed yet. The release must notice it
 // before declaring the workspace released, and the next release reclaims it.
 func Test_WindowsAppContainerReclaimProof(t *testing.T) {
-	skipUnlessWindowsSandbox(t)
+	skipUnlessChangeJournal(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	options := descendantSecurityFixture(t, 20*time.Millisecond)
