@@ -38,11 +38,23 @@ func serviceCommand(action string, args []string) error {
 	path := flags.String("config", "xmesh.yaml", "配置路径（用来取得节点名）")
 	name := flags.String("name", "", "服务名；省略时读取 --config 的节点名")
 	system := flags.Bool("system", false, "Windows：操作管理员 SCM 服务")
+	dir := flags.String("dir", "", "Windows，仅 uninstall：删除本用户程序位于该目录下的登录任务，不动其他目录的节点")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
 	if *system && runtime.GOOS != "windows" {
 		return fmt.Errorf("--system 仅适用于 Windows")
+	}
+	if *dir != "" {
+		if action != "uninstall" {
+			return fmt.Errorf("--dir 仅用于 uninstall")
+		}
+		removed, e := removeUserTasksUnder(*dir)
+		if e != nil {
+			return e
+		}
+		fmt.Printf("已删除 %d 个登录任务\n", removed)
+		return nil
 	}
 	serviceID := *name
 	if serviceID == "" {

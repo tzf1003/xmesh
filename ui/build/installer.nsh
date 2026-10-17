@@ -36,3 +36,16 @@
   ${endIf}
   Pop $1
 !macroend
+
+; The logon tasks this user registered for xmesh nodes run from this folder. Remove the ones that
+; do before the files go, or Task Scheduler restarts a kernel from a folder being deleted. Tasks
+; that run from other folders (a test node, say) stay. An upgrade runs the old uninstaller too;
+; it keeps the tasks, since the new version starts from them.
+!macro customUnInstall
+  ${IfNot} ${isUpdated}
+    ${if} ${FileExists} "$INSTDIR\resources\bin\xmesh.exe"
+      nsExec::Exec `"$INSTDIR\resources\bin\xmesh.exe" uninstall --dir "$INSTDIR" --json`
+      Pop $0
+    ${endIf}
+  ${EndIf}
+!macroend
