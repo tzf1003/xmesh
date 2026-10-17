@@ -13,6 +13,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/tzf1003/xmesh/internal/toolerr"
 	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
 )
@@ -50,6 +51,11 @@ func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
 	path, err = exec.LookPath(path)
 	if err != nil {
 		return nil, nil, err
+	}
+	// A Store application execution alias activates its package, which places
+	// every descendant in the package's own Job: they would outlive ours.
+	if winjob.IsAppExecLink(path) {
+		return nil, nil, toolerr.AppExecAlias("cmd", path)
 	}
 	application, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -158,6 +164,14 @@ func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
 	process, err := create(true)
 	boundLate := false
 	if winjob.JobListDenied(err) {
+		// A Job named in a failed job-list creation cannot take the Store
+		// package's process afterwards (every later assignment is refused), so
+		// the late binding uses a fresh, never-referenced Job.
+		_ = windows.CloseHandle(job)
+		job = 0
+		if job, err = winjob.New(); err != nil {
+			return nil, nil, err
+		}
 		process, err = create(false)
 		boundLate = true
 	}
