@@ -56,7 +56,7 @@ jobs:
           $skip = @(Select-String -Path $out -Pattern "--- SKIP: $esc ").Count
           $retry = @(Select-String -Path $out -Pattern 'race runtime failed to start').Count
           $elapsed = [int]((Get-Date) - $started).TotalSeconds
-          "==== $name: PASS $pass, FAIL $fail, SKIP $skip, race-start retries $retry, go test exit $code, ${elapsed}s ===="
+          "==== ${name}: PASS $pass, FAIL $fail, SKIP $skip, race-start retries $retry, go test exit $code, ${elapsed}s ===="
           Select-String -Path $out -Pattern '--- FAIL|_test.go:|timed out|readiness|DATA RACE|panic|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
           exit $code
       - uses: actions/upload-artifact@v4
