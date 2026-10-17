@@ -30,15 +30,42 @@
 
 ### 热加载与冷加载
 
+配置文件的生效方式有两条路，结果相同：
+
+- 文件监视：内核约每秒重读一次文件，有效的新内容立即成为生效的配置，并通过控制通道发 `config` 事件。
+- 显式重读：`POST /v1/config/reload`（见 [CTR-CTL-07](control.md#post-v1configreload)）立即重读，返回本次是否生效、变更路径与需重启的段。
+
+内容无法通过校验时，继续使用上一份有效配置，`policy_reload_failed` 计数加一，`load_error` 给出第一条错误。
+
+运行中的 Agent 与 Gateway 在每次调用或每个新代次上读取配置，因此下表的热加载段在下一次调用或下一个代次生效，不需要重启进程。下表中的需重启段由 `config.RestartPaths` 统一列出，控制通道的 diff 与 `restart_required` 都以它为准。
+
 | 配置段 | 变更如何生效 |
 | --- | --- |
 | `agent.policy` | 下一次工具调用，见 [CON-SEC-06](../constraints/security.md#con-sec-06) |
 | `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载 |
-| `agent.exec` 的配额数字、`agent.pty` 的上限、`agent.quota` | 热加载，`agent.quota` 对之后的调用生效。`gateway.quota` 不热加载，随 `gateway` 一起需要重启。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
+| `agent.exec` 的配额数字、`agent.pty` 的上限、`agent.quota` | 热加载，`agent.quota` 对之后的调用生效。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
-| `agent.policy.windows_appcontainer` | 不热加载。只在启动时读取，变更后 `status` 提示需要重启；见下方 [Windows L2 开关](#windows-l2-开关) |
-| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值 |
+| `gateway.quota`、`gateway.expose_backends` | 热加载。`gateway.quota` 对之后的调用生效，已经放行的调用保留原来的截止时间；`expose_backends` 对之后的工具列表生效 |
+| `node`、`mesh`、`ingress`、`gateway.listen`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
+
+#### 为什么这几段需要重启
+
+`node`、`mesh`、`ingress`、`gateway.listen` 决定本节点的身份、网络与监听端口，运行中的角色持有它们打开的网络、监听套接字和入口的 OAuth 状态；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈与全部角色，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。
+
+#### 字段速查
+
+| 字段 | 热加载 | 需重启 |
+| --- | --- | --- |
+| `node.name`、`node.roles` | | 是 |
+| `mesh.*` | | 是 |
+| `gateway.listen` | | 是 |
+| `gateway.quota`、`gateway.expose_backends` | 是 | |
+| `ingress.*` | | 是 |
+| `agent.policy.windows_appcontainer` | | 是 |
+| `agent.policy.*`（除上一项）、`agent.cwd_policy`、`agent.authz`、`agent.exec`、`agent.pty`、`agent.quota`、`agent.backends`、`agent.workspaces`、`agent.default_cwd` | 是 | |
+| `gateway.pats` | 是 | |
+| `audit.*` | | 是 |
 
 ### Windows L2 开关
 

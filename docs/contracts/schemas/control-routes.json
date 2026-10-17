@@ -1,5 +1,5 @@
 {
-  "api_version": "1.1",
+  "api_version": "1.2",
   "routes": [
     {
       "id": "control.status.get",
@@ -120,6 +120,20 @@
         "precondition_failed",
         "precondition_required"
       ]
+    },
+    {
+      "id": "control.config.reload",
+      "method": "POST",
+      "path": "/v1/config/reload",
+      "capability": "config.write",
+      "since": "1.2",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-config:1#/$defs/ConfigReloadResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
     },
     {
       "id": "control.pair.export",
