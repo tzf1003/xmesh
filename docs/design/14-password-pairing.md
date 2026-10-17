@@ -85,9 +85,8 @@ confirmB = HMAC-SHA256(K, "B" || TT)
 [CON-NET-09](../constraints/network.md#con-net-09) 要求「未配对的对端连接必须在 TLS 握手阶段失败，而不是连上后再用应用层口令补救」。连接密码配对要求未配对的设备能完成一次握手并交换 PAKE 消息，所以这条约束必须修订。修订后的规则：
 
 - 主监听器对未配对证书的握手仍然失败。`Test_CONNET09_PairedMTLS` 继续断言这一点。
-- 只有客户端在 ALPN 里声明 `xmesh-pair/1` 的握手，才会换用一个只请求客户端证书、不做信任校验的 TLS 配置。`GetConfigForClient` 按 ALPN 选择配置，普通客户端的握手路径不变。
-- 这个配置下只有 `/lan/pair/*` 三个路由可达，其他路径返回 404。`/lan/pair/*` 在非 `xmesh-pair/1` 的握手下同样返回 404。
-- 其他路由仍然由 `Authenticate` 按信任库判定，未配对的 TLS 会话拿到的是 `unauthenticated`。
+- 只有客户端在 ALPN 里声明 `xmesh-pair/1` 的握手，才会换用一个只请求客户端证书、不做信任校验的 TLS 配置。`GetConfigForClient` 按 ALPN 选择配置，普通客户端的握手路径不变。服务端不在 ALPN 里选中 `xmesh-pair/1`：`net/http` 遇到未知的应用层协议会直接断开，所以服务端不声明它。
+- 请求的路由由信任决定，不由 ALPN 决定。`/lan/pair/*` 对任何完成的握手开放，它的安全来自 PAKE 与限流。其余路径要求客户端证书在信任库中，否则返回 404，所以未配对的握手只能到达配对路由。
 - 配对是唯一的应用层口令路径，它的安全来自 PAKE，而不是口令本身；限流见下。
 
 这一修订在 PR 中单独成一个提交，并同步更新 `docs/constraints/network.md` 与 `docs/conformance.md`。**它改变了一条已有的 MUST，需要项目负责人确认。** 不确认则只能退回到配对文档方式，连接密码功能不能上线。
@@ -137,7 +136,7 @@ LAN 模式本来就强制开启 mDNS（[config.schema.json](../contracts/schemas
 | `PUT /v1/pair/password` | `PairPasswordRequest {password}` | `PairPasswordState` | 设置或修改。立即生效，清除锁定 |
 | `DELETE /v1/pair/password` | — | `204` | 清除密码，关闭被动配对 |
 | `GET /v1/pair/discovered` | — | `PairDiscoveredResponse {devices[]}` | 每项 `name`、`fingerprint`、`address`、`seen_at`。不含证书 |
-| `POST /v1/pair/connect` | `PairConnectRequest {address?, fingerprint?, password}` | `PairConnectResponse {name, fingerprint, address, tags}` | `address` 或 `fingerprint` 至少给一个；给 `fingerprint` 时只连发现列表里的那台，指纹不符返回 `invalid_args`。成功即生效，无需重启 |
+| `POST /v1/pair/connect` | `PairConnectRequest {address?, fingerprint?, password}` | `PairConnectResponse {name, fingerprint, address, tags}` | `address` 或 `fingerprint` 至少给一个；只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`；同时给出时对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`）。成功即生效，无需重启 |
 
 `PairPasswordRequest.password` 的长度与空白规则与上面一致，违反返回 `invalid_args`，字段为 `password`。
 
@@ -154,7 +153,7 @@ LAN 模式本来就强制开启 mDNS（[config.schema.json](../contracts/schemas
 
 ## 对端路由
 
-以下路由挂在 agent 监听器上，只在 `xmesh-pair/1` 握手下可达，路径前缀 `/lan/pair/`：
+以下路由挂在 agent 监听器上，路径前缀 `/lan/pair/`。它们对任何完成的握手开放，已配对的对端也能访问；未配对的对端只能访问这三个路由：
 
 - `POST /lan/pair/challenge`：返回对端名、盐与 KDF 标识。未设置密码时返回 `pair_rejected` 原因 `no_password`，HTTP 409。这一步不计入限流。
 - `POST /lan/pair/exchange`：计入限流；返回 `sid`、`Y`、B 的证书与 `confirmB`。
@@ -164,7 +163,7 @@ LAN 模式本来就强制开启 mDNS（[config.schema.json](../contracts/schemas
 
 ## 兼容性
 
-- 旧版本（beta.2 及更早）的节点没有 `pairing=1`，不出现在发现列表里；手动输入它们的地址时，握手会因为没有 `xmesh-pair/1` 而失败，UI 显示「对端版本不支持连接密码配对」。
+- 旧版本（beta.2 及更早）的节点没有 `pairing=1`，不出现在发现列表里；手动输入它们的地址时，旧版本的握手会因为证书不在信任库中而在 TLS 层失败，UI 显示「无法连接到对端」，并提示对端可能需要升级。
 - 旧版本节点之间仍可用配对文档互相导入。
 - 本版本的节点仍可与旧版本的已配对节点做 mTLS，信任库格式没有变化。
 
@@ -204,7 +203,7 @@ xmesh control pair connect (--address 地址 | --fingerprint 指纹) (--password
 Go：
 
 - `internal/spake2`：双方一致的会话；错误密码失败；替换任一证书失败；替换任一群元素失败；单位元拒绝；确认码篡改失败；同一密码不同盐的派生不同。
-- `internal/mesh`：盐与派生值的文件格式；未设置时的 `no_password`；限流的计数、锁定时长与清零；`exchange` 超过待定会话上限；两个进程内的 LAN 实例完成配对后互相可见（`tag:device`），且无需重启；未配对证书在普通 ALPN 下仍握手失败（`Test_CONNET09_PairedMTLS` 保持不变）；`/lan/pair/*` 在普通 ALPN 下返回 404；未配对证书访问 `/mcp` 返回 `unauthenticated`。
+- `internal/mesh`：盐与派生值的文件格式；未设置时的 `no_password`；限流的计数、锁定时长与清零；`exchange` 超过待定会话上限；两个进程内的 LAN 实例完成配对后互相可见（`tag:device`），且无需重启；未配对证书在普通 ALPN 下仍握手失败（`Test_CONNET09_PairedMTLS` 保持不变）；未配对证书访问 `/mcp` 返回 404，`/lan/pair/challenge` 可达。
 - `internal/control`：新路由的成功与错误路径；`PUT` 的口令规则；`connect` 的 `fingerprint` 核对；`unsupported_mode`。
 - 契约：`check_control.py` 对每个新路由定义的正例与反例；`control-routes.json` 与内核注册的路由一致。
 
