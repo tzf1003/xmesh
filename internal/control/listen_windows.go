@@ -41,35 +41,66 @@ func Listen(o ListenOptions) (net.Listener, Bound, error) {
 // client connects and drops again before the server has handled the connection
 // (ERROR_NO_DATA). A Close that lands during such an attempt is answered with that same error,
 // so the loop starts over, waits for a close request that was already consumed, and Close
-// blocks for good. http.Server.Shutdown closes the listener without a deadline, so the whole
-// shutdown stalled. Close requests are therefore repeated until the loop has really stopped; a
-// request that arrives after that returns at once. The retries are bounded: when the loop
-// still has not stopped, Close reports it and the server stops waiting for its serving
-// goroutine (see Server.Close).
-type pipeListener struct{ net.Listener }
+// blocks for good. Close requests are therefore repeated until the loop has really stopped; a
+// request that arrives after that returns at once.
+//
+// The wait is bounded. When the loop still has not stopped after pipeCloseWait, Close reports it
+// and every later Close returns at once, so one stuck listener costs one wait, not one per call.
+// The retries go on in the background until the loop stops or they run out.
+type pipeListener struct {
+	net.Listener
+	once    sync.Once
+	stopped chan struct{}
+}
 
 var (
 	pipeCloseRetry    = 25 * time.Millisecond
 	pipeCloseAttempts = 400
+	pipeCloseWait     = 2 * time.Second
 )
 
+var errPipeNotStopped = errors.New("the control pipe listener did not stop")
+
 func (l *pipeListener) Close() error {
-	done := make(chan struct{})
+	first := false
+	l.once.Do(func() {
+		first = true
+		l.stopped = make(chan struct{})
+		go l.stop()
+	})
+	if !first {
+		select {
+		case <-l.stopped:
+			return nil
+		default:
+			return errPipeNotStopped
+		}
+	}
+	select {
+	case <-l.stopped:
+		return nil
+	case <-time.After(pipeCloseWait):
+		return errPipeNotStopped
+	}
+}
+
+// stop sends close requests until the loop has stopped. Each request runs on its own goroutine,
+// because a request that is lost inside go-winio leaves its own call blocked.
+func (l *pipeListener) stop() {
 	var once sync.Once
 	request := func() {
 		_ = l.Listener.Close()
-		once.Do(func() { close(done) })
+		once.Do(func() { close(l.stopped) })
 	}
 	go request()
 	for attempt := 0; attempt < pipeCloseAttempts; attempt++ {
 		select {
-		case <-done:
-			return nil
+		case <-l.stopped:
+			return
 		case <-time.After(pipeCloseRetry):
 			go request()
 		}
 	}
-	return errors.New("the control pipe listener did not stop")
 }
 
 func PipeName(sid, node string) string { return `\\.\pipe\xmesh-` + sid + "-" + node }

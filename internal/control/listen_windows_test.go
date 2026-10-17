@@ -232,12 +232,12 @@ func (l *stuckListener) Close() error {
 	select {} // blocks for good
 }
 
-// A listener that never stops must make pipeListener.Close return an error once the retries
-// are used up, not block the caller.
+// A listener that never stops must make pipeListener.Close return an error after the wait, and a
+// later Close must not wait again.
 func Test_ControlPipeListenerCloseGivesUp(t *testing.T) {
-	oldRetry, oldAttempts := pipeCloseRetry, pipeCloseAttempts
-	pipeCloseRetry, pipeCloseAttempts = time.Millisecond, 5
-	defer func() { pipeCloseRetry, pipeCloseAttempts = oldRetry, oldAttempts }()
+	oldRetry, oldAttempts, oldWait := pipeCloseRetry, pipeCloseAttempts, pipeCloseWait
+	pipeCloseRetry, pipeCloseAttempts, pipeCloseWait = time.Millisecond, 5, 50*time.Millisecond
+	defer func() { pipeCloseRetry, pipeCloseAttempts, pipeCloseWait = oldRetry, oldAttempts, oldWait }()
 	inner := &stuckListener{closes: make(chan struct{}, 100)}
 	l := &pipeListener{Listener: inner}
 	result := make(chan error, 1)
@@ -252,5 +252,12 @@ func Test_ControlPipeListenerCloseGivesUp(t *testing.T) {
 	}
 	if len(inner.closes) < 2 {
 		t.Fatalf("Close was requested %d times, want retries", len(inner.closes))
+	}
+	start := time.Now()
+	if err := l.Close(); err == nil {
+		t.Fatal("a second Close of a listener that never stops returned nil")
+	}
+	if waited := time.Since(start); waited > pipeCloseWait {
+		t.Fatalf("a second Close waited %s, want none", waited)
 	}
 }

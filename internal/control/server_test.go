@@ -1,6 +1,9 @@
 package control
 
 import (
+	"context"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -334,5 +337,41 @@ func Test_WaitTimeout(t *testing.T) {
 	done.Done()
 	if !waitTimeout(&done, time.Second) {
 		t.Fatal("a released WaitGroup should be finished")
+	}
+}
+
+// acceptStuckListener never returns from Accept, like a Serve loop that cannot be stopped.
+type acceptStuckListener struct {
+	accepting chan struct{}
+	block     chan struct{}
+}
+
+func (l *acceptStuckListener) Accept() (net.Conn, error) {
+	l.accepting <- struct{}{}
+	<-l.block
+	return nil, net.ErrClosed
+}
+
+func (l *acceptStuckListener) Close() error   { return nil }
+func (l *acceptStuckListener) Addr() net.Addr { return &net.TCPAddr{} }
+
+// stopHTTP must come back when ctx ends, even though Serve never returns.
+func Test_StopHTTPReturnsWhenServeNeverStops(t *testing.T) {
+	l := &acceptStuckListener{accepting: make(chan struct{}, 1), block: make(chan struct{})}
+	defer close(l.block)
+	srv := &http.Server{}
+	go func() { _ = srv.Serve(l) }()
+	<-l.accepting
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	stopped := make(chan struct{})
+	go func() {
+		stopHTTP(ctx, srv)
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopHTTP waited for a Serve loop that never returns")
 	}
 }

@@ -171,9 +171,7 @@ func (s *Server) Close() {
 		// Streams end by themselves once the bus is closed; give them time to flush.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if s.srv.Shutdown(ctx) != nil {
-			_ = s.srv.Close()
-		}
+		stopHTTP(ctx, s.srv)
 		// A listener that refuses to stop leaves Serve blocked in Accept; shutdown must not
 		// wait for it forever.
 		waitTimeout(&s.done, serveStopTimeout)
@@ -459,6 +457,24 @@ func etagOf(b []byte) string { return "sha256-" + sum(b) }
 
 // serveStopTimeout bounds how long Close waits for the serving and polling goroutines.
 var serveStopTimeout = 5 * time.Second
+
+// stopHTTP shuts srv down and returns when that is done or ctx ends. net/http waits for every
+// Serve loop to return in both Shutdown and Close, so a listener that refuses to stop would hold
+// the caller for good. Shutdown therefore runs on its own goroutine. When ctx ends first, the
+// forced Close also runs on a goroutine, and it ends the connections that are still open.
+func stopHTTP(ctx context.Context, srv *http.Server) {
+	shut := make(chan error, 1)
+	go func() { shut <- srv.Shutdown(ctx) }()
+	select {
+	case err := <-shut:
+		// Shutdown returns only after its Serve loops have returned, so Close cannot block here.
+		if err != nil {
+			_ = srv.Close()
+		}
+	case <-ctx.Done():
+		go func() { _ = srv.Close() }()
+	}
+}
 
 // waitTimeout waits for wg and reports whether it finished within d.
 func waitTimeout(wg *sync.WaitGroup, d time.Duration) bool {
