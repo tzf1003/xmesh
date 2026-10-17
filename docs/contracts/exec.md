@@ -36,7 +36,7 @@
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `exit_code` | 整数 | 进程退出码。被信号杀死时 Unix 使用 128+信号号，Windows 使用进程退出码 |
-| `stdout` | 字符串 | 内联部分。非法 UTF-8 用替换字符，原始字节仍在 `output_ref` |
+| `stdout` | 字符串 | 内联部分。非法 UTF-8 用替换字符，原始字节仍在 `output_ref`。Windows 上整段输出不是合法 UTF-8 时（例如简体中文系统的 cmd.exe、Windows PowerShell 5.1 写出的 GBK），改按系统 OEM 代码页转成 UTF-8，不产生替换字符；合法 UTF-8 不转换 |
 | `stderr` | 字符串 | 同上 |
 | `duration_ms` | 整数 | 从进程启动到退出 |
 | `truncated` | 布尔 | 任一流发生了内联截断则为 true |
@@ -71,7 +71,7 @@
 
 | 字段 | 含义 |
 | --- | --- |
-| `stdout` / `stderr` | 本次分页的字节解码成 UTF-8 |
+| `stdout` / `stderr` | 本次分页的字节解码成 UTF-8，规则同上（Windows 上非 UTF-8 的分页按 OEM 代码页转换）。分页边界落在多字节字符中间时，该字符不能完整还原 |
 | `next_offset` | 下一次 `offset` |
 | `eof` | 该流已读完 |
 
