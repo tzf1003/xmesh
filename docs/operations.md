@@ -418,7 +418,7 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 
 ### 尚未提供
 
-- 配对、PAT、入口客户端与口令的接口（契约里的 `pair`、`pats`、`ingress` 能力）。
+- `xmesh control` 还没有配对、PAT、入口客户端与口令的子命令。内核本机控制通道已提供这三类接口（契约里的 `pair`、`pats`、`ingress` 能力，CTR-CTL-08 至 10），可以直接调用 HTTP 路由。
 - `install --system` 的服务以 SYSTEM 运行。不带 `--state-dir` 时安装命令默认补上 `--state-dir %ProgramData%\xmesh\<节点名>`（`Test_InstallStateDir`），UI 和 `xmesh ... --control` 会枚举这个位置（`Test_ControlDiscoverSystemServices`）；管道名里的 SID 是 SYSTEM 的，以 `control.json` 的 `endpoint` 为准。已有的 SYSTEM 服务若原来用了默认目录（SYSTEM 的用户配置目录），升级后会换到新目录，需要重新配对或重新注册，或在重新安装时显式传原来的 `--state-dir`。
 - Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`），并在打开 `windows_appcontainer` 的 `serve` 里验证 AppContainer 内的命令打开该管道被拒、本账户可以打开（`Test_WindowsL2ServeSandboxCannotOpenControlPipe`）。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，由 `go.yml` 的 `l2-unix` 任务运行。
 
