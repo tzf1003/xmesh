@@ -72,6 +72,8 @@ a { color: var(--accent); }
 .sub { color: var(--muted); }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+details.card > summary { cursor: pointer; }
+details.card[open] > summary { margin-bottom: 12px; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .stat { display: flex; flex-direction: column; gap: 2px; }
 .stat .value { font-size: 22px; font-weight: 600; }

@@ -11,6 +11,8 @@ export interface FakeMeshState {
   credential: boolean;
   /** false: commands that need write access fail like a read-only profile. */
   writeCredential: boolean;
+  /** false: `login` fails verification, like a key the control plane rejects. */
+  acceptKeys: boolean;
   policyText: string;
   version: number;
   snapshots: { id: string; text: string; version: string; label: string }[];
@@ -39,6 +41,7 @@ export function freshFakeMesh(): FakeMeshState {
     provider: "tailscale",
     credential: true,
     writeCredential: true,
+    acceptKeys: true,
     policyText: '{\n  "tagOwners": { "tag:device": ["autogroup:admin"] },\n  "acls": []\n}\n',
     version: 1,
     snapshots: [],
@@ -144,12 +147,33 @@ function derpAfter(s: FakeMeshState, regions: string[]): string {
   return s.policyText.replace(/\n\}\n$/, `,\n  "derpMap": { "regions": "${names}" }\n}\n`);
 }
 
-/** Interprets one `xmesh mesh ...` command line. */
-export function runFakeMesh(s: FakeMeshState, argv: string[]): MeshRun {
+/**
+ * `mesh login` reads the secret from stdin, as the real CLI does with `--secret-file=-`, and never from argv.
+ * The fake keeps a single profile, so either access level makes the other reads work.
+ */
+function fakeLogin(s: FakeMeshState, args: string[], input: string | undefined): MeshRun {
+  if (flag(args, "secret-file") !== "-") return fail("fake login expects --secret-file=-");
+  const kind = flag(args, "kind");
+  const access = flag(args, "access");
+  if (kind !== "tailscale" && kind !== "headscale") return fail("--kind 必须是 tailscale 或 headscale");
+  if (access !== "read" && access !== "write") return fail("--access 必须是 read 或 write");
+  if (kind === "headscale" && flag(args, "url") === undefined) return fail("headscale 需要 --url");
+  const secret = (input ?? "").trim();
+  if (secret === "") return fail("密钥为空");
+  if (!s.acceptKeys) return fail("凭据验证失败（用 --no-verify 跳过）: 控制面拒绝了这个密钥");
+  s.provider = kind;
+  s.credential = true;
+  if (access === "write") s.writeCredential = true;
+  return ok({ profile: "default", access, kind, stored: true });
+}
+
+/** Interprets one `xmesh mesh ...` command line; `input` is what the command reads from stdin. */
+export function runFakeMesh(s: FakeMeshState, argv: string[], input?: string): MeshRun {
   s.calls.push([...argv]);
   const [group, sub, ...rest] = argv;
   if (group !== "mesh" || sub === undefined) return fail("unexpected command");
   const args = rest;
+  if (sub === "login") return fakeLogin(s, args, input);
   if (!s.credential) return noCredential();
 
   switch (sub) {
@@ -282,8 +306,8 @@ function runFakeDerp(s: FakeMeshState, argv: string[]): MeshRun {
 
 /** A runner over `state`, with `state.delayMs` of latency. */
 export function fakeMeshRunner(state: FakeMeshState): MeshRunner {
-  return async (argv) => {
+  return async (argv, input) => {
     if (state.delayMs > 0) await new Promise((r) => setTimeout(r, state.delayMs));
-    return runFakeMesh(state, argv);
+    return runFakeMesh(state, argv, input);
   };
 }
