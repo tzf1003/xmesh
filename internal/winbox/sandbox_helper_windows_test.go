@@ -2,6 +2,7 @@ package winbox
 
 import (
 	"context"
+	"debug/buildinfo"
 	"fmt"
 	"os"
 	osexec "os/exec"
@@ -81,4 +82,28 @@ func sandboxHelperImage() ([]byte, error) {
 		return os.ReadFile(image)
 	}
 	return os.ReadFile(os.Args[0])
+}
+
+// The image must really be the build without the race runtime; a silent fall
+// back to the instrumented binary would bring the start failures back.
+func Test_WindowsSandboxHelperImageHasNoRaceRuntime(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	image := os.Getenv(sandboxHelperImageEnv)
+	if image == "" || image == "-" {
+		if os.Getenv("CI") != "" {
+			t.Fatal("the build without the race runtime was not made; see the TestMain output")
+		}
+		t.Skip("no go toolchain build of the helper image; sandbox helpers use the test binary")
+	}
+	info, err := buildinfo.ReadFile(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "-race" && setting.Value == "true" {
+			t.Fatal("sandbox helper image carries the race runtime")
+		}
+	}
 }
