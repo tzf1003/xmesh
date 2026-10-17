@@ -5,7 +5,7 @@ import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { GatewayCredentials } from "./gateway-token";
-import { discoverInstances, stateRoots } from "./discovery";
+import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import { MeshService, execMeshRunner } from "./mesh-service";
@@ -85,6 +85,7 @@ async function start(): Promise<void> {
 
   const controller = new ShellController({
     discover: () => discoverInstances(roots),
+    configured: () => discoverConfigured(roots),
     locale,
     getLoginItem: () => autostart.get().enabled,
     setLoginItem: (enabled) => {

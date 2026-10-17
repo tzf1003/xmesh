@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ControlEndpointFile, parseManifest } from "../shared/control";
+import { parseNodeName } from "../shared/ipc";
 
 export interface Instance {
   /** Directory name under `<UserConfigDir>/xmesh`. */
@@ -83,4 +84,32 @@ export function discoverInstances(roots: string | string[] = stateRoot()): Insta
   }
   out.sort((a, b) => a.id.localeCompare(b.id));
   return out;
+}
+
+/**
+ * Node directories that have a config file, running or not. A node whose kernel was stopped has no
+ * `control.json` any more, but its config and service are still there to start it again. Only names
+ * the CLI accepts with `--name` are listed: anything else could not be started by name.
+ */
+export function discoverConfigured(roots: string | string[] = stateRoot()): string[] {
+  const seen = new Set<string>();
+  for (const root of Array.isArray(roots) ? roots : [roots]) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (parseNodeName(e.name) === undefined || !e.isDirectory()) continue;
+      if (fs.existsSync(path.join(root, e.name, "xmesh.yaml"))) seen.add(e.name);
+    }
+  }
+  return [...seen].sort();
+}
+
+/** The configured nodes whose kernel is not running. */
+export function stoppedNodes(configured: string[], found: Instance[]): string[] {
+  const running = new Set(found.map((i) => i.id));
+  return configured.filter((id) => !running.has(id));
 }

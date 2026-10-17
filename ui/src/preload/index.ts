@@ -25,6 +25,8 @@ const api: PanelApi = {
   },
   drain: (mode) => (mode === undefined ? invoke("xmesh:drain") : invoke("xmesh:drain", mode)),
   resume: () => invoke("xmesh:resume"),
+  startKernel: (node) => invoke("xmesh:start-kernel", node),
+  restartUnresponsive: (node) => invoke("xmesh:restart-unresponsive", node),
   selectInstance: (id) => invoke("xmesh:select-instance", id),
   copy: (kind) => invoke("xmesh:copy", kind),
   copyGateway: (request) => invoke("xmesh:copy-gateway", request),

@@ -238,6 +238,32 @@ test("restart and stop name the selected node's service, so the CLI does not rea
   assert.deepEqual(seen, ["office-pc", "office-pc"]);
 });
 
+test("start runs the CLI for a stopped node only; any other name is refused without running anything", async () => {
+  const seen: string[] = [];
+  const { controller } = fakeController({ ...EMPTY_SNAPSHOT, stoppedNodes: ["beta2-mac"] });
+  const { platform } = fakePlatform();
+  platform.runCli = async (command, node) => {
+    seen.push(`${command}:${node}`);
+  };
+  const actions = new Actions(controller, platform, t);
+  assert.deepEqual(await actions.dispatch({ type: "start-kernel", node: "beta2-mac" }), { ok: true });
+  assert.deepEqual(await actions.startKernel("office-pc"), { ok: false, error: { code: "not_found", message: "no stopped node with that name" } });
+  assert.deepEqual(seen, ["start:beta2-mac"]);
+});
+
+test("restart of an unresponsive node runs the CLI for that node only; any other name is refused", async () => {
+  const seen: string[] = [];
+  const { controller } = fakeController({ ...EMPTY_SNAPSHOT, unresponsiveNodes: ["n1"] });
+  const { platform } = fakePlatform();
+  platform.runCli = async (command, node) => {
+    seen.push(`${command}:${node}`);
+  };
+  const actions = new Actions(controller, platform, t);
+  assert.deepEqual(await actions.dispatch({ type: "restart-unresponsive", node: "n1" }), { ok: true });
+  assert.deepEqual(await actions.restartUnresponsive("office-pc"), { ok: false, error: { code: "not_found", message: "no unresponsive node with that name" } });
+  assert.deepEqual(seen, ["restart:n1"]);
+});
+
 test("kernel errors become results with the kernel's code", async () => {
   const { controller } = fakeController(connected(), {
     drain: async () => {

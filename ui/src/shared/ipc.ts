@@ -32,6 +32,8 @@ export const CHANNELS = {
   getSnapshot: "xmesh:get-snapshot",
   drain: "xmesh:drain",
   resume: "xmesh:resume",
+  startKernel: "xmesh:start-kernel",
+  restartUnresponsive: "xmesh:restart-unresponsive",
   selectInstance: "xmesh:select-instance",
   copy: "xmesh:copy",
   copyGateway: "xmesh:copy-gateway",
@@ -164,6 +166,10 @@ export interface PanelApi {
   /** `keep` (default) refuses new calls; `kill` also ends every PTY and lease. */
   drain(mode?: DrainMode): Promise<ActionResult>;
   resume(): Promise<ActionResult>;
+  /** Starts the service of a node whose config exists but whose kernel is not running. */
+  startKernel(node: string): Promise<ActionResult>;
+  /** Restarts the service of a node whose kernel does not answer. */
+  restartUnresponsive(node: string): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
   copy(kind: CopyKind): Promise<ActionResult>;
   copyGateway(request: GatewayCopyRequest): Promise<ActionResult>;
@@ -201,6 +207,8 @@ export const PANEL_API_METHODS = [
   "onSnapshot",
   "drain",
   "resume",
+  "startKernel",
+  "restartUnresponsive",
   "selectInstance",
   "copy",
   "copyGateway",
