@@ -72,6 +72,9 @@ type Server struct {
 
 	lifecycle    atomic.Value // string
 	auditDropped atomic.Bool
+	// pairPending is set once a peer's certificate was imported: the trust store is read at start,
+	// so the node needs a restart although no configuration changed.
+	pairPending atomic.Bool
 
 	configMu   sync.Mutex // serialises PUT /v1/config and guards the fields below
 	digest     string

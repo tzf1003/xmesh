@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
@@ -17,6 +19,7 @@ import (
 // every connection goes to the endpoint's socket or pipe.
 type Client struct {
 	HTTP *http.Client
+	node string
 }
 
 func NewClient(e Endpoint) *Client {
@@ -25,7 +28,17 @@ func NewClient(e Endpoint) *Client {
 		// A reused connection would outlive a restarted kernel.
 		DisableKeepAlives: true,
 	}
-	return &Client{HTTP: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &Client{HTTP: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, node: e.Node}
+}
+
+// unreachable names the node in a transport failure and drops net/http's "Get http://xmesh-control/..."
+// prefix, which is a placeholder URL that means nothing to the person reading it.
+func (c *Client) unreachable(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = urlErr.Err
+	}
+	return fmt.Errorf("无法连接节点 %s 的控制通道（内核可能没有在运行，或刚被强制结束）: %w", c.node, err)
 }
 
 // Response is a decoded reply. Body holds the raw JSON.
@@ -71,7 +84,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, headers 
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, c.unreachable(err)
 	}
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))

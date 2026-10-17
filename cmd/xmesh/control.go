@@ -326,7 +326,7 @@ func controlStatus(node, stateDir string, machine bool) error {
 	defer cancel()
 	r, err := control.NewClient(e).Do(ctx, "GET", "/v1/status", nil, nil)
 	if err != nil {
-		return fmt.Errorf("无法连接节点 %s 的控制通道: %w", e.Node, err)
+		return err
 	}
 	if err = r.Error(); err != nil {
 		return err

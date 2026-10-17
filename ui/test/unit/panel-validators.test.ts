@@ -93,6 +93,10 @@ test("pair import requires the typed fingerprint and a well-formed document", ()
   assert.deepEqual(parsePairImport(ok), ok);
   assert.ok(parsePairImport({ ...ok, fingerprint: FP.match(/../g)!.join(":") }));
   assert.deepEqual(parsePairImport({ ...ok, tags: ["tag:device"] })?.tags, ["tag:device"]);
+  // files written by `xmesh pair --export` of earlier kernels carry "tags": null
+  assert.deepEqual(parsePairImport({ pair: { ...pair, tags: null }, fingerprint: FP })?.pair.tags, []);
+  const { tags: _omitted, ...withoutTags } = pair;
+  assert.deepEqual(parsePairImport({ pair: withoutTags, fingerprint: FP })?.pair.tags, []);
   for (const bad of [
     { pair },
     { ...ok, fingerprint: "abcd" },

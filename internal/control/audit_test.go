@@ -3,6 +3,7 @@ package control
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,8 +74,9 @@ func Test_ControlAuditView(t *testing.T) {
 	if got := list("?tool=run3"); len(got) != 1 {
 		t.Fatalf("tool filter: %v", got)
 	}
-	since := base.Add(2 * time.Second).Format(time.RFC3339Nano)
-	until := base.Add(4 * time.Second).Format(time.RFC3339Nano)
+	// a zone offset such as +08:00 carries a '+' that a raw query string would read as a space
+	since := url.QueryEscape(base.Add(2 * time.Second).Format(time.RFC3339Nano))
+	until := url.QueryEscape(base.Add(4 * time.Second).Format(time.RFC3339Nano))
 	if got := list("?since=" + since + "&until=" + until); len(got) != 3 {
 		t.Fatalf("time filter: %v", got)
 	}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -73,8 +74,15 @@ func Test_ControlPairExportImport(t *testing.T) {
 		t.Fatal("a refused import left a trust record")
 	}
 
+	if st := f.server.snapshot(); st.RestartRequired {
+		t.Fatalf("restart required before any import: %+v", st.Warnings)
+	}
 	var imported v1.PairImportResponse
 	decodeAs(t, f.ok("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: colon}, "PairImportResponse"), &imported)
+	// the trust store is read at start, so the status (and the tray icon built from it) says restart
+	if st := f.server.snapshot(); !st.RestartRequired || !slices.ContainsFunc(st.Warnings, func(w v1.Warning) bool { return w.Code == v1.WarnRestartRequired }) {
+		t.Fatalf("an imported peer left no restart notice: %+v", st)
+	}
 	if imported.Name != "peer-b" || imported.Fingerprint != other.Fingerprint || !imported.RestartRequired || strings.Join(imported.Tags, ",") != "tag:peer,tag:device" {
 		t.Fatalf("%+v", imported)
 	}

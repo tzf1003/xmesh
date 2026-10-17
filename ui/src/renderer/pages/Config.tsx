@@ -61,10 +61,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
     setBusy(false);
     if (!r.ok) return setErr(r.error);
     setErr(undefined);
-    if (r.data.diff.length === 0) {
-      setPreview(undefined);
-      return ctx.toast(t("config.noChanges"));
-    }
+    // An empty diff with a changed draft means only comments or layout differ; that is still saved, as written.
     setPreview({ changes: r.data.diff, content: draft });
   };
 
@@ -207,7 +204,8 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
                 </Banner>
               )}
               {needsRestart(preview.changes) && <Banner kind="warn" testid="config-needs-restart">{t("config.needsRestart")}</Banner>}
-              <div class="table-wrap">
+              {rows.length === 0 && <Banner kind="ok" testid="config-comments-only">{t("config.commentsOnly")}</Banner>}
+              {rows.length > 0 && <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
@@ -229,7 +227,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </div>}
             </div>
           }
         />

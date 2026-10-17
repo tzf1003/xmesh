@@ -190,6 +190,21 @@ test("config: review shows the diff and the weakening warning, then saves with t
   expect(h.kernel.panel.content).toContain("allow_dangerous: true");
 });
 
+test("config: a change to comments only can be saved", async () => {
+  const page = await open({}, "config");
+  const editor = page.getByTestId("config-editor");
+  await expect(editor).not.toHaveValue("");
+  const original = await editor.inputValue();
+
+  await editor.fill(`# my note\n${original}`);
+  await page.getByTestId("config-review").click();
+  await expect(page.getByTestId("config-comments-only")).toBeVisible();
+  await expect(page.getByTestId("config-weakens")).toHaveCount(0);
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("config-saved")).toBeVisible();
+  expect(h.kernel.panel.writes).toEqual([`# my note\n${original}`]);
+});
+
 test("config: a stale etag offers the latest version; an invalid config lists diagnostics", async () => {
   const page = await open({}, "config");
   const editor = page.getByTestId("config-editor");

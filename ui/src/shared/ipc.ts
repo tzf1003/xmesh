@@ -58,6 +58,9 @@ export const SNAPSHOT_EVENT = "xmesh:snapshot";
 /** Main -> renderer push channel: the newest `call` events (metadata only), newest last. */
 export const CALLS_EVENT = "xmesh:calls";
 
+/** Environment variable the copied Codex config reads the gateway PAT from; the token itself never passes through the UI. */
+export const CODEX_PAT_ENV = "XMESH_PAT";
+
 export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig", "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
 
@@ -318,14 +321,16 @@ export function parsePairImport(v: unknown): PairImportArgs | undefined {
   if (parseNodeName(pair.name) === undefined) return undefined;
   if (typeof pair.fingerprint !== "string" || typeof pair.certificate_pem !== "string") return undefined;
   if (!pair.certificate_pem.startsWith("-----BEGIN CERTIFICATE-----") || pair.certificate_pem.length > 16 * 1024) return undefined;
-  if (!Array.isArray(pair.tags) || !pair.tags.every((t) => typeof t === "string" && TAG.test(t))) return undefined;
+  // `xmesh pair --export` of earlier kernels wrote `"tags": null`, and a hand-trimmed file may omit it; the importer picks the roles anyway.
+  const pairTags = pair.tags ?? [];
+  if (!Array.isArray(pairTags) || !pairTags.every((t) => typeof t === "string" && TAG.test(t))) return undefined;
   if (typeof fingerprint !== "string" || !FINGERPRINT.test(fingerprint)) return undefined;
   const out: PairImportArgs = {
     pair: {
       name: pair.name as string,
       fingerprint: pair.fingerprint,
       certificate_pem: pair.certificate_pem,
-      tags: pair.tags as string[],
+      tags: pairTags as string[],
     },
     fingerprint,
   };
