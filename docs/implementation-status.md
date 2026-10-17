@@ -486,6 +486,6 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 | winbox 偶发原生测试 | `junction` 已修（T9，#31）；`delayed-delete` 只加了诊断和一次性重试，根因未证实，再失败时按新错误信息定位。另：master 上 `673dd5a` 的 `test (windows-latest)` 曾因 `internal/role/agent` 的 `Test_Gate1_MCPRealHTTP`（`exec.run` 30 秒超时）失败，同一代码在 #29 的 PR 运行里通过，按偶发处理，若再出现需要预热构建缓存或放宽预算。 |
 | 普通账户 L2 验收 | 按 [windows-l2-acceptance.md](validation/windows-l2-acceptance.md) 和 `scripts/accept_windows_l2.py` 在真实标准用户机器上执行（含杀软或 AppLocker、非 NTFS 或网络卷、小时级运行），需用户环境；通过前 L2 开关保持默认关闭。 |
 | 偶发 Windows 原生测试 | T10 与 T9 的 CI 里各出现过一次：`windows-l2-joint` 的 `TerminalInterrupt`（powershell 退出时序抖动）和 `Test_WindowsManagedRunnerTerminalKill`（`-race` 下 ThreadSanitizer 内存分配失败，属于 `raceRuntimeStartFailed` 已知类别）。均重跑通过、无证据指向产品逻辑；再出现时保留日志定位。 |
-| 控制通道 pair、PAT、ingress 的使用端 | 内核路由（#27）与 `xmesh control` 子命令（#36）已合入；面板三页（#25）已存在，核对线确认与 #27 一致，只会补一个前端拦截口令首尾空白的小改动。三者都还没有在真实内核加真实环境下端到端用过。已用旧默认状态目录装好的 SYSTEM 服务要重新 `install --system` 才会改用 `%ProgramData%\xmesh\<节点名>`（#26）。 |
+| 控制通道 pair、PAT、ingress 的使用端 | 内核路由（#27）与 `xmesh control` 子命令（#36）已合入；面板三页（#25）已存在，核对线确认与 #27 一致，只会补一个前端拦截口令首尾空白的小改动。三者都还没有在真实内核与真实环境下端到端用过。已用旧默认状态目录装好的 SYSTEM 服务要重新 `install --system` 才会改用 `%ProgramData%\xmesh\<节点名>`（#26）。 |
 | beta 标签 | 会话代理拒绝推送 git 标签，需要用户在 GitHub 上创建 `v0.1.0-beta.1` 预发布；`release.yml` 加入 UI 打包的前提是用户在对应线程确认。 |
 | Windows 代码签名与 Apple 开发者证书 | 桌面 UI 正式发布前需要；在此之前 beta 为未签名构建。 |
