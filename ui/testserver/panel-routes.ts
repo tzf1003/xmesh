@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { parse } from "yaml";
 import type {
   AuditEvent,
   AuditResponse,
@@ -89,7 +90,7 @@ export class PanelData {
     const res: ConfigResponse = {
       etag,
       content: this.diskContent,
-      parsed: valid ? { node: { name: "win-dev-01", roles: ["agent"] } } : null,
+      parsed: valid ? (parse(this.diskContent) as ConfigResponse["parsed"]) : null,
       valid,
       load_error: valid ? null : { message: "yaml: 缩进错误", line: 3, column: 1 },
       effective_etag: this.effectiveEtag,

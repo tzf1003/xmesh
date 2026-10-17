@@ -33,7 +33,8 @@
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
     "preact": "10.29.8",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "yaml": "2.8.4"
   },
   "engines": {
     "node": ">=22.18"

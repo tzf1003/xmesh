@@ -8,6 +8,7 @@ import { Badge, Banner, Toasts, useToasts } from "./components";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
+import type { Role } from "./lib/roles";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Config } from "./pages/Config";
@@ -15,10 +16,11 @@ import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
 import { Overview } from "./pages/Overview";
+import { Roles } from "./pages/Roles";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 
-export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "config" | "audit" | "mesh" | "setup";
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "roles" | "config" | "audit" | "mesh" | "setup";
 
 const NAV: { id: PageId; label: Key }[] = [
   { id: "overview", label: "nav.overview" },
@@ -26,6 +28,7 @@ const NAV: { id: PageId; label: Key }[] = [
   { id: "sessions", label: "nav.sessions" },
   { id: "authz", label: "nav.authz" },
   { id: "ingress", label: "nav.ingress" },
+  { id: "roles", label: "nav.roles" },
   { id: "config", label: "nav.config" },
   { id: "audit", label: "nav.audit" },
   { id: "mesh", label: "nav.mesh" },
@@ -55,14 +58,21 @@ export interface PageContext {
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
-  go(page: PageId): void;
+  /** The role the page opens on, when the link to it named one. Cleared by any other navigation. */
+  focus: Role | undefined;
+  go(page: PageId, focus?: Role): void;
 }
 
 export function App(): JSX.Element {
   const snapshot = useSnapshot();
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
   const [page, setPage] = useState<PageId | undefined>(undefined);
+  const [focus, setFocus] = useState<Role | undefined>(undefined);
   const { toasts, push } = useToasts();
+  const navigate = (next: PageId, nextFocus?: Role): void => {
+    setFocus(nextFocus);
+    setPage(next);
+  };
 
   useEffect(() => {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
@@ -77,13 +87,14 @@ export function App(): JSX.Element {
     snapshot,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
-    go: setPage,
+    focus,
+    go: navigate,
   };
 
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={setPage} />
+        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
         <div class="main">
           <TopBar snapshot={snapshot} />
           <main class="content" id="content" tabIndex={-1}>
@@ -174,6 +185,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Authorization ctx={ctx} />;
     case "ingress":
       return <Ingress ctx={ctx} />;
+    case "roles":
+      return <Roles ctx={ctx} />;
     case "config":
       return <Config ctx={ctx} />;
     case "audit":

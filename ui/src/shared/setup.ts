@@ -26,7 +26,7 @@ export function isAbsolutePath(p: string): boolean {
   return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\");
 }
 
-function isHttpsUrl(v: string): boolean {
+export function isHttpsUrl(v: string): boolean {
   if (v.length > 512 || /[\x00-\x20"'\\<>`{}|^]/.test(v)) return false;
   try {
     const u = new URL(v);

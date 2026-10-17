@@ -28,6 +28,7 @@ import type { Snapshot } from "./state";
 export const CHANNELS = {
   getSnapshot: "xmesh:get-snapshot",
   drain: "xmesh:drain",
+  restartKernel: "xmesh:restart-kernel",
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
   selectInstance: "xmesh:select-instance",
@@ -145,6 +146,8 @@ export interface PanelApi {
   resume(): Promise<ActionResult>;
   /** Starts the service of a node whose config exists but whose kernel is not running. */
   startKernel(node: string): Promise<ActionResult>;
+  /** Restarts the kernel of the selected node, as the tray menu does. Asks nothing: the caller confirms first. */
+  restartKernel(): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
   copy(kind: CopyKind): Promise<ActionResult>;
   openPath(kind: PathKind): Promise<ActionResult>;
@@ -178,6 +181,7 @@ export const PANEL_API_METHODS = [
   "drain",
   "resume",
   "startKernel",
+  "restartKernel",
   "selectInstance",
   "copy",
   "openPath",

@@ -28,8 +28,8 @@ export function Ingress({ ctx }: { ctx: PageContext }): JSX.Element | null {
         <PageHead title={t("nav.ingress")} sub={t("ingress.sub")} />
         <Banner testid="ingress-disabled">
           <p>{t("ingress.disabled")}</p>
-          <button type="button" class="btn" onClick={() => ctx.go("config")}>
-            {t("ingress.toConfig")}
+          <button type="button" class="btn" onClick={() => ctx.go("roles", "ingress")} data-testid="ingress-to-roles">
+            {t("ingress.toRoles")}
           </button>
         </Banner>
       </div>
