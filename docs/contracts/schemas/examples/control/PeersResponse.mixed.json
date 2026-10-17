@@ -32,7 +32,11 @@
       ],
       "last_seen": "2026-10-16T15:30:00.123Z",
       "os": "darwin",
-      "version": "0.4.0"
+      "version": "0.4.0",
+      "info": {
+        "refreshed_at": "2026-10-16T15:30:00.123Z",
+        "error": null
+      }
     },
     {
       "name": "cloud-vm",
@@ -49,7 +53,11 @@
       ],
       "last_seen": "2026-10-16T15:30:00.123Z",
       "os": "darwin",
-      "version": "0.4.0"
+      "version": "0.4.0",
+      "info": {
+        "refreshed_at": null,
+        "error": null
+      }
     },
     {
       "name": "linux-box",

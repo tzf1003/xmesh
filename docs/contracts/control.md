@@ -165,6 +165,8 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 响应 `PeersResponse`。`self` 为真的恰有一项（本机）。`connection` 是 `direct`、`derp`、`unknown`（离线或尚未探测）、`local`（本机自己）。数据来自 mesh 层，不触发任何工具调用。
 
+自 1.1 起，每个在线的对端可带 `info`（`PeerInfo`），即网关在后台对它读取 `sys.info` 的结果：`refreshed_at` 是最近一次成功读取的时间，`error` 是最近一次读取失败的原因。两者都为 null 表示第一次读取尚未完成，面板显示「正在获取设备信息」。本节点自己、离线设备，以及没有网关角色的节点上省略 `info`。网关每分钟对每个在线对端读取一次，读取失败后同样每分钟重试；这个读取与 `devices.list` 按 MCP 会话缓存的 `stale` 相互独立。
+
 ### GET /v1/sessions
 
 响应 `SessionsResponse`：`pty`（[CTR-PTY-01](pty.md#ctr-pty-01) 里除 `released` 外的会话）、`exec`（排队中与运行中）、`leases`（后端租约，`token` 是 fencing 序号，不是密钥）。只读视图。PTY 的字段与 [`pty.list`](pty.md#ctr-pty-02) 对应，加上 `oauth_client` 与 `created_at`；`exec.cmd` 只有可执行文件基名。没有终端缓冲、参数、stdin、环境变量。

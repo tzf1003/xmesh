@@ -147,6 +147,17 @@ type Peer struct {
 	LastSeen   *Time    `json:"last_seen"`
 	OS         *string  `json:"os"`
 	Version    *string  `json:"version"`
+	// Info is what the gateway has read from the device's sys.info. Absent on this node, on offline
+	// devices and on a node without a gateway.
+	Info *PeerInfo `json:"info,omitempty"`
+}
+
+// PeerInfo is the gateway's background reading of one online device (CTR-CTL-05).
+type PeerInfo struct {
+	// RefreshedAt is the latest successful read; null until the first one has finished.
+	RefreshedAt *Time `json:"refreshed_at"`
+	// Error is why the latest read failed; null after a success and while none has finished.
+	Error *string `json:"error"`
 }
 
 type PeersResponse struct {

@@ -6,7 +6,7 @@ import { type ConfigChange, type Peer, type StatusResponse } from "../../src/sha
 import { en, zh } from "../../src/renderer/messages";
 import { EMPTY_AUDIT_FORM, auditTarget, buildAuditQuery, toTimestamp } from "../../src/renderer/lib/audit";
 import { authzRows, cwdPolicy, diffRows, lineRange, needsRestart, weakening } from "../../src/renderer/lib/config";
-import { lacksDeviceTag, relayStats, sortPeers, worstWarning } from "../../src/renderer/lib/devices";
+import { deviceInfoState, lacksDeviceTag, relayStats, sortPeers, worstWarning } from "../../src/renderer/lib/devices";
 import { ago, formatDuration, formatIdle, formatTime, formatValue, fraction } from "../../src/renderer/lib/format";
 import { fingerprintMatches, groupFingerprint, normalizeFingerprint, parsePairText } from "../../src/renderer/lib/pair";
 import { checkScopes, isBroadScope, splitScopes } from "../../src/renderer/lib/scopes";
@@ -132,6 +132,18 @@ test("peer ordering and statistics", () => {
   assert.equal(lacksDeviceTag(p("x", { self: true, tags: [] })), false);
   const st = { warnings: [{ severity: "info", code: "i" }, { severity: "error", code: "e" }, { severity: "warning", code: "w" }] } as unknown as StatusResponse;
   assert.equal(worstWarning(st)?.code, "e");
+});
+
+test("device info state: pending before the first read, failed when the latest read failed, untracked otherwise", () => {
+  const p = (o: Partial<Peer>): Peer => ({ name: "d", self: false, online: true, tags: ["tag:device"], connection: "direct", ...o }) as Peer;
+  assert.equal(deviceInfoState(p({ info: { refreshed_at: null, error: null } })), "pending");
+  assert.equal(deviceInfoState(p({ info: { refreshed_at: null, error: "拨号失败" } })), "failed");
+  assert.equal(deviceInfoState(p({ info: { refreshed_at: "2026-10-17T06:00:00.000Z", error: "sys.info 暂不可用" } })), "failed");
+  assert.equal(deviceInfoState(p({ info: { refreshed_at: "2026-10-17T06:00:00.000Z", error: null } })), "ok");
+  // not tracked: no info key (an older kernel, a node without a gateway), this node, or an offline device
+  assert.equal(deviceInfoState(p({})), undefined);
+  assert.equal(deviceInfoState(p({ self: true, info: { refreshed_at: null, error: null } })), undefined);
+  assert.equal(deviceInfoState(p({ online: false, info: { refreshed_at: null, error: null } })), undefined);
 });
 
 test("wizard form check mirrors the main-process validation and previews the exact file", () => {
