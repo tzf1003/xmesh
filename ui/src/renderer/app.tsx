@@ -8,7 +8,7 @@ import { Badge, Banner, Toasts, useToasts } from "./components";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
-import type { Role } from "./lib/roles";
+import type { Role, Section } from "./lib/settings";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Config } from "./pages/Config";
@@ -16,11 +16,17 @@ import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
 import { Overview } from "./pages/Overview";
-import { Roles } from "./pages/Roles";
+import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 
-export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "roles" | "config" | "audit" | "mesh" | "setup";
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "settings" | "config" | "audit" | "mesh" | "setup";
+
+/** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
+export interface PageFocus {
+  section: Section;
+  role?: Role;
+}
 
 const NAV: { id: PageId; label: Key }[] = [
   { id: "overview", label: "nav.overview" },
@@ -28,7 +34,7 @@ const NAV: { id: PageId; label: Key }[] = [
   { id: "sessions", label: "nav.sessions" },
   { id: "authz", label: "nav.authz" },
   { id: "ingress", label: "nav.ingress" },
-  { id: "roles", label: "nav.roles" },
+  { id: "settings", label: "nav.settings" },
   { id: "config", label: "nav.config" },
   { id: "audit", label: "nav.audit" },
   { id: "mesh", label: "nav.mesh" },
@@ -58,18 +64,18 @@ export interface PageContext {
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
-  /** The role the page opens on, when the link to it named one. Cleared by any other navigation. */
-  focus: Role | undefined;
-  go(page: PageId, focus?: Role): void;
+  /** Where the page opens, when the link to it named a place. Cleared by any other navigation. */
+  focus: PageFocus | undefined;
+  go(page: PageId, focus?: PageFocus): void;
 }
 
 export function App(): JSX.Element {
   const snapshot = useSnapshot();
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
   const [page, setPage] = useState<PageId | undefined>(undefined);
-  const [focus, setFocus] = useState<Role | undefined>(undefined);
+  const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
   const { toasts, push } = useToasts();
-  const navigate = (next: PageId, nextFocus?: Role): void => {
+  const navigate = (next: PageId, nextFocus?: PageFocus): void => {
     setFocus(nextFocus);
     setPage(next);
   };
@@ -185,8 +191,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Authorization ctx={ctx} />;
     case "ingress":
       return <Ingress ctx={ctx} />;
-    case "roles":
-      return <Roles ctx={ctx} />;
+    case "settings":
+      return <Settings ctx={ctx} />;
     case "config":
       return <Config ctx={ctx} />;
     case "audit":

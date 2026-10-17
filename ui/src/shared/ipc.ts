@@ -29,6 +29,8 @@ export const CHANNELS = {
   getSnapshot: "xmesh:get-snapshot",
   drain: "xmesh:drain",
   restartKernel: "xmesh:restart-kernel",
+  readDenyFile: "xmesh:read-deny-file",
+  writeDenyFile: "xmesh:write-deny-file",
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
   selectInstance: "xmesh:select-instance",
@@ -156,6 +158,9 @@ export interface PanelApi {
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** The deny list file the config names; the renderer never supplies its path. */
+  readDenyFile(): Promise<DataResult<DenyFileResponse>>;
+  writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
   listPats(): Promise<DataResult<PatList>>;
   createPat(args: PatCreateArgs): Promise<DataResult<PatSecret>>;
   rotatePat(name: string): Promise<DataResult<PatSecret>>;
@@ -182,6 +187,8 @@ export const PANEL_API_METHODS = [
   "resume",
   "startKernel",
   "restartKernel",
+  "readDenyFile",
+  "writeDenyFile",
   "selectInstance",
   "copy",
   "openPath",
@@ -279,6 +286,37 @@ export function parseNodeName(v: unknown): string | undefined {
 
 export function parseScope(v: unknown): string | undefined {
   return typeof v === "string" && SCOPE.test(v) ? v : undefined;
+}
+
+/** The deny list file as the config names it. `path` is absent when the config names none. */
+export interface DenyFileResponse {
+  path?: string;
+  /** Whether the file exists; a configured file that is missing stops the agent role from starting. */
+  exists: boolean;
+  text: string;
+  /** Empty when the file does not exist, otherwise `sha256-<hex>` of `text`. */
+  etag: string;
+}
+
+export interface DenyFileSaveRequest {
+  /** Complete file text, at most 64 KiB. */
+  text: string;
+  /** The `etag` the edit started from; the save fails if the file changed since. */
+  etag: string;
+}
+
+export interface DenyFileSaved {
+  etag: string;
+}
+
+export const DENY_FILE_MAX_BYTES = 64 * 1024;
+
+export function parseDenyFileSave(v: unknown): DenyFileSaveRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["text", "etag"])) return undefined;
+  const { text, etag } = v;
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
+  if (typeof etag !== "string" || !/^(sha256-[0-9a-f]{64})?$/.test(etag)) return undefined;
+  return { text, etag };
 }
 
 export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {

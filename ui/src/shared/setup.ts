@@ -6,10 +6,13 @@
 
 import type { SetupParams } from "./ipc";
 
-const NODE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+export const NODE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const DEFAULT_CONTROL_URL = "https://controlplane.tailscale.com";
 
 export { DEFAULT_CONTROL_URL };
+
+/** Credential directories refused by default: the deny list the first run writes, and what "restore defaults" puts back. */
+export const DEFAULT_DENY = ["~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gcloud", "~/.azure", "~/.kube", "~/.docker"];
 
 export type SetupProblem =
   | "node_name"

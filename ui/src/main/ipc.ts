@@ -8,6 +8,7 @@ import {
   parseBoolean,
   parseClientId,
   parseConfigSave,
+  parseDenyFileSave,
   parseCopyKind,
   parseDrainMode,
   parseExternalKey,
@@ -103,6 +104,11 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
   handle(CHANNELS.putConfig, (req: unknown) => {
     const v = parseConfigSave(req);
     return v === undefined ? bad("config request") : service.putConfig(v);
+  });
+  handle(CHANNELS.readDenyFile, () => service.readDenyFile());
+  handle(CHANNELS.writeDenyFile, (req: unknown) => {
+    const v = parseDenyFileSave(req);
+    return v === undefined ? bad("deny file request") : service.writeDenyFile(v);
   });
   handle(CHANNELS.listPats, () => service.listPats());
   handle(CHANNELS.createPat, (args: unknown) => {
