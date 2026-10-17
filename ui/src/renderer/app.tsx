@@ -69,8 +69,9 @@ export function App(): JSX.Element {
   }, [snapshot.settings.locale]);
 
   const connected = snapshot.connection.kind === "connected";
-  // With no node found at all, the first thing worth showing is the setup wizard.
-  const current: PageId = page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 ? "setup" : "overview");
+  // With no node configured at all, the first thing worth showing is the setup wizard.
+  const current: PageId =
+    page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 && snapshot.stoppedNodes.length === 0 ? "setup" : "overview");
 
   const ctx: PageContext = {
     snapshot,
@@ -180,6 +181,13 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
   }
 }
 
+/** The panel follows the snapshot once the kernel answers, so only a failure is shown here. */
+function startKernel(ctx: PageContext, node: string): void {
+  void getApi().startKernel(node).then((r) => {
+    if (!r.ok) ctx.toast(r.error.message, true);
+  });
+}
+
 function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
   const c = ctx.snapshot.connection;
   return (
@@ -187,10 +195,25 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
       <h1>{kind === "offline" ? t("offline.title") : t("mismatch.title")}</h1>
       {kind === "offline" ? (
         <Banner testid="offline">
-          <p>{t("offline.body")}</p>
-          <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
-            {t("offline.setup")}
-          </button>
+          {ctx.snapshot.stoppedNodes.length > 0 ? (
+            <>
+              <p>{t("offline.startBody")}</p>
+              <div class="row">
+                {ctx.snapshot.stoppedNodes.map((node) => (
+                  <button key={node} type="button" class="btn primary" onClick={() => startKernel(ctx, node)} data-testid={`start-kernel-${node}`}>
+                    {ctx.snapshot.stoppedNodes.length === 1 ? t("offline.start") : t("offline.startNamed", { name: node })}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <p>{t("offline.body")}</p>
+              <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
+                {t("offline.setup")}
+              </button>
+            </>
+          )}
         </Banner>
       ) : (
         <Banner kind="danger" testid="mismatch">

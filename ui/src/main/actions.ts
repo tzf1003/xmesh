@@ -58,6 +58,8 @@ export class Actions {
         return this.selectInstance(a.id);
       case "restart-kernel":
         return this.runCli("restart", this.selectedNode());
+      case "start-kernel":
+        return this.startKernel(a.node);
       case "stop-kernel":
         return this.stopKernel();
       case "quit":
@@ -128,6 +130,12 @@ export class Actions {
       cancelLabel: this.t("dialog.cancel"),
     });
     return yes ? this.runCli("stop", this.selectedNode()) : ok;
+  }
+
+  /** Starts the service of a node whose config exists but whose kernel is not running. */
+  async startKernel(node: string): Promise<ActionResult> {
+    if (!this.controller.snapshot.stoppedNodes.includes(node)) return fail("not_found", "no stopped node with that name");
+    return this.runCli("start", node);
   }
 
   /** The node whose kernel the panel or tray is showing: its state directory is named after it. */

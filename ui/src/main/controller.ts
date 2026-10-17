@@ -12,10 +12,12 @@ import {
 import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
-import type { Instance } from "./discovery";
+import { type Instance, stoppedNodes } from "./discovery";
 
 export interface ControllerOptions {
   discover: () => Instance[];
+  /** Node directories that have a config file, running or not (see discoverConfigured). */
+  configured?: () => string[];
   getLoginItem: () => boolean;
   /** Tray and panel language; default Chinese. */
   locale?: Locale;
@@ -310,7 +312,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
 
   private updateInstances(found: Instance[]): void {
     this.found = found;
-    this.update({ instances: this.instanceInfos() });
+    this.update({ instances: this.instanceInfos(), stoppedNodes: stoppedNodes(this.opts.configured?.() ?? [], found) });
   }
 
   private instanceInfos(): InstanceInfo[] {

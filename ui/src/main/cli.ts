@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { defaultLookup, resolveXmeshBinary } from "./system/binary";
 
 /** The only `xmesh` subcommands the UI ever runs. K1 adds them alongside `--json` output. */
-export const CLI_COMMANDS = ["restart", "stop"] as const;
+export const CLI_COMMANDS = ["restart", "start", "stop"] as const;
 export type CliCommand = (typeof CLI_COMMANDS)[number];
 
 /** Where the installer puts the kernel it ships with: `<resources>/bin/xmesh[.exe]` (electron-builder extraResources). */

@@ -13,6 +13,7 @@ export type Action =
   | { type: "set-login-item"; enabled: boolean }
   | { type: "select-instance"; id: string }
   | { type: "restart-kernel" }
+  | { type: "start-kernel"; node: string }
   | { type: "stop-kernel" }
   | { type: "quit" };
 
@@ -77,6 +78,12 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
 
   out.push(sep("sep.actions"));
   if (c.kind !== "mismatch") out.push(item("action.openPanel", t("menu.openPanel"), { type: "open-panel" }));
+  if (c.kind === "offline") {
+    for (const node of snap.stoppedNodes) {
+      const label = snap.stoppedNodes.length === 1 ? t("menu.startKernel") : t("menu.startKernelNamed", { name: node });
+      out.push(item(`action.startKernel.${node}`, label, { type: "start-kernel", node }));
+    }
+  }
 
   if (c.kind === "connected") {
     const s = c.status;
