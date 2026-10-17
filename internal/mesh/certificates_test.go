@@ -287,3 +287,60 @@ func Test_LANPresenceFollowsAnnouncements(t *testing.T) {
 	}
 	t.Fatal("goodbye did not remove the node", seen)
 }
+
+func Test_LANSignalsPeerChangesButNotRenewals(t *testing.T) {
+	cert, _ := LoadCertificate(t.TempDir(), "device")
+	trust, _ := OpenTrust(t.TempDir())
+	if e := trust.Add(Trusted{Name: "device", Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM), Tags: []string{"tag:device"}}); e != nil {
+		t.Fatal(e)
+	}
+	l := &LAN{name: "client", trust: trust, peers: map[string]lanPeer{}, done: make(chan struct{}), changed: make(chan struct{}, 1)}
+	entry := func(ttl uint32, ip string) *mdns.Entry {
+		e := &mdns.Entry{Instance: "device", Text: []string{"fingerprint=" + cert.Fingerprint}, TTL: ttl, Port: AgentPort}
+		if ttl > 0 {
+			e.AddrIPv4 = []net.IP{net.ParseIP(ip)}
+		}
+		return e
+	}
+	feed := func(entries ...*mdns.Entry) {
+		ch := make(chan *mdns.Entry, len(entries))
+		for _, e := range entries {
+			ch <- e
+		}
+		close(ch)
+		l.discover(context.Background(), ch)
+	}
+	signalled := func() bool {
+		select {
+		case <-l.Changed():
+			return true
+		default:
+			return false
+		}
+	}
+	feed(entry(120, "192.168.1.2"))
+	if !signalled() {
+		t.Fatal("a new device must be signalled")
+	}
+	feed(entry(120, "192.168.1.2"))
+	if signalled() {
+		t.Fatal("renewing an unchanged device is not a change")
+	}
+	feed(entry(120, "192.168.1.3"))
+	if !signalled() {
+		t.Fatal("a device that moved must be signalled")
+	}
+	feed(entry(0, ""))
+	if !signalled() {
+		t.Fatal("a goodbye must be signalled")
+	}
+	feed(entry(0, ""))
+	if signalled() {
+		t.Fatal("a second goodbye for an unlisted device is not a change")
+	}
+	// signals coalesce instead of blocking the discovery loop
+	feed(entry(120, "192.168.1.4"), entry(0, ""), entry(120, "192.168.1.4"))
+	if !signalled() || signalled() {
+		t.Fatal("pending signals coalesce into one")
+	}
+}

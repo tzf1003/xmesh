@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -348,4 +349,25 @@ func Test_CTRGW02_CatalogRefreshAndFavorite(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("tool metadata remained stale")
+}
+
+func Test_DiscoveryWakesOnChangeSignal(t *testing.T) {
+	var polls atomic.Int32
+	changed := make(chan struct{}, 1)
+	g := New(Options{NodeName: "n", Changed: changed, Discover: func(context.Context) ([]mesh.Peer, error) {
+		polls.Add(1)
+		return nil, nil
+	}})
+	t.Cleanup(g.Close)
+	deadline := time.Now().Add(time.Second)
+	for polls.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	changed <- struct{}{}
+	for polls.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if polls.Load() < 2 {
+		t.Fatal("a change signal did not poll ahead of the 10 s ticker")
+	}
 }
