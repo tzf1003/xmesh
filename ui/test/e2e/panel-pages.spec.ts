@@ -7,7 +7,7 @@ import * as path from "node:path";
 import type { Capability } from "../../src/shared/control";
 import { type Harness, launch } from "./helpers";
 
-const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
+const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit", "gateway"];
 const LAN_STATUS = { network: { mode: "lan" as const, node_id: "win-dev-01", tags: ["tag:device"] } };
 const FP = "ab".repeat(32);
 const PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
@@ -313,6 +313,10 @@ test("wizard: a failing install is shown and start is not attempted; an existing
 
 test("panel IPC refuses malformed data operations", async () => {
   const page = await open();
+  // The overview's gateway card lists the PATs on mount. The rotate button appears once that read has
+  // finished, so the snapshot below counts only what the malformed calls sent.
+  await expect(page.getByTestId("gateway-rotate")).toBeVisible();
+  const before = h.kernel.requests.length;
   const codes = await page.evaluate(async () => {
     const api = (window as unknown as { xmesh: Record<string, (a?: unknown) => Promise<{ error?: { code: string } }>> }).xmesh;
     return [
@@ -326,5 +330,5 @@ test("panel IPC refuses malformed data operations", async () => {
     ].map((r) => r.error?.code);
   });
   expect(codes).toEqual(Array(7).fill("invalid_args"));
-  expect(h.kernel.requests.some((r) => r.path.startsWith("/v1/pats") || r.path.startsWith("/v1/audit"))).toBe(false);
+  expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v1/pats") || r.path.startsWith("/v1/audit"))).toBe(false);
 });

@@ -77,7 +77,7 @@ test("generated config carries the values and the safe defaults", () => {
   assert.match(text, /mdns: true/);
   assert.match(text, /default_cwd: "\/home\/me\/work"/);
   assert.match(text, /deny: \["~\/\.ssh"/);
-  assert.match(text, /listen: "127\.0\.0\.1:8080"/);
+  assert.match(text, /listen: ":8080"/);
   const tn = generateConfig(must(tailnet));
   assert.match(tn, /control_url: "https:\/\/controlplane\.tailscale\.com"/);
   assert.match(tn, /authkey_file: "\/home\/me\/authkey"/);

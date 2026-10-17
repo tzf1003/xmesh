@@ -179,6 +179,11 @@ test("the renderer bundle contains no dynamic code, raw HTML sinks or network AP
   for (const f of sources(srcDir).filter((x) => /\.tsx?$/.test(x))) {
     const text = fs.readFileSync(f, "utf8");
     assert.doesNotMatch(text, /dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML/, f);
-    assert.doesNotMatch(text, /localStorage|sessionStorage|document\.cookie/, f);
+    // Browser storage holds per-viewer convenience only: the token notice's dismissal, in one module whose every access is guarded.
+    if (f.endsWith(path.join("lib", "token-notice.ts"))) {
+      assert.match(text, /try \{/, "storage access must be guarded");
+    } else {
+      assert.doesNotMatch(text, /localStorage|sessionStorage|document\.cookie/, f);
+    }
   }
 });

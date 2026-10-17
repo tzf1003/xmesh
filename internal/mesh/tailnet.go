@@ -9,6 +9,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,28 @@ func (t *Tailnet) Listen(ctx context.Context) (net.Listener, error) {
 	return t.server.Listen("tcp", ":"+strconv.Itoa(AgentPort))
 }
 func (t *Tailnet) Funnel() (net.Listener, error) { return t.server.ListenFunnel("tcp", ":443") }
+
+// ListenPort serves on the tailnet address of this node at port: the Gateway's tailnet listener.
+func (t *Tailnet) ListenPort(port int) (net.Listener, error) {
+	return t.server.Listen("tcp", ":"+strconv.Itoa(port))
+}
+
+// Addresses returns this node's tailnet IPs and its MagicDNS name without the trailing dot. It is
+// empty until the node has joined the tailnet.
+func (t *Tailnet) Addresses(ctx context.Context) ([]netip.Addr, string, error) {
+	lc, e := t.server.LocalClient()
+	if e != nil {
+		return nil, "", e
+	}
+	status, e := lc.Status(ctx)
+	if e != nil {
+		return nil, "", e
+	}
+	if status.Self == nil {
+		return nil, "", fmt.Errorf("tailnet 身份尚未就绪")
+	}
+	return append([]netip.Addr{}, status.Self.TailscaleIPs...), strings.TrimSuffix(status.Self.DNSName, "."), nil
+}
 func (t *Tailnet) HTTPClient(_ Peer) *http.Client {
 	client := t.server.HTTPClient()
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

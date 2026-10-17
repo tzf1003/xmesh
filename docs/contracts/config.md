@@ -8,7 +8,7 @@
 
 | 条件 | 要求 |
 | --- | --- |
-| `roles` 含 `gateway` | `gateway.listen` 必须是回环地址。默认 `127.0.0.1:8080`。非回环地址拒绝启动 |
+| `roles` 含 `gateway` | `gateway.listen` 的主机为空、`0.0.0.0` 或 `[::]` 表示全部网卡，为 `127.0.0.1` 或 `[::1]` 表示只绑本机；其他地址拒绝启动。默认 `:8080`。`gateway.access` 缺省 `[localhost, lan, tailnet]`，`gateway.hosts` 缺省为空。每个请求都要令牌，见 [CTR-GW-07](gateway.md#ctr-gw-07) |
 | `roles` 含 `ingress` | `ingress` 对象必须存在，且 OAuth issuer 为 https |
 | `ingress.max_pty_per_client` | 正整数，默认 8；同一入口按 OAuth client 聚合各设备的 active/orphaned PTY，详见 [CTR-GW-06](gateway.md#ctr-gw-06) |
 | `ingress.pty_budget_file` | 可选绝对路径；默认使用状态目录中的 `ingress-pty.json`。同一主机的入口可指定同一文件进行跨进程准入，且 `max_pty_per_client` 必须一致 |
@@ -38,7 +38,8 @@
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
 | `agent.policy.windows_appcontainer` | 不热加载。只在启动时读取，变更后 `status` 提示需要重启；见下方 [Windows L2 开关](#windows-l2-开关) |
-| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值 |
+| `gateway.access`、`gateway.hosts` | 每个请求读取，立即生效；见 [CTR-GW-07](gateway.md#ctr-gw-07) |
+| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值。`gateway.listen` 的变更也要重启 |
 
 ### Windows L2 开关
 

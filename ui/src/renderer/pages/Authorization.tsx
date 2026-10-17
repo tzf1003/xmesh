@@ -67,7 +67,7 @@ function Pats({ ctx }: { ctx: PageContext }): JSX.Element {
       <ResourceView resource={resource}>
         {(list) => (
           <>
-            {!list.enforced && <Banner kind="warn" testid="pats-open">{t("authz.notEnforced")}</Banner>}
+            <Banner testid="pats-policy">{t("authz.tokenPolicy")}</Banner>
             {list.pats.length === 0 ? (
               <Empty>{t("authz.noPats")}</Empty>
             ) : (

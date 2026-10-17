@@ -9,6 +9,8 @@ import {
   parseClientId,
   parseConfigSave,
   parseCopyKind,
+  parseGatewayCopy,
+  parseGatewayUpdate,
   parseDrainMode,
   parseExternalKey,
   parseInstanceId,
@@ -80,6 +82,10 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
     const v = parseCopyKind(kind);
     return v === undefined ? bad("copy kind") : actions.copy(v);
   });
+  handle(CHANNELS.copyGateway, (req: unknown) => {
+    const v = parseGatewayCopy(req);
+    return v === undefined ? bad("gateway copy request") : actions.copyGateway(v.kind, v.url);
+  });
   handle(CHANNELS.openPath, (kind: unknown) => {
     const v = parsePathKind(kind);
     return v === undefined ? bad("path kind") : actions.openPath(v);
@@ -107,6 +113,11 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
   handle(CHANNELS.rotatePat, (name: unknown) => {
     const v = parseNodeName(name);
     return v === undefined ? bad("PAT name") : service.rotatePat(v);
+  });
+  handle(CHANNELS.rotateGatewayPat, () => service.rotateGatewayPat());
+  handle(CHANNELS.updateGateway, (req: unknown) => {
+    const v = parseGatewayUpdate(req);
+    return v === undefined ? bad("gateway request") : service.updateGateway(v);
   });
   handle(CHANNELS.deletePat, (name: unknown) => {
     const v = parseNodeName(name);

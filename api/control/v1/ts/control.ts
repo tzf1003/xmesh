@@ -40,6 +40,7 @@ export type Capability =
   | "config.write"
   | "pair"
   | "pats"
+  | "gateway"
   | "ingress"
   | "audit";
 export type Severity = "info" | "warning" | "error";
@@ -103,6 +104,10 @@ export type ToolErrorCode =
   | "timeout"
   | "internal";
 export type Session = PtySession | ExecRun | BackendLease;
+/**
+ * localhost、lan、tailnet，或单个 IP、CIDR。
+ */
+export type GatewayAccess = string;
 export type ControlEvent =
   | HelloEvent
   | ResetEvent
@@ -634,15 +639,41 @@ export interface Paths {
  * roles 含 gateway 时存在。
  */
 export interface GatewayInfo {
+  /**
+   * 配置里的 gateway.listen，原样给出。
+   */
   listen: string;
   /**
-   * UI 生成 MCP 连接命令用的地址。
+   * 本机地址，与 addresses 里 kind 为 localhost 的那一项相同。
    */
   url: string;
   /**
-   * gateway.pats 非空为 pat。
+   * 恒为 pat。每个请求都要令牌。
    */
-  auth: "pat" | "none";
+  auth: "pat";
+  /**
+   * 配置里的 gateway.access，原样给出。
+   */
+  access: GatewayAccess[];
+  /**
+   * 配置里的 gateway.hosts。
+   */
+  hosts: string[];
+  /**
+   * 当前真正可达的地址：绑定范围与 access 共同决定。localhost 恒在（绑定回环时只有它）。
+   */
+  addresses: GatewayAddress[];
+}
+export interface GatewayAddress {
+  /**
+   * 地址来源：本机、内网 IPv4、tailnet IP、tailnet MagicDNS 名、配置的域名。
+   */
+  kind: "localhost" | "lan" | "tailnet_ip" | "tailnet_name" | "host";
+  host: string;
+  /**
+   * MCP 地址，UI 用它生成连接命令。
+   */
+  url: string;
 }
 /**
  * roles 含 ingress 时存在。
@@ -702,6 +733,29 @@ export interface LifecycleEvent {
   time: Timestamp;
   type: "lifecycle";
   data: LifecycleEventData;
+}
+export interface GatewayUpdateRequest {
+  /**
+   * 与 config.schema.json 的 gateway.listen 相同。
+   */
+  listen: string;
+  /**
+   * 整份替换 gateway.access。
+   */
+  access: GatewayAccess[];
+  /**
+   * 整份替换 gateway.hosts。
+   */
+  hosts: string[];
+}
+export interface GatewayUpdateResponse {
+  listen: string;
+  access: GatewayAccess[];
+  hosts: string[];
+  /**
+   * listen 与写入前不同时为真。access 与 hosts 立即生效。
+   */
+  restart_required: boolean;
 }
 export interface IngressClient {
   client_id: string;
@@ -794,15 +848,30 @@ export interface SessionsResponse {
   leases: BackendLease[];
 }
 export interface GatewayInfo1 {
+  /**
+   * 配置里的 gateway.listen，原样给出。
+   */
   listen: string;
   /**
-   * UI 生成 MCP 连接命令用的地址。
+   * 本机地址，与 addresses 里 kind 为 localhost 的那一项相同。
    */
   url: string;
   /**
-   * gateway.pats 非空为 pat。
+   * 恒为 pat。每个请求都要令牌。
    */
-  auth: "pat" | "none";
+  auth: "pat";
+  /**
+   * 配置里的 gateway.access，原样给出。
+   */
+  access: GatewayAccess[];
+  /**
+   * 配置里的 gateway.hosts。
+   */
+  hosts: string[];
+  /**
+   * 当前真正可达的地址：绑定范围与 access 共同决定。localhost 恒在（绑定回环时只有它）。
+   */
+  addresses: GatewayAddress[];
 }
 export interface IngressInfo1 {
   listen: "funnel" | "public:443" | "tunnel";
@@ -812,7 +881,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.1" as const;
+export const CONTROL_API_VERSION = "1.2" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -826,6 +895,7 @@ export const CONTROL_CAPABILITIES = [
   "config.write",
   "pair",
   "pats",
+  "gateway",
   "ingress",
   "audit"
 ] as const;
@@ -1097,6 +1167,24 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.gateway.update",
+    "method": "PUT",
+    "path": "/v1/gateway",
+    "capability": "gateway",
+    "since": "1.2",
+    "query": null,
+    "body": "GatewayUpdateRequest",
+    "response": "GatewayUpdateResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "role_disabled",
+      "config_invalid",
+      "internal"
+    ]
+  },
+  {
     "id": "control.ingress.clients.list",
     "method": "GET",
     "path": "/v1/ingress/clients",
@@ -1181,6 +1269,7 @@ export interface ControlRouteTypes {
   "control.pats.create": { query: undefined; body: PatCreateRequest; response: PatSecret };
   "control.pats.rotate": { query: undefined; body: undefined; response: PatSecret };
   "control.pats.delete": { query: undefined; body: undefined; response: undefined };
+  "control.gateway.update": { query: undefined; body: GatewayUpdateRequest; response: GatewayUpdateResponse };
   "control.ingress.clients.list": { query: undefined; body: undefined; response: IngressClientsResponse };
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };
   "control.ingress.password.put": { query: undefined; body: IngressPasswordRequest; response: IngressPasswordResponse };

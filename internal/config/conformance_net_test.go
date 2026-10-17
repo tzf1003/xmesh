@@ -183,9 +183,16 @@ func Test_CONNET06_IngressListenModes(t *testing.T) {
 	if with(func(i map[string]any) { i["listen"] = "0.0.0.0:80" }) == nil {
 		t.Fatal("arbitrary listen value accepted")
 	}
-	// The Agent port is never configurable to a public address: the gateway
-	// listener must be loopback.
-	for _, listen := range []string{"0.0.0.0:8080", "192.0.2.5:8080", ":8080", "[::1]:8080"} {
+	// The gateway binds every interface or loopback only; a specific address is refused. Who may
+	// connect is gateway.access, checked per request (CTR-GW-07), not the bind address.
+	for _, listen := range []string{":8080", "0.0.0.0:8080", "[::]:8080", "127.0.0.1:8080", "[::1]:8080"} {
+		doc := clone(base)
+		doc["gateway"].(map[string]any)["listen"] = listen
+		if _, err := parseDoc(doc); err != nil {
+			t.Fatalf("gateway.listen %q rejected: %v", listen, err)
+		}
+	}
+	for _, listen := range []string{"192.0.2.5:8080", "10.1.2.3:8080", "[fd00::1]:8080"} {
 		doc := clone(base)
 		doc["gateway"].(map[string]any)["listen"] = listen
 		if _, err := parseDoc(doc); err == nil {

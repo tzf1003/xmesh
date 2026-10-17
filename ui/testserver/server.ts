@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
 import {
+  CONTROL_API_VERSION,
   CONTROL_VERSION_HEADER,
   type Capability,
   type ControlEndpointFile,
@@ -20,7 +21,7 @@ import { PanelData } from "./panel-routes";
 export interface FakeKernelOptions {
   /** Defaults to a unique socket (POSIX) or named pipe (Windows). */
   endpoint?: string;
-  /** Value of X-Xmesh-Control-Version and of api_version in control.json. Default "1.1". */
+  /** Value of X-Xmesh-Control-Version and of api_version in control.json. Default: the UI's CONTROL_API_VERSION. */
   controlVersion?: string;
   kernelVersion?: string;
   /** Capabilities to advertise. Routes of a capability that is not listed answer 501 not_implemented. */
@@ -70,8 +71,10 @@ export class FakeKernel {
   readonly endpoint: string;
   readonly kernelVersion: string;
   readonly requests: RecordedRequest[] = [];
-  /** Data behind the panel routes (config, PATs, ingress, pairing, audit, sessions). */
-  readonly panel = new PanelData();
+  /** Data behind the panel routes (config, PATs, gateway, ingress, pairing, audit, sessions). */
+  readonly panel: PanelData;
+  /** Directory of the PAT token files; removed by `stop()`. */
+  readonly tokenDir: string;
   private controlVersion: string;
   private status: StatusResponse;
   private peers: Peer[];
@@ -88,11 +91,18 @@ export class FakeKernel {
   private constructor(opts: FakeKernelOptions) {
     this.endpoint = opts.endpoint ?? randomEndpoint();
     this.kernelVersion = opts.kernelVersion ?? "0.0.0-test";
-    this.controlVersion = opts.controlVersion ?? "1.1";
+    this.controlVersion = opts.controlVersion ?? CONTROL_API_VERSION;
     this.bootId = randomBytes(4).toString("hex");
     this.capabilities = opts.capabilities ?? statusFixture().control.capabilities;
     this.peers = opts.peers ?? peersFixture();
     this.status = { ...statusFixture(), ...opts.status };
+    this.tokenDir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-fk-tok-"));
+    const gw = this.status.gateway;
+    this.panel = new PanelData(this.tokenDir, {
+      listen: gw?.listen ?? ":8080",
+      access: gw?.access ?? ["localhost", "lan", "tailnet"],
+      hosts: gw?.hosts ?? [],
+    });
     this.pingMs = opts.pingMs ?? 15000;
     this.refreshDerived();
     this.server = http.createServer((req, res) => this.handle(req, res));
@@ -216,12 +226,15 @@ export class FakeKernel {
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     if (process.platform !== "win32") fs.rmSync(this.endpoint, { force: true });
+    fs.rmSync(this.tokenDir, { recursive: true, force: true });
   }
 
   private refreshDerived(): void {
     const others = this.peers.filter((p) => !p.self);
     this.status = {
       ...this.status,
+      // The gateway block always follows the reach the panel data holds, as the kernel's status does.
+      ...(this.status.gateway !== undefined && { gateway: this.panel.gatewayInfo() }),
       control: {
         ...this.status.control,
         api_version: this.controlVersion,
@@ -316,6 +329,10 @@ export class FakeKernel {
       if (this.requires(res, "drain")) this.resume(res);
       return;
     }
+    if (method === "PUT" && url === "/v1/gateway") {
+      if (this.requires(res, "gateway")) this.putGateway(res, body);
+      return;
+    }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
     if (cap && this.requires(res, method === "PUT" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
       const r = this.panel.handle(method, url, body, ifMatch);
@@ -354,6 +371,19 @@ export class FakeKernel {
     }
     const out: DrainResponse = { drain, closed_pty: 0, released_leases: 0 };
     this.send(res, 200, out);
+  }
+
+  /** A listen change needs a restart and is reported as such (CTR-CTL-13); access and hosts apply at once. */
+  private putGateway(res: http.ServerResponse, body: unknown): void {
+    if (!this.status.roles.includes("gateway")) return this.error(res, 409, "role_disabled", "本机没有启用 gateway 角色");
+    const r = this.panel.putGateway(body);
+    if (r.status === 200) {
+      const restart = (r.body as { restart_required: boolean }).restart_required;
+      this.status = { ...this.status, restart_required: this.status.restart_required || restart };
+      this.refreshDerived();
+      this.emit("status", this.status);
+    }
+    this.send(res, r.status, r.body);
   }
 
   private resume(res: http.ServerResponse): void {

@@ -19,8 +19,8 @@ func Test_CONNET08_ServeRejectsRelayAndPublicGatewayBeforeListening(t *testing.T
 		return path
 	}
 	relay := write("relay.json", `{"node":{"name":"relay-node","roles":["agent"]},"mesh":{"mode":"relay"},"agent":{"cwd_policy":{"allow":["/tmp"]}}}`)
-	public := write("public.json", `{"node":{"name":"public-gw","roles":["agent","gateway"]},"mesh":{"mode":"lan","lan":{"mdns":true}},"gateway":{"listen":"0.0.0.0:8080"},"agent":{"cwd_policy":{"allow":["/tmp"]}}}`)
-	for name, path := range map[string]string{"mesh.mode relay": relay, "non-loopback gateway": public} {
+	public := write("public.json", `{"node":{"name":"public-gw","roles":["agent","gateway"]},"mesh":{"mode":"lan","lan":{"mdns":true}},"gateway":{"listen":"192.0.2.5:8080"},"agent":{"cwd_policy":{"allow":["/tmp"]}}}`)
+	for name, path := range map[string]string{"mesh.mode relay": relay, "gateway on a specific address": public} {
 		// serve returns the configuration error instead of starting any listener;
 		// a process that started would block here.
 		done := make(chan error, 1)
