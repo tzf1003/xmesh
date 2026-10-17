@@ -1,0 +1,52 @@
+name: Windows powershell 退出挂起复现
+# 反复运行 Test_WindowsManagedRunnerTerminalInterrupt 的 powershell 与 pwsh 用例，用来确认
+# "exit 之后终端一直没有结束" 这一偶发挂起。失败时测试会带出屏幕文本和仍存活的子进程
+# （processes below the test），每个分片的完整输出作为 artifact 上传。
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths:
+      - '.github/workflows/windows-powershell-hunt.yml'
+jobs:
+  hunt:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: 1, sub: powershell }
+          - { shard: 2, sub: powershell }
+          - { shard: 3, sub: pwsh }
+          - { shard: 4, sub: pwsh }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/windows-powershell-hunt.yml
+      - name: Repeat the interrupt case
+        shell: pwsh
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          SUB: ${{ matrix.sub }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          $pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$/^' + $env:SUB + '$'
+          $out = "hunt-$($env:SHARD)-$($env:SUB).txt"
+          go test -race ./internal/winbox -run $pattern -count 60 -v -timeout 3000s 2>&1 | Tee-Object -FilePath $out | Out-Null
+          $code = $LASTEXITCODE
+          $passed = (Select-String -Path $out -Pattern "--- PASS: Test_WindowsManagedRunnerTerminalInterrupt/$($env:SUB) ").Count
+          $skipped = (Select-String -Path $out -Pattern "--- SKIP: Test_WindowsManagedRunnerTerminalInterrupt/$($env:SUB) ").Count
+          "==== $($env:SUB): passed subtests $passed, skipped $skipped, go test exit $code ===="
+          Select-String -Path $out -Pattern '--- FAIL|_test.go:|terminal did not end|DATA RACE|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hunt-${{ matrix.shard }}-${{ matrix.sub }}
+          path: hunt-*.txt
