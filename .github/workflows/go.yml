@@ -73,6 +73,7 @@ jobs:
           XMESH_TEST_WINDOWS_PTY: "1"
         run: go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s
       - name: Build Windows service acceptance binary
+        if: ${{ !cancelled() }}
         run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
       - name: Windows SCM install, runtime, and cleanup
         env:

@@ -58,6 +58,9 @@ func newL2Node(t *testing.T) *l2Node {
 	if !filepath.IsAbs(binary) {
 		t.Fatal("XMESH_TEST_WINDOWS_BINARY must name the built xmesh executable")
 	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatal("the built xmesh executable is missing:", err)
+	}
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
