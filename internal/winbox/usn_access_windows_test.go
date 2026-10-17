@@ -3,6 +3,7 @@ package winbox
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -57,5 +58,28 @@ func Test_WindowsAppContainerChangeSourceAccess(t *testing.T) {
 	}
 	if _, _, err := source.read(workspaceChangeCursor{JournalID: span.JournalID, Next: span.Next}); err != nil {
 		t.Fatal("elevated change source read", err)
+	}
+}
+
+// The startup probe gives the same verdict as admission, without any runner state.
+func Test_WindowsAppContainerChangeJournalProbe(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_SANDBOX") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_SANDBOX=1 on Windows")
+	}
+	dir := t.TempDir()
+	// A directory that does not exist yet is probed through its nearest ancestor.
+	err := ProbeChangeJournalAccess(filepath.Join(dir, "state", "sandbox"))
+	if windows.GetCurrentProcessToken().IsElevated() {
+		if err != nil {
+			t.Fatal("elevated account refused by the probe:", err)
+		}
+		return
+	}
+	if !errors.Is(err, ErrChangeJournalAccess) {
+		t.Fatal("non-elevated account was not refused by the probe:", err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatal("the probe left state behind", entries, readErr)
 	}
 }

@@ -68,6 +68,7 @@ const (
 	WarnPeerOffline        WarningCode = "peer_offline"
 	WarnAuditDropped       WarningCode = "audit_dropped"
 	WarnQuotaExhausted     WarningCode = "quota_exhausted"
+	WarnSandboxUnavailable WarningCode = "sandbox_unavailable"
 	WarnUnclassified       WarningCode = "unclassified"
 )
 

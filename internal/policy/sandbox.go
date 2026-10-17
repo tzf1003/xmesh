@@ -21,6 +21,11 @@ import (
 // platforms without a native launcher then fail closed in Sandbox and SandboxPTY.
 func (e *Engine) UseSandboxRunner(r sandbox.Runner) { e.runner = r }
 
+// UseSandboxUnavailable records why a managed runner that was asked for is not
+// installed, so the refusal names the reason instead of a generic platform
+// message. It has no effect when a runner is installed.
+func (e *Engine) UseSandboxUnavailable(reason string) { e.unavailable = reason }
+
 // SandboxRunner returns the managed runner that must execute commands when L2 is
 // configured, or nil when the launcher form from Sandbox/SandboxPTY applies.
 func (e *Engine) SandboxRunner() sandbox.Runner {
@@ -46,6 +51,9 @@ func (e *Engine) SandboxPTY(cmd string, args []string, cwd string, env []string)
 func (e *Engine) sandbox(cmd string, args []string, cwd string, env []string, terminal bool) (string, []string, []string, error) {
 	if e.config.Isolation != "L2" {
 		return cmd, args, env, nil
+	}
+	if e.unavailable != "" && e.runner == nil {
+		return "", nil, nil, toolerr.New("policy_denied", "L2 运行器不可用", "rule", "sandbox.unavailable", "reason", e.unavailable)
 	}
 	if runtime.GOOS == "darwin" {
 		return seatbelt(cmd, args, cwd, env)

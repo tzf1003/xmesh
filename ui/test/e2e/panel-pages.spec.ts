@@ -69,6 +69,14 @@ test("overview: pause from the page, kill needs a confirmation, resume", async (
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "ok");
 });
 
+test("overview: an unavailable Windows L2 shows its reason and degrades the state", async () => {
+  const reason = "当前账户无法读取 NTFS 变更日志，Windows L2 需要以管理员（提权）或 LocalSystem 服务运行节点";
+  const warning = { code: "sandbox_unavailable" as const, severity: "warning" as const, message: `Windows L2 不可用（sandbox.unavailable）：${reason}` };
+  const page = await open({ kernel: { status: { warnings: [warning] } } });
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", "degraded");
+  await expect(page.getByTestId("warnings")).toContainText(reason);
+});
+
 test("overview: recent calls arrive over the event stream", async () => {
   const page = await open();
   h.kernel.emit("call", { tool: "exec.run", device: "d1", caller: "claude", oauth_client: null, status: "ok", error: null, duration_ms: 842 });

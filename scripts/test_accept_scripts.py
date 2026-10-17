@@ -16,6 +16,7 @@ sys.path.insert(0, str(HERE))
 import accept_collect  # noqa: E402
 import accept_net  # noqa: E402
 import accept_pty_budget  # noqa: E402
+import accept_windows_l2  # noqa: E402
 
 
 def generate(*args):
@@ -227,3 +228,24 @@ class PtyBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsL2Refusal(unittest.TestCase):
+    REASON = "当前账户无法读取 NTFS 变更日志，Windows L2 需要以管理员（提权）或 LocalSystem 服务运行节点"
+
+    def refused(self, **patch):
+        result = {"is_error": True, "exit_code": None, "error": "policy_denied", "rule": "sandbox.unavailable", "reason": self.REASON, "text": ""}
+        return {**result, **patch}
+
+    def test_explained_refusal_passes(self):
+        warnings = f"Windows L2 不可用，L2 继续拒绝执行（sandbox.unavailable）：{self.REASON}"
+        self.assertTrue(all(c["ok"] for c in accept_windows_l2.judge_refusal(warnings, self.refused())))
+
+    def test_each_missing_piece_fails(self):
+        for warnings, result in [
+            ("", self.refused()),
+            ("Windows L2 运行器未能启动（sandbox.unavailable）", self.refused()),
+            (f"（sandbox.unavailable）：{self.REASON}", self.refused(reason=None)),
+            (f"（sandbox.unavailable）：{self.REASON}", self.refused(error=None, rule=None, exit_code=0)),
+        ]:
+            self.assertFalse(all(c["ok"] for c in accept_windows_l2.judge_refusal(warnings, result)), (warnings, result))

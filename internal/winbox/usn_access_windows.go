@@ -3,6 +3,9 @@ package winbox
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -28,4 +31,47 @@ func openChangeSourceHandle(device *uint16) (windows.Handle, error) {
 		return 0, fmt.Errorf("%w (volume device open: %v)", ErrChangeJournalAccess, err)
 	}
 	return 0, fmt.Errorf("open AppContainer NTFS change source: %w", err)
+}
+
+// ProbeChangeJournalAccess reports whether this account can read the NTFS change
+// journal of the volume holding dir, before any runner state is created. Only a
+// refusal that is a property of the account is returned, wrapped as
+// ErrChangeJournalAccess; a volume or API failure is left to the runner's own
+// admission, which names it. Access to the raw volume device is decided by the
+// account's token, not by the volume, so one volume stands for all of them.
+func ProbeChangeJournalAccess(dir string) error {
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+	name, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return nil
+	}
+	var root [windows.MAX_PATH + 1]uint16
+	if err := windows.GetVolumePathName(name, &root[0], uint32(len(root))); err != nil {
+		return nil
+	}
+	var volume [64]uint16
+	if err := windows.GetVolumeNameForVolumeMountPoint(&root[0], &volume[0], uint32(len(volume))); err != nil {
+		return nil
+	}
+	device, err := windows.UTF16PtrFromString(strings.TrimSuffix(windows.UTF16ToString(volume[:]), `\`))
+	if err != nil {
+		return nil
+	}
+	h, err := openChangeSourceHandle(device)
+	if err != nil {
+		if errors.Is(err, ErrChangeJournalAccess) {
+			return err
+		}
+		return nil
+	}
+	return windows.CloseHandle(h)
 }
