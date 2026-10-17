@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
@@ -239,6 +240,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		launch(listener, g.HTTP(gateway.LocalAuthentication(store)), "Gateway MCP", nil)
 	}
+	var ingress control.IngressAdmin
 	if c.HasRole("ingress") {
 		if o.Local {
 			return fmt.Errorf("入口需要已入网的节点身份")
@@ -283,6 +285,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
 		addGateway(g)
+		ingress = &ingressAdmin{auth: authorization, passwordFile: passwordFile}
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
 			token, ok := oauth.FromContext(r.Context())
 			if !ok {
@@ -343,7 +346,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if o.Local {
 		mode = "local"
 	}
-	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs,
+	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress,
 		drain: func(kill bool) {
 			gatewaysMu.Lock()
 			pendingDrain[c.Node.Name] = true

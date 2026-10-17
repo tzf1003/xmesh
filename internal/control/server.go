@@ -35,6 +35,8 @@ type Options struct {
 	Poll time.Duration
 	// Heartbeat is the idle interval of the SSE comment line. Default 15s.
 	Heartbeat time.Duration
+	// Ingress serves the ingress routes; nil on a node that does not run the ingress.
+	Ingress IngressAdmin
 }
 
 func (o Options) heartbeat() time.Duration {
@@ -136,9 +138,9 @@ func Start(o Options) (*Server, error) {
 func capabilities(o Options) []v1.Capability {
 	caps := []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain}
 	if o.Store.Path() != "" {
-		caps = append(caps, v1.CapConfigRead, v1.CapConfigWrite)
+		caps = append(caps, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPats)
 	}
-	return append(caps, v1.CapAudit)
+	return append(caps, v1.CapPair, v1.CapIngress, v1.CapAudit)
 }
 
 func (s *Server) hasCapability(c v1.Capability) bool {
@@ -257,6 +259,16 @@ func (s *Server) table() map[string]handler {
 		"control.config.get":    s.getConfig,
 		"control.config.put":    s.putConfig,
 		"control.audit.list":    s.auditList,
+
+		"control.pair.export":            s.pairExport,
+		"control.pair.import":            s.pairImport,
+		"control.pats.list":              s.listPats,
+		"control.pats.create":            s.createPat,
+		"control.pats.rotate":            s.rotatePat,
+		"control.pats.delete":            s.deletePat,
+		"control.ingress.clients.list":   s.listIngressClients,
+		"control.ingress.clients.delete": s.deleteIngressClient,
+		"control.ingress.password.put":   s.putIngressPassword,
 	}
 }
 

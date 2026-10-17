@@ -158,7 +158,7 @@ func Test_ControlCallsAreAudited(t *testing.T) {
 	f.ok("GET", "/v1/status", nil, "StatusResponse")
 	f.ok("POST", "/v1/drain", map[string]string{"mode": "keep"}, "DrainResponse")
 	apiError(t, f.do("POST", "/v1/drain", map[string]string{"mode": "bogus"}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("POST", "/v1/pair/export", nil, nil), v1.ErrNotImplemented)
+	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Fingerprint: "SECRET-FP"}, nil), v1.ErrInvalidArgs)
 	r := f.ok("GET", "/v1/audit?event=control_call", nil, "AuditResponse")
 	var got v1.AuditResponse
 	decodeAs(t, r, &got)
@@ -184,11 +184,11 @@ func Test_ControlCallsAreAudited(t *testing.T) {
 		byTool[rec.Tool+"/"+rec.Status] = rec
 	}
 	ok := byTool["control.drain.start/ok"]
-	if len(ok.Digest.Keys) != 1 || ok.Digest.Keys[0] != "mode" || ok.Digest.Bytes == 0 || byTool["control.drain.start/error"].Error != "invalid_args" || byTool["control.pair.export/error"].Error != "not_implemented" {
+	if len(ok.Digest.Keys) != 1 || ok.Digest.Keys[0] != "mode" || ok.Digest.Bytes == 0 || byTool["control.drain.start/error"].Error != "invalid_args" || byTool["control.pair.import/error"].Error != "invalid_args" {
 		t.Fatalf("%+v", byTool)
 	}
 	for _, raw := range got.Events {
-		if strings.Contains(string(raw), "keep") || strings.Contains(string(raw), "bogus") {
+		if strings.Contains(string(raw), "keep") || strings.Contains(string(raw), "bogus") || strings.Contains(string(raw), "SECRET-FP") {
 			t.Fatalf("a request value reached the audit record: %s", raw)
 		}
 	}

@@ -200,3 +200,16 @@ func (s *TrustStore) TLS(cert Certificate, expected string, server bool) *tls.Co
 	}
 	return cfg
 }
+
+// CertificateFingerprint is the SHA-256 fingerprint of the first certificate in a PEM text.
+func CertificateFingerprint(certificatePEM string) (string, error) {
+	block, _ := pem.Decode([]byte(certificatePEM))
+	if block == nil {
+		return "", fmt.Errorf("证书 PEM 无效")
+	}
+	cert, e := x509.ParseCertificate(block.Bytes)
+	if e != nil {
+		return "", e
+	}
+	return fingerprint(cert), nil
+}

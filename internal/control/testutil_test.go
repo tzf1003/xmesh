@@ -119,13 +119,19 @@ func shortTempDir(t *testing.T) string {
 // newFixture starts a server on a fresh state directory.
 func newFixture(t *testing.T, mutate ...func(*Options)) *fixture {
 	t.Helper()
+	return newFixtureConfig(t, testConfig, mutate...)
+}
+
+// newFixtureConfig is newFixture with an explicit configuration file.
+func newFixtureConfig(t *testing.T, configText string, mutate ...func(*Options)) *fixture {
+	t.Helper()
 	dir := shortTempDir(t)
 	state := filepath.Join(dir, "s")
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "xmesh.yaml")
-	if err := os.WriteFile(path, []byte(testConfig), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(configText), 0600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := config.NewStore(path)

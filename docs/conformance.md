@@ -150,6 +150,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CON-ARCH-09 | 运行中的节点：端点是套接字或管道而不是 TCP 地址；Agent 与 Gateway 的 TCP 监听都不应答控制路径；任何 MCP 工具列表都不含控制或 drain 工具 |
 | CON-ARCH-10 | 事件订阅者不告而别（模拟 UI 崩溃）后，终端会话、节点状态与通道本身不变，终端仍可正常关闭 |
 | CON-SEC-12 | Unix：只接受内核同一 euid 的对端（别的 uid 被丢弃），套接字 0600、目录 0700；Windows：描述符只含当前用户、SYSTEM、管理员与显式追加的 SID，别名与宽泛主体被拒，运行中的管道不含 Everyone 与 AppContainer；L2 工作区含套接字时被拒绝；非 GET 请求以 `actor=control` 写审计（`Test_ControlCallsAreAudited`） |
+| CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 | 内核实现：配对导入同时核对用户确认的、文件里的与证书算出的三处指纹，非 lan 模式 `unsupported_mode`；PAT 创建、轮转、删除后正在运行的 Gateway 立即按新凭据认证，令牌正文只出现在 `PatSecret`，配置外的令牌文件删除时保留；入口路由无角色 `role_disabled`，撤销客户端使其 token 全部失效，口令只写不读（`Test_ControlPairExportImport`、`Test_ControlPats`、`Test_ControlIngress`、`Test_ControlPatsReachTheGateway`） |
 
 ## 模式夹具
 
