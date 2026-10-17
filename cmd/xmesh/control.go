@@ -38,9 +38,16 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
   resume
   config get                      读取配置原文与 ETag
   config set [--if-match ETAG] [--dry-run] (--yaml-file 文件 | --set /路径=JSON ... | --delete /路径 ...)
-  pair export [--out 文件]        导出本机配对文档（仅 lan 模式）
+  pair password show              查看连接密码是否已设置（不回显口令）
+  pair password set (--password-stdin | --password-file 文件)
+                                   设置或修改连接密码；其他设备输入它即可与本机配对
+  pair password clear             清除连接密码，关闭被动配对
+  pair discover                   列出内网中尚未配对、可以连接的设备
+  pair connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)
+                                   用对端的连接密码配对，成功即生效
+  pair export [--out 文件]        导出配对文档（高级用法，仅 lan 模式）
   pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
-                                   导入对端配对文档；指纹须是另行核对过的，导入后重启节点生效
+                                   导入配对文档（高级用法）；指纹须是另行核对过的，导入后重启节点生效
   pats list                       列出 Gateway PAT（不含令牌）
   pats create --name 名字 --scope S[,S...]
                                    创建 PAT；令牌只在这条输出里出现一次

@@ -88,6 +88,8 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   const page = await open({ kernel: { status: LAN_STATUS } }, "devices");
   await expect(page.getByTestId("peers-table")).toBeVisible();
 
+  // The document flow is the advanced fallback, collapsed by default.
+  await page.getByTestId("pair-advanced").locator("summary").click();
   await page.getByTestId("pair-export").click();
   await expect(page.getByTestId("pair-my-fingerprint")).toContainText(h.kernel.panel.localPair.fingerprint.slice(0, 2));
 

@@ -49,6 +49,7 @@
 | [11 已决事项与风险](design/11-decisions.md) | 五项已决、风险与缓解 |
 | [12 桌面 UI 与本机控制通道](design/12-ui-and-control.md) | Windows / macOS 托盘与面板、UI 与内核解耦、拆分与验收 |
 | [13 tailnet 管理与 DERP 提供商路径](design/13-mesh-admin-and-derp.md) | UI 端管理 tag、权限、第三方 DERP；国内 DERP 提供商的研究与风险 |
+| [14 连接密码配对与内网发现](design/14-password-pairing.md) | `lan` 模式下设置连接密码、SPAKE2 配对、发现未配对设备；CON-NET-09 的修订 |
 | [术语表](glossary.md) | 角色、身份、资源名词 |
 
 ### 约束

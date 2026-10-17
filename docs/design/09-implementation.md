@@ -124,7 +124,7 @@ type Lease struct {
 | `xmesh serve` | 按配置启动已启用的角色 |
 | `xmesh install` | 安装为本平台的用户级服务；Windows 默认注册当前用户的登录计划任务，`--system` 改为管理员 SCM 服务 |
 | `xmesh status` | 读取运行中节点的 `sys.info`，打印角色、网络身份、后端与配额。通过 `--endpoint` 访问 MCP，不读配置文件；打 Gateway 时用 `--tool local/sys.info` |
-| `xmesh pair` | `lan` 模式下首次配对：`--export` 导出本节点证书，`--import` 加 `--fingerprint` 导入对端证书 |
+| `xmesh pair` | `lan` 模式下配对：`pair password` 设置、查看或清除本节点连接密码；`pair discover` 列出内网中可配对的设备；`pair connect` 用地址或指纹加连接密码直接配对（口令只从标准输入或文件读取）。`pair export` / `pair import` 是配对文档的高级用法，`--import` 加 `--fingerprint` 导入对端证书 |
 | `xmesh version` | 打印版本号 |
 
 `status` 的人类可读输出使用中文标签，并同时给出机器可解析的 `--json`。

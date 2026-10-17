@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xmesh:schema:control-pair:1",
   "title": "ControlPair",
-  "description": "CTR-CTL-08。LAN 配对。只在 mesh.mode 为 lan 时可用，否则 unsupported_mode。配对文档只含公开证书。",
+  "description": "CTR-CTL-08。LAN 配对。只在 mesh.mode 为 lan 时可用，否则 unsupported_mode。配对文档只含公开证书。1.2 起增加连接密码（口令只写不读）与内网发现，配对文档保留为高级用法。",
   "$defs": {
     "PairFingerprint": {
       "type": "string",
@@ -60,6 +60,99 @@
         "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
         "tags": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" } },
         "restart_required": { "type": "boolean", "description": "与 xmesh pair 一致，重启节点后信任才生效时为 true。" }
+      }
+    },
+    "PairAddress": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 260,
+      "description": "主机或 主机:端口。省略端口时使用 7433。IPv6 地址放在方括号中。"
+    },
+    "PairPassword": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 128,
+      "pattern": "^\\S[\\s\\S]*\\S$",
+      "description": "连接密码。长度按 Unicode 码点计，首尾不能是空白。"
+    },
+    "PairPasswordRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["password"],
+      "properties": {
+        "password": { "$ref": "#/$defs/PairPassword" }
+      }
+    },
+    "PairPasswordState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["set", "updated_at", "failed_attempts", "locked_until"],
+      "properties": {
+        "set": { "type": "boolean", "description": "未设置时为 false，此时对端无法通过密码配对本机。" },
+        "updated_at": {
+          "anyOf": [{ "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }, { "type": "null" }],
+          "description": "最近一次设置或修改的时间，未设置时为 null。"
+        },
+        "failed_attempts": { "type": "integer", "minimum": 0, "description": "对端连续失败次数。成功配对后清零。" },
+        "locked_until": {
+          "anyOf": [{ "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }, { "type": "null" }],
+          "description": "限流锁定截止时间，未锁定时为 null。从不包含口令或派生值。"
+        }
+      }
+    },
+    "PairDiscoveredDevice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fingerprint", "address", "seen_at"],
+      "properties": {
+        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
+        "address": {
+          "type": "string",
+          "pattern": "^(\\[[^\\]\\s]+\\]|[^\\s\\[\\]:]+):[0-9]{1,5}$",
+          "description": "内网中发现的地址，主机:端口。"
+        },
+        "seen_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+      }
+    },
+    "PairDiscoveredResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["devices"],
+      "properties": {
+        "devices": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PairDiscoveredDevice" },
+          "description": "尚未配对、且宣告了 pairing=1 的设备。已配对的设备不出现在这里。"
+        }
+      }
+    },
+    "PairConnectRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["password"],
+      "if": { "required": ["address"] },
+      "then": {},
+      "else": { "required": ["fingerprint"] },
+      "description": "address 与 fingerprint 至少给一个。",
+      "properties": {
+        "address": { "$ref": "#/$defs/PairAddress" },
+        "fingerprint": {
+          "$ref": "#/$defs/PairFingerprint",
+          "description": "期望对端的证书指纹。给出时，对端证书不符则在确认前停止，返回 invalid_args（字段 fingerprint，原因 fingerprint_mismatch）。只给指纹时地址取自发现列表。"
+        },
+        "password": { "$ref": "#/$defs/PairPassword" }
+      }
+    },
+    "PairConnectResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fingerprint", "address", "tags"],
+      "properties": {
+        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
+        "address": { "$ref": "#/$defs/PairAddress" },
+        "tags": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" } }
       }
     }
   }

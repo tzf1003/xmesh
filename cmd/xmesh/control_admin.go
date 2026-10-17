@@ -67,10 +67,25 @@ func showDone(r *control.Response, err error, v any) error {
 	return nil
 }
 
+const pairUsage = "用法: xmesh control pair password show | set (--password-stdin | --password-file 文件) | clear\n" +
+	"      pair discover\n" +
+	"      pair connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)\n" +
+	"      pair export [--out 文件] | pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]"
+
 func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
-	const usage = "用法: xmesh control pair export [--out 文件] | pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]"
-	if len(args) == 0 || (args[0] != "export" && args[0] != "import") {
-		return fmt.Errorf("%s", usage)
+	if len(args) == 0 {
+		return fmt.Errorf("%s", pairUsage)
+	}
+	switch args[0] {
+	case "password":
+		return controlPairPassword(ctx, flags, target, args[1:])
+	case "discover":
+		return controlPairDiscover(ctx, flags, target, args[1:])
+	case "connect":
+		return controlPairConnect(ctx, flags, target, args[1:])
+	case "export", "import":
+	default:
+		return fmt.Errorf("%s", pairUsage)
 	}
 	verb := args[0]
 	out := flags.String("out", "", "export：把配对文档写到该文件（0600），可交给对端的 pair --import")
@@ -148,6 +163,128 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		}
 	}
 	return show(r, err)
+}
+
+// controlPairPassword is `pair password`: the connection password other devices enter to pair with
+// this one. The secret comes from standard input or a file, never from argv.
+func controlPairPassword(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
+	const usage = "用法: xmesh control pair password show | set (--password-stdin | --password-file 文件) | clear"
+	if len(args) == 0 {
+		return fmt.Errorf("%s", usage)
+	}
+	verb, rest := args[0], args[1:]
+	switch verb {
+	case "show", "clear":
+		if err := flags.Parse(rest); err != nil {
+			return err
+		}
+		c, err := target.client()
+		if err != nil {
+			return err
+		}
+		if verb == "show" {
+			return show(c.Do(ctx, "GET", "/v1/pair/password", nil, nil))
+		}
+		r, err := c.Do(ctx, "DELETE", "/v1/pair/password", nil, nil)
+		return showDone(r, err, map[string]any{"cleared": true})
+	case "set":
+		secret := registerSecretFlags(flags)
+		if err := flags.Parse(rest); err != nil {
+			return err
+		}
+		if flags.NArg() > 0 {
+			return fmt.Errorf("连接密码不能放在命令行上，请用 --password-stdin 或 --password-file\n%s", usage)
+		}
+		source, err := secret.source(usage)
+		if err != nil {
+			return err
+		}
+		password, err := readSecret(source, controlStdin, os.Stderr)
+		if err != nil {
+			return err
+		}
+		c, err := target.client()
+		if err != nil {
+			return err
+		}
+		return show(c.Do(ctx, "PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: password}, nil))
+	}
+	return fmt.Errorf("未知的 pair password 子命令: %s\n%s", verb, usage)
+}
+
+// controlPairDiscover lists unpaired devices announcing themselves on the LAN.
+func controlPairDiscover(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("多余的参数: %s", strings.Join(flags.Args(), " "))
+	}
+	c, err := target.client()
+	if err != nil {
+		return err
+	}
+	return show(c.Do(ctx, "GET", "/v1/pair/discovered", nil, nil))
+}
+
+// controlPairConnect pairs with a device using the connection password it was given.
+func controlPairConnect(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
+	const usage = "用法: xmesh control pair connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)"
+	address := flags.String("address", "", "对端地址，主机或 主机:端口，缺省端口为 7433")
+	fingerprint := flags.String("fingerprint", "", "对端证书 SHA-256 指纹；只给指纹时地址取自发现列表，同时给出地址时核对证书")
+	secret := registerSecretFlags(flags)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("连接密码不能放在命令行上，请用 --password-stdin 或 --password-file\n%s", usage)
+	}
+	if *address == "" && *fingerprint == "" {
+		return fmt.Errorf("connect 需要 --address 或 --fingerprint\n%s", usage)
+	}
+	source, err := secret.source(usage)
+	if err != nil {
+		return err
+	}
+	password, err := readSecret(source, controlStdin, os.Stderr)
+	if err != nil {
+		return err
+	}
+	c, err := target.client()
+	if err != nil {
+		return err
+	}
+	req := v1.PairConnectRequest{Address: strings.TrimSpace(*address), Fingerprint: cleanFingerprint(*fingerprint), Password: password}
+	return show(c.Do(ctx, "POST", "/v1/pair/connect", req, nil))
+}
+
+// secretFlags are the two ways to hand over a connection password. Exactly one must be given.
+type secretFlags struct {
+	stdin *bool
+	file  *string
+}
+
+func registerSecretFlags(flags *flag.FlagSet) secretFlags {
+	return secretFlags{
+		stdin: flags.Bool("password-stdin", false, "从标准输入读取连接密码"),
+		file:  flags.String("password-file", "", "连接密码所在的文件"),
+	}
+}
+
+// source is the value readSecret takes: a file name, or "-" for standard input.
+func (f secretFlags) source(usage string) (string, error) {
+	if *f.stdin == (*f.file != "") {
+		return "", fmt.Errorf("需要 --password-stdin 或 --password-file 之一\n%s", usage)
+	}
+	if *f.stdin {
+		return "-", nil
+	}
+	return *f.file, nil
+}
+
+// cleanFingerprint accepts the fingerprint the way people copy it: any case, with or without colons.
+func cleanFingerprint(text string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(text), ":", ""))
 }
 
 func controlPats(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {

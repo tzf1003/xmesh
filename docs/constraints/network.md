@@ -50,6 +50,11 @@ tsnet 的打洞失败时，流量必须能够经由 DERP（官方或 `derper`）
 
 ## CON-NET-09
 
-`mesh.mode: lan` 时，节点发现使用 mDNS / DNS-SD。数据面使用 mTLS。首次配对由 `xmesh pair` 交换节点证书，未配对的对端连接必须在 TLS 握手阶段失败，而不是连上后再用应用层口令补救。
+`mesh.mode: lan` 时，节点发现使用 mDNS / DNS-SD。数据面使用 mTLS。首次配对有两条路径，两条都在互相钉入证书之前由双方核实对方身份：
+
+- 交换配对文档：`xmesh pair` 或面板的高级选项，用户在另一台设备上亲自核对指纹。
+- 连接密码：一台设备设置口令，另一台输入它。这是 SPAKE2（口令认证密钥交换）加上以双方证书为转录的密钥确认，口令本身不离开设备，也不落盘。错误口令与中间人攻击无法在客户端区分，两者都不会钉入证书，并计入节点的限流。
+
+未配对的对端，普通握手（ALPN 未声明 `xmesh-pair/1`）仍在 TLS 层失败。只有声明该 ALPN 的握手能到达配对路由，而且它只访问 `/lan/pair/*`，其余路径返回 404。详见 [docs/design/14-password-pairing.md](../design/14-password-pairing.md)。
 
 `lan` 模式不提供 Funnel，也不实现 OAuth。云端客户端要接入时，仍需一台走公网的入口，入口背后可以是 tailnet。

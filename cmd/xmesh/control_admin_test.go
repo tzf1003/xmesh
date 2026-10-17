@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
 )
 
@@ -253,4 +256,83 @@ func differentFingerprint(fingerprint string) string {
 		first = '1'
 	}
 	return string(first) + fingerprint[1:]
+}
+
+// cliPairing is the LAN pairing the CLI talks to: it remembers the password it was given and
+// pairs with the one device it discovered.
+type cliPairing struct {
+	set      bool
+	password string
+	found    []mesh.DiscoveredPeer
+	paired   string
+}
+
+func (p *cliPairing) PairPasswordState() mesh.PairPasswordState {
+	return mesh.PairPasswordState{Set: p.set, UpdatedAt: time.Unix(1700000000, 0)}
+}
+func (p *cliPairing) SetPairPassword(password string) (mesh.PairPasswordState, error) {
+	if err := mesh.ValidatePairPassword(password); err != nil {
+		return mesh.PairPasswordState{}, err
+	}
+	p.set, p.password = true, password
+	return p.PairPasswordState(), nil
+}
+func (p *cliPairing) ClearPairPassword() error { p.set = false; return nil }
+func (p *cliPairing) Discovered(context.Context) ([]mesh.DiscoveredPeer, error) {
+	return p.found, nil
+}
+func (p *cliPairing) PairWith(_ context.Context, address, password, expected string) (mesh.Trusted, error) {
+	p.paired = address + " " + password
+	return mesh.Trusted{Name: "peer-b", Fingerprint: cliPeerFingerprint, Tags: []string{"tag:peer", "tag:device"}}, nil
+}
+
+const cliPeerFingerprint = "3f2a9c4e1b7d8a60f5e2c9b1d4a7e8f03c6b5a29d1e4f7a8b0c3d6e9f2a5b8c1"
+
+// conformance: CTR-CTL-08 the CLI takes connection passwords from stdin or a file, never argv.
+func Test_CLIControlPairPassword(t *testing.T) {
+	admin := &cliPairing{found: []mesh.DiscoveredPeer{{Name: "peer-b", Fingerprint: cliPeerFingerprint, Address: "192.168.31.15:7433", SeenAt: time.Now()}}}
+	state, _ := startKernelStubOptions(t, cliConfig, func(o *control.Options) { o.Pairing = admin })
+
+	if got := runObject(t, state, "pair", "password", "show"); got["set"] != false {
+		t.Fatalf("a new node has no password: %v", got)
+	}
+	controlStdin = strings.NewReader("correct horse battery staple\n")
+	t.Cleanup(func() { controlStdin = os.Stdin })
+	if got := runObject(t, state, "pair", "password", "set", "--password-stdin"); got["set"] != true || admin.password != "correct horse battery staple" {
+		t.Fatalf("set from stdin: %v %q", got, admin.password)
+	}
+	pwFile := filepath.Join(t.TempDir(), "pw")
+	if err := os.WriteFile(pwFile, []byte("another long password\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runObject(t, state, "pair", "password", "set", "--password-file", pwFile)
+	if admin.password != "another long password" {
+		t.Fatalf("set from file: %q", admin.password)
+	}
+	if out, err := runControl(t, state, "pair", "password", "set", "correct horse battery staple"); err == nil || strings.Contains(out, "horse") {
+		t.Fatalf("a password on the command line was accepted: %v", err)
+	}
+	if _, err := runControl(t, state, "pair", "password", "set"); err == nil || !strings.Contains(err.Error(), "--password-stdin") {
+		t.Fatalf("set without a source: %v", err)
+	}
+	controlStdin = strings.NewReader("short\n")
+	if _, err := runControl(t, state, "pair", "password", "set", "--password-stdin"); err == nil {
+		t.Fatal("a short password was accepted")
+	}
+
+	if got := runObject(t, state, "pair", "discover"); len(got["devices"].([]any)) != 1 {
+		t.Fatalf("discover: %v", got)
+	}
+	controlStdin = strings.NewReader("correct horse battery staple\n")
+	runObject(t, state, "pair", "connect", "--address", "192.168.31.15:7433", "--password-stdin")
+	if admin.paired != "192.168.31.15:7433 correct horse battery staple" {
+		t.Fatalf("connect: %q", admin.paired)
+	}
+	if _, err := runControl(t, state, "pair", "connect", "--password-stdin"); err == nil || !strings.Contains(err.Error(), "--address") {
+		t.Fatalf("connect without a target: %v", err)
+	}
+
+	if got := runObject(t, state, "pair", "password", "clear"); got["cleared"] != true || admin.set {
+		t.Fatalf("clear: %v", got)
+	}
 }
