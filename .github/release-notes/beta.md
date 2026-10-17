@@ -35,6 +35,9 @@ The installers are not code-signed, so the system warns on first launch:
 - macOS: Gatekeeper may say the app is damaged. Run `/usr/bin/xattr -dr com.apple.quarantine /Applications/xmesh.app`
   in Terminal and open the app again. Alternatively, open System Settings > Privacy & Security and choose
   "Open Anyway".
+  Run the command before the first launch. If the app was already opened while it was still quarantined, macOS
+  runs it from a read-only copy under AppTranslocation, and the command does nothing to that copy: quit xmesh,
+  run the command, then open it again from Applications.
 
 The control panel opens from the tray icon. It shows the overview, devices, pairing, configuration, audit,
 sessions, authorization, ingress and mesh pages. Try them, and the tray menu's restart and stop actions.
@@ -48,6 +51,8 @@ that install folder; tasks of other users and of other folders are kept.
 
 - The binaries are not code-signed or notarized. macOS: run `/usr/bin/xattr -d com.apple.quarantine xmesh` after
   extracting. Windows: SmartScreen may ask for confirmation.
+- LAN mode: the Agent always listens on TCP 7433 and that port cannot be configured, so two LAN nodes cannot run
+  on the same host.
 - Windows L2 isolation is not available in production yet: a Windows node configured with
   `agent.policy.isolation: L2` refuses exec and PTY with `sandbox.unavailable`. This is expected, and
   step F of the runbook checks for exactly that refusal.
