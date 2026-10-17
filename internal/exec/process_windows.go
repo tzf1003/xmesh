@@ -17,9 +17,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// denyJobList makes the job-list attribute fail like a Store application
+// execution alias does, so tests can exercise the late-assignment fallback.
+var denyJobList bool
+
 // startCommand uses file-backed output owned by Manager.execute. Only the three
 // explicit standard handles are inherited; the lifetime Job is assigned by
 // CreateProcess before the suspended command can become visible to its host.
+// Targets that refuse the job-list attribute (Store application execution
+// aliases) are created suspended without it and assigned to the Job before
+// their primary thread is resumed.
 func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
 	if c.Err != nil {
 		return nil, nil, c.Err
@@ -116,24 +123,45 @@ func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
 			closeJob()
 		}
 	}()
-	attributes, err := windows.NewProcThreadAttributeList(2)
+	// create starts the command suspended. With the job-list attribute the Job
+	// is bound inside CreateProcess; without it the caller must assign the Job
+	// before the primary thread is resumed.
+	create := func(bindJob bool) (process windows.ProcessInformation, err error) {
+		if bindJob && denyJobList {
+			return process, windows.ERROR_ACCESS_DENIED
+		}
+		count := uint32(1)
+		if bindJob {
+			count = 2
+		}
+		attributes, err := windows.NewProcThreadAttributeList(count)
+		if err != nil {
+			return process, err
+		}
+		defer attributes.Delete()
+		if bindJob {
+			if err = winjob.Apply(attributes, job); err != nil {
+				return process, err
+			}
+		}
+		if err = attributes.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&handles[0]), unsafe.Sizeof(handles)); err != nil {
+			return process, err
+		}
+		startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{
+			Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})), Flags: windows.STARTF_USESTDHANDLES,
+			StdInput: handles[0], StdOutput: handles[1], StdErr: handles[2],
+		}, ProcThreadAttributeList: attributes.List()}
+		flags := uint32(windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
+		err = windows.CreateProcess(application, command, nil, nil, true, flags, &block[0], directory, &startup.StartupInfo, &process)
+		return process, err
+	}
+	process, err := create(true)
+	boundLate := false
+	if winjob.JobListDenied(err) {
+		process, err = create(false)
+		boundLate = true
+	}
 	if err != nil {
-		return nil, nil, err
-	}
-	defer attributes.Delete()
-	if err = winjob.Apply(attributes, job); err != nil {
-		return nil, nil, err
-	}
-	if err = attributes.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&handles[0]), unsafe.Sizeof(handles)); err != nil {
-		return nil, nil, err
-	}
-	startup := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{
-		Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})), Flags: windows.STARTF_USESTDHANDLES,
-		StdInput: handles[0], StdOutput: handles[1], StdErr: handles[2],
-	}, ProcThreadAttributeList: attributes.List()}
-	var process windows.ProcessInformation
-	flags := uint32(windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
-	if err = windows.CreateProcess(application, command, nil, nil, true, flags, &block[0], directory, &startup.StartupInfo, &process); err != nil {
 		return nil, nil, err
 	}
 	defer windows.CloseHandle(process.Process)
@@ -153,6 +181,13 @@ func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
 			_ = c.Process.Release()
 		}
 	}()
+	if boundLate {
+		if err = winjob.AssignAfterCreate(job, process.Process); err != nil {
+			// Still suspended and outside the Job: nothing else would end it.
+			_ = windows.TerminateProcess(process.Process, 1)
+			return nil, nil, err
+		}
+	}
 	var previous uint32
 	previous, err = windows.ResumeThread(process.Thread)
 	if err != nil {

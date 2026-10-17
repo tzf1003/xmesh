@@ -42,7 +42,7 @@ func Internal(op string, err error) *Error {
 	if errors.As(err, &e) {
 		return e
 	}
-	v := New("internal", "本机操作失败", "op", op)
+	v := New("internal", "本机操作失败", append([]any{"op", op}, osFields(err)...)...)
 	v.Cause = err
 	return v
 }

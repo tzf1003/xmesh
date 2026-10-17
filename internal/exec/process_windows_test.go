@@ -37,7 +37,18 @@ func helperArgs(mode string, paths ...string) []string {
 	return append([]string{"-test.run=^Test_WindowsExecHelper$", "--", "--xmesh-exec-helper", mode}, paths...)
 }
 
-func Test_WindowsExecLaunchContract(t *testing.T) {
+func Test_WindowsExecLaunchContract(t *testing.T) { windowsExecLaunchContract(t) }
+
+// A target that refuses the job-list attribute (Store alias) is created
+// suspended, assigned to the Job and only then resumed; behavior is unchanged.
+func Test_WindowsExecLaunchContractJobListDenied(t *testing.T) {
+	windowsExecRuntime(t)
+	denyJobList = true
+	t.Cleanup(func() { denyJobList = false })
+	windowsExecLaunchContract(t)
+}
+
+func windowsExecLaunchContract(t *testing.T) {
 	exe := windowsExecRuntime(t)
 	root := filepath.Join(t.TempDir(), "工作 目录")
 	if err := os.Mkdir(root, 0700); err != nil {
@@ -261,7 +272,16 @@ func windowsExecPowerShell(t *testing.T) {
 	}
 }
 
-func Test_WindowsExecProcessTreeCleanup(t *testing.T) {
+func Test_WindowsExecProcessTreeCleanup(t *testing.T) { windowsExecProcessTreeCleanup(t) }
+
+func Test_WindowsExecProcessTreeCleanupJobListDenied(t *testing.T) {
+	windowsExecRuntime(t)
+	denyJobList = true
+	t.Cleanup(func() { denyJobList = false })
+	windowsExecProcessTreeCleanup(t)
+}
+
+func windowsExecProcessTreeCleanup(t *testing.T) {
 	exe := windowsExecRuntime(t)
 	for _, action := range []string{"root-exit", "timeout"} {
 		t.Run(action, func(t *testing.T) {

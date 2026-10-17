@@ -10,7 +10,7 @@ import (
 func (a *Agent) Drain(kill bool) {
 	a.draining.Store(true)
 	if kill {
-		a.PTY.Shutdown()
+		a.PTY.CloseAll()
 		a.Leases.ReleaseAll()
 	}
 }

@@ -35,3 +35,32 @@ func Test_CTRGW05_DrainKeepsExistingResources(t *testing.T) {
 		t.Fatal("kill retained active", active)
 	}
 }
+
+// Drain with kill closes the live terminals but keeps the manager, so a later
+// resume accepts new terminals again (docs/operations.md: resume only makes the
+// node accept new calls).
+func Test_DrainKillThenResumeOpensTerminal(t *testing.T) {
+	_, store := configuration(t)
+	a, e := New(store)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(a.Close)
+	server := httptest.NewServer(a.HTTP(Local))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	first := tool(t, client, "pty.open", map[string]any{"cols": 80, "rows": 24})
+	if first.IsError {
+		t.Fatal(first)
+	}
+	a.Drain(true)
+	if _, active, _ := a.PTY.Counts(); active != 0 {
+		t.Fatal("kill retained active", active)
+	}
+	a.Resume()
+	second := tool(t, client, "pty.open", map[string]any{"cols": 80, "rows": 24})
+	if second.IsError {
+		t.Fatal("pty.open after drain(kill) and resume failed:", object(t, second))
+	}
+	_ = tool(t, client, "pty.close", map[string]any{"session_id": object(t, second)["session_id"]})
+}
