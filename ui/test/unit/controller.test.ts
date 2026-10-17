@@ -101,6 +101,17 @@ test("a node with a config but no running kernel is listed as stopped, so the UI
   assert.deepEqual(s.instances, []);
 });
 
+test("a manifest whose kernel does not answer is listed as unresponsive, not as stopped, so the UI can restart it", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "n1");
+  await k.stop();
+  const c = controller();
+  c.start();
+  const s = await until(c, (x) => x.connection.kind === "offline" && x.unresponsiveNodes.length === 1, "unresponsive node");
+  assert.deepEqual(s.unresponsiveNodes, ["n1"]);
+  assert.deepEqual(s.stoppedNodes, []);
+});
+
 test("status changes pushed over the event stream reach the snapshot", async () => {
   const k = await kernel();
   k.writeManifest(root, "n1");

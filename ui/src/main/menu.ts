@@ -14,6 +14,7 @@ export type Action =
   | { type: "select-instance"; id: string }
   | { type: "restart-kernel" }
   | { type: "start-kernel"; node: string }
+  | { type: "restart-unresponsive"; node: string }
   | { type: "stop-kernel" }
   | { type: "quit" };
 
@@ -40,7 +41,7 @@ const item = (id: string, label: string, action: Action, enabled = true): MenuIt
 export function statusLabelKey(snap: Snapshot): MessageKey {
   switch (deriveIcon(snap.connection)) {
     case "offline":
-      return "status.offline";
+      return snap.unresponsiveNodes.length > 0 ? "status.unresponsive" : "status.offline";
     case "mismatch":
       return "status.mismatch";
     case "draining":
@@ -72,6 +73,8 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
     out.push(info("activity.exec", t("menu.exec", { used: s.limits.exec_shared_in_use, max: s.limits.exec_shared })));
   } else if (c.kind === "mismatch") {
     out.push(info("hint.mismatch", t("menu.mismatchHint", { kernel: c.kernelVersion || "?", api: c.apiVersion || "?" })));
+  } else if (snap.unresponsiveNodes.length > 0) {
+    out.push(info("hint.unresponsive", t("menu.unresponsiveHint")));
   } else {
     out.push(info("hint.offline", t("menu.offlineHint")));
   }
@@ -79,6 +82,10 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
   out.push(sep("sep.actions"));
   if (c.kind !== "mismatch") out.push(item("action.openPanel", t("menu.openPanel"), { type: "open-panel" }));
   if (c.kind === "offline") {
+    for (const node of snap.unresponsiveNodes) {
+      const label = snap.unresponsiveNodes.length === 1 ? t("menu.restartKernel") : t("menu.restartKernelNamed", { name: node });
+      out.push(item(`action.restartUnresponsive.${node}`, label, { type: "restart-unresponsive", node }));
+    }
     for (const node of snap.stoppedNodes) {
       const label = snap.stoppedNodes.length === 1 ? t("menu.startKernel") : t("menu.startKernelNamed", { name: node });
       out.push(item(`action.startKernel.${node}`, label, { type: "start-kernel", node }));

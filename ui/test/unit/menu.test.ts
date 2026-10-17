@@ -69,6 +69,19 @@ test("an offline UI offers to start each node that has a config but no running k
   assert.equal(findItem(buildMenu(connected({}, { stoppedNodes: ["beta2-mac"] }), t), "action.startKernel.beta2-mac"), undefined, "connected: no start entry");
 });
 
+test("an offline UI whose kernel does not answer says so and offers to restart that node", () => {
+  const snap = (unresponsiveNodes: string[]): Snapshot => ({ ...EMPTY_SNAPSHOT, instances: [{ id: "n1", label: "n1" }], unresponsiveNodes });
+  const m = buildMenu(snap(["n1"]), t);
+  assert.equal(findItem(m, "header.state")?.label, "状态：内核无响应");
+  assert.equal(findItem(m, "hint.unresponsive")?.label, "内核进程还在，但没有回应。可以重启内核。");
+  assert.equal(findItem(m, "hint.offline"), undefined);
+  assert.equal(findItem(m, "action.restartUnresponsive.n1")?.label, "重启内核");
+  assert.deepEqual(findItem(m, "action.restartUnresponsive.n1")?.action, { type: "restart-unresponsive", node: "n1" });
+  const two = buildMenu(snap(["a", "b"]), t);
+  assert.equal(findItem(two, "action.restartUnresponsive.b")?.label, "重启内核 b");
+  assert.equal(findItem(buildMenu({ ...EMPTY_SNAPSHOT, stoppedNodes: ["x"] }, t), "action.restartUnresponsive.x"), undefined, "a stopped node is started, not restarted");
+});
+
 test("draining swaps drain for resume; every warning is listed with its own entry", () => {
   const m = buildMenu(
     connected({
