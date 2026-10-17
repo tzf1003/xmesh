@@ -127,7 +127,7 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --export /tmp/node-
 bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-public.json --fingerprint VERIFIED_SHA256 --tags tag:peer,tag:device
 ```
 
-两端分别导入对方，重启使配对生效。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。
+两端分别导入对方，重启使配对生效。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。LAN 模式的 Agent 固定监听 TCP 7433（`mesh.AgentPort`，没有配置项），同一台机器上无法同时运行两个 LAN 节点。
 
 ## 状态目录权限
 

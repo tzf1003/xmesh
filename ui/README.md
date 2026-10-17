@@ -146,7 +146,7 @@ node scripts/verify-package.mjs --dir release/win-unpacked --kernel   # 本机�
 现在没有证书，beta 安装包是**未签名**的，系统会提示：
 
 - Windows：SmartScreen 显示「Windows 已保护你的电脑」，点「更多信息」再点「仍要运行」。
-- macOS：Gatekeeper 拒绝打开。把 `xmesh.app` 拖进「应用程序」后执行 `/usr/bin/xattr -dr com.apple.quarantine /Applications/xmesh.app`，或在「系统设置 > 隐私与安全性」里点「仍要打开」。
+- macOS：Gatekeeper 拒绝打开。把 `xmesh.app` 拖进「应用程序」后执行 `/usr/bin/xattr -dr com.apple.quarantine /Applications/xmesh.app`，或在「系统设置 > 隐私与安全性」里点「仍要打开」。若 xmesh 在清除隔离属性前已经打开过，macOS 会从只读副本（AppTranslocation）运行它，清除命令对这个副本无效：先退出 xmesh，执行命令，再从「应用程序」重新打开。
 
 有证书后只需要在仓库里配置 secrets，不改任何文件，下一次构建自动签名：
 
