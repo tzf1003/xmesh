@@ -152,7 +152,6 @@ test("wizard form check mirrors the main-process validation and previews the exa
   const good = checkForm({ ...INITIAL_FORM, nodeName: " dev-1 ", workspace: "/w" });
   assert.ok(good.ok);
   assert.equal(good.params.nodeName, "dev-1");
-  assert.match(good.preview, /name: "dev-1"/);
   assert.deepEqual(checkForm({ ...INITIAL_FORM, nodeName: "n", agent: false, gateway: false }), { ok: false, problem: "roles" });
   assert.deepEqual(checkForm({ ...INITIAL_FORM, nodeName: "n", workspace: "/w", mode: "tailnet" }), { ok: false, problem: "authkey_file" });
 });

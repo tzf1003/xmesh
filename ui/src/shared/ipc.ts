@@ -31,6 +31,11 @@ import type { Snapshot } from "./state";
 export const CHANNELS = {
   getSnapshot: "xmesh:get-snapshot",
   drain: "xmesh:drain",
+  restartKernel: "xmesh:restart-kernel",
+  readDenyFile: "xmesh:read-deny-file",
+  writeDenyFile: "xmesh:write-deny-file",
+  createDenyFile: "xmesh:create-deny-file",
+  reloadConfig: "xmesh:reload-config",
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
   restartUnresponsive: "xmesh:restart-unresponsive",
@@ -56,6 +61,7 @@ export const CHANNELS = {
   importPair: "xmesh:import-pair",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
+  previewSetup: "xmesh:preview-setup",
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
   mesh: "xmesh:mesh",
@@ -159,6 +165,14 @@ export interface SetupReport {
   steps: SetupStep[];
 }
 
+/** What the first run would write, exactly as `runSetup` writes it. Nothing is written by asking. */
+export interface SetupPreview {
+  configPath: string;
+  /** The deny list file the config names; written with the defaults when it does not exist yet. */
+  denyPath: string;
+  config: string;
+}
+
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
   getSnapshot(): Promise<Snapshot>;
@@ -168,6 +182,8 @@ export interface PanelApi {
   resume(): Promise<ActionResult>;
   /** Starts the service of a node whose config exists but whose kernel is not running. */
   startKernel(node: string): Promise<ActionResult>;
+  /** Restarts the kernel of the selected node, as the tray menu does. Asks nothing: the caller confirms first. */
+  restartKernel(): Promise<ActionResult>;
   /** Restarts the service of a node whose kernel does not answer. */
   restartUnresponsive(node: string): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
@@ -179,6 +195,13 @@ export interface PanelApi {
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** The deny list file the config names; the renderer never supplies its path. */
+  readDenyFile(): Promise<DataResult<DenyFileResponse>>;
+  writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
+  /** Creates the deny list file beside the config, for a config that names none yet; the path is the kernel config's directory plus `cwd-deny.yaml`. */
+  createDenyFile(request: DenyFileCreateRequest): Promise<DataResult<DenyFileCreated>>;
+  /** Asks the kernel to reload its config in place (control API 1.2). A kernel without the route answers with an error. */
+  reloadConfig(): Promise<DataResult<ConfigReloadResponse>>;
   listPats(): Promise<DataResult<PatList>>;
   createPat(args: PatCreateArgs): Promise<DataResult<PatSecret>>;
   rotatePat(name: string): Promise<DataResult<PatSecret>>;
@@ -195,6 +218,7 @@ export interface PanelApi {
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
+  previewSetup(params: SetupParams): Promise<DataResult<SetupPreview>>;
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
   /** Opens the system file chooser; `path` is null when the user cancels. */
   pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>>;
@@ -208,6 +232,11 @@ export const PANEL_API_METHODS = [
   "drain",
   "resume",
   "startKernel",
+  "restartKernel",
+  "readDenyFile",
+  "writeDenyFile",
+  "createDenyFile",
+  "reloadConfig",
   "restartUnresponsive",
   "selectInstance",
   "copy",
@@ -232,6 +261,7 @@ export const PANEL_API_METHODS = [
   "queryAudit",
   "getRecentCalls",
   "onCalls",
+  "previewSetup",
   "runSetup",
   "pickPath",
   "mesh",
@@ -341,6 +371,62 @@ export function parseNodeName(v: unknown): string | undefined {
 
 export function parseScope(v: unknown): string | undefined {
   return typeof v === "string" && SCOPE.test(v) ? v : undefined;
+}
+
+/** The deny list file as the config names it. `path` is absent when the config names none. */
+export interface DenyFileResponse {
+  path?: string;
+  /** Whether the file exists; a configured file that is missing stops the agent role from starting. */
+  exists: boolean;
+  text: string;
+  /** Empty when the file does not exist, otherwise `sha256-<hex>` of `text`. */
+  etag: string;
+}
+
+export interface DenyFileSaveRequest {
+  /** Complete file text, at most 64 KiB. */
+  text: string;
+  /** The `etag` the edit started from; the save fails if the file changed since. */
+  etag: string;
+}
+
+export interface DenyFileSaved {
+  etag: string;
+}
+export interface DenyFileCreateRequest {
+  /** Complete file text, at most 64 KiB. */
+  text: string;
+}
+export interface DenyFileCreated {
+  /** Absolute path of the new file; the config names it in `agent.cwd_policy.deny_file`. */
+  path: string;
+  etag: string;
+}
+/** The kernel's answer to a reload (control API 1.2): what it applied and what still needs a restart. */
+export interface ConfigReloadResponse {
+  applied: boolean;
+  valid: boolean;
+  load_error?: string | null;
+  changed_paths: string[];
+  restart_required: boolean;
+  restart_paths: string[];
+}
+
+export const DENY_FILE_MAX_BYTES = 64 * 1024;
+
+export function parseDenyFileSave(v: unknown): DenyFileSaveRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["text", "etag"])) return undefined;
+  const { text, etag } = v;
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
+  if (typeof etag !== "string" || !/^(sha256-[0-9a-f]{64})?$/.test(etag)) return undefined;
+  return { text, etag };
+}
+
+export function parseDenyFileCreate(v: unknown): DenyFileCreateRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["text"])) return undefined;
+  const { text } = v;
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
+  return { text };
 }
 
 export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {

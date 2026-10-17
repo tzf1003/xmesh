@@ -24,7 +24,7 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool local/sys.info --js
 
 开发 Agent 默认 `127.0.0.1:7433/mcp`（可用 `--listen` 改，必须在 `127.0.0.1` 上）；Gateway 默认 `127.0.0.1:8080/mcp`（`gateway.listen`），经它调用本机工具时工具名带 `local/` 前缀，所以 `status` 打 Gateway 要加 `--tool local/sys.info`。客户端使用带会话的 Streamable HTTP MCP，协议版本 `2025-11-25` 或 `2025-06-18`。PTY owner 与租约属于对应 MCP 会话。
 
-配置文件顶层的 `node`、`mesh`、`agent` 三段对所有角色都必填：只启用 `gateway` 或 `ingress` 的节点也要写 `agent` 段，且 `agent.cwd_policy.allow` 至少一条（模式校验的要求）；未启用 `agent` 角色时这一段不会被使用。
+配置文件顶层的 `node`、`mesh`、`agent` 三段对所有角色都必填：只启用 `gateway` 或 `ingress` 的节点也要写 `agent` 段，且 `agent.cwd_policy.allow` 必须存在（可以是空列表，表示除 `deny` 外全部目录可访问）；未启用 `agent` 角色时这一段不会被使用。
 
 ## tailnet 节点
 

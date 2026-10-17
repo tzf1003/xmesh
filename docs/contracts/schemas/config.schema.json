@@ -257,8 +257,9 @@
           "additionalProperties": false,
           "required": ["allow"],
           "properties": {
-            "allow": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
-            "deny": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "deny": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "deny_file": { "type": "string", "minLength": 1, "description": "禁止目录列表文件的绝对路径，内容是字符串列表；其中的目录始终拒绝，与允许列表是否为空无关。" }
           }
         },
         "exec": {

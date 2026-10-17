@@ -1,5 +1,5 @@
 import type { SetupParams } from "../../shared/ipc";
-import { DEFAULT_CONTROL_URL, generateConfig, parseSetup, type SetupProblem } from "../../shared/setup";
+import { DEFAULT_CONTROL_URL, parseSetup, type SetupProblem } from "../../shared/setup";
 
 export interface WizardForm {
   nodeName: string;
@@ -33,10 +33,13 @@ export function toParams(f: WizardForm): unknown {
   return p;
 }
 
-export type FormCheck = { ok: true; params: SetupParams; preview: string } | { ok: false; problem: SetupProblem };
+export type FormCheck = { ok: true; params: SetupParams } | { ok: false; problem: SetupProblem };
 
-/** Same validation the main process applies, so the form never offers a step the main process would refuse. */
+/**
+ * Same validation the main process applies, so the form never offers a step the main process would refuse.
+ * The review text comes from the main process, which knows where the files go, so it matches what gets written.
+ */
 export function checkForm(f: WizardForm): FormCheck {
   const r = parseSetup(toParams(f));
-  return r.ok ? { ok: true, params: r.value, preview: generateConfig(r.value) } : { ok: false, problem: r.problem };
+  return r.ok ? { ok: true, params: r.value } : { ok: false, problem: r.problem };
 }

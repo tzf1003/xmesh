@@ -3,6 +3,10 @@
 // already validated, and turns every outcome into a plain result object so no
 // exception or stack crosses into the page.
 
+import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 import { ControlRequestError } from "../shared/control";
 import type {
   AuditQuery,
@@ -21,19 +25,48 @@ import type {
   PatSecret,
   SessionsResponse,
 } from "../shared/control";
-import type {
-  ActionError,
-  ActionResult,
-  ConfigSaveRequest,
-  DataResult,
-  GatewayPatRotated,
-  PairImportArgs,
-  PatCreateArgs,
+import {
+  DENY_FILE_MAX_BYTES,
+  type ActionError,
+  type ActionResult,
+  type ConfigReloadResponse,
+  type ConfigSaveRequest,
+  type DataResult,
+  type DenyFileCreateRequest,
+  type DenyFileCreated,
+  type DenyFileResponse,
+  type DenyFileSaveRequest,
+  type DenyFileSaved,
+  type GatewayPatRotated,
+  type PairImportArgs,
+  type PatCreateArgs,
 } from "../shared/ipc";
+import { DENY_FILE_NAME } from "../shared/setup";
 import type { ControlClient } from "./client";
 import type { ShellController } from "./controller";
 
-export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain">;
+export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain" | "snapshot">;
+
+/** `agent.cwd_policy.deny_file` when the config names an absolute path for it. */
+export function denyFileOf(parsed: unknown): string | undefined {
+  const agent = (parsed as { agent?: { cwd_policy?: { deny_file?: unknown } } } | null)?.agent;
+  const file = agent?.cwd_policy?.deny_file;
+  return typeof file === "string" && path.isAbsolute(file) ? file : undefined;
+}
+
+/** The file's text, or undefined when it does not exist. Other read errors propagate. */
+function readOptional(file: string): string | undefined {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw e;
+  }
+}
+
+function etagOf(text: string): string {
+  return text === "" ? "" : `sha256-${crypto.createHash("sha256").update(text).digest("hex")}`;
+}
 
 /** The PAT that is the gateway's own token: created by the kernel, rotated from the panel. */
 export const GATEWAY_PAT = "default";
@@ -93,6 +126,70 @@ export class PanelService {
     return this.data("config.write", (c) =>
       c.call("PUT", "/v1/config", { body: { content: req.content, dry_run: req.dryRun }, ifMatch: req.etag }),
     );
+  }
+
+  /** The deny list file the config names. The path comes from the config, so the renderer cannot point this at another file. */
+  async readDenyFile(): Promise<DataResult<DenyFileResponse>> {
+    const cfg = await this.getConfig();
+    if (!cfg.ok) return cfg;
+    const file = denyFileOf(cfg.data.parsed);
+    if (file === undefined) return { ok: true, data: { exists: false, text: "", etag: "" } };
+    try {
+      const text = readOptional(file);
+      return { ok: true, data: { path: file, exists: text !== undefined, text: text ?? "", etag: etagOf(text ?? "") } };
+    } catch (e) {
+      return { ok: false, error: { code: "io", message: e instanceof Error ? e.message : String(e) } };
+    }
+  }
+
+  /** Writes the file only if it still holds what the edit started from; the kernel reloads it itself. */
+  async writeDenyFile(req: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>> {
+    if (Buffer.byteLength(req.text) > DENY_FILE_MAX_BYTES) return { ok: false, error: { code: "payload_too_large", message: "禁止目录文件过大" } };
+    const cfg = await this.getConfig();
+    if (!cfg.ok) return cfg;
+    const file = denyFileOf(cfg.data.parsed);
+    if (file === undefined) return { ok: false, error: { code: "not_configured", message: "配置里没有 deny_file" } };
+    try {
+      const current = readOptional(file) ?? "";
+      if (etagOf(current) !== req.etag) {
+        return { ok: false, error: { code: "precondition_failed", message: "禁止目录文件已被修改，请重新读取后再保存", current_etag: etagOf(current) } };
+      }
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, req.text, { mode: 0o600 });
+      fs.renameSync(tmp, file);
+      return { ok: true, data: { etag: etagOf(req.text) } };
+    } catch (e) {
+      return { ok: false, error: { code: "io", message: e instanceof Error ? e.message : String(e) } };
+    }
+  }
+
+  /**
+   * Creates the deny list file for a config that names none, beside the config file the kernel reports. A file
+   * already there with the same text is kept; one with other text is never replaced.
+   */
+  async createDenyFile(req: DenyFileCreateRequest): Promise<DataResult<DenyFileCreated>> {
+    if (Buffer.byteLength(req.text) > DENY_FILE_MAX_BYTES) return { ok: false, error: { code: "payload_too_large", message: "禁止目录文件过大" } };
+    const cfg = await this.getConfig();
+    if (!cfg.ok) return cfg;
+    if (denyFileOf(cfg.data.parsed) !== undefined) return { ok: false, error: { code: "already_configured", message: "配置里已经有 deny_file" } };
+    const node = this.controller.snapshot.connection;
+    const configFile = node.kind === "connected" ? node.status.paths?.config_file : undefined;
+    if (typeof configFile !== "string" || configFile === "") return { ok: false, error: { code: "unavailable", message: "内核没有报告配置文件的位置" } };
+    const file = path.join(path.dirname(configFile), DENY_FILE_NAME);
+    try {
+      fs.writeFileSync(file, req.text, { flag: "wx", mode: 0o600 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return { ok: false, error: { code: "io", message: e instanceof Error ? e.message : String(e) } };
+      if (readOptional(file) !== req.text) {
+        return { ok: false, error: { code: "exists", message: "这个节点目录里已有禁止目录文件，不会覆盖。请到「设置」页编辑它。" } };
+      }
+    }
+    return { ok: true, data: { path: file, etag: etagOf(req.text) } };
+  }
+
+  /** Has the kernel reload its config in place. A kernel without the route answers with an error, and the page restarts instead. */
+  reloadConfig(): Promise<DataResult<ConfigReloadResponse>> {
+    return this.data("config.write", (c) => c.call("POST", "/v1/config/reload"));
   }
 
   listPats(): Promise<DataResult<PatList>> {

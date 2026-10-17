@@ -8,6 +8,8 @@ import {
   parseBoolean,
   parseClientId,
   parseConfigSave,
+  parseDenyFileCreate,
+  parseDenyFileSave,
   parseCopyKind,
   parseGatewayCopy,
   parseGatewayUpdate,
@@ -23,7 +25,7 @@ import {
 } from "../shared/ipc";
 import type { CallEventData } from "../shared/control";
 import type { PanelService } from "./panel-service";
-import type { SetupReport } from "../shared/ipc";
+import type { SetupPreview, SetupReport } from "../shared/ipc";
 import type { DataResult } from "../shared/ipc";
 import type { Snapshot } from "../shared/state";
 import type { Actions } from "./actions";
@@ -47,6 +49,8 @@ export interface IpcDeps {
   controller: ShellController;
   actions: Actions;
   service: PanelService;
+  /** Validates first-run setup and returns what it would write; `params` is whatever the renderer sent. */
+  previewSetup: (params: unknown) => DataResult<SetupPreview>;
   /** Validates and runs first-run setup; `params` is whatever the renderer sent. */
   setup: (params: unknown) => Promise<DataResult<SetupReport>>;
   /** Validates and runs one tailnet-administration request; `request` is whatever the renderer sent. */
@@ -54,7 +58,7 @@ export interface IpcDeps {
   panel: () => WebContents | undefined;
 }
 
-export function registerIpc({ controller, actions, service, setup, mesh, panel }: IpcDeps): () => void {
+export function registerIpc({ controller, actions, service, previewSetup, setup, mesh, panel }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -78,6 +82,7 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
     const v = parseNodeName(node);
     return v === undefined ? bad("node name") : actions.startKernel(v);
   });
+  handle(CHANNELS.restartKernel, () => actions.dispatch({ type: "restart-kernel" }));
   handle(CHANNELS.restartUnresponsive, (node: unknown) => {
     const v = parseNodeName(node);
     return v === undefined ? bad("node name") : actions.restartUnresponsive(v);
@@ -113,6 +118,16 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
     const v = parseConfigSave(req);
     return v === undefined ? bad("config request") : service.putConfig(v);
   });
+  handle(CHANNELS.readDenyFile, () => service.readDenyFile());
+  handle(CHANNELS.writeDenyFile, (req: unknown) => {
+    const v = parseDenyFileSave(req);
+    return v === undefined ? bad("deny file request") : service.writeDenyFile(v);
+  });
+  handle(CHANNELS.createDenyFile, (req: unknown) => {
+    const v = parseDenyFileCreate(req);
+    return v === undefined ? bad("deny file request") : service.createDenyFile(v);
+  });
+  handle(CHANNELS.reloadConfig, () => service.reloadConfig());
   handle(CHANNELS.listPats, () => service.listPats());
   handle(CHANNELS.createPat, (args: unknown) => {
     const v = parsePatCreate(args);
@@ -150,6 +165,7 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
     return v === undefined ? bad("audit query") : service.queryAudit(v);
   });
   handle(CHANNELS.getRecentCalls, (): CallEventData[] => service.recentCalls());
+  handle(CHANNELS.previewSetup, (params: unknown) => previewSetup(params));
   handle(CHANNELS.runSetup, (params: unknown) => setup(params));
   handle(CHANNELS.pickPath, (kind: unknown) => {
     const v = parsePickKind(kind);
