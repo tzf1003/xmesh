@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"unicode/utf16"
 
 	"github.com/kardianos/service"
@@ -53,6 +56,49 @@ type userTask struct {
 func userTaskName(service, sid string) string {
 	suffix := sha256.Sum256([]byte(sid))
 	return fmt.Sprintf(`\%s-%x`, service, suffix[:6])
+}
+
+// isUserTaskOf reports whether name is a logon task that userTaskName makes for sid. The names end
+// in a hash of the SID, so this matches the tasks of that user for every node and no one else's.
+func isUserTaskOf(name, sid string) bool {
+	suffix := sha256.Sum256([]byte(sid))
+	tail := fmt.Sprintf("-%x", suffix[:6])
+	const prefix = `\xmesh-`
+	return strings.HasPrefix(name, prefix) && len(name) > len(prefix)+len(tail) && strings.HasSuffix(name, tail)
+}
+
+// programUnder reports whether program, a path to an executable, lies inside dir.
+func programUnder(program, dir string) bool {
+	dir = strings.TrimRight(dir, `\/`) + `\`
+	return len(program) > len(dir) && strings.EqualFold(program[:len(dir)], dir)
+}
+
+// taskDocumentText turns the output of schtasks /Query /XML into text. Task documents are UTF-16
+// when they start with a byte order mark or carry NUL bytes; anything else is taken as it is.
+func taskDocumentText(raw []byte) string {
+	switch {
+	case len(raw) >= 2 && raw[0] == 0xff && raw[1] == 0xfe:
+		raw = raw[2:]
+	case bytes.IndexByte(raw, 0) < 0:
+		return string(raw)
+	}
+	units := make([]uint16, 0, len(raw)/2)
+	for i := 0; i+1 < len(raw); i += 2 {
+		units = append(units, binary.LittleEndian.Uint16(raw[i:]))
+	}
+	return string(utf16.Decode(units))
+}
+
+// taskProgram is the executable a task document runs.
+func taskProgram(document string) (string, error) {
+	var task userTask
+	decoder := xml.NewDecoder(strings.NewReader(document))
+	// The declaration may say UTF-16; the text is already decoded, so take it as it is.
+	decoder.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) { return in, nil }
+	if err := decoder.Decode(&task); err != nil {
+		return "", err
+	}
+	return task.Actions.Exec.Command, nil
 }
 
 // createUserTask registers a current-user logon task. Registration is exclusive:

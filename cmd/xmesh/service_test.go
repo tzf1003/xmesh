@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,5 +96,14 @@ func Test_ServiceNotInstalledIsReportedByCode(t *testing.T) {
 	}
 	if !serviceMissing(fmt.Errorf("wrapped: %w", service.ErrNotInstalled)) || serviceMissing(errors.New("exit status 1")) {
 		t.Fatal("serviceMissing")
+	}
+}
+
+func Test_PairDeviceTagNote(t *testing.T) {
+	if note := missingDeviceTagNote([]string{"tag:peer", "tag:device"}); note != "" {
+		t.Fatal("a device pairing needs no note:", note)
+	}
+	if note := missingDeviceTagNote([]string{"tag:peer"}); !strings.Contains(note, "tag:device") {
+		t.Fatal("a peer-only pairing must say it is not listed as a device:", note)
 	}
 }

@@ -60,6 +60,8 @@ export default {
     extraResources: bundledKernel("bin/xmesh.exe"),
   },
   nsis: {
+    // build/installer.nsh replaces the image-name kill of running xmesh.exe with a check limited to this install's folder.
+    include: "installer.nsh",
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,

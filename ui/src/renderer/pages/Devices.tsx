@@ -172,6 +172,7 @@ function Pairing({ ctx }: { ctx: PageContext }): JSX.Element {
               </label>
             ))}
           </fieldset>
+          {!tags.includes("tag:device") && <p class="hint" data-testid="pair-no-device">{t("pair.noDeviceTag")}</p>}
           <Field label={t("pair.typeFingerprint")} hint={t("pair.typeFingerprintHint")}>
             <input type="text" value={typed} onInput={(e) => setTyped((e.currentTarget as HTMLInputElement).value)} autocomplete="off" spellcheck={false} aria-invalid={typed !== "" && !matches} data-testid="pair-typed" />
           </Field>

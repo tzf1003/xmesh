@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -218,9 +219,22 @@ func pair(args []string) error {
 		fmt.Println("节点证书指纹:", fp)
 		return nil
 	}
-	if e = mesh.ImportPair(dir, *importFile, *fingerprint, strings.Split(*tags, ",")); e != nil {
+	granted := strings.Split(*tags, ",")
+	if e = mesh.ImportPair(dir, *importFile, *fingerprint, granted); e != nil {
 		return e
 	}
 	fmt.Println("已保存对端配对证书；重启节点后生效")
+	if note := missingDeviceTagNote(granted); note != "" {
+		fmt.Println(note)
+	}
 	return nil
+}
+
+// missingDeviceTagNote says what a pairing without tag:device means. LAN discovery lists only
+// peers that carry tag:device as devices; the others show up as online and nothing more.
+func missingDeviceTagNote(tags []string) string {
+	if slices.Contains(tags, "tag:device") {
+		return ""
+	}
+	return "注意：未授予 tag:device 的对端只显示在线状态，不会出现在设备列表。需要它作为设备时，请加上 tag:device 后重新导入。"
 }

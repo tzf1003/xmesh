@@ -140,7 +140,14 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 	if err != nil {
 		return err
 	}
-	return show(c.Do(ctx, "POST", "/v1/pair/import", req, nil))
+	r, err := c.Do(ctx, "POST", "/v1/pair/import", req, nil)
+	// Without --tags the kernel grants tag:peer and tag:device; only explicit tags can leave it out.
+	if err == nil && r.Error() == nil && len(req.Tags) > 0 {
+		if note := missingDeviceTagNote(req.Tags); note != "" {
+			fmt.Fprintln(os.Stderr, note)
+		}
+	}
+	return show(r, err)
 }
 
 func controlPats(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
