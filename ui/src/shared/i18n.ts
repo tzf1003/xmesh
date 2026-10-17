@@ -4,6 +4,7 @@
 const zh = {
   "tray.tooltip": "xmesh：{status}",
   "status.offline": "内核未运行",
+  "status.unresponsive": "内核无响应",
   "status.mismatch": "内核版本不匹配",
   "status.ok": "正常",
   "status.degraded": "降级",
@@ -28,6 +29,8 @@ const zh = {
   "menu.loginItem": "登录时启动 UI",
   "menu.restartKernel": "重启内核",
   "menu.startKernel": "启动内核",
+  "menu.restartKernelNamed": "重启内核 {name}",
+  "menu.unresponsiveHint": "内核进程还在，但没有回应。可以重启内核。",
   "menu.startKernelNamed": "启动内核 {name}",
   "menu.instances": "切换节点",
   "menu.quit": "退出托盘",
@@ -60,6 +63,7 @@ export type MessageKey = keyof typeof zh;
 const en: Record<MessageKey, string> = {
   "tray.tooltip": "xmesh: {status}",
   "status.offline": "Kernel not running",
+  "status.unresponsive": "Kernel not responding",
   "status.mismatch": "Kernel version mismatch",
   "status.ok": "Healthy",
   "status.degraded": "Degraded",
@@ -85,6 +89,8 @@ const en: Record<MessageKey, string> = {
   "menu.restartKernel": "Restart kernel",
   "menu.startKernel": "Start kernel",
   "menu.startKernelNamed": "Start kernel {name}",
+  "menu.restartKernelNamed": "Restart kernel {name}",
+  "menu.unresponsiveHint": "The kernel process is there but not answering. You can restart the kernel.",
   "menu.instances": "Switch node",
   "menu.quit": "Quit tray",
   "menu.stopKernel": "Stop kernel…",

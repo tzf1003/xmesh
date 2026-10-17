@@ -148,7 +148,7 @@ function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
       </div>
       <Badge kind={STATUS_KIND[icon]}>
         <span data-testid="state" data-state={icon}>
-          {t(STATUS_KEY[icon])}
+          {t(icon === "offline" && snapshot.unresponsiveNodes.length > 0 ? "status.unresponsive" : STATUS_KEY[icon])}
         </span>
       </Badge>
     </header>
@@ -188,14 +188,34 @@ function startKernel(ctx: PageContext, node: string): void {
   });
 }
 
+/** The state file is there but nothing answers: restarting the node's service is the way back. */
+function restartUnresponsive(ctx: PageContext, node: string): void {
+  void getApi().restartUnresponsive(node).then((r) => {
+    if (!r.ok) ctx.toast(r.error.message, true);
+  });
+}
+
 function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
   const c = ctx.snapshot.connection;
+  const unresponsiveNodes = ctx.snapshot.unresponsiveNodes;
+  const unresponsive = kind === "offline" && unresponsiveNodes.length > 0;
   return (
     <div class="page">
-      <h1>{kind === "offline" ? t("offline.title") : t("mismatch.title")}</h1>
+      <h1>{kind === "offline" ? t(unresponsive ? "unresponsive.title" : "offline.title") : t("mismatch.title")}</h1>
       {kind === "offline" ? (
-        <Banner testid="offline">
-          {ctx.snapshot.stoppedNodes.length > 0 ? (
+        <Banner testid={unresponsive ? "unresponsive" : "offline"}>
+          {unresponsive ? (
+            <>
+              <p>{t("unresponsive.body")}</p>
+              <div class="row">
+                {unresponsiveNodes.map((node) => (
+                  <button key={node} type="button" class="btn primary" onClick={() => restartUnresponsive(ctx, node)} data-testid={`restart-unresponsive-${node}`}>
+                    {unresponsiveNodes.length === 1 ? t("unresponsive.restart") : t("unresponsive.restartNamed", { name: node })}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : ctx.snapshot.stoppedNodes.length > 0 ? (
             <>
               <p>{t("offline.startBody")}</p>
               <div class="row">
