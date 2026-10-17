@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"github.com/tzf1003/xmesh/internal/toolerr"
 	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
 	"os"
@@ -110,8 +111,13 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 	}
 	e = create(true)
 	if winjob.JobListDenied(e) {
-		// Store application execution aliases refuse the job-list attribute.
-		if e = create(false); e == nil {
+		// The target refuses the job-list attribute. A Job named in the failed
+		// creation cannot take its process afterwards, so bind a fresh one.
+		t.closeJob()
+		if t.job, e = winjob.New(); e == nil {
+			e = create(false)
+		}
+		if e == nil {
 			// Still suspended: a failure here leaves the process to the cleanup
 			// above, which terminates it without ever resuming it.
 			e = winjob.AssignAfterCreate(t.job, t.process.Process)
@@ -211,10 +217,41 @@ func (t *windowsTerminal) closeJob() {
 func (t *windowsTerminal) Wait() error { <-t.exited; return nil }
 func (t *windowsTerminal) PID() int    { return int(t.process.ProcessId) }
 func defaultShell() (string, error) {
-	if p, e := exec.LookPath("pwsh"); e == nil {
+	if p, e := exec.LookPath("pwsh"); e == nil && !storeAlias(p) {
+		return p, nil
+	}
+	// A Store alias is never chosen automatically (see unsupportedShell); an
+	// installed PowerShell 7 is preferred over the inbox Windows PowerShell.
+	if p, ok := installedPwsh(); ok {
 		return p, nil
 	}
 	return exec.LookPath("powershell")
+}
+
+// installedPwsh is the MSI/zip PowerShell 7 under %ProgramFiles%, found even
+// when PATH reaches a Store alias first.
+func installedPwsh() (string, bool) {
+	root := os.Getenv("ProgramFiles")
+	if root == "" {
+		return "", false
+	}
+	p := filepath.Join(root, "PowerShell", "7", "pwsh.exe")
+	if st, e := os.Stat(p); e != nil || st.IsDir() {
+		return "", false
+	}
+	return p, true
+}
+
+func storeAlias(path string) bool { return winjob.IsAppExecLink(path) }
+
+// unsupportedShell refuses a Store application execution alias: its package
+// activation puts descendants in a Job that is not ours, so closing the
+// terminal could not end them.
+func unsupportedShell(shell string) error {
+	if storeAlias(shell) {
+		return toolerr.AppExecAlias("shell", shell)
+	}
+	return nil
 }
 
 // alternateShell names the shell `auto` falls back to when the one it chose
