@@ -18,6 +18,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"github.com/tzf1003/xmesh/internal/winjob"
 	"github.com/tzf1003/xmesh/internal/winjob/winjobtest"
 	"golang.org/x/sys/windows"
 )
@@ -217,8 +218,13 @@ func windowsExecPowerShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Windows PowerShell is always present. PowerShell 7 is exercised when a real
+	// one can be launched: a Store alias is refused by exec and is not a shell.
 	for _, shellName := range []string{"powershell", "pwsh"} {
 		shell, lookupErr := osexec.LookPath(shellName)
+		if shellName == "pwsh" && (lookupErr != nil || winjob.IsAppExecLink(shell)) {
+			shell, lookupErr = installedPwsh()
+		}
 		if lookupErr != nil {
 			continue
 		}
@@ -469,4 +475,10 @@ func Test_WindowsExecRefusesAppExecAlias(t *testing.T) {
 	if !ok || failure.Code != "invalid_args" || failure.Fields["reason"] != "app_execution_alias" {
 		t.Fatalf("%#v", err)
 	}
+}
+
+// installedPwsh is the MSI/zip PowerShell 7 under %ProgramFiles%, which `auto`
+// also prefers over a Store alias.
+func installedPwsh() (string, error) {
+	return osexec.LookPath(filepath.Join(os.Getenv("ProgramFiles"), "PowerShell", "7", "pwsh.exe"))
 }

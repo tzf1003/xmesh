@@ -18,8 +18,11 @@ WINDOWS = sys.platform == "win32"
 
 
 def powershell(script):
-    """The exec.run arguments that run a PowerShell script, for hosts without sh."""
-    return {"cmd": "pwsh", "args": ["-NoProfile", "-NonInteractive", "-Command", script]}
+    """The exec.run arguments that run a PowerShell script, for hosts without sh.
+
+    Windows PowerShell is always installed; pwsh may be only a Store alias, which exec refuses.
+    """
+    return {"cmd": "powershell", "args": ["-NoProfile", "-NonInteractive", "-Command", script]}
 
 
 def address():
