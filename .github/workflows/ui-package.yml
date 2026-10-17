@@ -3,7 +3,7 @@
 # 三种触发：
 #   pull_request     只在打包相关文件变化时跑，只构建本机架构（win x64、mac arm64）并做启动冒烟，保持 PR 反馈快。
 #   workflow_dispatch  手动构建全部四个目标，产物挂在运行页上，用来在发布前试装。
-#   workflow_call    release.yml 在 T11 合入后调用（见 ui/README.md「并入发布流水线」），传入标签作为 version。
+#   workflow_call    release.yml 的 ui 作业调用（见 ui/README.md「并入发布流水线」），传入标签作为 version。
 #
 # 代码签名只由仓库 secrets 驱动，没有 secrets 时照常产出未签名安装包：
 #   WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD                 Windows Authenticode 证书（.pfx 的 base64）与口令
