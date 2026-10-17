@@ -380,7 +380,7 @@ func (o *ptyOutput) drain() {
 	o.t.Helper()
 	for deadline := time.Now().Add(90 * time.Second); !o.eof; {
 		if time.Now().After(deadline) {
-			o.t.Fatalf("terminal did not end: %q", o.text.String())
+			o.t.Fatalf("terminal did not end (processes below the test: %s): %q", descendantProcesses(), o.text.String())
 		}
 		result := o.call("pty.read", map[string]any{"session_id": o.session, "cursor": o.cursor, "wait_ms": 200})
 		o.text.WriteString(result["data"].(string))
@@ -435,7 +435,7 @@ func Test_WindowsManagedRunnerTerminalKill(t *testing.T) {
 	m, reg := newTerminalManager(t)
 	o := f.openTerminal(t, m, reg, "kill")
 	o.call("pty.write", map[string]any{"session_id": o.session, "data": "echo REA^DY\r\n"})
-	o.until(`\r\nREADY`)
+	o.until(terminalReadyLine)
 	// A descendant that would outlive the shell keeps running until the
 	// execution is reclaimed.
 	o.call("pty.write", map[string]any{"session_id": o.session, "data": "helper.exe -test.run=Test_WindowsManagedRunnerHelper -- --xmesh-runner-helper tree-timeout " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})

@@ -160,20 +160,7 @@ macOS 签名时启用 Hardened Runtime，内置的内核二进制也会一并被
 
 ### 并入发布流水线
 
-`ui-package.yml` 同时是可复用工作流。`release.yml` 的 `release` 作业接入时增加一个作业并把产物放进同一个预发布：
-
-```yaml
-  ui:
-    needs: verify
-    uses: ./.github/workflows/ui-package.yml
-    with:
-      version: ${{ github.ref_name }}
-    secrets: inherit
-  release:
-    needs: [build, ui]
-```
-
-`download-artifact` 的 `merge-multiple` 会把 `xmesh-ui-*` 一起收进 `dist/`，`SHA256SUMS.txt` 随之覆盖安装包。
+`release.yml` 的 `ui` 作业调用本工作流（`workflow_call`），同样排在 `verify` 之后。`release` 作业等待 `build` 与 `ui` 两者，所以安装包和内核归档进入同一个预发布。`release` 作业的 `download-artifact` 用 `merge-multiple` 把 `xmesh-ui-*` 收进 `dist/`，`SHA256SUMS.txt` 随之列入安装包。版本号取自标签，所以文件名形如 `xmesh-ui-0.1.0-beta.1-win-x64.exe`。
 
 ## 与契约的关系
 

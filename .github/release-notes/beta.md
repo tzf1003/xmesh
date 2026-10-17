@@ -19,6 +19,26 @@ shasum -a 256 --ignore-missing -c SHA256SUMS.txt    # macOS
 Windows (PowerShell): `(Get-FileHash .\xmesh-__TAG__-windows-amd64.zip).Hash` must equal the matching
 line in `SHA256SUMS.txt`. Then run `xmesh version`; it must print `xmesh __TAG__`.
 
+## Desktop app
+
+The tray app ships as an installer. Each installer also contains the `xmesh` binary for its platform, the
+same one as in the archives above.
+
+- Windows: `xmesh-ui-*-win-x64.exe` (64-bit Intel or AMD) or `xmesh-ui-*-win-arm64.exe` (ARM). Run it and
+  follow the installer.
+- macOS: `xmesh-ui-*-mac-arm64.dmg` (Apple silicon) or `xmesh-ui-*-mac-x64.dmg` (Intel). Open it and drag
+  xmesh to Applications.
+
+The installers are not code-signed, so the system warns on first launch:
+
+- Windows: SmartScreen shows "Windows protected your PC". Choose "More info", then "Run anyway".
+- macOS: Gatekeeper may say the app is damaged. Run `xattr -dr com.apple.quarantine /Applications/xmesh.app`
+  in Terminal and open the app again. Alternatively, open System Settings > Privacy & Security and choose
+  "Open Anyway".
+
+The panel window is still a placeholder in this build. Try the tray icon, its menu and the connection to
+the kernel.
+
 ## Known limits of this build
 
 - The binaries are not code-signed or notarized. macOS: run `xattr -d com.apple.quarantine xmesh` after
@@ -26,7 +46,7 @@ line in `SHA256SUMS.txt`. Then run `xmesh version`; it must print `xmesh __TAG__
 - Windows L2 isolation is not available in production yet: a Windows node configured with
   `agent.policy.isolation: L2` refuses exec and PTY with `sandbox.unavailable`. This is expected, and
   step F of the runbook checks for exactly that refusal.
-- There is no desktop UI in this build; everything is driven by the `xmesh` command line.
+- The desktop app is a first build. Apart from the tray app, everything is driven by the `xmesh` command line.
 - OAuth tokens are kept in memory only, so an ingress restart requires authorizing again.
 
 The release commit passed the Go, contract fixture and Headscale interop workflows, including the

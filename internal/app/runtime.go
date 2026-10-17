@@ -212,8 +212,12 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		localPeer = mesh.Peer{ID: "self", Name: c.Node.Name, Online: true, Tags: self.Tags}
 	}
 	var discover gateway.Discover
+	var changed <-chan struct{}
 	if network != nil {
 		discover = network.Peers
+		if notifier, ok := network.(mesh.Notifier); ok {
+			changed = notifier.Changed()
+		}
 	}
 	dial := func(ctx context.Context, peer mesh.Peer, p gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
 		if peer.ID == "self" {
@@ -233,7 +237,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		return gateway.RemoteDial(network.HTTPClient(peer))(ctx, peer, p, opts)
 	}
 	if c.HasRole("gateway") {
-		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log})
+		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Changed: changed, Dial: dial, Audit: log})
 		addGateway(g)
 		listener, e := net.Listen("tcp", c.Gateway.Listen)
 		if e != nil {
@@ -284,7 +288,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 				return e
 			}
 		}
-		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Dial: dial, Audit: log, PTYBudget: ptyBudget})
+		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Changed: changed, Dial: dial, Audit: log, PTYBudget: ptyBudget})
 		addGateway(g)
 		ingress = &ingressAdmin{auth: authorization, passwordFile: passwordFile}
 		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {

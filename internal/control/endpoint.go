@@ -65,9 +65,11 @@ func WriteEndpoint(dir string, e v1.ControlEndpointFile, readers ...string) erro
 	return err
 }
 
-// RemoveEndpoint deletes control.json if it still describes this process.
-func RemoveEndpoint(dir string, pid int) {
-	if e, err := ReadEndpoint(dir); err == nil && e.PID == pid {
+// RemoveEndpoint deletes control.json if it still describes the server that wrote owner: the same
+// process and the same start time. A replacement server in this process started later and must keep
+// its file.
+func RemoveEndpoint(dir string, owner v1.ControlEndpointFile) {
+	if e, err := ReadEndpoint(dir); err == nil && e.PID == owner.PID && e.StartedAt.Equal(owner.StartedAt.Time) {
 		_ = os.Remove(filepath.Join(dir, FileName))
 	}
 }

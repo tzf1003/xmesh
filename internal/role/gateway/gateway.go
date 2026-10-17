@@ -44,6 +44,8 @@ type Options struct {
 	LocalPeer mesh.Peer
 	Dial      Dial
 	Discover  Discover
+	// Changed, when set, wakes the discovery loop ahead of its 10 s poll (LAN announcements and goodbyes).
+	Changed   <-chan struct{}
 	Audit     *audit.Logger
 	PTYBudget *PTYBudget
 	// Quota is gateway.quota; zero fields take the built-in defaults.
@@ -128,6 +130,8 @@ func (g *Gateway) discover() {
 		select {
 		case <-g.ctx.Done():
 			return
+		case <-g.opts.Changed:
+			g.poll()
 		case <-ticker.C:
 			g.poll()
 			g.refreshViews()

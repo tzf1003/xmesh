@@ -30,6 +30,13 @@ type Network interface {
 	Close() error
 }
 
+// Notifier is implemented by networks that learn about peers from events (LAN announcements and
+// goodbyes), so a consumer need not wait for its next poll. Each receive means "Peers may have changed".
+// Signals coalesce: a consumer that is busy sees at most one pending signal.
+type Notifier interface {
+	Changed() <-chan struct{}
+}
+
 // Presence is implemented by networks that can say which nodes are online now.
 // authoritative is true when every node on the network is listed, so a missing
 // node has left; otherwise a missing node is only unobserved (CTR-ID-01).
