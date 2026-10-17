@@ -1,7 +1,9 @@
-name: Windows 偶发 winbox 测试复现
-# 反复运行 Test_WindowsManagedRunnerExecConcurrent、Test_WindowsAppContainerWorkspaceExecution
-# 、Test_WindowsManagedRunnerTerminalKill 和 Test_WindowsManagedRunnerTerminalInterrupt，失败时测试会带出 race 运行时日志与 helper 退出原因，
-# 用来确认这些偶发失败是否都来自 race 运行时启动期映射失败。
+name: Windows 偶发测试复现
+# 反复运行三个仍未确认根因的偶发测试，每个分片一个目标，并分别统计 PASS、FAIL 与 SKIP：
+#   delayed-delete：Test_WindowsAppContainerWorkspaceChangeMonitor/delayed-delete（USN 监视器的延迟删除阶段；只有一次重试）
+#   cancel：Test_WindowsAppContainerWorkspaceExecution/cancel（生命周期 helper 的就绪等待 20 秒超时）
+#   gate1：Test_Gate1_MCPRealHTTP（internal/role/agent 中 exec.run 30 秒超时，master 上出现过一次）
+# 与 CI 一样使用 -race，失败时输出相关行，并把每个分片的完整输出作为 artifact 上传。
 # pipe-close 作业另外反复关闭控制通道的命名管道监听器：先用裸 go-winio 监听器统计需要第二次 Close
 # 才能放行的轮数，再用带保护的监听器确认没有任何一轮卡住。
 on:
@@ -13,11 +15,15 @@ on:
 jobs:
   hunt:
     runs-on: windows-latest
-    timeout-minutes: 70
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        include:
+          - { shard: 1, target: delayed-delete }
+          - { shard: 2, target: delayed-delete }
+          - { shard: 3, target: cancel }
+          - { shard: 4, target: gate1 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -27,36 +33,37 @@ jobs:
           cache-dependency-path: |
             go.sum
             .github/workflows/windows-flake-hunt.yml
-      - name: Repeat the flaky tests
+      - name: Repeat the flaky test
         shell: pwsh
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
+          TARGET: ${{ matrix.target }}
           SHARD: ${{ matrix.shard }}
         run: |
-          $failed = 0
-          $runs = @(
-            @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 80 },
-            @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 40 },
-            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 },
-            @{ Name = 'TerminalInterrupt'; Pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$'; Count = 40 }
-          )
-          # Each shard repeats one test, so the four run in parallel instead of four times over.
-          $runs = @($runs[([int]$env:SHARD - 1)])
-          foreach ($run in $runs) {
-            $out = "hunt-$($run.Name).txt"
-            $pattern = $run.Pattern
-            $count = $run.Count
-            $started = Get-Date
-            go test -race ./internal/winbox -run $pattern -count $count -timeout 2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
-            if ($LASTEXITCODE -ne 0) { $failed = 1 }
-            "{0}: {1:n0}s for {2} iterations, go test exit {3}" -f $run.Name, ((Get-Date) - $started).TotalSeconds, $count, $LASTEXITCODE
+          switch ($env:TARGET) {
+            'delayed-delete' { $pkg = './internal/winbox'; $run = '^Test_WindowsAppContainerWorkspaceChangeMonitor$/^delayed-delete$'; $name = 'Test_WindowsAppContainerWorkspaceChangeMonitor/delayed-delete' }
+            'cancel'         { $pkg = './internal/winbox'; $run = '^Test_WindowsAppContainerWorkspaceExecution$/^cancel$'; $name = 'Test_WindowsAppContainerWorkspaceExecution/cancel' }
+            'gate1'          { $pkg = './internal/role/agent'; $run = '^Test_Gate1_MCPRealHTTP$'; $name = 'Test_Gate1_MCPRealHTTP' }
           }
-          "==== failures ===="
-          foreach ($run in $runs) {
-            "---- $($run.Name)"
-            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|sandbox helper image|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
-          }
-          if ($failed -ne 0) { exit 1 }
+          $count = 60
+          $out = "hunt-$($env:SHARD)-$($env:TARGET).txt"
+          $started = Get-Date
+          go test -race $pkg -run $run -count $count -v -timeout 5400s 2>&1 | Tee-Object -FilePath $out | Out-Null
+          $code = $LASTEXITCODE
+          $esc = [regex]::Escape($name)
+          $pass = @(Select-String -Path $out -Pattern "--- PASS: $esc ").Count
+          $fail = @(Select-String -Path $out -Pattern "--- FAIL: $esc ").Count
+          $skip = @(Select-String -Path $out -Pattern "--- SKIP: $esc ").Count
+          $retry = @(Select-String -Path $out -Pattern 'race runtime failed to start').Count
+          $elapsed = [int]((Get-Date) - $started).TotalSeconds
+          "==== $name: PASS $pass, FAIL $fail, SKIP $skip, race-start retries $retry, go test exit $code, ${elapsed}s ===="
+          Select-String -Path $out -Pattern '--- FAIL|_test.go:|timed out|readiness|DATA RACE|panic|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hunt-${{ matrix.shard }}-${{ matrix.target }}
+          path: hunt-*.txt
 
   pipe-close:
     runs-on: windows-latest
