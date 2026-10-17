@@ -38,11 +38,12 @@ jobs:
           )
           foreach ($run in $runs) {
             $out = "hunt-$($run.Name).txt"
-            $elapsed = Measure-Command {
-              go test -race ./internal/winbox -run $run.Pattern -count=$($run.Count) -timeout=2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
-            }
-            "{0}: {1:n0}s for {2} iterations" -f $run.Name, $elapsed.TotalSeconds, $run.Count
+            $pattern = $run.Pattern
+            $count = $run.Count
+            $started = Get-Date
+            go test -race ./internal/winbox -run $pattern -count $count -timeout 2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
             if ($LASTEXITCODE -ne 0) { $failed = 1 }
+            "{0}: {1:n0}s for {2} iterations, go test exit {3}" -f $run.Name, ((Get-Date) - $started).TotalSeconds, $count, $LASTEXITCODE
           }
           "==== failures ===="
           foreach ($run in $runs) {
