@@ -38,20 +38,25 @@ func (h *cliHost) Resume()                       { h.draining.Store(false) }
 // startKernelStub runs a real control server and returns its state directory.
 func startKernelStub(t *testing.T) (state, configPath string) {
 	t.Helper()
+	return startKernelStubWith(t, cliConfig, nil)
+}
+
+func startKernelStubWith(t *testing.T, configText string, ingress control.IngressAdmin) (state, configPath string) {
+	t.Helper()
 	dir := t.TempDir()
 	state = filepath.Join(dir, "s")
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
 	}
 	configPath = filepath.Join(dir, "xmesh.yaml")
-	if err := os.WriteFile(configPath, []byte(cliConfig), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte(configText), 0600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := config.NewStore(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := control.Start(control.Options{Host: &cliHost{}, Store: store, Version: "t", StateDir: state, AuditDir: filepath.Join(dir, "audit")})
+	s, err := control.Start(control.Options{Host: &cliHost{}, Store: store, Version: "t", StateDir: state, AuditDir: filepath.Join(dir, "audit"), Ingress: ingress})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +261,9 @@ func Test_CLIUsageMentionsControlChannel(t *testing.T) {
 			t.Errorf("usage 缺少 %q", word)
 		}
 	}
-	if !strings.Contains(controlUsage, "drain") || !strings.Contains(controlUsage, "config set") {
-		t.Error("control usage incomplete")
+	for _, word := range []string{"drain", "config set", "pair import", "pats create", "pats rotate", "ingress revoke", "ingress password"} {
+		if !strings.Contains(controlUsage, word) {
+			t.Errorf("control usage 缺少 %q", word)
+		}
 	}
 }

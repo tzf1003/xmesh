@@ -34,7 +34,19 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
   drain [--mode keep|kill]        排空本节点；resume 恢复
   resume
   config get                      读取配置原文与 ETag
-  config set [--if-match ETAG] [--dry-run] (--yaml-file 文件 | --set /路径=JSON ... | --delete /路径 ...)`
+  config set [--if-match ETAG] [--dry-run] (--yaml-file 文件 | --set /路径=JSON ... | --delete /路径 ...)
+  pair export [--out 文件]        导出本机配对文档（仅 lan 模式）
+  pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
+                                   导入对端配对文档；指纹须是另行核对过的，导入后重启节点生效
+  pats list                       列出 Gateway PAT（不含令牌）
+  pats create --name 名字 --scope S[,S...]
+                                   创建 PAT；令牌只在这条输出里出现一次
+  pats rotate 名字                轮转令牌（旧令牌立即失效，新令牌只出现一次）
+  pats delete 名字
+  ingress clients                 列出已注册的 OAuth 客户端
+  ingress revoke 客户端ID         撤销客户端及其已签发的令牌
+  ingress password [--password-file 文件]
+                                   改登录口令；口令从文件或标准输入读，不能放在命令行上`
 
 // controlTarget resolves which node's channel to talk to.
 func controlTarget(node, stateDir string) (control.Endpoint, error) {
@@ -138,6 +150,12 @@ func controlCommand(args []string) error {
 		return controlEvents(ctx, flags, target, rest)
 	case "config":
 		return controlConfig(ctx, flags, target, rest)
+	case "pair":
+		return controlPair(ctx, flags, target, rest)
+	case "pats":
+		return controlPats(ctx, flags, target, rest)
+	case "ingress":
+		return controlIngress(ctx, flags, target, rest)
 	}
 	return fmt.Errorf("未知的 control 子命令: %s\n\n%s", verb, controlUsage)
 }

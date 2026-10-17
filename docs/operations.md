@@ -411,14 +411,22 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 ```
 xmesh status --control [--node 名 | --state-dir 目录] [--json]
 xmesh control status|peers|sessions|events|audit|drain|resume|config get|config set ...
+xmesh control pair export [--out 文件] | pair import --file 文件 --fingerprint 指纹 [--tags ...]
+xmesh control pats list | create --name 名字 --scope S[,S...] | rotate 名字 | delete 名字
+xmesh control ingress clients | revoke 客户端ID | password [--password-file 文件]
 xmesh install|pair|uninstall|start|stop|restart ... --json
 ```
 
-`xmesh control` 的输出都是 JSON；`events` 每行一个事件（首条为 `hello`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。
+`xmesh control` 的输出都是 JSON；`events` 每行一个事件（首条为 `hello`）。
+
+`pair`、`pats`、`ingress` 三组命令调用上面同名的接口，节点不需要停：
+
+- `pair export` 打印本机公开配对文档（`{"pair": {...}}`）；加 `--out 文件` 则把文档写成 `0600` 的文件，stdout 只给出节点名与指纹，该文件可直接交给对端的 `xmesh pair --import` 或 `xmesh control pair import`。`pair import --file 文件 --fingerprint 指纹` 导入对端文件，`--fingerprint` 必须是从对端另行拿到的值（冒号与大小写不限），不能从配对文件里抄；`--tags` 缺省为 `tag:peer,tag:device`。两者都只在 `lan` 模式可用，导入后要重启节点才生效。`pair import` 也接受 `pair export` 的完整输出作文件。
+- `pats create` 的 `--scope` 可重复或用逗号分隔（语法见 [CTR-OAUTH-02](contracts/oauth-authz.md#ctr-oauth-02)，如 `devices:read`、`exec:<设备>`、`fs:read:<设备>`）；`pats rotate`、`pats delete` 的名字写在子命令后面或用 `--name`。令牌正文只在 `create` 和 `rotate` 的输出里出现一次，`list` 不含令牌，请在拿到时保存。删除成功输出 `{"deleted": true, "name": …}`。
+- `ingress clients` 列出 issuer 和已注册的 OAuth 客户端，`ingress revoke 客户端ID` 撤销并使其令牌失效，输出 `{"revoked": true, "client_id": …}`。`ingress password` 从 `--password-file` 或标准输入读新登录口令（交互终端下不回显），口令不接受命令行参数，以免进入 shell 历史和进程列表；长度 12 到 256 个字符，首尾空白会被去掉。口令不是来自文件时节点返回 `conflict`（`password_source_not_file`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。
 
 ### 尚未提供
 
-- 配对、PAT、入口客户端与口令的接口（契约里的 `pair`、`pats`、`ingress` 能力）。
 - `install --system` 的服务以 SYSTEM 运行。不带 `--state-dir` 时安装命令默认补上 `--state-dir %ProgramData%\xmesh\<节点名>`（`Test_InstallStateDir`），UI 和 `xmesh ... --control` 会枚举这个位置（`Test_ControlDiscoverSystemServices`）；管道名里的 SID 是 SYSTEM 的，以 `control.json` 的 `endpoint` 为准。已有的 SYSTEM 服务若原来用了默认目录（SYSTEM 的用户配置目录），升级后会换到新目录，需要重新配对或重新注册，或在重新安装时显式传原来的 `--state-dir`。
 - Windows 管道 DACL 以实际创建的对象检查（`Test_CONSEC12_LivePipeDACL`），并在打开 `windows_appcontainer` 的 `serve` 里验证 AppContainer 内的命令打开该管道被拒、本账户可以打开（`Test_WindowsL2ServeSandboxCannotOpenControlPipe`）。Linux 与 macOS 的 L2 沙箱真实拒绝测试（`Test_L2CannotConnectToControlSocket`）需要 `XMESH_TEST_L2=1`，由 `go.yml` 的 `l2-unix` 任务运行。
 
