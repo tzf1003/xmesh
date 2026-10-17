@@ -1,11 +1,17 @@
 package control
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
@@ -317,5 +323,67 @@ func Test_ControlDiscoverSystemServices(t *testing.T) {
 	found, err := Discover()
 	if err != nil || len(found) == 0 || found[0].Node != "svc-node" {
 		t.Fatalf("%v %+v", err, found)
+	}
+}
+
+func Test_WaitTimeout(t *testing.T) {
+	var done sync.WaitGroup
+	if !waitTimeout(&done, time.Second) {
+		t.Fatal("an empty WaitGroup should be finished")
+	}
+	done.Add(1)
+	if waitTimeout(&done, 20*time.Millisecond) {
+		t.Fatal("a pending WaitGroup reported finished")
+	}
+	done.Done()
+	if !waitTimeout(&done, time.Second) {
+		t.Fatal("a released WaitGroup should be finished")
+	}
+}
+
+// acceptStuckListener never returns from Accept, like a Serve loop that cannot be stopped.
+type acceptStuckListener struct {
+	accepting chan struct{}
+	block     chan struct{}
+}
+
+func (l *acceptStuckListener) Accept() (net.Conn, error) {
+	l.accepting <- struct{}{}
+	<-l.block
+	return nil, net.ErrClosed
+}
+
+func (l *acceptStuckListener) Close() error   { return nil }
+func (l *acceptStuckListener) Addr() net.Addr { return &net.TCPAddr{} }
+
+// stopHTTP must come back when ctx ends, even though Serve never returns.
+func Test_StopHTTPReturnsWhenServeNeverStops(t *testing.T) {
+	l := &acceptStuckListener{accepting: make(chan struct{}, 1), block: make(chan struct{})}
+	defer close(l.block)
+	srv := &http.Server{}
+	go func() { _ = srv.Serve(l) }()
+	<-l.accepting
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	stopped := make(chan struct{})
+	go func() {
+		stopHTTP(ctx, srv)
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stopHTTP waited for a Serve loop that never returns")
+	}
+}
+
+// Once the server is stopping, a request that still reaches it is refused as unavailable.
+func Test_ControlRefusesRequestsOnceStopping(t *testing.T) {
+	f := newFixture(t)
+	f.server.Close()
+	rec := httptest.NewRecorder()
+	f.server.serve(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d after Close, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }

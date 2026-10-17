@@ -62,7 +62,7 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			// reach a program started from the shell as a stray line feed.
 			write := func(data string) { o.call("pty.write", map[string]any{"session_id": o.session, "data": data + "\r"}) }
 			write("echo REA^DY")
-			o.until(`\r\nREADY`)
+			o.until(terminalReadyLine)
 			write(c.start)
 			o.until(c.ready)
 			if c.busy != "" {
@@ -96,6 +96,10 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			}
 			write("echo SURV^IVED-" + c.name)
 			o.until(`SURVIVED-` + c.name)
+			// The reply is printed before the prompt is drawn; typing "exit" into that redraw has
+			// left a session that never ended.
+			reply := `SURVIVED-` + c.name
+			o.untilAfter(strings.LastIndex(o.text.String(), reply), reply+`[^>]*workspace>`)
 			write("exit")
 			o.drain()
 			waitRunnerIdle(t, f, 1)

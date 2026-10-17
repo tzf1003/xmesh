@@ -171,11 +171,19 @@ func (s *Server) Close() {
 		// Streams end by themselves once the bus is closed; give them time to flush.
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if s.srv.Shutdown(ctx) != nil {
-			_ = s.srv.Close()
+		stopHTTP(ctx, s.srv)
+		// A listener that refuses to stop leaves Serve blocked in Accept; shutdown must not
+		// wait for it forever. While Serve may still hold the pipe, the endpoint stays, so
+		// discovery keeps pointing at a server that answers "stopping". The endpoint goes once
+		// Serve has really returned, however late that is.
+		if !waitTimeout(&s.done, serveStopTimeout) {
+			go func() {
+				s.done.Wait()
+				RemoveEndpoint(s.o.StateDir, s.endpoint)
+			}()
+			return
 		}
-		s.done.Wait()
-		RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
+		RemoveEndpoint(s.o.StateDir, s.endpoint)
 	})
 }
 
@@ -314,6 +322,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	w = rec
 	w.Header().Set(v1.HeaderVersion, v1.APIVersion)
 	w.Header().Set("Cache-Control", "no-store")
+	// A listener that outlives a stuck shutdown can still hand over connections. Once the server
+	// is stopping, none of them gets new work.
+	select {
+	case <-s.stop:
+		failWith(w, newError(v1.ErrUnavailable, "内核正在停止,不再接受请求"))
+		return
+	default:
+	}
 	// Browsers cannot reach a socket or pipe; a request that looks like one is wrong.
 	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
 		failWith(w, newError(v1.ErrForbidden, "控制通道不接受来自网页的请求"))
@@ -454,3 +470,41 @@ func ptr[T any](v T) *T { return &v }
 func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 func etagOf(b []byte) string { return "sha256-" + sum(b) }
+
+// serveStopTimeout bounds how long Close waits for the serving and polling goroutines.
+var serveStopTimeout = 5 * time.Second
+
+// stopHTTP shuts srv down and returns when that is done or ctx ends. net/http waits for every
+// Serve loop to return in both Shutdown and Close, so a listener that refuses to stop would hold
+// the caller for good. Shutdown therefore runs on its own goroutine. When ctx ends first, the
+// forced Close also runs on a goroutine, and it ends the connections that are still open.
+func stopHTTP(ctx context.Context, srv *http.Server) {
+	shut := make(chan error, 1)
+	go func() { shut <- srv.Shutdown(ctx) }()
+	select {
+	case err := <-shut:
+		// Shutdown returns only after its Serve loops have returned, so Close cannot block here.
+		if err != nil {
+			_ = srv.Close()
+		}
+	case <-ctx.Done():
+		go func() { _ = srv.Close() }()
+	}
+}
+
+// waitTimeout waits for wg and reports whether it finished within d.
+func waitTimeout(wg *sync.WaitGroup, d time.Duration) bool {
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-finished:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
