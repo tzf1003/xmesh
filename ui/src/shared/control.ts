@@ -28,7 +28,7 @@ export class ControlRequestError extends Error {
     readonly httpStatus?: number,
     readonly reason?: string,
     /** Remaining fields of the error body the panel shows (`field`, `current_etag`, `diagnostics`). */
-    readonly details: Pick<ControlError, "field" | "current_etag" | "diagnostics"> = {},
+    readonly details: Pick<ControlError, "field" | "current_etag" | "diagnostics" | "retry_after_ms"> = {},
   ) {
     super(message);
     this.name = "ControlRequestError";

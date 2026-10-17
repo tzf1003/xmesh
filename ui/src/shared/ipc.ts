@@ -14,9 +14,12 @@ import type {
   DrainResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
+  PairConnectResponse,
+  PairDiscoveredResponse,
   PairDocument,
   PairExportResponse,
   PairImportResponse,
+  PairPasswordState,
   PatList,
   PatSecret,
   SessionsResponse,
@@ -48,6 +51,11 @@ export const CHANNELS = {
   rotateIngressPassword: "xmesh:rotate-ingress-password",
   exportPair: "xmesh:export-pair",
   importPair: "xmesh:import-pair",
+  getPairPassword: "xmesh:get-pair-password",
+  setPairPassword: "xmesh:set-pair-password",
+  clearPairPassword: "xmesh:clear-pair-password",
+  discoverPairs: "xmesh:discover-pairs",
+  connectPair: "xmesh:connect-pair",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
   runSetup: "xmesh:run-setup",
@@ -86,6 +94,8 @@ export interface ActionError {
   reason?: string;
   field?: string;
   current_etag?: string;
+  /** rate_limited: how long to wait before trying again. */
+  retry_after_ms?: number;
   diagnostics?: ConfigDiagnostic[];
 }
 
@@ -111,6 +121,15 @@ export interface PairImportArgs {
   /** The fingerprint the user typed after reading it on the other device. */
   fingerprint: string;
   tags?: string[];
+}
+
+/** Pairing with a device found on the LAN or typed in. The password is the other device's connection password. */
+export interface PairConnectArgs {
+  /** Host or host:port; the kernel uses port 7433 when none is given. */
+  address?: string;
+  /** The certificate fingerprint the user saw in discovery; the kernel refuses any other certificate. */
+  fingerprint?: string;
+  password: string;
 }
 
 export interface SetupParams {
@@ -165,6 +184,12 @@ export interface PanelApi {
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>>;
   exportPair(): Promise<DataResult<PairExportResponse>>;
   importPair(args: PairImportArgs): Promise<DataResult<PairImportResponse>>;
+  getPairPassword(): Promise<DataResult<PairPasswordState>>;
+  /** Sets or changes this node's connection password. The value is write-only: nothing comes back that contains it. */
+  setPairPassword(password: string): Promise<DataResult<PairPasswordState>>;
+  clearPairPassword(): Promise<ActionResult>;
+  discoverPairs(): Promise<DataResult<PairDiscoveredResponse>>;
+  connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>>;
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
@@ -199,6 +224,11 @@ export const PANEL_API_METHODS = [
   "rotateIngressPassword",
   "exportPair",
   "importPair",
+  "getPairPassword",
+  "setPairPassword",
+  "clearPairPassword",
+  "discoverPairs",
+  "connectPair",
   "queryAudit",
   "getRecentCalls",
   "onCalls",
@@ -320,6 +350,40 @@ export function parsePassword(v: unknown): string | undefined {
   if (typeof v !== "string" || hasEdgeSpace(v)) return undefined;
   const n = [...v].length;
   return n >= PASSWORD_MIN && n <= PASSWORD_MAX ? v : undefined;
+}
+
+/** The kernel's connection-password rules (docs/contracts/control.md CTR-CTL-08): 10 to 128 characters, no edge whitespace. */
+export const PAIR_PASSWORD_MIN = 10;
+export const PAIR_PASSWORD_MAX = 128;
+
+export function parsePairPassword(v: unknown): string | undefined {
+  if (typeof v !== "string" || hasEdgeSpace(v)) return undefined;
+  const n = [...v].length;
+  return n >= PAIR_PASSWORD_MIN && n <= PAIR_PASSWORD_MAX ? v : undefined;
+}
+
+/** A fingerprint as the user may copy it, with or without colons and in any case; returned in the kernel's form. */
+function cleanFingerprint(v: unknown): string | undefined {
+  if (typeof v !== "string" || !FINGERPRINT.test(v)) return undefined;
+  return v.replace(/:/g, "").toLowerCase();
+}
+
+export function parsePairConnect(v: unknown): PairConnectArgs | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["address", "fingerprint", "password"])) return undefined;
+  const password = parsePairPassword(v.password);
+  if (password === undefined) return undefined;
+  const out: PairConnectArgs = { password };
+  if (v.address !== undefined) {
+    if (typeof v.address !== "string" || v.address.trim() === "" || v.address.length > 260) return undefined;
+    out.address = v.address.trim();
+  }
+  if (v.fingerprint !== undefined) {
+    const fp = cleanFingerprint(v.fingerprint);
+    if (fp === undefined) return undefined;
+    out.fingerprint = fp;
+  }
+  if (out.address === undefined && out.fingerprint === undefined) return undefined;
+  return out;
 }
 
 export function parsePairImport(v: unknown): PairImportArgs | undefined {

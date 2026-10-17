@@ -7,7 +7,10 @@ import type {
   ConfigPutResponse,
   ConfigResponse,
   IngressClient,
+  PairConnectRequest,
+  PairDiscoveredDevice,
   PairDocument,
+  PairPasswordState,
   PatInfo,
   SessionsResponse,
 } from "../src/shared/control";
@@ -46,6 +49,10 @@ export class PanelData {
   issuer: string | null = "https://win-dev-01.tail1234.ts.net";
   localPair: PairDocument = fixture<{ pair: PairDocument }>("PairExportResponse.ok").pair;
   imported: { name: string; tags: string[] }[] = [];
+  /** This node's connection password, as far as the panel can tell: the fake keeps only the state. */
+  pairPassword: PairPasswordState = { set: false, updated_at: null, failed_attempts: 0, locked_until: null };
+  /** Unpaired devices the fake sees on the LAN. Connecting to one removes it from the list. */
+  discovered: PairDiscoveredDevice[] = fixture<{ devices: PairDiscoveredDevice[] }>("PairDiscoveredResponse.two").devices;
   audit: AuditEvent[] = fixture<AuditResponse>("AuditResponse.page").events;
   auditEnabled = true;
   /** Config writes that reached the "disk". */
@@ -196,6 +203,9 @@ export class PanelData {
 
   private pair(method: string, p: string, body: unknown): RouteResult {
     if (this.mode !== "lan") return err(409, "unsupported_mode", "只有 lan 模式支持配对");
+    if (p === "/v1/pair/password") return this.pairPasswordRoute(method, body);
+    if (method === "GET" && p === "/v1/pair/discovered") return ok({ devices: this.discovered });
+    if (method === "POST" && p === "/v1/pair/connect") return this.connectPair(body);
     if (method === "POST" && p === "/v1/pair/export") return ok({ pair: this.localPair });
     if (method === "POST" && p === "/v1/pair/import") {
       const b = body as { pair?: PairDocument; fingerprint?: string; tags?: string[] } | null;
@@ -207,6 +217,43 @@ export class PanelData {
       return ok({ name: b.pair.name, fingerprint: b.pair.fingerprint, tags, restart_required: true });
     }
     return err(404, "not_found", "没有这个接口");
+  }
+
+  /**
+   * The connection password. The peer password the fake accepts is PEER_PASSWORD; addresses ending in
+   * ".limited" answer rate_limited and ".unreachable" answer unreachable, so tests can reach each error.
+   */
+  private pairPasswordRoute(method: string, body: unknown): RouteResult {
+    if (method === "GET") return ok(this.pairPassword);
+    if (method === "DELETE") {
+      this.pairPassword = { set: false, updated_at: null, failed_attempts: 0, locked_until: null };
+      return { status: 204 };
+    }
+    if (method === "PUT") {
+      const pw = (body as { password?: unknown } | null)?.password;
+      if (typeof pw !== "string" || [...pw].length < 10 || [...pw].length > 128 || pw.trim() !== pw) {
+        return err(400, "invalid_args", "连接密码长度须为 10 到 128 个字符，首尾不能有空白", { field: "password" });
+      }
+      this.pairPassword = { set: true, updated_at: iso(), failed_attempts: 0, locked_until: null };
+      return ok(this.pairPassword);
+    }
+    return err(404, "not_found", "没有这个接口");
+  }
+
+  private connectPair(body: unknown): RouteResult {
+    const b = body as PairConnectRequest | null;
+    if (!b || typeof b.password !== "string") return err(400, "invalid_args", "缺少 password", { field: "password" });
+    if (b.address === undefined && b.fingerprint === undefined) return err(400, "invalid_args", "需要 address 或 fingerprint", { field: "address" });
+    const device = b.fingerprint === undefined ? undefined : this.discovered.find((d) => d.fingerprint === b.fingerprint);
+    const address = b.address ?? device?.address;
+    if (address === undefined) return err(404, "not_found", "内网中没有发现这台设备");
+    if (address.endsWith(".unreachable")) return err(422, "pair_rejected", "无法连接到对端", { reason: "unreachable" });
+    if (address.endsWith(".limited")) return err(429, "rate_limited", "对端正在限制配对尝试，请稍后再试", { retry_after_ms: 30000 });
+    if (b.password !== PEER_PASSWORD) return err(422, "pair_rejected", "连接密码不正确，或对端不是待配对的 xmesh 设备", { reason: "wrong_password" });
+    const name = device?.name ?? "peer-typed";
+    this.discovered = this.discovered.filter((d) => d.name !== name);
+    this.imported.push({ name, tags: ["tag:peer", "tag:device"] });
+    return ok({ name, fingerprint: device?.fingerprint ?? "3f2a9c4e1b7d8a60f5e2c9b1d4a7e8f03c6b5a29d1e4f7a8b0c3d6e9f2a5b8c1", address, tags: ["tag:peer", "tag:device"] });
   }
 
   private auditQuery(q: URLSearchParams): RouteResult {
@@ -222,6 +269,9 @@ export class PanelData {
     return ok({ enabled: true, events: events.slice(0, limit), next_cursor: null } satisfies AuditResponse);
   }
 }
+
+/** The connection password the fake's peers accept. */
+export const PEER_PASSWORD = "correct horse battery staple";
 
 /** The YAML without comments and blank lines: what the fake treats as the configuration itself. */
 function semantic(content: string): string {

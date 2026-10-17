@@ -13,8 +13,11 @@ import type {
   DrainMode,
   IngressClientsResponse,
   IngressPasswordResponse,
+  PairConnectResponse,
+  PairDiscoveredResponse,
   PairExportResponse,
   PairImportResponse,
+  PairPasswordState,
   PatList,
   PatSecret,
   SessionsResponse,
@@ -24,6 +27,7 @@ import type {
   ActionResult,
   ConfigSaveRequest,
   DataResult,
+  PairConnectArgs,
   PairImportArgs,
   PatCreateArgs,
 } from "../shared/ipc";
@@ -38,6 +42,7 @@ function toError(e: unknown): ActionError {
     if (e.reason !== undefined) out.reason = e.reason;
     if (e.details.field !== undefined) out.field = e.details.field;
     if (e.details.current_etag !== undefined) out.current_etag = e.details.current_etag;
+    if (e.details.retry_after_ms !== undefined) out.retry_after_ms = e.details.retry_after_ms;
     if (e.details.diagnostics !== undefined) out.diagnostics = e.details.diagnostics;
     return out;
   }
@@ -126,6 +131,29 @@ export class PanelService {
     const body: Record<string, unknown> = { pair: args.pair, fingerprint: args.fingerprint };
     if (args.tags !== undefined) body.tags = args.tags;
     return this.data("pair", (c) => c.call("POST", "/v1/pair/import", { body }));
+  }
+
+  getPairPassword(): Promise<DataResult<PairPasswordState>> {
+    return this.data("pair", (c) => c.call("GET", "/v1/pair/password"));
+  }
+
+  setPairPassword(password: string): Promise<DataResult<PairPasswordState>> {
+    return this.data("pair", (c) => c.call("PUT", "/v1/pair/password", { body: { password } }));
+  }
+
+  clearPairPassword(): Promise<ActionResult> {
+    return this.action("pair", (c) => c.call("DELETE", "/v1/pair/password"));
+  }
+
+  discoverPairs(): Promise<DataResult<PairDiscoveredResponse>> {
+    return this.data("pair", (c) => c.call("GET", "/v1/pair/discovered"));
+  }
+
+  connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>> {
+    const body: Record<string, unknown> = { password: args.password };
+    if (args.address !== undefined) body.address = args.address;
+    if (args.fingerprint !== undefined) body.fingerprint = args.fingerprint;
+    return this.data("pair", (c) => c.call("POST", "/v1/pair/connect", { body }));
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {

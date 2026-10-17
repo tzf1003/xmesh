@@ -7,7 +7,7 @@ import { ShellController } from "../../src/main/controller";
 import { discoverInstances } from "../../src/main/discovery";
 import { PanelService } from "../../src/main/panel-service";
 import type { Capability } from "../../src/shared/control";
-import { etagOf } from "../../testserver/panel-routes";
+import { PEER_PASSWORD, etagOf } from "../../testserver/panel-routes";
 import { FakeKernel } from "../../testserver/server";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
@@ -143,6 +143,41 @@ test("pair export, and import only with a matching fingerprint", async () => {
   const good = await service.importPair({ pair, fingerprint: FP, tags: ["tag:device"] });
   assert.ok(good.ok);
   assert.deepEqual(k.panel.imported, [{ name: "peer-2", tags: ["tag:device"] }]);
+});
+
+test("connection password: set, read back without the value, clear; connect to a discovered device", async () => {
+  const { k, service } = await setup();
+  const before = await service.getPairPassword();
+  assert.ok(before.ok);
+  assert.equal(before.data.set, false);
+  const set = await service.setPairPassword("correct horse battery");
+  assert.ok(set.ok);
+  assert.equal(set.data.set, true);
+  assert.equal(JSON.stringify(set).includes("correct horse"), false, "the password is never echoed back");
+  assert.deepEqual(last(k, "PUT", "/v1/pair/password")?.body, { password: "correct horse battery" });
+
+  const found = await service.discoverPairs();
+  assert.ok(found.ok);
+  const device = found.data.devices[0]!;
+  const wrong = await service.connectPair({ address: device.address, fingerprint: device.fingerprint, password: "wrong password here" });
+  assert.ok(!wrong.ok);
+  assert.equal(wrong.error.code, "pair_rejected");
+  assert.equal(wrong.error.reason, "wrong_password");
+  const limited = await service.connectPair({ address: "10.0.0.9.limited", password: PEER_PASSWORD });
+  assert.ok(!limited.ok);
+  assert.equal(limited.error.code, "rate_limited");
+  assert.equal(limited.error.retry_after_ms, 30000);
+
+  const good = await service.connectPair({ fingerprint: device.fingerprint, password: PEER_PASSWORD });
+  assert.ok(good.ok, JSON.stringify(good));
+  assert.equal(good.data.name, device.name);
+  assert.ok(last(k, "POST", "/v1/pair/connect"));
+  const after = await service.discoverPairs();
+  assert.ok(after.ok);
+  assert.equal(after.data.devices.some((d) => d.name === device.name), false, "a paired device leaves the discovery list");
+
+  assert.deepEqual(await service.clearPairPassword(), { ok: true });
+  assert.equal(k.panel.pairPassword.set, false);
 });
 
 test("pairing outside lan mode is reported as unsupported_mode", async () => {
