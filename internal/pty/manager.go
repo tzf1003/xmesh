@@ -255,6 +255,7 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	if shell == "" {
 		shell = cfg.DefaultShell
 	}
+	auto := shell == "" || shell == "auto"
 	shell, e = DefaultShell(shell)
 	if e != nil {
 		return nil, toolerr.Args("shell")
@@ -266,8 +267,9 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 	var launch string
 	var argv []string
 	var innerTerminal bool
+	baseEnv := env
 	if runner == nil {
-		launch, argv, env, innerTerminal, e = p.SandboxPTY(shell, nil, resolved.Path, env)
+		launch, argv, env, innerTerminal, e = p.SandboxPTY(shell, nil, resolved.Path, baseEnv)
 		if e != nil {
 			return nil, e
 		}
@@ -296,6 +298,17 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 		term, e = startManaged(runner, shell, resolved.Path, env, a.Cols, a.Rows)
 	} else {
 		term, e = start(launch, argv, resolved.Path, env, a.Cols, a.Rows, innerTerminal)
+		if e != nil && auto {
+			// `auto` must not strand the caller on a first choice the system
+			// cannot launch; an explicitly requested shell is never replaced.
+			if alt, ok := alternateShell(shell); ok && p.Command(alt, nil) == nil {
+				if l, av, ev, inner, pe := p.SandboxPTY(alt, nil, resolved.Path, baseEnv); pe == nil {
+					if t2, e2 := start(l, av, resolved.Path, ev, a.Cols, a.Rows, inner); e2 == nil {
+						term, e = t2, nil
+					}
+				}
+			}
+		}
 	}
 	m.mu.Lock()
 	if e != nil {
@@ -559,43 +572,65 @@ func (m *Manager) reaper() {
 		}
 	}
 }
+
+// CloseAll kills every live session but leaves the manager usable, so a
+// drain with kill can be followed by Resume and new pty.open calls. Shutdown is
+// reserved for process exit.
+func (m *Manager) CloseAll() {
+	m.mu.Lock()
+	sessions := m.liveLocked()
+	m.mu.Unlock()
+	m.killSessions(sessions)
+}
+
+// Shutdown stops the reaper, refuses new sessions for good and kills the rest.
 func (m *Manager) Shutdown() {
 	m.once.Do(func() {
 		close(m.stop)
 		<-m.done
 		m.mu.Lock()
 		m.closing = true
-		sessions := []*Session{}
-		for _, s := range m.sessions {
-			if s.State != "closed" {
-				sessions = append(sessions, s)
-			}
-		}
+		sessions := m.liveLocked()
 		m.mu.Unlock()
-		for _, s := range sessions {
-			<-s.started
-			m.mu.Lock()
-			term := s.term
-			m.mu.Unlock()
-			if term != nil {
-				_ = term.Signal("KILL")
-			}
-		}
-		for _, s := range sessions {
-			if s.term != nil {
-				for {
-					s.mu.Lock()
-					eof := s.eof
-					changed := s.changed
-					s.mu.Unlock()
-					if eof {
-						break
-					}
-					<-changed
-				}
-			}
-		}
+		m.killSessions(sessions)
 	})
+}
+func (m *Manager) liveLocked() []*Session {
+	sessions := []*Session{}
+	for _, s := range m.sessions {
+		if s.State != "closed" {
+			sessions = append(sessions, s)
+		}
+	}
+	return sessions
+}
+
+// killSessions signals KILL to each session and waits until its output has
+// reached EOF.
+func (m *Manager) killSessions(sessions []*Session) {
+	for _, s := range sessions {
+		<-s.started
+		m.mu.Lock()
+		term := s.term
+		m.mu.Unlock()
+		if term != nil {
+			_ = term.Signal("KILL")
+		}
+	}
+	for _, s := range sessions {
+		if s.term != nil {
+			for {
+				s.mu.Lock()
+				eof := s.eof
+				changed := s.changed
+				s.mu.Unlock()
+				if eof {
+					break
+				}
+				<-changed
+			}
+		}
+	}
 }
 func DefaultShell(shell string) (string, error) {
 	if shell != "" && shell != "auto" {

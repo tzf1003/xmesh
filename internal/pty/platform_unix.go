@@ -84,3 +84,6 @@ func defaultShell() (string, error) {
 	}
 	return exec.LookPath(shell)
 }
+
+// alternateShell has no Unix counterpart: $SHELL is the only automatic choice.
+func alternateShell(string) (string, bool) { return "", false }

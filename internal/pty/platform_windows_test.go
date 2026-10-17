@@ -129,7 +129,17 @@ func Test_WindowsPTYInterruptAndResize(t *testing.T) {
 	output.until(t, `INTERRUPT_SURVIVED`)
 }
 
-func Test_WindowsPTYProcessTreeCleanup(t *testing.T) {
+func Test_WindowsPTYProcessTreeCleanup(t *testing.T) { windowsPTYProcessTreeCleanup(t) }
+
+// A shell that refuses the job-list attribute (Store alias) is bound to the Job
+// before it is resumed, so its descendants still die with it.
+func Test_WindowsPTYProcessTreeCleanupJobListDenied(t *testing.T) {
+	denyJobList = true
+	t.Cleanup(func() { denyJobList = false })
+	windowsPTYProcessTreeCleanup(t)
+}
+
+func windowsPTYProcessTreeCleanup(t *testing.T) {
 	for _, action := range []string{"TERM", "KILL", "shell-exit"} {
 		t.Run(action, func(t *testing.T) {
 			term, output := nativeTerminal(t)

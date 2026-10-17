@@ -39,7 +39,7 @@
 | `unauthorized` | scope 或 tag 不允许 | `scope` 或 `tag`、`tool` |
 | `not_found` | 设备、工具、output_ref 不存在 | `name` |
 | `timeout` | 命令或后端调用超过 timeout | `timeout_ms` |
-| `internal` | 未分类的本机故障 | `op` |
+| `internal` | 未分类的本机故障 | `op`；Windows 上底层是 Win32 错误时另带 `win32_error`（错误码）与 `reason`（系统给出的文字） |
 
 `invalid_cwd.reason = denied` 与 `policy_denied` 的分工：路径根本不在 allow/deny 规则允许的范围内，用 `invalid_cwd`。路径合法，但某条命名规则拒绝这次操作（递归删除、命令黑名单、环境变量），用 `policy_denied`。
 

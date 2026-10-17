@@ -7,6 +7,7 @@ import (
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,10 @@ type windowsTerminal struct {
 	consoleOnce   sync.Once
 	closeOnce     sync.Once
 }
+
+// denyJobList makes the job-list attribute fail like a Store application
+// execution alias does, so tests can exercise the late-assignment fallback.
+var denyJobList bool
 
 var updateConsoleAttribute = windows.NewLazySystemDLL("kernel32.dll").NewProc("UpdateProcThreadAttribute")
 
@@ -62,22 +67,8 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 	if e := windows.CreatePseudoConsole(windows.Coord{X: int16(cols), Y: int16(rows)}, inR, outW, 0, &t.console); e != nil {
 		return nil, e
 	}
-	attrs, e := windows.NewProcThreadAttributeList(2)
-	if e != nil {
-		return nil, e
-	}
-	defer attrs.Delete()
-	if e = winjob.Apply(attrs, t.job); e != nil {
-		return nil, e
-	}
-	// This attribute takes the HPCON value itself, unlike attributes that take
-	// a pointer to a value. Pass it as an opaque Win32 handle at the syscall boundary.
-	if ok, _, callErr := updateConsoleAttribute.Call(uintptr(unsafe.Pointer(attrs.List())), 0, windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, uintptr(t.console), unsafe.Sizeof(t.console), 0, 0); ok == 0 {
-		return nil, callErr
-	}
 	// Explicit standard handles prevent the child from using the hosting
 	// process's redirected handles; ConPTY supplies the attached console.
-	si := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})), Flags: windows.STARTF_USESTDHANDLES}, ProcThreadAttributeList: attrs.List()}
 	command, e := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{shell}, args...)))
 	if e != nil {
 		return nil, e
@@ -87,10 +78,46 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 		return nil, e
 	}
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
-	// The job-list attribute binds the process during creation. Keep it suspended
-	// until all hosting-side initialization has completed.
-	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED)
-	if e = windows.CreateProcess(nil, command, nil, nil, false, flags, &block[0], dir, &si.StartupInfo, &t.process); e != nil {
+	// The process is created suspended and stays so until all hosting-side
+	// initialization has completed. With the job-list attribute the Job is bound
+	// inside CreateProcess; without it the Job is assigned before the resume.
+	create := func(bindJob bool) error {
+		if bindJob && denyJobList {
+			return windows.ERROR_ACCESS_DENIED
+		}
+		count := uint32(1)
+		if bindJob {
+			count = 2
+		}
+		attrs, e := windows.NewProcThreadAttributeList(count)
+		if e != nil {
+			return e
+		}
+		defer attrs.Delete()
+		if bindJob {
+			if e = winjob.Apply(attrs, t.job); e != nil {
+				return e
+			}
+		}
+		// This attribute takes the HPCON value itself, unlike attributes that take
+		// a pointer to a value. Pass it as an opaque Win32 handle at the syscall boundary.
+		if ok, _, callErr := updateConsoleAttribute.Call(uintptr(unsafe.Pointer(attrs.List())), 0, windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, uintptr(t.console), unsafe.Sizeof(t.console), 0, 0); ok == 0 {
+			return callErr
+		}
+		si := windows.StartupInfoEx{StartupInfo: windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfoEx{})), Flags: windows.STARTF_USESTDHANDLES}, ProcThreadAttributeList: attrs.List()}
+		flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED)
+		return windows.CreateProcess(nil, command, nil, nil, false, flags, &block[0], dir, &si.StartupInfo, &t.process)
+	}
+	e = create(true)
+	if winjob.JobListDenied(e) {
+		// Store application execution aliases refuse the job-list attribute.
+		if e = create(false); e == nil {
+			// Still suspended: a failure here leaves the process to the cleanup
+			// above, which terminates it without ever resuming it.
+			e = winjob.AssignAfterCreate(t.job, t.process.Process)
+		}
+	}
+	if e != nil {
 		return nil, e
 	}
 	if _, e = windows.ResumeThread(t.process.Thread); e != nil {
@@ -188,4 +215,16 @@ func defaultShell() (string, error) {
 		return p, nil
 	}
 	return exec.LookPath("powershell")
+}
+
+// alternateShell names the shell `auto` falls back to when the one it chose
+// could not be started, for example a pwsh Store alias that the system refuses
+// to launch. Only pwsh has an alternate; the result is still subject to policy.
+func alternateShell(shell string) (string, bool) {
+	name := strings.ToLower(filepath.Base(shell))
+	if name != "pwsh" && name != "pwsh.exe" {
+		return "", false
+	}
+	p, e := exec.LookPath("powershell")
+	return p, e == nil
 }
