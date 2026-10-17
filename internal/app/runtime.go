@@ -84,7 +84,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if c.Mesh.Mode == "tailnet" {
 			network, e = mesh.OpenTailnet(ctx, c, filepath.Join(o.StateDir, "network"))
 		} else {
-			network, e = mesh.OpenLAN(ctx, c.Node.Name, filepath.Join(o.StateDir, "lan"), mesh.LANOptions{MDNS: c.Mesh.LAN.MDNS})
+			network, e = mesh.OpenLAN(ctx, c.Node.Name, filepath.Join(o.StateDir, "lan"), mesh.LANOptions{MDNS: c.Mesh.LAN.MDNS, Interface: c.Mesh.LAN.Interface})
 		}
 		if e != nil {
 			return e

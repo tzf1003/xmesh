@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/kardianos/service"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
 )
@@ -69,5 +72,28 @@ func Test_InstallStateDir(t *testing.T) {
 		if got := installStateDir(c.goos, env, c.system, c.flag, "n1"); got != c.want {
 			t.Errorf("%+v: got %q", c, got)
 		}
+	}
+}
+
+// A node whose service was never installed gets a stable code, not the platform tool's text.
+func Test_ServiceNotInstalledIsReportedByCode(t *testing.T) {
+	out, err := captureStdout(func() error {
+		return withJSON("stop", []string{"--json"}, func([]string) error { return notInstalled("xmesh-n1") })
+	})
+	if err == nil {
+		t.Fatal("a missing service must still fail")
+	}
+	var got struct {
+		OK    bool           `json:"ok"`
+		Error map[string]any `json:"error"`
+	}
+	if e := json.Unmarshal([]byte(out), &got); e != nil {
+		t.Fatalf("%v: %q", e, out)
+	}
+	if got.OK || got.Error["error"] != "not_found" || got.Error["reason"] != "not_installed" || got.Error["name"] != "xmesh-n1" {
+		t.Fatalf("%v", got)
+	}
+	if !serviceMissing(fmt.Errorf("wrapped: %w", service.ErrNotInstalled)) || serviceMissing(errors.New("exit status 1")) {
+		t.Fatal("serviceMissing")
 	}
 }

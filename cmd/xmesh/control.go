@@ -27,7 +27,10 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
 
 子命令:
   status | peers | sessions       读取状态、对端、会话
-  events [--last-event-id ID] [--count N]  订阅事件流，每行一个事件（首条为 hello）；
+  events [--last-event-id ID] [--count N] [--timeout 时长]
+                                   订阅事件流，每行一个事件（首条为 hello）；
+                                   --count 把 hello 也算在内；空闲节点除 hello 外没有事件，
+                                   所以要在有限时间内退出请加 --timeout（如 5s），到时正常退出；
                                    带 --last-event-id 时先补发其后的事件，id 失效则先收到 reset
   audit [--tool T --device D --caller C --status ok|error --event E
          --since RFC3339 --until RFC3339 --limit N --cursor C]
@@ -197,17 +200,27 @@ func queryEscape(s string) string {
 	return b.String()
 }
 
-// controlEvents prints each event's JSON on one line until the count is reached
-// or the stream ends.
+// controlEvents prints each event's JSON on one line until the count is reached,
+// the timeout passes or the stream ends. The hello event counts; an idle node sends nothing
+// else (heartbeats are SSE comments), so a count alone can wait for ever.
 func controlEvents(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
 	last := flags.String("last-event-id", "", "从该事件之后续传")
-	count := flags.Int("count", 0, "收到这么多事件后退出；0 表示一直订阅")
+	count := flags.Int("count", 0, "收到这么多事件（含 hello）后退出；0 表示不按数量退出")
+	timeout := flags.Duration("timeout", 0, "订阅这么长时间后正常退出，如 5s；0 表示不限时")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *timeout < 0 || *count < 0 {
+		return fmt.Errorf("--count 和 --timeout 不能为负")
 	}
 	c, err := target.client()
 	if err != nil {
 		return err
+	}
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
 	}
 	headers := map[string]string{}
 	if *last != "" {

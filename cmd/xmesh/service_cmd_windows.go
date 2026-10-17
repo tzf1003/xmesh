@@ -1,11 +1,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os/exec"
 
 	"github.com/kardianos/service"
 	"golang.org/x/sys/windows"
 )
+
+// errTaskMissing means the logon task of this node is not registered for the current user.
+var errTaskMissing = fmt.Errorf("%w: 登录任务不存在", service.ErrNotInstalled)
+
+// platformServiceMissing recognises the SCM's "no such service".
+func platformServiceMissing(err error) bool {
+	return errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST)
+}
 
 // userTaskAction drives the logon task that install registers for the current user.
 func userTaskAction(action string, c *service.Config) error {
@@ -18,6 +28,15 @@ func userTaskAction(action string, c *service.Config) error {
 		return err
 	}
 	name := userTaskName(c.Name, user.User.Sid.String())
+	// A task that was never registered is reported by schtasks in the system language, so ask
+	// it directly: /Query exits 1 when there is no such task.
+	if _, err := taskCommand(directory, "/Query", "/TN", name); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return errTaskMissing
+		}
+		return err
+	}
 	run := func(args ...string) error { _, err := taskCommand(directory, args...); return err }
 	switch action {
 	case "uninstall":

@@ -13,3 +13,5 @@ func userTaskAction(string, *service.Config) error {
 }
 
 func installerSID() string { return "" }
+
+func platformServiceMissing(error) bool { return false }

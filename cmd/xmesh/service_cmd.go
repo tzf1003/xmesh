@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,18 @@ import (
 
 // serviceName is the name install registers: xmesh-<node>.
 func serviceName(node string) string { return "xmesh-" + node }
+
+// notInstalled is the error for start, stop, restart and uninstall on a node whose service or
+// logon task was never installed. The platform tools say so in the system language (schtasks
+// may even answer in a legacy code page), so callers get a stable code instead of their text.
+func notInstalled(serviceID string) *toolerr.Error {
+	return toolerr.New("not_found", "服务未安装: "+serviceID+"（先运行 xmesh install）", "name", serviceID, "reason", "not_installed")
+}
+
+// serviceMissing reports whether err means the service does not exist.
+func serviceMissing(err error) bool {
+	return errors.Is(err, service.ErrNotInstalled) || platformServiceMissing(err)
+}
 
 // serviceCommand implements uninstall, start, stop and restart for the service
 // that install created. It resolves the node name from --config or --name.
@@ -42,6 +55,9 @@ func serviceCommand(action string, args []string) error {
 	c := &service.Config{Name: serviceID, DisplayName: "XmeSh", Option: service.KeyValue{"UserService": true, "RunAtLoad": true, "KeepAlive": true}}
 	if runtime.GOOS == "windows" && !*system {
 		if e := userTaskAction(action, c); e != nil {
+			if serviceMissing(e) {
+				return notInstalled(serviceID)
+			}
 			return e
 		}
 	} else {
@@ -60,6 +76,9 @@ func serviceCommand(action string, args []string) error {
 			e = s.Restart()
 		}
 		if e != nil {
+			if _, status := s.Status(); serviceMissing(e) || serviceMissing(status) {
+				return notInstalled(serviceID)
+			}
 			return e
 		}
 	}
@@ -79,7 +98,12 @@ func withJSON(action string, args []string, run func([]string) error) error {
 	captured, err := captureStdout(func() error { return run(rest) })
 	result := map[string]any{"ok": err == nil, "action": action}
 	if err != nil {
-		result["error"] = toolerr.New("internal", err.Error(), "op", "cli."+action).Object()
+		var typed *toolerr.Error
+		if errors.As(err, &typed) {
+			result["error"] = typed.Object()
+		} else {
+			result["error"] = toolerr.New("internal", err.Error(), "op", "cli."+action).Object()
+		}
 	}
 	messages := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(captured), "\n") {

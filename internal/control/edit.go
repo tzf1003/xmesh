@@ -2,6 +2,7 @@ package control
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -19,7 +20,8 @@ type Edit struct {
 }
 
 // ApplyEdits changes src through a YAML node tree, so comments and key order of
-// everything not edited survive.
+// everything not edited survive. A source that is a JSON object stays one: re-encoding it as YAML
+// would turn it into a flow mapping with unquoted keys that JSON tools cannot read.
 func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(src, &doc); err != nil {
@@ -41,6 +43,13 @@ func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 		}
 	}
 	var out bytes.Buffer
+	if json.Valid(src) && bytes.HasPrefix(bytes.TrimSpace(src), []byte("{")) {
+		if err := writeNodeJSON(&out, doc.Content[0], ""); err != nil {
+			return nil, err
+		}
+		out.WriteByte('\n')
+		return out.Bytes(), nil
+	}
 	enc := yaml.NewEncoder(&out)
 	enc.SetIndent(2)
 	if err := enc.Encode(&doc); err != nil {
@@ -107,4 +116,62 @@ func edit(m *yaml.Node, segments []string, e Edit) error {
 		return fmt.Errorf("%q 不是映射", key)
 	}
 	return edit(child, rest, e)
+}
+
+// writeNodeJSON renders a node tree as indented JSON, keeping key order.
+func writeNodeJSON(out *bytes.Buffer, n *yaml.Node, indent string) error {
+	inner := indent + "  "
+	switch n.Kind {
+	case yaml.MappingNode:
+		if len(n.Content) == 0 {
+			out.WriteString("{}")
+			return nil
+		}
+		out.WriteString("{\n")
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key, err := json.Marshal(n.Content[i].Value)
+			if err != nil {
+				return err
+			}
+			out.WriteString(inner)
+			out.Write(key)
+			out.WriteString(": ")
+			if err = writeNodeJSON(out, n.Content[i+1], inner); err != nil {
+				return err
+			}
+			if i+2 < len(n.Content) {
+				out.WriteByte(',')
+			}
+			out.WriteByte('\n')
+		}
+		out.WriteString(indent + "}")
+	case yaml.SequenceNode:
+		if len(n.Content) == 0 {
+			out.WriteString("[]")
+			return nil
+		}
+		out.WriteString("[\n")
+		for i, item := range n.Content {
+			out.WriteString(inner)
+			if err := writeNodeJSON(out, item, inner); err != nil {
+				return err
+			}
+			if i+1 < len(n.Content) {
+				out.WriteByte(',')
+			}
+			out.WriteByte('\n')
+		}
+		out.WriteString(indent + "]")
+	default:
+		var v any
+		if err := n.Decode(&v); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		out.Write(raw)
+	}
+	return nil
 }
