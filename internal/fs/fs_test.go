@@ -124,15 +124,18 @@ func Test_CTRFS06_07_MetadataAndDelete(t *testing.T) {
 	call(t, s, "fs.mkdir", Object{"path": "nested/deep", "parents": true})
 	call(t, s, "fs.write", Object{"path": "nested/deep/a", "content": "a"})
 	code(t, s, "fs.delete", Object{"path": "nested"}, "policy_denied")
+	// Creating a symlink needs a privilege on Windows that a standard account may lack; the
+	// rest of the test does not depend on it.
 	if e := os.Symlink(filepath.Join(root, "nested"), filepath.Join(root, "link")); e != nil {
-		t.Fatal(e)
-	}
-	if call(t, s, "fs.stat", Object{"path": "link"})["symlink"] != true {
-		t.Fatal("symlink metadata lost")
-	}
-	call(t, s, "fs.delete", Object{"path": "link"})
-	if _, e := os.Stat(filepath.Join(root, "nested/deep/a")); e != nil {
-		t.Fatal("symlink target removed", e)
+		t.Logf("symlinks are not available, symlink checks skipped: %v", e)
+	} else {
+		if call(t, s, "fs.stat", Object{"path": "link"})["symlink"] != true {
+			t.Fatal("symlink metadata lost")
+		}
+		call(t, s, "fs.delete", Object{"path": "link"})
+		if _, e := os.Stat(filepath.Join(root, "nested/deep/a")); e != nil {
+			t.Fatal("symlink target removed", e)
+		}
 	}
 	call(t, s, "fs.move", Object{"from": "nested/deep/a", "to": "b"})
 	code(t, s, "fs.move", Object{"from": "b", "to": "b"}, "conflict")

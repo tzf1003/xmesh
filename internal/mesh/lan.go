@@ -67,7 +67,7 @@ type lanCandidate struct {
 // virtualNameParts and virtualNamePrefixes recognise adapters that exist for VMs, containers and
 // tunnels, which are the wrong place to announce a LAN node on a machine that also has a real NIC.
 var (
-	virtualNameParts    = strings.Fields("vmnet vmware virtualbox vboxnet vethernet hyper-v docker wsl tailscale zerotier podman virbr flannel")
+	virtualNameParts    = strings.Fields("vmnet vmware virtualbox vboxnet vethernet hyper-v docker wsl tailscale zerotier mihomo clash podman virbr flannel")
 	virtualNamePrefixes = []string{"veth", "br-", "tun", "tap", "utun", "cni"}
 )
 

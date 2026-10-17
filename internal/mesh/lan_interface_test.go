@@ -22,6 +22,7 @@ func Test_LANPicksTheRealInterface(t *testing.T) {
 		lanNIC("vEthernet (Default Switch)", true, "172.20.64.1"),
 		lanNIC("vEthernet (WSL)", true, "172.28.0.1"),
 		lanNIC("Clash", true, "198.18.0.1"),
+		lanNIC("Mihomo", true, "192.168.99.1"),
 		lanNIC("Tailscale", true, "100.64.0.5"),
 		lanNIC("WLAN", true, "192.168.31.15"),
 		lanNIC("Ethernet", false, "10.0.0.5"),
@@ -56,7 +57,7 @@ func Test_LANFallsBackToVirtualAndRefusesNone(t *testing.T) {
 			t.Fatalf("%s looks virtual", name)
 		}
 	}
-	for _, name := range []string{"veth12ab", "br-1a2b", "virbr0", "utun3", "tun0", "docker0", "vEthernet (WSL)"} {
+	for _, name := range []string{"veth12ab", "br-1a2b", "virbr0", "utun3", "tun0", "docker0", "vEthernet (WSL)", "Mihomo", "Clash"} {
 		if !looksVirtual(name) {
 			t.Fatalf("%s should look virtual", name)
 		}
