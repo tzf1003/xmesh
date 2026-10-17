@@ -383,7 +383,7 @@ AppContainer ACL 读取、合并、写入使用按卷号和 128 位文件 ID 命
 
 | 平台 | 端点 | 谁能连 |
 | --- | --- | --- |
-| macOS、Linux | 状态目录下 `control.sock`（`0600`，目录 `0700`）；路径超过 100 字节时落到 `$TMPDIR/xmesh-<uid>/<节点名>.sock`（契约写作 `control.sock`；加上节点名是为了同一用户的多个节点不互相占用） | 对端 uid 必须等于内核运行用户（`SO_PEERCRED` / `LOCAL_PEERCRED`），其他用户的连接直接断开 |
+| macOS、Linux | 状态目录下 `control.sock`（`0600`，目录 `0700`）；路径超过 100 字节时落到 `/tmp/xmesh-<uid>/<节点名>.sock`（固定位置，不随 `$TMPDIR` 变化；契约写作 `control.sock`；加上节点名是为了同一用户的多个节点不互相占用）。回退路径仍超过 100 字节时启动失败，错误给出长度与上限，此时缩短节点名 | 对端 uid 必须等于内核运行用户（`SO_PEERCRED` / `LOCAL_PEERCRED`），其他用户的连接直接断开 |
 | Windows | 命名管道 `\\.\pipe\xmesh-<SID>-<节点名>`，创建时拒绝远程客户端，名字不可被抢占 | DACL 只含运行用户、`SYSTEM`、`Administrators`；`install --system` 额外加入安装者的 SID（`serve --control-allow-sid`）。AppContainer 不在其中 |
 
 状态目录里的 `control.json` 记录端点、PID、内核版本和 `control_api`，节点退出时删除。UI 与 CLI 按 `<用户配置目录>/xmesh/*/control.json` 找到本机所有节点；自定义了 `--state-dir` 的节点用 `--state-dir` 指定。

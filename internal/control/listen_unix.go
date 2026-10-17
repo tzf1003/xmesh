@@ -3,7 +3,6 @@
 package control
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,19 +17,23 @@ import (
 // maxSocketPath is below the smallest sun_path (104 bytes on macOS, 108 on Linux).
 const maxSocketPath = 100
 
+// socketFallbackRoot holds the per-user socket directory used when the state directory's path is too
+// long. It is a fixed location rather than $TMPDIR, which can be too long for a socket path as well.
+var socketFallbackRoot = "/tmp"
+
 // Listen opens control.sock in the state directory (mode 0600 in a 0700 directory)
 // and returns a listener that accepts only connections from the kernel's own uid.
 func Listen(o ListenOptions) (net.Listener, Bound, error) {
 	path := filepath.Join(o.StateDir, "control.sock")
 	if len(path) > maxSocketPath {
-		dir := filepath.Join(os.TempDir(), "xmesh-"+strconv.Itoa(os.Geteuid()))
-		if err := privateDir(dir); err != nil {
+		fallback := filepath.Join(socketFallbackRoot, "xmesh-"+strconv.Itoa(os.Geteuid()), o.Node+".sock")
+		if len(fallback) > maxSocketPath {
+			return nil, Bound{}, fmt.Errorf("控制通道套接字路径过长：%s 为 %d 字节，上限 %d 字节；请缩短节点名", fallback, len(fallback), maxSocketPath)
+		}
+		if err := privateDir(filepath.Dir(fallback)); err != nil {
 			return nil, Bound{}, err
 		}
-		path = filepath.Join(dir, o.Node+".sock")
-		if len(path) > maxSocketPath {
-			return nil, Bound{}, errors.New("控制通道套接字路径过长")
-		}
+		path = fallback
 	}
 	l, err := listenUnix(path, uint32(os.Geteuid()))
 	if err != nil {

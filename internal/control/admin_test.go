@@ -183,6 +183,9 @@ func Test_ControlPats(t *testing.T) {
 	if _, ok := f.store.Get().Gateway.PATs["ci"]; ok {
 		t.Fatal("entry kept")
 	}
+	if raw, _ := os.ReadFile(f.path); strings.Contains(string(raw), "pats") {
+		t.Fatalf("empty pats left behind:\n%s", raw)
+	}
 	apiError(t, f.do("DELETE", "/v1/pats/ci", nil, nil), v1.ErrNotFound)
 	var after v1.PatList
 	decodeAs(t, f.ok("GET", "/v1/pats", nil, "PatList"), &after)
