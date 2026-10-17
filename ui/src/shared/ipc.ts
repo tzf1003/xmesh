@@ -296,8 +296,13 @@ export function parseClientId(v: unknown): string | undefined {
   return typeof v === "string" && CLIENT_ID.test(v) ? v : undefined;
 }
 
+/** The kernel trims the password file on read, so edge whitespace would not survive a restart and is refused. */
+export function hasEdgeSpace(v: string): boolean {
+  return v.trim() !== v;
+}
+
 export function parsePassword(v: unknown): string | undefined {
-  if (typeof v !== "string") return undefined;
+  if (typeof v !== "string" || hasEdgeSpace(v)) return undefined;
   const n = [...v].length;
   return n >= PASSWORD_MIN && n <= PASSWORD_MAX ? v : undefined;
 }

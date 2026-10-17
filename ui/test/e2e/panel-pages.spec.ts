@@ -156,7 +156,12 @@ test("ingress: revoke a client and rotate the password", async () => {
 
   await page.getByTestId("pw-new").fill("short");
   await expect(page.getByTestId("pw-submit")).toBeDisabled();
+  await page.getByTestId("pw-new").fill(" a-long-enough-password ");
+  await page.getByTestId("pw-again").fill(" a-long-enough-password ");
+  await expect(page.getByTestId("pw-edge-space")).toBeVisible();
+  await expect(page.getByTestId("pw-submit")).toBeDisabled();
   await page.getByTestId("pw-new").fill("a-long-enough-password");
+  await expect(page.getByTestId("pw-edge-space")).toHaveCount(0);
   await page.getByTestId("pw-again").fill("something-else-entirely");
   await expect(page.getByTestId("pw-mismatch")).toBeVisible();
   await page.getByTestId("pw-again").fill("a-long-enough-password");

@@ -80,6 +80,9 @@ test("ingress password length is counted in characters, 12 to 256", () => {
   assert.equal(parsePassword("a".repeat(257)), undefined);
   assert.ok(parsePassword("密码".repeat(6)), "12 characters, 36 bytes");
   assert.equal(parsePassword(12), undefined);
+  assert.equal(parsePassword(" " + "a".repeat(12)), undefined, "the kernel refuses edge whitespace");
+  assert.equal(parsePassword("a".repeat(12) + "\n"), undefined);
+  assert.equal(parsePassword("a b c d e f g h"), "a b c d e f g h", "inner spaces are fine");
 });
 
 test("pair import requires the typed fingerprint and a well-formed document", () => {
