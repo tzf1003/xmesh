@@ -112,7 +112,8 @@ export function generateConfig(p: SetupParams, denyFile: string): string {
     lines.push("  lan:", "    mdns: true");
   }
   if (p.roles.includes("gateway")) {
-    lines.push("gateway:", '  listen: "127.0.0.1:8080"');
+    // Every interface, with access limited per request by gateway.access (localhost, LAN and tailnet by default).
+    lines.push("gateway:", '  listen: ":8080"');
   }
   // Always present: the schema requires it even when the agent role is off. LAN peers are trusted as
   // `tag:peer` (pairing); tailnet devices authenticate with the `tag:device` tag the control plane grants.

@@ -15,6 +15,8 @@ import type {
   ConfigPutResponse,
   ConfigResponse,
   DrainMode,
+  GatewayUpdateRequest,
+  GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
   PairExportResponse,
@@ -35,6 +37,7 @@ import {
   type DenyFileResponse,
   type DenyFileSaveRequest,
   type DenyFileSaved,
+  type GatewayPatRotated,
   type PairImportArgs,
   type PatCreateArgs,
 } from "../shared/ipc";
@@ -64,6 +67,9 @@ function readOptional(file: string): string | undefined {
 function etagOf(text: string): string {
   return text === "" ? "" : `sha256-${crypto.createHash("sha256").update(text).digest("hex")}`;
 }
+
+/** The PAT that is the gateway's own token: created by the kernel, rotated from the panel. */
+export const GATEWAY_PAT = "default";
 
 function toError(e: unknown): ActionError {
   if (e instanceof ControlRequestError) {
@@ -197,6 +203,27 @@ export class PanelService {
   /** `name` is a validated node name, so it is safe as a path segment. */
   rotatePat(name: string): Promise<DataResult<PatSecret>> {
     return this.data("pats", (c) => c.call("POST", `/v1/pats/${encodeURIComponent(name)}/rotate`));
+  }
+
+  /**
+   * PUT /v1/gateway: the whole reach replacement. Access and hosts apply at once; a changed listen
+   * needs a restart, which the response's `restart_required` says.
+   */
+  updateGateway(req: GatewayUpdateRequest): Promise<DataResult<GatewayUpdateResponse>> {
+    return this.data("gateway", (c) => c.call("PUT", "/v1/gateway", { body: req }));
+  }
+
+  /**
+   * Rotates the gateway PAT. The kernel answers with the new token too; it is dropped here, so only the
+   * PAT's name and modification time reach the page. The token is in the token file, which is all anyone needs.
+   */
+  rotateGatewayPat(): Promise<DataResult<GatewayPatRotated>> {
+    return this.data("pats", async (c) => {
+      const list = (await c.call("GET", "/v1/pats")) as PatList;
+      if (!list.pats.some((p) => p.name === GATEWAY_PAT)) throw new ControlRequestError("not_found", "the kernel has no default PAT");
+      const secret = (await c.call("POST", `/v1/pats/${encodeURIComponent(GATEWAY_PAT)}/rotate`)) as PatSecret;
+      return { name: secret.pat.name, modified_at: secret.pat.modified_at };
+    });
   }
 
   deletePat(name: string): Promise<ActionResult> {

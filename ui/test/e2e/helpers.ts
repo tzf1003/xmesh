@@ -45,7 +45,7 @@ export function menuHas(menu: MenuNode[], id: string): MenuNode | undefined {
 }
 
 /** Starts a fake kernel and the Electron app pointed at its state directory. */
-export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boolean } = {}): Promise<Harness> {
+export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boolean; lang?: "zh" | "en" } = {}): Promise<Harness> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-ui-e2e-"));
   const kernel = await FakeKernel.start({ pingMs: 300, ...opts.kernel });
   const publish = (id = "node-a"): void => void kernel.writeManifest(root, id);
@@ -61,7 +61,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       ...process.env,
       XMESH_UI_TEST: "1",
       XMESH_UI_STATE_ROOT: root,
-      XMESH_UI_LANG: "zh",
+      XMESH_UI_LANG: opts.lang ?? "zh",
     },
   });
 

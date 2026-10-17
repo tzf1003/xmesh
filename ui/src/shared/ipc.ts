@@ -12,6 +12,8 @@ import type {
   ConfigResponse,
   DrainMode,
   DrainResponse,
+  GatewayUpdateRequest,
+  GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
   PairDocument,
@@ -21,6 +23,7 @@ import type {
   PatSecret,
   SessionsResponse,
 } from "./control";
+import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
 
@@ -38,6 +41,9 @@ export const CHANNELS = {
   restartUnresponsive: "xmesh:restart-unresponsive",
   selectInstance: "xmesh:select-instance",
   copy: "xmesh:copy",
+  copyGateway: "xmesh:copy-gateway",
+  updateGateway: "xmesh:update-gateway",
+  rotateGatewayPat: "xmesh:rotate-gateway-pat",
   openPath: "xmesh:open-path",
   setLoginItem: "xmesh:set-login-item",
   openExternal: "xmesh:open-external",
@@ -66,11 +72,27 @@ export const SNAPSHOT_EVENT = "xmesh:snapshot";
 /** Main -> renderer push channel: the newest `call` events (metadata only), newest last. */
 export const CALLS_EVENT = "xmesh:calls";
 
-/** Environment variable the copied Codex config reads the gateway PAT from; the token itself never passes through the UI. */
-export const CODEX_PAT_ENV = "XMESH_PAT";
+/**
+ * Connect text for the local gateway. Each one carries the gateway token, which the main process reads
+ * from the token file; the renderer only names the kind and the address.
+ */
+export const GATEWAY_COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig"] as const;
+export type GatewayCopyKind = (typeof GATEWAY_COPY_KINDS)[number];
 
-export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig", "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
+export const COPY_KINDS = [...GATEWAY_COPY_KINDS, "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
+
+/** Copy one gateway address in one of the connect formats. `url` must be an address the kernel reports now. */
+export interface GatewayCopyRequest {
+  kind: GatewayCopyKind;
+  url: string;
+}
+
+/** What rotating the gateway token reports: the PAT and its new modification time. The token itself is written to the file and never returned. */
+export interface GatewayPatRotated {
+  name: string;
+  modified_at: string | null;
+}
 
 export const PATH_KINDS = ["config", "logs", "audit"] as const;
 export type PathKind = (typeof PATH_KINDS)[number];
@@ -166,6 +188,7 @@ export interface PanelApi {
   restartUnresponsive(node: string): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
   copy(kind: CopyKind): Promise<ActionResult>;
+  copyGateway(request: GatewayCopyRequest): Promise<ActionResult>;
   openPath(kind: PathKind): Promise<ActionResult>;
   setLoginItem(enabled: boolean): Promise<ActionResult>;
   openExternal(key: ExternalKey): Promise<ActionResult>;
@@ -182,7 +205,11 @@ export interface PanelApi {
   listPats(): Promise<DataResult<PatList>>;
   createPat(args: PatCreateArgs): Promise<DataResult<PatSecret>>;
   rotatePat(name: string): Promise<DataResult<PatSecret>>;
+  /** Rotates the PAT named "default" (the gateway token). The new token is never returned to the page. */
+  rotateGatewayPat(): Promise<DataResult<GatewayPatRotated>>;
   deletePat(name: string): Promise<ActionResult>;
+  /** Replaces the gateway's reach settings (PUT /v1/gateway). */
+  updateGateway(request: GatewayUpdateRequest): Promise<DataResult<GatewayUpdateResponse>>;
   listIngressClients(): Promise<DataResult<IngressClientsResponse>>;
   revokeIngressClient(clientId: string): Promise<ActionResult>;
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>>;
@@ -213,6 +240,7 @@ export const PANEL_API_METHODS = [
   "restartUnresponsive",
   "selectInstance",
   "copy",
+  "copyGateway",
   "openPath",
   "setLoginItem",
   "openExternal",
@@ -222,7 +250,9 @@ export const PANEL_API_METHODS = [
   "listPats",
   "createPat",
   "rotatePat",
+  "rotateGatewayPat",
   "deletePat",
+  "updateGateway",
   "listIngressClients",
   "revokeIngressClient",
   "rotateIngressPassword",
@@ -249,6 +279,38 @@ export function parseInstanceId(v: unknown): string | undefined {
 
 export function parseCopyKind(v: unknown): CopyKind | undefined {
   return (COPY_KINDS as readonly unknown[]).includes(v) ? (v as CopyKind) : undefined;
+}
+
+export function isGatewayCopyKind(v: unknown): v is GatewayCopyKind {
+  return (GATEWAY_COPY_KINDS as readonly unknown[]).includes(v);
+}
+
+export function parseGatewayCopy(v: unknown): GatewayCopyRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["kind", "url"])) return undefined;
+  if (!isGatewayCopyKind(v.kind) || typeof v.url !== "string" || v.url.length > 512) return undefined;
+  return { kind: v.kind, url: v.url };
+}
+
+const GATEWAY_LIST_MAX = 64;
+
+function uniqueStrings(v: unknown, valid: (s: string) => boolean): string[] | undefined {
+  if (!Array.isArray(v) || v.length > GATEWAY_LIST_MAX) return undefined;
+  const out: string[] = [];
+  for (const x of v) {
+    if (typeof x !== "string" || !valid(x) || out.includes(x)) return undefined;
+    out.push(x);
+  }
+  return out;
+}
+
+/** The whole reach replacement: a listen value the contract allows, and valid, distinct access entries and host names. */
+export function parseGatewayUpdate(v: unknown): GatewayUpdateRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["listen", "access", "hosts"])) return undefined;
+  if (typeof v.listen !== "string" || !isListen(v.listen)) return undefined;
+  const access = uniqueStrings(v.access, isAccessEntry);
+  const hosts = uniqueStrings(v.hosts, isGatewayHost);
+  if (access === undefined || hosts === undefined) return undefined;
+  return { listen: v.listen, access, hosts };
 }
 
 export function parsePathKind(v: unknown): PathKind | undefined {

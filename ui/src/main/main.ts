@@ -4,6 +4,7 @@ import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
 import { ShellController } from "./controller";
+import { GatewayCredentials } from "./gateway-token";
 import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
@@ -101,7 +102,7 @@ async function start(): Promise<void> {
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
     : electronPlatform(showPanel, notifyError);
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
 
   const runAction = (a: Action): void => {
     void actions.dispatch(a);

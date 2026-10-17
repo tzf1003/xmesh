@@ -1,5 +1,5 @@
 {
-  "api_version": "1.1",
+  "api_version": "1.2",
   "routes": [
     {
       "id": "control.status.get",
@@ -216,6 +216,24 @@
       "if_match": "none",
       "errors": [
         "not_found"
+      ]
+    },
+    {
+      "id": "control.gateway.update",
+      "method": "PUT",
+      "path": "/v1/gateway",
+      "capability": "gateway",
+      "since": "1.2",
+      "query": null,
+      "body": "urn:xmesh:schema:control-gateway:1#/$defs/GatewayUpdateRequest",
+      "response": "urn:xmesh:schema:control-gateway:1#/$defs/GatewayUpdateResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "role_disabled",
+        "config_invalid",
+        "internal"
       ]
     },
     {
