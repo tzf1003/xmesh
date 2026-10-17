@@ -245,7 +245,7 @@ test("start runs the CLI for a stopped node only; any other name is refused with
   platform.runCli = async (command, node) => {
     seen.push(`${command}:${node}`);
   };
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, NO_CREDENTIALS);
   assert.deepEqual(await actions.dispatch({ type: "start-kernel", node: "beta2-mac" }), { ok: true });
   assert.deepEqual(await actions.startKernel("office-pc"), { ok: false, error: { code: "not_found", message: "no stopped node with that name" } });
   assert.deepEqual(seen, ["start:beta2-mac"]);
@@ -258,7 +258,7 @@ test("restart of an unresponsive node runs the CLI for that node only; any other
   platform.runCli = async (command, node) => {
     seen.push(`${command}:${node}`);
   };
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, NO_CREDENTIALS);
   assert.deepEqual(await actions.dispatch({ type: "restart-unresponsive", node: "n1" }), { ok: true });
   assert.deepEqual(await actions.restartUnresponsive("office-pc"), { ok: false, error: { code: "not_found", message: "no unresponsive node with that name" } });
   assert.deepEqual(seen, ["restart:n1"]);
