@@ -166,7 +166,7 @@ func Test_WindowsAppContainerProcessConsole(t *testing.T) {
 						t.Error(err)
 					}
 				}()
-				body, err := os.ReadFile(os.Args[0])
+				body, err := sandboxHelperImage()
 				if err != nil {
 					t.Fatal(err)
 				}

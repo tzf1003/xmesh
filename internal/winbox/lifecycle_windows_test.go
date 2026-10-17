@@ -80,7 +80,7 @@ func Test_WindowsAppContainerWorkspaceExecution(t *testing.T) {
 			}()
 			journal, profile, monitor := e.journal, e.profile, e.monitor
 			helper := filepath.Join(profile.Directory(), "lifecycle-helper.exe")
-			body, err := os.ReadFile(os.Args[0])
+			body, err := sandboxHelperImage()
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -163,7 +163,7 @@ func Test_WindowsAppContainerWorkspaceMoveImport(t *testing.T) {
 				f.reopen(t)
 			}
 			helper := filepath.Join(f.p.Directory(), "move-import-helper.exe")
-			body, err := os.ReadFile(os.Args[0])
+			body, err := sandboxHelperImage()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -359,7 +359,7 @@ func Test_WindowsAppContainerWorkspaceMoveImportFault(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = owner.reap(context.Background(), 1); _ = owner.Close() })
 			helper := filepath.Join(f.p.Directory(), "move-fault-helper.exe")
-			body, err := os.ReadFile(os.Args[0])
+			body, err := sandboxHelperImage()
 			if err != nil {
 				t.Fatal(err)
 			}

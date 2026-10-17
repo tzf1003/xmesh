@@ -116,7 +116,7 @@ func Test_WindowsAppContainerWorkspaceExecutionImport(t *testing.T) {
 				}
 				// Exercise imported access through the lifecycle's supervised start.
 				helper := filepath.Join(e.profile.Directory(), "import-lifecycle-helper.exe")
-				body, err := os.ReadFile(os.Args[0])
+				body, err := sandboxHelperImage()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -229,7 +229,7 @@ func Test_WindowsAppContainerWorkspaceExecutionImportFault(t *testing.T) {
 		}
 	}()
 	helper := filepath.Join(e.profile.Directory(), "import-fault-helper.exe")
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}

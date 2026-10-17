@@ -32,9 +32,9 @@ jobs:
         run: |
           $failed = 0
           $runs = @(
-            @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 50 },
-            @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 30 },
-            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 25 }
+            @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 80 },
+            @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 40 },
+            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 }
           )
           foreach ($run in $runs) {
             $out = "hunt-$($run.Name).txt"
@@ -48,6 +48,6 @@ jobs:
           "==== failures ===="
           foreach ($run in $runs) {
             "---- $($run.Name)"
-            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
+            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|sandbox helper image|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
           }
           if ($failed -ne 0) { exit 1 }

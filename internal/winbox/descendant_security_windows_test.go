@@ -52,7 +52,7 @@ func descendantSecurityFixtureIn(t *testing.T, base string, interval time.Durati
 func startDescendantHelper(t *testing.T, ctx context.Context, e *workspaceExecution, workspace, mode string) (windows.ProcessInformation, string) {
 	t.Helper()
 	helper := filepath.Join(e.profile.Directory(), "descendant-helper.exe")
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}

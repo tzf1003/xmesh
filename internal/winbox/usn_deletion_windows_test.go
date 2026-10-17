@@ -168,7 +168,7 @@ func Test_WindowsAppContainerWorkspaceDeletionCrashHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	helper := filepath.Join(p.Directory(), "deletion-helper.exe")
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func Test_WindowsAppContainerWorkspaceLiveDeletionClose(t *testing.T) {
 				t.Fatal(err)
 			}
 			helper := filepath.Join(p.Directory(), "live-deletion-helper.exe")
-			body, err := os.ReadFile(os.Args[0])
+			body, err := sandboxHelperImage()
 			if err != nil {
 				t.Fatal(err)
 			}

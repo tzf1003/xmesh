@@ -72,7 +72,7 @@ func newRunnerFixtureWith(t *testing.T, production bool) *runnerFixture {
 	// The helper is this test binary, copied so the sandbox may execute it from
 	// the granted workspace.
 	f.helper = filepath.Join(f.root, "helper.exe")
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}

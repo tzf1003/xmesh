@@ -184,7 +184,7 @@ func Test_WindowsAppContainerWorkspaceImport(t *testing.T) {
 			}
 			if stage != "file" {
 				helper := filepath.Join(p.Directory(), "import-helper.exe")
-				body, err := os.ReadFile(os.Args[0])
+				body, err := sandboxHelperImage()
 				if err != nil {
 					t.Fatal(err)
 				}
