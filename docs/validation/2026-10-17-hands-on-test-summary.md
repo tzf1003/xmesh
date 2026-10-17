@@ -29,8 +29,8 @@
 
 | 编号 | 现象 | 状态 |
 | --- | --- | --- |
-| P1 | 商店版 `pwsh`（App Execution Alias）带 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 创建进程时 `ERROR_ACCESS_DENIED`，`exec.run` 和 `pty.open`（`default_shell` 为 auto）返回 `internal`；`powershell.exe` 与 `cmd.exe` 正常 | 已修（#42），待用户 Windows 机用真实商店别名复测 |
-| P2 | `drain --mode kill` 之后 `resume`，`pty.open` 一直返回“终端管理器正在关闭”，直到重启节点；`exec.run` 与 `drain --mode keep` 不受影响 | 已修（#42），待复测 |
+| P1 | 商店版 `pwsh`（App Execution Alias）带 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 创建进程时 `ERROR_ACCESS_DENIED`，`exec.run` 和 `pty.open`（`default_shell` 为 auto）返回 `internal`；`powershell.exe` 与 `cmd.exe` 正常 | #42 的第一版没有过用户复测（沿用失败创建里的 Job，加入全被拒）；#47 改为换新 Job，并拒绝应用执行别名、auto 跳过别名。Windows 真机复测 17/17 通过（经协调线转述），真实 pwsh 7 后代回收尚未验证 |
+| P2 | `drain --mode kill` 之后 `resume`，`pty.open` 一直返回“终端管理器正在关闭”，直到重启节点；`exec.run` 与 `drain --mode keep` 不受影响 | 已修（#42），用户复测通过 |
 | P3 | 面板配对页拒绝 `pair --export` 导出的 `tags: null` | 已由 #41 修复 |
 | P4 | 未提权账户打开 `agent.policy.windows_appcontainer` 后，运行器“启动成功”，之后每次 exec 都是 `policy_denied`（`sandbox.runner_failed`）且没有原因，原因只在节点日志里 | 已由 #43 修复：启动前探测，走 `sandbox.unavailable` 并带原因，验收页改为普通账户预期被拒 |
 | P5 | 控制通道 `status.warnings` 没有沙箱不可用告警，托盘与面板仍显示正常 | 已由 #43 修复：新增 `sandbox_unavailable` 告警 |
@@ -41,7 +41,7 @@
 | S4 | `xmesh control events --count 2` 在空闲节点上收到 hello 后无限阻塞 | 已由 #44 修复：增加 `--timeout`，文档写明 `--count` 把 hello 也算在内 |
 | S5 | `Test_ControlAuditView` 在 UTC+8 失败（#41 已修）；无符号链接权限账户上 `Test_WindowsPrivdirRefusesLinks`、`Test_CTRCWD01` 失败而不是跳过；`Test_CTRFS06_07_MetadataAndDelete` 同类 | 已由 #41、#44、#46 修复（#46 在创建符号链接失败时跳过该段并记日志，其余检查照常；任何 `os.Symlink` 错误都会跳过，不限于缺权限）|
 | S6 | LAN 监听和 mDNS 取第一块私有网卡，多网卡或虚拟网卡机器可能选错 | 已由 #44 修复：新增 `mesh.lan.interface`，缺省跳过虚拟网卡 |
-| S7 | 中文代码页输出 | 未修复，在「Windows 进程启动与终端恢复」线处理 |
+| S7 | 中文代码页输出 | 已由 #47 修复（非 UTF-8 输出按 OEM 代码页转 UTF-8），含在上述 17/17 真机复测里 |
 
 对照项（用户机上观察到、行为符合预期）：开关关闭时 L2 请求返回 `policy_denied`/`sandbox.unavailable`；损坏的 journal 使启动恢复失败，exec 与 pty 仍返回 `sandbox.unavailable`，`sys.info` 的 warnings 有提示；失败后状态目录与工作目录 ACL 无残留。
 
