@@ -6,7 +6,7 @@ import { Badge, Banner, Confirm, Empty, ErrorBanner, Field, NotSupported, PageHe
 import { useResource } from "../hooks";
 import { errorText, useT } from "../i18n";
 import { formatTime } from "../lib/format";
-import { PASSWORD_MAX, PASSWORD_MIN, type ActionError } from "../../shared/ipc";
+import { PASSWORD_MAX, PASSWORD_MIN, hasEdgeSpace, type ActionError } from "../../shared/ipc";
 import type { IngressClient } from "../../shared/control";
 
 export function Ingress({ ctx }: { ctx: PageContext }): JSX.Element | null {
@@ -140,10 +140,11 @@ function Password({ ctx }: { ctx: PageContext }): JSX.Element {
   const len = [...pw].length;
   const lengthOk = len >= PASSWORD_MIN && len <= PASSWORD_MAX;
   const same = pw === again;
+  const edgeSpace = hasEdgeSpace(pw);
 
   const submit = async (e: Event): Promise<void> => {
     e.preventDefault();
-    if (!lengthOk || !same) return;
+    if (!lengthOk || edgeSpace || !same) return;
     setBusy(true);
     const r = await getApi().rotateIngressPassword(pw);
     setBusy(false);
@@ -162,14 +163,15 @@ function Password({ ctx }: { ctx: PageContext }): JSX.Element {
       <p class="hint">{t("ingress.passwordHint")}</p>
       <form onSubmit={(e) => void submit(e)}>
         <Field label={t("ingress.newPassword")} hint={t("ingress.lengthHint", { min: PASSWORD_MIN, max: PASSWORD_MAX })}>
-          <input type="password" value={pw} onInput={(e) => setPw((e.currentTarget as HTMLInputElement).value)} autocomplete="new-password" aria-invalid={pw !== "" && !lengthOk} data-testid="pw-new" />
+          <input type="password" value={pw} onInput={(e) => setPw((e.currentTarget as HTMLInputElement).value)} autocomplete="new-password" aria-invalid={pw !== "" && (!lengthOk || edgeSpace)} data-testid="pw-new" />
         </Field>
         <Field label={t("ingress.repeat")}>
           <input type="password" value={again} onInput={(e) => setAgain((e.currentTarget as HTMLInputElement).value)} autocomplete="new-password" aria-invalid={again !== "" && !same} data-testid="pw-again" />
         </Field>
+        {edgeSpace && <p class="hint" data-testid="pw-edge-space">{t("ingress.edgeSpace")}</p>}
         {again !== "" && !same && <p class="hint" data-testid="pw-mismatch">{t("ingress.noMatch")}</p>}
         {err && <ErrorBanner error={err} />}
-        <button type="submit" class="btn primary" disabled={!lengthOk || !same || busy} data-testid="pw-submit">
+        <button type="submit" class="btn primary" disabled={!lengthOk || edgeSpace || !same || busy} data-testid="pw-submit">
           {t("ingress.rotate")}
         </button>
       </form>

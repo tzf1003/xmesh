@@ -296,8 +296,17 @@ export function parseClientId(v: unknown): string | undefined {
   return typeof v === "string" && CLIENT_ID.test(v) ? v : undefined;
 }
 
+// Go's unicode.IsSpace, which the kernel's strings.TrimSpace uses. ECMAScript trim() differs (it
+// strips U+FEFF and keeps U+0085), so the set is spelled out.
+const EDGE_SPACE = /^[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]|[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]$/;
+
+/** The kernel trims the password file on read, so edge whitespace would not survive a restart and is refused. */
+export function hasEdgeSpace(v: string): boolean {
+  return EDGE_SPACE.test(v);
+}
+
 export function parsePassword(v: unknown): string | undefined {
-  if (typeof v !== "string") return undefined;
+  if (typeof v !== "string" || hasEdgeSpace(v)) return undefined;
   const n = [...v].length;
   return n >= PASSWORD_MIN && n <= PASSWORD_MAX ? v : undefined;
 }
