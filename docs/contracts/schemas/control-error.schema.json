@@ -14,7 +14,9 @@
     "payload_too_large": 413,
     "config_invalid": 422,
     "fingerprint_mismatch": 422,
+    "pair_rejected": 422,
     "precondition_required": 428,
+    "rate_limited": 429,
     "internal": 500,
     "not_implemented": 501,
     "unavailable": 503
@@ -32,7 +34,9 @@
         "payload_too_large",
         "config_invalid",
         "fingerprint_mismatch",
+        "pair_rejected",
         "precondition_required",
+        "rate_limited",
         "internal",
         "not_implemented",
         "unavailable"
@@ -84,6 +88,14 @@
         {
           "if": { "properties": { "error": { "const": "invalid_args" } }, "required": ["error"] },
           "then": { "required": ["field"] }
+        },
+        {
+          "if": { "properties": { "error": { "const": "pair_rejected" } }, "required": ["error"] },
+          "then": { "required": ["reason"] }
+        },
+        {
+          "if": { "properties": { "error": { "const": "rate_limited" } }, "required": ["error"] },
+          "then": { "required": ["retry_after_ms"] }
         }
       ]
     }

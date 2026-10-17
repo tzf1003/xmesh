@@ -311,6 +311,47 @@ type PairImportResponse struct {
 	RestartRequired bool     `json:"restart_required"`
 }
 
+// PairPasswordRequest sets or changes the connection password. The password is write-only: no
+// response ever carries it or anything derived from it.
+type PairPasswordRequest struct {
+	Password string `json:"password"`
+}
+
+// PairPasswordState is what the panel shows about the connection password.
+type PairPasswordState struct {
+	Set            bool  `json:"set"`
+	UpdatedAt      *Time `json:"updated_at"`
+	FailedAttempts int   `json:"failed_attempts"`
+	LockedUntil    *Time `json:"locked_until"`
+}
+
+// PairDiscoveredDevice is an unpaired device seen on the LAN.
+type PairDiscoveredDevice struct {
+	Name        string `json:"name"`
+	Fingerprint string `json:"fingerprint"`
+	Address     string `json:"address"`
+	SeenAt      Time   `json:"seen_at"`
+}
+
+type PairDiscoveredResponse struct {
+	Devices []PairDiscoveredDevice `json:"devices"`
+}
+
+// PairConnectRequest pairs with a device on the LAN. Address or Fingerprint must be set. When only
+// Fingerprint is set the address comes from the discovery list.
+type PairConnectRequest struct {
+	Address     string `json:"address,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Password    string `json:"password"`
+}
+
+type PairConnectResponse struct {
+	Name        string   `json:"name"`
+	Fingerprint string   `json:"fingerprint"`
+	Address     string   `json:"address"`
+	Tags        []string `json:"tags"`
+}
+
 type PatInfo struct {
 	Name       string   `json:"name"`
 	Scopes     []string `json:"scopes"`

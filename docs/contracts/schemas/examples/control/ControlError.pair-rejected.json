@@ -1,0 +1,5 @@
+{
+  "error": "pair_rejected",
+  "message": "连接密码不正确，或对端不是待配对的 xmesh 设备",
+  "reason": "wrong_password"
+}
