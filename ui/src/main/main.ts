@@ -10,7 +10,7 @@ import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import { MeshService, execMeshRunner } from "./mesh-service";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, runSetup } from "./setup";
-import { runXmeshSetup } from "./cli";
+import { cliCommandText, runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -85,6 +85,7 @@ async function start(): Promise<void> {
   const controller = new ShellController({
     discover: () => discoverInstances(roots),
     configured: () => discoverConfigured(roots),
+    cliCommand: cliCommandText(),
     locale,
     getLoginItem: () => autostart.get().enabled,
     setLoginItem: (enabled) => {
