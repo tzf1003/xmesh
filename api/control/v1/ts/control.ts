@@ -56,6 +56,7 @@ export type WarningCode =
   | "audit_dropped"
   | "quota_exhausted"
   | "sandbox_unavailable"
+  | "firewall_blocked"
   | "unclassified";
 /**
  * 配置变更的来源。file 是直接改了配置文件（含热加载），control 是经控制通道写入。

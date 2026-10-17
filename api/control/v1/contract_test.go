@@ -271,7 +271,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 	check("Severity", enumOf(t, "control-common.schema.json", "$defs", "Severity", "enum"),
 		sorted(v1.SeverityInfo, v1.SeverityWarning, v1.SeverityError))
 	check("WarningCode", enumOf(t, "control-common.schema.json", "$defs", "WarningCode", "enum"),
-		sorted(v1.WarnRestartRequired, v1.WarnPolicyReloadFailed, v1.WarnAllowDangerous, v1.WarnTailnetNotReady, v1.WarnAuthkeyUnreadable, v1.WarnPeerOffline, v1.WarnAuditDropped, v1.WarnQuotaExhausted, v1.WarnSandboxUnavailable, v1.WarnUnclassified))
+		sorted(v1.WarnRestartRequired, v1.WarnPolicyReloadFailed, v1.WarnAllowDangerous, v1.WarnTailnetNotReady, v1.WarnAuthkeyUnreadable, v1.WarnPeerOffline, v1.WarnAuditDropped, v1.WarnQuotaExhausted, v1.WarnSandboxUnavailable, v1.WarnFirewallBlocked, v1.WarnUnclassified))
 	check("DrainMode", enumOf(t, "control-common.schema.json", "$defs", "DrainMode", "enum"), sorted(v1.DrainKeep, v1.DrainKill))
 	check("Actor", enumOf(t, "control-common.schema.json", "$defs", "Actor", "enum"), sorted(v1.ActorFile, v1.ActorControl))
 	check("ErrorCode", enumOf(t, "control-error.schema.json", "$defs", "ControlErrorCode", "enum"), sorted(v1.ErrorCodes()...))

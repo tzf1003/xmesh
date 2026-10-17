@@ -44,7 +44,7 @@ type controlDeps struct {
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
-	options := control.Options{Host: &controlHost{d: d}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress}
+	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress}
 	s, e := control.Start(options)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "控制通道未启动:", e)
@@ -66,8 +66,9 @@ func startControl(d controlDeps) (stop func()) {
 
 // controlHost adapts the running node to control.Host.
 type controlHost struct {
-	d       controlDeps
-	flagged atomic.Bool // drain mark of a node without the agent role
+	d        controlDeps
+	flagged  atomic.Bool // drain mark of a node without the agent role
+	firewall *firewallWatch
 }
 
 func (h *controlHost) Status() v1.StatusResponse {
@@ -124,6 +125,9 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 		if reason := h.d.agent.SandboxUnavailable(); reason != "" {
 			add(v1.WarnSandboxUnavailable, v1.SeverityWarning, "Windows L2 不可用，L2 的 exec 与 PTY 一律被拒绝（sandbox.unavailable）："+reason)
 		}
+	}
+	if h.firewall.Blocked() {
+		add(v1.WarnFirewallBlocked, v1.SeverityWarning, "Windows 防火墙阻止了本程序的入站连接，其他设备可能连不上本节点：请在 Windows 安全中心的防火墙设置里删除对 xmesh 的阻止规则")
 	}
 	if cfg.Mesh.Mode == "tailnet" {
 		if h.d.network == nil {

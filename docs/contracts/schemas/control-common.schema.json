@@ -64,6 +64,7 @@
         "audit_dropped",
         "quota_exhausted",
         "sandbox_unavailable",
+        "firewall_blocked",
         "unclassified"
       ],
       "description": "次版本可以增加取值。客户端遇到未知取值按 unclassified 处理。"

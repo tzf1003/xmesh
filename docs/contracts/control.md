@@ -111,6 +111,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | `audit_dropped` | `warning` | 有审计记录因含正文被拒绝写入 |
 | `quota_exhausted` | `warning` | PTY 或 exec 配额已满 |
 | `sandbox_unavailable` | `warning` | 配置打开了 Windows L2（`agent.policy.windows_appcontainer`），但运行器不可用，L2 的 exec 与 PTY 一律以 `sandbox.unavailable` 拒绝。`message` 带原因（例如账户不是管理员或 LocalSystem，读不了 NTFS 变更日志）；原因只含可对用户说的内容，细节在节点日志。不设置该开关或运行器正常时不出现 |
+| `firewall_blocked` | `warning` | Windows 防火墙有一条启用的入站阻止规则针对本节点的程序（例如取消防火墙提示时留下的规则），其他设备可能连不上本节点。只在 Windows 上检查，每分钟重新读取一次规则；读取失败时不出现，不是没有规则的证明 |
 | `unclassified` | 任意 | 客户端遇到不认识的 code 时的归类 |
 
 ### 托盘状态判定
