@@ -39,6 +39,11 @@ The installers are not code-signed, so the system warns on first launch:
 The control panel opens from the tray icon. It shows the overview, devices, pairing, configuration, audit,
 sessions, authorization, ingress and mesh pages. Try them, and the tray menu's restart and stop actions.
 
+On Windows, if the firewall blocks the node from receiving connections, the tray icon turns yellow and
+the overview shows a warning. The warning stays until the block rule for xmesh is removed or changed in
+Windows Defender Firewall. Uninstalling removes the logon task the installer created for your user and
+that install folder; tasks of other users and of other folders are kept.
+
 ## Known limits of this build
 
 - The binaries are not code-signed or notarized. macOS: run `/usr/bin/xattr -d com.apple.quarantine xmesh` after
