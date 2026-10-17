@@ -20,7 +20,8 @@ import (
 )
 
 // shellDir returns a directory containing placeholder executables with the
-// given names, as the only PATH entry.
+// given names, as the only PATH entry. %ProgramFiles% points at an empty
+// directory so an installed PowerShell 7 on the host cannot be selected.
 func shellDir(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -30,6 +31,7 @@ func shellDir(t *testing.T, names ...string) string {
 		}
 	}
 	t.Setenv("PATH", dir)
+	t.Setenv("ProgramFiles", filepath.Join(dir, "no-program-files"))
 	return dir
 }
 
