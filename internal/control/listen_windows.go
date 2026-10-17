@@ -3,9 +3,12 @@
 package control
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
+	"sync"
+	"time"
 
 	winio "github.com/tailscale/go-winio"
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
@@ -31,7 +34,40 @@ func Listen(o ListenOptions) (net.Listener, Bound, error) {
 	if err != nil {
 		return nil, Bound{}, err
 	}
-	return l, Bound{Transport: v1.TransportPipe, Address: name}, nil
+	return &pipeListener{Listener: l}, Bound{Transport: v1.TransportPipe, Address: name}, nil
+}
+
+// pipeListener makes Close reliable on go-winio's listener. Its accept loop retries when a
+// client connects and drops again before the server has handled the connection
+// (ERROR_NO_DATA). A Close that lands during such an attempt is answered with that same error,
+// so the loop starts over, waits for a close request that was already consumed, and Close
+// blocks for good. http.Server.Shutdown closes the listener without a deadline, so the whole
+// shutdown stalled. Close requests are therefore repeated until the loop has really stopped; a
+// request that arrives after that returns at once.
+type pipeListener struct{ net.Listener }
+
+const (
+	pipeCloseRetry    = 25 * time.Millisecond
+	pipeCloseAttempts = 400
+)
+
+func (l *pipeListener) Close() error {
+	done := make(chan struct{})
+	var once sync.Once
+	request := func() {
+		_ = l.Listener.Close()
+		once.Do(func() { close(done) })
+	}
+	go request()
+	for attempt := 0; attempt < pipeCloseAttempts; attempt++ {
+		select {
+		case <-done:
+			return nil
+		case <-time.After(pipeCloseRetry):
+			go request()
+		}
+	}
+	return errors.New("the control pipe listener did not stop")
 }
 
 func PipeName(sid, node string) string { return `\\.\pipe\xmesh-` + sid + "-" + node }

@@ -63,7 +63,7 @@ func Test_ControlPairExportImport(t *testing.T) {
 	peer := v1.PairDocument{Name: "peer-b", Fingerprint: other.Fingerprint, CertificatePEM: string(other.PEM), Tags: []string{}}
 	colon := strings.ToUpper(other.Fingerprint[:2] + ":" + other.Fingerprint[2:])
 
-	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: "00" + other.Fingerprint[2:]}, nil), v1.ErrFingerprintMismatch)
+	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: otherFingerprint(other.Fingerprint)}, nil), v1.ErrFingerprintMismatch)
 	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer}, nil), v1.ErrFingerprintMismatch)
 	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Pair: peer, Fingerprint: other.Fingerprint, Tags: []string{"tag:admin"}}, nil), v1.ErrInvalidArgs)
 	// a document whose own fingerprint field lies is refused even when the user confirmed the real one
@@ -291,4 +291,13 @@ func Test_ControlIngress(t *testing.T) {
 	if e := apiError(t, f.do("PUT", "/v1/ingress/password", v1.IngressPasswordRequest{Password: secret + "2"}, nil), v1.ErrConflict); e.Reason != "password_source_not_file" {
 		t.Fatalf("%+v", e)
 	}
+}
+
+// otherFingerprint returns a well-formed fingerprint that differs from fp. Swapping in a fixed
+// prefix would sometimes reproduce fp itself: one certificate in 256 starts with those bytes.
+func otherFingerprint(fp string) string {
+	if fp[0] == '0' {
+		return "1" + fp[1:]
+	}
+	return "0" + fp[1:]
 }

@@ -62,7 +62,7 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			// reach a program started from the shell as a stray line feed.
 			write := func(data string) { o.call("pty.write", map[string]any{"session_id": o.session, "data": data + "\r"}) }
 			write("echo REA^DY")
-			o.until(`\r\nREADY`)
+			o.until(terminalReadyLine)
 			write(c.start)
 			o.until(c.ready)
 			if c.busy != "" {

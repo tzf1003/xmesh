@@ -3,7 +3,10 @@
 package control
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +140,82 @@ func Test_ControlEndpointFileIsReadableByAllowedSIDs(t *testing.T) {
 		if !found {
 			t.Fatalf("pass %d: %s has no allow entry on control.json", i, reader)
 		}
+	}
+}
+
+// Closing the listener right after a client connected and went away must not hang. go-winio's
+// accept loop retries such a connection (ERROR_NO_DATA) and, on that path, consumed the one
+// close request, so Close waited forever (seen as a 2-minute test timeout in cleanup).
+// XMESH_TEST_PIPE_CLOSE_ROUNDS sets the number of rounds. XMESH_TEST_PIPE_CLOSE_RAW=1 uses the
+// bare go-winio listener instead, counts the rounds that hang, and releases each with a second
+// Close; that run only reports and never fails.
+func Test_ControlPipeListenerCloseAfterClientDrops(t *testing.T) {
+	rounds := 60
+	if v, err := strconv.Atoi(os.Getenv("XMESH_TEST_PIPE_CLOSE_ROUNDS")); err == nil && v > 0 {
+		rounds = v
+	}
+	raw := os.Getenv("XMESH_TEST_PIPE_CLOSE_RAW") == "1"
+	hung := 0
+	for i := 0; i < rounds; i++ {
+		node := fmt.Sprintf("close-drop-%d-%d", os.Getpid(), i)
+		l, bound, err := Listen(ListenOptions{StateDir: t.TempDir(), Node: node})
+		if err != nil {
+			t.Fatal(err)
+		}
+		accepted := make(chan struct{})
+		go func() {
+			defer close(accepted)
+			for {
+				c, err := l.Accept()
+				if err != nil {
+					return
+				}
+				c.Close()
+			}
+		}()
+		name, err := windows.UTF16PtrFromString(bound.Address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var h windows.Handle
+		for deadline := time.Now().Add(5 * time.Second); ; {
+			h, err = windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, 0, 0)
+			if err != windows.ERROR_PIPE_BUSY || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if err != nil {
+			t.Fatalf("round %d: %v", i, err)
+		}
+		windows.CloseHandle(h)
+		closer := l
+		if raw {
+			closer = l.(*pipeListener).Listener
+		}
+		stopped := make(chan struct{})
+		go func() { closer.Close(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			if !raw {
+				t.Fatalf("round %d: Close did not return 5s after the client dropped", i)
+			}
+			hung++
+			go closer.Close()
+			select {
+			case <-stopped:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("round %d: a second Close did not release the first", i)
+			}
+		}
+		select {
+		case <-accepted:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("round %d: Accept still blocked after Close", i)
+		}
+	}
+	if raw {
+		t.Logf("bare go-winio listener: %d of %d rounds needed a second Close", hung, rounds)
 	}
 }

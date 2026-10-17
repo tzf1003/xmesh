@@ -2,6 +2,8 @@ name: Windows 偶发 winbox 测试复现
 # 反复运行 Test_WindowsManagedRunnerExecConcurrent、Test_WindowsAppContainerWorkspaceExecution
 # 和 Test_WindowsManagedRunnerTerminalKill，失败时测试会带出 race 运行时日志与 helper 退出原因，
 # 用来确认这些偶发失败是否都来自 race 运行时启动期映射失败。
+# pipe-close 作业另外反复关闭控制通道的命名管道监听器：先用裸 go-winio 监听器统计需要第二次 Close
+# 才能放行的轮数，再用带保护的监听器确认没有任何一轮卡住。
 on:
   workflow_dispatch:
   push:
@@ -51,3 +53,28 @@ jobs:
             Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|sandbox helper image|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
           }
           if ($failed -ne 0) { exit 1 }
+
+  pipe-close:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            .github/workflows/windows-flake-hunt.yml
+      - name: Bare go-winio listener (report only)
+        shell: pwsh
+        env:
+          XMESH_TEST_PIPE_CLOSE_RAW: "1"
+          XMESH_TEST_PIPE_CLOSE_ROUNDS: "3000"
+        run: |
+          go test -race ./internal/control -run '^Test_ControlPipeListenerCloseAfterClientDrops$' -count 1 -v -timeout 1200s 2>&1 | Select-String -Pattern 'bare go-winio|--- (PASS|FAIL)|^(ok|FAIL)\s|_test.go:' | ForEach-Object { $_.Line }
+      - name: Guarded listener
+        shell: pwsh
+        env:
+          XMESH_TEST_PIPE_CLOSE_ROUNDS: "3000"
+        run: go test -race ./internal/control -run '^Test_ControlPipeListenerCloseAfterClientDrops$|^Test_CONSEC12_LivePipeDACL$' -count 3 -timeout 1200s

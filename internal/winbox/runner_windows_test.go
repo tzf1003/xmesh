@@ -435,7 +435,7 @@ func Test_WindowsManagedRunnerTerminalKill(t *testing.T) {
 	m, reg := newTerminalManager(t)
 	o := f.openTerminal(t, m, reg, "kill")
 	o.call("pty.write", map[string]any{"session_id": o.session, "data": "echo REA^DY\r\n"})
-	o.until(`\r\nREADY`)
+	o.until(terminalReadyLine)
 	// A descendant that would outlive the shell keeps running until the
 	// execution is reclaimed.
 	o.call("pty.write", map[string]any{"session_id": o.session, "data": "helper.exe -test.run=Test_WindowsManagedRunnerHelper -- --xmesh-runner-helper tree-timeout " + filepath.Join(f.root, "terminal-pids.txt") + "\r\n"})
