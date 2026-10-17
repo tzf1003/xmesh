@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,7 @@ type LAN struct {
 	advertisement *mdns.Responder
 	cancel        context.CancelFunc
 	done          chan struct{}
+	changed       chan struct{}
 }
 type lanPeer struct {
 	peer Peer
@@ -144,7 +146,7 @@ func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*L
 		return nil, e
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, presence: map[string]lanPeer{}, mdns: options.MDNS, iface: options.Interface, cancel: cancel, done: make(chan struct{})}
+	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, presence: map[string]lanPeer{}, mdns: options.MDNS, iface: options.Interface, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}, 1)}
 	if !options.MDNS {
 		close(l.done)
 		return l, nil
@@ -236,6 +238,18 @@ func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse f
 	}()
 	return nil
 }
+
+// Changed signals that the set of discovered peers changed: a device appeared, moved or said goodbye.
+// Expiry by TTL is not signalled; it is noticed by the consumer's next poll.
+func (l *LAN) Changed() <-chan struct{} { return l.changed }
+
+func (l *LAN) notify() {
+	select {
+	case l.changed <- struct{}{}:
+	default:
+	}
+}
+
 func (l *LAN) discover(ctx context.Context, entries <-chan *mdns.Entry) {
 	for {
 		select {
@@ -263,9 +277,13 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *mdns.Entry) {
 			}
 			if ttl <= 0 {
 				// mDNS goodbye: the node is leaving, whatever it advertised before.
+				_, listed := l.peers[trusted.Name]
 				delete(l.peers, trusted.Name)
 				delete(l.presence, id)
 				l.mu.Unlock()
+				if listed {
+					l.notify()
+				}
 				continue
 			}
 			l.presence[id] = lanPeer{seen: time.Now(), ttl: min(ttl, 30*time.Second)}
@@ -289,9 +307,15 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *mdns.Entry) {
 			if address == "" {
 				continue
 			}
+			peer := Peer{ID: id, Name: trusted.Name, Address: "https://" + address + "/mcp", Tags: trusted.Tags, Online: true, Direct: true, Fingerprint: fp}
 			l.mu.Lock()
-			l.peers[trusted.Name] = lanPeer{Peer{ID: id, Name: trusted.Name, Address: "https://" + address + "/mcp", Tags: trusted.Tags, Online: true, Direct: true, Fingerprint: fp}, time.Now(), min(ttl, 30*time.Second)}
+			previous, listed := l.peers[trusted.Name]
+			fresh := listed && time.Since(previous.seen) <= previous.ttl && reflect.DeepEqual(previous.peer, peer)
+			l.peers[trusted.Name] = lanPeer{peer, time.Now(), min(ttl, 30*time.Second)}
 			l.mu.Unlock()
+			if !fresh {
+				l.notify()
+			}
 		}
 	}
 }
