@@ -268,7 +268,7 @@ func (f *fixture) stream(lastID string) *stream {
 // next waits for an event matching match.
 func (s *stream) next(t *testing.T, match func(v1.Event) bool) v1.Event {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(20 * time.Second) // a slow Windows runner can need seconds to start sampling
 	for {
 		select {
 		case e, ok := <-s.events:

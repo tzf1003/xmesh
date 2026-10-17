@@ -196,14 +196,9 @@ func Test_ControlPolledEvents(t *testing.T) {
 		h.execs = []v1.ExecRun{{Kind: "exec", ID: "e-1", Caller: "n1/s", Cmd: "cargo", Mode: "shared", State: "queued", StartedAt: v1.Now()}}
 		h.leases = []v1.BackendLease{{Kind: "lease", Resource: "backend:ida", Owner: "n1/s", Token: 1, ExpiresAt: v1.Now()}}
 	})
-	var st v1.StatusResponse
-	payload(t, events.next(t, func(e v1.Event) bool {
-		if e.Type != v1.EventStatus {
-			return false
-		}
-		payload(t, e, &st)
-		return len(st.Warnings) == 1
-	}), &st)
+	// The first status event is not awaited here: the poller keys its status baseline after its
+	// first peer refresh, so on a slow host a change made right after Start can already be in it.
+	// The warning baseline is taken before serving, so the warning event always comes.
 	var w v1.WarningEventData
 	payload(t, events.next(t, ofType(v1.EventWarning)), &w)
 	if w.Change != "raised" || w.Warning.Code != v1.WarnQuotaExhausted {
@@ -238,6 +233,15 @@ func Test_ControlPolledEvents(t *testing.T) {
 		t.Fatalf("%+v", s)
 	}
 	f.host.mutate(func(h *fakeHost) { h.ptys, h.execs, h.leases, h.warnings = nil, nil, nil, nil })
+	// By now the poller is past its start-up, so the status change is announced, before the warning.
+	var st v1.StatusResponse
+	payload(t, events.next(t, func(e v1.Event) bool {
+		if e.Type != v1.EventStatus {
+			return false
+		}
+		payload(t, e, &st)
+		return len(st.Warnings) == 0
+	}), &st)
 	payload(t, events.next(t, ofType(v1.EventWarning)), &w)
 	if w.Change != "cleared" {
 		t.Fatal(w)
