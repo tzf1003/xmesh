@@ -39,7 +39,7 @@
 | S2 | 导入对端证书后 `restart_required` 不进 status，托盘不显示需要重启 | 已由 #41 修复 |
 | S3 | `policy_reload_failed` 告警在配置恢复合法后一直保留到重启 | 已由 #43 修复 |
 | S4 | `xmesh control events --count 2` 在空闲节点上收到 hello 后无限阻塞 | 已由 #44 修复：增加 `--timeout`，文档写明 `--count` 把 hello 也算在内 |
-| S5 | `Test_ControlAuditView` 在 UTC+8 失败（#41 已修）；无符号链接权限账户上 `Test_WindowsPrivdirRefusesLinks`、`Test_CTRCWD01` 失败而不是跳过；`Test_CTRFS06_07_MetadataAndDelete` 同类 | 已由 #41、#44、#46 修复（符号链接段按权限跳过，其余检查照常）|
+| S5 | `Test_ControlAuditView` 在 UTC+8 失败（#41 已修）；无符号链接权限账户上 `Test_WindowsPrivdirRefusesLinks`、`Test_CTRCWD01` 失败而不是跳过；`Test_CTRFS06_07_MetadataAndDelete` 同类 | 已由 #41、#44、#46 修复（#46 在创建符号链接失败时跳过该段并记日志，其余检查照常；任何 `os.Symlink` 错误都会跳过，不限于缺权限）|
 | S6 | LAN 监听和 mDNS 取第一块私有网卡，多网卡或虚拟网卡机器可能选错 | 已由 #44 修复：新增 `mesh.lan.interface`，缺省跳过虚拟网卡 |
 | S7 | 中文代码页输出 | 未修复，在「Windows 进程启动与终端恢复」线处理 |
 
