@@ -1,11 +1,18 @@
-// The hook the settings page uses to have the kernel pick up a saved config without a restart. The kernel's
-// reload call lands separately; until then there is none, and every change that needs one offers a restart.
+// After a config save the page asks the kernel to reload the file in place, so a change that the kernel can take
+// needs no restart. A kernel without the reload route, or a reload that fails, leaves the restart the write reported.
 
-/**
- * Asks the running kernel to reload its config in place. Undefined while the kernel has no reload call, which
- * leaves the restart offer on the page. When the call exists, return its promise here: it resolves `true` when
- * the kernel took the change, and `false` sends the page back to the restart offer.
- */
-export function requestReload(): Promise<boolean> | undefined {
-  return undefined;
+import { getApi } from "../api";
+
+/** What the page shows after a save: whether a restart is still needed, for which settings, and a load error. */
+export interface SaveOutcome {
+  restart: boolean;
+  /** The settings the kernel still needs a restart for, as config pointers. */
+  paths: string[];
+  loadError?: string;
+}
+
+export async function applySaved(restartRequired: boolean): Promise<SaveOutcome> {
+  const r = await getApi().reloadConfig();
+  if (!r.ok) return { restart: restartRequired, paths: [] };
+  return { restart: r.data.restart_required, paths: r.data.restart_paths, loadError: r.data.load_error ?? undefined };
 }

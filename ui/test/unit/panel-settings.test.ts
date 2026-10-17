@@ -5,6 +5,7 @@ import { test } from "node:test";
 import Ajv2020 from "ajv/dist/2020";
 import { parse } from "yaml";
 import {
+  applyDenyFile,
   applySettingsForm,
   checkDenyList,
   checkSettingsForm,
@@ -240,6 +241,18 @@ test("the text the form writes is valid under the config schema", () => {
 
 test("text that is not YAML cannot be edited", () => {
   assert.equal(applySettingsForm("node: [", lan), undefined);
+});
+
+test("moving the deny list into a file names that file and drops the inline list, and keeps the rest", () => {
+  const before = '# 保留这一行\nagent:\n  cwd_policy:\n    allow: ["/w"]\n    deny: ["~/.ssh"]\n  authz: {}\n';
+  const after = applyDenyFile(before, "/cfg/n1/cwd-deny.yaml");
+  assert.ok(after !== undefined);
+  assert.match(after, /^# 保留这一行$/m);
+  const cfg = parse(after) as { agent: { cwd_policy: Record<string, unknown> } };
+  assert.equal(cfg.agent.cwd_policy.deny_file, "/cfg/n1/cwd-deny.yaml");
+  assert.equal("deny" in cfg.agent.cwd_policy, false, "the file holds the entries now");
+  assert.deepEqual(cfg.agent.cwd_policy.allow, ["/w"]);
+  assert.equal(applyDenyFile("agent: [\n", "/cfg/n1/cwd-deny.yaml"), undefined);
 });
 
 test("the deny list file is a YAML list of strings and round-trips", () => {

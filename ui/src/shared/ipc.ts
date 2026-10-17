@@ -31,6 +31,8 @@ export const CHANNELS = {
   restartKernel: "xmesh:restart-kernel",
   readDenyFile: "xmesh:read-deny-file",
   writeDenyFile: "xmesh:write-deny-file",
+  createDenyFile: "xmesh:create-deny-file",
+  reloadConfig: "xmesh:reload-config",
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
   selectInstance: "xmesh:select-instance",
@@ -170,6 +172,10 @@ export interface PanelApi {
   /** The deny list file the config names; the renderer never supplies its path. */
   readDenyFile(): Promise<DataResult<DenyFileResponse>>;
   writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
+  /** Creates the deny list file beside the config, for a config that names none yet; the path is the kernel config's directory plus `cwd-deny.yaml`. */
+  createDenyFile(request: DenyFileCreateRequest): Promise<DataResult<DenyFileCreated>>;
+  /** Asks the kernel to reload its config in place (control API 1.2). A kernel without the route answers with an error. */
+  reloadConfig(): Promise<DataResult<ConfigReloadResponse>>;
   listPats(): Promise<DataResult<PatList>>;
   createPat(args: PatCreateArgs): Promise<DataResult<PatSecret>>;
   rotatePat(name: string): Promise<DataResult<PatSecret>>;
@@ -199,6 +205,8 @@ export const PANEL_API_METHODS = [
   "restartKernel",
   "readDenyFile",
   "writeDenyFile",
+  "createDenyFile",
+  "reloadConfig",
   "selectInstance",
   "copy",
   "openPath",
@@ -319,6 +327,24 @@ export interface DenyFileSaveRequest {
 export interface DenyFileSaved {
   etag: string;
 }
+export interface DenyFileCreateRequest {
+  /** Complete file text, at most 64 KiB. */
+  text: string;
+}
+export interface DenyFileCreated {
+  /** Absolute path of the new file; the config names it in `agent.cwd_policy.deny_file`. */
+  path: string;
+  etag: string;
+}
+/** The kernel's answer to a reload (control API 1.2): what it applied and what still needs a restart. */
+export interface ConfigReloadResponse {
+  applied: boolean;
+  valid: boolean;
+  load_error?: string | null;
+  changed_paths: string[];
+  restart_required: boolean;
+  restart_paths: string[];
+}
 
 export const DENY_FILE_MAX_BYTES = 64 * 1024;
 
@@ -328,6 +354,13 @@ export function parseDenyFileSave(v: unknown): DenyFileSaveRequest | undefined {
   if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
   if (typeof etag !== "string" || !/^(sha256-[0-9a-f]{64})?$/.test(etag)) return undefined;
   return { text, etag };
+}
+
+export function parseDenyFileCreate(v: unknown): DenyFileCreateRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["text"])) return undefined;
+  const { text } = v;
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
+  return { text };
 }
 
 export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {

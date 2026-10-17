@@ -317,7 +317,7 @@ export class FakeKernel {
       return;
     }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
-    if (cap && this.requires(res, method === "PUT" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
+    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
       const r = this.panel.handle(method, url, body, ifMatch);
       if (r) {
         if (r.status === 204) {

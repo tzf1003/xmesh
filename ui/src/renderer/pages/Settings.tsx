@@ -4,12 +4,13 @@ import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Confirm, ErrorBanner, Field, NotSupported, PageHead } from "../components";
 import { errorText, useT } from "../i18n";
-import { diffRows, needsRestart, weakening } from "../lib/config";
+import { cwdPolicy, diffRows, needsRestart, weakening } from "../lib/config";
 import {
   LISTEN_MODES,
   MODES,
   ROLES,
   TLS_MODES,
+  applyDenyFile,
   applySettingsForm,
   checkDenyList,
   checkSettingsForm,
@@ -25,7 +26,7 @@ import {
   type TLSMode,
 } from "../lib/settings";
 import { DEFAULT_DENY, denyListText, isAbsolutePath } from "../../shared/setup";
-import { requestReload } from "../lib/reload";
+import { applySaved, type SaveOutcome } from "../lib/reload";
 import type { ActionError, DenyFileResponse } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
 import type { Key } from "../messages";
@@ -62,7 +63,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const [err, setErr] = useState<ActionError | undefined>();
   const [review, setReview] = useState<Review | undefined>();
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState<{ restart: boolean } | undefined>();
+  const [saved, setSaved] = useState<SaveOutcome | undefined>();
   const [askRestart, setAskRestart] = useState(false);
 
   const [denyFile, setDenyFile] = useState<DenyFileResponse | undefined>();
@@ -71,8 +72,14 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const [denyReview, setDenyReview] = useState(false);
   const [denySaved, setDenySaved] = useState(false);
 
+  // Reads can overlap (a save re-reads what an earlier read is still fetching); only the latest may write the page.
+  const loadSeq = useRef(0);
+  const denySeq = useRef(0);
+
   const load = async (): Promise<void> => {
+    const seq = ++loadSeq.current;
     const r = await getApi().getConfig();
+    if (seq !== loadSeq.current) return;
     if (!r.ok) return setErr(r.error);
     setErr(undefined);
     setLoaded(r.data);
@@ -82,12 +89,18 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
     setReview(undefined);
   };
 
+  // Without a deny list file the list shown is the config's inline one, which saving moves into a file.
   const loadDeny = async (): Promise<void> => {
+    const seq = ++denySeq.current;
     const r = await getApi().readDenyFile();
+    if (seq !== denySeq.current) return;
     if (!r.ok) return setDenyErr(r.error);
     setDenyErr(undefined);
     setDenyFile(r.data);
-    setDenyEntries(parseDenyList(r.data.text) ?? []);
+    if (r.data.path !== undefined) return setDenyEntries(parseDenyList(r.data.text) ?? []);
+    const cfg = await getApi().getConfig();
+    if (seq !== denySeq.current) return;
+    setDenyEntries(cfg.ok ? cwdPolicy(cfg.data.parsed).deny : []);
   };
 
   useEffect(() => {
@@ -139,24 +152,48 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
     setBusy(false);
     setReview(undefined);
     if (!r.ok) return setErr(r.error);
-    // A change that needs a restart is first offered to the kernel as a reload; only a change it cannot take
-    // in place leaves a restart offer on the page.
-    const reload = r.data.restart_required ? requestReload() : undefined;
-    setSaved({ restart: reload === undefined ? r.data.restart_required : !(await reload) });
+    const outcome = await applySaved(r.data.restart_required);
+    setSaved(outcome);
+    if (outcome.loadError) ctx.toast(outcome.loadError, true);
     ctx.toast(t("config.saved"));
     await load();
+  };
+
+  // Writes the deny list file the config already names, then has the kernel read it again.
+  const writeDenyList = async (file: DenyFileResponse): Promise<ActionError | undefined> => {
+    const r = await getApi().writeDenyFile({ text: denyListText(denyEntries), etag: file.etag });
+    if (!r.ok) return r.error;
+    setSaved(await applySaved(false));
+    return undefined;
+  };
+
+  // A config whose deny list is still inline gets a file beside it, and the config is pointed at that file. The
+  // file is written first, since the kernel refuses a config that names a missing file; if saving the config then
+  // fails, the next save writes the same file again.
+  const migrateDeny = async (): Promise<ActionError | undefined> => {
+    if (!loaded) return undefined;
+    const created = await getApi().createDenyFile({ text: denyListText(denyEntries) });
+    if (!created.ok) return created.error;
+    const next = applyDenyFile(loaded.content, created.data.path);
+    if (next === undefined) return { code: "config_unparsed", message: "配置无法解析，禁止目录没有迁移。" };
+    const r = await getApi().putConfig({ content: next, etag: loaded.etag, dryRun: false });
+    if (!r.ok) return r.error;
+    setSaved(await applySaved(r.data.restart_required));
+    return undefined;
   };
 
   const saveDeny = async (): Promise<void> => {
     if (!denyFile) return;
     setBusy(true);
-    const r = await getApi().writeDenyFile({ text: denyListText(denyEntries), etag: denyFile.etag });
+    const failure = denyFile.path === undefined ? await migrateDeny() : await writeDenyList(denyFile);
     setBusy(false);
     setDenyReview(false);
-    if (!r.ok) return setDenyErr(r.error);
+    if (failure) return setDenyErr(failure);
     setDenySaved(true);
     setDenyErr(undefined);
     ctx.toast(t("settings.denySaved"));
+    // A migration changed the config, so its etag and the form are read again; the form has no unsaved edits by then.
+    if (denyFile.path === undefined) await load();
     await loadDeny();
   };
 
@@ -177,8 +214,12 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const weak = review ? weakening(review.changes) : [];
   const rows = review ? diffRows(review.changes) : [];
   const denyProblem = denyEntries.length > 0 ? checkDenyList(denyEntries) : undefined;
-  const denyChanged = denyFile !== undefined && denyListText(denyEntries) !== denyListText(parseDenyList(denyFile.text) ?? []);
-  const denyRemoved = denyFile ? (parseDenyList(denyFile.text) ?? []).filter((e) => !denyEntries.includes(e)) : [];
+  const denyUnset = denyFile !== undefined && denyFile.path === undefined;
+  const denyEditable = denyFile !== undefined && (denyUnset || parseDenyList(denyFile.text) !== undefined);
+  // Unset, the base is the config's inline list, and saving is always a move, so it is never "unchanged".
+  const denyBase = denyUnset ? cwdPolicy(loaded?.parsed).deny : (parseDenyList(denyFile?.text ?? "") ?? []);
+  const denyChanged = denyFile !== undefined && (denyUnset || denyListText(denyEntries) !== denyListText(denyBase));
+  const denyRemoved = denyFile ? denyBase.filter((e) => !denyEntries.includes(e)) : [];
 
   return (
     <div class="page" data-testid="page-settings">
@@ -192,12 +233,18 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
         <Banner kind={saved.restart ? "warn" : "ok"} testid="settings-saved">
           <div class="row">
             <span>{saved.restart ? t("settings.savedRestart") : t("settings.savedLive")}</span>
+            {saved.loadError && <span class="hint">{saved.loadError}</span>}
             {saved.restart && (
               <button type="button" class="btn small" onClick={() => setAskRestart(true)} disabled={!writable} data-testid="settings-restart">
                 {t("settings.restart")}
               </button>
             )}
           </div>
+          {saved.restart && saved.paths.length > 0 && (
+            <p class="hint" data-testid="settings-restart-paths">
+              {t("settings.restartPaths", { paths: saved.paths.join(", ") })}
+            </p>
+          )}
         </Banner>
       )}
       {err && <ErrorBanner error={err} />}
@@ -443,9 +490,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
         <h2>{t("settings.denyTitle")}</h2>
         <p class="hint">{t("settings.denySub")}</p>
         {denyErr && <ErrorBanner error={denyErr} testid="settings-deny-error" />}
-        {denyFile && denyFile.path === undefined && (
-          <Banner testid="settings-deny-unset">{t("settings.denyUnset")}</Banner>
-        )}
+        {denyUnset && <Banner testid="settings-deny-unset">{t("settings.denyUnset")}</Banner>}
         {denyFile?.path !== undefined && !denyFile.exists && (
           <Banner kind="danger" testid="settings-deny-missing">
             {t("settings.denyMissing")}
@@ -456,7 +501,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
             {t("settings.denyInvalid")}
           </Banner>
         )}
-        {denyFile?.path !== undefined && parseDenyList(denyFile.text) !== undefined && (
+        {denyEditable && (
           <fieldset disabled={!writable} class="deny-fields">
             {denyEntries.map((entry, i) => (
               <div class="row" key={i}>
@@ -484,8 +529,9 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
             </div>
             {denyProblem && <p class="hint" data-testid="deny-problem">{t(denyProblem === "blank" ? "settings.denyBlank" : "settings.denyControl")}</p>}
             {denySaved && !denyChanged && <p class="hint" data-testid="deny-saved">{t("settings.denySaved")}</p>}
+            {denyUnset && changed && <p class="hint" data-testid="deny-finish-first">{t("settings.denyFinishFirst")}</p>}
             <div class="row end" style={{ marginTop: "10px" }}>
-              <button type="button" class="btn primary" disabled={!writable || !denyChanged || denyProblem !== undefined || busy} onClick={() => setDenyReview(true)} data-testid="deny-review">
+              <button type="button" class="btn primary" disabled={!writable || !denyChanged || denyProblem !== undefined || busy || (denyUnset && changed)} onClick={() => setDenyReview(true)} data-testid="deny-review">
                 {t("settings.denySave")}
               </button>
             </div>

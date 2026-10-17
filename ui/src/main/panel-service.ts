@@ -27,18 +27,22 @@ import {
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
+  type ConfigReloadResponse,
   type ConfigSaveRequest,
   type DataResult,
+  type DenyFileCreateRequest,
+  type DenyFileCreated,
   type DenyFileResponse,
   type DenyFileSaveRequest,
   type DenyFileSaved,
   type PairImportArgs,
   type PatCreateArgs,
 } from "../shared/ipc";
+import { DENY_FILE_NAME } from "../shared/setup";
 import type { ControlClient } from "./client";
 import type { ShellController } from "./controller";
 
-export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain">;
+export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain" | "snapshot">;
 
 /** `agent.cwd_policy.deny_file` when the config names an absolute path for it. */
 export function denyFileOf(parsed: unknown): string | undefined {
@@ -151,6 +155,35 @@ export class PanelService {
     } catch (e) {
       return { ok: false, error: { code: "io", message: e instanceof Error ? e.message : String(e) } };
     }
+  }
+
+  /**
+   * Creates the deny list file for a config that names none, beside the config file the kernel reports. A file
+   * already there with the same text is kept; one with other text is never replaced.
+   */
+  async createDenyFile(req: DenyFileCreateRequest): Promise<DataResult<DenyFileCreated>> {
+    if (Buffer.byteLength(req.text) > DENY_FILE_MAX_BYTES) return { ok: false, error: { code: "payload_too_large", message: "禁止目录文件过大" } };
+    const cfg = await this.getConfig();
+    if (!cfg.ok) return cfg;
+    if (denyFileOf(cfg.data.parsed) !== undefined) return { ok: false, error: { code: "already_configured", message: "配置里已经有 deny_file" } };
+    const node = this.controller.snapshot.connection;
+    const configFile = node.kind === "connected" ? node.status.paths?.config_file : undefined;
+    if (typeof configFile !== "string" || configFile === "") return { ok: false, error: { code: "unavailable", message: "内核没有报告配置文件的位置" } };
+    const file = path.join(path.dirname(configFile), DENY_FILE_NAME);
+    try {
+      fs.writeFileSync(file, req.text, { flag: "wx", mode: 0o600 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return { ok: false, error: { code: "io", message: e instanceof Error ? e.message : String(e) } };
+      if (readOptional(file) !== req.text) {
+        return { ok: false, error: { code: "exists", message: "这个节点目录里已有禁止目录文件，不会覆盖。请到「设置」页编辑它。" } };
+      }
+    }
+    return { ok: true, data: { path: file, etag: etagOf(req.text) } };
+  }
+
+  /** Has the kernel reload its config in place. A kernel without the route answers with an error, and the page restarts instead. */
+  reloadConfig(): Promise<DataResult<ConfigReloadResponse>> {
+    return this.data("config.write", (c) => c.call("POST", "/v1/config/reload"));
   }
 
   listPats(): Promise<DataResult<PatList>> {

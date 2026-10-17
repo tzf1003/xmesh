@@ -181,6 +181,19 @@ function applyIngress(doc: Document, f: SettingsForm): void {
   }
 }
 
+/**
+ * The config text with its deny list moved to a file: `agent.cwd_policy.deny_file` names `denyPath` and the inline
+ * `deny` list goes, since the file holds those entries now. The rest stays as the user wrote it. Undefined when the
+ * text is not YAML at all.
+ */
+export function applyDenyFile(content: string, denyPath: string): string | undefined {
+  const doc = parseDocument(content);
+  if (doc.errors.length > 0) return undefined;
+  doc.setIn(["agent", "cwd_policy", "deny_file"], denyPath);
+  doc.deleteIn(["agent", "cwd_policy", "deny"]);
+  return doc.toString({ flowCollectionPadding: false });
+}
+
 /** The entries of a deny list file: a YAML list of strings. Undefined when the text is anything else. */
 export function parseDenyList(text: string): string[] | undefined {
   const doc = parseDocument(text);
