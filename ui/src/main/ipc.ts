@@ -72,6 +72,10 @@ export function registerIpc({ controller, actions, service, setup, mesh, panel }
     return v === undefined ? bad("drain mode") : actions.drain(v);
   });
   handle(CHANNELS.resume, () => actions.resume());
+  handle(CHANNELS.startKernel, (node: unknown) => {
+    const v = parseNodeName(node);
+    return v === undefined ? bad("node name") : actions.startKernel(v);
+  });
   handle(CHANNELS.selectInstance, (id: unknown) => {
     const v = parseInstanceId(id);
     return v === undefined ? bad("instance id") : actions.selectInstance(v);

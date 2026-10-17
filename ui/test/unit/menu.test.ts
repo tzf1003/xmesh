@@ -57,6 +57,18 @@ test("items the kernel gives no data for are disabled: no gateway role, no log o
   assert.equal(findItem(m, "action.openConfig")?.enabled, true);
 });
 
+test("an offline UI offers to start each node that has a config but no running kernel", () => {
+  const offline = (stoppedNodes: string[]): Snapshot => ({ ...EMPTY_SNAPSHOT, stoppedNodes });
+  const one = buildMenu(offline(["beta2-mac"]), t);
+  assert.equal(findItem(one, "action.startKernel.beta2-mac")?.label, "启动内核");
+  assert.deepEqual(findItem(one, "action.startKernel.beta2-mac")?.action, { type: "start-kernel", node: "beta2-mac" });
+  const two = buildMenu(offline(["a", "b"]), t);
+  assert.equal(findItem(two, "action.startKernel.a")?.label, "启动内核 a");
+  assert.equal(findItem(two, "action.startKernel.b")?.label, "启动内核 b");
+  assert.ok(!menuIds(buildMenu(offline([]), t)).some((id) => id.startsWith("action.startKernel")), "no config, nothing to start");
+  assert.equal(findItem(buildMenu(connected({}, { stoppedNodes: ["beta2-mac"] }), t), "action.startKernel.beta2-mac"), undefined, "connected: no start entry");
+});
+
 test("draining swaps drain for resume; every warning is listed with its own entry", () => {
   const m = buildMenu(
     connected({

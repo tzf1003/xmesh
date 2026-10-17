@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { ShellController } from "../../src/main/controller";
-import { discoverInstances } from "../../src/main/discovery";
+import { discoverConfigured, discoverInstances } from "../../src/main/discovery";
 import type { Snapshot } from "../../src/shared/state";
 import { peerNamed, peersFixture, warningOf } from "../../testserver/fixtures";
 import { FakeKernel } from "../../testserver/server";
@@ -35,6 +35,7 @@ function controller(): ShellController {
   let login = false;
   const c = new ShellController({
     discover: () => discoverInstances(root),
+    configured: () => discoverConfigured(root),
     getLoginItem: () => login,
     setLoginItem: (v) => {
       login = v;
@@ -88,6 +89,16 @@ test("with no manifest the controller reports offline, then connects when one ap
   assert.equal(s.connection.kind === "connected" && s.connection.status.hostname, "win-dev-01");
   assert.deepEqual(s.instances, [{ id: "n1", label: "win-dev-01" }]);
   assert.equal(s.selectedInstance, "n1");
+});
+
+test("a node with a config but no running kernel is listed as stopped, so the UI can start it", async () => {
+  fs.mkdirSync(path.join(root, "beta2-mac"));
+  fs.writeFileSync(path.join(root, "beta2-mac", "xmesh.yaml"), "node:\n  name: beta2-mac\n");
+  const c = controller();
+  c.start();
+  const s = await until(c, (x) => x.connection.kind === "offline" && x.stoppedNodes.length === 1, "stopped node");
+  assert.deepEqual(s.stoppedNodes, ["beta2-mac"]);
+  assert.deepEqual(s.instances, []);
 });
 
 test("status changes pushed over the event stream reach the snapshot", async () => {
