@@ -179,11 +179,11 @@ func (s *Server) Close() {
 		if !waitTimeout(&s.done, serveStopTimeout) {
 			go func() {
 				s.done.Wait()
-				RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
+				RemoveEndpoint(s.o.StateDir, s.endpoint)
 			}()
 			return
 		}
-		RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
+		RemoveEndpoint(s.o.StateDir, s.endpoint)
 	})
 }
 
