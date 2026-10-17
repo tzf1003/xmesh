@@ -1,6 +1,6 @@
 name: Windows 偶发 winbox 测试复现
 # 反复运行 Test_WindowsManagedRunnerExecConcurrent、Test_WindowsAppContainerWorkspaceExecution
-# 和 Test_WindowsManagedRunnerTerminalKill，失败时测试会带出 race 运行时日志与 helper 退出原因，
+# 、Test_WindowsManagedRunnerTerminalKill 和 Test_WindowsManagedRunnerTerminalInterrupt，失败时测试会带出 race 运行时日志与 helper 退出原因，
 # 用来确认这些偶发失败是否都来自 race 运行时启动期映射失败。
 # pipe-close 作业另外反复关闭控制通道的命名管道监听器：先用裸 go-winio 监听器统计需要第二次 Close
 # 才能放行的轮数，再用带保护的监听器确认没有任何一轮卡住。
@@ -36,7 +36,8 @@ jobs:
           $runs = @(
             @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 80 },
             @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 40 },
-            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 }
+            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 },
+            @{ Name = 'TerminalInterrupt'; Pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$'; Count = 40 }
           )
           foreach ($run in $runs) {
             $out = "hunt-$($run.Name).txt"

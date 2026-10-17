@@ -96,6 +96,10 @@ func Test_WindowsManagedRunnerTerminalInterrupt(t *testing.T) {
 			}
 			write("echo SURV^IVED-" + c.name)
 			o.until(`SURVIVED-` + c.name)
+			// The reply is printed before the prompt is drawn; typing "exit" into that redraw has
+			// left a session that never ended.
+			survived := o.text.Len()
+			o.untilAfter(survived-len(`SURVIVED-`+c.name), `SURVIVED-`+c.name+`[^>]*workspace>`)
 			write("exit")
 			o.drain()
 			waitRunnerIdle(t, f, 1)
