@@ -350,6 +350,49 @@ func Test_ApplyEditsKeepsComments(t *testing.T) {
 	}
 }
 
+// Deleting the last PAT removes the empty gateway.pats key, unless a comment hangs on it or another PAT remains.
+func Test_ApplyEditsDropsEmptyPats(t *testing.T) {
+	const base = testConfig + "gateway:\n  listen: 127.0.0.1:8099\n  pats:\n    ci:\n      token_file: pats/ci.token\n      scopes: [\"devices:read\"]\n"
+	del := Edit{Path: "/gateway/pats/ci", Delete: true}
+	out, err := ApplyEdits([]byte(base), []Edit{del})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "pats") {
+		t.Fatalf("empty pats kept:\n%s", out)
+	}
+	if _, err = config.Parse(out); err != nil {
+		t.Fatalf("the kernel cannot read its own edit: %v\n%s", err, out)
+	}
+
+	// a head comment on the key is the operator's own note: the key stays
+	headed := strings.Replace(base, "  pats:\n", "  # 网关令牌，请勿删除\n  pats:\n", 1)
+	if out, err = ApplyEdits([]byte(headed), []Edit{del}); err != nil {
+		t.Fatal(err)
+	}
+	if text := string(out); !strings.Contains(text, "# 网关令牌，请勿删除") || !strings.Contains(text, "pats: {}") {
+		t.Fatalf("comment or key lost:\n%s", text)
+	}
+
+	// so is a line comment on the key, even when the map is empty
+	lined := strings.Replace(base, "  pats:\n", "  pats: # 之后再填\n", 1)
+	if out, err = ApplyEdits([]byte(lined), []Edit{del}); err != nil {
+		t.Fatal(err)
+	}
+	if text := string(out); !strings.Contains(text, "pats: # 之后再填") || strings.Contains(text, "ci:") {
+		t.Fatalf("line comment or key lost:\n%s", text)
+	}
+
+	// another PAT keeps the map, and so does its key
+	out, err = ApplyEdits([]byte(base), []Edit{{Path: "/gateway/pats/ops", Value: map[string]any{"token_file": "pats/ops.token", "scopes": []string{"devices:read"}}}, del})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(out); !strings.Contains(text, "ops:") || strings.Contains(text, "ci:") {
+		t.Fatalf("wrong entries:\n%s", text)
+	}
+}
+
 // A JSON configuration stays JSON after a control-channel edit, so other tools can still read it.
 func Test_ApplyEditsKeepsJSON(t *testing.T) {
 	src := `{"node": {"name": "n1", "roles": ["agent", "gateway"]}, "mesh": {"mode": "lan", "lan": {"mdns": true}}, "gateway": {"listen": "127.0.0.1:18080"}, "agent": {"cwd_policy": {"allow": ["."]}}}`
@@ -366,7 +409,7 @@ func Test_ApplyEditsKeepsJSON(t *testing.T) {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
 	gateway, _ := got["gateway"].(map[string]any)
-	if gateway["listen"] != "127.0.0.1:18080" || len(gateway["pats"].(map[string]any)) != 0 {
+	if _, kept := gateway["pats"]; kept || gateway["listen"] != "127.0.0.1:18080" {
 		t.Fatalf("%v", got)
 	}
 	if exec, _ := got["agent"].(map[string]any)["exec"].(map[string]any); exec["max_concurrent"] != float64(2) {

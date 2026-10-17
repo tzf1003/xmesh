@@ -33,6 +33,7 @@ func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("配置根必须是映射")
 	}
+	patDeleted := false
 	for _, e := range edits {
 		segments, err := pointer(e.Path)
 		if err != nil {
@@ -41,6 +42,10 @@ func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 		if err = edit(doc.Content[0], segments, e); err != nil {
 			return nil, fmt.Errorf("%s: %w", e.Path, err)
 		}
+		patDeleted = patDeleted || (e.Delete && len(segments) == 3 && segments[0] == "gateway" && segments[1] == "pats")
+	}
+	if patDeleted {
+		dropEmptyPats(doc.Content[0])
 	}
 	var out bytes.Buffer
 	if json.Valid(src) && bytes.HasPrefix(bytes.TrimSpace(src), []byte("{")) {
@@ -116,6 +121,40 @@ func edit(m *yaml.Node, segments []string, e Edit) error {
 		return fmt.Errorf("%q 不是映射", key)
 	}
 	return edit(child, rest, e)
+}
+
+// dropEmptyPats removes gateway.pats once deleting a PAT has emptied it: an empty map and no map both
+// leave authentication off. The key stays when a comment hangs on it, since removing it would also
+// delete the operator's note.
+func dropEmptyPats(root *yaml.Node) {
+	gi, ok := mapIndex(root, "gateway")
+	if !ok || root.Content[gi+1].Kind != yaml.MappingNode {
+		return
+	}
+	gateway := root.Content[gi+1]
+	pi, ok := mapIndex(gateway, "pats")
+	if !ok {
+		return
+	}
+	key, value := gateway.Content[pi], gateway.Content[pi+1]
+	if value.Kind != yaml.MappingNode || len(value.Content) > 0 || hasComment(key) || hasComment(value) {
+		return
+	}
+	gateway.Content = append(gateway.Content[:pi], gateway.Content[pi+2:]...)
+}
+
+// mapIndex returns the position of key's name in a mapping's content; the value follows it.
+func mapIndex(m *yaml.Node, key string) (int, bool) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func hasComment(n *yaml.Node) bool {
+	return n.HeadComment != "" || n.LineComment != "" || n.FootComment != ""
 }
 
 // writeNodeJSON renders a node tree as indented JSON, keeping key order.

@@ -27,10 +27,10 @@
 
 | 平台 | 端点 | 访问控制 |
 | --- | --- | --- |
-| macOS、Linux | 状态目录下 `control.sock`，目录 `0700`，套接字 `0600`。路径超过 UDS 长度上限时落到 `$TMPDIR/xmesh-<uid>/control.sock` | 每个连接用对端凭据（`LOCAL_PEERCRED` / `SO_PEERCRED`）核对 uid 等于内核运行用户，不符立即关闭连接 |
+| macOS、Linux | 状态目录下 `control.sock`，目录 `0700`，套接字 `0600`。路径超过 UDS 长度上限（100 字节）时落到 `/tmp/xmesh-<uid>/<节点名>.sock`，这个位置固定，不随 `$TMPDIR` 变化；回退路径仍超限时启动失败，错误给出路径长度与上限 | 每个连接用对端凭据（`LOCAL_PEERCRED` / `SO_PEERCRED`）核对 uid 等于内核运行用户，不符立即关闭连接 |
 | Windows | 命名管道 `\\.\pipe\xmesh-<sid>-<节点名>` | 创建时设置 DACL：运行用户 SID、`SYSTEM`、`Administrators`；`install --system` 时额外授权安装者的 SID；拒绝远程客户端（`PIPE_REJECT_REMOTE_CLIENTS`） |
 
-内核在开始监听之后写 `control.json`（`ControlEndpointFile`），位置是状态目录（[`app.StateDir`](../../internal/app/runtime.go)，即 `<UserConfigDir>/xmesh/<节点名>/`）。写法是同目录临时文件加重命名；正常退出时删除。`endpoint` 永远是实际使用的路径，因此 UDS 回退到 `$TMPDIR` 时 UI 也不需要猜。
+内核在开始监听之后写 `control.json`（`ControlEndpointFile`），位置是状态目录（[`app.StateDir`](../../internal/app/runtime.go)，即 `<UserConfigDir>/xmesh/<节点名>/`）。写法是同目录临时文件加重命名；正常退出时删除。`endpoint` 永远是实际使用的路径，因此 UDS 回退到 `/tmp/xmesh-<uid>/` 时 UI 也不需要猜，CLI 与 UI 都从这个字段取路径。
 
 UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点实例；Windows 上还要枚举 `%ProgramData%\xmesh\*\control.json`，`install --system` 的 SYSTEM 服务默认把状态目录放在 `%ProgramData%\xmesh\<节点名>`。这个节点目录只对 `SYSTEM` 和 `Administrators` 开放（见 [操作手册](../operations.md) 的「状态目录权限」），登录用户不能列出它，只靠对 `control.json` 这一个文件的只读授权读取：内核每次写入该文件时把只读授权给 `--control-allow-sid` 的账户，客户端按精确路径 `%ProgramData%\xmesh\<节点名>\control.json` 打开它（Windows 允许穿越自己不能列出的目录）。需要列出的只有上一级 `%ProgramData%\xmesh`：它由 `privdir.Ensure` 的 `MkdirAll` 创建，沿用 `%ProgramData%` 的继承 ACL（通常允许普通用户列出和读取），这一级只暴露节点名。如果管理员收紧了这一级，枚举会得到空列表，此时 UI 需要用户给出节点名，或由安装方改用 `--state-dir` 指向用户可列出的位置。文件存在不代表内核还活着：以连接是否成功为准，`pid` 只作提示。连接被拒绝或文件缺失都按「未运行」处理，不删除文件。
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -65,8 +66,18 @@ func Test_ControlSocketPermissions(t *testing.T) {
 	}
 }
 
-// A state directory too deep for sun_path falls back to a private per-user directory.
-func Test_ControlLongPathFallback(t *testing.T) {
+// useFallbackRoot points the socket fallback at a short directory of this test; the real root is /tmp.
+func useFallbackRoot(t *testing.T) string {
+	t.Helper()
+	saved := socketFallbackRoot
+	socketFallbackRoot = shortTempDir(t)
+	t.Cleanup(func() { socketFallbackRoot = saved })
+	return socketFallbackRoot
+}
+
+// deepStateDir is a state directory whose control.sock path overflows sun_path.
+func deepStateDir(t *testing.T) string {
+	t.Helper()
 	deep := t.TempDir()
 	for len(deep) < 120 {
 		deep = filepath.Join(deep, "deeper-directory-name")
@@ -74,13 +85,20 @@ func Test_ControlLongPathFallback(t *testing.T) {
 	if err := os.MkdirAll(deep, 0700); err != nil {
 		t.Fatal(err)
 	}
+	return deep
+}
+
+// A state directory too deep for sun_path falls back to a private per-user directory.
+func Test_ControlLongPathFallback(t *testing.T) {
+	root := useFallbackRoot(t)
+	deep := deepStateDir(t)
 	l, ep, err := Listen(ListenOptions{StateDir: deep, Node: "fallback-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(ep.Address)
 	defer l.Close()
-	if strings.HasPrefix(ep.Address, deep) || len(ep.Address) > maxSocketPath {
+	if strings.HasPrefix(ep.Address, deep) || !strings.HasPrefix(ep.Address, root+string(filepath.Separator)) || len(ep.Address) > maxSocketPath {
 		t.Fatalf("fallback not used: %s", ep.Address)
 	}
 	st, err := os.Stat(filepath.Dir(ep.Address))
@@ -89,6 +107,52 @@ func Test_ControlLongPathFallback(t *testing.T) {
 	}
 	if owner := st.Sys().(*syscall.Stat_t).Uid; int(owner) != os.Geteuid() {
 		t.Fatalf("fallback directory owner %d", owner)
+	}
+}
+
+// $TMPDIR can be too long for a socket path itself, so the fallback must not be placed under it.
+func Test_ControlFallbackIgnoresTMPDIR(t *testing.T) {
+	root := useFallbackRoot(t)
+	t.Setenv("TMPDIR", deepStateDir(t))
+	l, ep, err := Listen(ListenOptions{StateDir: deepStateDir(t), Node: "tmpdir-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(ep.Address)
+	defer l.Close()
+	if want := filepath.Join(root, "xmesh-"+strconv.Itoa(os.Geteuid())); filepath.Dir(ep.Address) != want {
+		t.Fatalf("fallback at %s, want a directory under %s", ep.Address, want)
+	}
+}
+
+// A node name too long for the fallback as well is refused before anything is created, and the error
+// gives the length of the path and the limit.
+func Test_ControlFallbackTooLong(t *testing.T) {
+	root := useFallbackRoot(t)
+	node := strings.Repeat("n", 90)
+	_, _, err := Listen(ListenOptions{StateDir: deepStateDir(t), Node: node})
+	want := filepath.Join(root, "xmesh-"+strconv.Itoa(os.Geteuid()), node+".sock")
+	if err == nil || !strings.Contains(err.Error(), strconv.Itoa(len(want))) || !strings.Contains(err.Error(), strconv.Itoa(maxSocketPath)) {
+		t.Fatalf("error %v, want the %d-byte path and the %d-byte limit", err, len(want), maxSocketPath)
+	}
+	if _, statErr := os.Stat(filepath.Dir(want)); !os.IsNotExist(statErr) {
+		t.Fatalf("directory created for an unusable path: %v", statErr)
+	}
+}
+
+// The fallback directory must be a real directory of this user, never a link planted in its place.
+func Test_PrivateDirRefusesLink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	if err := privateDir(link); err == nil {
+		t.Fatal("a symlink was accepted as the socket directory")
 	}
 }
 
