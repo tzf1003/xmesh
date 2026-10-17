@@ -174,10 +174,16 @@ func (s *Server) Close() {
 		stopHTTP(ctx, s.srv)
 		// A listener that refuses to stop leaves Serve blocked in Accept; shutdown must not
 		// wait for it forever. While Serve may still hold the pipe, the endpoint stays, so
-		// discovery keeps pointing at a server that answers "stopping" until it is gone.
-		if waitTimeout(&s.done, serveStopTimeout) {
-			RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
+		// discovery keeps pointing at a server that answers "stopping". The endpoint goes once
+		// Serve has really returned, however late that is.
+		if !waitTimeout(&s.done, serveStopTimeout) {
+			go func() {
+				s.done.Wait()
+				RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
+			}()
+			return
 		}
+		RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
 	})
 }
 
