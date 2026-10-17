@@ -72,7 +72,7 @@ func (l *pipeListener) Close() error {
 	l.once.Do(func() {
 		first = true
 		l.stopped = make(chan struct{})
-		go l.stop()
+		go l.stop(pipeCloseRetry, pipeCloseAttempts)
 	})
 	if !first {
 		select {
@@ -91,8 +91,10 @@ func (l *pipeListener) Close() error {
 }
 
 // stop sends close requests until the loop has stopped. Each request runs on its own goroutine,
-// because a request that is lost inside go-winio leaves its own call blocked.
-func (l *pipeListener) stop() {
+// because a request that is lost inside go-winio leaves its own call blocked. The retry settings
+// are passed in: this loop can outlive Close, and it must not read package variables that a
+// later test or caller may change.
+func (l *pipeListener) stop(retry time.Duration, attempts int) {
 	var once sync.Once
 	var inFlight atomic.Int32
 	request := func() {
@@ -108,11 +110,11 @@ func (l *pipeListener) stop() {
 		go request()
 	}
 	send()
-	for attempt := 0; attempt < pipeCloseAttempts; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		select {
 		case <-l.stopped:
 			return
-		case <-time.After(pipeCloseRetry):
+		case <-time.After(retry):
 			send()
 		}
 	}
