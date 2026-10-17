@@ -25,13 +25,15 @@ func Test_WindowsPTYInterruptForegroundPrograms(t *testing.T) {
 			switch c.name {
 			case "ping":
 				windowsWrite(t, term, "ping -t 127.0.0.1")
-				output.until(t, `Pinging 127\.0\.0\.1`)
+				// Match fragments that survive localization of ping's text: the reply
+				// line carries TTL= and the statistics carry a "(n% ...)" loss figure.
+				output.until(t, `TTL=`)
 				time.Sleep(500 * time.Millisecond)
 				interrupted := output.mark()
 				if err := term.Signal("INT"); err != nil {
 					t.Fatal(err)
 				}
-				output.until(t, `Ping statistics for 127\.0\.0\.1`)
+				output.until(t, `\(\d+% `)
 				output.untilAfter(t, interrupted, `PS [^\r\n]*>`)
 			case "python":
 				windowsWrite(t, term, `python -q -i -c "print('PY_'+'READY')"`)
