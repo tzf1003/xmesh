@@ -56,6 +56,7 @@ const api: PanelApi = {
       ipcRenderer.removeListener("xmesh:calls", handler);
     };
   },
+  previewSetup: (params) => invoke("xmesh:preview-setup", params),
   runSetup: (params) => invoke("xmesh:run-setup", params),
   pickPath: (kind) => invoke("xmesh:pick-path", kind),
   mesh: (request) => invoke("xmesh:mesh", request),

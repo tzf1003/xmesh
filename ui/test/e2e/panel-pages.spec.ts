@@ -45,7 +45,15 @@ test("every page renders under the CSP without violations", async () => {
     await page.getByTestId(`nav-${id}`).click();
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }
-  await page.getByTestId("nav-setup").click();
+  // Once a node has a config the wizard leaves the navigation; it is checked on its own below.
+  await expect(page.getByTestId("nav-setup")).toHaveCount(0);
+  expect(await violations()).toEqual([]);
+});
+
+test("the wizard renders under the CSP without violations when no node has a config", async () => {
+  h = await launch({ publish: false });
+  const page = await h.openPanel();
+  const violations = await watchCsp(page);
   await expect(page.getByTestId("page-setup")).toBeVisible();
   expect(await violations()).toEqual([]);
 });
@@ -275,6 +283,10 @@ test("wizard: with no kernel the first page is the wizard; it writes a 0600 conf
   const file = path.join(h.root, "lab-1", "xmesh.yaml");
   const text = fs.readFileSync(file, "utf8");
   expect(text).toContain('default_cwd: "/home/me/work"');
+  // The default deny list is written beside the config, and the config names it.
+  const denyFile = path.join(h.root, "lab-1", "cwd-deny.yaml");
+  expect(text).toContain(`deny_file: ${JSON.stringify(denyFile)}`);
+  expect(fs.readFileSync(denyFile, "utf8")).toContain('- "~/.ssh"');
   if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
 
   const calls = (await h.calls()).filter((c) => c.op === "setup-cli");

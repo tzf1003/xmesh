@@ -52,6 +52,7 @@ export const CHANNELS = {
   importPair: "xmesh:import-pair",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
+  previewSetup: "xmesh:preview-setup",
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
   mesh: "xmesh:mesh",
@@ -139,6 +140,14 @@ export interface SetupReport {
   steps: SetupStep[];
 }
 
+/** What the first run would write, exactly as `runSetup` writes it. Nothing is written by asking. */
+export interface SetupPreview {
+  configPath: string;
+  /** The deny list file the config names; written with the defaults when it does not exist yet. */
+  denyPath: string;
+  config: string;
+}
+
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
   getSnapshot(): Promise<Snapshot>;
@@ -173,6 +182,7 @@ export interface PanelApi {
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
+  previewSetup(params: SetupParams): Promise<DataResult<SetupPreview>>;
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
   /** Opens the system file chooser; `path` is null when the user cancels. */
   pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>>;
@@ -209,6 +219,7 @@ export const PANEL_API_METHODS = [
   "queryAudit",
   "getRecentCalls",
   "onCalls",
+  "previewSetup",
   "runSetup",
   "pickPath",
   "mesh",

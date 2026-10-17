@@ -8,14 +8,13 @@ import {
   applySettingsForm,
   checkDenyList,
   checkSettingsForm,
-  denyListText,
   formFromConfig,
   isChanged,
   parseDenyList,
   toggleRole,
   type SettingsForm,
 } from "../../src/renderer/lib/settings";
-import { DEFAULT_CONTROL_URL, DEFAULT_DENY } from "../../src/shared/setup";
+import { DEFAULT_CONTROL_URL, DEFAULT_DENY, denyListText } from "../../src/shared/setup";
 import { schemaDir } from "../../testserver/fixtures";
 
 // The wizard's lan config, with a comment the edit must keep and a deny list it must not touch.

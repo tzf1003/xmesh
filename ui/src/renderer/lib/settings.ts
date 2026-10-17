@@ -200,9 +200,3 @@ export function checkDenyList(entries: readonly string[]): "blank" | "control" |
   }
   return undefined;
 }
-
-/** The deny list file's text for `entries`: a comment saying what the list does, then the YAML list. */
-export function denyListText(entries: readonly string[]): string {
-  const header = "# 禁止访问的目录。这里的目录始终拒绝，与工作目录允许列表是否为空无关。每行一项：绝对路径或以 ~ 开头的路径。\n";
-  return header + new Document(entries.map((e) => e.trim())).toString();
-}

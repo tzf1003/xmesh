@@ -5,7 +5,7 @@ import { getApi } from "../api";
 import { Banner, ErrorBanner, Field, PageHead } from "../components";
 import { useT } from "../i18n";
 import { INITIAL_FORM, checkForm, type WizardForm } from "../lib/setup";
-import type { ActionError, PickKind, SetupReport } from "../../shared/ipc";
+import type { ActionError, PickKind, SetupPreview, SetupReport } from "../../shared/ipc";
 import type { Key } from "../messages";
 
 const STEPS = ["wizard.step.mode", "wizard.step.where", "wizard.step.review", "wizard.step.install"] as const;
@@ -17,6 +17,7 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError | undefined>();
   const [report, setReport] = useState<SetupReport | undefined>();
+  const [preview, setPreview] = useState<SetupPreview | undefined>();
   const check = checkForm(form);
   const set = <K extends keyof WizardForm>(k: K, v: WizardForm[K]): void => setForm((f) => ({ ...f, [k]: v }));
 
@@ -27,6 +28,15 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
   const pick = async (kind: PickKind, field: "workspace" | "authkeyFile"): Promise<void> => {
     const r = await getApi().pickPath(kind);
     if (r.ok && r.data.path) set(field, r.data.path);
+  };
+
+  // The review shows the text the main process will write, so it asks for it before the step opens.
+  const review = async (): Promise<void> => {
+    if (!check.ok) return;
+    const r = await getApi().previewSetup(check.params);
+    if (!r.ok) return ctx.toast(r.error.message, true);
+    setPreview(r.data);
+    setStep(2);
   };
 
   const run = async (): Promise<void> => {
@@ -137,20 +147,23 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
             <button type="button" class="btn" onClick={() => setStep(0)}>
               {t("common.back")}
             </button>
-            <button type="button" class="btn primary" disabled={!whereOk} onClick={() => setStep(2)} data-testid="wizard-next">
+            <button type="button" class="btn primary" disabled={!whereOk} onClick={() => void review()} data-testid="wizard-next">
               {t("common.next")}
             </button>
           </div>
         </section>
       )}
 
-      {step === 2 && check.ok && (
+      {step === 2 && preview && (
         <section class="card" data-testid="wizard-review">
           <p>{t("wizard.reviewIntro")}</p>
           <pre class="preview mono" data-testid="wizard-preview">
-            {check.preview}
+            {preview.config}
           </pre>
-          <Banner>{t("wizard.reviewNote")}</Banner>
+          <Banner>
+            <p>{t("wizard.reviewNote")}</p>
+            <p>{t("wizard.denyFile", { path: preview.denyPath })}</p>
+          </Banner>
           <div class="row end" style={{ marginTop: "10px" }}>
             <button type="button" class="btn" onClick={() => setStep(1)}>
               {t("common.back")}

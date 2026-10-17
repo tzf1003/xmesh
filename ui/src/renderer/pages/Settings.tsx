@@ -13,7 +13,6 @@ import {
   applySettingsForm,
   checkDenyList,
   checkSettingsForm,
-  denyListText,
   formFromConfig,
   isChanged,
   parseDenyList,
@@ -25,7 +24,8 @@ import {
   type SettingsProblem,
   type TLSMode,
 } from "../lib/settings";
-import { DEFAULT_DENY, isAbsolutePath } from "../../shared/setup";
+import { DEFAULT_DENY, denyListText, isAbsolutePath } from "../../shared/setup";
+import { requestReload } from "../lib/reload";
 import type { ActionError, DenyFileResponse } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
 import type { Key } from "../messages";
@@ -139,8 +139,10 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
     setBusy(false);
     setReview(undefined);
     if (!r.ok) return setErr(r.error);
-    // Changes that need a restart offer one. Once the kernel can reload the file, this is where the reload is requested instead.
-    setSaved({ restart: r.data.restart_required });
+    // A change that needs a restart is first offered to the kernel as a reload; only a change it cannot take
+    // in place leaves a restart offer on the page.
+    const reload = r.data.restart_required ? requestReload() : undefined;
+    setSaved({ restart: reload === undefined ? r.data.restart_required : !(await reload) });
     ctx.toast(t("config.saved"));
     await load();
   };

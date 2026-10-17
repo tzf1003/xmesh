@@ -69,18 +69,37 @@ export function parseSetup(v: unknown): { ok: true; value: SetupParams } | { ok:
   return { ok: true, value };
 }
 
+/** The deny list file's name, beside the config file it belongs to. */
+export const DENY_FILE_NAME = "cwd-deny.yaml";
+
 /** A YAML double-quoted scalar. JSON string syntax is a subset of it, so escaping is delegated to JSON. */
 function q(s: string): string {
   return JSON.stringify(s);
 }
 
 /**
- * The config the wizard writes. Everything user-supplied goes through `q`, so a
- * value cannot add keys or end the scalar. `params` must already be valid.
+ * The deny list file's text for `entries`: a comment saying what the list does, then the list. Entries are
+ * written as double-quoted scalars, so a path cannot end its line early. Shared by the wizard and the settings page.
  */
-export function generateConfig(p: SetupParams): string {
+export function denyListText(entries: readonly string[]): string {
+  const header = "# 禁止访问的目录。这里的目录始终拒绝，与工作目录允许列表是否为空无关。每行一项：绝对路径或以 ~ 开头的路径。\n";
+  if (entries.length === 0) return `${header}[]\n`;
+  return header + entries.map((e) => `- ${q(e.trim())}\n`).join("");
+}
+
+/** The deny list the first run writes: the defaults, as the settings page would save them. */
+export function generateDenyFile(): string {
+  return denyListText(DEFAULT_DENY);
+}
+
+/**
+ * The config the wizard writes. Everything user-supplied goes through `q`, so a
+ * value cannot add keys or end the scalar. `params` must already be valid, and
+ * `denyFile` is the absolute path the first run writes the default deny list to.
+ */
+export function generateConfig(p: SetupParams, denyFile: string): string {
   const lines: string[] = [
-    "# 由 xmesh 首次运行向导生成。之后可以在面板的「配置」页修改。",
+    "# 由 xmesh 首次运行向导生成。之后可以在面板的「设置」页修改。",
     "node:",
     `  name: ${q(p.nodeName)}`,
     `  roles: [${p.roles.join(", ")}]`,
@@ -102,7 +121,7 @@ export function generateConfig(p: SetupParams): string {
     `  default_cwd: ${q(p.workspace)}`,
     "  cwd_policy:",
     `    allow: [${q(p.workspace)}]`,
-    '    deny: ["~/.ssh", "~/.config/gcloud", "~/.azure"]',
+    `    deny_file: ${q(denyFile)}`,
     "  authz:",
     `    "${p.mode === "tailnet" ? "tag:device" : "tag:peer"}":`,
     '      tools: ["*"]',
