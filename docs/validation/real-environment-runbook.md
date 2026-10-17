@@ -22,7 +22,7 @@ beta 是 GitHub 预发布版（Releases 页，标签形如 `v0.1.0-beta.1`），
    - Linux：`sha256sum --ignore-missing -c SHA256SUMS.txt`
    - macOS：`shasum -a 256 --ignore-missing -c SHA256SUMS.txt`
    - Windows（PowerShell）：`(Get-FileHash .\xmesh-<标签>-windows-amd64.zip).Hash` 应与 `SHA256SUMS.txt` 里该文件那一行相同（忽略大小写）。
-3. 解压并进入目录。二进制未签名：macOS 先执行 `xattr -d com.apple.quarantine xmesh`；Windows 若出现 SmartScreen，选“更多信息”再“仍要运行”。
+3. 解压并进入目录。二进制未签名：macOS 先执行 `/usr/bin/xattr -d com.apple.quarantine xmesh`；Windows 若出现 SmartScreen，选“更多信息”再“仍要运行”。
 4. 执行 `./xmesh version`（Windows 为 `.\xmesh.exe version`），输出应为 `xmesh <标签>`。
 
 **交回：** 第 2 步的校验结果（通过或不通过）、第 4 步的输出、系统与架构。

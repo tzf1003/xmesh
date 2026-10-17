@@ -146,7 +146,7 @@ node scripts/verify-package.mjs --dir release/win-unpacked --kernel   # 本机�
 现在没有证书，beta 安装包是**未签名**的，系统会提示：
 
 - Windows：SmartScreen 显示「Windows 已保护你的电脑」，点「更多信息」再点「仍要运行」。
-- macOS：Gatekeeper 拒绝打开。把 `xmesh.app` 拖进「应用程序」后执行 `xattr -dr com.apple.quarantine /Applications/xmesh.app`，或在「系统设置 > 隐私与安全性」里点「仍要打开」。
+- macOS：Gatekeeper 拒绝打开。把 `xmesh.app` 拖进「应用程序」后执行 `/usr/bin/xattr -dr com.apple.quarantine /Applications/xmesh.app`，或在「系统设置 > 隐私与安全性」里点「仍要打开」。
 
 有证书后只需要在仓库里配置 secrets，不改任何文件，下一次构建自动签名：
 
