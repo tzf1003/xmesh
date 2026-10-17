@@ -12,10 +12,12 @@ import {
 import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
-import type { Instance } from "./discovery";
+import { type Instance, stoppedNodes } from "./discovery";
 
 export interface ControllerOptions {
   discover: () => Instance[];
+  /** Node directories that have a config file, running or not (see discoverConfigured). */
+  configured?: () => string[];
   getLoginItem: () => boolean;
   /** Tray and panel language; default Chinese. */
   locale?: Locale;
@@ -188,6 +190,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.updateInstances(found);
     const candidates = this.explicit ? found.filter((i) => i.id === this.explicit) : found;
     let mismatch: Connection | undefined;
+    const unresponsive: string[] = [];
     for (const inst of candidates) {
       if (!isSupportedApiVersion(inst.manifest.api_version)) {
         mismatch = {
@@ -208,6 +211,9 @@ export class ShellController extends EventEmitter<ControllerEvents> {
         this.current = undefined;
         if (e instanceof VersionMismatchError) {
           mismatch = { kind: "mismatch", kernelVersion: inst.manifest.kernel_version, apiVersion: e.apiVersion };
+        } else if (!(e instanceof ControlRequestError)) {
+          // No HTTP reply at all (timeout, refused connection): the manifest is there but nothing answers.
+          unresponsive.push(inst.id);
         }
         continue;
       }
@@ -233,7 +239,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
       this.current = undefined;
       return true;
     }
-    this.update({ connection: mismatch ?? { kind: "offline" } });
+    this.update({ connection: mismatch ?? { kind: "offline" }, unresponsiveNodes: unresponsive });
     return false;
   }
 
@@ -310,7 +316,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
 
   private updateInstances(found: Instance[]): void {
     this.found = found;
-    this.update({ instances: this.instanceInfos() });
+    this.update({ instances: this.instanceInfos(), stoppedNodes: stoppedNodes(this.opts.configured?.() ?? [], found) });
   }
 
   private instanceInfos(): InstanceInfo[] {
