@@ -151,7 +151,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		wg.Wait()
 	}()
 	launch := func(listener net.Listener, handler http.Handler, label string, tlsConfig *tls.Config) {
-		server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tlsConfig}
+		server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tlsConfig, ErrorLog: newHandshakeLog()}
 		servers = append(servers, server)
 		listeners = append(listeners, listener)
 		wg.Add(1)
@@ -219,7 +219,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			changed = notifier.Changed()
 		}
 	}
-	dial := func(ctx context.Context, peer mesh.Peer, p gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+	dialPeer := func(ctx context.Context, peer mesh.Peer, p gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
 		if peer.ID == "self" {
 			principal := self
 			if p.ClientID != "" {
@@ -236,6 +236,8 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		return gateway.RemoteDial(network.HTTPClient(peer))(ctx, peer, p, opts)
 	}
+	// Both the catalogue refresh and the device info read dial through here; the pacing is per peer.
+	dial := gateway.Paced(dialPeer, time.Now)
 	if c.HasRole("gateway") {
 		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Changed: changed, Dial: dial, Audit: log})
 		addGateway(g)
