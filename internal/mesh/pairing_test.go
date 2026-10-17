@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -276,7 +277,8 @@ func TestPasswordIsStoredDerivedAndSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
+	// Windows has no Unix mode bits; the state directory's ACL protects the file there.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("password file mode %v, want 0600", info.Mode().Perm())
 	}
 	reopened, err := OpenLAN(t.Context(), "node-s", dir, LANOptions{MDNS: false})
