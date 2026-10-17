@@ -31,7 +31,7 @@ func Test_WindowsDecodeOEMRoundTrip(t *testing.T) {
 		if used != 0 {
 			continue // not representable in this code page
 		}
-		if got := decodeOutput(raw); got != text {
+		if got := decodeOutput(raw, false); got != text {
 			t.Fatalf("%q -> % x -> %q", text, raw, got)
 		}
 		return

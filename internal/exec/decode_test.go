@@ -7,14 +7,14 @@ import (
 
 func Test_DecodeOutputKeepsValidUTF8(t *testing.T) {
 	for _, in := range []string{"", "plain", "文件_中文.txt\r\n", "tail é"} {
-		if got := decodeOutput([]byte(in)); got != in {
+		if got := decodeOutput([]byte(in), false); got != in {
 			t.Fatalf("%q -> %q", in, got)
 		}
 	}
 	// invalid bytes are replaced when no code page conversion applies
 	t.Cleanup(func(old func([]byte) (string, bool)) func() { return func() { oemDecode = old } }(oemDecode))
 	oemDecode = func([]byte) (string, bool) { return "", false }
-	if got := decodeOutput([]byte{'a', 0xff, 'b'}); got != "a�b" {
+	if got := decodeOutput([]byte{'a', 0xff, 'b'}, false); got != "a�b" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -25,8 +25,8 @@ func Test_DecodeOutputPageBoundaryInsideUTF8(t *testing.T) {
 	oemDecode = func([]byte) (string, bool) { t.Fatal("converted valid UTF-8 as a code page"); return "", false }
 	whole := []byte(strings.Repeat("中文", 5))
 	for cut := 1; cut < len(whole); cut++ {
-		decodeOutput(whole[:cut])
-		decodeOutput(whole[cut:])
+		decodeOutput(whole[:cut], false)
+		decodeOutput(whole[cut:], true)
 	}
 }
 
@@ -34,7 +34,18 @@ func Test_DecodeOutputPageBoundaryInsideUTF8(t *testing.T) {
 func Test_DecodeOutputUsesCodePageForLegacyBytes(t *testing.T) {
 	t.Cleanup(func(old func([]byte) (string, bool)) func() { return func() { oemDecode = old } }(oemDecode))
 	oemDecode = func(b []byte) (string, bool) { return "converted:" + string(b), true }
-	if got := decodeOutput([]byte{0xce, 0xc4, 0xbc, 0xfe}); got != "converted:\xce\xc4\xbc\xfe" {
+	if got := decodeOutput([]byte{0xce, 0xc4, 0xbc, 0xfe}, false); got != "converted:\xce\xc4\xbc\xfe" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// A legacy stream may begin with bytes in the UTF-8 continuation range (the
+// GBK character 啊 is B0 A1); at the start of a stream they are not a cut rune.
+func Test_DecodeOutputLegacyStreamStartingWithHighBytes(t *testing.T) {
+	t.Cleanup(func(old func([]byte) (string, bool)) func() { return func() { oemDecode = old } }(oemDecode))
+	called := false
+	oemDecode = func(b []byte) (string, bool) { called = true; return "converted", true }
+	if got := decodeOutput([]byte{0xb0, 0xa1, 'x'}, false); got != "converted" || !called {
+		t.Fatalf("%q %v", got, called)
 	}
 }

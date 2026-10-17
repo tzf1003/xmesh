@@ -268,7 +268,7 @@ func inline(f *os.File, n int) (string, int64, error) {
 	if e == io.EOF {
 		e = nil
 	}
-	return decodeOutput(b), st.Size(), e
+	return decodeOutput(b, false), st.Size(), e
 }
 func (m *Manager) Output(caller string, raw json.RawMessage) (Object, error) {
 	a := struct {
@@ -312,7 +312,7 @@ func (m *Manager) Output(caller string, raw json.RawMessage) (Object, error) {
 		if e != nil && e != io.EOF {
 			return nil, e
 		}
-		out[name] = decodeOutput(b[:n])
+		out[name] = decodeOutput(b[:n], a.Offset > 0)
 		maxRead = max(maxRead, n)
 		eof = eof && a.Offset+int64(n) >= st.Size()
 	}
