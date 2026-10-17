@@ -69,6 +69,7 @@ const (
 	WarnAuditDropped       WarningCode = "audit_dropped"
 	WarnQuotaExhausted     WarningCode = "quota_exhausted"
 	WarnSandboxUnavailable WarningCode = "sandbox_unavailable"
+	WarnFirewallBlocked    WarningCode = "firewall_blocked"
 	WarnUnclassified       WarningCode = "unclassified"
 )
 
