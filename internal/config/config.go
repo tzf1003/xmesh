@@ -251,6 +251,9 @@ func (c *Config) Validate() error {
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
 	}
+	if c.Agent.CWDPolicy.DenyFile != "" && !filepath.IsAbs(c.Agent.CWDPolicy.DenyFile) {
+		return fail("/agent/cwd_policy/deny_file")
+	}
 	if c.Ingress.PTYBudgetAuthority != "" && !nodeNamePattern.MatchString(c.Ingress.PTYBudgetAuthority) {
 		return fail("/ingress/pty_budget_authority")
 	}

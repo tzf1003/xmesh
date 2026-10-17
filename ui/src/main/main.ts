@@ -9,7 +9,7 @@ import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import { MeshService, execMeshRunner } from "./mesh-service";
 import { PanelService } from "./panel-service";
-import { fsSetupHost, runSetup } from "./setup";
+import { fsSetupHost, previewSetup, runSetup } from "./setup";
 import { runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
@@ -128,6 +128,7 @@ async function start(): Promise<void> {
     controller,
     actions,
     service: new PanelService(controller),
+    previewSetup: (params) => previewSetup(params, setupHost),
     setup: (params) => runSetup(params, setupHost),
     mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
