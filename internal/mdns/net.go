@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -77,6 +78,7 @@ func readLoop(p *ipv4.PacketConn, deliver func(packet)) {
 				return
 			}
 			if failures++; failures > 100 {
+				slog.Warn("mdns_read_stopped", "error", err)
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
