@@ -71,7 +71,7 @@ flowchart LR
 要点：
 
 1. **新增 `meshadmin` 库**（根 module 的公开包，不依赖 `internal/`），封装控制面 Provider 接口，两个实现：Tailscale（API v2）和 Headscale。新的 `xmesh mesh ... --json` 子命令是它的入口，Electron 主进程调用该子命令，不用 TypeScript 重写一份，所以管理动作既能点按钮，也能脚本化，将来服务端控制台也能复用。
-2. **管理凭据不进内核。** OAuth client 密钥、Headscale API key 存系统钥匙串（Windows 凭据管理器、macOS 钥匙串），只由 `xmesh mesh` 子命令读取（UI 经该子命令间接使用），禁止写进 `xmesh.yaml`，禁止经 Control API 读回，内核进程不持有它们。读写分开签发两份凭据：日常只带只读 scope，要改动时才临时使用写凭据。
+2. **管理凭据不进内核。** OAuth client 密钥、Headscale API key 存系统钥匙串（Windows 凭据管理器、macOS 钥匙串），只由 `xmesh mesh` 子命令读取（UI 经该子命令间接使用），禁止写进 `xmesh.yaml`，禁止经 Control API 读回，内核进程不持有它们。UI 的登录表单只在保存时把密钥经标准输入交给 `xmesh mesh login --secret-file=-`，主进程与渲染进程不保存、不记录、不回显它，参数里不出现密钥（见 `ui/README.md`）。读写分开签发两份凭据：日常只带只读 scope，要改动时才临时使用写凭据。
 3. **不新增身份体系。** xmesh 是控制面的客户端，不是第二套节点身份，符合 [CON-NET-03](../constraints/network.md#con-net-03)。[CON-NET-04](../constraints/network.md#con-net-04) 禁止业务代码里按官方或 Headscale 分支，`meshadmin` 是管理工具，不是业务路径，Provider 的差异只允许出现在这个包里，内核与 Gateway 保持不变。需要在裁定里写明这个界限。
 
 ## 能力分期

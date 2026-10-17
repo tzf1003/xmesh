@@ -2,9 +2,10 @@
 // `xmesh mesh ... --json`; there is no shell, every value was validated by
 // parseMeshRequest and is attached with `--flag=value` so a value can never be
 // read as a flag. The control-plane credential stays in the CLI's keychain
-// profile: no secret is read, held or passed by this process. The only secret
-// the CLI produces (a pre-auth key) goes to a 0600 file the user chose, and
-// only the path comes back.
+// profile. The one secret this process handles is the one a `login` request
+// carries: it is written to the CLI's stdin, never to argv, and is not kept
+// anywhere after that. The only other secret the CLI produces (a pre-auth key)
+// goes to a 0600 file the user chose, and only the path comes back.
 
 import { execFile } from "node:child_process";
 import {
@@ -26,23 +27,29 @@ export interface MeshRun {
   missing?: boolean;
 }
 
-export type MeshRunner = (args: string[]) => Promise<MeshRun>;
+/** `input` is written to the command's stdin; only `login` uses it. */
+export type MeshRunner = (args: string[], input?: string) => Promise<MeshRun>;
 
 const MESH_TIMEOUT_MS = 150_000;
 const MAX_OUTPUT = 8 * 1024 * 1024;
 
 /** Runs the real CLI. Never rejects: a failure is a `MeshRun`. */
 export function execMeshRunner(bin: () => string = xmeshBinary): MeshRunner {
-  return (args) =>
+  return (args, input) =>
     new Promise((resolve) => {
       const file = bin();
-      execFile(file, args, { timeout: MESH_TIMEOUT_MS, windowsHide: true, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (err, stdout, stderr) => {
+      const child = execFile(file, args, { timeout: MESH_TIMEOUT_MS, windowsHide: true, maxBuffer: MAX_OUTPUT, encoding: "utf8" }, (err, stdout, stderr) => {
         if (!err) return resolve({ code: 0, stdout, stderr });
         const e = err as NodeJS.ErrnoException & { killed?: boolean };
         if (e.code === "ENOENT") return resolve({ code: 127, stdout: "", stderr: `找不到 xmesh 可执行文件：${file}`, missing: true });
         if (e.killed) return resolve({ code: 124, stdout, stderr: `${stderr}\n操作超时，没有等到控制面的回应`.trim() });
         resolve({ code: typeof e.code === "number" ? e.code : 1, stdout, stderr: stderr || e.message });
       });
+      if (input !== undefined) {
+        // When the binary is missing the callback reports it; a write to the dead pipe must not be an unhandled error.
+        child.stdin?.on("error", () => undefined);
+        child.stdin?.end(input);
+      }
     });
 }
 
@@ -66,6 +73,19 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
   const apply = (on: boolean): string[] => (on ? ["--apply", "--yes"] : []);
   const expect = (v: string | undefined): string[] => (v === undefined ? [] : [`--expect-version=${v}`]);
   switch (req.op) {
+    case "login":
+      // The secret is not here: `--secret-file=-` tells the CLI to read it from stdin.
+      return [
+        "mesh",
+        "login",
+        "--json",
+        `--kind=${req.kind}`,
+        `--access=${req.access}`,
+        "--secret-file=-",
+        ...(req.url !== undefined ? [`--url=${req.url}`] : []),
+        ...(req.tailnet !== undefined ? [`--tailnet=${req.tailnet}`] : []),
+        ...(req.clientId !== undefined ? [`--client-id=${req.clientId}`] : []),
+      ];
     case "status":
       return ["mesh", "status", "--json", ...node];
     case "tags":
@@ -188,7 +208,7 @@ export class MeshService {
     const req = parsed.value;
     let result: MeshRun;
     try {
-      result = await this.run(buildMeshArgs(req, this.nodeConfig()));
+      result = await this.run(buildMeshArgs(req, this.nodeConfig()), req.op === "login" ? req.secret : undefined);
     } catch (e) {
       return { ok: false, error: { code: "unavailable", message: e instanceof Error ? e.message : String(e) } };
     }

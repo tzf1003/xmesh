@@ -12,6 +12,7 @@ import type { MeshDeviceReport, MeshStatus, MeshTagPlan } from "../../shared/mes
 import type { Key } from "../messages";
 import { MeshError } from "./mesh/common";
 import { MeshDerp } from "./mesh/Derp";
+import { MeshLogin } from "./mesh/Login";
 import { MeshMatrix } from "./mesh/Matrix";
 import { MeshOnboard } from "./mesh/Onboard";
 import { MeshPolicy } from "./mesh/Policy";
@@ -48,6 +49,7 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
           {t("common.refresh")}
         </button>
       </PageHead>
+      <MeshLogin ctx={ctx} open={resource.state === "error" && resource.error.code === "no_credential"} onSaved={reload} />
       {resource.state === "error" && resource.stale === undefined ? (
         <MeshError error={resource.error} toast={ctx.toast} />
       ) : (
