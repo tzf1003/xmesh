@@ -4,6 +4,7 @@ package control
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -217,5 +218,39 @@ func Test_ControlPipeListenerCloseAfterClientDrops(t *testing.T) {
 	}
 	if raw {
 		t.Logf("bare go-winio listener: %d of %d rounds needed a second Close", hung, rounds)
+	}
+}
+
+// stuckListener never stops, like go-winio's loop after it has lost a close request.
+type stuckListener struct {
+	net.Listener
+	closes chan struct{}
+}
+
+func (l *stuckListener) Close() error {
+	l.closes <- struct{}{}
+	select {} // blocks for good
+}
+
+// A listener that never stops must make pipeListener.Close return an error once the retries
+// are used up, not block the caller.
+func Test_ControlPipeListenerCloseGivesUp(t *testing.T) {
+	oldRetry, oldAttempts := pipeCloseRetry, pipeCloseAttempts
+	pipeCloseRetry, pipeCloseAttempts = time.Millisecond, 5
+	defer func() { pipeCloseRetry, pipeCloseAttempts = oldRetry, oldAttempts }()
+	inner := &stuckListener{closes: make(chan struct{}, 100)}
+	l := &pipeListener{Listener: inner}
+	result := make(chan error, 1)
+	go func() { result <- l.Close() }()
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("Close of a listener that never stops returned nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close blocked on a listener that never stops")
+	}
+	if len(inner.closes) < 2 {
+		t.Fatalf("Close was requested %d times, want retries", len(inner.closes))
 	}
 }

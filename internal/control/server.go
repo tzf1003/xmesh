@@ -174,7 +174,9 @@ func (s *Server) Close() {
 		if s.srv.Shutdown(ctx) != nil {
 			_ = s.srv.Close()
 		}
-		s.done.Wait()
+		// A listener that refuses to stop leaves Serve blocked in Accept; shutdown must not
+		// wait for it forever.
+		waitTimeout(&s.done, serveStopTimeout)
 		RemoveEndpoint(s.o.StateDir, s.endpoint.PID)
 	})
 }
@@ -454,3 +456,23 @@ func ptr[T any](v T) *T { return &v }
 func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 func etagOf(b []byte) string { return "sha256-" + sum(b) }
+
+// serveStopTimeout bounds how long Close waits for the serving and polling goroutines.
+var serveStopTimeout = 5 * time.Second
+
+// waitTimeout waits for wg and reports whether it finished within d.
+func waitTimeout(wg *sync.WaitGroup, d time.Duration) bool {
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-finished:
+		return true
+	case <-timer.C:
+		return false
+	}
+}

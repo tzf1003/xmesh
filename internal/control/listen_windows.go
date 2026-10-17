@@ -43,10 +43,12 @@ func Listen(o ListenOptions) (net.Listener, Bound, error) {
 // so the loop starts over, waits for a close request that was already consumed, and Close
 // blocks for good. http.Server.Shutdown closes the listener without a deadline, so the whole
 // shutdown stalled. Close requests are therefore repeated until the loop has really stopped; a
-// request that arrives after that returns at once.
+// request that arrives after that returns at once. The retries are bounded: when the loop
+// still has not stopped, Close reports it and the server stops waiting for its serving
+// goroutine (see Server.Close).
 type pipeListener struct{ net.Listener }
 
-const (
+var (
 	pipeCloseRetry    = 25 * time.Millisecond
 	pipeCloseAttempts = 400
 )

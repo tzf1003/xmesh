@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 )
@@ -317,5 +319,20 @@ func Test_ControlDiscoverSystemServices(t *testing.T) {
 	found, err := Discover()
 	if err != nil || len(found) == 0 || found[0].Node != "svc-node" {
 		t.Fatalf("%v %+v", err, found)
+	}
+}
+
+func Test_WaitTimeout(t *testing.T) {
+	var done sync.WaitGroup
+	if !waitTimeout(&done, time.Second) {
+		t.Fatal("an empty WaitGroup should be finished")
+	}
+	done.Add(1)
+	if waitTimeout(&done, 20*time.Millisecond) {
+		t.Fatal("a pending WaitGroup reported finished")
+	}
+	done.Done()
+	if !waitTimeout(&done, time.Second) {
+		t.Fatal("a released WaitGroup should be finished")
 	}
 }
