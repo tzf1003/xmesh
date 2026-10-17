@@ -70,7 +70,7 @@ func newRunnerFixtureWith(t *testing.T, production bool) *runnerFixture {
 	// The helper is this test binary, copied so the sandbox may execute it from
 	// the granted workspace.
 	f.helper = filepath.Join(f.root, "helper.exe")
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func Test_WindowsManagedRunnerExec(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result["exit_code"] != 37 || result["stderr"] != "proof-stderr" {
-		t.Fatalf("exec result: %v", result)
+		t.Fatalf("exec result: %v, race runtime logs: %q", result, raceRuntimeLogs(f.root, "runner-race"))
 	}
 	var proof runnerProof
 	if err := json.Unmarshal([]byte(result["stdout"].(string)), &proof); err != nil {
@@ -294,7 +294,8 @@ func Test_WindowsManagedRunnerExecConcurrent(t *testing.T) {
 	wg.Wait()
 	for i := range errs {
 		if errs[i] != nil || results[i]["exit_code"] != 0 || results[i]["stdout"] != "held" {
-			t.Fatal(i, results[i], errs[i])
+			// The helper's race runtime writes to the GORACE log file, not stderr.
+			t.Fatal(i, results[i], errs[i], "race runtime logs:", raceRuntimeLogs(f.root, "runner-race"))
 		}
 	}
 	f.requireReclaimed(t, before, control, 2)

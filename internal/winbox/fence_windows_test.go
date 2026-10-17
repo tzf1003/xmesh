@@ -325,7 +325,7 @@ func Test_WindowsAppContainerWorkspaceExecutionWriterFence(t *testing.T) {
 			}
 			journal, profile, monitor := e.journal, e.profile, e.monitor
 			helper := filepath.Join(profile.Directory(), "fence-helper.exe")
-			body, err := os.ReadFile(os.Args[0])
+			body, err := sandboxHelperImage()
 			if err != nil {
 				t.Fatal(err)
 			}

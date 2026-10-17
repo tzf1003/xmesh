@@ -100,7 +100,7 @@ func Test_WindowsAppContainerExecutionJournalGate(t *testing.T) {
 			if !j.state.executions[owner.intent] || j.records[len(j.records)-1].Kind != "execution" {
 				t.Fatal("owner published before its durable execution intent")
 			}
-			body, err := os.ReadFile(os.Args[0])
+			body, err := sandboxHelperImage()
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -152,7 +152,7 @@ func runMonitorStage(t *testing.T, stage string, mayRetry bool) (relaunch bool) 
 		t.Fatal("monitor observer changed its lifecycle", err)
 	}
 	helper := filepath.Join(p.Directory(), "monitor-helper.exe")
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}

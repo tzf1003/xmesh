@@ -109,7 +109,7 @@ func Test_WindowsAppContainerProcessStdio(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				body, err := os.ReadFile(os.Args[0])
+				body, err := sandboxHelperImage()
 				if err != nil {
 					t.Fatal(err)
 				}

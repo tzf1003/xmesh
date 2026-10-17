@@ -399,7 +399,7 @@ func Test_WindowsAppContainerSupervisorHostHelper(t *testing.T) {
 	if err != nil {
 		fail(err)
 	}
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		fail(err)
 	}
@@ -619,7 +619,7 @@ func Test_WindowsAppContainerSupervisorLiveReap(t *testing.T) {
 			}
 		}
 	}()
-	body, err := os.ReadFile(os.Args[0])
+	body, err := sandboxHelperImage()
 	if err != nil {
 		t.Fatal(err)
 	}
