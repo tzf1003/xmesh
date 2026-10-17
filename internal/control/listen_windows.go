@@ -8,7 +8,6 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	winio "github.com/tailscale/go-winio"
@@ -62,11 +61,6 @@ var (
 
 var errPipeNotStopped = errors.New("the control pipe listener did not stop")
 
-// pipeCloseInFlight bounds the Close calls that may be outstanding on a listener that never stops.
-// A call whose request was lost stays blocked until the loop stops, and a later call is what
-// releases it, so a few are needed; more would only pile up goroutines.
-const pipeCloseInFlight = 4
-
 func (l *pipeListener) Close() error {
 	first := false
 	l.once.Do(func() {
@@ -91,31 +85,24 @@ func (l *pipeListener) Close() error {
 }
 
 // stop sends close requests until the loop has stopped. Each request runs on its own goroutine,
-// because a request that is lost inside go-winio leaves its own call blocked. The retry settings
-// are passed in: this loop can outlive Close, and it must not read package variables that a
-// later test or caller may change.
+// because a request that is lost inside go-winio leaves its own call blocked until a later request
+// releases it. Withholding requests would leave a lost one unanswered for good, so every retry is
+// sent. The goroutines return once the loop stops, and there are at most attempts+1 of them. The
+// retry settings are passed in: this loop can outlive Close, and it must not read package
+// variables that a later test or caller may change.
 func (l *pipeListener) stop(retry time.Duration, attempts int) {
 	var once sync.Once
-	var inFlight atomic.Int32
 	request := func() {
 		_ = l.Listener.Close()
-		inFlight.Add(-1)
 		once.Do(func() { close(l.stopped) })
 	}
-	send := func() {
-		if inFlight.Add(1) > pipeCloseInFlight {
-			inFlight.Add(-1)
-			return
-		}
-		go request()
-	}
-	send()
+	go request()
 	for attempt := 0; attempt < attempts; attempt++ {
 		select {
 		case <-l.stopped:
 			return
 		case <-time.After(retry):
-			send()
+			go request()
 		}
 	}
 }

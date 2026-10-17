@@ -250,8 +250,8 @@ func Test_ControlPipeListenerCloseGivesUp(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Close blocked on a listener that never stops")
 	}
-	if n := len(inner.closes); n < 2 || n > pipeCloseInFlight {
-		t.Fatalf("Close was requested %d times, want retries bounded by %d", n, pipeCloseInFlight)
+	if n := len(inner.closes); n < 2 || n > pipeCloseAttempts+1 {
+		t.Fatalf("Close was requested %d times, want retries bounded by %d", n, pipeCloseAttempts+1)
 	}
 	start := time.Now()
 	if err := l.Close(); err == nil {
