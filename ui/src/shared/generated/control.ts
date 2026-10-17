@@ -295,6 +295,37 @@ export interface ConfigPutResponse {
    */
   restart_required: boolean;
 }
+export interface ConfigReloadResponse {
+  /**
+   * 本次调用是否使磁盘上的新内容成为生效的配置。内容未变、或已被文件监视器采纳时为 false。
+   */
+  applied: boolean;
+  /**
+   * 磁盘上的内容能否通过校验。为 false 时 load_error 给出第一条错误，生效的配置保持不变。
+   */
+  valid: boolean;
+  load_error: ConfigLoadError | null;
+  /**
+   * 磁盘上当前内容的 ETag。
+   */
+  etag: string;
+  /**
+   * 正在生效的那份配置所对应的文件 ETag。
+   */
+  effective_etag: string;
+  /**
+   * 本次生效的变更对应的 JSON Pointer。未生效时为空数组。
+   */
+  changed_paths: string[];
+  /**
+   * 磁盘上是否有需要重启才生效的段（RestartPaths）尚未运行。
+   */
+  restart_required: boolean;
+  /**
+   * 需要重启的段，例如 /mesh、/ingress。
+   */
+  restart_paths: string[];
+}
 export interface DrainState {
   draining: boolean;
   /**
@@ -813,7 +844,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.1" as const;
+export const CONTROL_API_VERSION = "1.2" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -1001,6 +1032,20 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.config.reload",
+    "method": "POST",
+    "path": "/v1/config/reload",
+    "capability": "config.write",
+    "since": "1.2",
+    "query": null,
+    "body": null,
+    "response": "ConfigReloadResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
+  },
+  {
     "id": "control.pair.export",
     "method": "POST",
     "path": "/v1/pair/export",
@@ -1176,6 +1221,7 @@ export interface ControlRouteTypes {
   "control.drain.resume": { query: undefined; body: undefined; response: DrainResponse };
   "control.config.get": { query: undefined; body: undefined; response: ConfigResponse };
   "control.config.put": { query: undefined; body: ConfigPutRequest; response: ConfigPutResponse };
+  "control.config.reload": { query: undefined; body: undefined; response: ConfigReloadResponse };
   "control.pair.export": { query: undefined; body: undefined; response: PairExportResponse };
   "control.pair.import": { query: undefined; body: PairImportRequest; response: PairImportResponse };
   "control.pats.list": { query: undefined; body: undefined; response: PatList };

@@ -204,7 +204,27 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 4. 写同目录临时文件（保持原文件权限）、`fsync`、重命名覆盖。Windows 使用等价的原子替换。注释与格式由客户端提交的 `content` 原样保留，内核不重新序列化。
 5. 返回 `applied: true`、新 `etag`、`diff`、`restart_required`，发 `config` 事件（`actor: control`），写审计。
 
-写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的字段（`node`、`mesh`、`ingress`、`gateway.listen`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node`、`mesh`、`gateway.listen`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
+
+### POST /v1/config/reload
+
+请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.2 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
+
+| 字段 | 含义 |
+| --- | --- |
+| `applied` | 本次调用是否使磁盘上的新内容成为生效的配置。内容未变，或文件监视器已经采纳过，为 `false` |
+| `valid` | 磁盘上的内容能否通过与启动相同的校验。为 `false` 时 `load_error` 给出第一条错误，生效的配置保持不变 |
+| `etag`、`effective_etag` | 磁盘上当前内容，与正在生效的那份对应的文件 ETag。需重启的段待生效时两者不同 |
+| `changed_paths` | 本次生效的变更的 JSON Pointer，与 `config` 事件的 `changed_paths` 相同；未生效时为空数组 |
+| `restart_required`、`restart_paths` | 磁盘上是否有需重启的段尚未运行，以及它们的路径（`config.RestartPaths` 中的一项或多项，例如 `/mesh`） |
+
+行为：
+
+- 有效的新内容：`applied: true`，发 `config` 事件（`change: reloaded`，`actor: control`）。
+- 无效的内容：`applied: false`、`valid: false`、给出 `load_error`，继续使用上一份有效配置；首次出现时发 `config` 事件（`change: reload_failed`），`policy_reload_failed` 计数加一。
+- 没有变化：`applied: false`，不发事件，只返回当前状态。
+
+`POST /v1/config/reload` 是幂等的：连续两次调用，第二次的 `applied` 为 `false`。
 
 ### diff 与 `weakens_security`
 
