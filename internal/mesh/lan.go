@@ -417,7 +417,10 @@ func (l *LAN) Close() error {
 		l.advertisement.Close()
 	}
 	if l.listener != nil {
-		return l.listener.Close()
+		// The agent's server closes the listener first on shutdown; closing it again is not a failure.
+		if e := l.listener.Close(); e != nil && !errors.Is(e, net.ErrClosed) {
+			return e
+		}
 	}
 	return nil
 }
