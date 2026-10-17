@@ -20,7 +20,7 @@ import { PanelData } from "./panel-routes";
 export interface FakeKernelOptions {
   /** Defaults to a unique socket (POSIX) or named pipe (Windows). */
   endpoint?: string;
-  /** Value of X-Xmesh-Control-Version and of api_version in control.json. Default "1.1". */
+  /** Value of X-Xmesh-Control-Version and of api_version in control.json. Default "1.2". */
   controlVersion?: string;
   kernelVersion?: string;
   /** Capabilities to advertise. Routes of a capability that is not listed answer 501 not_implemented. */
@@ -89,7 +89,7 @@ export class FakeKernel {
   private constructor(opts: FakeKernelOptions) {
     this.endpoint = opts.endpoint ?? randomEndpoint();
     this.kernelVersion = opts.kernelVersion ?? "0.0.0-test";
-    this.controlVersion = opts.controlVersion ?? "1.1";
+    this.controlVersion = opts.controlVersion ?? "1.2";
     this.bootId = randomBytes(4).toString("hex");
     this.capabilities = opts.capabilities ?? statusFixture().control.capabilities;
     this.peers = opts.peers ?? peersFixture();
@@ -319,7 +319,7 @@ export class FakeKernel {
       return;
     }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
-    if (cap && this.requires(res, (method === "PUT" || method === "PATCH") && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
+    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
       const r = this.panel.handle(method, url, body, ifMatch);
       if (r) {
         if (r.status === 204) {

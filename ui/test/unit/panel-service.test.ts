@@ -6,7 +6,8 @@ import { afterEach, beforeEach, test } from "node:test";
 import { ShellController } from "../../src/main/controller";
 import { discoverInstances } from "../../src/main/discovery";
 import { PanelService } from "../../src/main/panel-service";
-import type { Capability } from "../../src/shared/control";
+import type { Capability, StatusResponse } from "../../src/shared/control";
+import { statusFixture } from "../../testserver/fixtures";
 import { etagOf } from "../../testserver/panel-routes";
 import { FakeKernel } from "../../testserver/server";
 
@@ -30,8 +31,8 @@ afterEach(async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(capabilities: Capability[] = ALL) {
-  const k = await FakeKernel.start({ pingMs: 100, capabilities });
+async function setup(capabilities: Capability[] = ALL, status: Partial<StatusResponse> = {}) {
+  const k = await FakeKernel.start({ pingMs: 100, capabilities, status });
   kernels.push(k);
   k.writeManifest(root, "n1");
   const c = new ShellController({
@@ -70,6 +71,35 @@ test("sessions and config reads return the kernel's documents", async () => {
   const c = await service.getConfig();
   assert.ok(c.ok);
   assert.equal(c.data.etag, etagOf(k.panel.content));
+});
+
+test("the deny list file goes beside the config the kernel reports, and an existing file with other text is kept", async () => {
+  const node = path.join(root, "n1");
+  const { service } = await setup(ALL, { paths: { ...statusFixture().paths, config_file: path.join(node, "xmesh.yaml") } });
+  const text = '- "~/.ssh"\n';
+  const made = await service.createDenyFile({ text });
+  assert.ok(made.ok);
+  assert.equal(made.data.path, path.join(node, "cwd-deny.yaml"));
+  assert.equal(fs.readFileSync(made.data.path, "utf8"), text);
+  if (process.platform !== "win32") assert.equal(fs.statSync(made.data.path).mode & 0o777, 0o600);
+
+  assert.ok((await service.createDenyFile({ text })).ok, "the same text is the same file");
+  const other = await service.createDenyFile({ text: '- "/x"\n' });
+  assert.ok(!other.ok);
+  assert.equal(other.error.code, "exists");
+  assert.equal(fs.readFileSync(made.data.path, "utf8"), text);
+});
+
+test("a reload goes to the kernel's reload route; a kernel without it answers with an error", async () => {
+  const { k, service } = await setup();
+  const r = await service.reloadConfig();
+  assert.ok(r.ok);
+  assert.equal(r.data.restart_required, false);
+  assert.deepEqual(r.data.restart_paths, []);
+  assert.equal(last(k, "POST", "/v1/config/reload")?.path, "/v1/config/reload");
+
+  k.failNext("/v1/config/reload", 404, "not_found", "没有这个接口");
+  assert.ok(!(await service.reloadConfig()).ok);
 });
 
 test("config save sends If-Match and dry_run; a stale etag comes back with the current one", async () => {

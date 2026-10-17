@@ -26,6 +26,11 @@ const api: PanelApi = {
   drain: (mode) => (mode === undefined ? invoke("xmesh:drain") : invoke("xmesh:drain", mode)),
   resume: () => invoke("xmesh:resume"),
   startKernel: (node) => invoke("xmesh:start-kernel", node),
+  restartKernel: () => invoke("xmesh:restart-kernel"),
+  readDenyFile: () => invoke("xmesh:read-deny-file"),
+  writeDenyFile: (request) => invoke("xmesh:write-deny-file", request),
+  createDenyFile: (request) => invoke("xmesh:create-deny-file", request),
+  reloadConfig: () => invoke("xmesh:reload-config"),
   restartUnresponsive: (node) => invoke("xmesh:restart-unresponsive", node),
   selectInstance: (id) => invoke("xmesh:select-instance", id),
   copy: (kind) => invoke("xmesh:copy", kind),
@@ -55,6 +60,7 @@ const api: PanelApi = {
       ipcRenderer.removeListener("xmesh:calls", handler);
     };
   },
+  previewSetup: (params) => invoke("xmesh:preview-setup", params),
   runSetup: (params) => invoke("xmesh:run-setup", params),
   pickPath: (kind) => invoke("xmesh:pick-path", kind),
   mesh: (request) => invoke("xmesh:mesh", request),

@@ -2,11 +2,14 @@
 package cwd
 
 import (
-	"github.com/tzf1003/xmesh/internal/toolerr"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/tzf1003/xmesh/internal/toolerr"
+	"go.yaml.in/yaml/v3"
 )
 
 type Workspace struct {
@@ -16,7 +19,29 @@ type Workspace struct {
 type Policy struct {
 	Allow []string `json:"allow" yaml:"allow"`
 	Deny  []string `json:"deny,omitempty" yaml:"deny,omitempty"`
+	// DenyFile is an absolute path to a YAML list of directories that are always refused. Its
+	// entries are added to Deny, so they apply even when Allow is empty.
+	DenyFile string `json:"deny_file,omitempty" yaml:"deny_file,omitempty"`
 }
+
+// WithDenyFile returns the policy with the entries of DenyFile added to Deny. A missing or
+// unreadable file is an error rather than an empty list, so the boundary never widens silently.
+func (p Policy) WithDenyFile() (Policy, error) {
+	if p.DenyFile == "" {
+		return p, nil
+	}
+	raw, err := os.ReadFile(p.DenyFile)
+	if err != nil {
+		return p, fmt.Errorf("读取禁止目录文件: %w", err)
+	}
+	var extra []string
+	if err := yaml.Unmarshal(raw, &extra); err != nil {
+		return p, fmt.Errorf("禁止目录文件不是字符串列表: %w", err)
+	}
+	p.Deny = append(append([]string{}, p.Deny...), extra...)
+	return p, nil
+}
+
 type Resolver struct {
 	Home, Default string
 	Aliases       map[string]Workspace
@@ -37,6 +62,9 @@ const (
 func New(base string, aliases map[string]Workspace, policy Policy) (*Resolver, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return nil, err
+	}
+	if policy, err = policy.WithDenyFile(); err != nil {
 		return nil, err
 	}
 	if base == "" {
@@ -146,7 +174,8 @@ func (r *Resolver) Resolve(raw, base string, mode Mode) (Result, error) {
 		}
 		return false
 	}
-	if match(r.Policy.Deny) || !match(r.Policy.Allow) {
+	// An empty allow list admits every path that deny does not cover.
+	if match(r.Policy.Deny) || (len(r.Policy.Allow) > 0 && !match(r.Policy.Allow)) {
 		reason := "denied"
 		if p != real {
 			reason = "symlink_escape"

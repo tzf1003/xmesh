@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { parse } from "yaml";
 import type {
   AuditEvent,
   AuditResponse,
@@ -11,6 +12,7 @@ import type {
   PatInfo,
   SessionsResponse,
 } from "../src/shared/control";
+import type { ConfigReloadResponse } from "../src/shared/ipc";
 import { fixture } from "./fixtures";
 
 // The panel's data routes for the fake kernel: config, PATs, ingress, pairing,
@@ -43,6 +45,8 @@ export function etagOf(content: string): string {
 export class PanelData {
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
   private diskContent: string;
+  /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
+  private restartPaths: string[] = [];
   private effectiveEtag: string;
   /** The parsed document `GET /v1/config` returns. PATCH edits it; a PUT adopts it only when the text is JSON. */
   private model: Record<string, unknown>;
@@ -86,6 +90,7 @@ export class PanelData {
     if (method === "GET" && p === "/v1/config") return this.getConfig();
     if (method === "PUT" && p === "/v1/config") return this.putConfig(body, ifMatch);
     if (method === "PATCH" && p === "/v1/config") return this.patchConfig(body, ifMatch);
+    if (method === "POST" && p === "/v1/config/reload") return ok(this.reload());
     if (p === "/v1/pats" || p.startsWith("/v1/pats/")) return this.pats_(method, p, body);
     if (p.startsWith("/v1/ingress/")) return this.ingress(method, p, body);
     if (p.startsWith("/v1/pair/")) return this.pair(method, p, body);
@@ -99,13 +104,25 @@ export class PanelData {
     const res: ConfigResponse = {
       etag,
       content: this.diskContent,
-      parsed: valid ? this.model : null,
+      parsed: valid ? (parse(this.diskContent) as ConfigResponse["parsed"]) : null,
       valid,
       load_error: valid ? null : { message: "yaml: 缩进错误", line: 3, column: 1 },
       effective_etag: this.effectiveEtag,
       restart_required: this.effectiveEtag !== etag,
     };
     return ok(res, 200, { ETag: `"${etag}"` });
+  }
+
+  /** The kernel applies what it can in place; what it cannot takes a restart, until one happens. */
+  private reload(): ConfigReloadResponse {
+    return {
+      applied: true,
+      valid: true,
+      load_error: null,
+      changed_paths: [],
+      restart_required: this.restartPaths.length > 0,
+      restart_paths: [...this.restartPaths],
+    };
   }
 
   private putConfig(body: unknown, ifMatch: string | undefined): RouteResult {
@@ -142,6 +159,7 @@ export class PanelData {
     // Like the kernel, a change that only touches comments or blank lines has an empty diff but is still written.
     const apply = b.dry_run !== true && b.content !== this.diskContent;
     if (apply) {
+      this.restartPaths = [...new Set([...this.restartPaths, ...diff.filter((d) => d.restart_required).map((d) => d.pointer)])];
       this.writes.push(b.content);
       this.diskContent = b.content;
       if (!restart) this.effectiveEtag = etagOf(b.content);
