@@ -314,6 +314,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	w = rec
 	w.Header().Set(v1.HeaderVersion, v1.APIVersion)
 	w.Header().Set("Cache-Control", "no-store")
+	// A listener that outlives a stuck shutdown can still hand over connections. Once the server
+	// is stopping, none of them gets new work.
+	select {
+	case <-s.stop:
+		failWith(w, newError(v1.ErrUnavailable, "内核正在停止,不再接受请求"))
+		return
+	default:
+	}
 	// Browsers cannot reach a socket or pipe; a request that looks like one is wrong.
 	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
 		failWith(w, newError(v1.ErrForbidden, "控制通道不接受来自网页的请求"))

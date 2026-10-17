@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	winio "github.com/tailscale/go-winio"
@@ -61,6 +62,11 @@ var (
 
 var errPipeNotStopped = errors.New("the control pipe listener did not stop")
 
+// pipeCloseInFlight bounds the Close calls that may be outstanding on a listener that never stops.
+// A call whose request was lost stays blocked until the loop stops, and a later call is what
+// releases it, so a few are needed; more would only pile up goroutines.
+const pipeCloseInFlight = 4
+
 func (l *pipeListener) Close() error {
 	first := false
 	l.once.Do(func() {
@@ -88,17 +94,26 @@ func (l *pipeListener) Close() error {
 // because a request that is lost inside go-winio leaves its own call blocked.
 func (l *pipeListener) stop() {
 	var once sync.Once
+	var inFlight atomic.Int32
 	request := func() {
 		_ = l.Listener.Close()
+		inFlight.Add(-1)
 		once.Do(func() { close(l.stopped) })
 	}
-	go request()
+	send := func() {
+		if inFlight.Add(1) > pipeCloseInFlight {
+			inFlight.Add(-1)
+			return
+		}
+		go request()
+	}
+	send()
 	for attempt := 0; attempt < pipeCloseAttempts; attempt++ {
 		select {
 		case <-l.stopped:
 			return
 		case <-time.After(pipeCloseRetry):
-			go request()
+			send()
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -373,5 +374,16 @@ func Test_StopHTTPReturnsWhenServeNeverStops(t *testing.T) {
 	case <-stopped:
 	case <-time.After(5 * time.Second):
 		t.Fatal("stopHTTP waited for a Serve loop that never returns")
+	}
+}
+
+// Once the server is stopping, a request that still reaches it is refused as unavailable.
+func Test_ControlRefusesRequestsOnceStopping(t *testing.T) {
+	f := newFixture(t)
+	f.server.Close()
+	rec := httptest.NewRecorder()
+	f.server.serve(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d after Close, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }
