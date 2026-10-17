@@ -16,10 +16,12 @@ import (
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"github.com/tzf1003/xmesh/internal/winjob/winjobtest"
 )
 
 // shellDir returns a directory containing placeholder executables with the
-// given names, as the only PATH entry.
+// given names, as the only PATH entry. %ProgramFiles% points at an empty
+// directory so an installed PowerShell 7 on the host cannot be selected.
 func shellDir(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -29,6 +31,7 @@ func shellDir(t *testing.T, names ...string) string {
 		}
 	}
 	t.Setenv("PATH", dir)
+	t.Setenv("ProgramFiles", filepath.Join(dir, "no-program-files"))
 	return dir
 }
 
@@ -98,5 +101,46 @@ func Test_CONIMPL04_WindowsAutoFallsBackWhenPwshCannotStart(t *testing.T) {
 	var failure *toolerr.Error
 	if !errors.As(err, &failure) || failure.Code != "internal" || failure.Fields["win32_error"] == nil {
 		t.Fatalf("explicit pwsh must fail with its Win32 error code: %#v", err)
+	}
+}
+
+// A Store alias for pwsh is never chosen by `auto`: it falls through to the
+// next candidate, and an explicit request for it is refused with the reason.
+// conformance: CON-IMPL-04
+func Test_CONIMPL04_WindowsAutoSkipsStoreAlias(t *testing.T) {
+	dir := shellDir(t, "powershell.exe")
+	winjobtest.AppExecLink(t, filepath.Join(dir, "pwsh.exe"))
+	t.Setenv("ProgramFiles", filepath.Join(dir, "no-program-files"))
+	got, err := DefaultShell("auto")
+	if err != nil || !strings.EqualFold(got, filepath.Join(dir, "powershell.exe")) {
+		t.Fatalf("auto = %q, %v", got, err)
+	}
+	var failure *toolerr.Error
+	if err := unsupportedShell(filepath.Join(dir, "pwsh.exe")); !errors.As(err, &failure) || failure.Fields["reason"] != "app_execution_alias" {
+		t.Fatalf("explicit alias: %#v", err)
+	}
+	if err := unsupportedShell(filepath.Join(dir, "powershell.exe")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An installed PowerShell 7 beats the inbox Windows PowerShell when PATH only
+// reaches a Store alias.
+// conformance: CON-IMPL-04
+func Test_CONIMPL04_WindowsAutoPrefersInstalledPwsh(t *testing.T) {
+	dir := shellDir(t, "powershell.exe")
+	winjobtest.AppExecLink(t, filepath.Join(dir, "pwsh.exe"))
+	programFiles := t.TempDir()
+	installed := filepath.Join(programFiles, "PowerShell", "7")
+	if err := os.MkdirAll(installed, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed, "pwsh.exe"), []byte("MZ"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ProgramFiles", programFiles)
+	got, err := DefaultShell("auto")
+	if err != nil || !strings.EqualFold(got, filepath.Join(installed, "pwsh.exe")) {
+		t.Fatalf("auto = %q, %v", got, err)
 	}
 }

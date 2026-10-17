@@ -87,3 +87,6 @@ func defaultShell() (string, error) {
 
 // alternateShell has no Unix counterpart: $SHELL is the only automatic choice.
 func alternateShell(string) (string, bool) { return "", false }
+
+// unsupportedShell has no Unix counterpart.
+func unsupportedShell(string) error { return nil }
