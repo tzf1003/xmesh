@@ -79,7 +79,7 @@ export class PanelData {
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
-  private restartPaths: string[] = [];
+  restartPaths: string[] = [];
   /** Valid settings the kernel could not put into effect, as the reload reports them (control API 1.5). */
   applyErrors: { section: string; message: string }[] = [];
   private effectiveEtag: string;

@@ -10,6 +10,9 @@ import { isDegrading } from "../../shared/control";
 import type { ActionResult, PathKind } from "../../shared/ipc";
 import { GatewayCard } from "./gateway/GatewayCard";
 
+/** The restart and the settings the kernel could not apply are the bar's (see ApplyBar); the rest is listed here. */
+const listed = (w: { code: string }): boolean => w.code !== "restart_required" && w.code !== "policy_reload_failed";
+
 export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
   const t = useT();
   const c = ctx.snapshot.connection;
@@ -42,18 +45,17 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
         </div>
       </PageHead>
 
-      {s.restart_required && <Banner kind="warn" testid="restart-required">{t("overview.restartRequired")}</Banner>}
       {draining && (
         <Banner kind="warn" testid="draining">
           {t(s.drain.mode === "kill" ? "overview.drainingKill" : "overview.drainingKeep", { since: formatTime(s.drain.since) })}
         </Banner>
       )}
-      {s.warnings.filter((w) => w.code !== "restart_required").length > 0 && (
+      {s.warnings.filter(listed).length > 0 && (
         <Banner kind={s.warnings.some((w) => w.severity === "error") ? "danger" : "warn"} testid="warnings">
           <strong>{t("overview.warnings")}</strong>
           <ul>
             {s.warnings
-              .filter((w) => w.code !== "restart_required")
+              .filter(listed)
               .map((w, i) => (
                 <li key={`${w.code}${i}`}>
                   {isDegrading(w) ? "" : "ℹ "}

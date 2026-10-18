@@ -62,6 +62,8 @@ test("tool access: switching a built-in tool off writes disabled_tools, and on a
   await sw.click();
   await expect.poll(() => doc().agent?.disabled_tools).toEqual(["exec.run"]);
   await expect(sw).not.toBeChecked();
+  // The kernel took the write at once; the page says so in the same place as every other page.
+  await expect(page.getByTestId("apply-applied")).toContainText("已应用");
 
   await sw.click();
   await expect.poll(() => doc().agent?.disabled_tools).toBeUndefined();

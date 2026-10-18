@@ -148,14 +148,15 @@ test("the reach editor saves access and the listen scope at once, with no restar
   await reach.getByTestId("reach-lan").uncheck();
   await reach.getByTestId("reach-save").click();
   await expect(page.getByTestId("toast").first()).toContainText("可连接范围已保存");
+  await expect(page.getByTestId("apply-applied")).toContainText("已应用");
   expect(putBodies()).toEqual([{ listen: ":8080", access: ["localhost", "tailnet"], hosts: [] }]);
-  await expect(page.getByTestId("gateway-restart")).toHaveCount(0);
+  await expect(page.getByTestId("apply-restart-needed")).toHaveCount(0);
   await expect(page.getByTestId("gateway-address")).toHaveCount(3);
 
   await reach.getByTestId("reach-listen-loopback").check();
   await reach.getByTestId("reach-save").click();
   await expect(page.getByTestId("gateway-address")).toHaveCount(1);
-  await expect(page.getByTestId("gateway-restart")).toHaveCount(0);
+  await expect(page.getByTestId("apply-restart-needed")).toHaveCount(0);
   expect(putBodies()[1]).toEqual({ listen: "127.0.0.1:8080", access: ["localhost", "tailnet"], hosts: [] });
   await expect(page.getByTestId("gateway-address")).toHaveCount(1);
 });
@@ -168,7 +169,7 @@ test("a loopback-only gateway says so and offers to listen on all interfaces, ke
   await page.getByTestId("gateway-listen-all").click();
   expect(putBodies()).toEqual([{ listen: ":8080", access: ["localhost"], hosts: [] }]);
   await expect(page.getByTestId("gateway-loopback")).toHaveCount(0);
-  await expect(page.getByTestId("gateway-restart")).toHaveCount(0);
+  await expect(page.getByTestId("apply-restart-needed")).toHaveCount(0);
 });
 
 test("a listen move the running gateway could not make is shown with its reason", async () => {
@@ -177,8 +178,8 @@ test("a listen move the running gateway could not make is shown with its reason"
   const reach = page.getByTestId("reach");
   await reach.getByTestId("reach-listen-loopback").check();
   await reach.getByTestId("reach-save").click();
-  await expect(page.getByTestId("gateway-apply-error")).toContainText("address already in use");
-  await expect(page.getByTestId("gateway-restart")).toHaveCount(0);
+  await expect(page.getByTestId("apply-error")).toContainText("address already in use");
+  await expect(page.getByTestId("apply-restart-needed")).toHaveCount(0);
 });
 
 test("invalid custom addresses and domain names keep Add disabled; valid ones are saved", async () => {
