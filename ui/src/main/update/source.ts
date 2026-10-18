@@ -92,19 +92,29 @@ export function httpSource(opts: HttpSourceOptions): UpdateSource {
     },
 
     async text(tag, name, signal) {
-      const res = await get(assetUrl(tag, name), signal);
-      const len = Number(res.headers.get("content-length") ?? 0);
-      if (len > MAX_TEXT_BYTES) throw new SourceError("too_large", `${name} is too large`);
-      if (res.body === null) return "";
-      // content-length can be absent (chunked, some proxies), so the cap is enforced on what is actually read.
-      const decoder = new TextDecoder();
-      const reader = res.body.getReader();
-      let text = "";
-      let bytes = 0;
+      // The same stall rule as the installer: a server that goes quiet must not hold the update forever.
+      const stall = new AbortController();
+      const both = AbortSignal.any([signal, stall.signal]);
+      let timer: NodeJS.Timeout | undefined;
+      const arm = (): void => {
+        clearTimeout(timer);
+        timer = setTimeout(() => stall.abort(), stallMs);
+      };
+      arm();
       try {
+        const res = await get(assetUrl(tag, name), both);
+        const len = Number(res.headers.get("content-length") ?? 0);
+        if (len > MAX_TEXT_BYTES) throw new SourceError("too_large", `${name} is too large`);
+        if (res.body === null) return "";
+        // content-length can be absent (chunked, some proxies), so the cap is enforced on what is actually read.
+        const decoder = new TextDecoder();
+        const reader = res.body.getReader();
+        let text = "";
+        let bytes = 0;
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          arm();
           bytes += value.byteLength;
           if (bytes > MAX_TEXT_BYTES) {
             void reader.cancel().catch(() => {});
@@ -114,8 +124,11 @@ export function httpSource(opts: HttpSourceOptions): UpdateSource {
         }
         return text + decoder.decode();
       } catch (e) {
-        if (e instanceof SourceError) throw e;
+        if (e instanceof SourceError && !(e.code === "cancelled" && stall.signal.aborted && !signal.aborted)) throw e;
+        if (stall.signal.aborted && !signal.aborted) throw new SourceError("network", `no data for ${Math.round(stallMs / 1000)} seconds`);
         throw new SourceError(signal.aborted ? "cancelled" : "network", e instanceof Error ? e.message : String(e));
+      } finally {
+        clearTimeout(timer);
       }
     },
 

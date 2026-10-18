@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { ApplyError, type Applier, type HandOver } from "../../src/main/update/apply";
 import { CHECKSUM_FILE, type RawRelease, installerName } from "../../src/main/update/releases";
 import { SourceError, type UpdateSource } from "../../src/main/update/source";
@@ -341,6 +341,27 @@ test("a kernel that will not start after the update is reported, the others stil
   await after.updater.finishPending();
   assert.deepEqual(after.events, ["start node-b"]);
   assert.deepEqual(after.updater.state.outcome, { ok: true, version: "0.1.0-beta.3", unstarted: ["node-a"] });
+});
+
+test("a leftover that cannot be removed does not keep the kernels down", async () => {
+  const r = rig();
+  await r.updater.check(true);
+  await r.updater.install();
+  const after = rig({ version: "0.1.0-beta.3", dataDir: r.data });
+  // the module object itself: the updater reads rmSync through it at call time
+  const mod = require("node:fs") as typeof fs;
+  const real = mod.rmSync;
+  const locked = mock.method(mod, "rmSync", (p: fs.PathLike, o?: fs.RmOptions) => {
+    if (String(p).endsWith(".exe")) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+    return real(p, o);
+  });
+  try {
+    await after.updater.finishPending();
+  } finally {
+    locked.mock.restore();
+  }
+  assert.deepEqual(after.events, ["start node-a", "start node-b"]);
+  assert.equal(after.updater.state.outcome?.ok, true);
 });
 
 test("if the app comes back at the old version the update failed; the reason the script left is shown and kernels still restart", async () => {

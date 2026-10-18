@@ -324,7 +324,13 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     } catch {
       return;
     }
-    for (const n of names) fs.rmSync(path.join(this.env.dataDir, n), { force: true, recursive: true });
+    for (const n of names) {
+      try {
+        fs.rmSync(path.join(this.env.dataDir, n), { force: true, recursive: true });
+      } catch {
+        // a file still locked (antivirus, the installer's last handle) is removed by the next start; it must not hold up the kernels
+      }
+    }
   }
 
   private fail(e: unknown, fallback: string): UpdateError {
