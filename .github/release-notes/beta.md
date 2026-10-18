@@ -6,6 +6,25 @@ machines. The steps are in
 each one is independent and can be skipped. Every archive also contains the runbook and the
 `scripts/` it uses, so nothing else needs to be cloned.
 
+## What changed since beta.2
+
+- Most configuration changes apply without restarting the node, and the gateway and ingress roles can be
+  started, stopped and rebound at runtime. When a change still needs a restart, the control panel says so
+  and shows a restart button.
+- Devices can pair with a connection password, and LAN discovery finds other nodes on the same network.
+- The authorization page can add MCP servers by hand and turn built-in tools on or off. API keys for MCP
+  servers are kept as environment variables; the app shows only the variable names.
+- The control panel has a new visual style. Text size (100–150%) and the interface and code fonts can be
+  set; Ctrl +, Ctrl - and Ctrl 0 change the size.
+- The Tailnet page has a form to save Tailscale or Headscale credentials. The app does not keep the secret
+  and does not show it again after you submit it.
+- The control panel checks for newer releases and can install one for you. It checks the download against
+  `SHA256SUMS.txt` first, and it does not change your configuration or tokens. On macOS the app must be in
+  Applications for the update to replace it.
+
+beta.2 does not have the update check, so install this build by hand once. After that, later releases can
+be installed from the control panel.
+
 ## Download and verify
 
 Pick the archive for your system (`linux`, `darwin` or `windows`; `amd64` or `arm64`), then check it
