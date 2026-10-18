@@ -16,6 +16,7 @@ export type Action =
   | { type: "restart-kernel" }
   | { type: "start-kernel"; node: string }
   | { type: "restart-unresponsive"; node: string }
+  | { type: "cleanup-stale"; node: string }
   | { type: "stop-kernel" }
   | { type: "quit" };
 
@@ -81,6 +82,8 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
     out.push(info("hint.mismatch", t("menu.mismatchHint", { kernel: c.kernelVersion || "?", api: c.apiVersion || "?" })));
   } else if (snap.unresponsiveNodes.length > 0) {
     out.push(info("hint.unresponsive", t("menu.unresponsiveHint")));
+  } else if (snap.staleNodes.length > 0) {
+    out.push(info("hint.stale", t("menu.staleHint")));
   } else {
     out.push(info("hint.offline", t("menu.offlineHint")));
   }
@@ -89,6 +92,11 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
   if (c.kind !== "mismatch") out.push(item("action.openPanel", t("menu.openPanel"), { type: "open-panel" }));
   if (snap.update.phase === "available" && snap.update.latest !== undefined) {
     out.push(item("action.update", t("menu.updateAvailable", { version: snap.update.latest.version }), { type: "open-panel" }));
+  }
+  for (const node of snap.staleNodes) {
+    out.push(snap.protectedStaleNodes.includes(node)
+      ? info(`hint.staleAdmin.${node}`, t("menu.staleAdminNamed", { name: node }))
+      : item(`action.cleanupStale.${node}`, t("menu.cleanupStaleNamed", { name: node }), { type: "cleanup-stale", node }));
   }
   if (c.kind === "offline") {
     for (const node of snap.unresponsiveNodes) {

@@ -135,7 +135,7 @@ async function start(): Promise<void> {
           }),
     applier,
     store: new UpdateStore(path.join(app.getPath("userData"), "update.json")),
-    runningNodes: () => controller.snapshot.instances.map((i) => i.id),
+    runningNodes: () => controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id),
     stopNode: async (node) => {
       if (TEST_MODE) {
         calls.push({ op: "update-stop", arg: node });

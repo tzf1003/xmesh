@@ -46,6 +46,7 @@ export const CHANNELS = {
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
   restartUnresponsive: "xmesh:restart-unresponsive",
+  cleanupStale: "xmesh:cleanup-stale",
   selectInstance: "xmesh:select-instance",
   copy: "xmesh:copy",
   copyGateway: "xmesh:copy-gateway",
@@ -255,6 +256,8 @@ export interface PanelApi {
   restartKernel(): Promise<ActionResult>;
   /** Restarts the service of a node whose kernel does not answer. */
   restartUnresponsive(node: string): Promise<ActionResult>;
+  /** Removes the leftover control.json of a node whose kernel process is gone. */
+  cleanupStale(node: string): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
   copy(kind: CopyKind): Promise<ActionResult>;
   copyGateway(request: GatewayCopyRequest): Promise<ActionResult>;
@@ -330,6 +333,7 @@ export const PANEL_API_METHODS = [
   "createDenyFile",
   "reloadConfig",
   "restartUnresponsive",
+  "cleanupStale",
   "selectInstance",
   "copy",
   "copyGateway",

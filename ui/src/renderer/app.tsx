@@ -131,6 +131,7 @@ export function App(): JSX.Element {
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
             <UpdateStrip ctx={ctx} current={current} />
+            <StaleState ctx={ctx} />
             <ApplyBar
               fresh={connected ? fresh : undefined}
               status={snapshot.connection.kind === "connected" ? snapshot.connection.status : undefined}
@@ -280,9 +281,38 @@ function restartUnresponsive(ctx: PageContext, node: string): void {
   });
 }
 
+/** The recorded process is gone: the state file is a leftover, and removing it is the way back. */
+function cleanupStale(ctx: PageContext, node: string): void {
+  void getApi().cleanupStale(node).then((r) => {
+    if (!r.ok) ctx.toast(r.error.message, true);
+  });
+}
+
+function StaleState({ ctx }: { ctx: PageContext }): JSX.Element | null {
+  const t = useT();
+  if (ctx.snapshot.staleNodes.length === 0) return null;
+  return (
+    <div class="page strip">
+      <Banner testid="stale-state">
+        <p>{t("stale.body")}</p>
+        <div class="row">
+          {ctx.snapshot.staleNodes.map((node) => ctx.snapshot.protectedStaleNodes.includes(node) ? (
+            <p key={node}>{t("stale.adminNamed", { name: node })}</p>
+          ) : (
+            <button key={node} type="button" class="btn" onClick={() => cleanupStale(ctx, node)} data-testid={`cleanup-stale-${node}`}>
+              {t("stale.cleanupNamed", { name: node })}
+            </button>
+          ))}
+        </div>
+      </Banner>
+    </div>
+  );
+}
+
 function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
   const c = ctx.snapshot.connection;
   const unresponsiveNodes = ctx.snapshot.unresponsiveNodes;
+  const staleNodes = ctx.snapshot.staleNodes;
   const unresponsive = kind === "offline" && unresponsiveNodes.length > 0;
   return (
     <div class="page">
@@ -313,7 +343,7 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
             </>
           ) : (
             <>
-              <p>{t("offline.body")}</p>
+              {staleNodes.length === 0 && <p>{t("offline.body")}</p>}
               <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
                 {t("offline.setup")}
               </button>

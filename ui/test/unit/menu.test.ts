@@ -83,6 +83,23 @@ test("an offline UI whose kernel does not answer says so and offers to restart t
   assert.equal(findItem(buildMenu({ ...EMPTY_SNAPSHOT, stoppedNodes: ["x"] }, t), "action.restartUnresponsive.x"), undefined, "a stopped node is started, not restarted");
 });
 
+test("a leftover state file is named as such and offers cleanup, not a restart", () => {
+  const snap: Snapshot = { ...EMPTY_SNAPSHOT, instances: [{ id: "n1", label: "n1" }], staleNodes: ["n1"] };
+  const m = buildMenu(snap, t);
+  assert.equal(findItem(m, "hint.stale")?.label, "状态文件还在，但记录的内核进程已经退出。");
+  assert.equal(findItem(m, "hint.unresponsive"), undefined, "nothing is listening: this is not the restart case");
+  assert.equal(findItem(m, "action.cleanupStale.n1")?.label, "清理残留状态：n1");
+  assert.deepEqual(findItem(m, "action.cleanupStale.n1")?.action, { type: "cleanup-stale", node: "n1" });
+  assert.equal(findItem(m, "action.restartUnresponsive.n1"), undefined);
+});
+
+test("stale cleanup remains available while another node is connected; system state names the administrator", () => {
+  const m = buildMenu(connected({}, { staleNodes: ["old", "system"], protectedStaleNodes: ["system"] }), t);
+  assert.deepEqual(findItem(m, "action.cleanupStale.old")?.action, { type: "cleanup-stale", node: "old" });
+  assert.equal(findItem(m, "action.cleanupStale.system"), undefined);
+  assert.equal(findItem(m, "hint.staleAdmin.system")?.enabled, false);
+});
+
 test("draining swaps drain for resume; every warning is listed with its own entry", () => {
   const m = buildMenu(
     connected({

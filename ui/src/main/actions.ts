@@ -22,6 +22,8 @@ export interface Platform {
   notifyError(message: string): void;
   /** Native chooser; resolves to the chosen absolute path or undefined on cancel. */
   pickPath(kind: PickKind): Promise<string | undefined>;
+  /** Deletes the leftover control.json of a node whose kernel is gone. */
+  removeStaleState(node: string): Promise<void>;
 }
 
 /** Supplies the gateway token that the copied connect commands carry. Throws when there is none. */
@@ -74,6 +76,8 @@ export class Actions {
         return this.startKernel(a.node);
       case "restart-unresponsive":
         return this.restartUnresponsive(a.node);
+      case "cleanup-stale":
+        return this.cleanupStale(a.node);
       case "stop-kernel":
         return this.stopKernel();
       case "quit":
@@ -193,6 +197,19 @@ export class Actions {
   async restartUnresponsive(node: string): Promise<ActionResult> {
     if (!this.controller.snapshot.unresponsiveNodes.includes(node)) return fail("not_found", "no unresponsive node with that name");
     return this.runCli("restart", node);
+  }
+
+  /** Clears a state file after rechecking that its recorded process has exited. */
+  async cleanupStale(node: string): Promise<ActionResult> {
+    if (!this.controller.snapshot.staleNodes.includes(node)) return fail("not_found", "no stale node with that name");
+    if (this.controller.snapshot.protectedStaleNodes.includes(node)) return fail("forbidden", this.t("menu.staleAdminNamed", { name: node }));
+    try {
+      await this.platform.removeStaleState(node);
+    } catch (e) {
+      return fail("internal", e instanceof Error ? e.message : String(e));
+    }
+    this.controller.nudge();
+    return ok;
   }
 
   /** The node whose kernel the panel or tray is showing: its state directory is named after it. */
