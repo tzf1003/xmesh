@@ -1,4 +1,5 @@
 import { type Peer, type StatusResponse, isDegrading } from "./control";
+import { DEFAULT_DISPLAY, type DisplayPrefs } from "./display";
 import type { Locale } from "./i18n";
 
 /** What the main process currently knows about the kernel. */
@@ -20,6 +21,8 @@ export interface UiSettings {
   loginItem: boolean;
   /** Language of the tray and the panel; the panel has no other way to learn it. */
   locale: Locale;
+  /** Text size and typefaces of the panel. */
+  display: DisplayPrefs;
 }
 
 /** Everything the tray menu and the panel render from. */
@@ -64,6 +67,6 @@ export const EMPTY_SNAPSHOT: Snapshot = {
   stoppedNodes: [],
   unresponsiveNodes: [],
   selectedInstance: "",
-  settings: { loginItem: false, locale: "zh" },
+  settings: { loginItem: false, locale: "zh", display: DEFAULT_DISPLAY },
   cliCommand: "xmesh",
 };

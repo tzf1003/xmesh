@@ -1,3 +1,4 @@
+import { DEFAULT_DISPLAY } from "../../src/shared/display";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { translator } from "../../src/shared/i18n";
@@ -135,7 +136,7 @@ test("a second instance adds a switcher with the selection checked", () => {
 });
 
 test("the login item checkbox toggles to the opposite value", () => {
-  const on = buildMenu(connected({}, { settings: { loginItem: true, locale: "zh" } }), t);
+  const on = buildMenu(connected({}, { settings: { loginItem: true, locale: "zh", display: DEFAULT_DISPLAY } }), t);
   assert.equal(findItem(on, "settings.loginItem")?.checked, true);
   assert.deepEqual(findItem(on, "settings.loginItem")?.action, { type: "set-login-item", enabled: false });
 });

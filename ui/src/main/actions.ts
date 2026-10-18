@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type GatewayCopyKind, type PathKind, type PickKind, isGatewayCopyKind } from "../shared/ipc";
+import type { DisplayPrefs } from "../shared/display";
 import type { Translate } from "../shared/i18n";
 import { ControlRequestError, type DrainMode, type StatusResponse } from "../shared/control";
 import { CliError, type CliCommand } from "./cli";
@@ -96,6 +97,11 @@ export class Actions {
   async selectInstance(id: string): Promise<ActionResult> {
     if (!this.controller.snapshot.instances.some((i) => i.id === id)) return fail("not_found", "unknown instance");
     this.controller.selectInstance(id);
+    return ok;
+  }
+
+  async setDisplay(prefs: DisplayPrefs): Promise<ActionResult> {
+    this.controller.setDisplay(prefs);
     return ok;
   }
 

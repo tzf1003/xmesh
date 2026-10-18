@@ -28,8 +28,12 @@
   --shadow-pop: 0 16px 44px rgba(20, 22, 30, 0.16), 0 2px 8px rgba(20, 22, 30, 0.06), 0 0 0 0.5px rgba(20, 22, 30, 0.1);
   --thumb: #ffffff;
   --thumb-edge: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
-  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  /* The system stacks; the display dialog puts a chosen family in front of them through --font-ui and --mono. */
+  --font-sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --mono-sys: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --font-ui: var(--font-sys);
+  --mono: var(--mono-sys);
+  font: 13px/1.45 var(--font-ui);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -63,6 +67,8 @@
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
+.mac { --font-sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "PingFang SC", sans-serif; }
+.win { --font-sys: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; --mono-sys: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace; }
 code, pre, .mono { font-family: var(--mono); font-size: 12px; }
 h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.015em; margin: 0 0 4px; }
 h2 { font-size: 14px; font-weight: 600; letter-spacing: -0.005em; margin: 0 0 8px; }
@@ -81,6 +87,11 @@ a { color: var(--accent); }
 .brand { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
 .topbar .title { flex: 1; min-width: 0; color: var(--muted); font-size: 12.5px; }
 .topbar .title strong { font-weight: 500; }
+.icon-btn { background: none; border: 0; border-radius: 7px; min-width: 28px; height: 26px; padding: 0 6px; cursor: pointer; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.segs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--surface-2); }
+.segs button { background: none; border: 0; border-radius: 8px; padding: 3px 12px; cursor: pointer; color: var(--muted); }
+.segs button[aria-pressed="true"] { background: var(--thumb); color: var(--text); box-shadow: var(--thumb-edge); font-weight: 600; }
 .body { flex: 1; display: grid; grid-template-columns: 188px 1fr; min-height: 0; }
 .sidebar { background: var(--bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 12px 10px; gap: 2px; overflow-y: auto; }
 .nav-item { text-align: left; background: none; border: 0; border-radius: 8px; padding: 6px 10px; cursor: pointer; color: var(--muted); transition: background 0.12s, color 0.12s; }
