@@ -51,6 +51,9 @@ var (
 	ciIDPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 	ciLabelPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	ciSlugStrip     = regexp.MustCompile(`[^a-z0-9]+`)
+	// A registration token as GitHub issues it: letters, digits and underscores. Anything else would be an
+	// argument for config.sh, not a token.
+	ciRegTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_]{10,255}$`)
 )
 
 const ciVisibilityTimeout = 20 * time.Second
@@ -406,6 +409,10 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		failWith(w, argError("id", "id 只能含小写字母、数字和连字符，最长 40"))
 		return
 	}
+	if req.RegistrationToken != "" && !ciRegTokenPattern.MatchString(req.RegistrationToken) {
+		failWith(w, argError("registration_token", "注册令牌只含字母、数字和下划线"))
+		return
+	}
 	if req.Concurrency < 0 || req.Concurrency > 16 {
 		failWith(w, argError("concurrency", "并发数在 1 到 16 之间"))
 		return
@@ -748,6 +755,10 @@ func (s *Server) repairCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 			failWith(w, e)
 			return
 		}
+	}
+	if req.RegistrationToken != "" && !ciRegTokenPattern.MatchString(req.RegistrationToken) {
+		failWith(w, argError("registration_token", "注册令牌只含字母、数字和下划线"))
+		return
 	}
 	view, ok := admin.Binding(id)
 	if !ok || view.Removing {

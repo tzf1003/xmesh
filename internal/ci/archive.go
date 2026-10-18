@@ -26,11 +26,17 @@ func Extract(archive, dst string) error {
 	return extractTarGz(archive, dst)
 }
 
+// rooted reports whether name starts at a root on any system. A leading slash is rooted on Windows too, where
+// filepath.IsAbs would say it is not and joining it to dst would quietly place it inside.
+func rooted(name string) bool {
+	return strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) || filepath.VolumeName(name) != "" || filepath.IsAbs(name)
+}
+
 // inside resolves name below dst and reports whether it stays there.
 func inside(dst, name string) (string, error) {
 	clean := filepath.Join(dst, filepath.FromSlash(name))
 	rel, err := filepath.Rel(dst, clean)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(name) {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rooted(name) {
 		return "", fmt.Errorf("压缩包里的路径越界: %q", name)
 	}
 	return clean, nil
@@ -87,10 +93,10 @@ func extractTarGz(archive, dst string) error {
 }
 
 func makeSymlink(dst, target, link string) error {
-	resolved := link
-	if !filepath.IsAbs(link) {
-		resolved = filepath.Join(filepath.Dir(target), filepath.FromSlash(link))
+	if rooted(link) {
+		return fmt.Errorf("压缩包里的链接是绝对路径: %q", link)
 	}
+	resolved := filepath.Join(filepath.Dir(target), filepath.FromSlash(link))
 	if rel, err := filepath.Rel(dst, resolved); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("压缩包里的链接指向目录之外: %q", link)
 	}

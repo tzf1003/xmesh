@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -188,7 +189,8 @@ func Test_CTRCTL15_ExtractRefusesEscapes(t *testing.T) {
 	if err := Extract(write(map[string]string{"bin/": "", "!run.sh": "#!/bin/sh\n", "bin/tool": "->run.sh"}), dst); err != nil {
 		t.Fatalf("a normal package: %v", err)
 	}
-	if info, err := os.Stat(filepath.Join(dst, "run.sh")); err != nil || info.Mode().Perm()&0o100 == 0 {
+	// Windows has no executable bit to keep.
+	if info, err := os.Stat(filepath.Join(dst, "run.sh")); err != nil || (runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0) {
 		t.Errorf("run.sh must stay executable: %v %v", info, err)
 	}
 	for name, files := range map[string]map[string]string{

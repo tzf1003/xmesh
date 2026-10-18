@@ -142,6 +142,7 @@ func Test_CTRCTL15_BindingLifecycle(t *testing.T) {
 	if e.Field != "registration_token" {
 		t.Fatalf("field = %q", e.Field)
 	}
+	apiError(t, f.do("POST", "/v1/ci/bindings/tzf1003-xmesh/repair", v1.CiBindingRepair{RegistrationToken: "--url http://evil"}, nil), v1.ErrInvalidArgs)
 	r = f.do("POST", "/v1/ci/bindings/tzf1003-xmesh/repair", v1.CiBindingRepair{RegistrationToken: ciRegistrationToken}, nil)
 	if r.Status != 200 {
 		t.Fatalf("repair: %d %s", r.Status, r.Body)
@@ -199,6 +200,7 @@ func Test_CTRCTL15_BindingCreateArguments(t *testing.T) {
 		"bad id":       {ID: "Bad_ID", Target: "o/r", RegistrationToken: ciRegistrationToken},
 		"bad conc":     {Target: "o/r", RegistrationToken: ciRegistrationToken, Concurrency: 40},
 		"bad label":    {Target: "o/r", RegistrationToken: ciRegistrationToken, Labels: []string{"has space"}},
+		"bad token":    {Target: "o/r", RegistrationToken: "--url http://evil"},
 	}
 	for name, body := range cases {
 		if r := f.do("POST", "/v1/ci/bindings", body, nil); r.Status != 400 {
