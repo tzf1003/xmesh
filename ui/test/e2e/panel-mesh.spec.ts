@@ -21,7 +21,7 @@ async function open(opts: { publish?: boolean } = {}): Promise<Page> {
   return page;
 }
 
-type Patch = Partial<Pick<FakeMeshState, "credential" | "writeCredential" | "provider" | "version" | "delayMs">>;
+type Patch = Partial<Pick<FakeMeshState, "credential" | "writeCredential" | "acceptKeys" | "provider" | "version" | "delayMs">>;
 const patch = (p: Patch): Promise<void> =>
   h.app.evaluate((_e, v) => {
     Object.assign((globalThis as unknown as { __xmeshUiTest: { mesh: object } }).__xmeshUiTest.mesh, v);
@@ -76,6 +76,43 @@ test("no credential: the page shows the login commands, copies them, and recover
   await page.getByTestId("mesh-refresh").click();
   await expect(page.getByTestId("mesh-devices")).toBeVisible();
   await expect(page.getByTestId("mesh-no-credential")).toHaveCount(0);
+});
+
+test("login form: the key goes to the CLI on stdin, the field is cleared, and the devices load", async () => {
+  const page = await open();
+  await patch({ credential: false });
+  await page.getByTestId("mesh-refresh").click();
+  await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open", true);
+  await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
+  const key = "tskey-api-e2e-SECRET-42";
+  await page.getByTestId("mesh-login-secret").fill(key);
+  await page.getByTestId("mesh-login-submit").click();
+  await expect(page.getByTestId("mesh-devices")).toContainText("laptop");
+  await expect(page.getByTestId("mesh-no-credential")).toHaveCount(0);
+  await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open", false);
+  await expect(page.getByTestId("mesh-login-secret")).toHaveValue("");
+  expect(await page.content()).not.toContain(key);
+  const calls = await fake("calls");
+  expect(calls.find((c) => c[1] === "login")).toEqual(["mesh", "login", "--json", "--kind=tailscale", "--access=read", "--secret-file=-"]);
+  expect(JSON.stringify(calls)).not.toContain(key);
+});
+
+test("login form: a rejected key is reported and cleared; a Headscale address must be https", async () => {
+  const page = await open();
+  await patch({ credential: false, acceptKeys: false });
+  await page.getByTestId("mesh-refresh").click();
+  await page.getByTestId("mesh-login-kind").selectOption("headscale");
+  await page.getByTestId("mesh-login-url").fill("http://headscale.example.com");
+  await page.getByTestId("mesh-login-secret").fill("hskey-e2e");
+  await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
+  await page.getByTestId("mesh-login-url").fill("https://headscale.example.com");
+  await expect(page.getByTestId("mesh-login-submit")).toBeEnabled();
+  await page.getByTestId("mesh-login-submit").click();
+  await expect(page.getByTestId("mesh-error")).toContainText("凭据验证失败");
+  await expect(page.getByTestId("mesh-login-secret")).toHaveValue("");
+  await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
+  expect(await page.content()).not.toContain("hskey-e2e");
+  expect(await fake("credential")).toBe(false);
 });
 
 test("read-only credential: reading works and writing explains the missing write login", async () => {

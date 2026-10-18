@@ -1,9 +1,10 @@
 // Tailnet administration from the panel. Everything here goes through the
 // `xmesh mesh ... --json` command line (meshadmin): the control-plane
-// credential lives in the OS keychain that the CLI reads, so it never passes
-// through Electron. The renderer sends one validated request object; the main
-// process turns it into fixed argv (see src/main/mesh-service.ts) and returns
-// the CLI's JSON after the tolerant normalisers below.
+// credential lives in the OS keychain that the CLI writes and reads. Only
+// `login` carries a secret, and it reaches the CLI on stdin, never argv (see
+// src/main/mesh-service.ts). The renderer sends one validated request object;
+// the main process turns it into fixed argv and returns the CLI's JSON after
+// the tolerant normalisers below.
 
 import { isAbsolutePath } from "./setup";
 
@@ -26,7 +27,11 @@ export interface DerpRegionInput {
   certName?: string;
 }
 
+export type MeshControlPlane = "tailscale" | "headscale";
+export type MeshAccess = "read" | "write";
+
 export type MeshRequest =
+  | { op: "login"; kind: MeshControlPlane; access: MeshAccess; url?: string; tailnet?: string; clientId?: string; secret: string }
   | { op: "status" }
   | { op: "tags"; device: string; tags: string[]; apply: boolean }
   | { op: "onboard"; tags: string[]; ttl: string; ephemeral: boolean; user?: string; file: string; overwrite: boolean }
@@ -43,6 +48,7 @@ export type MeshRequest =
 export type MeshOp = MeshRequest["op"];
 
 export const MESH_OPS = [
+  "login",
   "status",
   "tags",
   "onboard",
@@ -71,6 +77,9 @@ const REGION_NAME = /^[^,=\x00-\x1f\x7f]{1,64}$/;
 const HOSTNAME = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
 const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 const IPV6 = /^[0-9A-Fa-f:.]{2,45}$/;
+const SECRET = /^[\x21-\x7e]{1,4096}$/;
+const TAILNET = /^[A-Za-z0-9-][A-Za-z0-9._@-]{0,127}$/;
+const CLIENT_ID = /^[A-Za-z0-9._-]{1,128}$/;
 
 export const MESH_TAGS_MAX = 16;
 export const MESH_REGIONS_MAX = 8;
@@ -162,6 +171,12 @@ export function parseAdmissionUrl(v: unknown): string | undefined {
   return u.href;
 }
 
+/** A control-plane address. An API key or OAuth secret is only ever sent over https. */
+function httpsUrl(v: unknown): string | undefined {
+  const u = parseAdmissionUrl(v);
+  return u?.startsWith("https://") ? u : undefined;
+}
+
 function absPath(v: unknown): string | undefined {
   return typeof v === "string" && v.length <= 1024 && isAbsolutePath(v) ? v : undefined;
 }
@@ -179,6 +194,30 @@ const bad = (field: string): MeshParse => ({ ok: false, field });
 export function parseMeshRequest(v: unknown): MeshParse {
   if (!isRecord(v) || typeof v.op !== "string") return bad("op");
   switch (v.op) {
+    case "login": {
+      if (!onlyKeys(v, ["op", "kind", "access", "url", "tailnet", "clientId", "secret"])) return bad("keys");
+      if (v.kind !== "tailscale" && v.kind !== "headscale") return bad("kind");
+      if (v.access !== "read" && v.access !== "write") return bad("access");
+      if (typeof v.secret !== "string" || !SECRET.test(v.secret)) return bad("secret");
+      if (v.kind === "headscale") {
+        const url = httpsUrl(v.url);
+        if (url === undefined) return bad("url");
+        if (v.tailnet !== undefined) return bad("tailnet");
+        if (v.clientId !== undefined) return bad("clientId");
+        return { ok: true, value: { op: "login", kind: "headscale", access: v.access, url, secret: v.secret } };
+      }
+      if (v.url !== undefined) return bad("url");
+      const out: MeshRequest = { op: "login", kind: "tailscale", access: v.access, secret: v.secret };
+      if (v.tailnet !== undefined) {
+        if (typeof v.tailnet !== "string" || !TAILNET.test(v.tailnet)) return bad("tailnet");
+        out.tailnet = v.tailnet;
+      }
+      if (v.clientId !== undefined) {
+        if (typeof v.clientId !== "string" || !CLIENT_ID.test(v.clientId)) return bad("clientId");
+        out.clientId = v.clientId;
+      }
+      return { ok: true, value: out };
+    }
     case "status":
     case "policy.show":
     case "policy.snapshots":
@@ -348,6 +387,13 @@ export interface MeshTagPlan {
   now?: string[];
 }
 
+/** What `xmesh mesh login --json` reports. The secret is never part of it. */
+export interface MeshLoginResult {
+  kind: MeshControlPlane;
+  access: MeshAccess;
+  stored: boolean;
+}
+
 export interface MeshKeyResult {
   id: string;
   expires?: string;
@@ -457,6 +503,7 @@ export interface MeshSync {
 }
 
 export interface MeshResults {
+  login: MeshLoginResult;
   status: MeshStatus;
   tags: MeshTagPlan;
   onboard: MeshKeyResult;
@@ -557,6 +604,11 @@ export function normalizeTagPlan(v: unknown): MeshTagPlan {
   };
   if (Array.isArray(r.now)) out.now = strs(r.now);
   return out;
+}
+
+export function normalizeLogin(v: unknown): MeshLoginResult {
+  const r = rec(v);
+  return { kind: r.kind === "headscale" ? "headscale" : "tailscale", access: r.access === "write" ? "write" : "read", stored: r.stored === true };
 }
 
 export function normalizeKey(v: unknown): MeshKeyResult {
@@ -706,6 +758,8 @@ export function normalizeSync(v: unknown): MeshSync {
 export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshResults[O] {
   const out = ((): MeshResults[MeshOp] => {
     switch (op) {
+      case "login":
+        return normalizeLogin(json);
       case "status":
         return normalizeStatus(json);
       case "tags":

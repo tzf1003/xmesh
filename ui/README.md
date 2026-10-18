@@ -70,7 +70,7 @@ npm start             # 另开终端，启动 Electron
 
 ### Tailnet 管理页面
 
-侧栏的「Tailnet 管理」不依赖本机内核：它通过控制面（Tailscale 或 Headscale）管理整个 tailnet，实现方式是调用 `xmesh mesh … --json`（meshadmin）。凭据留在命令行的系统钥匙串配置里，**从不经过 Electron**：界面没有输入密钥的地方，没有凭据时只给出可复制的终端命令（`xmesh mesh login --kind … --access read|write`）。
+侧栏的「Tailnet 管理」不依赖本机内核：它通过控制面（Tailscale 或 Headscale）管理整个 tailnet，实现方式是调用 `xmesh mesh … --json`（meshadmin）。凭据存在系统钥匙串里，由 `xmesh mesh` 命令行写入和读取。页面顶部的「保存控制面凭据」表单可以保存一份凭据（Tailscale 或 Headscale，只读或读写）：密钥经主进程通过标准输入交给 `xmesh mesh login --secret-file=-`，命令行验证后存进钥匙串，密钥不进命令行参数，主进程和渲染进程都不保存、不记录、不回显它，提交后输入框立即清空。除此之外，界面仍然给出可复制的终端命令（`xmesh mesh login --kind … --access read|write`），两种方式任选。读取凭据的所有调用都不经过密钥。
 
 | 标签页 | 内容 |
 | --- | --- |

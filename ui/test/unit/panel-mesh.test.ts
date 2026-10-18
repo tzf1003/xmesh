@@ -32,6 +32,8 @@ function field(v: unknown): string {
 
 test("every op is accepted in its documented shape", () => {
   const good: unknown[] = [
+    { op: "login", kind: "tailscale", access: "read", secret: "tskey-api-example" },
+    { op: "login", kind: "headscale", access: "write", url: "https://headscale.example.com", secret: "hskey-example" },
     { op: "status" },
     { op: "tags", device: "n100", tags: ["tag:device"], apply: false },
     { op: "tags", device: "n100", tags: [], apply: true },
@@ -388,6 +390,83 @@ test("service: non-JSON output and a crashing runner become errors, not exceptio
   const b = await boom.request({ op: "status" });
   assert.ok(!b.ok);
   if (!b.ok) assert.equal(b.error.code, "unavailable");
+});
+
+test("login: the secret is checked, Headscale needs https, and the secret never reaches argv", () => {
+  const key = "tskey-api-k1234567890ABCDEF";
+  assert.deepEqual(buildMeshArgs(ok({ op: "login", kind: "tailscale", access: "read", secret: key })), [
+    "mesh",
+    "login",
+    "--json",
+    "--kind=tailscale",
+    "--access=read",
+    "--secret-file=-",
+  ]);
+  assert.deepEqual(
+    buildMeshArgs(ok({ op: "login", kind: "tailscale", access: "write", secret: key, tailnet: "example.com", clientId: "kCLIENT1CNTRL" })),
+    ["mesh", "login", "--json", "--kind=tailscale", "--access=write", "--secret-file=-", "--tailnet=example.com", "--client-id=kCLIENT1CNTRL"],
+  );
+  assert.deepEqual(buildMeshArgs(ok({ op: "login", kind: "headscale", access: "write", url: "https://headscale.example.com", secret: key })), [
+    "mesh",
+    "login",
+    "--json",
+    "--kind=headscale",
+    "--access=write",
+    "--secret-file=-",
+    "--url=https://headscale.example.com/",
+  ]);
+  for (const req of [
+    { op: "login", kind: "tailscale", access: "read", secret: key },
+    { op: "login", kind: "headscale", access: "read", url: "https://hs.example.com", secret: key },
+  ] as const) {
+    assert.ok(!buildMeshArgs(ok(req)).join(" ").includes(key));
+  }
+
+  const base = { op: "login", kind: "tailscale", access: "read", secret: key };
+  assert.equal(field({ ...base, kind: "github" }), "kind");
+  assert.equal(field({ ...base, access: "admin" }), "access");
+  assert.equal(field({ ...base, secret: "" }), "secret");
+  assert.equal(field({ ...base, secret: "tskey with space" }), "secret");
+  assert.equal(field({ ...base, secret: `${key}\n--apply` }), "secret");
+  assert.equal(field({ ...base, secret: "k".repeat(4097) }), "secret");
+  assert.equal(field({ ...base, url: "https://api.example.com" }), "url");
+  assert.equal(field({ ...base, tailnet: "bad name" }), "tailnet");
+  assert.equal(field({ ...base, clientId: "id with space" }), "clientId");
+  assert.equal(field({ ...base, args: ["--apply"] }), "keys");
+  assert.equal(field({ op: "login", kind: "headscale", access: "read", secret: key }), "url");
+  assert.equal(field({ op: "login", kind: "headscale", access: "read", url: "http://hs.example.com", secret: key }), "url");
+  assert.equal(field({ op: "login", kind: "headscale", access: "read", url: "https://hs.example.com", tailnet: "example.com", secret: key }), "tailnet");
+});
+
+test("service: the secret goes to the CLI's stdin only, and a rejected key is not echoed", async () => {
+  const key = "tskey-api-SECRETVALUE123";
+  const seen: { args: string[]; input?: string }[] = [];
+  const recording = new MeshService(async (args, input) => {
+    seen.push({ args, input });
+    return { code: 0, stdout: JSON.stringify({ profile: "default", access: "read", kind: "tailscale", stored: true }), stderr: "" };
+  });
+  const saved = await recording.request({ op: "login", kind: "tailscale", access: "read", secret: key });
+  assert.deepEqual(saved, { ok: true, data: { kind: "tailscale", access: "read", stored: true } });
+  assert.equal(seen[0]!.input, key);
+  assert.ok(!seen[0]!.args.join(" ").includes(key));
+
+  const { svc, fake } = service((f) => (f.acceptKeys = false));
+  const rejected = await svc.request({ op: "login", kind: "tailscale", access: "write", secret: key });
+  assert.ok(!rejected.ok);
+  if (!rejected.ok) assert.equal(rejected.error.code, "mesh_failed");
+  assert.ok(!JSON.stringify(rejected).includes(key));
+  assert.ok(!JSON.stringify(fake.calls).includes(key));
+});
+
+test("service: a saved login brings the credential back through the fake CLI", async () => {
+  const key = "hskey-example-KEY";
+  const { svc, fake } = service((f) => (f.credential = false));
+  assert.ok(!(await svc.request({ op: "status" })).ok);
+  const r = await svc.request({ op: "login", kind: "headscale", access: "write", url: "https://headscale.example.com", secret: key });
+  assert.deepEqual(r, { ok: true, data: { kind: "headscale", access: "write", stored: true } });
+  assert.equal(fake.provider, "headscale");
+  assert.ok((await svc.request({ op: "status" })).ok);
+  assert.ok(!JSON.stringify(fake.calls).includes(key));
 });
 
 test("form helpers", () => {
