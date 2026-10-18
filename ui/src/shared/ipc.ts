@@ -26,6 +26,7 @@ import type {
   PatSecret,
   SessionsResponse,
 } from "./control";
+import type { DisplayPrefs } from "./display";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
@@ -49,6 +50,7 @@ export const CHANNELS = {
   rotateGatewayPat: "xmesh:rotate-gateway-pat",
   openPath: "xmesh:open-path",
   setLoginItem: "xmesh:set-login-item",
+  setDisplay: "xmesh:set-display",
   openExternal: "xmesh:open-external",
   getSessions: "xmesh:get-sessions",
   getConfig: "xmesh:get-config",
@@ -232,6 +234,8 @@ export interface PanelApi {
   copyGateway(request: GatewayCopyRequest): Promise<ActionResult>;
   openPath(kind: PathKind): Promise<ActionResult>;
   setLoginItem(enabled: boolean): Promise<ActionResult>;
+  /** Saves the panel's text size and typefaces on this machine and applies them at once. */
+  setDisplay(prefs: DisplayPrefs): Promise<ActionResult>;
   openExternal(key: ExternalKey): Promise<ActionResult>;
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
@@ -292,6 +296,7 @@ export const PANEL_API_METHODS = [
   "copyGateway",
   "openPath",
   "setLoginItem",
+  "setDisplay",
   "openExternal",
   "getSessions",
   "getConfig",

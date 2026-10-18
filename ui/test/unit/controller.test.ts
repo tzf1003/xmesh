@@ -233,6 +233,25 @@ test("setLoginItem goes through the injected setter and is reflected", async () 
   assert.equal(c.snapshot.settings.loginItem, true);
 });
 
+test("setDisplay goes through the injected setter, is reflected in the snapshot and notifies listeners", () => {
+  const saved: unknown[] = [];
+  const c = new ShellController({
+    discover: () => [],
+    getLoginItem: () => false,
+    setLoginItem: () => {},
+    getDisplay: () => ({ zoom: 1.1, uiFont: "", codeFont: "" }),
+    setDisplay: (p) => void saved.push(p),
+  });
+  controllers.push(c);
+  assert.equal(c.snapshot.settings.display.zoom, 1.1);
+  const seen: number[] = [];
+  c.on("change", (s) => seen.push(s.settings.display.zoom));
+  c.setDisplay({ zoom: 1.5, uiFont: "Inter", codeFont: "" });
+  assert.deepEqual(saved, [{ zoom: 1.5, uiFont: "Inter", codeFont: "" }]);
+  assert.equal(c.snapshot.settings.display.uiFont, "Inter");
+  assert.deepEqual(seen, [1.5]);
+});
+
 test("a manifest with an unsupported api_version is a mismatch without talking to the kernel", async () => {
   const k = await kernel({ controlVersion: "2.0", kernelVersion: "9.9.9" });
   k.writeManifest(root, "n1");

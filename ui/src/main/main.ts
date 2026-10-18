@@ -4,6 +4,7 @@ import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
 import { ShellController } from "./controller";
+import { DisplayStore } from "./display-store";
 import { GatewayCredentials } from "./gateway-token";
 import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
@@ -55,8 +56,15 @@ async function start(): Promise<void> {
   const t = translator(locale);
   const roots = stateRoots();
   let panel: PanelWindow | undefined;
+  const display = new DisplayStore(path.join(app.getPath("userData"), "display.json"));
   const showPanel = (): void => {
-    if (!panel || panel.window.isDestroyed()) panel = createPanelWindow();
+    if (!panel || panel.window.isDestroyed()) {
+      // Ctrl/Cmd +, - and 0 in the panel go through the same path as the display dialog.
+      panel = createPanelWindow(undefined, {
+        get: () => display.get().zoom,
+        set: (zoom) => controller.setDisplay({ ...display.get(), zoom }),
+      });
+    }
     panel.show();
   };
   app.on("second-instance", showPanel);
@@ -89,6 +97,11 @@ async function start(): Promise<void> {
     cliCommand: cliCommandText(),
     locale,
     getLoginItem: () => autostart.get().enabled,
+    getDisplay: () => display.get(),
+    setDisplay: (prefs) => {
+      if (!display.set(prefs)) notify([{ key: "display.save", text: t("display.saveFailed") }]);
+      if (panel && !panel.window.isDestroyed()) panel.window.webContents.setZoomFactor(prefs.zoom);
+    },
     setLoginItem: (enabled) => {
       const hint = autostart.set(enabled).hint;
       const text = hint === undefined ? undefined : loginHints[hint];

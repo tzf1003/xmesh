@@ -37,6 +37,7 @@ const api: PanelApi = {
   copyGateway: (request) => invoke("xmesh:copy-gateway", request),
   openPath: (kind) => invoke("xmesh:open-path", kind),
   setLoginItem: (enabled) => invoke("xmesh:set-login-item", enabled),
+  setDisplay: (prefs) => invoke("xmesh:set-display", prefs),
   openExternal: (key) => invoke("xmesh:open-external", key),
   getSessions: () => invoke("xmesh:get-sessions"),
   getConfig: () => invoke("xmesh:get-config"),
