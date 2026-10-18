@@ -1,0 +1,26 @@
+{
+  "bindings": [
+    {
+      "id": "xmesh",
+      "scope": "repo",
+      "target": "tzf1003/xmesh",
+      "source": "account",
+      "account": "gh-tzf1003",
+      "concurrency": 1,
+      "labels": [],
+      "paused": false,
+      "removing": false,
+      "dir": "/home/ci/.config/xmesh/node/ci/xmesh",
+      "instances": [
+        {
+          "index": 1,
+          "name": "xmesh-node-xmesh-1",
+          "state": "idle",
+          "pid": 77,
+          "restarts": 0,
+          "since": "2026-10-18T09:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

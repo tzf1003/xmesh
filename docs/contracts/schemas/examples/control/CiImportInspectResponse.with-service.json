@@ -1,0 +1,8 @@
+{
+  "target": "tzf1003/xmesh",
+  "runner_name": "xiaosong-mac",
+  "labels": ["self-hosted", "macOS", "ARM64"],
+  "service_installed": true,
+  "service_hint": "cd /Users/xiaosong/actions-runner && ./svc.sh stop && ./svc.sh uninstall",
+  "running": false
+}

@@ -1,0 +1,50 @@
+{
+  "node": {
+    "name": "ci-demo",
+    "roles": [
+      "agent"
+    ]
+  },
+  "mesh": {
+    "mode": "lan",
+    "lan": {
+      "mdns": true
+    }
+  },
+  "agent": {
+    "default_cwd": "/srv/workspace",
+    "cwd_policy": {
+      "allow": [
+        "/srv/workspace"
+      ]
+    }
+  },
+  "ci": {
+    "prevent_sleep_while_busy": true,
+    "stop_timeout": "30m",
+    "accounts": [
+      {
+        "id": "gh-tzf1003",
+        "host": "github.com",
+        "login": "tzf1003"
+      }
+    ],
+    "bindings": [
+      {
+        "id": "xmesh",
+        "target": "tzf1003/xmesh",
+        "account": "gh-tzf1003",
+        "concurrency": 0,
+        "labels": [
+          "mac"
+        ]
+      },
+      {
+        "id": "legacy",
+        "target": "tzf1003/legacy",
+        "source": "import",
+        "dir": "/Users/xiaosong/actions-runner"
+      }
+    ]
+  }
+}

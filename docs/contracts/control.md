@@ -14,6 +14,7 @@
 | [schemas/control-peers.schema.json](schemas/control-peers.schema.json)、[control-sessions](schemas/control-sessions.schema.json) | 对端与会话视图 |
 | [schemas/control-drain.schema.json](schemas/control-drain.schema.json) | drain 与 resume |
 | [schemas/control-config.schema.json](schemas/control-config.schema.json) | 配置读写 |
+| [schemas/control-ci.schema.json](schemas/control-ci.schema.json) | GitHub Actions 运行器托管 |
 | [schemas/control-pair.schema.json](schemas/control-pair.schema.json)、[control-pats](schemas/control-pats.schema.json)、[control-ingress](schemas/control-ingress.schema.json)、[control-audit](schemas/control-audit.schema.json) | 配对、PAT、入口、审计 |
 | [schemas/control-backends.schema.json](schemas/control-backends.schema.json) | stdio 后端的环境变量 |
 | [schemas/control-routes.json](schemas/control-routes.json) | 路由表：方法、路径、能力、请求与响应类型、错误码 |
@@ -351,3 +352,34 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 存储在状态目录的 `backend-env.json`，`0600`，原子替换，不是 `xmesh.yaml` 的一部分：`GET/PUT/PATCH /v1/config`、配置差异、`config` 事件都不含它。变量改动立即生效，只重启受影响的后端；手工编辑这个文件的结果内核在一秒内应用。通过控制通道把后端从配置里删除时，它的变量一并删除；从没出现在配置里的名字保持原样，由 `DELETE` 清理。
 
 `StatusResponse.backends[].env_names` 列出 stdio 后端已设置的变量名（没有时省略）。审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名（`set`、`unset`）与大小，不含变量名与值。
+
+## CTR-CTL-15
+
+### GitHub Actions 运行器托管
+
+内核在本机监督官方 `actions/runner` 进程：一台机器可以绑定多个仓库，每个绑定可以有多个并发实例，进程崩溃自动重启，随内核服务开机拉起。方案见 [15 GitHub Actions 运行器托管](../design/15-github-runner.md)。能力为 `ci`（API 1.8 起）；内核没有这项能力时整组路由返回 `not_implemented`。类型在 [control-ci.schema.json](schemas/control-ci.schema.json)。
+
+绑定与账号的非密钥部分存在 `xmesh.yaml` 的 `ci` 段（[CTR-CFG-01](config.md#ctr-cfg-01)），经与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入修改，并发 `config` 事件；GitHub 凭据存在系统钥匙串，没有钥匙串时存在状态目录里 `0600` 的文件，不在配置、响应、状态、事件、审计和日志里出现。运行状态不另设事件：`GET /v1/status` 的 `ci`（`CiSummary`）随每次状态采样变化，UI 从 `status` 事件得到更新。
+
+| 路由 | 作用 |
+| --- | --- |
+| `GET /v1/ci` | `CiOverview`：账号（只有掩码）、绑定与每个实例的状态、需要用户处理的提示（`notices`）、运行器包缓存、睡眠与停止超时设置 |
+| `POST /v1/ci/accounts` | 请求体 `CiAccountCreate`：令牌与可选主机。内核用令牌调用 `GET /user` 取得登录名，成功后保存令牌，响应 `CiAccount`（令牌只有掩码）。同一主机同一登录名再次提交就是更换令牌。GitHub 拒绝令牌时 `invalid_args`，`field` 为 `token`，`reason` 为 `github_rejected`；连不上 GitHub 时 `unavailable`，`reason` 为 `github_unreachable` |
+| `DELETE /v1/ci/accounts/{id}` | 删除账号与令牌，`204`。仍有绑定引用它时 `conflict`，`reason` 为 `account_in_use` |
+| `GET /v1/ci/accounts/{id}/repos` | 查询串 `CiReposQuery`。列出账号有管理员权限的仓库（只有这些能注册运行器），带私有或公开标记与已有绑定，分页用 `next_page` |
+| `POST /v1/ci/bindings` | 请求体 `CiBindingCreate`，三种方式恰好用一种：`target` 加 `account`（内核签发注册令牌），`target` 加 `registration_token`（用户从仓库网页复制的一次性令牌，不留长期凭据），或 `import_dir`（接管已有运行器目录，仓库与运行器名读自目录里的 `.runner`）。响应 `CiBinding`，实例在后台依次 `installing`、`registering`、`starting`、`idle`。目标是公开仓库而 `confirm_public` 不为真时 `invalid_args`，`reason` 为 `public_repo_requires_confirm`；同一仓库已有绑定、`id` 重复时 `conflict`；账号不存在 `not_found`；`import_dir` 里没有运行器、运行器是一次性的、装着官方服务或正在运行时 `invalid_args`，`reason` 分别为 `not_a_runner`、`ephemeral_runner`、`service_installed`、`runner_running` |
+| `PATCH /v1/ci/bindings/{id}` | 请求体 `CiBindingPatch`：并发数、标签、暂停与恢复、补上账号。立即生效：加实例、排空后减实例、暂停时排空 |
+| `DELETE /v1/ci/bindings/{id}` | 解绑。查询串 `CiDeleteQuery`：`force=true` 不等正在跑的任务。响应 `CiBinding`，`removing` 为真；实例排空后内核向 GitHub 注销运行器（绑定有账号时）并删除目录与配置项。没有凭据时只做本地清理，GitHub 上的运行器留给网页删除或 14 天后自动消失 |
+| `POST /v1/ci/bindings/{id}/restart` | 重启这个绑定的所有实例，`204` |
+| `POST /v1/ci/bindings/{id}/repair` | 重新注册（运行器被 GitHub 删除、会话冲突排除后、注册信息损坏）。有账号时内核自己签发令牌，没有时请求体必须带 `registration_token`。响应 `CiBinding` |
+| `POST /v1/ci/import/inspect` | 请求体 `CiImportInspectRequest`：目录。只读检查，不改任何东西：仓库、运行器名、标签、是否装着官方服务（带卸载命令）、是否正在运行、是否一次性。目录里没有 `.runner` 时 `not_found` |
+
+实例状态机和退出码分流见设计文档。契约只规定可观察的部分：
+
+- `busy` 时 `job` 给出 job 名与开始时间；`last_result` 给出最近一次跑完的 job 与结果。两者来自运行器 stdout 的固定状态行，不含任务日志、参数或环境变量（沿用 [INV-10](../constraints/invariants.md#inv-10)）。
+- `broken` 的实例带 `problem`，`code` 稳定、`message` 中文一行；`backoff` 的实例带上一次退出的原因。同一个 `code` 之下用户的下一步固定：`session_conflict` 关掉另一处的运行器后调用 `restart`；`runner_removed`、`registration_failed` 调用 `repair`；`auth_failed` 更换账号令牌；`download_failed`、`missing_dependency`、`start_failed` 按 `message` 处理后 `restart`。
+- 节点排空（`POST /v1/drain`）时运行器不再接新任务，`CiSummary.draining` 为真；`POST /v1/resume` 恢复。排空只停空闲实例，正在跑的任务跑完再停；超过 `ci.stop_timeout` 仍未结束的任务被结束。
+- `notices` 描述会让运行器扛不过重启或退出登录的环境条件，各带可复制的 `command`（有的话）：Linux 没有 `loginctl enable-linger`、Windows 没有自动登录、PATH 里没有 `git`、缺系统库、官方运行器不支持当前系统。
+- 公开仓库默认拒绝（见上），因为公开仓库的 fork PR 可以在这台机器上执行代码。CI 任务以内核运行用户的完整权限执行，不受 `cwd_policy`、禁止目录和 L2 沙箱约束；这些只约束 MCP 工具调用。运行器目录默认写入禁止目录文件，工具读不到运行器自己的凭据。
+
+审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名与大小，不含令牌；绑定、解绑、重启、重新注册各记一条，job 的开始与结束记仓库、job 名、结果与耗时。

@@ -1,0 +1,14 @@
+{
+  "id": "xmesh",
+  "scope": "repo",
+  "target": "tzf1003/xmesh",
+  "source": "token",
+  "concurrency": 1,
+  "labels": [],
+  "paused": true,
+  "removing": true,
+  "dir": "/home/ci/.config/xmesh/node/ci/xmesh",
+  "instances": [
+    { "index": 1, "name": "xmesh-node-xmesh-1", "state": "stopping", "pid": 77, "restarts": 0, "since": "2026-10-18T09:20:00.000Z", "job": { "name": "build", "started_at": "2026-10-18T09:00:00.000Z" } }
+  ]
+}

@@ -14,6 +14,69 @@ export type NodeName = string;
  */
 export type EnvName = string;
 /**
+ * 绑定或账号的标识，由内核或客户端取名，创建后不变。
+ */
+export type CiId = string;
+/**
+ * GitHub 主机名，默认 github.com。其他主机按 GitHub Enterprise Server 处理，API 在 https://<主机>/api/v3。
+ */
+export type CiHost = string;
+/**
+ * owner/repo。
+ */
+export type CiRepoName = string;
+/**
+ * 附加标签。内核总是另加 self-hosted、系统、架构、xmesh 与 xmesh-<节点名>，不必写。
+ */
+export type CiLabel = string;
+/**
+ * installing 下载并解压运行器；registering 向 GitHub 注册；starting 进程已起、尚未连上；idle 在等任务；busy 正在跑任务；backoff 进程退出后等待重启；stopping 排空中；stopped 已暂停；broken 需要用户处理，见 problem。
+ */
+export type CiInstanceState =
+  | "installing"
+  | "registering"
+  | "starting"
+  | "idle"
+  | "busy"
+  | "backoff"
+  | "stopping"
+  | "stopped"
+  | "broken";
+/**
+ * session_conflict：同名运行器在别处也在运行（退出码 5）；runner_removed：GitHub 已删除这个运行器；registration_failed：注册被拒绝；download_failed：下载或校验运行器包失败；missing_dependency：缺系统库；start_failed：进程起不来；version_deprecated：运行器版本已弃用；auth_failed：GitHub 凭据无效或权限不够。未知代码按 unclassified 处理。
+ */
+export type CiProblemCode =
+  | "session_conflict"
+  | "runner_removed"
+  | "registration_failed"
+  | "download_failed"
+  | "missing_dependency"
+  | "start_failed"
+  | "version_deprecated"
+  | "auth_failed"
+  | "unclassified";
+export type CiResultKind =
+  "succeeded" | "failed" | "canceled" | "skipped" | "abandoned" | "unknown";
+/**
+ * account：用已保存的 GitHub 凭据注册；token：用户粘贴的一次性注册令牌；import：接管已有的运行器目录。
+ */
+export type CiBindingSource = "account" | "token" | "import";
+/**
+ * linger_disabled：Linux 用户服务在退出登录后会停，需要 loginctl enable-linger；autologon_disabled：Windows 没有开启自动登录，重启后要登录才会恢复；git_missing：PATH 里没有 git；missing_dependency：缺运行器需要的系统库；runner_unsupported：官方运行器没有这个系统或架构的版本。
+ */
+export type CiNoticeCode =
+  | "linger_disabled"
+  | "autologon_disabled"
+  | "git_missing"
+  | "missing_dependency"
+  | "runner_unsupported";
+/**
+ * 三种绑定方式恰好用一种：账号加仓库、仓库加注册令牌、导入目录。
+ */
+export type CiBindingCreate = {
+  [k: string]: unknown | undefined;
+};
+/**
  * 控制 API 版本，主版本.次版本。响应头 X-Xmesh-Control-Version 与 control.json 使用同一写法。
  */
 export type ApiVersion = string;
@@ -47,7 +110,8 @@ export type Capability =
   | "pats"
   | "gateway"
   | "ingress"
-  | "audit";
+  | "audit"
+  | "ci";
 export type Severity = "info" | "warning" | "error";
 /**
  * 次版本可以增加取值。客户端遇到未知取值按 unclassified 处理。
@@ -245,6 +309,445 @@ export interface BackendEnvResponse {
    * 修改之后这个后端还有哪些变量，按字母序。只有名字，没有值。
    */
   names: EnvName[];
+}
+export interface CiProblem {
+  code: CiProblemCode;
+  /**
+   * 中文，一行，不含令牌与任务输出。
+   */
+  message: string;
+}
+export interface CiJob {
+  /**
+   * 工作流里 job 的名字。
+   */
+  name: string;
+  started_at: Timestamp;
+}
+export interface CiResult {
+  name: string;
+  result: CiResultKind;
+  finished_at: Timestamp;
+}
+export interface CiInstance {
+  index: number;
+  /**
+   * GitHub 上的运行器名，默认 xmesh-<节点名>-<绑定>-<序号>。
+   */
+  name: string;
+  state: CiInstanceState;
+  /**
+   * 监听进程的 pid；没有进程时省略。
+   */
+  pid?: number;
+  /**
+   * 内核启动以来这个实例被重启的次数。
+   */
+  restarts: number;
+  /**
+   * RFC3339，UTC，固定毫秒。比 date-time 更严，让两端的序列化结果逐字相同。
+   */
+  since: string;
+  job?: CiJob1;
+  last_result?: CiResult1;
+  problem?: CiProblem1;
+}
+/**
+ * state 为 busy 时当前的 job。
+ */
+export interface CiJob1 {
+  /**
+   * 工作流里 job 的名字。
+   */
+  name: string;
+  started_at: Timestamp;
+}
+/**
+ * 最近一次跑完的 job。
+ */
+export interface CiResult1 {
+  name: string;
+  result: CiResultKind;
+  finished_at: Timestamp;
+}
+/**
+ * state 为 broken 或 backoff 时的原因。
+ */
+export interface CiProblem1 {
+  code: CiProblemCode;
+  /**
+   * 中文，一行，不含令牌与任务输出。
+   */
+  message: string;
+}
+export interface CiBinding {
+  id: CiId;
+  /**
+   * 目前只有仓库级。组织级以后追加。
+   */
+  scope: "repo";
+  target: CiRepoName;
+  source: CiBindingSource;
+  /**
+   * 绑定或账号的标识，由内核或客户端取名，创建后不变。
+   */
+  account?: string;
+  /**
+   * 仓库是否公开；不知道时省略。
+   */
+  public?: boolean;
+  concurrency: number;
+  /**
+   * @maxItems 16
+   */
+  labels:
+    | []
+    | [CiLabel]
+    | [CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ];
+  paused: boolean;
+  /**
+   * 正在解绑：等任务跑完后删除。
+   */
+  removing: boolean;
+  /**
+   * 运行器目录的根，实例在其下按序号分目录；import 时是原目录。
+   */
+  dir: string;
+  instances: CiInstance[];
+}
+export interface CiAccount {
+  id: CiId;
+  host: CiHost;
+  login: string;
+  /**
+   * 令牌的掩码：前缀加省略号加末四位，只用于让用户认出是哪个令牌。令牌正文从不返回。
+   */
+  token_hint: string;
+}
+export interface CiNotice {
+  code: CiNoticeCode;
+  message: string;
+  /**
+   * 用户可以复制执行的命令，没有时省略。
+   */
+  command?: string;
+}
+export interface CiRunnerPackage {
+  /**
+   * 已缓存的运行器版本；还没下载过时省略。
+   */
+  version?: string;
+  cached: boolean;
+}
+/**
+ * StatusResponse.ci。没有任何绑定时省略整段。
+ */
+export interface CiSummary {
+  bindings: CiBinding[];
+  /**
+   * 节点在排空，运行器不再接新任务。
+   */
+  draining?: boolean;
+}
+export interface CiOverview {
+  accounts: CiAccount[];
+  bindings: CiBinding[];
+  notices: CiNotice[];
+  runner: CiRunnerPackage;
+  prevent_sleep_while_busy: boolean;
+  /**
+   * 停止内核前最多等任务跑完多久。
+   */
+  stop_timeout_s: number;
+  draining?: boolean;
+}
+export interface CiAccountCreate {
+  /**
+   * GitHub 令牌。只出现在这个请求里。内核用它调用 GET /user 取得登录名；同一主机的同一登录名再次提交就是更换令牌。
+   */
+  token: string;
+  host?: CiHost;
+}
+export interface CiReposQuery {
+  /**
+   * 按仓库全名过滤，不分大小写的子串。
+   */
+  q?: string;
+  /**
+   * 上一次响应的 next_page。
+   */
+  page?: string;
+}
+export interface CiRepo {
+  full_name: CiRepoName;
+  private: boolean;
+  /**
+   * 绑定或账号的标识，由内核或客户端取名，创建后不变。
+   */
+  binding?: string;
+}
+export interface CiReposResponse {
+  /**
+   * 账号有管理员权限的仓库，只有这些能注册运行器。
+   */
+  repos: CiRepo[];
+  next_page: string | null;
+}
+export interface CiBindingPatch {
+  concurrency?: number;
+  /**
+   * @maxItems 16
+   */
+  labels?:
+    | []
+    | [CiLabel]
+    | [CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel, CiLabel]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ]
+    | [
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel,
+        CiLabel
+      ];
+  paused?: boolean;
+  /**
+   * 绑定或账号的标识，由内核或客户端取名，创建后不变。
+   */
+  account?: string;
+}
+export interface CiDeleteQuery {
+  /**
+   * true：不等正在跑的任务，立即结束。默认 false：排空后再删除。
+   */
+  force?: "true" | "false";
+}
+export interface CiImportInspectRequest {
+  dir: string;
+}
+export interface CiImportInspectResponse {
+  target: CiRepoName;
+  runner_name: string;
+  labels: string[];
+  /**
+   * 目录里装着官方的 svc.sh / 系统服务（actions.runner.*）。导入前必须先卸载，否则两个监听进程会抢同一个会话。
+   */
+  service_installed: boolean;
+  /**
+   * 卸载官方服务的命令，没有时省略。
+   */
+  service_hint?: string;
+  /**
+   * 这个目录的监听进程正在运行（例如开着一个终端）。导入前要先关掉。
+   */
+  running: boolean;
+  /**
+   * 是一次性运行器；这种目录不能导入常驻托管。
+   */
+  ephemeral?: boolean;
+}
+/**
+ * POST /v1/ci/bindings/{id}/repair 的请求体，可以是空对象。
+ */
+export interface CiBindingRepair {
+  /**
+   * 没有账号的绑定重新注册时用的一次性注册令牌。有账号时省略，内核自己签发。只出现在这个请求里。
+   */
+  registration_token?: string;
 }
 export interface Warning {
   code: WarningCode;
@@ -693,6 +1196,7 @@ export interface StatusResponse {
   gateway?: GatewayInfo;
   ingress?: IngressInfo;
   peers: PeerSummary;
+  ci?: CiSummary1;
 }
 export interface ControlInfo {
   api_version: ApiVersion;
@@ -807,6 +1311,16 @@ export interface PeerSummary {
    */
   total: number;
   online: number;
+}
+/**
+ * 有 GitHub Actions 运行器绑定时存在（API 1.8 起）。
+ */
+export interface CiSummary1 {
+  bindings: CiBinding[];
+  /**
+   * 节点在排空，运行器不再接新任务。
+   */
+  draining?: boolean;
 }
 export interface PeerEvent {
   id: EventId;
@@ -1054,7 +1568,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.7" as const;
+export const CONTROL_API_VERSION = "1.8" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -1070,7 +1584,8 @@ export const CONTROL_CAPABILITIES = [
   "pats",
   "gateway",
   "ingress",
-  "audit"
+  "audit",
+  "ci"
 ] as const;
 
 /** Event "type" values on GET /v1/events, in schema order. */
@@ -1511,6 +2026,174 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.ci.get",
+    "method": "GET",
+    "path": "/v1/ci",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": null,
+    "response": "CiOverview",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
+  },
+  {
+    "id": "control.ci.accounts.create",
+    "method": "POST",
+    "path": "/v1/ci/accounts",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": "CiAccountCreate",
+    "response": "CiAccount",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args"
+    ]
+  },
+  {
+    "id": "control.ci.accounts.delete",
+    "method": "DELETE",
+    "path": "/v1/ci/accounts/{id}",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "not_found",
+      "conflict"
+    ]
+  },
+  {
+    "id": "control.ci.accounts.repos",
+    "method": "GET",
+    "path": "/v1/ci/accounts/{id}/repos",
+    "capability": "ci",
+    "since": "1.8",
+    "query": "CiReposQuery",
+    "body": null,
+    "response": "CiReposResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found"
+    ]
+  },
+  {
+    "id": "control.ci.bindings.create",
+    "method": "POST",
+    "path": "/v1/ci/bindings",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": "CiBindingCreate",
+    "response": "CiBinding",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "conflict"
+    ]
+  },
+  {
+    "id": "control.ci.bindings.patch",
+    "method": "PATCH",
+    "path": "/v1/ci/bindings/{id}",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": "CiBindingPatch",
+    "response": "CiBinding",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found"
+    ]
+  },
+  {
+    "id": "control.ci.bindings.delete",
+    "method": "DELETE",
+    "path": "/v1/ci/bindings/{id}",
+    "capability": "ci",
+    "since": "1.8",
+    "query": "CiDeleteQuery",
+    "body": null,
+    "response": "CiBinding",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found"
+    ]
+  },
+  {
+    "id": "control.ci.bindings.restart",
+    "method": "POST",
+    "path": "/v1/ci/bindings/{id}/restart",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "not_found",
+      "conflict"
+    ]
+  },
+  {
+    "id": "control.ci.bindings.repair",
+    "method": "POST",
+    "path": "/v1/ci/bindings/{id}/repair",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": "CiBindingRepair",
+    "response": "CiBinding",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "conflict"
+    ]
+  },
+  {
+    "id": "control.ci.import.inspect",
+    "method": "POST",
+    "path": "/v1/ci/import/inspect",
+    "capability": "ci",
+    "since": "1.8",
+    "query": null,
+    "body": "CiImportInspectRequest",
+    "response": "CiImportInspectResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found"
+    ]
+  },
+  {
     "id": "control.ingress.clients.list",
     "method": "GET",
     "path": "/v1/ingress/clients",
@@ -1605,6 +2288,16 @@ export interface ControlRouteTypes {
   "control.backends.env.patch": { query: undefined; body: BackendEnvPatch; response: BackendEnvResponse };
   "control.backends.env.delete": { query: undefined; body: undefined; response: undefined };
   "control.gateway.update": { query: undefined; body: GatewayUpdateRequest; response: GatewayUpdateResponse };
+  "control.ci.get": { query: undefined; body: undefined; response: CiOverview };
+  "control.ci.accounts.create": { query: undefined; body: CiAccountCreate; response: CiAccount };
+  "control.ci.accounts.delete": { query: undefined; body: undefined; response: undefined };
+  "control.ci.accounts.repos": { query: CiReposQuery; body: undefined; response: CiReposResponse };
+  "control.ci.bindings.create": { query: undefined; body: CiBindingCreate; response: CiBinding };
+  "control.ci.bindings.patch": { query: undefined; body: CiBindingPatch; response: CiBinding };
+  "control.ci.bindings.delete": { query: CiDeleteQuery; body: undefined; response: CiBinding };
+  "control.ci.bindings.restart": { query: undefined; body: undefined; response: undefined };
+  "control.ci.bindings.repair": { query: undefined; body: CiBindingRepair; response: CiBinding };
+  "control.ci.import.inspect": { query: undefined; body: CiImportInspectRequest; response: CiImportInspectResponse };
   "control.ingress.clients.list": { query: undefined; body: undefined; response: IngressClientsResponse };
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };
   "control.ingress.password.put": { query: undefined; body: IngressPasswordRequest; response: IngressPasswordResponse };

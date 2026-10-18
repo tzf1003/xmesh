@@ -143,6 +143,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-CTL-05 CTR-CTL-06 CTR-CTL-07 | 对端、会话、drain、配置读写的请求与响应夹具；终端缓冲字段被拒绝；`replace` 缺 `before` 被拒绝 |
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 CTR-CTL-11 | 配对（文档、连接密码、发现、连接）、PAT、入口、审计夹具；令牌与 `secret_hash` 泄漏的反例失败；口令出现在响应里的反例失败；`PatSecret` 之外的类型没有令牌字段；审计元素含 stdout 的反例失败 |
 | CTR-CTL-14 | 后端环境变量的请求、响应夹具；`env_names` 夹具；含值的响应与状态被拒绝 |
+| CTR-CTL-15 | 运行器托管的请求、响应夹具；三种绑定方式恰好用一种；掩码以外的令牌、任务输出、未知实例状态被拒绝；配置 `ci` 段的默认值、重复 id 与重复仓库、未知账号、相对目录、配置里出现令牌都被拒绝（`Test_CTRCTL15_CIConfigDefaultsAndValidation`、`Test_CTRCTL15_CIConfigHasNoSecretFields`） |
 | CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`contracts.yml`） |
 
 内核实现（U1）追加：

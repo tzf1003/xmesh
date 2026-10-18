@@ -46,6 +46,7 @@ if "date-time" not in FormatChecker.checkers:
     "xmesh.ingress-public.json": "config.schema.json",
     "xmesh.ingress-multihost.json": "config.schema.json",
     "xmesh.windows-l2.json": "config.schema.json",
+    "xmesh.ci.json": "config.schema.json",
 }
 
 # 反例同样按文件名选择模式。这些文件必须无法通过校验。
@@ -59,6 +60,8 @@ if "date-time" not in FormatChecker.checkers:
     "invalid/error-pty-limit-named-active.json": "error.schema.json",
     "invalid/config-pty-authority-bad-name.json": "config.schema.json",
     "invalid/config-windows-appcontainer-not-boolean.json": "config.schema.json",
+    "invalid/config-ci-binding-with-token.json": "config.schema.json",
+    "invalid/config-ci-zero-concurrency.json": "config.schema.json",
 }
 
 

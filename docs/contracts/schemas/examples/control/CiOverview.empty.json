@@ -1,0 +1,8 @@
+{
+  "accounts": [],
+  "bindings": [],
+  "notices": [],
+  "runner": { "cached": false },
+  "prevent_sleep_while_busy": true,
+  "stop_timeout_s": 1800
+}

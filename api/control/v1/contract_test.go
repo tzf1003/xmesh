@@ -53,6 +53,19 @@ var typeFor = map[string]func() any{
 	"AuditQuery":              func() any { return new(v1.AuditQuery) },
 	"AuditResponse":           func() any { return new(v1.AuditResponse) },
 	"ControlError":            func() any { return new(v1.Error) },
+	"CiAccount":               func() any { return new(v1.CiAccount) },
+	"CiAccountCreate":         func() any { return new(v1.CiAccountCreate) },
+	"CiBinding":               func() any { return new(v1.CiBinding) },
+	"CiBindingCreate":         func() any { return new(v1.CiBindingCreate) },
+	"CiBindingPatch":          func() any { return new(v1.CiBindingPatch) },
+	"CiBindingRepair":         func() any { return new(v1.CiBindingRepair) },
+	"CiDeleteQuery":           func() any { return new(v1.CiDeleteQuery) },
+	"CiImportInspectRequest":  func() any { return new(v1.CiImportInspectRequest) },
+	"CiImportInspectResponse": func() any { return new(v1.CiImportInspectResponse) },
+	"CiOverview":              func() any { return new(v1.CiOverview) },
+	"CiReposQuery":            func() any { return new(v1.CiReposQuery) },
+	"CiReposResponse":         func() any { return new(v1.CiReposResponse) },
+	"CiSummary":               func() any { return new(v1.CiSummary) },
 }
 
 func fixtures(t *testing.T, sub string) map[string][]byte {
@@ -226,7 +239,7 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 			t.Errorf("route %s is a stream and has a response type", r.ID)
 		}
 	}
-	for _, c := range []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit} {
+	for _, c := range []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI} {
 		if !capabilities[c] {
 			t.Errorf("capability %s has no route", c)
 		}
@@ -278,7 +291,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 		}
 	}
 	check("Capability", enumOf(t, "control-common.schema.json", "$defs", "Capability", "enum"),
-		sorted(v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit))
+		sorted(v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI))
 	check("Severity", enumOf(t, "control-common.schema.json", "$defs", "Severity", "enum"),
 		sorted(v1.SeverityInfo, v1.SeverityWarning, v1.SeverityError))
 	check("WarningCode", enumOf(t, "control-common.schema.json", "$defs", "WarningCode", "enum"),
@@ -304,8 +317,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v1.APIVersion != "1.7" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 1.7", v1.APIVersion)
+	if v1.APIVersion != "1.8" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 1.8", v1.APIVersion)
 	}
 }
 
@@ -314,9 +327,9 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 // Encoding a Go value that leaves optional parts empty still satisfies the schema, and the one
 // secret-carrying type is the only one that has a token field.
 func Test_CTRCTL09_SecretsOnlyInPatSecret(t *testing.T) {
-	secretFields := []string{"token", "password", "secret_hash", "secret", "authkey"}
+	secretFields := []string{"token", "password", "secret_hash", "secret", "authkey", "registration_token"}
 	// Request bodies that carry a password are write-only. No response type may carry one.
-	writeOnly := map[string]bool{"PatSecret": true, "IngressPasswordRequest": true, "PairPasswordRequest": true, "PairConnectRequest": true}
+	writeOnly := map[string]bool{"PatSecret": true, "IngressPasswordRequest": true, "PairPasswordRequest": true, "PairConnectRequest": true, "CiAccountCreate": true, "CiBindingCreate": true, "CiBindingRepair": true}
 	for def, mk := range typeFor {
 		if writeOnly[def] {
 			continue

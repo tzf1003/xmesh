@@ -64,7 +64,7 @@ async function main(): Promise<void> {
         break;
       }
       case "mismatch":
-        kernel.setControlVersion(a === "on" ? "2.0" : "1.7");
+        kernel.setControlVersion(a === "on" ? "2.0" : "1.8");
         break;
       case "drop":
         kernel.dropStreams();

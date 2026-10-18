@@ -1,0 +1,6 @@
+{
+  "target": "tzf1003/xmesh",
+  "account": "gh-tzf1003",
+  "concurrency": 2,
+  "labels": ["mac"]
+}

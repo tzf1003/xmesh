@@ -1,0 +1,54 @@
+{
+  "accounts": [
+    {
+      "id": "gh-tzf1003",
+      "host": "github.com",
+      "login": "tzf1003",
+      "token_hint": "github_pat…a1b2",
+      "token": "github_pat_11ABCDEFG0abcdefghijklmnop"
+    }
+  ],
+  "bindings": [
+    {
+      "id": "xmesh",
+      "scope": "repo",
+      "target": "tzf1003/xmesh",
+      "source": "account",
+      "account": "gh-tzf1003",
+      "concurrency": 1,
+      "labels": [
+        "mac"
+      ],
+      "paused": false,
+      "removing": false,
+      "dir": "/Users/xiaosong/Library/Application Support/xmesh/mac/ci/xmesh",
+      "instances": [
+        {
+          "index": 1,
+          "name": "xmesh-mac-xmesh-1",
+          "state": "starting",
+          "restarts": 0,
+          "since": "2026-10-18T09:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "notices": [
+    {
+      "code": "linger_disabled",
+      "message": "退出登录后用户服务会停止，运行器也会停。",
+      "command": "loginctl enable-linger $USER"
+    },
+    {
+      "code": "git_missing",
+      "message": "PATH 里没有 git，actions/checkout 会改用下载压缩包的方式，速度较慢。"
+    }
+  ],
+  "runner": {
+    "version": "2.329.0",
+    "cached": true
+  },
+  "prevent_sleep_while_busy": true,
+  "stop_timeout_s": 1800,
+  "draining": false
+}

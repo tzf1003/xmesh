@@ -1,0 +1,654 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-ci:1",
+  "title": "ControlCi",
+  "description": "CTR-CTL-15。GitHub Actions 运行器托管：内核在本机监督官方运行器进程，一台机器可以绑定多个仓库。GitHub 凭据与注册令牌只写不读：响应只给掩码，不进配置、事件、审计和日志。",
+  "$defs": {
+    "CiId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+      "description": "绑定或账号的标识，由内核或客户端取名，创建后不变。"
+    },
+    "CiHost": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$",
+      "description": "GitHub 主机名，默认 github.com。其他主机按 GitHub Enterprise Server 处理，API 在 https://<主机>/api/v3。"
+    },
+    "CiRepoName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$",
+      "description": "owner/repo。"
+    },
+    "CiLabel": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "附加标签。内核总是另加 self-hosted、系统、架构、xmesh 与 xmesh-<节点名>，不必写。"
+    },
+    "CiInstanceState": {
+      "enum": [
+        "installing",
+        "registering",
+        "starting",
+        "idle",
+        "busy",
+        "backoff",
+        "stopping",
+        "stopped",
+        "broken"
+      ],
+      "description": "installing 下载并解压运行器；registering 向 GitHub 注册；starting 进程已起、尚未连上；idle 在等任务；busy 正在跑任务；backoff 进程退出后等待重启；stopping 排空中；stopped 已暂停；broken 需要用户处理，见 problem。"
+    },
+    "CiProblemCode": {
+      "enum": [
+        "session_conflict",
+        "runner_removed",
+        "registration_failed",
+        "download_failed",
+        "missing_dependency",
+        "start_failed",
+        "version_deprecated",
+        "auth_failed",
+        "unclassified"
+      ],
+      "description": "session_conflict：同名运行器在别处也在运行（退出码 5）；runner_removed：GitHub 已删除这个运行器；registration_failed：注册被拒绝；download_failed：下载或校验运行器包失败；missing_dependency：缺系统库；start_failed：进程起不来；version_deprecated：运行器版本已弃用；auth_failed：GitHub 凭据无效或权限不够。未知代码按 unclassified 处理。"
+    },
+    "CiProblem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/CiProblemCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "中文，一行，不含令牌与任务输出。"
+        }
+      }
+    },
+    "CiResultKind": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "canceled",
+        "skipped",
+        "abandoned",
+        "unknown"
+      ]
+    },
+    "CiJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "started_at"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "工作流里 job 的名字。"
+        },
+        "started_at": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp"
+        }
+      }
+    },
+    "CiResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "result",
+        "finished_at"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "result": {
+          "$ref": "#/$defs/CiResultKind"
+        },
+        "finished_at": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp"
+        }
+      }
+    },
+    "CiInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "name",
+        "state",
+        "restarts",
+        "since"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "GitHub 上的运行器名，默认 xmesh-<节点名>-<绑定>-<序号>。"
+        },
+        "state": {
+          "$ref": "#/$defs/CiInstanceState"
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "监听进程的 pid；没有进程时省略。"
+        },
+        "restarts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "内核启动以来这个实例被重启的次数。"
+        },
+        "since": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp",
+          "description": "进入当前状态的时间。"
+        },
+        "job": {
+          "$ref": "#/$defs/CiJob",
+          "description": "state 为 busy 时当前的 job。"
+        },
+        "last_result": {
+          "$ref": "#/$defs/CiResult",
+          "description": "最近一次跑完的 job。"
+        },
+        "problem": {
+          "$ref": "#/$defs/CiProblem",
+          "description": "state 为 broken 或 backoff 时的原因。"
+        }
+      }
+    },
+    "CiBindingSource": {
+      "enum": [
+        "account",
+        "token",
+        "import"
+      ],
+      "description": "account：用已保存的 GitHub 凭据注册；token：用户粘贴的一次性注册令牌；import：接管已有的运行器目录。"
+    },
+    "CiBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "target",
+        "source",
+        "concurrency",
+        "labels",
+        "paused",
+        "removing",
+        "dir",
+        "instances"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CiId"
+        },
+        "scope": {
+          "enum": [
+            "repo"
+          ],
+          "description": "目前只有仓库级。组织级以后追加。"
+        },
+        "target": {
+          "$ref": "#/$defs/CiRepoName"
+        },
+        "source": {
+          "$ref": "#/$defs/CiBindingSource"
+        },
+        "account": {
+          "$ref": "#/$defs/CiId",
+          "description": "source 为 account 时使用的账号；之后连接了账号的 token / import 绑定也可以带。"
+        },
+        "public": {
+          "type": "boolean",
+          "description": "仓库是否公开；不知道时省略。"
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "labels": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CiLabel"
+          }
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "removing": {
+          "type": "boolean",
+          "description": "正在解绑：等任务跑完后删除。"
+        },
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "运行器目录的根，实例在其下按序号分目录；import 时是原目录。"
+        },
+        "instances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CiInstance"
+          }
+        }
+      }
+    },
+    "CiAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "host",
+        "login",
+        "token_hint"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CiId"
+        },
+        "host": {
+          "$ref": "#/$defs/CiHost"
+        },
+        "login": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "token_hint": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]{1,12}…[A-Za-z0-9_]{4}$",
+          "description": "令牌的掩码：前缀加省略号加末四位，只用于让用户认出是哪个令牌。令牌正文从不返回。"
+        }
+      }
+    },
+    "CiNoticeCode": {
+      "enum": [
+        "linger_disabled",
+        "autologon_disabled",
+        "git_missing",
+        "missing_dependency",
+        "runner_unsupported"
+      ],
+      "description": "linger_disabled：Linux 用户服务在退出登录后会停，需要 loginctl enable-linger；autologon_disabled：Windows 没有开启自动登录，重启后要登录才会恢复；git_missing：PATH 里没有 git；missing_dependency：缺运行器需要的系统库；runner_unsupported：官方运行器没有这个系统或架构的版本。"
+    },
+    "CiNotice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/CiNoticeCode"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "command": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "用户可以复制执行的命令，没有时省略。"
+        }
+      }
+    },
+    "CiRunnerPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cached"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "已缓存的运行器版本；还没下载过时省略。"
+        },
+        "cached": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CiSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bindings"
+      ],
+      "properties": {
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CiBinding"
+          }
+        },
+        "draining": {
+          "type": "boolean",
+          "description": "节点在排空，运行器不再接新任务。"
+        }
+      },
+      "description": "StatusResponse.ci。没有任何绑定时省略整段。"
+    },
+    "CiOverview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accounts",
+        "bindings",
+        "notices",
+        "runner",
+        "prevent_sleep_while_busy",
+        "stop_timeout_s"
+      ],
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CiAccount"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CiBinding"
+          }
+        },
+        "notices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CiNotice"
+          }
+        },
+        "runner": {
+          "$ref": "#/$defs/CiRunnerPackage"
+        },
+        "prevent_sleep_while_busy": {
+          "type": "boolean"
+        },
+        "stop_timeout_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "停止内核前最多等任务跑完多久。"
+        },
+        "draining": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CiAccountCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "token"
+      ],
+      "properties": {
+        "token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]{20,255}$",
+          "description": "GitHub 令牌。只出现在这个请求里。内核用它调用 GET /user 取得登录名；同一主机的同一登录名再次提交就是更换令牌。"
+        },
+        "host": {
+          "$ref": "#/$defs/CiHost"
+        }
+      }
+    },
+    "CiReposQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "q": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "按仓库全名过滤，不分大小写的子串。"
+        },
+        "page": {
+          "type": "string",
+          "pattern": "^[0-9]{1,4}$",
+          "description": "上一次响应的 next_page。"
+        }
+      }
+    },
+    "CiRepo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "full_name",
+        "private"
+      ],
+      "properties": {
+        "full_name": {
+          "$ref": "#/$defs/CiRepoName"
+        },
+        "private": {
+          "type": "boolean"
+        },
+        "binding": {
+          "$ref": "#/$defs/CiId",
+          "description": "已经绑定到这个仓库的绑定。"
+        }
+      }
+    },
+    "CiReposResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repos",
+        "next_page"
+      ],
+      "properties": {
+        "repos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CiRepo"
+          },
+          "description": "账号有管理员权限的仓库，只有这些能注册运行器。"
+        },
+        "next_page": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{1,4}$"
+        }
+      }
+    },
+    "CiBindingCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CiId",
+          "description": "省略时由内核按仓库名生成。"
+        },
+        "target": {
+          "$ref": "#/$defs/CiRepoName"
+        },
+        "account": {
+          "$ref": "#/$defs/CiId"
+        },
+        "registration_token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]{10,255}$",
+          "description": "从仓库 Settings → Actions → Runners 复制的一次性注册令牌（一小时有效）。只出现在这个请求里。"
+        },
+        "import_dir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "已有运行器的目录（含 .runner）。"
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16,
+          "description": "默认 1。import 时固定为 1。"
+        },
+        "labels": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CiLabel"
+          }
+        },
+        "confirm_public": {
+          "type": "boolean",
+          "description": "目标是公开仓库时必须为 true，否则返回 invalid_args，reason 为 public_repo_requires_confirm。"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "target",
+            "account"
+          ]
+        },
+        {
+          "required": [
+            "target",
+            "registration_token"
+          ]
+        },
+        {
+          "required": [
+            "import_dir"
+          ]
+        }
+      ],
+      "description": "三种绑定方式恰好用一种：账号加仓库、仓库加注册令牌、导入目录。"
+    },
+    "CiBindingPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "labels": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CiLabel"
+          }
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "account": {
+          "$ref": "#/$defs/CiId",
+          "description": "给 token / import 绑定补上账号，用于以后自动重新注册和解绑。"
+        }
+      }
+    },
+    "CiDeleteQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "force": {
+          "enum": [
+            "true",
+            "false"
+          ],
+          "description": "true：不等正在跑的任务，立即结束。默认 false：排空后再删除。"
+        }
+      }
+    },
+    "CiImportInspectRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dir"
+      ],
+      "properties": {
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "CiImportInspectResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "runner_name",
+        "labels",
+        "service_installed",
+        "running"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/CiRepoName"
+        },
+        "runner_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "service_installed": {
+          "type": "boolean",
+          "description": "目录里装着官方的 svc.sh / 系统服务（actions.runner.*）。导入前必须先卸载，否则两个监听进程会抢同一个会话。"
+        },
+        "service_hint": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "卸载官方服务的命令，没有时省略。"
+        },
+        "running": {
+          "type": "boolean",
+          "description": "这个目录的监听进程正在运行（例如开着一个终端）。导入前要先关掉。"
+        },
+        "ephemeral": {
+          "type": "boolean",
+          "description": "是一次性运行器；这种目录不能导入常驻托管。"
+        }
+      }
+    },
+    "CiBindingRepair": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registration_token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]{10,255}$",
+          "description": "没有账号的绑定重新注册时用的一次性注册令牌。有账号时省略，内核自己签发。只出现在这个请求里。"
+        }
+      },
+      "description": "POST /v1/ci/bindings/{id}/repair 的请求体，可以是空对象。"
+    }
+  }
+}

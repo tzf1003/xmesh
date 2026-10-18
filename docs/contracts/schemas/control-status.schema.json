@@ -209,7 +209,8 @@
         "paths": { "$ref": "#/$defs/Paths" },
         "gateway": { "$ref": "#/$defs/GatewayInfo", "description": "roles 含 gateway 时存在。" },
         "ingress": { "$ref": "#/$defs/IngressInfo", "description": "roles 含 ingress 时存在。" },
-        "peers": { "$ref": "#/$defs/PeerSummary" }
+        "peers": { "$ref": "#/$defs/PeerSummary" },
+        "ci": { "$ref": "urn:xmesh:schema:control-ci:1#/$defs/CiSummary", "description": "有 GitHub Actions 运行器绑定时存在（API 1.8 起）。" }
       }
     }
   }

@@ -29,6 +29,7 @@ type Config struct {
 	Ingress Ingress `json:"ingress"`
 	Agent   Agent   `json:"agent"`
 	Audit   Audit   `json:"audit"`
+	CI      CI      `json:"ci"`
 }
 type Node struct {
 	Name  string   `json:"name"`
@@ -176,6 +177,45 @@ type Audit struct {
 	Dir       string `json:"dir"`
 }
 
+// CI configures the hosted GitHub Actions runners (CTR-CTL-15). It holds no secrets.
+type CI struct {
+	PreventSleepWhileBusy bool        `json:"prevent_sleep_while_busy"`
+	StopTimeout           string      `json:"stop_timeout"`
+	Accounts              []CIAccount `json:"accounts"`
+	Bindings              []CIBinding `json:"bindings"`
+}
+
+// CIAccount names a saved GitHub credential; the token lives in the keychain or a 0600 file.
+type CIAccount struct {
+	ID    string `json:"id"`
+	Host  string `json:"host"`
+	Login string `json:"login"`
+}
+
+type CIBinding struct {
+	ID          string   `json:"id"`
+	Scope       string   `json:"scope"`
+	Target      string   `json:"target"`
+	Source      string   `json:"source"`
+	Account     string   `json:"account"`
+	Public      *bool    `json:"public"`
+	Concurrency int      `json:"concurrency"`
+	Labels      []string `json:"labels"`
+	Paused      bool     `json:"paused"`
+	Dir         string   `json:"dir"`
+}
+
+// DefaultCIStopTimeout is how long stopping the kernel waits for running jobs.
+const DefaultCIStopTimeout = 30 * time.Minute
+
+// StopTimeoutDuration is the effective stop timeout.
+func (c CI) StopTimeoutDuration() time.Duration {
+	if d, e := time.ParseDuration(c.StopTimeout); e == nil && d >= 0 && c.StopTimeout != "" {
+		return d
+	}
+	return DefaultCIStopTimeout
+}
+
 func (c *Config) HasRole(role string) bool {
 	for _, r := range c.Node.Roles {
 		if role == r {
@@ -246,8 +286,27 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.Quota = Quota{DefaultCallsPerHour, DefaultMaxConcurrent, DefaultCallDuration.String()}
 	c.Gateway.Quota = c.Agent.Quota
 	c.Audit.Retention = "720h"
+	c.CI.PreventSleepWhileBusy = true
+	c.CI.StopTimeout = DefaultCIStopTimeout.String()
 	if e = json.Unmarshal(raw, c); e != nil {
 		return nil, e
+	}
+	for i := range c.CI.Bindings {
+		b := &c.CI.Bindings[i]
+		if b.Scope == "" {
+			b.Scope = "repo"
+		}
+		if b.Source == "" {
+			b.Source = "account"
+		}
+		if b.Concurrency == 0 {
+			b.Concurrency = 1
+		}
+	}
+	for i := range c.CI.Accounts {
+		if c.CI.Accounts[i].Host == "" {
+			c.CI.Accounts[i].Host = "github.com"
+		}
 	}
 	if e = c.Validate(); e != nil {
 		return nil, e
@@ -358,8 +417,64 @@ func (c *Config) Validate() error {
 			return fail("/agent/policy/exec/deny_patterns")
 		}
 	}
+	return c.validateCI()
+}
+
+// validateCI checks what the schema cannot say: ids are unique, a binding names an account that
+// exists, and a directory is absolute.
+func (c *Config) validateCI() error {
+	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
+	if c.CI.StopTimeout != "" {
+		if d, e := time.ParseDuration(c.CI.StopTimeout); e != nil || d < 0 {
+			return fail("/ci/stop_timeout")
+		}
+	}
+	accounts := map[string]bool{}
+	for i, a := range c.CI.Accounts {
+		if accounts[a.ID] {
+			return fail(fmt.Sprintf("/ci/accounts/%d/id: 重复", i))
+		}
+		accounts[a.ID] = true
+	}
+	bindings := map[string]bool{}
+	targets := map[string]bool{}
+	for i, b := range c.CI.Bindings {
+		p := fmt.Sprintf("/ci/bindings/%d", i)
+		if bindings[b.ID] {
+			return fail(p + "/id: 重复")
+		}
+		bindings[b.ID] = true
+		key := strings.ToLower(b.Target)
+		if targets[key] {
+			return fail(p + "/target: 同一个仓库只能绑定一次")
+		}
+		targets[key] = true
+		if b.Account != "" && !accounts[b.Account] {
+			return fail(p + "/account: 没有这个账号")
+		}
+		if b.Source == "account" && b.Account == "" {
+			return fail(p + "/account: source 为 account 时必须指定账号")
+		}
+		if b.Source == "import" && b.Dir == "" {
+			return fail(p + "/dir: source 为 import 时必须指定目录")
+		}
+		if b.Dir != "" && !absAnyOS(b.Dir) {
+			return fail(p + "/dir")
+		}
+	}
 	return nil
 }
+
+// absAnyOS reports whether p is absolute on some supported system. A config written on one
+// system (the shared examples among them) must stay valid when another system loads it; whether
+// the directory exists is checked where it is used.
+func absAnyOS(p string) bool {
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') && (p[0]|0x20 >= 'a' && p[0]|0x20 <= 'z')
+}
+
 func Duration(s string) time.Duration { v, _ := time.ParseDuration(s); return v }
 func Size(s string) (int, error) {
 	re := regexp.MustCompile(`^([0-9]+)([KMGT]iB|B)?$`)
