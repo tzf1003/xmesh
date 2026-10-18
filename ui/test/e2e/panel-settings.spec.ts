@@ -79,6 +79,20 @@ test("settings: removing the last allowed directory is reviewed and saved as an 
   expect(h.kernel.panel.content).toContain('deny: ["~/.ssh"]');
 });
 
+test("settings: a setting the running kernel could not apply is shown with its reason, not as live", async () => {
+  const page = await open();
+  h.kernel.panel.setContent(FULL_CONFIG);
+  h.kernel.panel.applyErrors = [{ section: "gateway", message: "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上：address already in use" }];
+  await page.getByTestId("nav-settings").click();
+
+  await page.getByTestId("settings-allow-remove-0").click();
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("settings-saved")).toBeVisible();
+  await expect(page.getByTestId("settings-apply-error")).toContainText("address already in use");
+  await expect(page.getByTestId("settings-saved")).not.toContainText("改动已经生效");
+});
+
 test("settings: a deny list still inline moves to its own file on save, and the config points at it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-deny-e2e-"));
   try {

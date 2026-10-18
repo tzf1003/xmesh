@@ -371,6 +371,20 @@ export interface ConfigReloadResponse {
    * 需要重启的段，例如 /mesh、/ingress。
    */
   restart_paths: string[];
+  /**
+   * 有效但没能在运行中的进程里生效的部分。没有时为空数组。
+   */
+  apply_errors: ApplyError[];
+}
+export interface ApplyError {
+  /**
+   * 没能生效的部分，目前是 gateway。
+   */
+  section: string;
+  /**
+   * 给人看的原因，例如监听地址被占用，以及运行中的进程现在是什么状态。
+   */
+  message: string;
 }
 export interface DrainState {
   draining: boolean;
@@ -826,9 +840,13 @@ export interface GatewayUpdateResponse {
   access: GatewayAccess[];
   hosts: string[];
   /**
-   * listen 与写入前不同时为真。access 与 hosts 立即生效。
+   * 自 API 1.5 起恒为 false：listen、access 与 hosts 都在运行中生效。字段保留给旧的客户端。
    */
   restart_required: boolean;
+  /**
+   * 写入已完成，但运行中的 Gateway 没能移到新的 listen（例如端口被占用）时给出原因；Gateway 仍在原来的地址上。没有时为空数组。
+   */
+  apply_errors: ApplyError[];
 }
 export interface IngressClient {
   client_id: string;
@@ -1007,7 +1025,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.5" as const;
+export const CONTROL_API_VERSION = "1.6" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */

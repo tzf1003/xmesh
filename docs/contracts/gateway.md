@@ -149,7 +149,7 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 2. **Host 头。** 必须是 IP 字面量、`localhost`，或 `gateway.hosts` 里列出的主机名。其余名字一律拒绝，这也挡住 DNS rebinding。
 3. **令牌。** 恰好一个 `Authorization: Bearer`，与 `gateway.pats` 中某个令牌文件的内容匹配。没有任何 PAT 时，任何请求都被拒绝。
 
-`gateway.listen` 决定实际绑定：`:8080` 绑全部网卡，`127.0.0.1:8080` 只绑本机，此时地址列表只有 `localhost`。tailnet 地址由 tsnet 在 tailnet 上提供，不经过操作系统网卡（CON-NET）。
+`gateway.listen` 决定实际绑定：`:8080` 绑全部网卡，`127.0.0.1:8080` 只绑本机，此时地址列表只有 `localhost`。tailnet 地址由 tsnet 在 tailnet 上提供，不经过操作系统网卡（CON-NET）。`gateway.listen` 在运行中改动不需要重启：Gateway 先绑定新地址再放弃旧地址，已经建立的连接继续使用，Agent 与 PTY、exec 会话不受影响（见 [config.md 的热加载表](config.md#热加载与冷加载)）。新地址绑不上时 Gateway 留在旧地址，原因通过 `apply_errors` 与状态警告报告。
 
 **地址列表（`GatewayInfo.addresses`）。** 内核列出当前真正可达的地址，每项带 `kind`、`host` 与 `url`：`localhost`（恒有）、`lan`（`lan` 条目开启时，每个启用网卡的私网 IPv4）、`tailnet_ip` 与 `tailnet_name`（`tailnet` 条目开启、节点已入网时，tailnet 的 IP 与 MagicDNS 名）、`host`（每个 `gateway.hosts`）。绑定回环时只有 `localhost`。自定义 IP 与 CIDR 只是来源，不作为地址列出。
 

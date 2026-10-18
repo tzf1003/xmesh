@@ -9,10 +9,17 @@ export interface SaveOutcome {
   /** The settings the kernel still needs a restart for, as config pointers. */
   paths: string[];
   loadError?: string;
+  /** Why a setting that is valid did not take effect in the running kernel; empty when everything did. */
+  applyErrors: string[];
 }
 
 export async function applySaved(restartRequired: boolean): Promise<SaveOutcome> {
   const r = await getApi().reloadConfig();
-  if (!r.ok) return { restart: restartRequired, paths: [] };
-  return { restart: r.data.restart_required, paths: r.data.restart_paths, loadError: r.data.load_error ?? undefined };
+  if (!r.ok) return { restart: restartRequired, paths: [], applyErrors: [] };
+  return {
+    restart: r.data.restart_required,
+    paths: r.data.restart_paths,
+    loadError: r.data.load_error ?? undefined,
+    applyErrors: (r.data.apply_errors ?? []).map((e) => e.message),
+  };
 }

@@ -34,7 +34,7 @@
 配置文件的生效方式有两条路，结果相同：
 
 - 文件监视：内核约每秒重读一次文件，有效的新内容立即成为生效的配置，并通过控制通道发 `config` 事件。
-- 显式重读：`POST /v1/config/reload`（见 [CTR-CTL-07](control.md#post-v1configreload)）立即重读，返回本次是否生效、变更路径与需重启的段。
+- 显式重读：`POST /v1/config/reload`（见 [CTR-CTL-07](control.md#post-v1configreload)）立即重读，返回本次是否生效、变更路径、需重启的段与没能热应用的部分。
 
 内容无法通过校验时，继续使用上一份有效配置，`policy_reload_failed` 计数加一，`load_error` 给出第一条错误。
 
@@ -49,20 +49,35 @@
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
 | `gateway.quota` | 热加载。对之后的调用生效，已经放行的调用保留原来的截止时间 |
+| `gateway.expose_backends` | 热加载。已连接的客户端会被通知重新读取工具列表 |
 | `gateway.access`、`gateway.hosts` | 每个请求读取，立即生效；见 [CTR-GW-07](gateway.md#ctr-gw-07) |
-| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
+| `gateway.listen` | 热加载。运行中的 Gateway 先绑定新地址，成功后再放弃旧地址，Agent、PTY 与 exec 会话不受影响；新地址被占用时 Gateway 留在旧地址上，在 `apply_errors` 与状态警告里报告。同一个端口只是放宽绑定范围（例如 `127.0.0.1:8080` 改为 `:8080`）而系统不允许两个监听并存时，先关旧监听再绑新的，新的失败就恢复旧的 |
+| `node.roles` 中的 `gateway` | 热加载。加入时创建 Gateway（令牌不存在才创建，见 [CTR-GW-07](gateway.md#ctr-gw-07)）并开始监听，去掉时停止监听并关闭它的 MCP 会话；Agent、网络和其他角色不受影响。启动失败（例如端口被占用）时节点照常运行，在 `apply_errors` 与状态警告里报告 |
+| `node.name`、`node.roles` 里 `agent` 与 `ingress` 的增减、`mesh`、`ingress`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
+
+#### 热应用失败时
+
+有效的配置可以在应用时失败：新的监听地址被占用，Gateway 没能启动。此时运行中的进程保持原样，该段不进入 `restart_paths`（重启也不会让占用的端口变空），而是：
+
+- `POST /v1/config/reload` 的 `apply_errors` 列出 `{section, message}`；
+- 状态警告 `policy_reload_failed` 带同样的文字，`policy_reload_failures` 计数加一，并写一条 `policy_reload_failed` 审计事件；
+- 之后的新配置，或再次调用 `POST /v1/config/reload`（它会重试上一次失败的部分），应用成功时清除。
+
+文件监视不会自行反复重试，所以端口一直被占用时不会刷屏。
 
 #### 为什么这几段需要重启
 
-`node`、`mesh`、`ingress`、`gateway.listen` 决定本节点的身份、网络与监听端口，`gateway.expose_backends` 由 Gateway 在启动时读取一次，运行中的角色持有它们打开的网络、监听套接字和入口的 OAuth 状态；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈与全部角色，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。
+`node.name`、`mesh` 决定本节点的身份与网络；`node.roles` 里的 `agent` 持有 PTY、exec、租约与沙箱运行器；`ingress` 持有入口的 OAuth 状态、公网监听与证书；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈或正在服务的会话，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。Gateway 只是进来的路径，不保存会话状态（[INV-03](../constraints/invariants.md#inv-03)），所以可以在进程内启停和换地址。
 
 #### 字段速查
 
 | 字段 | 热加载 | 需重启 |
 | --- | --- | --- |
-| `node.name`、`node.roles` | | 是 |
+| `node.name` | | 是 |
+| `node.roles`（`gateway` 的增减） | 是 | |
+| `node.roles`（`agent`、`ingress` 的增减） | | 是 |
 | `mesh.*` | | 是 |
-| `gateway.listen`、`gateway.expose_backends` | | 是 |
+| `gateway.listen`、`gateway.expose_backends` | 是 | |
 | `gateway.quota` | 是 | |
 | `gateway.access`、`gateway.hosts` | 是 | |
 | `ingress.*` | | 是 |

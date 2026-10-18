@@ -80,6 +80,8 @@ export class PanelData {
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
   private restartPaths: string[] = [];
+  /** Valid settings the kernel could not put into effect, as the reload reports them (control API 1.5). */
+  applyErrors: { section: string; message: string }[] = [];
   private effectiveEtag: string;
   /** The parsed document `GET /v1/config` returns. PATCH edits it; a PUT adopts it only when the text is JSON. */
   private model: Record<string, unknown>;
@@ -184,6 +186,7 @@ export class PanelData {
       changed_paths: [],
       restart_required: this.restartPaths.length > 0,
       restart_paths: [...this.restartPaths],
+      apply_errors: this.applyErrors.map((e) => ({ ...e })),
     };
   }
 
@@ -361,9 +364,8 @@ export class PanelData {
     const hosts = list(b.hosts, "/gateway/hosts", isGatewayHost, "必须是域名，不能是 IP 地址");
     if (diagnostics.length > 0) return err(422, "config_invalid", "配置未通过校验", { diagnostics });
     const listen = b.listen as string;
-    const restart = listen !== this.gateway.listen;
     this.gateway = { listen, access, hosts };
-    const res: GatewayUpdateResponse = { listen, access, hosts, restart_required: restart };
+    const res: GatewayUpdateResponse = { listen, access, hosts, restart_required: false, apply_errors: this.applyErrors.map((e) => ({ ...e })) };
     return ok(res);
   }
 
