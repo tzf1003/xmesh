@@ -29,6 +29,7 @@ function fakeController(snapshot: Snapshot, overrides: Partial<Record<"drain" | 
     drain: overrides.drain ?? (async () => void calls.push("drain")),
     resume: overrides.resume ?? (async () => void calls.push("resume")),
     selectInstance: (id: string) => void calls.push(`select:${id}`),
+    nudge: () => void calls.push("nudge"),
     setLoginItem: (v: boolean) => void calls.push(`login:${v}`),
   });
   return { controller: c as unknown as ShellController, calls };
@@ -67,6 +68,7 @@ function fakePlatform(confirm = true) {
     quit: () => void log.push("quit"),
     runCli: async (c) => void log.push(`cli:${c}`),
     notifyError: (m) => void log.push(`err:${m}`),
+    removeStaleState: async (n) => void log.push(`remove:${n}`),
     pickPath: async () => undefined,
   };
   return { platform, log };
@@ -269,6 +271,24 @@ test("restart of an unresponsive node runs the CLI for that node only; any other
   assert.deepEqual(await actions.dispatch({ type: "restart-unresponsive", node: "n1" }), { ok: true });
   assert.deepEqual(await actions.restartUnresponsive("office-pc"), { ok: false, error: { code: "not_found", message: "no unresponsive node with that name" } });
   assert.deepEqual(seen, ["restart:n1"]);
+});
+
+test("cleanup of a leftover state file only accepts a stale node and goes through the platform", async () => {
+  const { controller } = fakeController({ ...EMPTY_SNAPSHOT, staleNodes: ["n1"] });
+  const { platform, log } = fakePlatform();
+  const actions = new Actions(controller, platform, t, NO_CREDENTIALS);
+  assert.deepEqual(await actions.dispatch({ type: "cleanup-stale", node: "n1" }), { ok: true });
+  assert.deepEqual(await actions.cleanupStale("office-pc"), { ok: false, error: { code: "not_found", message: "no stale node with that name" } });
+  assert.deepEqual(log.filter((l) => l.startsWith("remove:")), ["remove:n1"]);
+});
+
+test("system service state requires administrator cleanup", async () => {
+  const { controller } = fakeController({ ...EMPTY_SNAPSHOT, staleNodes: ["system"], protectedStaleNodes: ["system"] });
+  const { platform, log } = fakePlatform();
+  const r = await new Actions(controller, platform, t, NO_CREDENTIALS).cleanupStale("system");
+  assert.equal(r.ok, false);
+  assert.ok(!r.ok && r.error.code === "forbidden");
+  assert.deepEqual(log, []);
 });
 
 test("kernel errors become results with the kernel's code", async () => {

@@ -96,6 +96,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
     const v = parseNodeName(node);
     return v === undefined ? bad("node name") : actions.restartUnresponsive(v);
   });
+  handle(CHANNELS.cleanupStale, (node: unknown) => {
+    const v = parseNodeName(node);
+    return v === undefined ? bad("node name") : actions.cleanupStale(v);
+  });
   handle(CHANNELS.selectInstance, (id: unknown) => {
     const v = parseInstanceId(id);
     return v === undefined ? bad("instance id") : actions.selectInstance(v);

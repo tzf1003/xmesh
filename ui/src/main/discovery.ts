@@ -8,6 +8,8 @@ export interface Instance {
   /** Directory name under `<UserConfigDir>/xmesh`. */
   id: string;
   manifest: ControlEndpointFile;
+  /** System service state is managed by an administrator. */
+  protected?: boolean;
 }
 
 /** Go's os.UserConfigDir, so the UI finds what `xmesh` wrote. */
@@ -53,12 +55,17 @@ export function stateRoots(
   return roots;
 }
 
+/** Windows system service state has read-only discovery grants for the signed-in user. */
+export function protectedStateRoots(): string[] {
+  return process.platform === "win32" ? stateRoots().slice(1) : [];
+}
+
 /**
  * Enumerates `<root>/*\/control.json` over one or more roots. Unreadable or
  * malformed manifests are skipped. A node name found under several roots is
  * listed once, from the first root.
  */
-export function discoverInstances(roots: string | string[] = stateRoot()): Instance[] {
+export function discoverInstances(roots: string | string[] = stateRoot(), protectedRoots: readonly string[] = protectedStateRoots()): Instance[] {
   const out: Instance[] = [];
   const seen = new Set<string>();
   for (const root of Array.isArray(roots) ? roots : [roots]) {
@@ -74,7 +81,7 @@ export function discoverInstances(roots: string | string[] = stateRoot()): Insta
         const raw: unknown = JSON.parse(fs.readFileSync(path.join(root, e.name, "control.json"), "utf8"));
         const manifest = parseManifest(raw);
         if (manifest) {
-          out.push({ id: e.name, manifest });
+          out.push({ id: e.name, manifest, protected: protectedRoots.includes(root) });
           seen.add(e.name);
         }
       } catch {
@@ -108,8 +115,75 @@ export function discoverConfigured(roots: string | string[] = stateRoot()): stri
   return [...seen].sort();
 }
 
-/** The configured nodes whose kernel is not running. */
+/** The configured nodes whose kernel is not running. A stale manifest's process is gone too. */
 export function stoppedNodes(configured: string[], found: Instance[]): string[] {
   const running = new Set(found.map((i) => i.id));
   return configured.filter((id) => !running.has(id));
+}
+
+/** A missing PID proves exit; access errors and invalid PIDs leave the process state unknown. */
+export function kernelGone(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/**
+ * Captures the directory entry under a private name before checking and deleting it. New kernel
+ * publications at control.json are independent of the captured file. A captured replacement is restored
+ * with an exclusive hard link, so restoration also leaves any later publication in place.
+ */
+export function removeStaleControl(
+  roots: string | string[],
+  id: string,
+  gone: (pid: number) => boolean = kernelGone,
+  protectedRoots: readonly string[] = protectedStateRoots(),
+): boolean {
+  if (parseNodeName(id) === undefined) return false;
+  for (const root of Array.isArray(roots) ? roots : [roots]) {
+    const file = path.join(root, id, "control.json");
+    let manifest: ReturnType<typeof parseManifest>;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+      manifest = parseManifest(JSON.parse(raw));
+    } catch {
+      continue;
+    }
+    if (!manifest) continue;
+    // The first root determines the selected node; later roots can contain other installations.
+    if (protectedRoots.includes(root) || !gone(manifest.pid)) return false;
+    const pending = fs.mkdtempSync(path.join(root, id, ".control-cleanup-"));
+    const captured = path.join(pending, "control.json");
+    let moved = false;
+    let removed = false;
+    let retain = false;
+    try {
+      // Verify hard-link support before moving a directory entry that might need restoration.
+      fs.linkSync(file, path.join(pending, "backup.json"));
+      fs.renameSync(file, captured);
+      moved = true;
+      if (fs.readFileSync(captured, "utf8") !== raw || !gone(manifest.pid)) return false;
+      fs.unlinkSync(captured);
+      removed = true;
+      return true;
+    } finally {
+      if (moved && !removed) {
+        try {
+          fs.linkSync(captured, file);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") {
+            retain = true;
+            throw new Error(`无法恢复内核状态文件，请从 ${captured} 恢复`, { cause: e });
+          }
+        }
+      }
+      if (!retain) fs.rmSync(pending, { recursive: true, force: true });
+    }
+  }
+  return false;
 }
