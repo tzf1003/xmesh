@@ -113,9 +113,14 @@ func conformanceCommand(t *testing.T) []string {
 // conformanceFixture starts one supervised stdio backend named "ida".
 func conformanceFixture(t *testing.T, policy string, upstream func(string) *mcp.ServerSession, changed func()) (*Manager, *lease.Manager) {
 	t.Helper()
+	return conformanceFixtureWithLeases(t, policy, lease.New(), upstream, changed)
+}
+
+// conformanceFixtureWithLeases is conformanceFixture with the caller's lease manager, for a test that controls its clock.
+func conformanceFixtureWithLeases(t *testing.T, policy string, leases *lease.Manager, upstream func(string) *mcp.ServerSession, changed func()) (*Manager, *lease.Manager) {
+	t.Helper()
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
-	leases := lease.New()
 	t.Cleanup(leases.Close)
 	c := &config.Config{}
 	c.Agent.DefaultCWD = root
@@ -331,12 +336,33 @@ func Test_CTRBE02_AcquireRenewRelease(t *testing.T) {
 	}
 }
 
+// fakeClock is a lease clock that moves only when a test advances it.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 // conformance: RUL-03
 func Test_RUL03_BusinessTrafficDoesNotRenewLease(t *testing.T) {
-	m, _ := conformanceFixture(t, "exclusive", nil, nil)
+	// Lease expiry follows this clock, not the wall clock, so no step races a ttl.
+	clock := &fakeClock{now: time.Now()}
+	leases := lease.NewWithClock(clock.Now)
+	m, _ := conformanceFixtureWithLeases(t, "exclusive", leases, nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	start := time.Now()
+	start := clock.Now()
 	v, err := m.Control(ctx, "n/a", "backend.acquire", raw(map[string]any{"name": "ida", "ttl": "1s"}))
 	if err != nil {
 		t.Fatal(err)
@@ -344,13 +370,13 @@ func Test_RUL03_BusinessTrafficDoesNotRenewLease(t *testing.T) {
 	granted := v.(lease.Lease)
 	successes := 0
 	var failure error
-	for time.Since(start) < 4*time.Second {
+	for clock.Now().Sub(start) < 4*time.Second {
 		_, failure = m.Call(ctx, "n/a", "ida.echo", raw(map[string]any{"_lease_token": granted.Token}), mcpmux.Progress{})
 		if failure != nil {
 			break
 		}
 		successes++
-		time.Sleep(50 * time.Millisecond)
+		clock.Advance(50 * time.Millisecond)
 	}
 	if failure == nil {
 		t.Fatal("successful business calls kept extending the lease")
@@ -361,19 +387,21 @@ func Test_RUL03_BusinessTrafficDoesNotRenewLease(t *testing.T) {
 	if errCode(failure) != "resource_busy" || errReason(failure) != "token_stale" {
 		t.Fatalf("expiry error: %v", failure)
 	}
-	if elapsed := time.Since(start); elapsed < 900*time.Millisecond {
+	if elapsed := clock.Now().Sub(start); elapsed < time.Second {
 		t.Fatalf("lease ended after %v, before its 1s ttl", elapsed)
 	}
-	// Read-only probing does not keep another holder's lease alive either, and
-	// an explicit renew is the only thing that moves Expires.
+	// Business calls do not move Expires; only an explicit renew does.
 	v, err = m.Control(ctx, "n/a", "backend.acquire", raw(map[string]any{"name": "ida", "ttl": "400ms"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	second := v.(lease.Lease)
-	time.Sleep(150 * time.Millisecond)
+	clock.Advance(150 * time.Millisecond)
 	if _, err = m.Call(ctx, "n/a", "ida.echo", raw(map[string]any{"_lease_token": second.Token}), mcpmux.Progress{}); err != nil {
 		t.Fatal(err)
+	}
+	if active := leases.Active(); len(active) != 1 || !active[0].Expires.Equal(second.Expires) {
+		t.Fatalf("business call moved Expires: %+v, want %v", active, second.Expires)
 	}
 	renewed, err := m.Control(ctx, "n/a", "backend.renew", raw(map[string]any{"name": "ida", "ttl": "5s", "_lease_token": second.Token}))
 	if err != nil {
@@ -381,6 +409,11 @@ func Test_RUL03_BusinessTrafficDoesNotRenewLease(t *testing.T) {
 	}
 	if !renewed.(lease.Lease).Expires.After(second.Expires.Add(3 * time.Second)) {
 		t.Fatal("explicit renew did not extend Expires")
+	}
+	// The renewed lease still holds after the original 400ms ttl has passed.
+	clock.Advance(time.Second)
+	if _, err = m.Call(ctx, "n/a", "ida.echo", raw(map[string]any{"_lease_token": second.Token}), mcpmux.Progress{}); err != nil {
+		t.Fatalf("renewed lease ended early: %v", err)
 	}
 }
 

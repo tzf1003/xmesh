@@ -33,8 +33,11 @@ type Manager struct {
 	once      sync.Once
 }
 
-func New() *Manager {
-	m := &Manager{resources: map[string]*resource{}, now: time.Now, stop: make(chan struct{}), done: make(chan struct{})}
+func New() *Manager { return NewWithClock(time.Now) }
+
+// NewWithClock is New with the time source replaced, so a test can move lease time without sleeping.
+func NewWithClock(now func() time.Time) *Manager {
+	m := &Manager{resources: map[string]*resource{}, now: now, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(m.done)
 		tick := time.NewTicker(30 * time.Second)

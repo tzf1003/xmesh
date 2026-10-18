@@ -3,9 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { DEFAULT_DISPLAY, cssFamily, isFontName, parseDisplay, stepZoom } from "../../src/shared/display";
+import { DEFAULT_DISPLAY, cssFamily, isFontName, parseDisplay, stepZoom, zoomKey } from "../../src/shared/display";
 import { DisplayStore } from "../../src/main/display-store";
-import { zoomKey } from "../../src/main/window";
 
 test("parseDisplay accepts exactly a zoom step and clean font names", () => {
   assert.deepEqual(parseDisplay({ zoom: 1.25, uiFont: "Microsoft YaHei UI", codeFont: "Cascadia Mono" }), { zoom: 1.25, uiFont: "Microsoft YaHei UI", codeFont: "Cascadia Mono" });
