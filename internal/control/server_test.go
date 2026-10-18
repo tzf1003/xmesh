@@ -60,7 +60,7 @@ func Test_ControlStatus(t *testing.T) {
 	if st.Hostname != "ctl-node" || st.Paths.ConfigFile != f.path || st.Paths.StateDir != f.server.o.StateDir || st.Paths.AuditDir == nil || st.Drain.Draining {
 		t.Fatalf("%+v", st)
 	}
-	want := map[v1.Capability]bool{v1.CapStatus: true, v1.CapEvents: true, v1.CapPeers: true, v1.CapSessions: true, v1.CapDrain: true, v1.CapConfigRead: true, v1.CapConfigWrite: true, v1.CapPats: true, v1.CapPair: true, v1.CapIngress: true, v1.CapAudit: true}
+	want := map[v1.Capability]bool{v1.CapStatus: true, v1.CapEvents: true, v1.CapPeers: true, v1.CapSessions: true, v1.CapDrain: true, v1.CapConfigRead: true, v1.CapConfigWrite: true, v1.CapPats: true, v1.CapGateway: true, v1.CapPair: true, v1.CapIngress: true, v1.CapAudit: true}
 	if len(st.Control.Capabilities) != len(want) {
 		t.Fatalf("capabilities: %v", st.Control.Capabilities)
 	}

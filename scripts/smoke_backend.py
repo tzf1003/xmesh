@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 
-from smoke_local import MCP, address, stop_runtime, wait_for_gateway
+from smoke_local import MCP, address, stop_runtime, wait_for_default_token, wait_for_gateway
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -109,8 +109,9 @@ def main():
                                         "--state-dir", str(root / "state"), "--listen", direct],
                                        stdout=runtime_log, stderr=runtime_log)
             try:
-                first = wait_for_gateway(process, gateway, runtime_log)
-                second = MCP(gateway)
+                gateway_token = wait_for_default_token(root / "state")
+                first = wait_for_gateway(process, gateway, runtime_log, gateway_token)
+                second = MCP(gateway, gateway_token)
                 assert first.session != second.session
                 # The backend starts with the Agent; remember which process it is.
                 first_pid = wait_until(lambda: next((r["pid"] for r in records(log) if r["event"] == "start"), None),

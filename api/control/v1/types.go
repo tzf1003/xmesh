@@ -118,10 +118,36 @@ type Paths struct {
 	AuditDir   *string `json:"audit_dir"`
 }
 
+// GatewayInfo is the gateway block of StatusResponse (CTR-CTL-03, CTR-GW-07).
 type GatewayInfo struct {
-	Listen string `json:"listen"`
-	URL    string `json:"url"`
-	Auth   string `json:"auth"`
+	Listen    string           `json:"listen"`
+	URL       string           `json:"url"`
+	Auth      string           `json:"auth"`
+	Access    []string         `json:"access"`
+	Hosts     []string         `json:"hosts"`
+	Addresses []GatewayAddress `json:"addresses"`
+}
+
+// GatewayUpdateRequest replaces the listen address and the reach settings of the gateway (CTR-CTL-13).
+type GatewayUpdateRequest struct {
+	Listen string   `json:"listen"`
+	Access []string `json:"access"`
+	Hosts  []string `json:"hosts"`
+}
+
+// GatewayUpdateResponse echoes what was written. RestartRequired is true when Listen changed.
+type GatewayUpdateResponse struct {
+	Listen          string   `json:"listen"`
+	Access          []string `json:"access"`
+	Hosts           []string `json:"hosts"`
+	RestartRequired bool     `json:"restart_required"`
+}
+
+// GatewayAddress is one address the gateway answers on right now.
+type GatewayAddress struct {
+	Kind string `json:"kind"`
+	Host string `json:"host"`
+	URL  string `json:"url"`
 }
 
 type IngressInfo struct {

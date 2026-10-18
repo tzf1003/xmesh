@@ -46,7 +46,12 @@ type Mesh struct {
 	} `json:"lan"`
 }
 type Gateway struct {
-	Listen         string         `json:"listen"`
+	// Listen is the local bind address. Its host is "" or 0.0.0.0 or [::] for every interface, or a
+	// loopback address to serve this machine only (CTR-CFG-01).
+	Listen string `json:"listen"`
+	// Access says which sources may connect (CTR-GW-07). Every request needs a token.
+	Access         []string       `json:"access"`
+	Hosts          []string       `json:"hosts"`
 	ExposeBackends string         `json:"expose_backends"`
 	PATs           map[string]PAT `json:"pats"`
 	Quota          Quota          `json:"quota"`
@@ -233,7 +238,8 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.Policy.Isolation = "L1"
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
-	c.Gateway.Listen = "127.0.0.1:8080"
+	c.Gateway.Listen = ":8080"
+	c.Gateway.Access = []string{"localhost", "lan", "tailnet"}
 	c.Ingress.MaxPTYPerClient = 8
 	c.Agent.Quota = Quota{DefaultCallsPerHour, DefaultMaxConcurrent, DefaultCallDuration.String()}
 	c.Gateway.Quota = c.Agent.Quota
@@ -246,18 +252,39 @@ func Parse(b []byte) (*Config, error) {
 	}
 	return c, nil
 }
+
+// listenHostAllowed admits the wildcard hosts and loopback. A specific interface address is refused:
+// the LAN and tailnet range is chosen with gateway.access, which also applies per request.
+func listenHostAllowed(host string) bool {
+	switch host {
+	case "", "0.0.0.0", "::", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
 func (c *Config) Validate() error {
 	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
 	}
+	if c.Agent.CWDPolicy.DenyFile != "" && !filepath.IsAbs(c.Agent.CWDPolicy.DenyFile) {
+		return fail("/agent/cwd_policy/deny_file")
+	}
 	if c.Ingress.PTYBudgetAuthority != "" && !nodeNamePattern.MatchString(c.Ingress.PTYBudgetAuthority) {
 		return fail("/ingress/pty_budget_authority")
 	}
 	if c.Gateway.Listen != "" {
-		host, _, e := net.SplitHostPort(c.Gateway.Listen)
-		if e != nil || host != "127.0.0.1" {
+		if host, _, e := GatewayListenHost(c.Gateway.Listen); e != nil || !listenHostAllowed(host) {
 			return fail("/gateway/listen")
+		}
+	}
+	if _, e := ParseAccess(c.Gateway.Access); e != nil {
+		return fail("/gateway/access")
+	}
+	for _, h := range c.Gateway.Hosts {
+		if net.ParseIP(h) != nil {
+			return fail("/gateway/hosts")
 		}
 	}
 	if c.HasRole("ingress") {

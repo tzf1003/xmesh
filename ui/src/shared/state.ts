@@ -26,6 +26,10 @@ export interface UiSettings {
 export interface Snapshot {
   connection: Connection;
   instances: InstanceInfo[];
+  /** Nodes with a config file but no running kernel; the offline view offers to start them. */
+  stoppedNodes: string[];
+  /** Nodes whose control manifest is there but whose kernel does not answer; the offline view offers to restart them. */
+  unresponsiveNodes: string[];
   selectedInstance: string;
   settings: UiSettings;
 }
@@ -55,6 +59,8 @@ export function deriveIcon(c: Connection): TrayIcon {
 export const EMPTY_SNAPSHOT: Snapshot = {
   connection: { kind: "offline" },
   instances: [],
+  stoppedNodes: [],
+  unresponsiveNodes: [],
   selectedInstance: "",
   settings: { loginItem: false, locale: "zh" },
 };

@@ -331,6 +331,8 @@ func weakensSecurity(c v1.ConfigChange, before, after map[string]any) bool {
 		return string(c.After) == "true"
 	case hasPrefix(c.Pointer, "/agent/cwd_policy/allow"):
 		return changed
+	case hasPrefix(c.Pointer, "/agent/cwd_policy/deny_file"):
+		return changed
 	case hasPrefix(c.Pointer, "/agent/cwd_policy/deny"):
 		return c.Op == "remove" || c.Op == "replace"
 	case hasPrefix(c.Pointer, "/agent/authz"):

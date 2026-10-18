@@ -106,13 +106,13 @@ func (n *node) post(path string, body any) {
 		n.t.Fatalf("POST %s violates the contract: %v\n%s", path, err, r.Body)
 	}
 }
-func session(t *testing.T, endpoint string) *mcp.ClientSession {
+func session(t *testing.T, stateDir, endpoint string) *mcp.ClientSession {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 		attempt, stop := context.WithTimeout(context.Background(), time.Second)
-		s, err := client.Connect(attempt, &mcp.StreamableClientTransport{Endpoint: endpoint}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+		s, err := client.Connect(attempt, &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: gatewayHTTPClient(stateDir)}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 		stop()
 		if err == nil {
 			t.Cleanup(func() { s.Close() })
@@ -163,7 +163,7 @@ func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 	}
 	// No MCP tool, through the Gateway or directly, exposes it.
 	for _, endpoint := range []string{"http://" + n.gateway + "/mcp", "http://" + n.agent + "/mcp"} {
-		s := session(t, endpoint)
+		s := session(t, n.stateDir, endpoint)
 		tools, err := s.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
@@ -185,7 +185,7 @@ func Test_ControlStatusFromRunningNode(t *testing.T) {
 	if len(st.Roles) != 2 || st.Limits.PTYMaxSessions == 0 || st.Network.Mode != "local" || st.Paths.StateDir != n.stateDir || st.Paths.ConfigFile == "" {
 		t.Fatalf("%+v", st)
 	}
-	if st.Gateway == nil || st.Gateway.Listen != n.gateway || st.Gateway.URL != "http://"+n.gateway+"/mcp" || st.Gateway.Auth != "none" || st.Ingress != nil {
+	if st.Gateway == nil || st.Gateway.Listen != n.gateway || st.Gateway.URL != "http://"+n.gateway+"/mcp" || st.Gateway.Auth != "pat" || len(st.Gateway.Addresses) != 1 || st.Ingress != nil {
 		t.Fatalf("gateway info: %+v ingress %+v", st.Gateway, st.Ingress)
 	}
 	var peers v1.PeersResponse
@@ -203,8 +203,8 @@ func Test_ControlStatusFromRunningNode(t *testing.T) {
 // The channel can drain the node and bring it back, which the MCP-side drain cannot.
 func Test_ControlDrainResumeEndToEnd(t *testing.T) {
 	n := startNode(t)
-	direct := session(t, "http://"+n.agent+"/mcp")
-	gateway := session(t, "http://"+n.gateway+"/mcp")
+	direct := session(t, n.stateDir, "http://"+n.agent+"/mcp")
+	gateway := session(t, n.stateDir, "http://"+n.gateway+"/mcp")
 	if _, isErr := call(t, direct, "exec.run", map[string]any{"cmd": "go", "args": []string{"version"}}); isErr {
 		t.Fatal("exec before drain failed")
 	}
@@ -267,7 +267,7 @@ func Test_ControlEventsAndAuditFromRunningNode(t *testing.T) {
 			}
 		}
 	}()
-	direct := session(t, "http://"+n.agent+"/mcp")
+	direct := session(t, n.stateDir, "http://"+n.agent+"/mcp")
 	call(t, direct, "sys.info", map[string]any{})
 	if _, isErr := call(t, direct, "exec.run", map[string]any{"cmd": "go", "args": []string{"version"}}); isErr {
 		t.Fatal("exec failed")
@@ -307,7 +307,7 @@ func Test_ControlEndpointRemovedOnShutdown(t *testing.T) {
 // A running exec call is visible in the sessions view with its executable's base name only.
 func Test_ControlSessionsShowRunningExec(t *testing.T) {
 	n := startNode(t)
-	direct := session(t, "http://"+n.agent+"/mcp")
+	direct := session(t, n.stateDir, "http://"+n.agent+"/mcp")
 	program := filepath.Join(n.stateDir, "..", "sleep.go")
 	if err := os.WriteFile(program, []byte("package main\nimport \"time\"\nfunc main() { time.Sleep(4 * time.Second) }\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -354,7 +354,7 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 // UI) leaves the terminal, the node status and the channel itself untouched.
 func Test_CONARCH10_UIExitDoesNotAffectKernel(t *testing.T) {
 	n := startNode(t)
-	direct := session(t, "http://"+n.agent+"/mcp")
+	direct := session(t, n.stateDir, "http://"+n.agent+"/mcp")
 	opened, failed := call(t, direct, "pty.open", map[string]any{"cols": 80, "rows": 24})
 	if failed {
 		t.Fatal(opened)
@@ -405,7 +405,6 @@ func Test_ControlPatsReachTheGateway(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	open := status("")
 	call := func(method, path string, body any, def string, out any) {
 		t.Helper()
 		r, err := n.control.Do(context.Background(), method, path, body, nil)
@@ -421,20 +420,29 @@ func Test_ControlPatsReachTheGateway(t *testing.T) {
 			}
 		}
 	}
+	// The kernel creates the default token when none exists, so an unauthenticated request is refused
+	// from the start; a PAT made through the channel is honoured at once.
+	defaultToken, err := os.ReadFile(filepath.Join(n.stateDir, "pats", "default.token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status("") != 401 || status(strings.TrimSpace(string(defaultToken))) == 401 {
+		t.Fatal("the gateway serves a request without a token, or refuses the default token")
+	}
 	var made v1.PatSecret
 	call("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, "PatSecret", &made)
-	enforced := status("")
-	if enforced == open || status(made.Token) != open {
-		t.Fatalf("open=%d without token=%d with token=%d", open, enforced, status(made.Token))
+	authorized := status(made.Token)
+	if status("") != 401 || authorized == 401 {
+		t.Fatalf("without token=%d with token=%d", status(""), authorized)
 	}
 	var rotated v1.PatSecret
 	call("POST", "/v1/pats/ci/rotate", nil, "PatSecret", &rotated)
-	if status(made.Token) != enforced || status(rotated.Token) != open {
+	if status(made.Token) != 401 || status(rotated.Token) != authorized {
 		t.Fatal("rotation did not switch the credential")
 	}
 	call("DELETE", "/v1/pats/ci", nil, "", nil)
-	if status("") != open {
-		t.Fatal("deleting the last PAT should turn authentication off again")
+	if status(rotated.Token) != 401 || status(strings.TrimSpace(string(defaultToken))) == 401 {
+		t.Fatal("deleting one PAT changed the others")
 	}
 	var export v1.PairExportResponse
 	call("POST", "/v1/pair/export", nil, "PairExportResponse", &export)

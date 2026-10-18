@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cliArgs } from "../../src/main/cli";
 
-test("restart and stop name the node's service, so no config file in the working directory is needed", () => {
+test("start, restart and stop name the node's service, so no config file in the working directory is needed", () => {
+  assert.deepEqual(cliArgs("start", "office-pc"), ["start", "--name", "xmesh-office-pc", "--json"]);
   assert.deepEqual(cliArgs("restart", "office-pc"), ["restart", "--name", "xmesh-office-pc", "--json"]);
   assert.deepEqual(cliArgs("stop", "office-pc"), ["stop", "--name", "xmesh-office-pc", "--json"]);
 });

@@ -156,13 +156,15 @@ func Test_CLIControlPats(t *testing.T) {
 		t.Fatal("rotation repeated a token")
 	}
 
+	// The last PAT cannot be deleted: the gateway always needs one (CTR-CTL-09).
+	runObject(t, state, "pats", "create", "--name", "spare", "--scope", "devices:read")
 	if gone := runObject(t, state, "pats", "delete", "ci"); gone["deleted"] != true || gone["name"] != "ci" {
 		t.Fatal(gone)
 	}
 	if _, err = os.Stat(file); err == nil {
 		t.Fatal("token file survived delete")
 	}
-	if list := runObject(t, state, "pats", "list"); list["enforced"] != false {
+	if list := runObject(t, state, "pats", "list"); list["enforced"] != true || len(list["pats"].([]any)) != 1 {
 		t.Fatal(list)
 	}
 }

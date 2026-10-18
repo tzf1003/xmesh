@@ -59,6 +59,8 @@ test("each method calls its own channel with only the caller's argument", async 
   await api.getSnapshot!();
   await api.drain!();
   await api.resume!();
+  await api.startKernel!("n1");
+  await api.restartUnresponsive!("n1");
   await api.selectInstance!("n1");
   await api.copy!("gatewayUrl");
   await api.openPath!("logs");
@@ -68,6 +70,8 @@ test("each method calls its own channel with only the caller's argument", async 
     { channel: CHANNELS.getSnapshot, args: [] },
     { channel: CHANNELS.drain, args: [] },
     { channel: CHANNELS.resume, args: [] },
+    { channel: CHANNELS.startKernel, args: ["n1"] },
+    { channel: CHANNELS.restartUnresponsive, args: ["n1"] },
     { channel: CHANNELS.selectInstance, args: ["n1"] },
     { channel: CHANNELS.copy, args: ["gatewayUrl"] },
     { channel: CHANNELS.openPath, args: ["logs"] },
@@ -97,6 +101,9 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.runSetup!({ any: 1 });
   await api.pickPath!("workspace");
   await api.mesh!({ op: "status" });
+  await api.copyGateway!({ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" });
+  await api.updateGateway!({ listen: ":8080", access: ["localhost"], hosts: [] });
+  await api.rotateGatewayPat!();
   assert.deepEqual(
     invoked.map((i) => i.channel),
     [
@@ -104,10 +111,13 @@ test("panel data methods use their own fixed channels and forward only the calle
       CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
       CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.queryAudit,
       CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
+      CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat,
     ],
   );
   assert.deepEqual(invoked[2]!.args, [cfg]);
   assert.deepEqual(invoked[5]!.args, ["ci"]);
+  assert.deepEqual(invoked.at(-3)!.args, [{ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" }]);
+  assert.deepEqual(invoked.at(-1)!.args, [], "rotation takes no argument from the page");
 });
 
 test("onCalls hands the page the calls only and unsubscribes", () => {

@@ -67,7 +67,7 @@ function Pats({ ctx }: { ctx: PageContext }): JSX.Element {
       <ResourceView resource={resource}>
         {(list) => (
           <>
-            {!list.enforced && <Banner kind="warn" testid="pats-open">{t("authz.notEnforced")}</Banner>}
+            <Banner testid="pats-policy">{t("authz.tokenPolicy")}</Banner>
             {list.pats.length === 0 ? (
               <Empty>{t("authz.noPats")}</Empty>
             ) : (
@@ -284,11 +284,14 @@ function AuthzView({ ctx }: { ctx: PageContext }): JSX.Element {
               )}
               <h3 style={{ marginTop: "12px" }}>{t("authz.cwd")}</h3>
               <p>
-                {t("authz.cwdAllow")}: <span class="mono">{cwd.allow.join(", ") || "—"}</span>
+                {t("authz.cwdAllow")}: <span class="mono">{cwd.allow.join(", ") || t("authz.cwdAllowAll")}</span>
               </p>
               <p>
                 {t("authz.cwdDeny")}: <span class="mono">{cwd.deny.join(", ") || "—"}</span>
               </p>
+              <button type="button" class="btn" onClick={() => ctx.go("settings", { section: "workdirs" })} data-testid="authz-to-workdirs">
+                {t("authz.editWorkdirs")}
+              </button>
             </>
           );
         }}

@@ -8,6 +8,7 @@ import { Badge, Banner, Toasts, useToasts } from "./components";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
+import type { Role, Section } from "./lib/settings";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Config } from "./pages/Config";
@@ -15,10 +16,17 @@ import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
 import { Overview } from "./pages/Overview";
+import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 
-export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "config" | "audit" | "mesh" | "setup";
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "settings" | "config" | "audit" | "mesh" | "setup";
+
+/** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
+export interface PageFocus {
+  section: Section;
+  role?: Role;
+}
 
 const NAV: { id: PageId; label: Key }[] = [
   { id: "overview", label: "nav.overview" },
@@ -26,6 +34,7 @@ const NAV: { id: PageId; label: Key }[] = [
   { id: "sessions", label: "nav.sessions" },
   { id: "authz", label: "nav.authz" },
   { id: "ingress", label: "nav.ingress" },
+  { id: "settings", label: "nav.settings" },
   { id: "config", label: "nav.config" },
   { id: "audit", label: "nav.audit" },
   { id: "mesh", label: "nav.mesh" },
@@ -55,34 +64,43 @@ export interface PageContext {
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
-  go(page: PageId): void;
+  /** Where the page opens, when the link to it named a place. Cleared by any other navigation. */
+  focus: PageFocus | undefined;
+  go(page: PageId, focus?: PageFocus): void;
 }
 
 export function App(): JSX.Element {
   const snapshot = useSnapshot();
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
   const [page, setPage] = useState<PageId | undefined>(undefined);
+  const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
   const { toasts, push } = useToasts();
+  const navigate = (next: PageId, nextFocus?: PageFocus): void => {
+    setFocus(nextFocus);
+    setPage(next);
+  };
 
   useEffect(() => {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
   }, [snapshot.settings.locale]);
 
   const connected = snapshot.connection.kind === "connected";
-  // With no node found at all, the first thing worth showing is the setup wizard.
-  const current: PageId = page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 ? "setup" : "overview");
+  // With no node configured at all, the first thing worth showing is the setup wizard.
+  const current: PageId =
+    page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 && snapshot.stoppedNodes.length === 0 ? "setup" : "overview");
 
   const ctx: PageContext = {
     snapshot,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
-    go: setPage,
+    focus,
+    go: navigate,
   };
 
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={setPage} />
+        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
         <div class="main">
           <TopBar snapshot={snapshot} />
           <main class="content" id="content" tabIndex={-1}>
@@ -97,10 +115,12 @@ export function App(): JSX.Element {
 
 function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; connected: boolean; snapshot: Snapshot; onSelect: (p: PageId) => void }): JSX.Element {
   const t = useT();
+  // The wizard is for a node that has no config yet; once one exists, its settings live on the settings page.
+  const configured = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0;
   return (
     <nav class="sidebar" aria-label={t("nav.label")}>
       <div class="brand">xmesh</div>
-      {NAV.map((n) => (
+      {NAV.filter((n) => n.id !== "setup" || !configured).map((n) => (
         <button
           key={n.id}
           type="button"
@@ -147,7 +167,7 @@ function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
       </div>
       <Badge kind={STATUS_KIND[icon]}>
         <span data-testid="state" data-state={icon}>
-          {t(STATUS_KEY[icon])}
+          {t(icon === "offline" && snapshot.unresponsiveNodes.length > 0 ? "status.unresponsive" : STATUS_KEY[icon])}
         </span>
       </Badge>
     </header>
@@ -173,6 +193,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Authorization ctx={ctx} />;
     case "ingress":
       return <Ingress ctx={ctx} />;
+    case "settings":
+      return <Settings ctx={ctx} />;
     case "config":
       return <Config ctx={ctx} />;
     case "audit":
@@ -180,17 +202,59 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
   }
 }
 
+/** The panel follows the snapshot once the kernel answers, so only a failure is shown here. */
+function startKernel(ctx: PageContext, node: string): void {
+  void getApi().startKernel(node).then((r) => {
+    if (!r.ok) ctx.toast(r.error.message, true);
+  });
+}
+
+/** The state file is there but nothing answers: restarting the node's service is the way back. */
+function restartUnresponsive(ctx: PageContext, node: string): void {
+  void getApi().restartUnresponsive(node).then((r) => {
+    if (!r.ok) ctx.toast(r.error.message, true);
+  });
+}
+
 function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
   const c = ctx.snapshot.connection;
+  const unresponsiveNodes = ctx.snapshot.unresponsiveNodes;
+  const unresponsive = kind === "offline" && unresponsiveNodes.length > 0;
   return (
     <div class="page">
-      <h1>{kind === "offline" ? t("offline.title") : t("mismatch.title")}</h1>
+      <h1>{kind === "offline" ? t(unresponsive ? "unresponsive.title" : "offline.title") : t("mismatch.title")}</h1>
       {kind === "offline" ? (
-        <Banner testid="offline">
-          <p>{t("offline.body")}</p>
-          <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
-            {t("offline.setup")}
-          </button>
+        <Banner testid={unresponsive ? "unresponsive" : "offline"}>
+          {unresponsive ? (
+            <>
+              <p>{t("unresponsive.body")}</p>
+              <div class="row">
+                {unresponsiveNodes.map((node) => (
+                  <button key={node} type="button" class="btn primary" onClick={() => restartUnresponsive(ctx, node)} data-testid={`restart-unresponsive-${node}`}>
+                    {unresponsiveNodes.length === 1 ? t("unresponsive.restart") : t("unresponsive.restartNamed", { name: node })}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : ctx.snapshot.stoppedNodes.length > 0 ? (
+            <>
+              <p>{t("offline.startBody")}</p>
+              <div class="row">
+                {ctx.snapshot.stoppedNodes.map((node) => (
+                  <button key={node} type="button" class="btn primary" onClick={() => startKernel(ctx, node)} data-testid={`start-kernel-${node}`}>
+                    {ctx.snapshot.stoppedNodes.length === 1 ? t("offline.start") : t("offline.startNamed", { name: node })}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <p>{t("offline.body")}</p>
+              <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
+                {t("offline.setup")}
+              </button>
+            </>
+          )}
         </Banner>
       ) : (
         <Banner kind="danger" testid="mismatch">
