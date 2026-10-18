@@ -28,6 +28,7 @@ import {
   parsePickKind,
 } from "../shared/ipc";
 import type { CallEventData } from "../shared/control";
+import { parseDisplay } from "../shared/display";
 import type { PanelService } from "./panel-service";
 import type { SetupPreview, SetupReport } from "../shared/ipc";
 import type { DataResult } from "../shared/ipc";
@@ -110,6 +111,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.setLoginItem, (enabled: unknown) => {
     const v = parseBoolean(enabled);
     return v === undefined ? bad("flag") : actions.setLoginItem(v);
+  });
+  handle(CHANNELS.setDisplay, (prefs: unknown) => {
+    const v = parseDisplay(prefs);
+    return v === undefined ? bad("display preferences") : actions.setDisplay(v);
   });
   handle(CHANNELS.openExternal, (key: unknown) => {
     const v = parseExternalKey(key);

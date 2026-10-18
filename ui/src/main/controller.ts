@@ -9,6 +9,7 @@ import {
   hasCapability,
   isSupportedApiVersion,
 } from "../shared/control";
+import { DEFAULT_DISPLAY, type DisplayPrefs } from "../shared/display";
 import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
@@ -21,6 +22,10 @@ export interface ControllerOptions {
   /** The CLI as typed in a terminal, for the copied commands (see cliCommandText). */
   cliCommand?: string;
   getLoginItem: () => boolean;
+  /** Saved display preferences; defaults when absent. */
+  getDisplay?: () => DisplayPrefs;
+  /** Persists and applies new display preferences. */
+  setDisplay?: (prefs: DisplayPrefs) => void;
   /** Tray and panel language; default Chinese. */
   locale?: Locale;
   setLoginItem: (enabled: boolean) => void;
@@ -82,7 +87,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.snap = {
       ...EMPTY_SNAPSHOT,
       cliCommand: opts.cliCommand ?? EMPTY_SNAPSHOT.cliCommand,
-      settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh" },
+      settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh", display: opts.getDisplay?.() ?? DEFAULT_DISPLAY },
     };
   }
 
@@ -125,6 +130,11 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   setLoginItem(enabled: boolean): void {
     this.opts.setLoginItem(enabled);
     this.update({ settings: { ...this.snap.settings, loginItem: this.opts.getLoginItem() } });
+  }
+
+  setDisplay(prefs: DisplayPrefs): void {
+    this.opts.setDisplay?.(prefs);
+    this.update({ settings: { ...this.snap.settings, display: prefs } });
   }
 
   get recentCalls(): CallEventData[] {

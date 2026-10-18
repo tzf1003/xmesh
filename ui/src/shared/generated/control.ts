@@ -393,7 +393,7 @@ export interface ConfigReloadResponse {
    */
   restart_required: boolean;
   /**
-   * 需要重启的段，例如 /mesh、/ingress。
+   * 需要重启的段，例如 /mesh、/audit。
    */
   restart_paths: string[];
   /**

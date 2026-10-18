@@ -42,6 +42,9 @@ type Options struct {
 	// with unavailable. ApplyBackendEnv, when set, makes the running backends pick up a change at once.
 	BackendEnv      *backendenv.Store
 	ApplyBackendEnv func()
+	// IngressNow, when set, replaces Ingress: it returns the ingress running now, nil while none
+	// runs, for a node whose ingress comes and goes with the configuration.
+	IngressNow func() IngressAdmin
 	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
 	Pairing PairingAdmin
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;

@@ -5,6 +5,7 @@ import { hasCapability } from "../shared/control";
 import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
 import { getApi } from "./api";
 import { Badge, Banner, Toasts, useToasts } from "./components";
+import { DisplayDialog, applyDisplay } from "./display";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
@@ -84,6 +85,10 @@ export function App(): JSX.Element {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
   }, [snapshot.settings.locale]);
 
+  const [showDisplay, setShowDisplay] = useState(false);
+  const { display } = snapshot.settings;
+  useEffect(() => applyDisplay(display), [display.uiFont, display.codeFont]);
+
   const connected = snapshot.connection.kind === "connected";
   // With no node configured at all, the first thing worth showing is the setup wizard.
   const current: PageId =
@@ -100,7 +105,7 @@ export function App(): JSX.Element {
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <TopBar snapshot={snapshot} />
+        <TopBar snapshot={snapshot} onDisplay={() => setShowDisplay(true)} />
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
@@ -108,6 +113,7 @@ export function App(): JSX.Element {
           </main>
         </div>
       </div>
+      {showDisplay && <DisplayDialog prefs={display} onClose={() => setShowDisplay(false)} />}
       <Toasts toasts={toasts} />
     </I18nContext.Provider>
   );
@@ -155,7 +161,7 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   );
 }
 
-function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
+function TopBar({ snapshot, onDisplay }: { snapshot: Snapshot; onDisplay: () => void }): JSX.Element {
   const t = useT();
   const icon = deriveIcon(snapshot.connection);
   const c = snapshot.connection;
@@ -165,6 +171,9 @@ function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
       <div class="title">
         <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
       </div>
+      <button type="button" class="icon-btn" onClick={onDisplay} title={t("display.open")} aria-label={t("display.open")} data-testid="open-display">
+        Aa
+      </button>
       <Badge kind={STATUS_KIND[icon]}>
         <span data-testid="state" data-state={icon}>
           {t(icon === "offline" && snapshot.unresponsiveNodes.length > 0 ? "status.unresponsive" : STATUS_KEY[icon])}

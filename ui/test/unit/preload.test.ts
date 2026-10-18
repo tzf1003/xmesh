@@ -65,6 +65,7 @@ test("each method calls its own channel with only the caller's argument", async 
   await api.copy!("gatewayUrl");
   await api.openPath!("logs");
   await api.setLoginItem!(true);
+  await api.setDisplay!({ zoom: 1.1, uiFont: "", codeFont: "" });
   await api.openExternal!("docs");
   assert.deepEqual(invoked, [
     { channel: CHANNELS.getSnapshot, args: [] },
@@ -76,6 +77,7 @@ test("each method calls its own channel with only the caller's argument", async 
     { channel: CHANNELS.copy, args: ["gatewayUrl"] },
     { channel: CHANNELS.openPath, args: ["logs"] },
     { channel: CHANNELS.setLoginItem, args: [true] },
+    { channel: CHANNELS.setDisplay, args: [{ zoom: 1.1, uiFont: "", codeFont: "" }] },
     { channel: CHANNELS.openExternal, args: ["docs"] },
   ]);
 });
