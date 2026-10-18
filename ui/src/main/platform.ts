@@ -31,7 +31,7 @@ export function electronPlatform(showPanel: () => void, notifyError: (message: s
         return r.canceled ? undefined : r.filePath;
       }
       const r = await dialog.showOpenDialog({
-        properties: kind === "workspace" ? ["openDirectory", "createDirectory"] : ["openFile"],
+        properties: kind === "workspace" ? ["openDirectory", "createDirectory"] : kind === "runnerDir" ? ["openDirectory"] : ["openFile"],
       });
       return r.canceled ? undefined : r.filePaths[0];
     },

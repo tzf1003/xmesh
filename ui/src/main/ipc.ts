@@ -1,4 +1,5 @@
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
+import { parseCiRequest } from "../shared/ci";
 import {
   CALLS_EVENT,
   CHANNELS,
@@ -216,6 +217,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   });
 
   handle(CHANNELS.mesh, (request: unknown) => mesh(request));
+  handle(CHANNELS.ci, (request: unknown) => {
+    const v = parseCiRequest(request);
+    return v === undefined ? bad("ci request") : service.ci(v);
+  });
 
   const push = (snap: Snapshot): void => {
     const target = panel();

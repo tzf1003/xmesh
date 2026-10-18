@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { translator } from "../../src/shared/i18n";
 import { EMPTY_SNAPSHOT, type Snapshot } from "../../src/shared/state";
 import { buildMenu, findItem, menuIds } from "../../src/main/menu";
-import type { StatusResponse } from "../../src/shared/control";
-import { peersFixture, statusFixture, statusWith, warningOf } from "../../testserver/fixtures";
+import type { CiBinding, StatusResponse } from "../../src/shared/control";
+import { fixture, peersFixture, statusFixture, statusWith, warningOf } from "../../testserver/fixtures";
 
 const t = translator("zh");
 
@@ -156,4 +156,19 @@ test("a found update adds one menu entry that opens the panel; nothing before th
   assert.equal(item?.label, "发现新版本 0.1.0-beta.3，打开面板更新");
   assert.deepEqual(item?.action, { type: "open-panel" });
   assert.equal(findItem(buildMenu(connected(withPaths, upd("installing")), t), "action.update"), undefined);
+});
+
+test("the menu counts CI runners by what they are doing and flags the ones that need the user", () => {
+  const bindings = [
+    { ...fixture<CiBinding>("CiBinding.busy"), concurrency: 2 },
+    fixture<CiBinding>("CiBinding.broken"),
+  ];
+  const m = buildMenu(connected({ ...withPaths, ci: { bindings } }), t);
+  const busy = bindings[0]!.instances.filter((i) => i.state === "busy").length;
+  const idle = bindings[0]!.instances.filter((i) => i.state === "idle").length;
+  assert.equal(findItem(m, "activity.ci")?.label, `CI：${busy} 个在跑 / ${idle} 个空闲`);
+  assert.equal(findItem(m, "activity.ciBroken")?.label, "CI：1 个运行器需要处理");
+
+  const none = buildMenu(connected(withPaths), t);
+  assert.equal(findItem(none, "activity.ci"), undefined, "a node without runners shows no CI line");
 });

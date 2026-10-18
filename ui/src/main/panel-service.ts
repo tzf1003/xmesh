@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { ControlRequestError } from "../shared/control";
+import type { CiRequest, CiResultFor } from "../shared/ci";
 import type {
   AuditQuery,
   AuditResponse,
@@ -303,6 +304,49 @@ export class PanelService {
     if (args.address !== undefined) body.address = args.address;
     if (args.fingerprint !== undefined) body.fingerprint = args.fingerprint;
     return this.data("pair", (c) => c.call("POST", "/v1/pair/connect", { body }));
+  }
+
+  /**
+   * One GitHub Actions runner request (CTR-CTL-15). The route is chosen here from the validated request; the
+   * renderer never names a path. Tokens are in `req` and go straight to the kernel; no result carries one.
+   */
+  ci<R extends CiRequest>(req: R): Promise<DataResult<CiResultFor<R>>> {
+    const id = (x: string): string => encodeURIComponent(x);
+    const run = (call: (c: ControlClient) => Promise<unknown>): Promise<DataResult<CiResultFor<R>>> =>
+      this.data("ci", async (c) => (await call(c)) ?? null);
+    const r = req as CiRequest;
+    switch (r.op) {
+      case "get":
+        return run((c) => c.call("GET", "/v1/ci"));
+      case "account.create": {
+        const body: Record<string, unknown> = { token: r.token };
+        if (r.host !== undefined) body.host = r.host;
+        return run((c) => c.call("POST", "/v1/ci/accounts", { body }));
+      }
+      case "account.delete":
+        return run((c) => c.call("DELETE", `/v1/ci/accounts/${id(r.id)}`));
+      case "repos": {
+        const params = new URLSearchParams();
+        if (r.q !== undefined && r.q !== "") params.set("q", r.q);
+        if (r.page !== undefined) params.set("page", r.page);
+        const qs = params.toString();
+        return run((c) => c.call("GET", `/v1/ci/accounts/${id(r.id)}/repos${qs === "" ? "" : `?${qs}`}`));
+      }
+      case "binding.create":
+        return run((c) => c.call("POST", "/v1/ci/bindings", { body: r.args }));
+      case "binding.patch":
+        return run((c) => c.call("PATCH", `/v1/ci/bindings/${id(r.id)}`, { body: r.patch }));
+      case "binding.delete":
+        return run((c) => c.call("DELETE", `/v1/ci/bindings/${id(r.id)}${r.force === true ? "?force=true" : ""}`));
+      case "binding.restart":
+        return run((c) => c.call("POST", `/v1/ci/bindings/${id(r.id)}/restart`));
+      case "binding.repair": {
+        const body = r.registration_token === undefined ? undefined : { registration_token: r.registration_token };
+        return run((c) => c.call("POST", `/v1/ci/bindings/${id(r.id)}/repair`, body === undefined ? {} : { body }));
+      }
+      case "import.inspect":
+        return run((c) => c.call("POST", "/v1/ci/import/inspect", { body: { dir: r.dir } }));
+    }
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {

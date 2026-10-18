@@ -1,5 +1,6 @@
 import type { ExternalKey, CopyKind, PathKind } from "../shared/ipc";
 import type { Translate, MessageKey } from "../shared/i18n";
+import { ciCounts } from "../shared/ci";
 import { hasCapability } from "../shared/control";
 import { type Snapshot, deriveIcon } from "../shared/state";
 
@@ -71,6 +72,11 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
     out.push(sep("sep.activity"));
     out.push(info("activity.pty", t("menu.pty", { used: s.limits.pty_in_use, max: s.limits.pty_max_sessions })));
     out.push(info("activity.exec", t("menu.exec", { used: s.limits.exec_shared_in_use, max: s.limits.exec_shared })));
+    if (s.ci !== undefined) {
+      const n = ciCounts(s.ci.bindings);
+      out.push(info("activity.ci", t("menu.ci", { busy: n.busy, idle: n.idle })));
+      if (n.broken > 0) out.push(info("activity.ciBroken", t("menu.ciBroken", { n: n.broken })));
+    }
   } else if (c.kind === "mismatch") {
     out.push(info("hint.mismatch", t("menu.mismatchHint", { kernel: c.kernelVersion || "?", api: c.apiVersion || "?" })));
   } else if (snap.unresponsiveNodes.length > 0) {
