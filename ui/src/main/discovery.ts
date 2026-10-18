@@ -108,8 +108,55 @@ export function discoverConfigured(roots: string | string[] = stateRoot()): stri
   return [...seen].sort();
 }
 
-/** The configured nodes whose kernel is not running. */
+/** The configured nodes whose kernel is not running. A stale manifest's process is gone too. */
 export function stoppedNodes(configured: string[], found: Instance[]): string[] {
   const running = new Set(found.map((i) => i.id));
   return configured.filter((id) => !running.has(id));
+}
+
+/** A missing PID proves exit; access errors and invalid PIDs leave the process state unknown. */
+export function kernelGone(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/**
+ * Removes `<root>/<id>/control.json` for an instance whose kernel is gone. It re-reads the manifest and
+ * proves the process is absent again, so a kernel that started between discovery and this call keeps its
+ * file; the node name must be one the CLI accepts, so no path outside the roots can be named.
+ */
+export function removeStaleControl(
+  roots: string | string[],
+  id: string,
+  gone: (pid: number) => boolean = kernelGone,
+): boolean {
+  if (parseNodeName(id) === undefined) return false;
+  for (const root of Array.isArray(roots) ? roots : [roots]) {
+    const file = path.join(root, id, "control.json");
+    let manifest: ReturnType<typeof parseManifest>;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file, "utf8");
+      manifest = parseManifest(JSON.parse(raw));
+    } catch {
+      continue;
+    }
+    if (!manifest) continue;
+    // Match discovery precedence: a same-name node in a later root is a separate installation.
+    if (!gone(manifest.pid)) return false;
+    try {
+      // A restarting kernel may publish a replacement while the process is being checked.
+      if (fs.readFileSync(file, "utf8") !== raw) return false;
+      fs.unlinkSync(file);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }

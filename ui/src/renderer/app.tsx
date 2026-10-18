@@ -283,9 +283,17 @@ function restartUnresponsive(ctx: PageContext, node: string): void {
   });
 }
 
+/** The recorded process is gone: the state file is a leftover, and removing it is the way back. */
+function cleanupStale(ctx: PageContext, node: string): void {
+  void getApi().cleanupStale(node).then((r) => {
+    if (!r.ok) ctx.toast(r.error.message, true);
+  });
+}
+
 function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
   const c = ctx.snapshot.connection;
   const unresponsiveNodes = ctx.snapshot.unresponsiveNodes;
+  const staleNodes = ctx.snapshot.staleNodes;
   const unresponsive = kind === "offline" && unresponsiveNodes.length > 0;
   return (
     <div class="page">
@@ -316,11 +324,23 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
             </>
           ) : (
             <>
-              <p>{t("offline.body")}</p>
+              {staleNodes.length === 0 && <p>{t("offline.body")}</p>}
               <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
                 {t("offline.setup")}
               </button>
             </>
+          )}
+          {staleNodes.length > 0 && (
+            <div data-testid="stale-state">
+              <p>{t("stale.body")}</p>
+              <div class="row">
+                {staleNodes.map((node) => (
+                  <button key={node} type="button" class="btn" onClick={() => cleanupStale(ctx, node)} data-testid={`cleanup-stale-${node}`}>
+                    {t("stale.cleanupNamed", { name: node })}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </Banner>
       ) : (

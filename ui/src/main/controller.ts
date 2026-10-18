@@ -14,7 +14,7 @@ import type { UpdateState } from "../shared/update";
 import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
-import { type Instance, stoppedNodes } from "./discovery";
+import { type Instance, kernelGone, stoppedNodes } from "./discovery";
 
 export interface ControllerOptions {
   discover: () => Instance[];
@@ -38,6 +38,8 @@ export interface ControllerOptions {
   reconnectMs?: number;
   /** Longest reconnect pause. */
   maxBackoffMs?: number;
+  /** Whether the process a manifest names is gone. Defaults to probing the pid (see kernelGone). */
+  kernelGone?: (pid: number) => boolean;
   /** Quiet period that coalesces a burst of events into one status refresh. */
   refreshDelayMs?: number;
   /** Status poll interval for kernels that do not advertise the `events` capability. */
@@ -210,7 +212,9 @@ export class ShellController extends EventEmitter<ControllerEvents> {
 
   /** One attempt to find a kernel, connect, and follow it until the stream ends. */
   private async connectOnce(): Promise<boolean> {
+    const gone = this.opts.kernelGone ?? kernelGone;
     const found = this.opts.discover();
+    const stale = new Set<string>();
     this.updateInstances(found);
     const candidates = this.explicit ? found.filter((i) => i.id === this.explicit) : found;
     let mismatch: Connection | undefined;
@@ -237,10 +241,13 @@ export class ShellController extends EventEmitter<ControllerEvents> {
           mismatch = { kind: "mismatch", kernelVersion: inst.manifest.kernel_version, apiVersion: e.apiVersion };
         } else if (!(e instanceof ControlRequestError)) {
           // No HTTP reply at all (timeout, refused connection): the manifest is there but nothing answers.
-          unresponsive.push(inst.id);
+          if (gone(inst.manifest.pid)) stale.add(inst.id);
+          else unresponsive.push(inst.id);
         }
         continue;
       }
+      this.updateInstances(found, stale);
+      this.update({ unresponsiveNodes: unresponsive });
       if (this.stopped) {
         stream.close();
         return true;
@@ -263,6 +270,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
       this.current = undefined;
       return true;
     }
+    this.updateInstances(found, stale);
     this.update({ connection: mismatch ?? { kind: "offline" }, unresponsiveNodes: unresponsive });
     return false;
   }
@@ -338,9 +346,21 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     }
   }
 
-  private updateInstances(found: Instance[]): void {
+  /** Stale manifests keep their node visible while its config becomes available to start. */
+  private updateInstances(found: Instance[], stale?: ReadonlySet<string>): void {
+    // Keep a failed probe's classification until the next connection attempt or a new manifest.
+    stale ??= new Set(this.snap.staleNodes.filter((id) => {
+      const before = this.found.find((i) => i.id === id)?.manifest;
+      const after = found.find((i) => i.id === id)?.manifest;
+      return before && after && before.pid === after.pid && before.boot_id === after.boot_id && before.endpoint === after.endpoint;
+    }));
     this.found = found;
-    this.update({ instances: this.instanceInfos(), stoppedNodes: stoppedNodes(this.opts.configured?.() ?? [], found) });
+    const live = found.filter((i) => !stale.has(i.id));
+    this.update({
+      instances: this.instanceInfos(),
+      stoppedNodes: stoppedNodes(this.opts.configured?.() ?? [], live),
+      staleNodes: [...stale],
+    });
   }
 
   private instanceInfos(): InstanceInfo[] {

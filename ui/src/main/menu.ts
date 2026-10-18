@@ -16,6 +16,7 @@ export type Action =
   | { type: "restart-kernel" }
   | { type: "start-kernel"; node: string }
   | { type: "restart-unresponsive"; node: string }
+  | { type: "cleanup-stale"; node: string }
   | { type: "stop-kernel" }
   | { type: "quit" };
 
@@ -81,6 +82,8 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
     out.push(info("hint.mismatch", t("menu.mismatchHint", { kernel: c.kernelVersion || "?", api: c.apiVersion || "?" })));
   } else if (snap.unresponsiveNodes.length > 0) {
     out.push(info("hint.unresponsive", t("menu.unresponsiveHint")));
+  } else if (snap.staleNodes.length > 0) {
+    out.push(info("hint.stale", t("menu.staleHint")));
   } else {
     out.push(info("hint.offline", t("menu.offlineHint")));
   }
@@ -94,6 +97,9 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
     for (const node of snap.unresponsiveNodes) {
       const label = snap.unresponsiveNodes.length === 1 ? t("menu.restartKernel") : t("menu.restartKernelNamed", { name: node });
       out.push(item(`action.restartUnresponsive.${node}`, label, { type: "restart-unresponsive", node }));
+    }
+    for (const node of snap.staleNodes) {
+      out.push(item(`action.cleanupStale.${node}`, t("menu.cleanupStaleNamed", { name: node }), { type: "cleanup-stale", node }));
     }
     for (const node of snap.stoppedNodes) {
       const label = snap.stoppedNodes.length === 1 ? t("menu.startKernel") : t("menu.startKernelNamed", { name: node });

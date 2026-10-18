@@ -35,6 +35,8 @@ export interface Snapshot {
   stoppedNodes: string[];
   /** Nodes whose control manifest is there but whose kernel does not answer; the offline view offers to restart them. */
   unresponsiveNodes: string[];
+  /** Nodes whose control endpoint failed and whose recorded process has exited. */
+  staleNodes: string[];
   selectedInstance: string;
   settings: UiSettings;
   /** The CLI as the user types it in a terminal, naming the binary the app runs (see cliCommandText). */
@@ -72,6 +74,7 @@ export const EMPTY_SNAPSHOT: Snapshot = {
   instances: [],
   stoppedNodes: [],
   unresponsiveNodes: [],
+  staleNodes: [],
   selectedInstance: "",
   settings: { loginItem: false, locale: "zh", display: DEFAULT_DISPLAY },
   cliCommand: "xmesh",

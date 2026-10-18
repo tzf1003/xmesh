@@ -31,9 +31,10 @@ async function kernel(opts: Parameters<typeof FakeKernel.start>[0] = {}): Promis
   return k;
 }
 
-function controller(): ShellController {
+function controller(opts: { kernelGone?: (pid: number) => boolean } = {}): ShellController {
   let login = false;
   const c = new ShellController({
+    ...(opts.kernelGone && { kernelGone: opts.kernelGone }),
     discover: () => discoverInstances(root),
     configured: () => discoverConfigured(root),
     getLoginItem: () => login,
@@ -105,11 +106,40 @@ test("a manifest whose kernel does not answer is listed as unresponsive, not as 
   const k = await kernel();
   k.writeManifest(root, "n1");
   await k.stop();
-  const c = controller();
+  // The endpoint is closed while the hosting process is still alive.
+  const c = controller({ kernelGone: () => false });
   c.start();
   const s = await until(c, (x) => x.connection.kind === "offline" && x.unresponsiveNodes.length === 1, "unresponsive node");
   assert.deepEqual(s.unresponsiveNodes, ["n1"]);
+  assert.deepEqual(s.staleNodes, []);
   assert.deepEqual(s.stoppedNodes, []);
+});
+
+test("a failed endpoint with an exited process is stale and the node stays startable", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "n1");
+  await k.stop();
+  fs.writeFileSync(path.join(root, "n1", "xmesh.yaml"), "node:\n  name: n1\n");
+  const c = controller({ kernelGone: () => true });
+  c.start();
+  const s = await until(c, (x) => x.connection.kind === "offline" && x.staleNodes.length === 1, "stale node");
+  assert.deepEqual(s.staleNodes, ["n1"]);
+  assert.deepEqual(s.unresponsiveNodes, []);
+  assert.deepEqual(s.stoppedNodes, ["n1"], "the config is still there, so starting is what helps");
+  const replacement = await kernel();
+  replacement.writeManifest(root, "n1");
+  await ready(c, replacement);
+  assert.deepEqual(c.snapshot.staleNodes, []);
+  assert.deepEqual(c.snapshot.stoppedNodes, []);
+});
+
+test("a successful control response takes precedence over the manifest PID", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "n1");
+  const c = controller({ kernelGone: () => true });
+  c.start();
+  await ready(c, k);
+  assert.deepEqual(c.snapshot.staleNodes, []);
 });
 
 test("status changes pushed over the event stream reach the snapshot", async () => {
