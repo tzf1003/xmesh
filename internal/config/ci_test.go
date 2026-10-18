@@ -42,7 +42,9 @@ func Test_CTRCTL15_CIConfigDefaultsAndValidation(t *testing.T) {
 		{"duplicate binding id", func(s string) string { return strings.Replace(s, `"id": "legacy"`, `"id": "xmesh"`, 1) }, "/ci/bindings/1/id"},
 		{"duplicate repository", func(s string) string { return strings.Replace(s, `"tzf1003/legacy"`, `"TZF1003/XMesh"`, 1) }, "/ci/bindings/1/target"},
 		{"unknown account", func(s string) string { return strings.Replace(s, `"account": "gh-tzf1003"`, `"account": "nobody"`, 1) }, ""},
-		{"relative directory", func(s string) string { return strings.Replace(s, `/Users/xiaosong/actions-runner`, `actions-runner`, 1) }, "/ci/bindings/1/dir"},
+		{"relative directory", func(s string) string {
+			return strings.Replace(s, `/Users/xiaosong/actions-runner`, `actions-runner`, 1)
+		}, "/ci/bindings/1/dir"},
 		{"import without directory", func(s string) string {
 			return strings.Replace(s, `"dir": "/Users/xiaosong/actions-runner"`, `"labels": []`, 1)
 		}, "/ci/bindings/1/dir"},
