@@ -70,6 +70,17 @@ test("recent calls identify observed callers and the inspector filters by device
   await capture(page, "configuration.png");
 });
 
+test("the primary client action copies usable configuration through the main process", async () => {
+  const page = await open();
+  await page.getByTestId("topology-copy-client").click();
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").length).toBe(1);
+  const copied = (await h.calls()).find((c) => c.op === "clipboard")?.arg as string;
+  expect(copied).toContain("http://127.0.0.1:8080/mcp");
+  expect(copied).toContain(h.kernel.panel.tokenOf("default"));
+  await expect(page.getByTestId("toast").first()).toContainText("已复制");
+  expect(await page.content()).not.toContain(h.kernel.panel.tokenOf("default")!);
+});
+
 test("command search uses keyboard navigation and opens a device or configuration", async () => {
   const page = await open();
   await expect(page.getByTestId("nav-config")).not.toBeVisible();

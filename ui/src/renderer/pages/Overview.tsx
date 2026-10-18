@@ -38,7 +38,7 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
     <div class="page" data-testid="page-overview">
       <PageHead title={t("topology.title")} sub={t("topology.sub")}>
         <div class="row">
-          <button type="button" class="btn" onClick={() => { document.getElementById("overview-advanced")?.setAttribute("open", ""); document.getElementById("gateway-panel")?.scrollIntoView({ block: "start" }); }} disabled={!s.gateway}>{t("topology.copy")}</button>
+          <button type="button" class="btn" data-testid="topology-copy-client" onClick={() => { if (s.gateway) void run(getApi().copyGateway({ kind: "codexConfig", url: s.gateway.url }), t("overview.copied")); }} disabled={busy || !s.gateway}><Icon name="copy"/>{t("overview.copyCodex")}</button>
           <button type="button" class="btn primary" onClick={() => s.network.mode === "tailnet" ? ctx.go("mesh", { meshTab: "onboard" }) : ctx.go("devices")}><Icon name="plus"/>{t("topology.addDevice")}</button>
         </div>
       </PageHead>
