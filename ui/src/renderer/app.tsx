@@ -15,6 +15,7 @@ import type { Role, Section } from "./lib/settings";
 import { About, outcomeText } from "./pages/About";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
+import { Ci } from "./pages/Ci";
 import { Config } from "./pages/Config";
 import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
@@ -24,7 +25,7 @@ import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 
-export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
@@ -38,6 +39,7 @@ const NAV: { id: PageId; label: Key }[] = [
   { id: "sessions", label: "nav.sessions" },
   { id: "authz", label: "nav.authz" },
   { id: "ingress", label: "nav.ingress" },
+  { id: "ci", label: "nav.ci" },
   { id: "settings", label: "nav.settings" },
   { id: "config", label: "nav.config" },
   { id: "audit", label: "nav.audit" },
@@ -256,6 +258,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Authorization ctx={ctx} />;
     case "ingress":
       return <Ingress ctx={ctx} />;
+    case "ci":
+      return <Ci ctx={ctx} />;
     case "settings":
       return <Settings ctx={ctx} />;
     case "config":

@@ -9,9 +9,9 @@ import { isSafeGatewayUrl } from "../../src/main/connect";
 import type { ShellController } from "../../src/main/controller";
 import { translator } from "../../src/shared/i18n";
 import { ControlRequestError } from "../../src/shared/control";
-import type { StatusResponse } from "../../src/shared/control";
+import type { CiBinding, StatusResponse } from "../../src/shared/control";
 import { EMPTY_SNAPSHOT, type Snapshot } from "../../src/shared/state";
-import { peersFixture, statusWith } from "../../testserver/fixtures";
+import { fixture, peersFixture, statusWith } from "../../testserver/fixtures";
 
 const t = translator("zh");
 const TOKEN = "tok-0123456789abcdefABCDEF";
@@ -294,4 +294,20 @@ test("openExternal resolves the key to the fixed URL", async () => {
   const { platform, log } = fakePlatform();
   await new Actions(controller, platform, t, OK_CREDENTIALS).openExternal("docs");
   assert.deepEqual(log, ["ext:https://github.com/tzf1003/xmesh#readme"]);
+});
+
+test("stopping the kernel says so when CI jobs are running", async () => {
+  const details: string[] = [];
+  const busy = fixture<CiBinding>("CiBinding.busy");
+  for (const status of [connected(), connected({ ci: { bindings: [busy] } })]) {
+    const { controller } = fakeController(status);
+    const { platform } = fakePlatform(false);
+    platform.confirm = async (o) => {
+      details.push(o.detail);
+      return false;
+    };
+    await new Actions(controller, platform, t, OK_CREDENTIALS).dispatch({ type: "stop-kernel" });
+  }
+  assert.ok(!details[0]!.includes("CI"));
+  assert.match(details[1]!, /还有 1 个 CI 任务正在运行/);
 });

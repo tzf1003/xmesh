@@ -222,3 +222,12 @@ ul.entry-list li { display: flex; align-items: center; gap: 8px; }
 .kv dd { margin: 0; }
 .notes { margin: 6px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border-radius: 8px; }
 progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
+
+/* GitHub Actions runners page */
+.command { display: block; user-select: all; padding: 6px 8px; margin: 6px 0; border-radius: 6px; background: var(--surface-2); word-break: break-all; cursor: text; }
+.stack { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.ci-instance { padding: 8px 0; border-top: 1px solid var(--border-2); }
+.ci-instance p { margin: 2px 0 0; }
+.ci-problem { color: var(--warn); }
+.ci-repos { max-height: 220px; overflow-y: auto; }
+.ci-account { padding: 4px 0; }

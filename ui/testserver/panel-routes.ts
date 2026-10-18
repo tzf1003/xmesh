@@ -25,6 +25,7 @@ import type {
 } from "../src/shared/control";
 import type { ConfigReloadResponse } from "../src/shared/ipc";
 import { isAccessEntry, isGatewayHost, isListen, listenPort, listenScope } from "../src/shared/gateway";
+import { CiFake } from "./ci-routes";
 import { fixture } from "./fixtures";
 
 // The panel's data routes for the fake kernel: config, PATs, ingress, pairing,
@@ -117,6 +118,8 @@ export class PanelData {
   /** `lan` makes pairing available; anything else answers unsupported_mode. */
   mode: "lan" | "tailnet" | "local" = "lan";
   hasIngress = true;
+  /** GitHub Actions runners (control API 1.8). */
+  ci = new CiFake();
 
   constructor(
     readonly tokenDir: string,
@@ -173,6 +176,7 @@ export class PanelData {
     if (env && (method === "PATCH" || method === "DELETE")) return this.backendEnvRoute(method, decodeURIComponent(env[1]!), body);
     if (p.startsWith("/v1/ingress/")) return this.ingress(method, p, body);
     if (p.startsWith("/v1/pair/")) return this.pair(method, p, body);
+    if (p === "/v1/ci" || p.startsWith("/v1/ci/")) return this.ci.handle(method, p, u.searchParams, body);
     if (method === "GET" && p === "/v1/audit") return this.auditQuery(u.searchParams);
     return undefined;
   }

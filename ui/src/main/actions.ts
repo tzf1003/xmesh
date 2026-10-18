@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type GatewayCopyKind, type PathKind, type PickKind, isGatewayCopyKind } from "../shared/ipc";
+import { ciCounts } from "../shared/ci";
 import type { DisplayPrefs } from "../shared/display";
 import type { Translate } from "../shared/i18n";
 import { ControlRequestError, type DrainMode, type StatusResponse } from "../shared/control";
@@ -171,9 +172,11 @@ export class Actions {
   }
 
   async stopKernel(): Promise<ActionResult> {
+    const c = this.controller.snapshot.connection;
+    const busy = c.kind === "connected" ? ciCounts(c.status.ci?.bindings).busy : 0;
     const yes = await this.platform.confirm({
       title: this.t("dialog.stopKernel.title"),
-      detail: this.t("dialog.stopKernel.detail"),
+      detail: busy > 0 ? `${this.t("dialog.stopKernel.detail")}\n${this.t("dialog.stopKernel.ciBusy", { n: busy })}` : this.t("dialog.stopKernel.detail"),
       confirmLabel: this.t("dialog.stopKernel.confirm"),
       cancelLabel: this.t("dialog.cancel"),
     });

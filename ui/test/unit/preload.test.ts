@@ -112,6 +112,7 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.runSetup!({ any: 1 });
   await api.pickPath!("workspace");
   await api.mesh!({ op: "status" });
+  await api.ci!({ op: "get" });
   await api.copyGateway!({ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" });
   await api.updateGateway!({ listen: ":8080", access: ["localhost"], hosts: [] });
   await api.rotateGatewayPat!();
@@ -123,6 +124,7 @@ test("panel data methods use their own fixed channels and forward only the calle
       CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.getPairPassword,
       CHANNELS.setPairPassword, CHANNELS.clearPairPassword, CHANNELS.discoverPairs, CHANNELS.connectPair,
       CHANNELS.queryAudit, CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
+      CHANNELS.ci,
       CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat,
     ],
   );

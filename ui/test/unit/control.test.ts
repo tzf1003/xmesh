@@ -10,6 +10,7 @@ import {
   parsePeers,
   parseStatus,
 } from "../../src/shared/control";
+import type { CiBinding } from "../../src/shared/control";
 import { deriveIcon } from "../../src/shared/state";
 import { eventFixture, fixture, peersFixture, statusFixture, statusWith, warningOf } from "../../testserver/fixtures";
 
@@ -101,6 +102,10 @@ test("icon priority (RUL-18): offline > mismatch > draining > restart > degraded
   assert.equal(deriveIcon(c({ drain: draining, restart_required: true, warnings: bad })), "draining");
   // An info-level warning never makes it yellow.
   assert.equal(deriveIcon(c({ warnings: [warningOf("allow_dangerous", "info")] })), "ok");
+  // A CI runner that needs the user turns it yellow; an idle or busy one does not.
+  const broken = fixture<CiBinding>("CiBinding.broken");
+  assert.equal(deriveIcon(c({ ci: { bindings: [broken] } })), "degraded");
+  assert.equal(deriveIcon(c({ ci: { bindings: [fixture<CiBinding>("CiBinding.busy")] } })), "ok");
   // The contract's own degraded fixture follows the same order.
   assert.equal(deriveIcon({ kind: "connected", status: statusFixture("degraded-draining"), peers: [] }), "draining");
 });

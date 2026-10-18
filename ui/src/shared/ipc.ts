@@ -30,6 +30,7 @@ import type {
 import type { DisplayPrefs } from "./display";
 import type { UpdatePrefs } from "./update";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
+import type { CiRequest, CiResultFor } from "./ci";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
 
@@ -84,6 +85,7 @@ export const CHANNELS = {
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
   mesh: "xmesh:mesh",
+  ci: "xmesh:ci",
 } as const;
 
 /** Main -> renderer push channel. */
@@ -120,11 +122,13 @@ export type PathKind = (typeof PATH_KINDS)[number];
 export const EXTERNAL_LINKS = {
   docs: "https://github.com/tzf1003/xmesh#readme",
   releases: "https://github.com/tzf1003/xmesh/releases",
+  /** Where a user creates the GitHub token for a runner account (fine-grained, one repository at a time). */
+  githubToken: "https://github.com/settings/personal-access-tokens/new",
 } as const;
 export type ExternalKey = keyof typeof EXTERNAL_LINKS;
 
 /** What the native chooser selects: the workspace is a directory; the others are files (`authkeySave` names one to be created). */
-export const PICK_KINDS = ["workspace", "authkeyFile", "authkeySave", "allowlistFile", "tokenFile"] as const;
+export const PICK_KINDS = ["workspace", "runnerDir", "authkeyFile", "authkeySave", "allowlistFile", "tokenFile"] as const;
 export type PickKind = (typeof PICK_KINDS)[number];
 
 /** What the renderer learns about a failed operation. `diagnostics` and `current_etag` come from the kernel's error body (CTR-CTL-02). */
@@ -310,6 +314,8 @@ export interface PanelApi {
   pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>>;
   /** Tailnet administration through `xmesh mesh ... --json`; credentials stay in the CLI's keychain profile. */
   mesh<R extends MeshRequest>(request: R): Promise<DataResult<MeshResultFor<R>>>;
+  /** GitHub Actions runner hosting (CTR-CTL-15). Tokens go in the request once and never come back. */
+  ci<R extends CiRequest>(request: R): Promise<DataResult<CiResultFor<R>>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -364,6 +370,7 @@ export const PANEL_API_METHODS = [
   "runSetup",
   "pickPath",
   "mesh",
+  "ci",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";
