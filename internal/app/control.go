@@ -11,6 +11,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -114,6 +115,9 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 	}
 	if h.d.store.Failing() {
 		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "配置文件当前无法加载，继续使用最近有效配置")
+	}
+	if h.d.agent != nil && cwd.DenyFailing(cfg.Agent.CWDPolicy.DenyFile) {
+		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "禁止目录文件当前无法加载，继续使用最近有效内容")
 	}
 	if h.d.agent != nil && cfg.Agent.Policy.AllowDangerous {
 		add(v1.WarnAllowDangerous, v1.SeverityInfo, "allow_dangerous 已启用")

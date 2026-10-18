@@ -49,6 +49,7 @@ func (a *Agent) Overview() v1.StatusResponse {
 		out.Network = v1.NetworkIdentity{Mode: network.Mode, NodeID: network.Node, Tags: append([]string{}, network.Tags...)}
 	}
 	out.RestartRequired, out.PolicyReloadFailures = restartState(a.store)
+	out.PolicyReloadFailures += int(cwd.DenyFailures())
 	out.AuthkeyReadable = cfg.Mesh.Mode == "tailnet" && readable(cfg.Mesh.AuthkeyFile)
 	if resolver, e := cwd.New(cfg.Agent.DefaultCWD, cfg.Agent.Workspaces, cfg.Agent.CWDPolicy); e == nil {
 		info := a.info(cfg, identity.Caller{}, resolver)

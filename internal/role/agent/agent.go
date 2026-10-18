@@ -111,7 +111,10 @@ func (a *Agent) supervise(previous *config.Config) {
 			a.refreshBackends()
 		case <-ticker.C:
 			cfg := a.store.Get()
+			// Read the deny file as well, so an edit that breaks it is noticed without a tool call.
+			cwd.DenyFailing(cfg.Agent.CWDPolicy.DenyFile)
 			_, failures := a.store.State()
+			failures += cwd.DenyFailures()
 			if failures > recordedFailures {
 				if log := a.auditLog.Load(); log != nil {
 					if err := log.Write(map[string]any{"time": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "event": "policy_reload_failed", "caller": "config/internal", "device": cfg.Node.Name, "tool": "config.reload", "status": "error", "error": "internal", "duration_ms": 0}); err == nil {
@@ -498,6 +501,10 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	if a.store.Failing() {
 		warnings = append(warnings, "配置文件当前无法加载，继续使用最近有效配置")
 	}
+	if cwd.DenyFailing(c.Agent.CWDPolicy.DenyFile) {
+		warnings = append(warnings, "禁止目录文件当前无法加载，继续使用最近有效内容")
+	}
+	failures += cwd.DenyFailures()
 	if c.Agent.Policy.AllowDangerous {
 		warnings = append(warnings, "allow_dangerous 已启用")
 	}

@@ -103,7 +103,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | code | severity | 何时 |
 | --- | --- | --- |
 | `restart_required` | `info` | `restart_required` 为真 |
-| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
+| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置；或 `agent.cwd_policy.deny_file` 指向的文件无法加载，继续使用上一份成功的禁止目录列表（`message` 说明是哪一个）。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
 | `allow_dangerous` | `info` | 配置启用了 `allow_dangerous`（[CON-SEC-10](../constraints/security.md#con-sec-10) 要求提示） |
 | `tailnet_not_ready` | `warning` | 模式是 tailnet 但尚未加入 |
 | `authkey_unreadable` | `warning` | tailnet 模式下 `authkey_file` 不可读 |
