@@ -1,5 +1,5 @@
 import { type CopyKind, type GatewayCopyKind, isGatewayCopyKind } from "../shared/ipc";
-import { MESH_LOGIN_COMMANDS } from "../shared/mesh";
+import { meshLoginCommands } from "../shared/mesh";
 import { isSafeToken } from "../shared/gateway";
 
 // The gateway URL comes from the kernel and ends up in text the user pastes
@@ -14,13 +14,15 @@ export function isSafeGatewayUrl(url: string): boolean {
  * Text to put on the clipboard, or undefined when there is nothing safe to copy. Every gateway kind
  * carries the bearer token: the gateway refuses requests without one, so a command without it would
  * only fail later. The token comes from the token file in the main process; it is never passed to the page.
+ * `cli` is the CLI as typed in a terminal, used by the login commands.
  */
-export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined, token?: string): string | undefined {
+export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined, token?: string, cli = "xmesh"): string | undefined {
   // Terminal commands for the tailnet admin login; the secret is typed into the CLI, never into this app.
-  if (kind === "meshLoginRead") return MESH_LOGIN_COMMANDS.read;
-  if (kind === "meshLoginWrite") return MESH_LOGIN_COMMANDS.write;
-  if (kind === "meshLoginReadHeadscale") return MESH_LOGIN_COMMANDS.readHeadscale;
-  if (kind === "meshLoginWriteHeadscale") return MESH_LOGIN_COMMANDS.writeHeadscale;
+  const login = meshLoginCommands(cli);
+  if (kind === "meshLoginRead") return login.read;
+  if (kind === "meshLoginWrite") return login.write;
+  if (kind === "meshLoginReadHeadscale") return login.readHeadscale;
+  if (kind === "meshLoginWriteHeadscale") return login.writeHeadscale;
   if (!isGatewayCopyKind(kind)) return undefined;
   if (gatewayUrl === undefined || !isSafeGatewayUrl(gatewayUrl)) return undefined;
   if (token === undefined || !isSafeToken(token)) return undefined;

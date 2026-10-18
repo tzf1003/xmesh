@@ -111,7 +111,7 @@ export class Actions {
       if (gateway === undefined) return fail("unavailable", "no gateway address");
       return this.copyGateway(kind, gateway.url);
     }
-    const text = clipboardText(kind, undefined);
+    const text = clipboardText(kind, undefined, undefined, this.controller.snapshot.cliCommand);
     if (text === undefined) return fail("invalid_args", "copy kind");
     this.platform.writeClipboard(text);
     return ok;

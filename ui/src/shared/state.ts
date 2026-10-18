@@ -32,6 +32,8 @@ export interface Snapshot {
   unresponsiveNodes: string[];
   selectedInstance: string;
   settings: UiSettings;
+  /** The CLI as the user types it in a terminal, naming the binary the app runs (see cliCommandText). */
+  cliCommand: string;
 }
 
 /**
@@ -63,4 +65,5 @@ export const EMPTY_SNAPSHOT: Snapshot = {
   unresponsiveNodes: [],
   selectedInstance: "",
   settings: { loginItem: false, locale: "zh" },
+  cliCommand: "xmesh",
 };

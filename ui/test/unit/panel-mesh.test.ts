@@ -5,8 +5,8 @@ import { MeshService, buildMeshArgs, meshError } from "../../src/main/mesh-servi
 import { clipboardText } from "../../src/main/connect";
 import { COPY_KINDS, PICK_KINDS } from "../../src/shared/ipc";
 import {
-  MESH_LOGIN_COMMANDS,
   MESH_OPS,
+  meshLoginCommands,
   normalizeResult,
   normalizeStatus,
   parseAdmissionUrl,
@@ -178,12 +178,13 @@ test("the CLI's Go quirks become clean values", () => {
 
 test("login commands: fixed text, copied by key", () => {
   assert.ok((COPY_KINDS as readonly string[]).includes("meshLoginRead"));
-  assert.equal(clipboardText("meshLoginRead", undefined), MESH_LOGIN_COMMANDS.read);
-  assert.equal(clipboardText("meshLoginWrite", undefined), MESH_LOGIN_COMMANDS.write);
-  assert.equal(clipboardText("meshLoginReadHeadscale", undefined), MESH_LOGIN_COMMANDS.readHeadscale);
-  assert.equal(clipboardText("meshLoginWriteHeadscale", undefined), MESH_LOGIN_COMMANDS.writeHeadscale);
+  const cmds = meshLoginCommands();
+  assert.equal(clipboardText("meshLoginRead", undefined), cmds.read);
+  assert.equal(clipboardText("meshLoginWrite", undefined), cmds.write);
+  assert.equal(clipboardText("meshLoginReadHeadscale", undefined), cmds.readHeadscale);
+  assert.equal(clipboardText("meshLoginWriteHeadscale", undefined), cmds.writeHeadscale);
   // The text is pasted into a terminal: no pipes, redirects or substitutions.
-  for (const c of Object.values(MESH_LOGIN_COMMANDS)) assert.doesNotMatch(c, /[|&;<>$`\\(){}]/);
+  for (const c of Object.values(cmds)) assert.doesNotMatch(c, /[|&;<>$`\\(){}]/);
   assert.equal(clipboardText("gatewayUrl", undefined), undefined);
   for (const k of ["authkeySave", "allowlistFile", "tokenFile"]) assert.ok((PICK_KINDS as readonly string[]).includes(k));
 });
