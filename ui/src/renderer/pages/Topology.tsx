@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import type { CallEventData, Peer } from "../../shared/control";
 import { deriveIcon } from "../../shared/state";
@@ -16,7 +16,7 @@ function Node({ id, point, selected, kind, title, sub, children, onSelect, onHov
   children?: JSX.Element; onSelect(): void; onHover(id: string | undefined): void;
 }): JSX.Element {
   const ref = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     // CSSOM works with the panel's strict style-src policy.
     ref.current?.style.setProperty("--x", `${point.x / 8}%`);
     ref.current?.style.setProperty("--y", `${point.y / 5.6}%`);
@@ -158,7 +158,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
 function Relay({ point, region, onClick }: { point: Point; region: string; onClick(): void }): JSX.Element {
   const t = useT();
   const ref = useRef<HTMLButtonElement>(null);
-  useEffect(() => { ref.current?.style.setProperty("--x", `${point.x / 8}%`); ref.current?.style.setProperty("--y", `${point.y / 5.6}%`); }, [point.x, point.y]);
+  useLayoutEffect(() => { ref.current?.style.setProperty("--x", `${point.x / 8}%`); ref.current?.style.setProperty("--y", `${point.y / 5.6}%`); }, [point.x, point.y]);
   return <button type="button" ref={ref} class="relay-node" onClick={onClick}><Icon name="network"/><span>DERP · {region}</span><small>{t("topology.relay")}</small></button>;
 }
 
