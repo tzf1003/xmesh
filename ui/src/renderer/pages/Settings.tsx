@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Confirm, ErrorBanner, Field, NotSupported, PageHead } from "../components";
-import { errorText, useT } from "../i18n";
+import { useT } from "../i18n";
 import { cwdPolicy, diffRows, needsRestart, weakening } from "../lib/config";
 import {
   LISTEN_MODES,
@@ -26,7 +26,7 @@ import {
   type TLSMode,
 } from "../lib/settings";
 import { DEFAULT_DENY, denyListText, isAbsolutePath } from "../../shared/setup";
-import { applySaved, type SaveOutcome } from "../lib/reload";
+import { applySaved } from "../lib/reload";
 import type { ActionError, DenyFileResponse } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
 import type { Key } from "../messages";
@@ -63,8 +63,6 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const [err, setErr] = useState<ActionError | undefined>();
   const [review, setReview] = useState<Review | undefined>();
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState<SaveOutcome | undefined>();
-  const [askRestart, setAskRestart] = useState(false);
 
   const [denyFile, setDenyFile] = useState<DenyFileResponse | undefined>();
   const [denyEntries, setDenyEntries] = useState<string[]>([]);
@@ -128,7 +126,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const update = (patch: Partial<SettingsForm>): void => {
     setForm((f) => (f ? { ...f, ...patch } : f));
     setReview(undefined);
-    setSaved(undefined);
+    ctx.applied(undefined);
   };
   const problem = form ? checkSettingsForm(form) : undefined;
   const changed = loaded !== undefined && form !== undefined && isChanged(formFromConfig(loaded.parsed), form);
@@ -152,9 +150,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
     setBusy(false);
     setReview(undefined);
     if (!r.ok) return setErr(r.error);
-    const outcome = await applySaved(r.data.restart_required);
-    setSaved(outcome);
-    if (outcome.loadError) ctx.toast(outcome.loadError, true);
+    ctx.applied(await applySaved(r.data.restart_required));
     ctx.toast(t("config.saved"));
     await load();
   };
@@ -163,7 +159,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const writeDenyList = async (file: DenyFileResponse): Promise<ActionError | undefined> => {
     const r = await getApi().writeDenyFile({ text: denyListText(denyEntries), etag: file.etag });
     if (!r.ok) return r.error;
-    setSaved(await applySaved(false));
+    ctx.applied(await applySaved(false));
     return undefined;
   };
 
@@ -178,7 +174,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
     if (next === undefined) return { code: "config_unparsed", message: "配置无法解析，禁止目录没有迁移。" };
     const r = await getApi().putConfig({ content: next, etag: loaded.etag, dryRun: false });
     if (!r.ok) return r.error;
-    setSaved(await applySaved(r.data.restart_required));
+    ctx.applied(await applySaved(r.data.restart_required));
     return undefined;
   };
 
@@ -195,15 +191,6 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
     // A migration changed the config, so its etag and the form are read again; the form has no unsaved edits by then.
     if (denyFile.path === undefined) await load();
     await loadDeny();
-  };
-
-  const restart = async (): Promise<void> => {
-    setBusy(true);
-    const r = await getApi().restartKernel();
-    setBusy(false);
-    setAskRestart(false);
-    if (r.ok) ctx.toast(t("settings.restarting"));
-    else ctx.toast(errorText(t, r.error), true);
   };
 
   const pick = async (kind: "workspace" | "authkeyFile"): Promise<string | undefined> => {
@@ -227,29 +214,6 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
       {loaded && !loaded.valid && (
         <Banner kind="danger" testid="settings-invalid-disk">
           {t("settings.invalidDisk")}
-        </Banner>
-      )}
-      {saved && (
-        <Banner kind={saved.restart || saved.applyErrors.length > 0 ? "warn" : "ok"} testid="settings-saved">
-          <div class="row">
-            <span>{saved.restart ? t("settings.savedRestart") : saved.applyErrors.length > 0 ? t("settings.savedNotApplied") : t("settings.savedLive")}</span>
-            {saved.loadError && <span class="hint">{saved.loadError}</span>}
-            {saved.restart && (
-              <button type="button" class="btn small" onClick={() => setAskRestart(true)} disabled={!writable} data-testid="settings-restart">
-                {t("settings.restart")}
-              </button>
-            )}
-          </div>
-          {saved.applyErrors.map((message) => (
-            <p class="hint" data-testid="settings-apply-error" key={message}>
-              {message}
-            </p>
-          ))}
-          {saved.restart && saved.paths.length > 0 && (
-            <p class="hint" data-testid="settings-restart-paths">
-              {t("settings.restartPaths", { paths: saved.paths.join(", ") })}
-            </p>
-          )}
         </Banner>
       )}
       {err && <ErrorBanner error={err} />}
@@ -617,17 +581,6 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
               <p class="hint">{t("settings.denyReviewNote")}</p>
             </div>
           }
-        />
-      )}
-
-      {askRestart && (
-        <Confirm
-          title={t("settings.restartTitle")}
-          body={<p>{t("settings.restartBody")}</p>}
-          confirmLabel={t("settings.restart")}
-          busy={busy}
-          onCancel={() => setAskRestart(false)}
-          onConfirm={() => void restart()}
         />
       )}
     </div>

@@ -4,11 +4,13 @@ import type { Capability } from "../shared/control";
 import { hasCapability } from "../shared/control";
 import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
 import { getApi } from "./api";
+import { ApplyBar } from "./apply-bar";
 import { Badge, Banner, Toasts, useToasts } from "./components";
 import { DisplayDialog, applyDisplay } from "./display";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
+import type { SaveOutcome } from "./lib/reload";
 import type { Role, Section } from "./lib/settings";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
@@ -59,12 +61,23 @@ const STATUS_KIND: Record<TrayIcon, "" | "ok" | "warn" | "danger"> = {
   restart: "warn",
 };
 
+/** A save that left something to do: a restart, a setting the kernel did not take, a file it could not load. */
+function outstanding(o: SaveOutcome): boolean {
+  return o.restart || o.applyErrors.length > 0 || o.loadError !== undefined;
+}
+
 /** What a page needs from the kernel before it is worth showing. */
 export interface PageContext {
   snapshot: Snapshot;
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
+  /**
+   * A page reports what its save returned, and the shell says whether the kernel has taken it: applied, waiting for a
+   * restart (with the restart button), or not applied. `undefined` withdraws the "applied" of the last save, for a form
+   * that changed again; what is still outstanding from it stays.
+   */
+  applied(outcome: SaveOutcome | undefined): void;
   /** Where the page opens, when the link to it named a place. Cleared by any other navigation. */
   focus: PageFocus | undefined;
   go(page: PageId, focus?: PageFocus): void;
@@ -76,10 +89,14 @@ export function App(): JSX.Element {
   const [page, setPage] = useState<PageId | undefined>(undefined);
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
   const { toasts, push } = useToasts();
+  // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
+  const [fresh, setFresh] = useState<SaveOutcome | undefined>(undefined);
   const navigate = (next: PageId, nextFocus?: PageFocus): void => {
     setFocus(nextFocus);
     setPage(next);
+    setFresh(undefined);
   };
+  useEffect(() => setFresh(undefined), [snapshot.selectedInstance]);
 
   useEffect(() => {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
@@ -98,6 +115,7 @@ export function App(): JSX.Element {
     snapshot,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
+    applied: (outcome) => setFresh((last) => outcome ?? (last && outstanding(last) ? last : undefined)),
     focus,
     go: navigate,
   };
@@ -109,6 +127,13 @@ export function App(): JSX.Element {
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
+            <ApplyBar
+              fresh={connected ? fresh : undefined}
+              status={snapshot.connection.kind === "connected" ? snapshot.connection.status : undefined}
+              writable={ctx.can("config.write")}
+              onClear={() => setFresh(undefined)}
+              toast={push}
+            />
             <PageSwitch page={current} ctx={ctx} />
           </main>
         </div>

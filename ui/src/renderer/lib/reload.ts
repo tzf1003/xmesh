@@ -23,3 +23,8 @@ export async function applySaved(restartRequired: boolean): Promise<SaveOutcome>
     applyErrors: (r.data.apply_errors ?? []).map((e) => e.message),
   };
 }
+
+/** The outcome of a save that the kernel answered itself, as a gateway update does: it reports what it could not apply. */
+export function outcomeOf(r: { restart_required: boolean; apply_errors?: { message: string }[] }): SaveOutcome {
+  return { restart: r.restart_required, paths: [], applyErrors: (r.apply_errors ?? []).map((e) => e.message) };
+}

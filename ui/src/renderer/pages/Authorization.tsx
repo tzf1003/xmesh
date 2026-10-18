@@ -8,6 +8,7 @@ import { type Key } from "../messages";
 import { errorText, useLocale, useT, type T } from "../i18n";
 import { MAX_CONFIG_EDITS, applyConfigEdits } from "../lib/apply-config";
 import { type AuthzRow, authzRows, cwdPolicy } from "../lib/config";
+import { applySaved } from "../lib/reload";
 import {
   BACKEND_POLICIES,
   MAX_EDITS,
@@ -282,7 +283,6 @@ function SecretDialog({ secret, onClose }: { secret: PatSecret; onClose: () => v
 function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance]);
-  const [restart, setRestart] = useState(false);
   const writable = ctx.can("config.write");
 
   /** One PATCH per action. Success reloads the config; a stale etag also reloads, so the next try starts from the file on disk. */
@@ -293,8 +293,8 @@ function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
       if (r.error.code === "precondition_failed") reload();
       return r.error;
     }
-    setRestart(r.data.restart_required);
-    ctx.toast(t(r.data.restart_required ? "config.savedRestart" : "config.savedLive"));
+    ctx.applied(await applySaved(r.data.restart_required));
+    ctx.toast(t("config.saved"));
     reload();
     return undefined;
   };
@@ -302,7 +302,6 @@ function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
   return (
     <>
       {!writable && <Banner kind="warn" testid="config-readonly">{t("config.readOnly")}</Banner>}
-      {restart && <Banner kind="warn" testid="authz-restart">{t("config.savedRestart")}</Banner>}
       <ResourceView resource={resource}>
         {(cfg) => {
           const editable = writable && cfg.valid;

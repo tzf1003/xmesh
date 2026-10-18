@@ -73,7 +73,8 @@ test("settings: removing the last allowed directory is reviewed and saved as an 
   expect(h.kernel.panel.writes).toEqual([]);
 
   await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("settings-saved")).toBeVisible();
+  await expect(page.getByTestId("apply-applied")).toContainText("已应用");
+  await expect(page.getByTestId("apply-restart")).toHaveCount(0);
   expect(h.kernel.panel.writes.length).toBe(1);
   expect(h.kernel.panel.content).toContain("allow: []");
   expect(h.kernel.panel.content).toContain('deny: ["~/.ssh"]');
@@ -88,9 +89,10 @@ test("settings: a setting the running kernel could not apply is shown with its r
   await page.getByTestId("settings-allow-remove-0").click();
   await page.getByTestId("settings-review").click();
   await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("settings-saved")).toBeVisible();
-  await expect(page.getByTestId("settings-apply-error")).toContainText("address already in use");
-  await expect(page.getByTestId("settings-saved")).not.toContainText("改动已经生效");
+  await expect(page.getByTestId("apply-failed")).toBeVisible();
+  await expect(page.getByTestId("apply-error")).toContainText("address already in use");
+  await expect(page.getByTestId("apply-applied")).toHaveCount(0);
+  await expect(page.getByTestId("apply-restart")).toHaveCount(0);
 });
 
 test("settings: a deny list still inline moves to its own file on save, and the config points at it", async () => {
@@ -130,4 +132,60 @@ test("settings: an unsaved change to the form holds the move until it is saved o
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("settings: a change that only takes effect after a restart says so, names it, and restarts from the same place", async () => {
+  const page = await open();
+  h.kernel.panel.setContent(FULL_CONFIG);
+  h.kernel.panel.restartPaths = ["/mesh/mode"];
+  await page.getByTestId("nav-settings").click();
+
+  await page.getByTestId("settings-allow-remove-0").click();
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+
+  await expect(page.getByTestId("apply-restart-needed")).toContainText("需要重启内核");
+  await expect(page.getByTestId("apply-waiting")).toContainText("组网方式");
+  await expect(page.getByTestId("apply-applied")).toHaveCount(0);
+
+  await page.getByTestId("apply-restart").click();
+  await expect(page.getByTestId("confirm")).toBeVisible();
+  expect((await h.calls()).filter((c) => c.op === "cli")).toEqual([]);
+  await page.getByTestId("confirm-ok").click();
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "cli").map((c) => c.arg)).toEqual(["restart"]);
+  await expect(page.getByTestId("apply-waiting")).toHaveCount(0);
+});
+
+test("settings: editing the form again withdraws the 'applied' of the last save", async () => {
+  const page = await open();
+  h.kernel.panel.setContent(FULL_CONFIG);
+  await page.getByTestId("nav-settings").click();
+
+  await page.getByTestId("settings-allow-remove-0").click();
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("apply-applied")).toBeVisible();
+
+  await page.getByTestId("settings-name").fill("dev-2");
+  await expect(page.getByTestId("apply-applied")).toHaveCount(0);
+});
+
+test("a restart the kernel is waiting on shows on every page, with the restart button, and the 'applied' note does not follow the user around", async () => {
+  const page = await open();
+  h.kernel.panel.setContent(FULL_CONFIG);
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-allow-remove-0").click();
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("apply-applied")).toBeVisible();
+
+  await page.getByTestId("nav-overview").click();
+  await expect(page.getByTestId("apply-applied")).toHaveCount(0);
+  await expect(page.getByTestId("apply-status")).toHaveCount(0);
+
+  // The kernel says a restart is due (a file edited by hand, an imported pairing): any page shows it.
+  h.kernel.setStatus({ restart_required: true });
+  await expect(page.getByTestId("apply-restart-needed")).toBeVisible();
+  await page.getByTestId("nav-audit").click();
+  await expect(page.getByTestId("apply-restart")).toBeEnabled();
 });

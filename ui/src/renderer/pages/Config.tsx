@@ -5,6 +5,7 @@ import { getApi } from "../api";
 import { Badge, Banner, Confirm, ErrorBanner, NotSupported, PageHead } from "../components";
 import { useT } from "../i18n";
 import { diffRows, isDirty, lineRange, needsRestart, weakening } from "../lib/config";
+import { applySaved } from "../lib/reload";
 import { CONFIG_MAX_BYTES, type ActionError } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
 
@@ -24,7 +25,6 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
   const [preview, setPreview] = useState<Preview | undefined>();
   const [busy, setBusy] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
-  const [savedNote, setSavedNote] = useState<{ restart: boolean; applied: boolean } | undefined>();
   const area = useRef<HTMLTextAreaElement>(null);
 
   const load = async (): Promise<void> => {
@@ -56,7 +56,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
   const review = async (): Promise<void> => {
     if (!loaded) return;
     setBusy(true);
-    setSavedNote(undefined);
+    ctx.applied(undefined);
     const r = await getApi().putConfig({ content: draft, etag: loaded.etag, dryRun: true });
     setBusy(false);
     if (!r.ok) return setErr(r.error);
@@ -72,7 +72,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
     setBusy(false);
     setPreview(undefined);
     if (!r.ok) return setErr(r.error);
-    setSavedNote({ applied: r.data.applied, restart: r.data.restart_required });
+    ctx.applied(await applySaved(r.data.restart_required));
     ctx.toast(t("config.saved"));
     await load();
   };
@@ -108,11 +108,6 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
         </Banner>
       )}
       {loaded && loaded.effective_etag !== loaded.etag && loaded.valid && <Banner kind="warn" testid="config-pending">{t("config.pending")}</Banner>}
-      {savedNote && (
-        <Banner kind={savedNote.restart ? "warn" : "ok"} testid="config-saved">
-          {savedNote.restart ? t("config.savedRestart") : t("config.savedLive")}
-        </Banner>
-      )}
       {askDiscard && (
         <Banner kind="warn" testid="config-discard">
           <p>{t("config.discardAsk")}</p>
@@ -170,7 +165,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
             onInput={(e) => {
               setDraft((e.currentTarget as HTMLTextAreaElement).value);
               setPreview(undefined);
-              setSavedNote(undefined);
+              ctx.applied(undefined);
             }}
             data-testid="config-editor"
           />
