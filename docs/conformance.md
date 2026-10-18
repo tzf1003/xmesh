@@ -107,6 +107,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | INV-10 | 编码器拒绝把 stdout 写进审计 |
 | CTR-AUD-01 | 正例通过模式；含 stdout 的反例失败 |
 | CTR-GW-05 | `drain: keep` 拒绝新调用并保留旧 PTY；`drain: kill` 终止会话 |
+| CTR-GW-07 | 每个请求都要令牌（含回环）；来源、Host、令牌任一层拒绝即 401；地址列表只列真正可达的地址 |
 | CON-SEC-10 | L2 沙箱在 Linux 上用 bwrap 或 nsjail 跑一条被允许的命令，并挡住网络与凭证目录 |
 
 云沙箱加入 tailnet 是实验：Codex Cloud 与 Claude Code 云沙箱至少一家用 ephemeral pre-auth key 连上并调用一次对端工具。失败时写下出站限制，主路径（公网入口）的门 4 结果仍然有效。

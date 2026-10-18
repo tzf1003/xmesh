@@ -1,5 +1,6 @@
-import { CODEX_PAT_ENV, type CopyKind } from "../shared/ipc";
+import { type CopyKind, type GatewayCopyKind, isGatewayCopyKind } from "../shared/ipc";
 import { meshLoginCommands } from "../shared/mesh";
+import { isSafeToken } from "../shared/gateway";
 
 // The gateway URL comes from the kernel and ends up in text the user pastes
 // into a shell or a config file, so anything beyond a plain http(s) URL is refused.
@@ -10,27 +11,31 @@ export function isSafeGatewayUrl(url: string): boolean {
 }
 
 /**
- * Text to put on the clipboard, or undefined when there is nothing safe to copy. With `auth` "pat" the
- * gateway rejects a request without a bearer token, so the text carries a placeholder where the token
- * goes: the token files are the user's to read, and the UI never holds the secret. `cli` is the CLI as typed
- * in a terminal, used by the login commands.
+ * Text to put on the clipboard, or undefined when there is nothing safe to copy. Every gateway kind
+ * carries the bearer token: the gateway refuses requests without one, so a command without it would
+ * only fail later. The token comes from the token file in the main process; it is never passed to the page.
+ * `cli` is the CLI as typed in a terminal, used by the login commands.
  */
-export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined, auth?: string, cli = "xmesh"): string | undefined {
+export function clipboardText(kind: CopyKind, gatewayUrl: string | undefined, token?: string, cli = "xmesh"): string | undefined {
   // Terminal commands for the tailnet admin login; the secret is typed into the CLI, never into this app.
   const login = meshLoginCommands(cli);
   if (kind === "meshLoginRead") return login.read;
   if (kind === "meshLoginWrite") return login.write;
   if (kind === "meshLoginReadHeadscale") return login.readHeadscale;
   if (kind === "meshLoginWriteHeadscale") return login.writeHeadscale;
+  if (!isGatewayCopyKind(kind)) return undefined;
   if (gatewayUrl === undefined || !isSafeGatewayUrl(gatewayUrl)) return undefined;
+  if (token === undefined || !isSafeToken(token)) return undefined;
+  return gatewayText(kind, gatewayUrl, token);
+}
+
+function gatewayText(kind: GatewayCopyKind, url: string, token: string): string {
   switch (kind) {
     case "gatewayUrl":
-      return gatewayUrl;
+      return `${url}\nAuthorization: Bearer ${token}`;
     case "claudeCodeCommand":
-      return `claude mcp add --transport http xmesh ${gatewayUrl}` + (auth === "pat" ? ` --header "Authorization: Bearer <PAT>"` : "");
+      return `claude mcp add --transport http xmesh ${url} --header "Authorization: Bearer ${token}"`;
     case "codexConfig":
-      return `[mcp_servers.xmesh]\nurl = "${gatewayUrl}"\n` + (auth === "pat" ? `bearer_token_env_var = "${CODEX_PAT_ENV}"\n` : "");
-    default:
-      return undefined;
+      return `[mcp_servers.xmesh]\nurl = "${url}"\nhttp_headers = { Authorization = "Bearer ${token}" }\n`;
   }
 }

@@ -47,6 +47,7 @@
         "config.write",
         "pair",
         "pats",
+        "gateway",
         "ingress",
         "audit"
       ],

@@ -28,9 +28,9 @@
 
 ### 策略比较
 
-1. 若候选路径等于某条已展开的 deny，或位于其下级，拒绝，`reason: denied`。
+1. 若候选路径等于某条已展开的 deny，或位于其下级，拒绝，`reason: denied`。deny 包括配置里的 `deny`，以及 `deny_file` 指向的列表文件中的每一条。文件缺失、不可读或内容不是字符串列表时解析器创建失败，不会当作空列表。
 2. 否则若 allow 非空，且候选路径不等于任何 allow、也不在其下级，拒绝，`reason: denied`。
-3. allow 为空且未命中 deny：拒绝。空 allow 不是「允许全部」。要允许全部必须显式配置 allow 根，例如 `/` 或 `C:\`，并同时用 deny 挡住凭证目录。默认示例不是允许全部。
+3. allow 为空：除上一条拒绝的路径外全部允许。deny 仍然生效，因此凭证目录须写进 deny 或 deny_file（向导默认把 `~/.ssh`、`~/.gnupg`、`~/.aws`、`~/.config/gcloud`、`~/.azure`、`~/.kube`、`~/.docker` 写入 deny_file 指向的文件）。
 
 比较时路径都已是符号链接求值之后的结果，见 [CON-TOOL-02](../constraints/tools.md#con-tool-02)。
 

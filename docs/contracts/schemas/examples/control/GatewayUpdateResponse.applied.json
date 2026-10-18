@@ -1,0 +1,6 @@
+{
+  "listen": ":8080",
+  "access": ["localhost", "lan", "tailnet"],
+  "hosts": [],
+  "restart_required": false
+}

@@ -95,7 +95,12 @@
   "gateway": {
     "listen": "127.0.0.1:8080",
     "url": "http://127.0.0.1:8080/mcp",
-    "auth": "pat"
+    "auth": "pat",
+    "access": ["localhost"],
+    "hosts": [],
+    "addresses": [
+      { "kind": "localhost", "host": "127.0.0.1", "url": "http://127.0.0.1:8080/mcp" }
+    ]
   },
   "peers": {
     "total": 2,

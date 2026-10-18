@@ -96,11 +96,33 @@
     "GatewayInfo": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["listen", "url", "auth"],
+      "required": ["listen", "url", "auth", "access", "hosts", "addresses"],
       "properties": {
-        "listen": { "type": "string", "pattern": "^127\\.0\\.0\\.1:[0-9]{1,5}$" },
-        "url": { "type": "string", "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}/mcp$", "description": "UI 生成 MCP 连接命令用的地址。" },
-        "auth": { "enum": ["pat", "none"], "description": "gateway.pats 非空为 pat。" }
+        "listen": { "type": "string", "description": "配置里的 gateway.listen，原样给出。" },
+        "url": { "type": "string", "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}/mcp$", "description": "本机地址，与 addresses 里 kind 为 localhost 的那一项相同。" },
+        "auth": { "enum": ["pat"], "description": "恒为 pat。每个请求都要令牌。" },
+        "access": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/GatewayAccess" },
+          "description": "配置里的 gateway.access，原样给出。"
+        },
+        "hosts": { "type": "array", "items": { "type": "string" }, "description": "配置里的 gateway.hosts。" },
+        "addresses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/GatewayAddress" },
+          "description": "当前真正可达的地址：绑定范围与 access 共同决定。localhost 恒在（绑定回环时只有它）。"
+        }
+      }
+    },
+    "GatewayAccess": { "type": "string", "description": "localhost、lan、tailnet，或单个 IP、CIDR。" },
+    "GatewayAddress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "host", "url"],
+      "properties": {
+        "kind": { "enum": ["localhost", "lan", "tailnet_ip", "tailnet_name", "host"], "description": "地址来源：本机、内网 IPv4、tailnet IP、tailnet MagicDNS 名、配置的域名。" },
+        "host": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "pattern": "^http://[^\\s/]+/mcp$", "description": "MCP 地址，UI 用它生成连接命令。" }
       }
     },
     "IngressInfo": {

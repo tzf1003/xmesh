@@ -8,12 +8,13 @@
 
 | 条件 | 要求 |
 | --- | --- |
-| `roles` 含 `gateway` | `gateway.listen` 必须是回环地址。默认 `127.0.0.1:8080`。非回环地址拒绝启动 |
+| `roles` 含 `gateway` | `gateway.listen` 的主机为空、`0.0.0.0` 或 `[::]` 表示全部网卡，为 `127.0.0.1` 或 `[::1]` 表示只绑本机；其他地址拒绝启动。默认 `:8080`。`gateway.access` 缺省 `[localhost, lan, tailnet]`，`gateway.hosts` 缺省为空。每个请求都要令牌，见 [CTR-GW-07](gateway.md#ctr-gw-07) |
 | `roles` 含 `ingress` | `ingress` 对象必须存在，且 OAuth issuer 为 https |
 | `ingress.max_pty_per_client` | 正整数，默认 8；同一入口按 OAuth client 聚合各设备的 active/orphaned PTY，详见 [CTR-GW-06](gateway.md#ctr-gw-06) |
 | `ingress.pty_budget_file` | 可选绝对路径；默认使用状态目录中的 `ingress-pty.json`。同一主机的入口可指定同一文件进行跨进程准入，且 `max_pty_per_client` 必须一致 |
 | `ingress.pty_budget_authority` | 可选设备名（与 `node.name` 同样的字符集）；多台主机上的入口须配置同一设备，由该 Agent 托管跨主机准入租约，详见 [CTR-GW-06](gateway.md#ctr-gw-06)。留空只在本机协调 |
-| `roles` 含 `agent` | `agent.cwd_policy.allow` 至少一条 |
+| `roles` 含 `agent` | `agent.cwd_policy.allow` 必须存在，可以为空；空表示除 `deny` 外的全部目录都可访问 |
+| `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件缺失时 agent 不能启动，不会视为空列表。向导默认创建该文件并写入凭证目录 |
 | `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
 | `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
 | `mesh.mode = lan` | `mesh.lan.mdns` 为 true，且不读取 auth key。可选 `mesh.lan.interface` 指定监听、mDNS 通告和浏览用的网卡名，mDNS 组播只经这块网卡收发（Windows 上显式固定组播出口，不受 Clash/Tailscale 等低 metric 隧道网卡影响）；缺省选第一块带私有 IPv4 的启用网卡，并跳过名字像虚拟机、容器、WSL、Hyper-V、VPN 隧道的网卡（只有它们时才退回使用）。指定的网卡不存在或没有私有 IPv4 时拒绝启动 |
@@ -38,7 +39,8 @@
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
 | `agent.policy.windows_appcontainer` | 不热加载。只在启动时读取，变更后 `status` 提示需要重启；见下方 [Windows L2 开关](#windows-l2-开关) |
-| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值 |
+| `gateway.access`、`gateway.hosts` | 每个请求读取，立即生效；见 [CTR-GW-07](gateway.md#ctr-gw-07) |
+| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值。`gateway.listen` 的变更也要重启 |
 
 ### Windows L2 开关
 

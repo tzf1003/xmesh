@@ -21,6 +21,7 @@ def main():
     parser.add_argument("--control-url", default="https://controlplane.tailscale.com")
     parser.add_argument("--peer", required=True, action="append", metavar="NAME:OS")
     parser.add_argument("--observer-gateway", help="Existing loopback Gateway used for incoming calls and offline observation")
+    parser.add_argument("--observer-token-file", type=pathlib.Path, help="The observer Gateway's default token file, <state-dir>/pats/default.token")
     parser.add_argument("--rounds", type=int, choices=range(1, 4), default=2)
     options = parser.parse_args()
     binary, key = options.binary.resolve(), options.auth_key_file.resolve(strict=True)
@@ -28,6 +29,8 @@ def main():
     assert all(len(peer) == 2 and peer[1] in ("darwin", "linux") for peer in peers), peers
     if options.observer_gateway:
         assert options.observer_gateway.startswith("127.0.0.1:"), "Observer must use loopback"
+        assert options.observer_token_file, "The observer needs its token file"
+        observer_token = options.observer_token_file.read_text().strip()
     identities, checks = [], []
     name = "xmesh-sandbox-" + uuid.uuid4().hex[:12]
     with tempfile.TemporaryDirectory(prefix="xmesh-sandbox-") as temporary:
@@ -53,7 +56,8 @@ def main():
                     deadline = time.monotonic() + 60
                     while True:
                         try:
-                            client = MCP(gateway)
+                            gateway_token = (state / "pats" / "default.token").read_text().strip()
+                            client = MCP(gateway, gateway_token)
                             info = client.call("local/sys.info")
                             break
                         except (OSError, http.client.HTTPException):
@@ -66,9 +70,9 @@ def main():
                     assert identity and identity not in identities, "Restart reused ephemeral node identity"
                     identities.append(identity)
                     for peer, system in peers:
-                        checks.append(verify_peer(gateway, peer, system))
+                        checks.append(verify_peer(gateway, peer, system, token=gateway_token))
                     if options.observer_gateway:
-                        checks.append(verify_peer(options.observer_gateway, name, info["os"]))
+                        checks.append(verify_peer(options.observer_gateway, name, info["os"], token=observer_token))
                 finally:
                     try:
                         if client:
