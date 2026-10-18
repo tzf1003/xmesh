@@ -35,6 +35,7 @@ type controlDeps struct {
 	mode      string
 	allowSIDs []string
 	ingress   control.IngressAdmin // nil on a node without the ingress role
+	pairing   control.PairingAdmin // nil unless the node runs the LAN network
 	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume    func()
 	// peerInfo is the gateways' sys.info readings by device; nil on a node without a gateway.
@@ -44,7 +45,7 @@ type controlDeps struct {
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
-	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress}
+	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress, Pairing: d.pairing}
 	s, e := control.Start(options)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "控制通道未启动:", e)

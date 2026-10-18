@@ -98,6 +98,11 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.rotateIngressPassword!("a-long-enough-password");
   await api.exportPair!();
   await api.importPair!({ text: "t", fingerprint: "f" });
+  await api.getPairPassword!();
+  await api.setPairPassword!("correct horse battery");
+  await api.clearPairPassword!();
+  await api.discoverPairs!();
+  await api.connectPair!({ address: "10.0.0.2", password: "correct horse battery" });
   await api.queryAudit!({ limit: 5 });
   await api.getRecentCalls!();
   await api.runSetup!({ any: 1 });
@@ -111,8 +116,9 @@ test("panel data methods use their own fixed channels and forward only the calle
     [
       CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.patchConfig, CHANNELS.listPats, CHANNELS.createPat,
       CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
-      CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.queryAudit,
-      CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
+      CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.getPairPassword,
+      CHANNELS.setPairPassword, CHANNELS.clearPairPassword, CHANNELS.discoverPairs, CHANNELS.connectPair,
+      CHANNELS.queryAudit, CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
       CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat,
     ],
   );

@@ -19,6 +19,8 @@ const (
 	ErrPayloadTooLarge     ErrorCode = "payload_too_large"
 	ErrConfigInvalid       ErrorCode = "config_invalid"
 	ErrFingerprintMismatch ErrorCode = "fingerprint_mismatch"
+	ErrPairRejected        ErrorCode = "pair_rejected"
+	ErrRateLimited         ErrorCode = "rate_limited"
 	ErrPreconditionNeeded  ErrorCode = "precondition_required"
 	ErrInternal            ErrorCode = "internal"
 	ErrNotImplemented      ErrorCode = "not_implemented"
@@ -36,6 +38,8 @@ var statusByCode = map[ErrorCode]int{
 	ErrPayloadTooLarge:     http.StatusRequestEntityTooLarge,
 	ErrConfigInvalid:       http.StatusUnprocessableEntity,
 	ErrFingerprintMismatch: http.StatusUnprocessableEntity,
+	ErrPairRejected:        http.StatusUnprocessableEntity,
+	ErrRateLimited:         http.StatusTooManyRequests,
 	ErrPreconditionNeeded:  http.StatusPreconditionRequired,
 	ErrInternal:            http.StatusInternalServerError,
 	ErrNotImplemented:      http.StatusNotImplemented,

@@ -8,7 +8,7 @@ import { EMPTY_AUDIT_FORM, auditTarget, buildAuditQuery, toTimestamp } from "../
 import { authzRows, cwdPolicy, diffRows, lineRange, needsRestart, weakening } from "../../src/renderer/lib/config";
 import { deviceInfoState, lacksDeviceTag, relayStats, sortPeers, worstWarning } from "../../src/renderer/lib/devices";
 import { ago, formatDuration, formatIdle, formatTime, formatValue, fraction } from "../../src/renderer/lib/format";
-import { fingerprintMatches, groupFingerprint, normalizeFingerprint, parsePairText } from "../../src/renderer/lib/pair";
+import { fingerprintMatches, groupFingerprint, normalizeFingerprint, pairFailure, pairPasswordValid, parsePairText } from "../../src/renderer/lib/pair";
 import { checkScopes, isBroadScope, splitScopes } from "../../src/renderer/lib/scopes";
 import { INITIAL_FORM, checkForm } from "../../src/renderer/lib/setup";
 
@@ -185,4 +185,22 @@ test("the renderer bundle contains no dynamic code, raw HTML sinks or network AP
       assert.doesNotMatch(text, /localStorage|sessionStorage|document\.cookie/, f);
     }
   }
+});
+
+test("pairing failures are worded by reason; a rate limit says how long to wait", () => {
+  assert.deepEqual(pairFailure({ code: "pair_rejected", message: "x", reason: "wrong_password" }), { key: "pair.err.wrongPassword" });
+  assert.deepEqual(pairFailure({ code: "pair_rejected", message: "x", reason: "unreachable" }), { key: "pair.err.unreachable" });
+  assert.equal(pairFailure({ code: "pair_rejected", message: "x", reason: "something_new" }), undefined);
+  assert.deepEqual(pairFailure({ code: "rate_limited", message: "x", retry_after_ms: 30000 }), { key: "pair.err.rateLimited", params: { seconds: 30 } });
+  assert.deepEqual(pairFailure({ code: "rate_limited", message: "x", retry_after_ms: 1 }), { key: "pair.err.rateLimited", params: { seconds: 1 } });
+  assert.deepEqual(pairFailure({ code: "invalid_args", message: "x", field: "password" }), { key: "pair.err.passwordRules" });
+  assert.deepEqual(pairFailure({ code: "invalid_args", message: "x", field: "fingerprint", reason: "fingerprint_mismatch" }), { key: "pair.err.fingerprint" });
+  assert.deepEqual(pairFailure({ code: "not_found", message: "x" }), { key: "pair.err.notFound" });
+  assert.equal(pairFailure({ code: "internal", message: "x" }), undefined);
+});
+
+test("the connection password the user types is checked before it is sent", () => {
+  assert.ok(pairPasswordValid("correct horse"));
+  assert.ok(!pairPasswordValid("too short"));
+  assert.ok(!pairPasswordValid(" correct horse "));
 });

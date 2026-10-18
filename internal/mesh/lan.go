@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,9 +29,11 @@ type LAN struct {
 	name          string
 	cert          Certificate
 	trust         *TrustStore
+	pairing       lanPairing
 	mu            sync.Mutex
 	peers         map[string]lanPeer
 	presence      map[string]lanPeer // every paired node seen over mDNS, keyed by node id
+	found         map[string]lanPeer // pairing-capable devices not paired yet, keyed by fingerprint
 	mdns          bool
 	iface         string
 	listener      net.Listener
@@ -147,6 +150,13 @@ func OpenLAN(ctx context.Context, name, stateDir string, options LANOptions) (*L
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	l := &LAN{name: name, cert: cert, trust: trust, peers: map[string]lanPeer{}, presence: map[string]lanPeer{}, mdns: options.MDNS, iface: options.Interface, cancel: cancel, done: make(chan struct{}), changed: make(chan struct{}, 1)}
+	l.pairing.dir = stateDir
+	if record, e := loadPairRecord(stateDir); e != nil {
+		// A damaged password file leaves incoming pairing off until the password is set again.
+		slog.Warn("lan_pair_password_unreadable", "error", e)
+	} else {
+		l.pairing.record = record
+	}
 	if !options.MDNS {
 		close(l.done)
 		return l, nil
@@ -266,7 +276,13 @@ func (l *LAN) discover(ctx context.Context, entries <-chan *mdns.Entry) {
 			}
 			fp := txt["fingerprint"]
 			trusted, ok := l.trust.Find(fp)
-			if !ok || trusted.Name == l.name {
+			if !ok {
+				if len(fp) == 64 && fp != l.cert.Fingerprint {
+					l.discoverUnpaired(fp, ent, txt, time.Duration(ent.TTL)*time.Second)
+				}
+				continue
+			}
+			if trusted.Name == l.name {
 				continue
 			}
 			id := "lan-" + fp[:24]
@@ -345,11 +361,11 @@ func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
 	if e != nil {
 		return nil, e
 	}
-	l.listener = tls.NewListener(raw, l.trust.TLS(l.cert, "", true))
+	l.listener = tls.NewListener(raw, l.serverTLS())
 	if !l.mdns {
 		return l.listener, nil
 	}
-	advertisement, e := mdns.Advertise(mdns.Service{Instance: l.name, Type: lanService, Domain: "local", Host: l.name, Port: AgentPort, Text: []string{"fingerprint=" + l.cert.Fingerprint}, IP: ip}, selected)
+	advertisement, e := mdns.Advertise(mdns.Service{Instance: l.name, Type: lanService, Domain: "local", Host: l.name, Port: AgentPort, Text: []string{"fingerprint=" + l.cert.Fingerprint, "pairing=1"}, IP: ip}, selected)
 	if e != nil {
 		raw.Close()
 		return nil, e
@@ -358,6 +374,27 @@ func (l *LAN) Listen(ctx context.Context) (net.Listener, error) {
 	l.advertisement = advertisement
 	return l.listener, nil
 }
+
+// serverTLS is the agent listener's configuration. An ordinary handshake must present a trusted
+// certificate, so an unpaired peer fails at the TLS handshake (CON-NET-09). A handshake that offers
+// PairALPN gets the pairing configuration, which accepts any certificate; ServeAgent then answers
+// only the pairing routes to it (pairing.go).
+func (l *LAN) serverTLS() *tls.Config {
+	strict := l.trust.TLS(l.cert, "", true)
+	pairing := &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{l.cert.Certificate},
+		ClientAuth:   tls.RequestClientCert,
+	}
+	strict.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		if slices.Contains(hello.SupportedProtos, PairALPN) {
+			return pairing, nil
+		}
+		return nil, nil
+	}
+	return strict
+}
+
 func (l *LAN) Peers(context.Context) ([]Peer, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

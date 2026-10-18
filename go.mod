@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.3
+	github.com/cloudflare/circl v1.6.5
 	github.com/creack/pty v1.1.24
 	github.com/kardianos/service v1.3.0
 	github.com/miekg/dns v1.1.73
@@ -27,6 +28,7 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e // indirect
 	github.com/axiomhq/hyperloglog v0.2.6 // indirect
+	github.com/bwesterb/go-ristretto v1.2.4 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creachadair/msync v0.10.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect

@@ -35,6 +35,11 @@ var typeFor = map[string]func() any{
 	"PairExportResponse":      func() any { return new(v1.PairExportResponse) },
 	"PairImportRequest":       func() any { return new(v1.PairImportRequest) },
 	"PairImportResponse":      func() any { return new(v1.PairImportResponse) },
+	"PairPasswordRequest":     func() any { return new(v1.PairPasswordRequest) },
+	"PairPasswordState":       func() any { return new(v1.PairPasswordState) },
+	"PairDiscoveredResponse":  func() any { return new(v1.PairDiscoveredResponse) },
+	"PairConnectRequest":      func() any { return new(v1.PairConnectRequest) },
+	"PairConnectResponse":     func() any { return new(v1.PairConnectResponse) },
 	"PatList":                 func() any { return new(v1.PatList) },
 	"PatCreateRequest":        func() any { return new(v1.PatCreateRequest) },
 	"PatSecret":               func() any { return new(v1.PatSecret) },
@@ -297,8 +302,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v1.APIVersion != "1.4" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 1.4", v1.APIVersion)
+	if v1.APIVersion != "1.5" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 1.5", v1.APIVersion)
 	}
 }
 
@@ -308,8 +313,10 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 // secret-carrying type is the only one that has a token field.
 func Test_CTRCTL09_SecretsOnlyInPatSecret(t *testing.T) {
 	secretFields := []string{"token", "password", "secret_hash", "secret", "authkey"}
+	// Request bodies that carry a password are write-only. No response type may carry one.
+	writeOnly := map[string]bool{"PatSecret": true, "IngressPasswordRequest": true, "PairPasswordRequest": true, "PairConnectRequest": true}
 	for def, mk := range typeFor {
-		if def == "PatSecret" || def == "IngressPasswordRequest" {
+		if writeOnly[def] {
 			continue
 		}
 		var walk func(reflect.Type, string)

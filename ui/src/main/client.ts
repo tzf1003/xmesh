@@ -146,6 +146,7 @@ export class ControlClient {
       const details: ConstructorParameters<typeof ControlRequestError>[4] = {};
       if (typeof b?.field === "string") details.field = b.field;
       if (typeof b?.current_etag === "string") details.current_etag = b.current_etag;
+      if (typeof b?.retry_after_ms === "number") details.retry_after_ms = b.retry_after_ms;
       if (Array.isArray(b?.diagnostics)) {
         details.diagnostics = b.diagnostics.filter(
           (d): d is ConfigDiagnostic => typeof d === "object" && d !== null && typeof (d as ConfigDiagnostic).message === "string",

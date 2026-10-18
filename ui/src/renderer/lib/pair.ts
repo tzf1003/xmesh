@@ -1,5 +1,6 @@
 import type { PairDocument } from "../../shared/control";
-import { parsePairImport } from "../../shared/ipc";
+import { type ActionError, parsePairImport, parsePairPassword } from "../../shared/ipc";
+import type { Key } from "../messages";
 
 export const PAIR_TAG_CHOICES = ["tag:peer", "tag:device", "tag:ingress"] as const;
 
@@ -35,4 +36,43 @@ export function parsePairText(text: string): PairParse {
 export function fingerprintMatches(typed: string, declared: string): boolean {
   const a = normalizeFingerprint(typed);
   return /^[0-9a-f]{64}$/.test(a) && a === normalizeFingerprint(declared);
+}
+
+/** Whether a connection password a user has typed meets the kernel's rules. */
+export function pairPasswordValid(text: string): boolean {
+  return parsePairPassword(text) !== undefined;
+}
+
+/** A pairing failure worded for people: the message key and its parameters. */
+export interface PairFailure {
+  key: Key;
+  params?: Record<string, number>;
+}
+
+/**
+ * The panel's own wording for the pairing errors (CTR-CTL-08). Undefined for anything else, which the
+ * generic error text handles. A wrong password and a man in the middle are worded the same way.
+ */
+export function pairFailure(e: ActionError): PairFailure | undefined {
+  if (e.code === "pair_rejected") {
+    switch (e.reason) {
+      case "wrong_password":
+        return { key: "pair.err.wrongPassword" };
+      case "no_password":
+        return { key: "pair.err.noPassword" };
+      case "unsupported_peer":
+        return { key: "pair.err.unsupportedPeer" };
+      case "unreachable":
+        return { key: "pair.err.unreachable" };
+      case "bad_peer":
+        return { key: "pair.err.badPeer" };
+    }
+  }
+  if (e.code === "rate_limited") {
+    return { key: "pair.err.rateLimited", params: { seconds: Math.max(1, Math.ceil((e.retry_after_ms ?? 0) / 1000)) } };
+  }
+  if (e.code === "invalid_args" && e.field === "password") return { key: "pair.err.passwordRules" };
+  if (e.code === "invalid_args" && e.reason === "fingerprint_mismatch") return { key: "pair.err.fingerprint" };
+  if (e.code === "not_found") return { key: "pair.err.notFound" };
+  return undefined;
 }

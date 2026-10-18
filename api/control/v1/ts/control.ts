@@ -78,7 +78,9 @@ export type ControlErrorCode =
   | "payload_too_large"
   | "config_invalid"
   | "fingerprint_mismatch"
+  | "pair_rejected"
   | "precondition_required"
+  | "rate_limited"
   | "internal"
   | "not_implemented"
   | "unavailable";
@@ -122,6 +124,14 @@ export type ControlEvent =
  * 证书 SHA-256，小写十六进制，无分隔符。
  */
 export type PairFingerprint = string;
+/**
+ * 主机或 主机:端口。省略端口时使用 7433。IPv6 地址放在方括号中。
+ */
+export type PairAddress = string;
+/**
+ * 连接密码。长度按 Unicode 码点计，首尾不能是空白。
+ */
+export type PairPassword = string;
 
 /**
  * 查询串参数。所有值都是字符串，数字与时间在服务端解析。多个条件取交集。
@@ -868,6 +878,59 @@ export interface PairImportResponse {
    */
   restart_required: boolean;
 }
+export interface PairPasswordRequest {
+  password: PairPassword;
+}
+export interface PairPasswordState {
+  /**
+   * 未设置时为 false，此时对端无法通过密码配对本机。
+   */
+  set: boolean;
+  /**
+   * 最近一次设置或修改的时间，未设置时为 null。
+   */
+  updated_at: Timestamp | null;
+  /**
+   * 对端连续失败次数。成功配对后清零。
+   */
+  failed_attempts: number;
+  /**
+   * 限流锁定截止时间，未锁定时为 null。从不包含口令或派生值。
+   */
+  locked_until: Timestamp | null;
+}
+export interface PairDiscoveredDevice {
+  name: NodeName;
+  fingerprint: PairFingerprint;
+  /**
+   * 内网中发现的地址，主机:端口。
+   */
+  address: string;
+  seen_at: Timestamp;
+}
+export interface PairDiscoveredResponse {
+  /**
+   * 尚未配对、且宣告了 pairing=1 的设备。已配对的设备不出现在这里。
+   */
+  devices: PairDiscoveredDevice[];
+}
+/**
+ * address 与 fingerprint 至少给一个。
+ */
+export interface PairConnectRequest {
+  address?: PairAddress;
+  /**
+   * 证书 SHA-256，小写十六进制，无分隔符。
+   */
+  fingerprint?: string;
+  password: PairPassword;
+}
+export interface PairConnectResponse {
+  name: NodeName;
+  fingerprint: PairFingerprint;
+  address: PairAddress;
+  tags: Tag[];
+}
 export interface PatInfo {
   name: NodeName;
   /**
@@ -943,7 +1006,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.4" as const;
+export const CONTROL_API_VERSION = "1.5" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -987,7 +1050,9 @@ export const CONTROL_ERROR_STATUS = {
   "payload_too_large": 413,
   "config_invalid": 422,
   "fingerprint_mismatch": 422,
+  "pair_rejected": 422,
   "precondition_required": 428,
+  "rate_limited": 429,
   "internal": 500,
   "not_implemented": 501,
   "unavailable": 503
@@ -1200,6 +1265,91 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.pair.password.get",
+    "method": "GET",
+    "path": "/v1/pair/password",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": null,
+    "response": "PairPasswordState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.password.put",
+    "method": "PUT",
+    "path": "/v1/pair/password",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": "PairPasswordRequest",
+    "response": "PairPasswordState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.password.delete",
+    "method": "DELETE",
+    "path": "/v1/pair/password",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.discovered",
+    "method": "GET",
+    "path": "/v1/pair/discovered",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": null,
+    "response": "PairDiscoveredResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.connect",
+    "method": "POST",
+    "path": "/v1/pair/connect",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": "PairConnectRequest",
+    "response": "PairConnectResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "pair_rejected",
+      "rate_limited",
+      "unsupported_mode"
+    ]
+  },
+  {
     "id": "control.pats.list",
     "method": "GET",
     "path": "/v1/pats",
@@ -1363,6 +1513,11 @@ export interface ControlRouteTypes {
   "control.config.reload": { query: undefined; body: undefined; response: ConfigReloadResponse };
   "control.pair.export": { query: undefined; body: undefined; response: PairExportResponse };
   "control.pair.import": { query: undefined; body: PairImportRequest; response: PairImportResponse };
+  "control.pair.password.get": { query: undefined; body: undefined; response: PairPasswordState };
+  "control.pair.password.put": { query: undefined; body: PairPasswordRequest; response: PairPasswordState };
+  "control.pair.password.delete": { query: undefined; body: undefined; response: undefined };
+  "control.pair.discovered": { query: undefined; body: undefined; response: PairDiscoveredResponse };
+  "control.pair.connect": { query: undefined; body: PairConnectRequest; response: PairConnectResponse };
   "control.pats.list": { query: undefined; body: undefined; response: PatList };
   "control.pats.create": { query: undefined; body: PatCreateRequest; response: PatSecret };
   "control.pats.rotate": { query: undefined; body: undefined; response: PatSecret };
