@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xmesh:schema:control-pair:1",
   "title": "ControlPair",
-  "description": "CTR-CTL-08。LAN 配对。只在 mesh.mode 为 lan 时可用，否则 unsupported_mode。配对文档只含公开证书。1.4 起增加连接密码（口令只写不读）与内网发现，配对文档保留为高级用法。",
+  "description": "CTR-CTL-08。LAN 配对。只在 mesh.mode 为 lan 时可用，否则 unsupported_mode。配对文档只含公开证书。1.5 起增加连接密码（口令只写不读）与内网发现，配对文档保留为高级用法。",
   "$defs": {
     "PairFingerprint": {
       "type": "string",

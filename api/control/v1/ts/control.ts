@@ -1006,7 +1006,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.4" as const;
+export const CONTROL_API_VERSION = "1.5" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -1269,7 +1269,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "GET",
     "path": "/v1/pair/password",
     "capability": "pair",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": null,
     "response": "PairPasswordState",
@@ -1285,7 +1285,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "PUT",
     "path": "/v1/pair/password",
     "capability": "pair",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": "PairPasswordRequest",
     "response": "PairPasswordState",
@@ -1302,7 +1302,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "DELETE",
     "path": "/v1/pair/password",
     "capability": "pair",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": null,
     "response": null,
@@ -1318,7 +1318,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "GET",
     "path": "/v1/pair/discovered",
     "capability": "pair",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": null,
     "response": "PairDiscoveredResponse",
@@ -1334,7 +1334,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "POST",
     "path": "/v1/pair/connect",
     "capability": "pair",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": "PairConnectRequest",
     "response": "PairConnectResponse",

@@ -244,7 +244,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ## CTR-CTL-08
 
-### 连接密码（1.4 起）
+### 连接密码（1.5 起）
 
 每台 `lan` 节点可以设置一个连接密码。另一台设备输入它即可直接配对，无需交换文件。
 
@@ -253,7 +253,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 - `DELETE /v1/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
 - 口令只写不读：没有任何响应包含它。磁盘上只保存 Argon2id 的派生密钥与盐。
 
-### 内网发现与连接（1.4 起）
+### 内网发现与连接（1.5 起）
 
 - `GET /v1/pair/discovered` 返回 `PairDiscoveredResponse {devices[]}`：尚未配对、宣告了 `pairing=1` 的设备，每项 `name`、`fingerprint`、`address`（主机:端口）、`seen_at`。不含证书，已配对的设备不出现。
 - `POST /v1/pair/connect` 的请求是 `PairConnectRequest {address?, fingerprint?, password}`，`address` 与 `fingerprint` 至少给一个。只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`。同时给出时，对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`），不会钉入任何证书。成功返回 `PairConnectResponse {name, fingerprint, address, tags}`，立即生效，无需重启。
