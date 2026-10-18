@@ -33,6 +33,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   const t = useT();
   const c = ctx.snapshot.connection;
   const [selected, setSelected] = useState<string | undefined>();
+  const [selectedCaller, setSelectedCaller] = useState<string | undefined>();
   const [hover, setHover] = useState<string | undefined>();
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [tag, setTag] = useState("");
@@ -40,10 +41,10 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   const [tab, setTab] = useState<"overview" | "calls" | "config">("overview");
   const slots = useRef(new Map<string, number>());
   useEffect(() => {
-    setSelected(undefined); setHover(undefined); setTab("overview"); setTag(""); setOnlyOnline(false); slots.current = new Map();
+    setSelected(undefined); setSelectedCaller(undefined); setHover(undefined); setTab("overview"); setTag(""); setOnlyOnline(false); slots.current = new Map();
   }, [ctx.snapshot.selectedInstance]);
   useEffect(() => {
-    if (ctx.focus?.peer) { setSelected(ctx.focus.peer); setMode("connections"); setOnlyOnline(false); setTag(""); }
+    if (ctx.focus?.peer) { setSelected(ctx.focus.peer); setSelectedCaller(undefined); setMode("connections"); setOnlyOnline(false); setTag(""); }
   }, [ctx.focus?.peer]);
   if (c.kind !== "connected") return null;
   const status = c.status;
@@ -62,8 +63,8 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   const callers = recentCallers(calls);
   const online = ctx.can("peers") ? peers.filter((p) => !p.self && p.online).length : status.peers.online;
   const total = ctx.can("peers") ? peers.length - 1 : status.peers.total;
-  const scopedCalls = calls.filter((call) => call.device === picked.name).slice(-6).reverse();
-  const select = (id: string): void => { setSelected(id); setTab("overview"); };
+  const scopedCalls = calls.filter((call) => selectedCaller ? (call.oauth_client ?? call.caller) === selectedCaller : call.device === picked.name).slice(-6).reverse();
+  const select = (id: string): void => { setSelected(id); setSelectedCaller(undefined); setTab("overview"); };
   const copy = (): void => {
     if (!status.gateway) return;
     void getApi().copyGateway({ kind: "codexConfig", url: status.gateway.url }).then((r) => ctx.toast(r.ok ? t("overview.copied") : errorText(t, r.error), !r.ok));
@@ -101,7 +102,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
               })}
               {callers.map((caller, i) => <path key={caller} class="graph-link caller" d={curve({ x: (i + 1) * 800 / (callers.length + 1), y: 66 }, { x: 400, y: 270 })} marker-end="url(#call-arrow)"/>)}
             </svg>
-            {callers.map((caller, i) => <Node key={caller} id={`caller:${caller}`} point={{ x: (i + 1) * 800 / (callers.length + 1), y: 66 }} kind="caller" title={caller} sub={t("topology.observedCaller")} selected={false} onSelect={() => { select(selfId); setTab("calls"); }} onHover={setHover}/>)}
+            {callers.map((caller, i) => <Node key={caller} id={`caller:${caller}`} point={{ x: (i + 1) * 800 / (callers.length + 1), y: 66 }} kind="caller" title={caller} sub={t("topology.observedCaller")} selected={selectedCaller === caller} onSelect={() => { select(selfId); setSelectedCaller(caller); setTab("calls"); }} onHover={setHover}/>)}
             <Node id={selfId} point={CENTER} selected={picked.self} kind={`self state-${deriveIcon(c)}`} title={status.hostname} sub={status.roles.join(" + ")} onSelect={() => select(selfId)} onHover={setHover}><span class="node-role">{t("devices.self")}</span></Node>
             {plotted.map((p) => <Node key={peerKey(p)} id={peerKey(p)} point={PEER_SLOTS[slots.current.get(peerKey(p))!]!} selected={peerKey(picked) === peerKey(p)} kind={linkKind(p)} title={p.name} sub={connectionText(p, t)} onSelect={() => select(peerKey(p))} onHover={setHover}>
               {p.info?.error ? <span class="node-role issue" title={p.info.error}>{t("devices.infoFailed")}</span> : undefined}
@@ -132,10 +133,10 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
       </section>
     </div>
     <aside class="node-inspector" data-testid="topology-inspector" aria-label={t("topology.inspector")}>
-      <div class="inspector-title"><Icon name="device"/><h2>{picked.name}</h2></div>
-      <p class="inspector-sub">{connectionText(picked, t)}{picked.os ? ` · ${picked.os}` : ""}</p>
+      <div class="inspector-title"><Icon name={selectedCaller ? "cloud" : "device"}/><h2>{selectedCaller ?? picked.name}</h2></div>
+      <p class="inspector-sub">{selectedCaller ? t("topology.observedCaller") : `${connectionText(picked, t)}${picked.os ? ` · ${picked.os}` : ""}`}</p>
       <div class="inspector-tabs" role="tablist" aria-label={t("topology.inspector")}>
-        {(["overview", "calls", "config"] as const).map((id) => <button type="button" key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} data-testid={`inspector-tab-${id}`}>{t(id === "overview" ? "topology.summary" : id === "calls" ? "topology.calls" : "topology.configuration")}</button>)}
+        {(["overview", "calls", "config"] as const).map((id) => <button type="button" key={id} role="tab" aria-selected={tab === id} onClick={() => { setTab(id); if (id !== "calls") setSelectedCaller(undefined); }} data-testid={`inspector-tab-${id}`}>{t(id === "overview" ? "topology.summary" : id === "calls" ? "topology.calls" : "topology.configuration")}</button>)}
       </div>
       <div role="tabpanel">
         {tab === "overview" && <>

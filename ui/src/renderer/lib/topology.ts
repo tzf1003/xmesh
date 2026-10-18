@@ -4,7 +4,7 @@ export type Point = { x: number; y: number };
 export const CENTER: Point = { x: 400, y: 295 };
 export const PEER_SLOTS: readonly Point[] = [
   { x: 170, y: 205 }, { x: 630, y: 205 }, { x: 665, y: 400 }, { x: 560, y: 505 },
-  { x: 350, y: 515 }, { x: 155, y: 460 }, { x: 120, y: 330 }, { x: 400, y: 165 },
+  { x: 350, y: 515 }, { x: 155, y: 460 }, { x: 120, y: 330 }, { x: 470, y: 425 },
 ];
 export const peerKey = (p: Peer): string => p.node_id || p.name;
 

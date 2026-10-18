@@ -58,6 +58,9 @@ test("recent calls identify observed callers and the inspector filters by device
   const page = await open();
   h.kernel.emit("call", { tool: "exec.run", device: "mac-dev-01", caller: "test-cli", oauth_client: null, status: "ok", error: null, duration_ms: 120 });
   await expect(page.locator('[data-node="caller:test-cli"]')).toContainText("最近调用方");
+  await page.locator('[data-node="caller:test-cli"]').click();
+  await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
+  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("test-cli");
   await page.locator('[data-node="mac-dev-01"]').click();
   await page.getByTestId("inspector-tab-calls").click();
   await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
@@ -108,6 +111,7 @@ test("compact layout, large text and empty state remain usable", async () => {
   await page.keyboard.press("Escape");
   await expect(page.locator(".graph-list")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+  expect(await page.locator(".content").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
   await capture(page, "compact-125.png");
   h.kernel.setPeers(peersFixture().filter((p) => p.self));
   // The controller refreshes /peers on a peer event.
