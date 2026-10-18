@@ -132,6 +132,7 @@ export function App(): JSX.Element {
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
             <UpdateStrip ctx={ctx} current={current} />
+            <StaleState ctx={ctx} />
             <ApplyBar
               fresh={connected ? fresh : undefined}
               status={snapshot.connection.kind === "connected" ? snapshot.connection.status : undefined}
@@ -290,6 +291,27 @@ function cleanupStale(ctx: PageContext, node: string): void {
   });
 }
 
+function StaleState({ ctx }: { ctx: PageContext }): JSX.Element | null {
+  const t = useT();
+  if (ctx.snapshot.staleNodes.length === 0) return null;
+  return (
+    <div class="page strip">
+      <Banner testid="stale-state">
+        <p>{t("stale.body")}</p>
+        <div class="row">
+          {ctx.snapshot.staleNodes.map((node) => ctx.snapshot.protectedStaleNodes.includes(node) ? (
+            <p key={node}>{t("stale.adminNamed", { name: node })}</p>
+          ) : (
+            <button key={node} type="button" class="btn" onClick={() => cleanupStale(ctx, node)} data-testid={`cleanup-stale-${node}`}>
+              {t("stale.cleanupNamed", { name: node })}
+            </button>
+          ))}
+        </div>
+      </Banner>
+    </div>
+  );
+}
+
 function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline" | "mismatch" }): JSX.Element {
   const c = ctx.snapshot.connection;
   const unresponsiveNodes = ctx.snapshot.unresponsiveNodes;
@@ -329,18 +351,6 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
                 {t("offline.setup")}
               </button>
             </>
-          )}
-          {staleNodes.length > 0 && (
-            <div data-testid="stale-state">
-              <p>{t("stale.body")}</p>
-              <div class="row">
-                {staleNodes.map((node) => (
-                  <button key={node} type="button" class="btn" onClick={() => cleanupStale(ctx, node)} data-testid={`cleanup-stale-${node}`}>
-                    {t("stale.cleanupNamed", { name: node })}
-                  </button>
-                ))}
-              </div>
-            </div>
           )}
         </Banner>
       ) : (

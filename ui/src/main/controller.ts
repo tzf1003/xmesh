@@ -1,3 +1,4 @@
+import * as net from "node:net";
 import { EventEmitter } from "node:events";
 import {
   type CallEventData,
@@ -221,6 +222,11 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     const unresponsive: string[] = [];
     for (const inst of candidates) {
       if (!isSupportedApiVersion(inst.manifest.api_version)) {
+        // Check only the transport for an exited PID; incompatible APIs receive no requests.
+        if (gone(inst.manifest.pid) && !(await endpointExists(inst.manifest.endpoint))) {
+          stale.add(inst.id);
+          continue;
+        }
         mismatch = {
           kind: "mismatch",
           kernelVersion: inst.manifest.kernel_version,
@@ -360,6 +366,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
       instances: this.instanceInfos(),
       stoppedNodes: stoppedNodes(this.opts.configured?.() ?? [], live),
       staleNodes: [...stale],
+      protectedStaleNodes: found.filter((i) => stale.has(i.id) && i.protected).map((i) => i.id),
     });
   }
 
@@ -373,4 +380,16 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.snap = next;
     this.emit("change", next);
   }
+}
+
+
+/** A successful connection or uncertain error keeps an incompatible kernel in the mismatch state. */
+function endpointExists(endpoint: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(endpoint);
+    const done = (exists: boolean): void => { socket.destroy(); resolve(exists); };
+    socket.once("connect", () => done(true));
+    socket.once("error", (e: NodeJS.ErrnoException) => done(e.code !== "ENOENT" && e.code !== "ECONNREFUSED"));
+    socket.setTimeout(1000, () => done(true));
+  });
 }

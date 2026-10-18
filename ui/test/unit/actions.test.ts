@@ -282,6 +282,15 @@ test("cleanup of a leftover state file only accepts a stale node and goes throug
   assert.deepEqual(log.filter((l) => l.startsWith("remove:")), ["remove:n1"]);
 });
 
+test("system service state requires administrator cleanup", async () => {
+  const { controller } = fakeController({ ...EMPTY_SNAPSHOT, staleNodes: ["system"], protectedStaleNodes: ["system"] });
+  const { platform, log } = fakePlatform();
+  const r = await new Actions(controller, platform, t, NO_CREDENTIALS).cleanupStale("system");
+  assert.equal(r.ok, false);
+  assert.ok(!r.ok && r.error.code === "forbidden");
+  assert.deepEqual(log, []);
+});
+
 test("kernel errors become results with the kernel's code", async () => {
   const { controller } = fakeController(connected(), {
     drain: async () => {

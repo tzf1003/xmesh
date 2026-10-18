@@ -202,6 +202,7 @@ export class Actions {
   /** Clears a state file after rechecking that its recorded process has exited. */
   async cleanupStale(node: string): Promise<ActionResult> {
     if (!this.controller.snapshot.staleNodes.includes(node)) return fail("not_found", "no stale node with that name");
+    if (this.controller.snapshot.protectedStaleNodes.includes(node)) return fail("forbidden", this.t("menu.staleAdminNamed", { name: node }));
     try {
       await this.platform.removeStaleState(node);
     } catch (e) {

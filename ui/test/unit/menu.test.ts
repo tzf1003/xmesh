@@ -93,6 +93,13 @@ test("a leftover state file is named as such and offers cleanup, not a restart",
   assert.equal(findItem(m, "action.restartUnresponsive.n1"), undefined);
 });
 
+test("stale cleanup remains available while another node is connected; system state names the administrator", () => {
+  const m = buildMenu(connected({}, { staleNodes: ["old", "system"], protectedStaleNodes: ["system"] }), t);
+  assert.deepEqual(findItem(m, "action.cleanupStale.old")?.action, { type: "cleanup-stale", node: "old" });
+  assert.equal(findItem(m, "action.cleanupStale.system"), undefined);
+  assert.equal(findItem(m, "hint.staleAdmin.system")?.enabled, false);
+});
+
 test("draining swaps drain for resume; every warning is listed with its own entry", () => {
   const m = buildMenu(
     connected({

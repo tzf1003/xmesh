@@ -48,7 +48,7 @@ export interface RecordedCall {
   arg?: unknown;
 }
 
-/** Test double used when XMESH_UI_TEST=1: records side effects instead of performing them. */
+/** Test double records desktop effects; state cleanup uses the isolated test state root. */
 export function recordingPlatform(
   showPanel: () => void,
   calls: RecordedCall[],

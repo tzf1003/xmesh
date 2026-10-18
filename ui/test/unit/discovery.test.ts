@@ -110,6 +110,24 @@ test("removeStaleControl deletes a leftover file, refuses a live kernel and a na
     put("restarting", 21);
     assert.equal(removeStaleControl(root, "restarting", () => { put("restarting", 22); return true; }), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, "restarting", "control.json"), "utf8")).pid, 22);
+    put("publishing", 21);
+    let probes = 0;
+    assert.equal(removeStaleControl(root, "publishing", () => {
+      if (++probes === 2) put("publishing", 22);
+      return true;
+    }), true);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "publishing", "control.json"), "utf8")).pid, 22, "publication after capture survives cleanup");
+    put("restoring", 21);
+    probes = 0;
+    assert.equal(removeStaleControl(root, "restoring", () => {
+      if (++probes === 2) { put("restoring", 22); return false; }
+      return true;
+    }), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "restoring", "control.json"), "utf8")).pid, 22, "restoration preserves a newer publication");
+    put("system", 21);
+    assert.equal(removeStaleControl(root, "system", gone, [root]), false);
+    assert.ok(discoverInstances(root, [root]).find((i) => i.id === "system")?.protected);
+    assert.ok(fs.existsSync(path.join(root, "system", "control.json")));
     const secondary = path.join(root, "secondary");
     fs.mkdirSync(path.join(secondary, "live"), { recursive: true });
     const secondaryFile = path.join(secondary, "live", "control.json");

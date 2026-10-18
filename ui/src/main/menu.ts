@@ -93,13 +93,15 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
   if (snap.update.phase === "available" && snap.update.latest !== undefined) {
     out.push(item("action.update", t("menu.updateAvailable", { version: snap.update.latest.version }), { type: "open-panel" }));
   }
+  for (const node of snap.staleNodes) {
+    out.push(snap.protectedStaleNodes.includes(node)
+      ? info(`hint.staleAdmin.${node}`, t("menu.staleAdminNamed", { name: node }))
+      : item(`action.cleanupStale.${node}`, t("menu.cleanupStaleNamed", { name: node }), { type: "cleanup-stale", node }));
+  }
   if (c.kind === "offline") {
     for (const node of snap.unresponsiveNodes) {
       const label = snap.unresponsiveNodes.length === 1 ? t("menu.restartKernel") : t("menu.restartKernelNamed", { name: node });
       out.push(item(`action.restartUnresponsive.${node}`, label, { type: "restart-unresponsive", node }));
-    }
-    for (const node of snap.staleNodes) {
-      out.push(item(`action.cleanupStale.${node}`, t("menu.cleanupStaleNamed", { name: node }), { type: "cleanup-stale", node }));
     }
     for (const node of snap.stoppedNodes) {
       const label = snap.stoppedNodes.length === 1 ? t("menu.startKernel") : t("menu.startKernelNamed", { name: node });

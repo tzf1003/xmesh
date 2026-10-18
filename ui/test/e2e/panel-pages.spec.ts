@@ -393,3 +393,22 @@ test("leftover kernel state without a config still offers cleanup and setup", as
   await expect(page.getByTestId("stale-state")).toHaveCount(0);
   await expect(page.getByTestId("page-setup")).toBeVisible();
 });
+
+
+test("stale state cleanup stays available alongside a connected node", async () => {
+  h = await launch({ publish: false });
+  const child = spawnSync(process.execPath, ["-e", ""]);
+  expect(child.status).toBe(0);
+  const dir = path.join(h.root, "aa-old");
+  fs.mkdirSync(dir);
+  const manifest = path.join(dir, "control.json");
+  fs.writeFileSync(manifest, JSON.stringify({ ...h.kernel.manifest(), pid: child.pid, endpoint: `${h.kernel.endpoint}-closed` }));
+  h.publish();
+  const page = await h.openPanel();
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
+  await expect(page.getByTestId("cleanup-stale-aa-old")).toBeVisible();
+  await h.clickMenu("action.cleanupStale.aa-old");
+  await expect(page.getByTestId("stale-state")).toHaveCount(0);
+  expect(fs.existsSync(manifest)).toBe(false);
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
+});
