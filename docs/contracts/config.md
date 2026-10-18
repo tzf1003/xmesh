@@ -54,6 +54,7 @@
 | `gateway.listen` | 热加载。运行中的 Gateway 先绑定新地址，成功后再放弃旧地址，Agent、PTY 与 exec 会话不受影响；新地址被占用时 Gateway 留在旧地址上，在 `apply_errors` 与状态警告里报告。同一个端口只是放宽绑定范围（例如 `127.0.0.1:8080` 改为 `:8080`）而系统不允许两个监听并存时，先关旧监听再绑新的，新的失败就恢复旧的 |
 | `node.roles` 中的 `gateway` | 热加载。加入时创建 Gateway（令牌不存在才创建，见 [CTR-GW-07](gateway.md#ctr-gw-07)）并开始监听，去掉时停止监听并关闭它的 MCP 会话；Agent、网络和其他角色不受影响。启动失败（例如端口被占用）时节点照常运行，在 `apply_errors` 与状态警告里报告 |
 | `node.roles` 中的 `ingress` 与 `ingress` 段 | 热加载。加入时检查 `tag:ingress`、登录口令文件并开始监听，去掉时停止监听并关闭它的 MCP 会话；`ingress` 段有任何改动时入口先停再按新配置启动，因为新的监听可能要用同一个端口。已通过入口登录的客户端需要重新授权（OAuth 令牌只在入口进程内存里，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01)）。新配置在启动前就能判定不可用（例如读不到证书）时，入口保持原样；启动时才失败则恢复原来的配置，两种情况都在 `apply_errors` 与状态警告里报告。Agent、网络和其他角色不受影响 |
+| `ci` 段 | 热加载。新增、删除绑定，改并发数、标签、暂停：内核只动变化的绑定，其他绑定的运行器不受影响；改账号只影响之后的注册与注销。段里没有密钥（[CTR-CTL-15](control.md#ctr-ctl-15)） |
 | `node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
 
 #### 热应用失败时

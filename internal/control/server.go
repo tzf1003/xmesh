@@ -311,6 +311,17 @@ func (s *Server) table() map[string]handler {
 		"control.ingress.clients.list":   s.listIngressClients,
 		"control.ingress.clients.delete": s.deleteIngressClient,
 		"control.ingress.password.put":   s.putIngressPassword,
+
+		"control.ci.get":              s.ciNotImplemented,
+		"control.ci.accounts.create":  s.ciNotImplemented,
+		"control.ci.accounts.delete":  s.ciNotImplemented,
+		"control.ci.accounts.repos":   s.ciNotImplemented,
+		"control.ci.bindings.create":  s.ciNotImplemented,
+		"control.ci.bindings.patch":   s.ciNotImplemented,
+		"control.ci.bindings.delete":  s.ciNotImplemented,
+		"control.ci.bindings.restart": s.ciNotImplemented,
+		"control.ci.bindings.repair":  s.ciNotImplemented,
+		"control.ci.import.inspect":   s.ciNotImplemented,
 	}
 }
 

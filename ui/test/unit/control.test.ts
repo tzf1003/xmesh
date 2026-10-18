@@ -38,7 +38,7 @@ test("parseManifest rejects what the UI cannot connect to, and drops unknown cap
   assert.equal(parseManifest({ endpoint: "", transport: "unix", api_version: "1.0" }), undefined);
   assert.equal(parseManifest({ endpoint: "/x.sock", transport: "tcp", api_version: "1.0" }), undefined);
   assert.equal(parseManifest({ endpoint: "/x.sock", transport: "unix" }), undefined);
-  const m = parseManifest({ endpoint: "/x.sock", transport: "unix", api_version: "1.7", capabilities: ["status", "teleport", 3] });
+  const m = parseManifest({ endpoint: "/x.sock", transport: "unix", api_version: "1.8", capabilities: ["status", "teleport", 3] });
   assert.deepEqual(m?.capabilities, ["status"]);
 });
 

@@ -1,0 +1,21 @@
+{
+  "id": "legacy",
+  "scope": "repo",
+  "target": "tzf1003/legacy",
+  "source": "import",
+  "concurrency": 1,
+  "labels": [],
+  "paused": false,
+  "removing": false,
+  "dir": "/Users/xiaosong/actions-runner",
+  "instances": [
+    {
+      "index": 1,
+      "name": "xiaosong-mac",
+      "state": "broken",
+      "restarts": 3,
+      "since": "2026-10-18T09:10:00.000Z",
+      "problem": { "code": "session_conflict", "message": "这个运行器在别处也在运行，请先关掉另一个。" }
+    }
+  ]
+}

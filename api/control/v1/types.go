@@ -69,6 +69,7 @@ type StatusResponse struct {
 	Gateway              *GatewayInfo    `json:"gateway,omitempty"`
 	Ingress              *IngressInfo    `json:"ingress,omitempty"`
 	Peers                PeerSummary     `json:"peers"`
+	CI                   *CiSummary      `json:"ci,omitempty"`
 }
 
 type ControlInfo struct {

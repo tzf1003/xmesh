@@ -93,6 +93,7 @@ flowchart LR
 | `POST /v1/drain`、`POST /v1/resume` | 排空（keep / kill）与恢复 | drain 已有；resume 新增 |
 | `GET/PUT /v1/config` | 读取当前生效配置；写入前经 `config.Parse` 校验，临时文件加重命名原子写，返回 diff 与 `restart_required` | 新增。保留 YAML 注释，使用 yaml.Node 往返 |
 | `GET/PUT/DELETE /v1/pair/password`、`GET /v1/pair/discovered`、`POST /v1/pair/connect` | LAN 连接密码配对与内网发现（1.2）；口令只写不读，见 [14](../design/14-password-pairing.md) | 新增，底层是 `internal/mesh` 的 SPAKE2 配对 |
+| `GET /v1/ci`、`/v1/ci/accounts`、`/v1/ci/bindings`、`POST /v1/ci/import/inspect` | GitHub Actions 运行器托管（1.8）；GitHub 令牌只写不读，见 [15](../design/15-github-runner.md) | 新增，底层是 `internal/ci` |
 | `POST /v1/pair/export`、`POST /v1/pair/import` | LAN 配对文档（高级用法）；导入必须带 UI 用户确认过的指纹 | 逻辑已有（`xmesh pair`），抽成库 |
 | `GET/POST/DELETE /v1/pats` | 列出、创建、轮转、撤销本机 Gateway PAT。令牌正文只在创建响应里出现一次，并直接写入 `0600` 文件，之后不可读回 | 新增 |
 | `GET/DELETE /v1/ingress/clients` | 查看已注册 OAuth 客户端，撤销；口令轮转只写不读 | 新增 |

@@ -1,5 +1,5 @@
 {
-  "api_version": "1.7",
+  "api_version": "1.8",
   "routes": [
     {
       "id": "control.status.get",
@@ -385,6 +385,174 @@
         "role_disabled",
         "config_invalid",
         "internal"
+      ]
+    },
+    {
+      "id": "control.ci.get",
+      "method": "GET",
+      "path": "/v1/ci",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiOverview",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.ci.accounts.create",
+      "method": "POST",
+      "path": "/v1/ci/accounts",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ci:1#/$defs/CiAccountCreate",
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiAccount",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args"
+      ]
+    },
+    {
+      "id": "control.ci.accounts.delete",
+      "method": "DELETE",
+      "path": "/v1/ci/accounts/{id}",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.ci.accounts.repos",
+      "method": "GET",
+      "path": "/v1/ci/accounts/{id}/repos",
+      "capability": "ci",
+      "since": "1.8",
+      "query": "urn:xmesh:schema:control-ci:1#/$defs/CiReposQuery",
+      "body": null,
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiReposResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found"
+      ]
+    },
+    {
+      "id": "control.ci.bindings.create",
+      "method": "POST",
+      "path": "/v1/ci/bindings",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ci:1#/$defs/CiBindingCreate",
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiBinding",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.ci.bindings.patch",
+      "method": "PATCH",
+      "path": "/v1/ci/bindings/{id}",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ci:1#/$defs/CiBindingPatch",
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiBinding",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found"
+      ]
+    },
+    {
+      "id": "control.ci.bindings.delete",
+      "method": "DELETE",
+      "path": "/v1/ci/bindings/{id}",
+      "capability": "ci",
+      "since": "1.8",
+      "query": "urn:xmesh:schema:control-ci:1#/$defs/CiDeleteQuery",
+      "body": null,
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiBinding",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found"
+      ]
+    },
+    {
+      "id": "control.ci.bindings.restart",
+      "method": "POST",
+      "path": "/v1/ci/bindings/{id}/restart",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.ci.bindings.repair",
+      "method": "POST",
+      "path": "/v1/ci/bindings/{id}/repair",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ci:1#/$defs/CiBindingRepair",
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiBinding",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.ci.import.inspect",
+      "method": "POST",
+      "path": "/v1/ci/import/inspect",
+      "capability": "ci",
+      "since": "1.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ci:1#/$defs/CiImportInspectRequest",
+      "response": "urn:xmesh:schema:control-ci:1#/$defs/CiImportInspectResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found"
       ]
     },
     {

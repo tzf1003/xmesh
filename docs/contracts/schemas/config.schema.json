@@ -49,6 +49,14 @@
     "scope": {
       "type": "string",
       "pattern": "^(devices:read|exec:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|pty:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(read|write):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|sys:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|backend:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}))$"
+    },
+    "ciId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+    },
+    "ciLabel": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
     }
   },
   "properties": {
@@ -374,6 +382,50 @@
       "properties": {
         "retention": { "$ref": "#/$defs/duration" },
         "dir": { "type": "string" }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "GitHub Actions 运行器托管（CTR-CTL-15）。不含任何密钥：GitHub 凭据在系统钥匙串或 0600 文件里。",
+      "properties": {
+        "prevent_sleep_while_busy": { "type": "boolean", "default": true },
+        "stop_timeout": { "$ref": "#/$defs/duration", "default": "30m" },
+        "accounts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "login"],
+            "properties": {
+              "id": { "$ref": "#/$defs/ciId" },
+              "host": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$", "default": "github.com" },
+              "login": { "type": "string", "minLength": 1, "maxLength": 100 }
+            }
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "target"],
+            "properties": {
+              "id": { "$ref": "#/$defs/ciId" },
+              "scope": { "enum": ["repo"], "default": "repo" },
+              "target": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$" },
+              "source": { "enum": ["account", "token", "import"], "default": "account" },
+              "account": { "$ref": "#/$defs/ciId" },
+              "public": { "type": "boolean" },
+              "concurrency": { "type": "integer", "minimum": 1, "maximum": 16, "default": 1 },
+              "labels": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/ciLabel" } },
+              "paused": { "type": "boolean", "default": false },
+              "dir": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
       }
     }
   },

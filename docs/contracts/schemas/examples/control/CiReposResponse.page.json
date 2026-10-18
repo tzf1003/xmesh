@@ -1,0 +1,7 @@
+{
+  "repos": [
+    { "full_name": "tzf1003/xmesh", "private": true, "binding": "xmesh" },
+    { "full_name": "tzf1003/oss-lib", "private": false }
+  ],
+  "next_page": "2"
+}

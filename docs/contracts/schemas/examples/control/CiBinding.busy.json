@@ -1,0 +1,33 @@
+{
+  "id": "xmesh",
+  "scope": "repo",
+  "target": "tzf1003/xmesh",
+  "source": "account",
+  "account": "gh-tzf1003",
+  "public": false,
+  "concurrency": 2,
+  "labels": ["mac"],
+  "paused": false,
+  "removing": false,
+  "dir": "/Users/xiaosong/Library/Application Support/xmesh/mac/ci/xmesh",
+  "instances": [
+    {
+      "index": 1,
+      "name": "xmesh-mac-xmesh-1",
+      "state": "busy",
+      "pid": 4242,
+      "restarts": 0,
+      "since": "2026-10-18T09:05:00.000Z",
+      "job": { "name": "go-test", "started_at": "2026-10-18T09:05:00.000Z" },
+      "last_result": { "name": "lint", "result": "succeeded", "finished_at": "2026-10-18T09:04:30.000Z" }
+    },
+    {
+      "index": 2,
+      "name": "xmesh-mac-xmesh-2",
+      "state": "idle",
+      "pid": 4243,
+      "restarts": 1,
+      "since": "2026-10-18T08:50:00.000Z"
+    }
+  ]
+}
