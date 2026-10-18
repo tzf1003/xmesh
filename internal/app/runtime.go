@@ -12,17 +12,14 @@ import (
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
-	"github.com/tzf1003/xmesh/internal/oauth"
 	"github.com/tzf1003/xmesh/internal/privdir"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 	"github.com/tzf1003/xmesh/internal/sandbox"
-	"golang.org/x/crypto/acme/autocert"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -123,13 +120,6 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	servers := []*http.Server{}
 	listeners := []net.Listener{}
 	registry := newGatewayRegistry()
-	addGateway := func(g *gateway.Gateway) {
-		registry.add(g)
-		// Read the generation after registering, so a change landing between the two is
-		// either seen here or delivered to the subscription.
-		gw := store.Get().Gateway
-		g.Reconfigure(gw.Quota, gw.ExposeBackends == "favorite")
-	}
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go store.Watch(watchCtx, time.Second)
@@ -247,6 +237,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		default:
 		}
 	})
+	roles.configureIngress(ingressDeps{local: o.Local, self: self, stateDir: o.StateDir, passwordFile: o.PasswordFile, tunnelListen: o.TunnelListen}, c.HasRole("ingress") && !store.Get().HasRole("ingress"))
 	// Generations that take effect reach the running gateways; the agent re-reads its own sections
 	// on every call. Sections in config.RestartPaths keep their startup values. The roles follow in
 	// the worker, which starts below.
@@ -262,106 +253,14 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return e
 		}
 	}
-	var ingress control.IngressAdmin
 	if c.HasRole("ingress") {
-		if o.Local {
-			return fmt.Errorf("入口需要已入网的节点身份")
-		}
-		tagged := false
-		for _, tag := range self.Tags {
-			if tag == "tag:ingress" {
-				tagged = true
-			}
-		}
-		if !tagged {
-			return fmt.Errorf("入口节点需要控制面授予 tag:ingress")
-		}
-		passwordFile := o.PasswordFile
-		if passwordFile == "" {
-			passwordFile = filepath.Join(o.StateDir, "oauth-password")
-		}
-		password, e := os.ReadFile(passwordFile)
-		if e != nil {
-			return fmt.Errorf("无法读取 OAuth 登录口令文件")
-		}
-		clients := map[string][]string{}
-		for id, client := range c.Ingress.OAuth.Clients {
-			clients[id] = client.Scopes
-		}
-		authorization, e := oauth.New(oauth.Options{Issuer: c.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(o.StateDir, "oauth"), Clients: clients, DynamicScopes: c.Ingress.OAuth.DynamicClientScopes, Proxied: c.Ingress.Listen == "tunnel"})
-		if e != nil {
+		if e := roles.startIngress(c); e != nil {
 			return e
 		}
-		budgetFile := c.Ingress.PTYBudgetFile
-		if budgetFile == "" {
-			budgetFile = filepath.Join(o.StateDir, "ingress-pty.json")
-		}
-		ptyBudget, e := gateway.NewPTYBudget(c.Ingress.MaxPTYPerClient, budgetFile)
-		if e != nil {
-			return e
-		}
-		if c.Ingress.PTYBudgetAuthority != "" {
-			if e = ptyBudget.UseAuthority(c.Ingress.PTYBudgetAuthority); e != nil {
-				return e
-			}
-		}
-		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, Ingress: true, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Changed: changed, Dial: dial, Audit: log, PTYBudget: ptyBudget})
-		addGateway(g)
-		ingress = &ingressAdmin{auth: authorization, passwordFile: passwordFile}
-		handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
-			token, ok := oauth.FromContext(r.Context())
-			if !ok {
-				return gateway.Principal{}, fmt.Errorf("OAuth 会话未认证")
-			}
-			return gateway.Principal{ClientID: token.ClientID, OAuthSession: token.Family, Scopes: token.Scopes}, nil
-		}))
-		var listener net.Listener
-		var tlsConfig *tls.Config
-		switch c.Ingress.Listen {
-		case "funnel":
-			tailnet, ok := network.(*mesh.Tailnet)
-			if !ok {
-				return fmt.Errorf("Funnel 需要 tailnet")
-			}
-			listener, e = tailnet.Funnel()
-		case "tunnel":
-			address := o.TunnelListen
-			if address == "" {
-				address = "127.0.0.1:8443"
-			}
-			host, _, err := net.SplitHostPort(address)
-			if err != nil || host != "127.0.0.1" {
-				return fmt.Errorf("反向隧道入口必须绑定 127.0.0.1")
-			}
-			listener, e = net.Listen("tcp", address)
-		case "public:443":
-			listener, e = net.Listen("tcp", ":443")
-			if c.Ingress.TLS == "file" {
-				cert, err := tls.LoadX509KeyPair(c.Ingress.CertFile, c.Ingress.KeyFile)
-				if err != nil {
-					if listener != nil {
-						listener.Close()
-					}
-					return err
-				}
-				tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
-			} else {
-				cache := filepath.Join(o.StateDir, "acme")
-				if e = os.MkdirAll(cache, 0700); e != nil {
-					return e
-				}
-				manager := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(c.Ingress.Domain), Cache: autocert.DirCache(cache)}
-				tlsConfig = manager.TLSConfig()
-			}
-		default:
-			return fmt.Errorf("入口监听模式无效")
-		}
-		if e != nil {
-			return e
-		}
-		launch(listener, handler, "Ingress MCP", tlsConfig)
 	}
-	if _, serving := roles.gatewayListen(); len(servers) == 0 && !serving {
+	_, serving := roles.gatewayListen()
+	_, ingressServing := roles.ingressConfig()
+	if len(servers) == 0 && !serving && !ingressServing {
 		return fmt.Errorf("没有可启动的角色")
 	}
 	mode := c.Mesh.Mode
@@ -382,7 +281,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if lan, ok := network.(*mesh.LAN); ok {
 		pairing = lan
 	}
-	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, pairing: pairing, peerInfo: peerInfo, roles: roles,
+	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
 		drain:  func(kill bool) { registry.drain(c.Node.Name) },
 		resume: func() { registry.resume(c.Node.Name, "") }})()
 	select {

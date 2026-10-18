@@ -158,8 +158,8 @@ func Test_ControlConfigReloadReportsApplyErrors(t *testing.T) {
 	}
 }
 
-// node.roles is one change in the diff, judged by the roles that moved: the gateway comes and goes
-// without a restart, the agent does not.
+// node.roles is one change in the diff, judged by the roles that moved: the gateway and the ingress come and
+// go without a restart, the agent does not.
 func Test_ControlConfigDiffJudgesRolesBySet(t *testing.T) {
 	before := map[string]any{"node": map[string]any{"name": "n", "roles": []any{"agent", "gateway"}}}
 	cases := []struct {
@@ -171,7 +171,8 @@ func Test_ControlConfigDiffJudgesRolesBySet(t *testing.T) {
 		{[]any{"gateway", "agent"}, 1, false},
 		{[]any{"agent", "gateway"}, 0, false},
 		{[]any{"gateway"}, 1, true},
-		{[]any{"agent", "gateway", "ingress"}, 1, true},
+		{[]any{"agent", "gateway", "ingress"}, 1, false},
+		{[]any{"gateway", "ingress"}, 1, true},
 	}
 	for _, c := range cases {
 		after := map[string]any{"node": map[string]any{"name": "n", "roles": c.roles}}

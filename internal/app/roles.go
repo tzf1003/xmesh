@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -15,8 +16,8 @@ import (
 )
 
 // roleRuntime puts the roles that come and go with the configuration into effect: it starts and
-// stops the local gateway and moves it to a new gateway.listen, while the agent, the network and
-// the sessions go on. A generation is applied by a worker, never inside the store's subscriber
+// stops the local gateway and the ingress, moves the gateway to a new gateway.listen and the ingress
+// to a new ingress section, while the agent, the network and the sessions go on. A generation is applied by a worker, never inside the store's subscriber
 // call: starting a listener there would hold up every reader of the configuration, and the
 // subscriber may not read the configuration itself.
 //
@@ -25,38 +26,54 @@ import (
 type roleRuntime struct {
 	deps     gatewayDeps
 	stateDir string
+	// ingressDeps is set before the ingress can start; the zero value means the node has no way to run one.
+	ingressDeps ingressDeps
+	// forceIngress keeps the ingress running although the configuration file does not list the role,
+	// as when the node was started with --ingress.
+	forceIngress bool
 	// fatal ends the process; it is how a role that fails while the node starts is reported.
 	fatal func(error)
 
-	mu        sync.Mutex
-	gateway   *gatewayRole
-	problems  map[string]string
-	failures  uint64
-	latest    *config.Config // the generation last submitted, kept for a retry
-	pending   *config.Config
-	submitted uint64
-	finished  uint64
-	settled   chan struct{} // closed, and replaced, whenever finished advances
-	wake      chan struct{}
-	started   atomic.Bool
-	stopWork  context.CancelFunc
-	workDone  chan struct{}
+	mu      sync.Mutex
+	gateway *gatewayRole
+	ingress *ingressRole
+	// ingressFailed is the ingress section the last restart could not move to. It is not tried again
+	// by unrelated changes, which would tear the ingress down each time; an explicit retry clears it.
+	ingressFailed *config.Ingress
+	problems      map[string]string
+	failures      uint64
+	latest        *config.Config // the generation last submitted, kept for a retry
+	pending       *config.Config
+	submitted     uint64
+	finished      uint64
+	settled       chan struct{} // closed, and replaced, whenever finished advances
+	wake          chan struct{}
+	started       atomic.Bool
+	stopWork      context.CancelFunc
+	workDone      chan struct{}
 }
 
 func newRoleRuntime(deps gatewayDeps, stateDir string, fatal func(error)) *roleRuntime {
 	r := &roleRuntime{deps: deps, stateDir: stateDir, fatal: fatal, problems: map[string]string{}, settled: make(chan struct{}), wake: make(chan struct{}, 1)}
-	r.deps.serveFailed = r.serveFailed
+	r.deps.serveFailed = func(err error) { r.serveFailed("gateway", "网关", err) }
 	return r
+}
+
+// configureIngress gives the runtime what it needs to run the ingress.
+func (r *roleRuntime) configureIngress(d ingressDeps, forced bool) {
+	d.gatewayDeps = r.deps
+	d.serveFailed = func(err error) { r.serveFailed("ingress", "入口", err) }
+	r.ingressDeps, r.forceIngress = d, forced
 }
 
 // serveFailed handles an accept loop that ended by itself. While the node starts that ends the
 // process, as it always has; afterwards it is a problem to report, not a reason to stop the node.
-func (r *roleRuntime) serveFailed(err error) {
+func (r *roleRuntime) serveFailed(section, name string, err error) {
 	if !r.started.Load() {
 		r.fatal(err)
 		return
 	}
-	r.record(map[string]string{"gateway": fmt.Sprintf("网关监听中断：%v", err)})
+	r.record(map[string]string{section: fmt.Sprintf("%s监听中断：%v", name, err)})
 }
 
 // startGateway starts the local gateway as the node starts. Its failure ends the start.
@@ -74,6 +91,18 @@ func (r *roleRuntime) startGateway(cfg *config.Config) error {
 	}
 	r.mu.Lock()
 	r.gateway = role
+	r.mu.Unlock()
+	return nil
+}
+
+// startIngress starts the ingress as the node starts. Its failure ends the start.
+func (r *roleRuntime) startIngress(cfg *config.Config) error {
+	role, err := startIngressRole(r.ingressDeps, cfg)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.ingress = role
 	r.mu.Unlock()
 	return nil
 }
@@ -126,9 +155,9 @@ func (r *roleRuntime) work(ctx context.Context) {
 
 // apply brings the roles to what cfg asks for and returns, per role, why it could not.
 func (r *roleRuntime) apply(cfg *config.Config) map[string]string {
-	out := map[string]string{"gateway": ""}
+	out := map[string]string{"gateway": "", "ingress": ""}
 	r.mu.Lock()
-	role := r.gateway
+	role, ingress := r.gateway, r.ingress
 	r.mu.Unlock()
 	switch {
 	case cfg.HasRole("gateway") && role == nil:
@@ -145,7 +174,70 @@ func (r *roleRuntime) apply(cfg *config.Config) map[string]string {
 			out["gateway"] = fmt.Sprintf("网关没能改到监听地址 %s，仍在 %s 上：%v", cfg.Gateway.Listen, role.bindAddress(), err)
 		}
 	}
+	wantIngress := cfg.HasRole("ingress") || r.forceIngress
+	switch {
+	case wantIngress && ingress == nil:
+		if err := r.startIngress(cfg); err != nil {
+			out["ingress"] = fmt.Sprintf("入口没能启动：%v", err)
+		}
+	case !wantIngress && ingress != nil:
+		r.mu.Lock()
+		r.ingress = nil
+		r.mu.Unlock()
+		ingress.stop()
+	case ingress != nil && !reflect.DeepEqual(ingress.cfg.Ingress, cfg.Ingress):
+		r.mu.Lock()
+		failed, problem := r.ingressFailed, r.problems["ingress"]
+		r.mu.Unlock()
+		if failed != nil && reflect.DeepEqual(*failed, cfg.Ingress) {
+			out["ingress"] = problem
+			break
+		}
+		err := r.restartIngress(ingress, cfg)
+		r.mu.Lock()
+		if err != nil {
+			section := cfg.Ingress
+			r.ingressFailed = &section
+			out["ingress"] = err.Error()
+		} else {
+			r.ingressFailed = nil
+		}
+		r.mu.Unlock()
+	}
+	r.mu.Lock()
+	if r.ingress == nil || reflect.DeepEqual(r.ingress.cfg.Ingress, cfg.Ingress) {
+		r.ingressFailed = nil
+	}
+	r.mu.Unlock()
 	return out
+}
+
+// restartIngress moves the running ingress to the section in cfg. The new section is checked before
+// the old ingress is touched. The old one then has to be stopped first, because the new one may need
+// the very port it holds; if the new one still cannot start, the old section is put back.
+func (r *roleRuntime) restartIngress(old *ingressRole, cfg *config.Config) error {
+	if err := validateIngress(r.ingressDeps, cfg); err != nil {
+		return fmt.Errorf("入口没能改用新的配置，仍按原来的配置运行：%v", err)
+	}
+	r.mu.Lock()
+	r.ingress = nil
+	r.mu.Unlock()
+	old.stop()
+	next, err := startIngressRole(r.ingressDeps, cfg)
+	if err == nil {
+		r.mu.Lock()
+		r.ingress = next
+		r.mu.Unlock()
+		return nil
+	}
+	back, e := startIngressRole(r.ingressDeps, old.cfg)
+	if e != nil {
+		return fmt.Errorf("入口没能改用新的配置：%v；原来的配置也没能恢复，入口已停止：%v", err, e)
+	}
+	r.mu.Lock()
+	r.ingress = back
+	r.mu.Unlock()
+	return fmt.Errorf("入口没能改用新的配置，仍按原来的配置运行：%v", err)
 }
 
 // record stores the outcome of an apply: a role named with a message is failing, a role named with
@@ -178,6 +270,9 @@ func (r *roleRuntime) Settle(ctx context.Context, retry bool) []v1.ApplyError {
 		r.mu.Lock()
 		again := len(r.problems) > 0 && r.pending == nil && r.latest != nil
 		cfg := r.latest
+		if again {
+			r.ingressFailed = nil
+		}
 		r.mu.Unlock()
 		if again {
 			r.submit(cfg)
@@ -246,16 +341,45 @@ func (r *roleRuntime) gatewayListen() (listen string, ok bool) {
 	return role.bindAddress(), true
 }
 
-// close stops the worker, after the apply it is in the middle of, and then the local gateway.
+// ingressAdmin is the running ingress as the control channel manages it; nil while none runs.
+func (r *roleRuntime) ingressAdmin() control.IngressAdmin {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ingress == nil {
+		return nil
+	}
+	return r.ingress.admin
+}
+
+// ingressConfig is the ingress section the running ingress was started from; ok is false when none runs.
+func (r *roleRuntime) ingressConfig() (section config.Ingress, ok bool) {
+	if r == nil {
+		return config.Ingress{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ingress == nil {
+		return config.Ingress{}, false
+	}
+	return r.ingress.cfg.Ingress, true
+}
+
+// close stops the worker, after the apply it is in the middle of, and then the roles.
 func (r *roleRuntime) close() {
 	if r.stopWork != nil {
 		r.stopWork()
 		<-r.workDone
 	}
 	r.mu.Lock()
-	role := r.gateway
-	r.gateway = nil
+	role, ingress := r.gateway, r.ingress
+	r.gateway, r.ingress = nil, nil
 	r.mu.Unlock()
+	if ingress != nil {
+		ingress.stop()
+	}
 	if role != nil {
 		role.stop()
 	}

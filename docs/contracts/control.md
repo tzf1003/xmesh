@@ -208,7 +208,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 请求 `ConfigEditRequest`，必须带 `If-Match`，与 `PUT` 的 ETag 规则相同。`edits` 是按 JSON Pointer 依次应用到磁盘当前文件上的修改（数组整体替换，缺失的映射自动创建，`delete: true` 删除路径），注释与未修改的部分原样保留。内核先在当前文件上应用全部修改，再走与 `PUT` 相同的 `config.Parse` 校验、diff、原子写入与事件；任一步失败整批都不写入。无法应用的修改（例如路径穿过标量）返回 `conflict`（409）。`dry_run: true` 只返回 diff。UI 的表单式设置（MCP 服务器、内置工具开关、授权）都经此路由写入，避免客户端整文件改写 YAML。
 
-写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node.name`、`node.roles` 里 `agent` 与 `ingress` 的增减、`mesh`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。`gateway.listen`、`gateway.expose_backends` 和 `node.roles` 里 `gateway` 的增减不在其中：运行中的进程自己应用它们。diff 里 `node.roles` 是一项变更（整个数组），`restart_required` 只看哪些角色变了。
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。`gateway.listen`、`gateway.expose_backends`、`ingress` 段和 `node.roles` 里 `gateway`、`ingress` 的增减不在其中：运行中的进程自己应用它们。diff 里 `node.roles` 是一项变更（整个数组），`restart_required` 只看哪些角色变了。
 
 ### POST /v1/config/reload
 

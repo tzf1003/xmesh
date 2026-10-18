@@ -58,13 +58,13 @@ func section(doc map[string]any, name string) map[string]any {
 }
 
 func Test_NeedsRestartPointers(t *testing.T) {
-	restart := []string{"", "/node", "/node/name", "/node/roles", "/mesh/mode", "/ingress/oauth/issuer", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy"}
+	restart := []string{"", "/node", "/node/name", "/node/roles", "/mesh/mode", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy"}
 	for _, ptr := range restart {
 		if !NeedsRestart(ptr) {
 			t.Errorf("%q should need a restart", ptr)
 		}
 	}
-	hot := []string{"/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway", "/gateway/listen", "/gateway/expose_backends", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer", "/node_x"}
+	hot := []string{"/ingress", "/ingress/oauth/issuer", "/ingress/listen", "/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway", "/gateway/listen", "/gateway/expose_backends", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer", "/node_x"}
 	for _, ptr := range hot {
 		if NeedsRestart(ptr) {
 			t.Errorf("%q should apply without a restart", ptr)
@@ -117,7 +117,9 @@ func Test_RolesNeedRestart(t *testing.T) {
 		{[]string{"gateway", "agent"}, []string{"agent", "gateway"}, false},
 		{[]string{"agent", "gateway"}, []string{"gateway"}, true},
 		{[]string{"gateway"}, []string{"gateway", "agent"}, true},
-		{[]string{"agent", "gateway"}, []string{"agent", "ingress"}, true},
+		{[]string{"agent", "gateway"}, []string{"agent", "ingress"}, false},
+		{[]string{"agent"}, []string{"agent", "gateway", "ingress"}, false},
+		{[]string{"agent", "gateway"}, []string{"gateway", "ingress"}, true},
 	}
 	for _, c := range cases {
 		if got := RolesNeedRestart(c.before, c.after); got != c.restart {
@@ -284,5 +286,41 @@ func Test_WatchReturnsForStaticStore(t *testing.T) {
 	}
 	if s.Refresh() {
 		t.Fatal("static store adopted a generation")
+	}
+}
+
+// The ingress comes and goes with the generation like the gateway, and its section is read from the
+// file at once instead of waiting for a restart.
+func Test_IngressRoleAndSectionAreHot(t *testing.T) {
+	b, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &reloadFixture{t: t, path: filepath.Join(t.TempDir(), "config.json"), base: b}
+	f.write(nil)
+	s, err := NewStore(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.write(func(doc map[string]any) {
+		section(doc, "ingress")["max_pty_per_client"] = 3
+		section(section(doc, "ingress"), "oauth")["dynamic_client_scopes"] = []string{"devices:read"}
+	})
+	if got := s.Get().Ingress; got.MaxPTYPerClient != 3 || len(got.OAuth.DynamicClientScopes) != 1 {
+		t.Fatalf("the ingress section did not take effect: %+v", got)
+	}
+	if pending := s.RestartPending(); len(pending) != 0 {
+		t.Fatalf("changing the ingress section asked for a restart: %v", pending)
+	}
+	f.write(func(doc map[string]any) { section(doc, "node")["roles"] = []string{"agent", "gateway"} })
+	if got := s.Get().Node.Roles; !slices.Equal(got, []string{"agent", "gateway"}) || s.Get().HasRole("ingress") {
+		t.Fatalf("the ingress was not removed from the roles in effect: %v", got)
+	}
+	if pending := s.RestartPending(); len(pending) != 0 {
+		t.Fatalf("removing the ingress asked for a restart: %v", pending)
+	}
+	f.write(nil)
+	if got := s.Get().Node.Roles; !slices.Equal(got, []string{"agent", "gateway", "ingress"}) {
+		t.Fatalf("the ingress was not added back: %v", got)
 	}
 }
