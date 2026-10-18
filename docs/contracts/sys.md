@@ -49,7 +49,7 @@
 | `home` | Resolver 使用的主目录 |
 | `roles` | 配置的 `node.roles`，原样返回 |
 | `network` | 本次调用实际使用的网络身份：`mode`（`tailnet`、`lan` 或 `local`）、`node_id`、`tags`。`--local` 开发模式固定为 `mode: local`、`node_id: local`、`tags: ["tag:peer"]` |
-| `restart_required` | `config.RestartPaths` 中的段（`node`、`mesh`、`ingress`、`gateway.listen`、`audit`、`agent.policy.windows_appcontainer`）在热加载中变更过，需要重启才生效；对应的 `warnings` 有文字提示 |
+| `restart_required` | `config.RestartPaths` 中的段（`node.name`、`node.roles` 里 `agent` 与 `ingress` 的增减、`mesh`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）在热加载中变更过，需要重启才生效；对应的 `warnings` 有文字提示 |
 | `policy_reload_failures` | 配置热加载失败的累计次数；大于 0 时继续使用最近一份有效配置，`warnings` 有提示 |
 | `authkey_readable` | `mesh.mode = tailnet` 时 `authkey_file` 当前是否可读；其他模式恒为 `false`。不返回 key 内容 |
 | `warnings` | 面向人的警告字符串数组，可为空：需要重启、热加载曾失败、`allow_dangerous` 已启用。调用方不得依赖具体措辞，机器判断用上面的布尔与计数字段 |

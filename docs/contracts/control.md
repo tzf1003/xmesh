@@ -208,11 +208,11 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 请求 `ConfigEditRequest`，必须带 `If-Match`，与 `PUT` 的 ETag 规则相同。`edits` 是按 JSON Pointer 依次应用到磁盘当前文件上的修改（数组整体替换，缺失的映射自动创建，`delete: true` 删除路径），注释与未修改的部分原样保留。内核先在当前文件上应用全部修改，再走与 `PUT` 相同的 `config.Parse` 校验、diff、原子写入与事件；任一步失败整批都不写入。无法应用的修改（例如路径穿过标量）返回 `conflict`（409）。`dry_run: true` 只返回 diff。UI 的表单式设置（MCP 服务器、内置工具开关、授权）都经此路由写入，避免客户端整文件改写 YAML。
 
-写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node`、`mesh`、`gateway.listen`、`gateway.expose_backends`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node.name`、`node.roles` 里 `agent` 与 `ingress` 的增减、`mesh`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。`gateway.listen`、`gateway.expose_backends` 和 `node.roles` 里 `gateway` 的增减不在其中：运行中的进程自己应用它们。diff 里 `node.roles` 是一项变更（整个数组），`restart_required` 只看哪些角色变了。
 
 ### POST /v1/config/reload
 
-请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.4 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
+请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.4 起；`apply_errors` 自 1.6 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
 
 | 字段 | 含义 |
 | --- | --- |
@@ -221,6 +221,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 | `etag`、`effective_etag` | 磁盘上当前内容，与正在生效的那份对应的文件 ETag。需重启的段待生效时两者不同 |
 | `changed_paths` | 本次生效的变更的 JSON Pointer，与 `config` 事件的 `changed_paths` 相同；未生效时为空数组 |
 | `restart_required`、`restart_paths` | 磁盘上是否有需重启的段尚未运行，以及它们的路径（`config.RestartPaths` 中的一项或多项，例如 `/mesh`） |
+| `apply_errors` | 有效但没能在运行中的进程里生效的部分，`{section, message}`；目前 `section` 只有 `gateway`（新的 `listen` 绑不上，或 Gateway 没能启动）。进程保持原样，不进入 `restart_paths`。调用本接口时会先重试上一次失败的部分，再等本代次应用完（最多约 10 秒）。没有时为空数组 |
 
 行为：
 
@@ -331,4 +332,4 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 ### PUT /v1/gateway
 
-`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`restart_required` 在 `listen` 与运行中的值不同时为真。`access` 与 `hosts` 立即生效（每个请求读取）；`listen` 要重启。能力为 `gateway`（API 1.2 起）。
+`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`access` 与 `hosts` 立即生效（每个请求读取）；自 API 1.6 起 `listen` 也在运行中生效：Gateway 先绑定新地址再放弃旧地址，Agent 与会话不受影响，所以 `restart_required` 恒为 `false`（字段保留给旧客户端）。新地址绑不上（例如端口被占用）时写入仍然完成，Gateway 留在旧地址，原因在 `apply_errors`，之后再调用一次 `POST /v1/config/reload` 可重试。能力为 `gateway`（API 1.2 起）。

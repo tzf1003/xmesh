@@ -21,7 +21,8 @@ const HOST_PROBLEM_KEY: Record<"invalid" | "duplicate", Key> = {
 
 /**
  * The gateway's reach as quick controls: which sources may connect, which domain names it answers to,
- * and whether it listens on every interface. Access and hosts apply at once; the listen scope needs a restart.
+ * and whether it listens on every interface. All of it applies at once (control API 1.5); a kernel that cannot
+ * move the running gateway to the new listen scope says why, and an older one asks for a restart.
  */
 export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: GatewayInfo }): JSX.Element {
   const t = useT();
@@ -33,6 +34,7 @@ export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: Gatew
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ActionError | undefined>(undefined);
   const [restart, setRestart] = useState(false);
+  const [applyErrors, setApplyErrors] = useState<string[]>([]);
 
   // The kernel's reach changed (this save or another): start from what it now says.
   useEffect(() => {
@@ -57,6 +59,7 @@ export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: Gatew
     }
     setDraft(draftFrom(r.data));
     if (r.data.restart_required) setRestart(true);
+    setApplyErrors((r.data.apply_errors ?? []).map((e) => e.message));
     ctx.toast(t("reach.saved"));
   };
 
@@ -225,6 +228,16 @@ export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: Gatew
       {restart && (
         <Banner kind="warn" testid="gateway-restart">
           {t("reach.restartRequired")}
+        </Banner>
+      )}
+      {applyErrors.length > 0 && (
+        <Banner kind="warn" testid="gateway-apply-error">
+          <p>{t("reach.notApplied")}</p>
+          {applyErrors.map((message) => (
+            <p class="hint" key={message}>
+              {message}
+            </p>
+          ))}
         </Banner>
       )}
       {error && <ErrorBanner error={error} testid="reach-error" />}

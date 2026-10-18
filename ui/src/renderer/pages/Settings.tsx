@@ -230,9 +230,9 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
         </Banner>
       )}
       {saved && (
-        <Banner kind={saved.restart ? "warn" : "ok"} testid="settings-saved">
+        <Banner kind={saved.restart || saved.applyErrors.length > 0 ? "warn" : "ok"} testid="settings-saved">
           <div class="row">
-            <span>{saved.restart ? t("settings.savedRestart") : t("settings.savedLive")}</span>
+            <span>{saved.restart ? t("settings.savedRestart") : saved.applyErrors.length > 0 ? t("settings.savedNotApplied") : t("settings.savedLive")}</span>
             {saved.loadError && <span class="hint">{saved.loadError}</span>}
             {saved.restart && (
               <button type="button" class="btn small" onClick={() => setAskRestart(true)} disabled={!writable} data-testid="settings-restart">
@@ -240,6 +240,11 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
               </button>
             )}
           </div>
+          {saved.applyErrors.map((message) => (
+            <p class="hint" data-testid="settings-apply-error" key={message}>
+              {message}
+            </p>
+          ))}
           {saved.restart && saved.paths.length > 0 && (
             <p class="hint" data-testid="settings-restart-paths">
               {t("settings.restartPaths", { paths: saved.paths.join(", ") })}

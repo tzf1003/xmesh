@@ -39,14 +39,19 @@ type controlDeps struct {
 	pairing   control.PairingAdmin // nil unless the node runs the LAN network
 	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume    func()
-	// peerInfo is the gateways' sys.info readings by device; nil on a node without a gateway.
-	peerInfo func() map[string]gateway.DeviceInfo
+	// peerInfo is the gateways' sys.info readings by device; ok is false while the node runs no gateway.
+	peerInfo func() (readings map[string]gateway.DeviceInfo, ok bool)
+	// roles starts, stops and moves the roles that follow the configuration.
+	roles *roleRuntime
 }
 
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
 	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress, Pairing: d.pairing}
+	if d.roles != nil {
+		options.Applier = d.roles
+	}
 	s, e := control.Start(options)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "控制通道未启动:", e)
@@ -88,10 +93,15 @@ func (h *controlHost) Status() v1.StatusResponse {
 		st.Home, _ = os.UserHomeDir()
 	}
 	st.Roles = cfg.Node.Roles
+	st.PolicyReloadFailures += int(h.d.roles.failureCount())
 	st.AuthkeyReadable = authkeyReadable(cfg)
 	st.Warnings = h.warnings(cfg, st)
-	if hasRole(cfg.Node.Roles, "gateway") {
-		st.Gateway = gatewayInfo(cfg, h.d.network)
+	if listen, serving := h.d.roles.gatewayListen(); serving {
+		// What the gateway answers on is where it is bound, which differs from the configuration while
+		// a move to a new listen address has failed.
+		shown := *cfg
+		shown.Gateway.Listen = listen
+		st.Gateway = gatewayInfo(&shown, h.d.network)
 	}
 	if hasRole(cfg.Node.Roles, "ingress") {
 		info := &v1.IngressInfo{Listen: cfg.Ingress.Listen}
@@ -115,6 +125,9 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 	}
 	if h.d.store.Failing() {
 		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "配置文件当前无法加载，继续使用最近有效配置")
+	}
+	for _, message := range h.d.roles.problemMessages() {
+		add(v1.WarnPolicyReloadFailed, v1.SeverityError, message)
 	}
 	if h.d.agent != nil && cwd.DenyFailing(cfg.Agent.CWDPolicy.DenyFile) {
 		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "禁止目录文件当前无法加载，继续使用最近有效内容")
@@ -186,8 +199,9 @@ func (h *controlHost) Peers(ctx context.Context) ([]v1.Peer, error) {
 		return nil, e
 	}
 	var readings map[string]gateway.DeviceInfo
+	haveInfo := false
 	if h.d.peerInfo != nil {
-		readings = h.d.peerInfo()
+		readings, haveInfo = h.d.peerInfo()
 	}
 	for _, p := range peers {
 		if p.Name == cfg.Node.Name || (p.ID != "" && p.ID == h.d.self.Node) {
@@ -212,7 +226,7 @@ func (h *controlHost) Peers(ctx context.Context) ([]v1.Peer, error) {
 			system := p.OS
 			row.OS = &system
 		}
-		if p.Online && h.d.peerInfo != nil {
+		if p.Online && haveInfo {
 			row.Info = deviceInfoView(readings[p.Name])
 		}
 		out = append(out, row)

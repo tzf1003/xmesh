@@ -465,6 +465,8 @@ export interface ConfigReloadResponse {
   changed_paths: string[];
   restart_required: boolean;
   restart_paths: string[];
+  /** Valid settings the running kernel could not put into effect, such as a listen address that is taken (control API 1.6). Absent from older kernels. */
+  apply_errors?: { section: string; message: string }[];
 }
 
 export const DENY_FILE_MAX_BYTES = 64 * 1024;

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -61,7 +62,7 @@ func Test_ControlConfigReloadReportsRestartSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.reload()
-	if !got.Applied || !got.RestartRequired || !slices.Equal(got.RestartPaths, []string{"/node"}) {
+	if !got.Applied || !got.RestartRequired || !slices.Equal(got.RestartPaths, []string{"/node/name"}) {
 		t.Fatalf("%+v", got)
 	}
 	if got.EffectiveETag == got.ETag {
@@ -124,6 +125,62 @@ func Test_ControlConfigReloadRepeatedInvalidFileStillFails(t *testing.T) {
 		payload(t, events.next(t, ofType(v1.EventConfig)), &data)
 		if data.Change != "reloaded" {
 			t.Fatalf("%+v", data)
+		}
+	}
+}
+
+// fakeApplier stands in for the node's role runtime.
+type fakeApplier struct {
+	errs    []v1.ApplyError
+	retries []bool
+}
+
+func (a *fakeApplier) Settle(_ context.Context, retry bool) []v1.ApplyError {
+	a.retries = append(a.retries, retry)
+	return a.errs
+}
+
+// What the node could not put into effect comes back with the reload, and an explicit reload asks it
+// to try again what failed before.
+func Test_ControlConfigReloadReportsApplyErrors(t *testing.T) {
+	applier := &fakeApplier{}
+	f := newFixture(t, quietPoll, func(o *Options) { o.Applier = applier })
+	if got := f.reload(); got.ApplyErrors == nil || len(got.ApplyErrors) != 0 {
+		t.Fatalf("a clean reload must report an empty list: %+v", got)
+	}
+	applier.errs = []v1.ApplyError{{Section: "gateway", Message: "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上"}}
+	got := f.reload()
+	if len(got.ApplyErrors) != 1 || got.ApplyErrors[0].Section != "gateway" || got.RestartRequired {
+		t.Fatalf("%+v", got)
+	}
+	if !slices.Equal(applier.retries, []bool{true, true}) {
+		t.Fatalf("an explicit reload did not ask for a retry: %v", applier.retries)
+	}
+}
+
+// node.roles is one change in the diff, judged by the roles that moved: the gateway comes and goes
+// without a restart, the agent does not.
+func Test_ControlConfigDiffJudgesRolesBySet(t *testing.T) {
+	before := map[string]any{"node": map[string]any{"name": "n", "roles": []any{"agent", "gateway"}}}
+	cases := []struct {
+		roles   []any
+		changes int
+		restart bool
+	}{
+		{[]any{"agent"}, 1, false},
+		{[]any{"gateway", "agent"}, 1, false},
+		{[]any{"agent", "gateway"}, 0, false},
+		{[]any{"gateway"}, 1, true},
+		{[]any{"agent", "gateway", "ingress"}, 1, true},
+	}
+	for _, c := range cases {
+		after := map[string]any{"node": map[string]any{"name": "n", "roles": c.roles}}
+		diff := diffConfigs(before, after)
+		if len(diff) != c.changes {
+			t.Fatalf("%v: %d changes: %+v", c.roles, len(diff), diff)
+		}
+		if c.changes == 1 && (diff[0].Pointer != "/node/roles" || diff[0].RestartRequired != c.restart) {
+			t.Fatalf("%v: %+v", c.roles, diff[0])
 		}
 	}
 }

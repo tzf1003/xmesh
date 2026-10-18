@@ -1,0 +1,13 @@
+{
+  "applied": true,
+  "valid": true,
+  "load_error": null,
+  "etag": "sha256-1c8b0f0c5f1a94ee7a3d6d7b1f3a2e9c4b5d6e7f8091a2b3c4d5e6f708192a3b",
+  "effective_etag": "sha256-1c8b0f0c5f1a94ee7a3d6d7b1f3a2e9c4b5d6e7f8091a2b3c4d5e6f708192a3b",
+  "changed_paths": ["/gateway/listen"],
+  "restart_required": false,
+  "restart_paths": [],
+  "apply_errors": [
+    { "section": "gateway", "message": "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上：listen tcp :8080: bind: address already in use" }
+  ]
+}

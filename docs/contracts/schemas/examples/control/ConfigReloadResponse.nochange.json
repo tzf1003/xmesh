@@ -6,5 +6,6 @@
   "effective_etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
   "changed_paths": [],
   "restart_required": false,
-  "restart_paths": []
+  "restart_paths": [],
+  "apply_errors": []
 }
