@@ -14,7 +14,7 @@
 | `ingress.pty_budget_file` | 可选绝对路径；默认使用状态目录中的 `ingress-pty.json`。同一主机的入口可指定同一文件进行跨进程准入，且 `max_pty_per_client` 必须一致 |
 | `ingress.pty_budget_authority` | 可选设备名（与 `node.name` 同样的字符集）；多台主机上的入口须配置同一设备，由该 Agent 托管跨主机准入租约，详见 [CTR-GW-06](gateway.md#ctr-gw-06)。留空只在本机协调 |
 | `roles` 含 `agent` | `agent.cwd_policy.allow` 必须存在，可以为空；空表示除 `deny` 外的全部目录都可访问 |
-| `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件缺失时 agent 不能启动，不会视为空列表。向导默认创建该文件并写入凭证目录 |
+| `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件在每次工具调用时重读，改动在下一次调用生效，不需要重启。空列表要写成 `[]`，没有内容的文件按写了一半处理。启动时文件缺失或无法解析，agent 不能启动，不会视为空列表；运行中文件不再能加载（缺失、不可读、不是字符串列表），继续使用上一份成功的列表，`policy_reload_failed` 计数加一，状态里出现同名警告，文件恢复后清除。向导默认创建该文件并写入凭证目录 |
 | `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
 | `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
 | `mesh.mode = lan` | `mesh.lan.mdns` 为 true，且不读取 auth key。可选 `mesh.lan.interface` 指定监听、mDNS 通告和浏览用的网卡名，mDNS 组播只经这块网卡收发（Windows 上显式固定组播出口，不受 Clash/Tailscale 等低 metric 隧道网卡影响）；缺省选第一块带私有 IPv4 的启用网卡，并跳过名字像虚拟机、容器、WSL、Hyper-V、VPN 隧道的网卡（只有它们时才退回使用）。指定的网卡不存在或没有私有 IPv4 时拒绝启动 |
@@ -43,7 +43,7 @@
 | 配置段 | 变更如何生效 |
 | --- | --- |
 | `agent.policy` | 下一次工具调用，见 [CON-SEC-06](../constraints/security.md#con-sec-06) |
-| `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载 |
+| `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载。`deny_file` 指向的文件也在每次工具调用时重读，不需要重启；该文件无法加载时保留上一份成功的列表，见字段速查 |
 | `agent.disabled_tools` | 可选的内置工具名数组，取值限定为内置工具表（见 config.schema.json）。列出的工具不出现在 `tools/list` 中，调用返回 `policy_denied`；缺省或空数组表示全部开启。与 `agent.authz` 一样热加载，无需重启 |
 | `agent.exec` 的配额数字、`agent.pty` 的上限、`agent.quota` | 热加载，`agent.quota` 对之后的调用生效。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
