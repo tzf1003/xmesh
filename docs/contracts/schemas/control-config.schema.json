@@ -107,6 +107,21 @@
         "diff": { "type": "array", "items": { "$ref": "#/$defs/ConfigChange" } },
         "restart_required": { "type": "boolean", "description": "写入后的配置是否有变更需要重启才生效。" }
       }
+    },
+    "ConfigReloadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied", "valid", "load_error", "etag", "effective_etag", "changed_paths", "restart_required", "restart_paths"],
+      "properties": {
+        "applied": { "type": "boolean", "description": "本次调用是否使磁盘上的新内容成为生效的配置。内容未变、或已被文件监视器采纳时为 false。" },
+        "valid": { "type": "boolean", "description": "磁盘上的内容能否通过校验。为 false 时 load_error 给出第一条错误，生效的配置保持不变。" },
+        "load_error": { "oneOf": [{ "$ref": "#/$defs/ConfigLoadError" }, { "type": "null" }] },
+        "etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "磁盘上当前内容的 ETag。" },
+        "effective_etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "正在生效的那份配置所对应的文件 ETag。" },
+        "changed_paths": { "type": "array", "items": { "type": "string" }, "description": "本次生效的变更对应的 JSON Pointer。未生效时为空数组。" },
+        "restart_required": { "type": "boolean", "description": "磁盘上是否有需要重启才生效的段（RestartPaths）尚未运行。" },
+        "restart_paths": { "type": "array", "items": { "type": "string" }, "description": "需要重启的段，例如 /mesh、/ingress。" }
+      }
     }
   }
 }

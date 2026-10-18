@@ -1,0 +1,10 @@
+{
+  "applied": false,
+  "valid": true,
+  "load_error": null,
+  "etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "effective_etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "changed_paths": [],
+  "restart_required": false,
+  "restart_paths": []
+}

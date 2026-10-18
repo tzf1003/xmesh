@@ -3,12 +3,14 @@ import { getApi } from "../../api";
 import { Banner, ErrorBanner } from "../../components";
 import { useT } from "../../i18n";
 import { clipLines } from "../../lib/mesh";
+import { useSnapshot } from "../../hooks";
 import type { ActionError } from "../../../shared/ipc";
-import { MESH_LOGIN_COMMANDS, type MeshPlan } from "../../../shared/mesh";
+import { type MeshPlan, meshLoginCommands } from "../../../shared/mesh";
 
 /** An error from a `xmesh mesh` call. A missing credential gets the login steps instead of a bare message. */
 export function MeshError({ error, toast }: { error: ActionError; toast: (text: string, error?: boolean) => void }): JSX.Element {
   const t = useT();
+  const commands = meshLoginCommands(useSnapshot().cliCommand);
   if (error.code !== "no_credential") return <ErrorBanner error={error} testid="mesh-error" />;
   const copy = async (kind: "meshLoginRead" | "meshLoginWrite" | "meshLoginReadHeadscale" | "meshLoginWriteHeadscale"): Promise<void> => {
     const r = await getApi().copy(kind);
@@ -30,13 +32,13 @@ export function MeshError({ error, toast }: { error: ActionError; toast: (text: 
           <p>{t(access === "read" ? "mesh.noCredential.read" : "mesh.noCredential.write")}</p>
           <ul class="plain">
             <li>
-              Tailscale: <code>{MESH_LOGIN_COMMANDS[access]}</code>{" "}
+              Tailscale: <code>{commands[access]}</code>{" "}
               <button type="button" class="btn small" onClick={() => void copy(tsKind)} data-testid={tsId}>
                 {t("mesh.copy")}
               </button>
             </li>
             <li>
-              Headscale: <code>{MESH_LOGIN_COMMANDS[access === "read" ? "readHeadscale" : "writeHeadscale"]}</code>{" "}
+              Headscale: <code>{commands[access === "read" ? "readHeadscale" : "writeHeadscale"]}</code>{" "}
               <button type="button" class="btn small" onClick={() => void copy(hsKind)} data-testid={hsId}>
                 {t("mesh.copy")}
               </button>

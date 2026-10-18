@@ -135,12 +135,30 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	pendingDrain := map[string]bool{}
 	addGateway := func(g *gateway.Gateway) {
 		gatewaysMu.Lock()
-		defer gatewaysMu.Unlock()
 		for name := range pendingDrain {
 			g.Drain(name)
 		}
 		gateways = append(gateways, g)
+		gatewaysMu.Unlock()
+		// Read the generation after registering, so a change landing between the two is
+		// either seen here or delivered to the subscription below.
+		gw := store.Get().Gateway
+		g.Reconfigure(gw.Quota, gw.ExposeBackends == "favorite")
 	}
+	// Generations that take effect reach the running gateways; the agent re-reads its own
+	// sections on every call. Sections in config.RestartPaths keep their startup values.
+	unsubscribe := store.Subscribe(func(next *config.Config) {
+		gatewaysMu.Lock()
+		current := append([]*gateway.Gateway{}, gateways...)
+		gatewaysMu.Unlock()
+		for _, g := range current {
+			g.Reconfigure(next.Gateway.Quota, next.Gateway.ExposeBackends == "favorite")
+		}
+	})
+	defer unsubscribe()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go store.Watch(watchCtx, time.Second)
 	errc := make(chan error, 8)
 	var wg sync.WaitGroup
 	defer func() {

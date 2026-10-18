@@ -314,6 +314,20 @@ type ConfigPutResponse struct {
 	RestartRequired bool           `json:"restart_required"`
 }
 
+// ConfigReloadResponse is the outcome of re-reading the configuration file now. Applied is
+// true when this call made the file's content the generation in effect. Invalid content
+// keeps the last good generation and sets LoadError.
+type ConfigReloadResponse struct {
+	Applied         bool             `json:"applied"`
+	Valid           bool             `json:"valid"`
+	LoadError       *ConfigLoadError `json:"load_error"`
+	ETag            string           `json:"etag"`
+	EffectiveETag   string           `json:"effective_etag"`
+	ChangedPaths    []string         `json:"changed_paths"`
+	RestartRequired bool             `json:"restart_required"`
+	RestartPaths    []string         `json:"restart_paths"`
+}
+
 // ConfigEdit is one JSON Pointer edit of the configuration file (ConfigEdit in control-config.schema.json).
 type ConfigEdit struct {
 	Path   string `json:"path"`

@@ -18,9 +18,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// restartPrefixes mirror config.Store: these sections only apply after a restart.
-var restartPrefixes = []string{"/node", "/mesh", "/gateway/listen", "/ingress"}
-
 func hasPrefix(path string, prefixes ...string) bool {
 	for _, p := range prefixes {
 		if path == p || strings.HasPrefix(path, p+"/") {
@@ -198,25 +195,62 @@ func (s *Server) watchConfigFile() {
 	if now == "" || now == s.digest {
 		return
 	}
-	s.digest = now
 	raw, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
 		return
 	}
+	s.adoptFileLocked(raw, v1.ActorFile)
+}
+
+// reloadConfig re-reads the configuration file now. The UI calls it after it has written
+// the file by other means, or to see the outcome without waiting for the watcher's next tick.
+func (s *Server) reloadConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	raw, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		return
+	}
+	writeJSON(w, 200, s.adoptFileLocked(raw, v1.ActorControl))
+}
+
+// adoptFileLocked re-reads the store from raw, the file's current content, and announces
+// what changed on the event stream. A valid new content becomes the generation in effect
+// (restart-only sections keep their running values); invalid content keeps the last good
+// one and is reported as load_error. The caller holds configMu.
+func (s *Server) adoptFileLocked(raw []byte, actor v1.Actor) v1.ConfigReloadResponse {
+	changed := sum(raw) != s.digest
+	s.digest = sum(raw)
+	adopted := s.o.Store.Refresh()
+	_, failures := s.o.Store.State()
+	failed := failures > s.failures
+	s.failures = failures
+	pending := s.o.Store.RestartPending()
 	etag := etagOf(raw)
-	s.o.Store.Get()
-	restart, failures := s.o.Store.State()
-	data := v1.ConfigEventData{Change: "reloaded", Actor: v1.ActorFile, ETag: &etag, RestartRequired: restart, ChangedPaths: []string{}}
-	if failures > s.failures {
+	out := v1.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + s.o.Store.Digest(), ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending}
+	if _, err := config.Parse(raw); err != nil {
+		out.LoadError = loadError(err)
+	} else {
+		out.Valid = true
+	}
+	// Content that failed before is not counted again, but it is still a failed reload.
+	invalid := out.LoadError != nil
+	if !changed && !failed {
+		return out
+	}
+	data := v1.ConfigEventData{Change: "reloaded", Actor: actor, ETag: &etag, RestartRequired: out.RestartRequired, ChangedPaths: []string{}}
+	if invalid || failed {
 		data.Change = "reload_failed"
 	} else if parsed := parsedOf(raw); parsed != nil {
 		for _, c := range diffConfigs(s.lastParsed, parsed) {
-			data.ChangedPaths = append(data.ChangedPaths, c.Pointer)
+			out.ChangedPaths = append(out.ChangedPaths, c.Pointer)
 		}
 		s.lastParsed = parsed
+		data.ChangedPaths = out.ChangedPaths
 	}
-	s.failures = failures
 	_ = s.bus.Publish(v1.EventConfig, data)
+	return out
 }
 
 // parsedOf is the YAML document as the JSON data model, or nil if it does not parse.
@@ -330,7 +364,7 @@ func diffConfigs(before, after map[string]any) []v1.ConfigChange {
 	}
 	diffValue("", before, after, &out)
 	for i := range out {
-		out[i].RestartRequired = hasPrefix(out[i].Pointer, restartPrefixes...)
+		out[i].RestartRequired = config.NeedsRestart(out[i].Pointer)
 		out[i].WeakensSecurity = weakensSecurity(out[i], before, after)
 	}
 	if out == nil {
