@@ -19,6 +19,7 @@ import (
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -37,6 +38,10 @@ type Options struct {
 	Heartbeat time.Duration
 	// Ingress serves the ingress routes; nil on a node that does not run the ingress.
 	Ingress IngressAdmin
+	// BackendEnv keeps the environment variables of stdio backends; nil answers the env routes
+	// with unavailable. ApplyBackendEnv, when set, makes the running backends pick up a change at once.
+	BackendEnv      *backendenv.Store
+	ApplyBackendEnv func()
 	// IngressNow, when set, replaces Ingress: it returns the ingress running now, nil while none
 	// runs, for a node whose ingress comes and goes with the configuration.
 	IngressNow func() IngressAdmin
@@ -300,6 +305,8 @@ func (s *Server) table() map[string]handler {
 		"control.pats.create":            s.createPat,
 		"control.pats.rotate":            s.rotatePat,
 		"control.pats.delete":            s.deletePat,
+		"control.backends.env.patch":     s.patchBackendEnv,
+		"control.backends.env.delete":    s.deleteBackendEnv,
 		"control.gateway.update":         s.updateGateway,
 		"control.ingress.clients.list":   s.listIngressClients,
 		"control.ingress.clients.delete": s.deleteIngressClient,

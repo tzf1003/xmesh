@@ -5,6 +5,7 @@ import { parse } from "yaml";
 import type {
   AuditEvent,
   AuditResponse,
+  Backend,
   ConfigChange,
   ConfigDiagnostic,
   ConfigPutResponse,
@@ -39,7 +40,10 @@ import { fixture } from "./fixtures";
 //     are not kept by the fake; the real kernel keeps them.
 //   - PATs keep their token in a file under `tokenDir`, like the kernel's 0600 files: create,
 //     rotate and delete rewrite or remove it, and nothing else ever returns the token body;
-//   - PUT /v1/gateway validates the reach settings; the addresses follow from listen and access.
+//   - PUT /v1/gateway validates the reach settings; the addresses follow from listen and access;
+//   - PATCH and DELETE /v1/backends/{name}/env keep environment variables write-only, like the kernel's
+//     private file: nothing the fake serves ever carries a value, only `envValues` (a test hook) reads one.
+//     Loader and shell hijack names (LD_*, XMESH_* ...) answer 400 invalid_args with reason env_denied.
 
 /** Addresses the fake reports for a LAN and a tailnet, so the panel has something to list. */
 export const FAKE_LAN_IP = "192.168.1.20";
@@ -52,6 +56,13 @@ export interface GatewayReach {
   access: string[];
   hosts: string[];
 }
+
+/** Names the kernel refuses for a backend whatever the operator says (the fake's copy of the hijack list). */
+const HIJACK_ENV = /^(SSH_AUTH_SOCK|TS_AUTHKEY|TAILSCALE_.*|XMESH_.*|LD_.*|DYLD_.*|BASH_ENV|ENV|ZDOTDIR|PYTHONPATH|NODE_OPTIONS)$/i;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const BACKEND_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+const ENV_MAX_VARS = 64;
+const ENV_MAX_VALUE_BYTES = 8192;
 
 export interface RouteResult {
   status: number;
@@ -79,7 +90,7 @@ export class PanelData {
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
-  private restartPaths: string[] = [];
+  restartPaths: string[] = [];
   /** Valid settings the kernel could not put into effect, as the reload reports them (control API 1.5). */
   applyErrors: { section: string; message: string }[] = [];
   private effectiveEtag: string;
@@ -99,6 +110,8 @@ export class PanelData {
   auditEnabled = true;
   /** Config writes that reached the "disk". */
   writes: string[] = [];
+  /** Environment variables of stdio backends: backend, then name, then value. Never served back. */
+  private backendEnv = new Map<string, Map<string, string>>();
   /** Passwords are write-only; the fake only counts them. */
   passwordRotations = 0;
   /** `lan` makes pairing available; anything else answers unsupported_mode. */
@@ -156,6 +169,8 @@ export class PanelData {
     if (method === "POST" && p === "/v1/config/reload") return ok(this.reload());
     if (p === "/v1/pats" || p.startsWith("/v1/pats/")) return this.pats_(method, p, body);
     if (method === "PUT" && p === "/v1/gateway") return this.putGateway(body);
+    const env = /^\/v1\/backends\/([^/]+)\/env$/.exec(p);
+    if (env && (method === "PATCH" || method === "DELETE")) return this.backendEnvRoute(method, decodeURIComponent(env[1]!), body);
     if (p.startsWith("/v1/ingress/")) return this.ingress(method, p, body);
     if (p.startsWith("/v1/pair/")) return this.pair(method, p, body);
     if (method === "GET" && p === "/v1/audit") return this.auditQuery(u.searchParams);
@@ -229,6 +244,7 @@ export class PanelData {
       this.diskContent = b.content;
       if (!restart) this.effectiveEtag = etagOf(b.content);
       this.adopt(b.content);
+      this.pruneBackendEnv();
     }
     const res: ConfigPutResponse = { applied: apply, etag: etagOf(this.diskContent), diff, restart_required: restart };
     return ok(res);
@@ -272,10 +288,82 @@ export class PanelData {
       this.diskContent = content;
       this.model = doc;
       this.effectiveEtag = etagOf(content);
+      this.pruneBackendEnv();
     }
     // Agent settings reload without a restart in the fake, as in the kernel.
     const res: ConfigPutResponse = { applied: apply, etag: etagOf(this.diskContent), diff, restart_required: false };
     return ok(res);
+  }
+
+  /** The backends the document defines, as the kernel's status lists them: the state is always running, env_names follow the private file. */
+  backendRows(): Backend[] {
+    const backends = pointerGet(this.model, ["agent", "backends"]);
+    if (!isNode(backends)) return [];
+    return Object.keys(backends)
+      .sort()
+      .map((name) => {
+        const b = isNode(backends[name]) ? backends[name] : {};
+        const names = b.transport === "stdio" ? this.envNames(name) : [];
+        return {
+          name,
+          policy: b.policy === "exclusive" ? "exclusive" : "shared",
+          state: "running" as const,
+          favorite: b.favorite === true,
+          ...(names.length > 0 && { env_names: names }),
+        };
+      });
+  }
+
+  /** The variable names of one backend, sorted. */
+  envNames(name: string): string[] {
+    return [...(this.backendEnv.get(name)?.keys() ?? [])].sort();
+  }
+
+  /** Test hook: the stored values of one backend. The panel never gets these from any route. */
+  envValues(name: string): Record<string, string> {
+    return Object.fromEntries(this.backendEnv.get(name) ?? []);
+  }
+
+  /** Like the kernel after a config save: a backend that is no longer in the document keeps no variables. */
+  private pruneBackendEnv(): void {
+    const backends = pointerGet(this.model, ["agent", "backends"]);
+    for (const name of [...this.backendEnv.keys()]) {
+      if (!isNode(backends) || !(name in backends)) this.backendEnv.delete(name);
+    }
+  }
+
+  private backendEnvRoute(method: string, name: string, body: unknown): RouteResult {
+    if (!BACKEND_NAME.test(name)) return err(400, "invalid_args", "后端名不合法", { field: "name" });
+    if (method === "DELETE") {
+      this.backendEnv.delete(name);
+      return { status: 204 };
+    }
+    if (!isNode(body)) return err(400, "invalid_args", "请求体必须是对象", { field: "body" });
+    const extra = Object.keys(body).find((k) => k !== "set" && k !== "unset");
+    if (extra !== undefined) return err(400, "invalid_args", `未知字段 ${extra}`, { field: extra });
+    const set = body.set === undefined ? {} : body.set;
+    const unset = body.unset === undefined ? [] : body.unset;
+    if (!isNode(set) || !Array.isArray(unset) || !unset.every((x) => typeof x === "string")) {
+      return err(400, "invalid_args", "set 必须是对象，unset 必须是字符串数组", { field: "body" });
+    }
+    if (Object.keys(set).length === 0 && unset.length === 0) return err(400, "invalid_args", "set 和 unset 至少要有一项", { field: "body" });
+    if (Object.keys(set).length > ENV_MAX_VARS || unset.length > ENV_MAX_VARS) return err(400, "invalid_args", "一次最多改 64 个变量", { field: "body" });
+    for (const [k, v] of Object.entries(set).sort(([a], [b]) => a.localeCompare(b))) {
+      if (!ENV_NAME.test(k)) return err(400, "invalid_args", "变量名不合法", { field: "set" });
+      if (typeof v !== "string" || v.includes("\0") || Buffer.byteLength(v) > ENV_MAX_VALUE_BYTES) return err(400, "invalid_args", "变量值不合法", { field: `set.${k}` });
+      if (HIJACK_ENV.test(k)) return err(400, "invalid_args", "节点策略不允许这个变量", { field: `set.${k}`, reason: "env_denied" });
+    }
+    for (const k of unset as string[]) {
+      if (!ENV_NAME.test(k)) return err(400, "invalid_args", "变量名不合法", { field: "unset" });
+      if (k in set) return err(400, "invalid_args", "同一个变量不能同时设置和删除", { field: "unset" });
+    }
+    const vars = new Map(this.backendEnv.get(name) ?? []);
+    for (const k of unset as string[]) vars.delete(k);
+    for (const [k, v] of Object.entries(set)) vars.set(k, v as string);
+    if (vars.size > ENV_MAX_VARS) return err(400, "invalid_args", "一个后端最多 64 个变量", { field: "body" });
+    if (vars.size === 0) this.backendEnv.delete(name);
+    else this.backendEnv.set(name, vars);
+    return ok({ name, names: this.envNames(name) });
   }
 
   /** A JSON object becomes the parsed document; other text (YAML) leaves the last parsed document in place. */

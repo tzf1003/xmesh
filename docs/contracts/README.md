@@ -59,6 +59,7 @@
 | [CTR-CTL-10](control.md#ctr-ctl-10) | 控制通道 | 入口客户端与口令 |
 | [CTR-CTL-11](control.md#ctr-ctl-11) | 控制通道 | 审计视图 |
 | [CTR-CTL-12](control.md#ctr-ctl-12) | 控制通道 | 路由表、Go 与 TypeScript 生成物 |
+| [CTR-CTL-14](control.md#ctr-ctl-14) | 控制通道 | stdio 后端的环境变量 |
 
 ## 模式文件
 
@@ -68,7 +69,7 @@
 | [schemas/lease.schema.json](schemas/lease.schema.json) | CTR-LEASE-01 |
 | [schemas/audit-event.schema.json](schemas/audit-event.schema.json) | CTR-AUD-01 |
 | [schemas/config.schema.json](schemas/config.schema.json) | CTR-CFG-01 |
-| [schemas/control-*.schema.json](schemas/) 与 [schemas/control-routes.json](schemas/control-routes.json) | CTR-CTL-01 至 CTR-CTL-12，列表见 [control.md](control.md) |
+| [schemas/control-*.schema.json](schemas/) 与 [schemas/control-routes.json](schemas/control-routes.json) | CTR-CTL-01 至 CTR-CTL-14，列表见 [control.md](control.md) |
 | [schemas/examples/](schemas/examples/) | 错误与配置的正例、反例 |
 | [schemas/examples/control/](schemas/examples/control/) | 控制通道的正例，`invalid/` 下是反例，文件名 `<定义名>.<变体>.json` |
 

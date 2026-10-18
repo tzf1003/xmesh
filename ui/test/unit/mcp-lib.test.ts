@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { BUILTIN_TOOLS, BUILTIN_TOOL_NAMES, isBuiltinTool } from "../../src/shared/builtin-tools";
 import { en, zh } from "../../src/renderer/messages";
 import { authzRows } from "../../src/renderer/lib/config";
+import type { EnvRow } from "../../src/renderer/lib/mcp-env";
 import {
   BACKEND_NAME,
   DURATION,
@@ -45,6 +46,7 @@ const formBase: BackendForm = {
   grants: [],
   newTag: "",
   favorite: false,
+  env: [],
 };
 
 test("the built-in tool catalog is the enum of agent.disabled_tools in the config schema", () => {
@@ -129,6 +131,45 @@ test("an http form stores the URL and never a command", () => {
   const r = checkBackendForm({ ...formBase, transport: "http", command: "ignored", url: " http://localhost:7433/mcp ", favorite: true }, []);
   assert.ok(r.ok);
   assert.deepEqual(r.value, { transport: "http", url: "http://localhost:7433/mcp", policy: "shared", favorite: true });
+});
+
+test("a stdio form carries its env change beside the value, and an http form has none", () => {
+  const rows: EnvRow[] = [
+    { id: 1, name: "API_KEY", value: "k1", stored: false, removed: false },
+    { id: 2, name: "OLD", value: "", stored: true, removed: true },
+    { id: 3, name: "KEPT", value: "", stored: true, removed: false },
+  ];
+  const r = checkBackendForm({ ...formBase, env: rows }, []);
+  assert.ok(r.ok);
+  assert.deepEqual(r.env, { set: { API_KEY: "k1" }, unset: ["OLD"] });
+  assert.ok(!JSON.stringify(r.value).includes("k1"), "the value must stay out of the config value");
+
+  const remote = checkBackendForm({ ...formBase, transport: "http", url: "http://localhost:7433/mcp", env: rows }, []);
+  assert.ok(remote.ok);
+  assert.equal(remote.env, undefined);
+
+  const none = checkBackendForm({ ...formBase, env: [] }, []);
+  assert.ok(none.ok);
+  assert.equal(none.env, undefined);
+});
+
+test("env problems come back as a single field with the code of what is wrong", () => {
+  const codes = (env: EnvRow[]) => {
+    const r = checkBackendForm({ ...formBase, env }, []);
+    return r.ok ? [] : r.problems.map((p) => `${p.field}:${p.code}`);
+  };
+  assert.deepEqual(codes([{ id: 1, name: "1BAD", value: "x", stored: false, removed: false }]), ["env:env.name"]);
+  assert.deepEqual(codes([{ id: 1, name: "A", value: "", stored: false, removed: false }]), ["env:env.value"]);
+  assert.deepEqual(
+    codes([
+      { id: 1, name: "A", value: "1", stored: false, removed: false },
+      { id: 2, name: "A", value: "2", stored: false, removed: false },
+    ]),
+    ["env:env.duplicate"],
+  );
+  assert.deepEqual(codes([{ id: 1, name: "A", value: "x".repeat(8193), stored: false, removed: false }]), ["env:env.tooLong"]);
+  // an untouched blank row is not a problem
+  assert.deepEqual(codes([{ id: 1, name: "", value: "", stored: false, removed: false }]), []);
 });
 
 test("form problems come back as codes, one per field", () => {
@@ -335,7 +376,10 @@ test("every problem and warning code the lib or importer can produce has a messa
     assert.ok(`mcp.err.${c}` in zh, `zh has mcp.err.${c}`);
     assert.ok(`mcp.err.${c}` in en, `en has mcp.err.${c}`);
   }
-  for (const c of ["env", "ignored"]) {
+  for (const c of ["env.name", "env.duplicate", "env.value", "env.tooLong", "env.tooMany", "env.invalid", "env.shape"]) {
+    assert.ok(`mcp.err.${c}` in zh && `mcp.err.${c}` in en, c);
+  }
+  for (const c of ["envIgnored", "ignored"]) {
     assert.ok(`mcp.warn.${c}` in zh && `mcp.warn.${c}` in en, c);
   }
 });

@@ -1,8 +1,10 @@
 // Reads pasted MCP server JSON, the way Claude Code, Claude Desktop and similar clients write it,
 // and turns it into kernel backends. Nothing is written here: the result is a preview with the
-// entries that can be imported, the ones that cannot (with a reason), and warnings. Secrets never
-// reach a warning: an `env` block is reported by variable name only, and its values are dropped.
+// entries that can be imported, the ones that cannot (with a reason), and warnings. An stdio server's
+// `env` block is kept apart from the backend value: it goes to the kernel's private variable file, not
+// into the config. Values never reach a note: problems and warnings name variables only.
 
+import { BACKEND_ENV_MAX_VALUE_BYTES, BACKEND_ENV_MAX_VARS, ENV_VAR_NAME } from "../../shared/ipc";
 import { BACKEND_NAME, BACKEND_POLICIES, DURATION, checkBackendUrl, isPlainObject, type BackendPolicy, type BackendValue, type Transport } from "./mcp";
 
 /** Larger pastes are refused before parsing. */
@@ -18,6 +20,8 @@ export interface ImportNote {
 export interface ImportEntry {
   name: string;
   value: BackendValue;
+  /** The server's environment variables, for an stdio server that has any. Sent to the kernel's private file, not written to the config. */
+  env?: Record<string, string>;
   warnings: ImportNote[];
 }
 
@@ -114,13 +118,33 @@ function convertEntry(name: string, raw: unknown): Converted {
   if (raw.favorite === true) value.favorite = true;
 
   const warnings: ImportNote[] = [];
-  if (isPlainObject(raw.env) && Object.keys(raw.env).length > 0) {
-    // Only the names: the values are often secrets, and they are not stored.
-    warnings.push({ name, code: "env", detail: Object.keys(raw.env).join(", ") });
+  let env: Record<string, string> | undefined;
+  if (raw.env !== undefined) {
+    if (!isPlainObject(raw.env)) return fail("env.shape");
+    const checked = envBlock(raw.env);
+    if ("problem" in checked) return fail("env.invalid", checked.problem);
+    if (checked.vars.length > BACKEND_ENV_MAX_VARS) return fail("env.tooMany");
+    if (checked.vars.length > 0) {
+      if (transport === "stdio") env = Object.fromEntries(checked.vars);
+      // A remote server has no process of ours to give variables to: say so, by name.
+      else warnings.push({ name, code: "envIgnored", detail: checked.vars.map(([k]) => k).join(", ") });
+    }
   }
   const ignored = Object.keys(raw).filter((k) => !COMMON_KEYS.includes(k) && !used.includes(k));
   if (ignored.length > 0) warnings.push({ name, code: "ignored", detail: ignored.join(", ") });
-  return { entry: { name, value, warnings } };
+  return { entry: { name, value, ...(env !== undefined && { env }), warnings } };
+}
+
+/** The `env` block as name and value pairs, or the names that cannot be used (never a value). */
+function envBlock(raw: Record<string, unknown>): { vars: [string, string][] } | { problem: string } {
+  const bad: string[] = [];
+  const vars: [string, string][] = [];
+  for (const [k, v] of Object.entries(raw)) {
+    const fine = ENV_VAR_NAME.test(k) && typeof v === "string" && !v.includes("\0") && new TextEncoder().encode(v).length <= BACKEND_ENV_MAX_VALUE_BYTES;
+    if (fine) vars.push([k, v]);
+    else bad.push(k);
+  }
+  return bad.length > 0 ? { problem: bad.join(", ") } : { vars };
 }
 
 /** `command` (a string plus optional `args`, or an array that already holds the argv), or the code of what is wrong with it. */

@@ -12,13 +12,52 @@ test("the mcpServers wrapper and the flat name map both import", () => {
   assert.deepEqual(wrapped.problems, []);
 });
 
-test("env is dropped with a warning that names the variables, never their values", () => {
-  const secret = "sk-very-secret-value-123";
-  const r = one(JSON.stringify({ github: { command: "npx", args: ["srv"], env: { GITHUB_TOKEN: secret, DEBUG: "1" } } }));
+test("an stdio entry's env comes out beside the config value, which never holds it", () => {
+  const r = one(JSON.stringify({ github: { command: "npx", args: ["srv"], env: { GITHUB_TOKEN: "sk-secret-1", DEBUG: "1" } } }));
   assert.equal(r.entries.length, 1);
-  assert.deepEqual(r.entries[0]!.value, { transport: "stdio", command: ["npx", "srv"], policy: "shared" });
-  assert.deepEqual(r.entries[0]!.warnings, [{ name: "github", code: "env", detail: "GITHUB_TOKEN, DEBUG" }]);
+  const e = r.entries[0]!;
+  assert.deepEqual(e.value, { transport: "stdio", command: ["npx", "srv"], policy: "shared" });
+  assert.deepEqual(e.env, { GITHUB_TOKEN: "sk-secret-1", DEBUG: "1" });
+  assert.deepEqual(e.warnings, []);
+  assert.ok(!JSON.stringify(e.value).includes("sk-secret-1"), "the value must not be part of what is written to the config");
+});
+
+test("an empty env block imports as no env", () => {
+  const r = one(JSON.stringify({ a: { command: "npx", env: {} } }));
+  assert.equal(r.entries[0]!.env, undefined);
+  assert.deepEqual(r.entries[0]!.warnings, []);
+});
+
+test("an http entry's env is ignored with a warning that names the variables, never their values", () => {
+  const secret = "sk-very-secret-value-123";
+  const r = one(JSON.stringify({ remote: { url: "http://localhost:9001/mcp", env: { API_KEY: secret, DEBUG: "1" } } }));
+  assert.equal(r.entries.length, 1);
+  assert.equal(r.entries[0]!.env, undefined);
+  assert.deepEqual(r.entries[0]!.warnings, [{ name: "remote", code: "envIgnored", detail: "API_KEY, DEBUG" }]);
   assert.ok(!JSON.stringify(r).includes(secret), "the value must not reach the preview");
+});
+
+test("an env block that cannot be used refuses the entry and names only the bad variables", () => {
+  const secret = "sk-bad-name-secret";
+  const bad = one(JSON.stringify({ a: { command: "npx", env: { "BAD NAME": secret, GOOD: "1" } }, b: { command: "npx" } }));
+  assert.deepEqual(bad.entries.map((e) => e.name), ["b"]);
+  assert.deepEqual(bad.problems, [{ name: "a", code: "env.invalid", detail: "BAD NAME" }]);
+  assert.ok(!JSON.stringify(bad).includes(secret));
+
+  const notString = one(JSON.stringify({ a: { command: "npx", env: { PORT: 8080 } } }));
+  assert.deepEqual(notString.problems, [{ name: "a", code: "env.invalid", detail: "PORT" }]);
+
+  const nul = one(JSON.stringify({ a: { command: "npx", env: { K: "a\u0000b" } } }));
+  assert.deepEqual(nul.problems, [{ name: "a", code: "env.invalid", detail: "K" }]);
+
+  const shape = one(JSON.stringify({ a: { command: "npx", env: ["X=1"] } }));
+  assert.deepEqual(shape.problems, [{ name: "a", code: "env.shape" }]);
+
+  const many = Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`V${i}`, "1"]));
+  assert.deepEqual(one(JSON.stringify({ a: { command: "npx", env: many } })).problems, [{ name: "a", code: "env.tooMany" }]);
+
+  const big = one(JSON.stringify({ a: { command: "npx", env: { K: "x".repeat(8193) } } }));
+  assert.deepEqual(big.problems, [{ name: "a", code: "env.invalid", detail: "K" }]);
 });
 
 test("type and url choose the transport: streamable-http and http map to http", () => {

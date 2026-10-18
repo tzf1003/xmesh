@@ -132,12 +132,19 @@ a { color: var(--accent); }
 .btn.small { padding: 2px 9px; font-size: 12px; border-radius: 7px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row.end { justify-content: flex-end; }
+.env-row { flex-wrap: nowrap; margin-bottom: 6px; }
+.env-row input { flex: 1 1 0; min-width: 0; }
+.env-row input:first-child { flex: 0 0 12em; }
 
 .banner { border-radius: 10px; padding: 10px 14px; border: 1px solid transparent; background: var(--info-bg); }
 .banner.warn { background: var(--warn-bg); }
 .banner.danger { background: var(--danger-bg); }
 .banner.ok { background: var(--ok-bg); }
 .banner ul { margin: 4px 0 0; padding-left: 20px; }
+/* Whether the kernel has the configuration, above every page and in view while the page scrolls. */
+.apply-bar { position: sticky; top: -22px; z-index: 4; max-width: 1040px; margin: -22px auto 0; padding: 14px 0; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+.apply-bar .grow { flex: 1; }
+.apply-bar p { margin: 4px 0 0; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-2); vertical-align: top; }

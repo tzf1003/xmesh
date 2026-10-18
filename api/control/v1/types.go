@@ -96,6 +96,8 @@ type Backend struct {
 	Policy   string `json:"policy"`
 	State    string `json:"state"`
 	Favorite bool   `json:"favorite"`
+	// EnvNames are the names of the environment variables set for a stdio backend; never their values.
+	EnvNames []string `json:"env_names,omitempty"`
 }
 
 type Limits struct {
@@ -349,6 +351,18 @@ type ConfigEdit struct {
 type ConfigEditRequest struct {
 	Edits  []ConfigEdit `json:"edits"`
 	DryRun bool         `json:"dry_run,omitempty"`
+}
+
+// BackendEnvPatch is PATCH /v1/backends/{name}/env: Unset is applied first, then Set.
+type BackendEnvPatch struct {
+	Set   map[string]string `json:"set,omitempty"`
+	Unset []string          `json:"unset,omitempty"`
+}
+
+// BackendEnvResponse lists the variable names a backend has after a change. Values are never returned.
+type BackendEnvResponse struct {
+	Name  string   `json:"name"`
+	Names []string `json:"names"`
 }
 
 // PairDocument is the public pairing file; it matches mesh.Trusted.

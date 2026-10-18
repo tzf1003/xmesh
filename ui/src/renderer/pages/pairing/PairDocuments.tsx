@@ -30,7 +30,7 @@ export function PairDocuments({ ctx }: { ctx: PageContext }): JSX.Element {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError | undefined>();
-  const [done, setDone] = useState<{ name: string; restart: boolean } | undefined>();
+  const [done, setDone] = useState<{ name: string } | undefined>();
   const parsed = text.trim() === "" ? undefined : parsePairText(text);
   const matches = parsed?.ok === true && fingerprintMatches(typed, parsed.pair.fingerprint);
 
@@ -42,7 +42,8 @@ export function PairDocuments({ ctx }: { ctx: PageContext }): JSX.Element {
     setConfirm(false);
     if (r.ok) {
       setErr(undefined);
-      setDone({ name: r.data.name, restart: r.data.restart_required });
+      setDone({ name: r.data.name });
+      ctx.applied({ restart: r.data.restart_required, paths: [], applyErrors: [] });
       setText("");
       setTyped("");
       ctx.toast(t("pair.imported", { name: r.data.name }));
@@ -108,7 +109,7 @@ export function PairDocuments({ ctx }: { ctx: PageContext }): JSX.Element {
       {err && <ErrorBanner error={err} />}
       {done && (
         <Banner kind="ok" testid="pair-done">
-          {t(done.restart ? "pair.doneRestart" : "pair.done", { name: done.name })}
+          {t("pair.done", { name: done.name })}
         </Banner>
       )}
       {confirm && parsed?.ok === true && (

@@ -28,7 +28,7 @@ func TestBackendProcess(t *testing.T) {
 		return
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "mock-ida", Version: "1"}, nil)
-	for _, name := range []string{"echo", "crash", "slow"} {
+	for _, name := range []string{"echo", "crash", "slow", "env"} {
 		name := name
 		server.AddTool(&mcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if name == "crash" {
@@ -41,6 +41,10 @@ func TestBackendProcess(t *testing.T) {
 			_ = json.Unmarshal(r.Params.Arguments, &args)
 			if _, ok := args["_lease_token"]; ok {
 				return nil, toolerr.New("internal", "token reached backend", "op", "test")
+			}
+			if name == "env" {
+				variable, _ := args["name"].(string)
+				args = map[string]any{"value": os.Getenv(variable)}
 			}
 			b, _ := json.Marshal(args)
 			return &mcp.CallToolResult{StructuredContent: args, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}, nil

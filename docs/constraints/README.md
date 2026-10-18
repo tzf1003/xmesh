@@ -63,6 +63,7 @@
 | [CON-TOOL-09](tools.md#con-tool-09) | 必须 | `fs.edit` 的 `old_string` 不唯一则不修改 |
 | [CON-TOOL-10](tools.md#con-tool-10) | 必须 | 后端工具参数与返回原样透传 |
 | [CON-TOOL-11](tools.md#con-tool-11) | 必须 | exclusive 调用携带 `_lease_token`，转发前剥离 |
+| [CON-TOOL-12](tools.md#con-tool-12) | 必须 | stdio 后端的环境变量只写不读，存 `0600` 文件，改动只重启该后端 |
 
 ## 并发与资源
 

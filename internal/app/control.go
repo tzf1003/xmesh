@@ -9,6 +9,7 @@ import (
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/cwd"
@@ -26,18 +27,19 @@ var Version = "dev"
 // controlDeps is what Run hands the control channel. The channel is a window
 // onto the running node, never a dependency of it (CON-ARCH-10).
 type controlDeps struct {
-	store     *config.Store
-	stateDir  string
-	auditDir  string
-	log       *audit.Logger
-	agent     *agent.Agent // nil on a node without the agent role
-	network   mesh.Network // nil in --local mode
-	self      identity.Principal
-	mode      string
-	allowSIDs []string
-	pairing   control.PairingAdmin // nil unless the node runs the LAN network
-	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
-	resume    func()
+	store      *config.Store
+	backendEnv *backendenv.Store // nil: the node cannot keep backend variables
+	stateDir   string
+	auditDir   string
+	log        *audit.Logger
+	agent      *agent.Agent // nil on a node without the agent role
+	network    mesh.Network // nil in --local mode
+	self       identity.Principal
+	mode       string
+	allowSIDs  []string
+	pairing    control.PairingAdmin // nil unless the node runs the LAN network
+	drain      func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
+	resume     func()
 	// peerInfo is the gateways' sys.info readings by device; ok is false while the node runs no gateway.
 	peerInfo func() (readings map[string]gateway.DeviceInfo, ok bool)
 	// roles starts, stops and moves the roles that follow the configuration.
@@ -48,6 +50,10 @@ type controlDeps struct {
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
 	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Pairing: d.pairing}
+	options.BackendEnv = d.backendEnv
+	if d.agent != nil {
+		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
+	}
 	if d.roles != nil {
 		options.Applier = d.roles
 		options.IngressNow = d.roles.ingressAdmin
