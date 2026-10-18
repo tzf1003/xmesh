@@ -29,6 +29,8 @@ Gateway 与入口不保存设备资源，见 [INV-03](../constraints/invariants.
 
 Gateway 三个自有工具在 `tools/list` 里带完整的输入模式和说明，模型据此填写 `device`、`pattern`、`cwd`、`env`。
 
+设置过默认 device 的连接，`tools/list` 额外展开该设备的完整工具表（含 `inputSchema`），不受 `expose_backends: favorite` 限制。默认设备是未带前缀调用的落点，客户端不应为了拿到 schema 再猜子串；其他设备仍按 favorite 过滤。
+
 ## CTR-GW-02
 
 ### devices.list
@@ -56,9 +58,9 @@ scope 不含 `devices:read` 的客户端得到 `unauthorized`。
 
 ### tools.search
 
-参数：`device`（节点名或 `local`）、`pattern`（大小写不敏感的子串，不是正则）。
+参数：`device`（节点名或 `local`）、`pattern`（大小写不敏感的子串，不是正则；传 `*` 列出全部）。
 
-在该设备的完整工具表里查找，包括当前 `expose_backends: favorite` 下没有放进默认 `tools/list` 的工具。返回 `tools`：`name`（已带前缀）、`description`。上限 100 条，带 `truncated`。
+在该设备的完整工具表里查找，包括当前 `expose_backends: favorite` 下没有放进默认 `tools/list` 的工具。返回 `tools`：`name`（已带前缀）、`description`、`inputSchema`。上限 100 条，带 `truncated`。
 
 `pattern` 为空 → `invalid_args`。设备不存在 → `not_found`。
 

@@ -20,7 +20,7 @@
 
 | error | 何时 | 额外字段 |
 | --- | --- | --- |
-| `invalid_args` | 参数类型或必填项不对 | `field`；Windows 上命令或 shell 是 Store 应用执行别名时另带 `reason: "app_execution_alias"` 与 `path` |
+| `invalid_args` | 参数类型或必填项不对 | `field`；Windows 上命令或 shell 是 Store 应用执行别名时另带 `reason: "app_execution_alias"` 与 `path`；`backend.*` 另带 `reason: "unknown_backend"` / `"not_exclusive"` |
 | `invalid_cwd` | 路径解析或策略前的路径不成立 | `path`、`reason`：`not_found` / `parent_missing` / `symlink_escape` / `denied` / `not_directory` |
 | `policy_denied` | 策略引擎拒绝 | `rule`、`reason` |
 | `conflict` | 乐观并发失败，或移动目标已存在 | `path`、`current_sha256`、`mtime` |
