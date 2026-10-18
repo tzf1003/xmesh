@@ -44,6 +44,17 @@ type Options struct {
 	ApplyBackendEnv func()
 	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
 	Pairing PairingAdmin
+	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
+	// nil on a node that has none.
+	Applier Applier
+}
+
+// Applier is the part of the node that puts a new configuration generation into effect in the
+// running process, such as moving the gateway to a new listen address.
+type Applier interface {
+	// Settle waits until every generation adopted so far has been applied and returns what could
+	// not be. With retry it first tries again what failed last time.
+	Settle(ctx context.Context, retry bool) []v1.ApplyError
 }
 
 func (o Options) heartbeat() time.Duration {

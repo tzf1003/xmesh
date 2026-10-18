@@ -47,7 +47,7 @@
 | CTR-PTY-01 CTR-PTY-02 | 四状态、long-poll、关闭顺序、列表不含缓冲文本 |
 | CTR-FS-01 CTR-FS-02 CTR-FS-03 CTR-FS-04 CTR-FS-05 CTR-FS-06 CTR-FS-07 | 各文件工具的错误码与成功字段 |
 | CTR-CFG-01 | `examples/xmesh.config.json` 通过模式；Funnel 配了 domain 的反例失败；非法配置拒绝启动 |
-| CTR-CFG-02 | 对应 [CTR-CFG-01](contracts/config.md#ctr-cfg-01) 的“热加载与冷加载”一节（该节尚未单独编号，测试以 `Test_CTRCFG02_*` 命名）：热加载失败保持上一份有效配置，写入 `policy_reload_failed` 审计事件并累计到 `sys.info` 的 `policy_reload_failures`；`node`、`mesh`、`ingress` 变更只置 `restart_required`、不改变运行中的值；后端监督循环随配置增删后端 |
+| CTR-CFG-02 | 对应 [CTR-CFG-01](contracts/config.md#ctr-cfg-01) 的“热加载与冷加载”一节（该节尚未单独编号，测试以 `Test_CTRCFG02_*` 命名）：热加载失败保持上一份有效配置，写入 `policy_reload_failed` 审计事件并累计到 `sys.info` 的 `policy_reload_failures`；`node.name`、`node.roles` 里 `agent` 与 `ingress` 的增减、`mesh`、`ingress`、`audit` 变更只置 `restart_required`、不改变运行中的值；`gateway.listen` 与 `node.roles` 里 `gateway` 的增减在运行中生效，没能应用的部分留在 `apply_errors` 与 `policy_reload_failed` 警告里，运行中的状态不变；禁止目录文件无法加载时沿用上一份；后端监督循环随配置增删后端 |
 | RUL-01 RUL-04 RUL-05 RUL-07 RUL-08 RUL-10 RUL-11 RUL-12 | 排队含 `retry_after_ms`；缓存；内联阈值；状态名；MCP 承载；编辑错误码；规范化命令行；closed 配额 |
 
 Claude Code 连上本机 URL，完成一次 `fs.read`、一次 `fs.write`、一次 `pty.open` + `pty.write` + `pty.read`。这是门 1 的人工观察，不代替上表的单元测试。

@@ -133,14 +133,19 @@ func New(o Options) *Gateway {
 
 // Reconfigure applies the gateway.quota and gateway.expose_backends of a new
 // configuration generation. Calls already admitted keep the limits they were
-// given; later calls use the new ones.
+// given; later calls use the new ones. A change of expose_backends refreshes the
+// tool lists of the connected clients.
 func (g *Gateway) Reconfigure(q config.Quota, favorite bool) {
-	g.favorite.Store(favorite)
+	changed := g.favorite.Swap(favorite) != favorite
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if q != g.quotaApplied {
 		g.quota.SetLimits(q.Limits())
 		g.quotaApplied = q
+	}
+	g.mu.Unlock()
+	if changed {
+		// Which tools tools/list shows depends on it, so connected clients are told to read the list again.
+		g.refreshViews()
 	}
 }
 func (g *Gateway) discover() {

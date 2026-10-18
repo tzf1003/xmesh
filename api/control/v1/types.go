@@ -137,12 +137,15 @@ type GatewayUpdateRequest struct {
 	Hosts  []string `json:"hosts"`
 }
 
-// GatewayUpdateResponse echoes what was written. RestartRequired is true when Listen changed.
+// GatewayUpdateResponse echoes what was written. Since API 1.6 the running gateway moves to a new Listen
+// itself, so RestartRequired stays false; a move that failed is in ApplyErrors and the gateway is still
+// where it was.
 type GatewayUpdateResponse struct {
-	Listen          string   `json:"listen"`
-	Access          []string `json:"access"`
-	Hosts           []string `json:"hosts"`
-	RestartRequired bool     `json:"restart_required"`
+	Listen          string       `json:"listen"`
+	Access          []string     `json:"access"`
+	Hosts           []string     `json:"hosts"`
+	RestartRequired bool         `json:"restart_required"`
+	ApplyErrors     []ApplyError `json:"apply_errors"`
 }
 
 // GatewayAddress is one address the gateway answers on right now.
@@ -326,6 +329,15 @@ type ConfigReloadResponse struct {
 	ChangedPaths    []string         `json:"changed_paths"`
 	RestartRequired bool             `json:"restart_required"`
 	RestartPaths    []string         `json:"restart_paths"`
+	ApplyErrors     []ApplyError     `json:"apply_errors"`
+}
+
+// ApplyError is a part of the configuration that is valid but could not be put into effect in the
+// running process, for example a gateway.listen whose port is taken. The process keeps running
+// as it was and the failure stays reported until a later reload succeeds.
+type ApplyError struct {
+	Section string `json:"section"`
+	Message string `json:"message"`
 }
 
 // ConfigEdit is one JSON Pointer edit of the configuration file (ConfigEdit in control-config.schema.json).

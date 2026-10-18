@@ -89,7 +89,8 @@ func Test_GatewayTokenOnlyForGatewayNodes(t *testing.T) {
 	}
 }
 
-// PUT /v1/gateway changes access and host names at once; a changed listen address needs a restart.
+// PUT /v1/gateway changes access and host names at once; a changed listen address is moved to by the
+// running gateway, so it needs no restart.
 func Test_GatewayUpdateReachSettings(t *testing.T) {
 	f := newFixtureConfig(t, gatewayTokenConfig(""))
 	var out v1.GatewayUpdateResponse
@@ -103,8 +104,11 @@ func Test_GatewayUpdateReachSettings(t *testing.T) {
 	}
 	body.Listen = "127.0.0.1:8080"
 	decodeAs(t, f.ok("PUT", "/v1/gateway", body, "GatewayUpdateResponse"), &out)
-	if !out.RestartRequired {
-		t.Fatal("a listen change did not ask for a restart")
+	if out.RestartRequired || out.Listen != "127.0.0.1:8080" {
+		t.Fatalf("a listen change asked for a restart: %+v", out)
+	}
+	if got := f.store.Get().Gateway.Listen; got != "127.0.0.1:8080" {
+		t.Fatalf("the running generation still has listen %q", got)
 	}
 	// Malformed access entries, an address used as a host name, and a specific bind address are refused.
 	raw, _ := os.ReadFile(f.path)

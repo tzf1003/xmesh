@@ -2,6 +2,7 @@ package control
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
@@ -46,6 +48,9 @@ func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
 	w.Header().Set("ETag", `"`+etag+`"`)
 	writeJSON(w, 200, out)
 }
+
+// applySettleTimeout is how long a reload waits for the roles to follow the new generation.
+const applySettleTimeout = 10 * time.Second
 
 // maxConfigEdits bounds one PATCH /v1/config; a form edit needs a handful, a whole file goes through PUT.
 const maxConfigEdits = 64
@@ -199,12 +204,12 @@ func (s *Server) watchConfigFile() {
 	if err != nil {
 		return
 	}
-	s.adoptFileLocked(raw, v1.ActorFile)
+	s.adoptFileLocked(context.Background(), raw, v1.ActorFile, false)
 }
 
 // reloadConfig re-reads the configuration file now. The UI calls it after it has written
 // the file by other means, or to see the outcome without waiting for the watcher's next tick.
-func (s *Server) reloadConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
+func (s *Server) reloadConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	raw, err := os.ReadFile(s.o.Store.Path())
@@ -212,14 +217,16 @@ func (s *Server) reloadConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
 		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
 		return
 	}
-	writeJSON(w, 200, s.adoptFileLocked(raw, v1.ActorControl))
+	writeJSON(w, 200, s.adoptFileLocked(r.Context(), raw, v1.ActorControl, true))
 }
 
 // adoptFileLocked re-reads the store from raw, the file's current content, and announces
 // what changed on the event stream. A valid new content becomes the generation in effect
 // (restart-only sections keep their running values); invalid content keeps the last good
-// one and is reported as load_error. The caller holds configMu.
-func (s *Server) adoptFileLocked(raw []byte, actor v1.Actor) v1.ConfigReloadResponse {
+// one and is reported as load_error. Roles that start, stop or move with the new generation are
+// given a short while to do so, and what still failed is reported as apply_errors; retry tries again
+// what failed last time. The caller holds configMu.
+func (s *Server) adoptFileLocked(ctx context.Context, raw []byte, actor v1.Actor, retry bool) v1.ConfigReloadResponse {
 	changed := sum(raw) != s.digest
 	s.digest = sum(raw)
 	adopted := s.o.Store.Refresh()
@@ -228,7 +235,14 @@ func (s *Server) adoptFileLocked(raw []byte, actor v1.Actor) v1.ConfigReloadResp
 	s.failures = failures
 	pending := s.o.Store.RestartPending()
 	etag := etagOf(raw)
-	out := v1.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + s.o.Store.Digest(), ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending}
+	out := v1.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + s.o.Store.Digest(), ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending, ApplyErrors: []v1.ApplyError{}}
+	if s.o.Applier != nil {
+		settle, cancel := context.WithTimeout(ctx, applySettleTimeout)
+		if errs := s.o.Applier.Settle(settle, retry); errs != nil {
+			out.ApplyErrors = errs
+		}
+		cancel()
+	}
 	if _, err := config.Parse(raw); err != nil {
 		out.LoadError = loadError(err)
 	} else {
@@ -364,13 +378,25 @@ func diffConfigs(before, after map[string]any) []v1.ConfigChange {
 	}
 	diffValue("", before, after, &out)
 	for i := range out {
-		out[i].RestartRequired = config.NeedsRestart(out[i].Pointer)
+		out[i].RestartRequired = restartNeeded(out[i])
 		out[i].WeakensSecurity = weakensSecurity(out[i], before, after)
 	}
 	if out == nil {
 		out = []v1.ConfigChange{}
 	}
 	return out
+}
+
+// restartNeeded reports whether the change falls under config.RestartPaths. node.roles is judged by
+// the roles that were added or removed: those in config.HotRoles come and go without a restart.
+func restartNeeded(c v1.ConfigChange) bool {
+	if c.Pointer != "/node/roles" {
+		return config.NeedsRestart(c.Pointer)
+	}
+	var before, after []string
+	_ = json.Unmarshal(c.Before, &before)
+	_ = json.Unmarshal(c.After, &after)
+	return config.RolesNeedRestart(before, after)
 }
 
 func escapePointer(key string) string {
@@ -404,6 +430,14 @@ func diffValue(ptr string, a, b any, out *[]v1.ConfigChange) {
 			return
 		}
 	case []any:
+		if y, ok := b.([]any); ok && ptr == "/node/roles" {
+			// The roles are a set: which of them need a restart does not depend on their order, so the
+			// list is one change rather than one per position.
+			if !reflect.DeepEqual(x, y) {
+				*out = append(*out, v1.ConfigChange{Pointer: ptr, Op: "replace", Before: raw(a), After: raw(b)})
+			}
+			return
+		}
 		if y, ok := b.([]any); ok {
 			n := min(len(x), len(y))
 			for i := 0; i < n; i++ {

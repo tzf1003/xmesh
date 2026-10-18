@@ -390,20 +390,20 @@ test("PATCH /v1/config delete removes a key and leaves the rest of the document 
   assert.equal("disabled_tools" in ((end.agent as Record<string, unknown>) ?? {}), false);
   assert.deepEqual(end.node, { name: "win-dev-01", roles: ["agent"] });
 });
-test("the gateway reach is replaced as a whole: access and hosts apply now, a listen change asks for a restart", async () => {
+test("the gateway reach is replaced as a whole: access, hosts and the listen scope all apply now", async () => {
   const { k, service } = await setup();
   const hot = await service.updateGateway({ listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
   assert.deepEqual(hot, {
     ok: true,
-    data: { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"], restart_required: false },
+    data: { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"], restart_required: false, apply_errors: [] },
   });
   assert.deepEqual(last(k, "PUT", "/v1/gateway")?.body, { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
   assert.ok(k.currentStatus.gateway?.addresses.some((a) => a.url === "http://xmesh.home.example:8080/mcp"), "the status follows the new reach");
 
   const cold = await service.updateGateway({ listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
   assert.ok(cold.ok);
-  assert.equal(cold.data.restart_required, true);
-  assert.equal(k.currentStatus.restart_required, true);
+  assert.equal(cold.data.restart_required, false);
+  assert.equal(k.currentStatus.restart_required, false);
   assert.deepEqual(k.currentStatus.gateway?.addresses.map((a) => a.kind), ["localhost"], "loopback only: one address");
 
   const bad = await service.updateGateway({ listen: ":8080", access: ["192.168.1.999"], hosts: [] });

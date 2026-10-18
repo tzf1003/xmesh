@@ -17,7 +17,53 @@ import (
 // start. A change to them is written to the file and reported through
 // restart_required; the running values stay until the next start. Every other
 // section takes effect in the next generation (docs/contracts/config.md).
-var RestartPaths = []string{"/node", "/mesh", "/gateway/listen", "/gateway/expose_backends", "/ingress", "/audit", "/agent/policy/windows_appcontainer"}
+//
+// /node/roles is on the list for the roles that cannot start or stop in process; the roles in
+// HotRoles come and go with the generation and are not part of what needs a restart.
+var RestartPaths = []string{"/node/name", "/node/roles", "/mesh", "/ingress", "/audit", "/agent/policy/windows_appcontainer"}
+
+// HotRoles are the node roles that a running process starts and stops itself when node.roles
+// changes, without touching the network or the other roles.
+var HotRoles = []string{"gateway"}
+
+// IsHotRole reports whether role comes and goes with the generation.
+func IsHotRole(role string) bool { return slices.Contains(HotRoles, role) }
+
+// ColdRoles returns the roles in roles that need a restart to change, sorted and without
+// duplicates.
+func ColdRoles(roles []string) []string {
+	out := []string{}
+	for _, r := range roles {
+		if !IsHotRole(r) && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// RolesNeedRestart reports whether changing node.roles from before to after needs a restart,
+// which it does when a role outside HotRoles is added or removed. Order never matters.
+func RolesNeedRestart(before, after []string) bool {
+	return !slices.Equal(ColdRoles(before), ColdRoles(after))
+}
+
+// mergeRoles is the role list of the generation in effect: the roles of the running process that
+// need a restart to change, then the hot roles the file asks for.
+func mergeRoles(startup, next []string) []string {
+	out := []string{}
+	for _, r := range startup {
+		if !IsHotRole(r) && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	for _, r := range next {
+		if IsHotRole(r) && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 // NeedsRestart reports whether a change at the JSON Pointer ptr, or at a
 // section nested below it, falls under RestartPaths. A pointer above a restart
@@ -183,10 +229,9 @@ func (s *Store) load() (*Config, bool) {
 	// Sections in RestartPaths keep the startup values until restart; the file's
 	// values are reported as pending.
 	s.restart = restartChanged(s.startup, c)
-	c.Node = s.startup.Node
+	c.Node.Name = s.startup.Node.Name
+	c.Node.Roles = mergeRoles(s.startup.Node.Roles, c.Node.Roles)
 	c.Mesh = s.startup.Mesh
-	c.Gateway.Listen = s.startup.Gateway.Listen
-	c.Gateway.ExposeBackends = s.startup.Gateway.ExposeBackends
 	c.Ingress = s.startup.Ingress
 	c.Audit = s.startup.Audit
 	c.Agent.Policy.WindowsAppContainer = s.startup.Agent.Policy.WindowsAppContainer
@@ -207,10 +252,9 @@ func restartChanged(startup, next *Config) []string {
 			out = append(out, ptr)
 		}
 	}
-	add("/node", !reflect.DeepEqual(startup.Node, next.Node))
+	add("/node/name", startup.Node.Name != next.Node.Name)
+	add("/node/roles", RolesNeedRestart(startup.Node.Roles, next.Node.Roles))
 	add("/mesh", !reflect.DeepEqual(startup.Mesh, next.Mesh))
-	add("/gateway/listen", startup.Gateway.Listen != next.Gateway.Listen)
-	add("/gateway/expose_backends", startup.Gateway.ExposeBackends != next.Gateway.ExposeBackends)
 	add("/ingress", !reflect.DeepEqual(startup.Ingress, next.Ingress))
 	add("/audit", !reflect.DeepEqual(startup.Audit, next.Audit))
 	add("/agent/policy/windows_appcontainer", startup.Agent.Policy.WindowsAppContainer != next.Agent.Policy.WindowsAppContainer)

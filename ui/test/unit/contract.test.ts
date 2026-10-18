@@ -87,13 +87,13 @@ test("the copied TypeScript types are the contract's generated file", () => {
 });
 
 test("the UI speaks the contract's API version", () => {
-  assert.equal(CONTROL_API_VERSION, "1.6");
+  assert.equal(CONTROL_API_VERSION, "1.7");
 });
 
 test("status, peers, sessions and control.json from the fake validate against the schemas", async () => {
   const status = await call(k.endpoint, "GET", "/v1/status");
   assert.equal(status.status, 200);
-  assert.equal(status.headers["x-xmesh-control-version"], "1.6");
+  assert.equal(status.headers["x-xmesh-control-version"], "1.7");
   validate("control-status", "StatusResponse", status.body);
   validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v1/peers")).body);
   validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v1/sessions")).body);
@@ -216,13 +216,14 @@ test("routes the UI calls exist in the contract route table with the capability 
   }
 });
 
-test("PUT /v1/gateway: the reach replacement validates, answers restart_required for a listen change only, and the status follows", async () => {
+test("PUT /v1/gateway: the reach replacement validates, applies a listen change without a restart, and the status follows", async () => {
   const gw = await FakeKernel.start({ pingMs: 50, capabilities: ["status", "events", "peers", "sessions", "drain", "pats", "gateway"] });
   try {
     const ok = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
     assert.equal(ok.status, 200);
     validate("control-gateway", "GatewayUpdateResponse", ok.body);
     assert.equal((ok.body as { restart_required: boolean }).restart_required, false, "access and hosts apply at once");
+    assert.deepEqual((ok.body as { apply_errors: unknown[] }).apply_errors, []);
     const status = await call(gw.endpoint, "GET", "/v1/status");
     validate("control-status", "StatusResponse", status.body);
     const info = (status.body as { gateway: { access: string[]; hosts: string[]; addresses: { kind: string; url: string }[] } }).gateway;
@@ -231,7 +232,8 @@ test("PUT /v1/gateway: the reach replacement validates, answers restart_required
     assert.ok(info.addresses.some((a) => a.kind === "host" && a.url === "http://xmesh.home.example:8080/mcp"));
 
     const loopback = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
-    assert.equal((loopback.body as { restart_required: boolean }).restart_required, true, "a listen change needs a restart");
+    validate("control-gateway", "GatewayUpdateResponse", loopback.body);
+    assert.equal((loopback.body as { restart_required: boolean }).restart_required, false, "a listen change applies at once");
 
     const bad = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["192.168.1.999"], hosts: [] });
     assert.equal(bad.status, 422);

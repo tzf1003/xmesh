@@ -254,7 +254,7 @@ export interface PanelApi {
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
   /** Applies JSON Pointer edits to the config on disk (`PATCH /v1/config`); the form-style settings write through here. */
   patchConfig(request: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>>;
-  /** Sets and removes environment variables of a stdio backend (control API 1.6). The kernel restarts only that backend; the answer lists names, never values. */
+  /** Sets and removes environment variables of a stdio backend (control API 1.7). The kernel restarts only that backend; the answer lists names, never values. */
   patchBackendEnv(request: BackendEnvRequest): Promise<DataResult<BackendEnvResponse>>;
   /** Removes every variable of a backend. */
   clearBackendEnv(name: string): Promise<ActionResult>;
@@ -487,6 +487,8 @@ export interface ConfigReloadResponse {
   changed_paths: string[];
   restart_required: boolean;
   restart_paths: string[];
+  /** Valid settings the running kernel could not put into effect, such as a listen address that is taken (control API 1.6). Absent from older kernels. */
+  apply_errors?: { section: string; message: string }[];
 }
 
 export const DENY_FILE_MAX_BYTES = 64 * 1024;

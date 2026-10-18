@@ -58,13 +58,13 @@ func section(doc map[string]any, name string) map[string]any {
 }
 
 func Test_NeedsRestartPointers(t *testing.T) {
-	restart := []string{"", "/node", "/node/name", "/mesh/mode", "/gateway/listen", "/gateway/expose_backends", "/ingress/oauth/issuer", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy", "/gateway"}
+	restart := []string{"", "/node", "/node/name", "/node/roles", "/mesh/mode", "/ingress/oauth/issuer", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy"}
 	for _, ptr := range restart {
 		if !NeedsRestart(ptr) {
 			t.Errorf("%q should need a restart", ptr)
 		}
 	}
-	hot := []string{"/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer"}
+	hot := []string{"/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway", "/gateway/listen", "/gateway/expose_backends", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer", "/node_x"}
 	for _, ptr := range hot {
 		if NeedsRestart(ptr) {
 			t.Errorf("%q should apply without a restart", ptr)
@@ -81,8 +81,8 @@ func Test_RestartChangedUsesRestartPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	edits := map[string]func(doc map[string]any){
-		"/node":                              func(doc map[string]any) { section(doc, "node")["name"] = "other-node" },
-		"/gateway/listen":                    func(doc map[string]any) { section(doc, "gateway")["listen"] = "127.0.0.1:8181" },
+		"/node/name":                         func(doc map[string]any) { section(doc, "node")["name"] = "other-node" },
+		"/node/roles":                        func(doc map[string]any) { section(doc, "node")["roles"] = []string{"gateway"} },
 		"/audit":                             func(doc map[string]any) { section(doc, "audit")["retention"] = "24h" },
 		"/agent/policy/windows_appcontainer": func(doc map[string]any) { section(section(doc, "agent"), "policy")["windows_appcontainer"] = true },
 	}
@@ -107,6 +107,53 @@ func Test_RestartChangedUsesRestartPaths(t *testing.T) {
 	}
 }
 
+func Test_RolesNeedRestart(t *testing.T) {
+	cases := []struct {
+		before, after []string
+		restart       bool
+	}{
+		{[]string{"agent", "gateway"}, []string{"agent"}, false},
+		{[]string{"agent"}, []string{"agent", "gateway"}, false},
+		{[]string{"gateway", "agent"}, []string{"agent", "gateway"}, false},
+		{[]string{"agent", "gateway"}, []string{"gateway"}, true},
+		{[]string{"gateway"}, []string{"gateway", "agent"}, true},
+		{[]string{"agent", "gateway"}, []string{"agent", "ingress"}, true},
+	}
+	for _, c := range cases {
+		if got := RolesNeedRestart(c.before, c.after); got != c.restart {
+			t.Errorf("%v -> %v: restart = %v", c.before, c.after, got)
+		}
+	}
+}
+
+// The gateway role comes and goes with the generation: it is in the roles of the generation in
+// effect at once and asks for no restart, while a role outside HotRoles waits for one.
+func Test_HotRolesFollowTheGeneration(t *testing.T) {
+	f := newReloadFixture(t)
+	s, err := NewStore(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.write(func(doc map[string]any) { section(doc, "node")["roles"] = []string{"agent"} })
+	if got := s.Get().Node.Roles; !slices.Equal(got, []string{"agent"}) {
+		t.Fatalf("gateway not removed from the roles in effect: %v", got)
+	}
+	if pending := s.RestartPending(); len(pending) != 0 {
+		t.Fatalf("removing the gateway asked for a restart: %v", pending)
+	}
+	f.write(nil)
+	if got := s.Get().Node.Roles; !slices.Equal(got, []string{"agent", "gateway"}) {
+		t.Fatalf("gateway not added back: %v", got)
+	}
+	f.write(func(doc map[string]any) { section(doc, "node")["roles"] = []string{"gateway"} })
+	if got := s.Get().Node.Roles; !slices.Equal(got, []string{"agent", "gateway"}) {
+		t.Fatalf("a role that needs a restart left the running roles: %v", got)
+	}
+	if pending := s.RestartPending(); !slices.Equal(pending, []string{"/node/roles"}) {
+		t.Fatalf("RestartPending = %v", pending)
+	}
+}
+
 func Test_RestartPendingListsSections(t *testing.T) {
 	f := newReloadFixture(t)
 	s, err := NewStore(f.path)
@@ -120,7 +167,7 @@ func Test_RestartPendingListsSections(t *testing.T) {
 	if !s.Refresh() {
 		t.Fatal("a valid edit did not take effect")
 	}
-	if got := s.RestartPending(); !slices.Equal(got, []string{"/node"}) {
+	if got := s.RestartPending(); !slices.Equal(got, []string{"/node/name"}) {
 		t.Fatalf("RestartPending = %v", got)
 	}
 	if !s.Get().Agent.Policy.AllowDangerous {

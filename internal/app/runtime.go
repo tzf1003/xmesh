@@ -130,39 +130,27 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	servers := []*http.Server{}
 	listeners := []net.Listener{}
-	gateways := []*gateway.Gateway{}
-	var gatewaysMu sync.Mutex
-	pendingDrain := map[string]bool{}
+	registry := newGatewayRegistry()
 	addGateway := func(g *gateway.Gateway) {
-		gatewaysMu.Lock()
-		for name := range pendingDrain {
-			g.Drain(name)
-		}
-		gateways = append(gateways, g)
-		gatewaysMu.Unlock()
+		registry.add(g)
 		// Read the generation after registering, so a change landing between the two is
-		// either seen here or delivered to the subscription below.
+		// either seen here or delivered to the subscription.
 		gw := store.Get().Gateway
 		g.Reconfigure(gw.Quota, gw.ExposeBackends == "favorite")
 	}
-	// Generations that take effect reach the running gateways; the agent re-reads its own
-	// sections on every call. Sections in config.RestartPaths keep their startup values.
-	unsubscribe := store.Subscribe(func(next *config.Config) {
-		gatewaysMu.Lock()
-		current := append([]*gateway.Gateway{}, gateways...)
-		gatewaysMu.Unlock()
-		for _, g := range current {
-			g.Reconfigure(next.Gateway.Quota, next.Gateway.ExposeBackends == "favorite")
-		}
-	})
-	defer unsubscribe()
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go store.Watch(watchCtx, time.Second)
 	errc := make(chan error, 8)
 	var wg sync.WaitGroup
+	// roles starts, stops and moves the roles that follow the configuration; it exists once the
+	// network is open.
+	var roles *roleRuntime
 	defer func() {
-		for _, g := range gateways {
+		if roles != nil {
+			roles.close()
+		}
+		for _, g := range registry.all() {
 			g.Close()
 		}
 		if a != nil {
@@ -221,15 +209,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", a.HTTP(auth))
 		if !o.Local {
-			mux.Handle("/control/drain", a.Control(auth, func(name string) {
-				gatewaysMu.Lock()
-				pendingDrain[name] = true
-				current := append([]*gateway.Gateway{}, gateways...)
-				gatewaysMu.Unlock()
-				for _, g := range current {
-					g.Drain(name)
-				}
-			}))
+			mux.Handle("/control/drain", a.Control(auth, registry.drain))
 		}
 		var handler http.Handler = mux
 		if lan, ok := network.(*mesh.LAN); ok {
@@ -269,30 +249,25 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	// Both the catalogue refresh and the device info read dial through here; the pacing is per peer.
 	dial := gateway.Paced(dialPeer, time.Now)
+	roles = newRoleRuntime(gatewayDeps{store: store, registry: registry, log: log, network: network, nodeID: self.Node, localPeer: localPeer, discover: discover, changed: changed, dial: dial, mode: c.Mesh.Mode}, o.StateDir, func(e error) {
+		select {
+		case errc <- e:
+		default:
+		}
+	})
+	// Generations that take effect reach the running gateways; the agent re-reads its own sections
+	// on every call. Sections in config.RestartPaths keep their startup values. The roles follow in
+	// the worker, which starts below.
+	unsubscribe := store.Subscribe(func(next *config.Config) {
+		for _, g := range registry.all() {
+			g.Reconfigure(next.Gateway.Quota, next.Gateway.ExposeBackends == "favorite")
+		}
+		roles.submit(next)
+	})
+	defer unsubscribe()
 	if c.HasRole("gateway") {
-		// Every gateway request needs a token (CTR-GW-07). The token is created only when none exists.
-		created, e := control.EnsureDefaultPAT(store, o.StateDir)
-		if e != nil {
-			return fmt.Errorf("无法创建本机 Gateway 令牌: %w", e)
-		}
-		if created {
-			fmt.Fprintln(os.Stderr, "gateway: 已创建本机 Gateway 令牌（PAT default），令牌文件在状态目录的 pats 下")
-		}
-		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Changed: changed, Dial: dial, Audit: log})
-		addGateway(g)
-		handler := g.HTTP(gateway.LocalAuthentication(store))
-		listener, e := net.Listen("tcp", c.Gateway.Listen)
-		if e != nil {
+		if e := roles.startGateway(c); e != nil {
 			return e
-		}
-		launch(listener, handler, "Gateway MCP", nil)
-		// In tailnet mode the tailnet address is served by the tsnet netstack, not by the OS (CON-NET).
-		if tn, ok := network.(tailnetGatewayListener); ok && c.Mesh.Mode == "tailnet" && !gatewayLoopbackOnly(c.Gateway.Listen) {
-			tailnetListener, e := tn.ListenPort(gatewayPort(c.Gateway.Listen))
-			if e != nil {
-				return e
-			}
-			launch(tailnetListener, handler, "Gateway MCP (tailnet)", nil)
 		}
 	}
 	var ingress control.IngressAdmin
@@ -394,47 +369,30 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		launch(listener, handler, "Ingress MCP", tlsConfig)
 	}
-	if len(servers) == 0 {
+	if _, serving := roles.gatewayListen(); len(servers) == 0 && !serving {
 		return fmt.Errorf("没有可启动的角色")
 	}
 	mode := c.Mesh.Mode
 	if o.Local {
 		mode = "local"
 	}
-	var peerInfo func() map[string]gateway.DeviceInfo
-	if c.HasRole("gateway") {
-		peerInfo = func() map[string]gateway.DeviceInfo {
-			gatewaysMu.Lock()
-			current := append([]*gateway.Gateway{}, gateways...)
-			gatewaysMu.Unlock()
-			return readings(current)
+	// From here the roles follow the configuration. A generation that arrived while the node was
+	// starting is applied first; applying the current one again does nothing if it changes nothing.
+	roles.begin(watchCtx)
+	roles.submit(store.Get())
+	peerInfo := func() (map[string]gateway.DeviceInfo, bool) {
+		if _, serving := roles.gatewayListen(); !serving {
+			return nil, false
 		}
+		return readings(registry.all()), true
 	}
 	var pairing control.PairingAdmin
 	if lan, ok := network.(*mesh.LAN); ok {
 		pairing = lan
 	}
-	defer startControl(controlDeps{store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, pairing: pairing, peerInfo: peerInfo,
-		drain: func(kill bool) {
-			gatewaysMu.Lock()
-			pendingDrain[c.Node.Name] = true
-			current := append([]*gateway.Gateway{}, gateways...)
-			gatewaysMu.Unlock()
-			for _, g := range current {
-				g.Drain(c.Node.Name)
-			}
-		},
-		resume: func() {
-			gatewaysMu.Lock()
-			delete(pendingDrain, c.Node.Name)
-			delete(pendingDrain, "")
-			current := append([]*gateway.Gateway{}, gateways...)
-			gatewaysMu.Unlock()
-			for _, g := range current {
-				g.Resume(c.Node.Name)
-				g.Resume("")
-			}
-		}})()
+	defer startControl(controlDeps{store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, pairing: pairing, peerInfo: peerInfo, roles: roles,
+		drain:  func(kill bool) { registry.drain(c.Node.Name) },
+		resume: func() { registry.resume(c.Node.Name, "") }})()
 	select {
 	case <-ctx.Done():
 		return nil

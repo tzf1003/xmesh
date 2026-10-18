@@ -1,5 +1,5 @@
 {
-  "api_version": "1.6",
+  "api_version": "1.7",
   "routes": [
     {
       "id": "control.status.get",
@@ -342,7 +342,7 @@
       "method": "PATCH",
       "path": "/v1/backends/{name}/env",
       "capability": "config.write",
-      "since": "1.6",
+      "since": "1.7",
       "query": null,
       "body": "urn:xmesh:schema:control-backends:1#/$defs/BackendEnvPatch",
       "response": "urn:xmesh:schema:control-backends:1#/$defs/BackendEnvResponse",
@@ -358,7 +358,7 @@
       "method": "DELETE",
       "path": "/v1/backends/{name}/env",
       "capability": "config.write",
-      "since": "1.6",
+      "since": "1.7",
       "query": null,
       "body": null,
       "response": null,
