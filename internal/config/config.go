@@ -458,12 +458,23 @@ func (c *Config) validateCI() error {
 		if b.Source == "import" && b.Dir == "" {
 			return fail(p + "/dir: source 为 import 时必须指定目录")
 		}
-		if b.Dir != "" && !filepath.IsAbs(b.Dir) {
+		if b.Dir != "" && !absAnyOS(b.Dir) {
 			return fail(p + "/dir")
 		}
 	}
 	return nil
 }
+
+// absAnyOS reports whether p is absolute on some supported system. A config written on one
+// system (the shared examples among them) must stay valid when another system loads it; whether
+// the directory exists is checked where it is used.
+func absAnyOS(p string) bool {
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') && (p[0]|0x20 >= 'a' && p[0]|0x20 <= 'z')
+}
+
 func Duration(s string) time.Duration { v, _ := time.ParseDuration(s); return v }
 func Size(s string) (int, error) {
 	re := regexp.MustCompile(`^([0-9]+)([KMGT]iB|B)?$`)
