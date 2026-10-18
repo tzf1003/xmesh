@@ -44,3 +44,12 @@ export function stepZoom(current: number, dir: 1 | -1): number {
 export function cssFamily(name: string, fallback: string): string | undefined {
   return isFontName(name) ? `"${name}", ${fallback}` : undefined;
 }
+
+/** Ctrl/Cmd + "+", "-" and "0" step or reset the panel's text size, as in a browser; nothing else is intercepted. */
+export function zoomKey(input: { type: string; key: string; control: boolean; meta: boolean; alt: boolean }): 1 | -1 | 0 | undefined {
+  if (input.type !== "keyDown" || input.alt || !(input.control || input.meta)) return undefined;
+  if (input.key === "+" || input.key === "=") return 1;
+  if (input.key === "-" || input.key === "_") return -1;
+  if (input.key === "0") return 0;
+  return undefined;
+}
