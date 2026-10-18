@@ -78,6 +78,11 @@ test("command search uses keyboard navigation and opens a device or configuratio
   await page.getByTestId("command-input").press("Enter");
   await expect(page.getByTestId("command-palette")).toHaveCount(0);
   await expect(page.getByTestId("topology-inspector")).toContainText("linux-box");
+  await page.locator('[data-node="mac-dev-01"]').click();
+  await page.getByTestId("open-search").click();
+  await page.getByTestId("command-input").fill("linux-box");
+  await page.getByTestId("command-input").press("Enter");
+  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("linux-box");
   await page.getByTestId("open-search").click();
   await page.getByTestId("command-input").fill("不存在的设备");
   await expect(page.getByTestId("command-palette")).toContainText("没有找到匹配项");
@@ -104,6 +109,10 @@ test("compact layout, large text and empty state remain usable", async () => {
   await expect(page.locator(".graph-list")).toBeVisible();
   await page.locator(".graph-list-row").filter({ hasText: "mac-dev-01" }).click();
   await expect(page.getByTestId("topology-inspector")).toContainText("mac-dev-01");
+  h.kernel.emit("call", { tool: "exec.run", device: "mac-dev-01", caller: "compact-cli", oauth_client: null, status: "ok", error: null, duration_ms: 20 });
+  await page.locator('[data-caller="compact-cli"]').click();
+  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("compact-cli");
+  await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await capture(page, "compact.png");
   await page.getByTestId("open-display").click();
@@ -160,4 +169,29 @@ test("a disconnected kernel removes the live graph and still offers independent 
   await expect(page.getByTestId("topology")).toHaveCount(0);
   await navigate(page, "mesh");
   await expect(page.getByTestId("mesh-devices")).toBeVisible();
+});
+
+test("leaving the topology preserves slots when a colliding device joins", async () => {
+  const page = await open();
+  const before = await page.locator('[data-node="mac-dev-01"]').getAttribute("style");
+  await navigate(page, "sessions");
+  const joined = { ...peersFixture()[1]!, name: "aa", node_id: "aa" };
+  h.kernel.setPeers([...peersFixture(), joined]);
+  h.kernel.emit("peer", { change: "added", peer: joined });
+  await expect.poll(() => h.kernel.requests.filter((r) => r.path === "/v1/peers").length).toBeGreaterThan(1);
+  await navigate(page, "overview");
+  await expect(page.locator('[data-node="aa"]')).toBeVisible();
+  expect(await page.locator('[data-node="mac-dev-01"]').getAttribute("style")).toBe(before);
+});
+
+test("the complete device list stays reachable when filters hide overflow peers", async () => {
+  const page = await open();
+  const peers = Array.from({ length: 12 }, (_, i) => ({ ...peersFixture()[1]!, name: `device-${i}`, node_id: `device-${i}`, online: i === 0 }));
+  h.kernel.setPeers([peersFixture()[0]!, ...peers]);
+  h.kernel.emit("peer", { change: "added", peer: peers[0]! });
+  await expect(page.getByTestId("topology-all-devices")).toBeVisible();
+  await page.getByTestId("topology-online").check();
+  await expect(page.getByTestId("topology-all-devices")).toBeVisible();
+  await page.getByTestId("topology-all-devices").click();
+  await expect(page.getByTestId("peers-table").locator("tbody tr")).toHaveCount(13);
 });

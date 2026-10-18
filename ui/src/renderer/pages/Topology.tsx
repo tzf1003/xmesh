@@ -39,25 +39,22 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   const [tag, setTag] = useState("");
   const [mode, setMode] = useState<"connections" | "configuration">("connections");
   const [tab, setTab] = useState<"overview" | "calls" | "config">("overview");
-  const slots = useRef(new Map<string, number>());
-  useEffect(() => {
-    setSelected(undefined); setSelectedCaller(undefined); setHover(undefined); setTab("overview"); setTag(""); setOnlyOnline(false); slots.current = new Map();
-  }, [ctx.snapshot.selectedInstance]);
   useEffect(() => {
     if (ctx.focus?.peer) { setSelected(ctx.focus.peer); setSelectedCaller(undefined); setMode("connections"); setOnlyOnline(false); setTag(""); }
-  }, [ctx.focus?.peer]);
+  }, [ctx.focus]);
   if (c.kind !== "connected") return null;
   const status = c.status;
   const peers = topologyPeers(status, ctx.can("peers") ? c.peers : []);
-  slots.current = assignSlots(peers, slots.current);
+  const slots = assignSlots(peers, ctx.topologySlots.get(ctx.snapshot.selectedInstance) ?? new Map());
+  ctx.topologySlots.set(ctx.snapshot.selectedInstance, slots);
   const self = peers[0]!;
   const selfId = peerKey(self);
   const picked = peers.find((p) => peerKey(p) === selected) ?? self;
   const active = hover ?? peerKey(picked);
   const visible = peers.filter((p) => p.self || ((!onlyOnline || p.online) && (!tag || p.tags.includes(tag))));
   const tags = [...new Set(peers.flatMap((p) => p.tags))].sort();
-  const plotted = visible.filter((p) => !p.self && slots.current.has(peerKey(p)));
-  const unplotted = visible.length - plotted.length - 1;
+  const plotted = visible.filter((p) => !p.self && slots.has(peerKey(p)));
+  const unplotted = peers.filter((p) => !p.self && !slots.has(peerKey(p))).length;
   const relays = [...new Set(plotted.filter((p) => linkKind(p) === "derp").map((p) => p.derp_region ?? "?"))];
   const relayPoint = (region: string): Point => ({ x: 735, y: 280 + relays.indexOf(region) * 64 });
   const callers = recentCallers(calls);
@@ -65,6 +62,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   const total = ctx.can("peers") ? peers.length - 1 : status.peers.total;
   const scopedCalls = calls.filter((call) => selectedCaller ? (call.oauth_client ?? call.caller) === selectedCaller : call.device === picked.name).slice(-6).reverse();
   const select = (id: string): void => { setSelected(id); setSelectedCaller(undefined); setTab("overview"); };
+  const selectCaller = (caller: string): void => { select(selfId); setSelectedCaller(caller); setTab("calls"); };
   const copy = (): void => {
     if (!status.gateway) return;
     void getApi().copyGateway({ kind: "codexConfig", url: status.gateway.url }).then((r) => ctx.toast(r.ok ? t("overview.copied") : errorText(t, r.error), !r.ok));
@@ -94,7 +92,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
               <defs><marker id="call-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z"/></marker></defs>
               <ellipse class="graph-ring" cx="400" cy="295" rx="130" ry="135"/><ellipse class="graph-ring" cx="400" cy="295" rx="275" ry="235"/>
               {plotted.map((p) => {
-                const id = peerKey(p), point = PEER_SLOTS[slots.current.get(id)!]!, kind = linkKind(p);
+                const id = peerKey(p), point = PEER_SLOTS[slots.get(id)!]!, kind = linkKind(p);
                 const relay = kind === "derp" ? relayPoint(p.derp_region ?? "?") : undefined;
                 return <g key={id} data-edge={id} data-kind={kind} class={active !== selfId && active !== id ? "edge-dim" : ""}>
                   <path class={`graph-link ${kind}`} d={relay ? `${curve(CENTER, relay)} ${curve(relay, point)}` : curve(CENTER, point)}/>
@@ -102,18 +100,19 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
               })}
               {callers.map((caller, i) => <path key={caller} class="graph-link caller" d={curve({ x: (i + 1) * 800 / (callers.length + 1), y: 66 }, { x: 400, y: 270 })} marker-end="url(#call-arrow)"/>)}
             </svg>
-            {callers.map((caller, i) => <Node key={caller} id={`caller:${caller}`} point={{ x: (i + 1) * 800 / (callers.length + 1), y: 66 }} kind="caller" title={caller} sub={t("topology.observedCaller")} selected={selectedCaller === caller} onSelect={() => { select(selfId); setSelectedCaller(caller); setTab("calls"); }} onHover={setHover}/>)}
+            {callers.map((caller, i) => <Node key={caller} id={`caller:${caller}`} point={{ x: (i + 1) * 800 / (callers.length + 1), y: 66 }} kind="caller" title={caller} sub={t("topology.observedCaller")} selected={selectedCaller === caller} onSelect={() => selectCaller(caller)} onHover={setHover}/>)}
             <Node id={selfId} point={CENTER} selected={picked.self} kind={`self state-${deriveIcon(c)}`} title={status.hostname} sub={status.roles.join(" + ")} onSelect={() => select(selfId)} onHover={setHover}><span class="node-role">{t("devices.self")}</span></Node>
-            {plotted.map((p) => <Node key={peerKey(p)} id={peerKey(p)} point={PEER_SLOTS[slots.current.get(peerKey(p))!]!} selected={peerKey(picked) === peerKey(p)} kind={linkKind(p)} title={p.name} sub={connectionText(p, t)} onSelect={() => select(peerKey(p))} onHover={setHover}>
+            {plotted.map((p) => <Node key={peerKey(p)} id={peerKey(p)} point={PEER_SLOTS[slots.get(peerKey(p))!]!} selected={peerKey(picked) === peerKey(p)} kind={linkKind(p)} title={p.name} sub={connectionText(p, t)} onSelect={() => select(peerKey(p))} onHover={setHover}>
               {p.info?.error ? <span class="node-role issue" title={p.info.error}>{t("devices.infoFailed")}</span> : undefined}
             </Node>)}
             {relays.map((region) => <Relay key={region} point={relayPoint(region)} region={region} onClick={() => ctx.go("mesh", { meshTab: "derp" })}/>)}
           </div>
           <div class={`graph-list ${relays.length > 4 ? "graph-dense-list" : ""}`} aria-label={t("nav.devices")}>
+            {callers.map((caller) => <button type="button" key={`caller:${caller}`} data-caller={caller} aria-pressed={selectedCaller === caller} onClick={() => selectCaller(caller)} class="graph-list-row"><Icon name="cloud"/><strong>{caller}</strong><span>{t("topology.observedCaller")}</span></button>)}
             {visible.map((p) => <button type="button" key={peerKey(p)} aria-pressed={peerKey(picked) === peerKey(p)} onClick={() => select(peerKey(p))} class="graph-list-row"><Icon name="device"/><strong>{p.name}</strong><span>{connectionText(p, t)}</span></button>)}
           </div>
           {peers.length === 1 && ctx.can("peers") && <div class="topology-empty"><p>{t("topology.empty")}</p><button type="button" class="btn primary" onClick={onboard}>{t("topology.addDevice")}</button></div>}
-          {unplotted > 0 && <button type="button" class="graph-overflow" onClick={() => ctx.go("devices")}>{t("topology.more", { n: unplotted })}</button>}
+          {unplotted > 0 && <button type="button" class="graph-overflow" data-testid="topology-all-devices" onClick={() => ctx.go("devices")}>{t("topology.more", { n: unplotted })}</button>}
           <footer class="topology-footer"><span data-testid="peers">{online} / {total} {t("topology.onlinePeers")}</span><span>{t(`mode.${status.network.mode}`)}</span><span>{t("topology.live")}</span></footer>
         </> : <RuntimeConfiguration ctx={ctx}/>}
       </section>

@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
 import { hasCapability } from "../shared/control";
 import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
@@ -63,6 +63,8 @@ function outstanding(o: SaveOutcome): boolean {
 /** What a page needs from the kernel before it is worth showing. */
 export interface PageContext {
   snapshot: Snapshot;
+  /** UI-only positions kept per instance across page navigation. */
+  topologySlots: Map<string, Map<string, number>>;
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
@@ -79,6 +81,7 @@ export interface PageContext {
 
 export function App(): JSX.Element {
   const snapshot = useSnapshot();
+  const topologySlots = useRef(new Map<string, Map<string, number>>());
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
   const [page, setPage] = useState<PageId | undefined>(undefined);
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
@@ -116,6 +119,7 @@ export function App(): JSX.Element {
 
   const ctx: PageContext = {
     snapshot,
+    topologySlots: topologySlots.current,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
     applied: (outcome) => setFresh((last) => outcome ?? (last && outstanding(last) ? last : undefined)),
