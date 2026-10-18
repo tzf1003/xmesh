@@ -10,6 +10,7 @@ import {
   isSupportedApiVersion,
 } from "../shared/control";
 import { DEFAULT_DISPLAY, type DisplayPrefs } from "../shared/display";
+import type { UpdateState } from "../shared/update";
 import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
@@ -28,6 +29,8 @@ export interface ControllerOptions {
   setDisplay?: (prefs: DisplayPrefs) => void;
   /** Tray and panel language; default Chinese. */
   locale?: Locale;
+  /** The update state at start; the shell pushes later changes through `setUpdate`. */
+  getUpdate?: () => UpdateState;
   setLoginItem: (enabled: boolean) => void;
   /** How often to look for a kernel while none is connected, and for new instances while connected. */
   pollMs?: number;
@@ -88,6 +91,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
       ...EMPTY_SNAPSHOT,
       cliCommand: opts.cliCommand ?? EMPTY_SNAPSHOT.cliCommand,
       settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh", display: opts.getDisplay?.() ?? DEFAULT_DISPLAY },
+      update: opts.getUpdate?.() ?? EMPTY_SNAPSHOT.update,
     };
   }
 
@@ -135,6 +139,10 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   setDisplay(prefs: DisplayPrefs): void {
     this.opts.setDisplay?.(prefs);
     this.update({ settings: { ...this.snap.settings, display: prefs } });
+  }
+
+  setUpdate(update: UpdateState): void {
+    this.update({ update });
   }
 
   get recentCalls(): CallEventData[] {

@@ -10,6 +10,7 @@ import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
 import type { Role, Section } from "./lib/settings";
+import { About, outcomeText } from "./pages/About";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Config } from "./pages/Config";
@@ -21,7 +22,7 @@ import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 
-export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "settings" | "config" | "audit" | "mesh" | "setup";
+export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
@@ -39,6 +40,7 @@ const NAV: { id: PageId; label: Key }[] = [
   { id: "config", label: "nav.config" },
   { id: "audit", label: "nav.audit" },
   { id: "mesh", label: "nav.mesh" },
+  { id: "about", label: "nav.about" },
   { id: "setup", label: "nav.setup" },
 ];
 
@@ -109,6 +111,7 @@ export function App(): JSX.Element {
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
+            <UpdateStrip ctx={ctx} current={current} />
             <PageSwitch page={current} ctx={ctx} />
           </main>
         </div>
@@ -132,7 +135,7 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
           class="nav-item"
           data-testid={`nav-${n.id}`}
           aria-current={current === n.id ? "page" : undefined}
-          disabled={!connected && n.id !== "setup" && n.id !== "overview" && n.id !== "mesh"}
+          disabled={!connected && n.id !== "setup" && n.id !== "overview" && n.id !== "mesh" && n.id !== "about"}
           onClick={() => onSelect(n.id)}
         >
           {t(n.label)}
@@ -183,10 +186,36 @@ function TopBar({ snapshot, onDisplay }: { snapshot: Snapshot; onDisplay: () => 
   );
 }
 
+/** A new version, or a failed update, is worth saying on every page; the About page has the details and the button. */
+function UpdateStrip({ ctx, current }: { ctx: PageContext; current: PageId }): JSX.Element | null {
+  const t = useT();
+  const u = ctx.snapshot.update;
+  if (current === "about") return null;
+  const failed = u.outcome !== undefined && !u.outcome.ok;
+  const show = u.phase === "available" || u.phase === "downloading" || u.phase === "installing" || failed;
+  if (!show) return null;
+  return (
+    <div class="page strip">
+      <Banner kind={failed && u.phase === "idle" ? "danger" : ""} testid="update-strip">
+        <div class="row">
+          <span class="grow">
+            {failed && u.phase === "idle" && u.outcome ? outcomeText(t, u.outcome) : t("update.banner", { version: u.latest?.version ?? "" })}
+          </span>
+          <button type="button" class="btn small" onClick={() => ctx.go("about")} data-testid="update-strip-view">
+            {t("update.bannerView")}
+          </button>
+        </div>
+      </Banner>
+    </div>
+  );
+}
+
 function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Element {
   const t = useT();
   const c = ctx.snapshot.connection;
   if (page === "setup") return <Wizard ctx={ctx} />;
+  // Updating needs no running kernel: it is how a kernel that is too old gets replaced.
+  if (page === "about") return <About ctx={ctx} />;
   // The tailnet is administered through the control plane, so this page does not need a running kernel.
   if (page === "mesh") return <Mesh ctx={ctx} />;
   if (c.kind === "offline") return <Unavailable ctx={ctx} t={t} kind="offline" />;

@@ -1,6 +1,7 @@
 import { type Peer, type StatusResponse, isDegrading } from "./control";
 import { DEFAULT_DISPLAY, type DisplayPrefs } from "./display";
 import type { Locale } from "./i18n";
+import { EMPTY_UPDATE, type UpdateState } from "./update";
 
 /** What the main process currently knows about the kernel. */
 export type Connection =
@@ -37,6 +38,8 @@ export interface Snapshot {
   settings: UiSettings;
   /** The CLI as the user types it in a terminal, naming the binary the app runs (see cliCommandText). */
   cliCommand: string;
+  /** Version check and one-click update of the app and the kernel inside it. */
+  update: UpdateState;
 }
 
 /**
@@ -69,4 +72,5 @@ export const EMPTY_SNAPSHOT: Snapshot = {
   selectedInstance: "",
   settings: { loginItem: false, locale: "zh", display: DEFAULT_DISPLAY },
   cliCommand: "xmesh",
+  update: EMPTY_UPDATE,
 };

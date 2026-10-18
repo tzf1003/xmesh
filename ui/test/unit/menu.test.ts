@@ -146,3 +146,14 @@ test("stopping the kernel is separate from quitting the tray", () => {
   assert.deepEqual(findItem(m, "action.quit")?.action, { type: "quit" });
   assert.deepEqual(findItem(m, "action.stopKernel")?.action, { type: "stop-kernel" });
 });
+
+test("a found update adds one menu entry that opens the panel; nothing before that and nothing while installing", () => {
+  const upd = (phase: "idle" | "available" | "installing") => ({
+    update: { ...EMPTY_SNAPSHOT.update, phase, ...(phase === "idle" ? {} : { latest: { version: "0.1.0-beta.3", tag: "v0.1.0-beta.3", prerelease: true, publishedAt: "", size: 1, notes: "" } }) },
+  });
+  assert.equal(findItem(buildMenu(connected(withPaths, upd("idle")), t), "action.update"), undefined);
+  const item = findItem(buildMenu(connected(withPaths, upd("available")), t), "action.update");
+  assert.equal(item?.label, "发现新版本 0.1.0-beta.3，打开面板更新");
+  assert.deepEqual(item?.action, { type: "open-panel" });
+  assert.equal(findItem(buildMenu(connected(withPaths, upd("installing")), t), "action.update"), undefined);
+});

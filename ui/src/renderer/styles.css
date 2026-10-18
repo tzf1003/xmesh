@@ -204,3 +204,12 @@ ul.entry-list { display: flex; flex-direction: column; gap: 4px; margin: 0; }
 ul.entry-list li { display: flex; align-items: center; gap: 8px; }
 .reach { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border-2); padding-top: 12px; }
 .reach > fieldset { margin-top: 10px; }
+
+/* About & updates */
+.strip { margin-bottom: 14px; }
+.row > .grow { flex: 1; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 8px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.notes { margin: 6px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border-radius: 8px; }
+progress.download { width: 100%; height: 6px; accent-color: var(--accent); }

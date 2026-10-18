@@ -62,3 +62,12 @@ export function formatValue(v: unknown, max = 120): string {
   }
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
+
+/** `842 KB`, `12.4 MB`, `1.3 GB`: decimal units, one decimal from MB up. */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1000) return `${Math.round(n)} B`;
+  if (n < 1e6) return `${Math.round(n / 1e3)} KB`;
+  if (n < 1e9) return `${(n / 1e6).toFixed(1)} MB`;
+  return `${(n / 1e9).toFixed(1)} GB`;
+}

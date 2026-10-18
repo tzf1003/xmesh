@@ -77,6 +77,24 @@ export function runXmesh(command: CliCommand, node?: string, bin: string = xmesh
   });
 }
 
+export interface CliRun {
+  /** Exit code; 127 when the binary was not found. */
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Like `runXmesh`, but never rejects: the caller reads the exit code and the `--json` answer itself. */
+export function runXmeshRaw(command: CliCommand, node?: string, bin: string = xmeshBinary()): Promise<CliRun> {
+  return new Promise((resolve) => {
+    execFile(bin, cliArgs(command, node), { timeout: 120_000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
+      if (!err) return resolve({ code: 0, stdout, stderr });
+      const e = err as NodeJS.ErrnoException;
+      resolve({ code: e.code === "ENOENT" ? 127 : typeof e.code === "number" ? e.code : 1, stdout, stderr: stderr || e.message });
+    });
+  });
+}
+
 /** First-run subcommands. Unlike `CliCommand` these take arguments, built here from validated values only. */
 export type SetupCliArgs = readonly ["install", "--config", string] | readonly ["start", "--config", string];
 

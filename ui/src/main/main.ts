@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { Notification, app, powerMonitor } from "electron";
+import { Notification, app, net, powerMonitor, shell } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
@@ -12,7 +12,7 @@ import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import { MeshService, execMeshRunner } from "./mesh-service";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { cliCommandText, runXmeshSetup } from "./cli";
+import { bundledXmesh, cliCommandText, runXmesh, runXmeshRaw, runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -20,6 +20,13 @@ import { registerPanelScheme, servePanel } from "./protocol";
 import { Autostart, type LoginItemHint } from "./system/autostart";
 import { SeenFlags } from "./system/firstrun";
 import { Notifier } from "./system/notifier";
+import { macApplier, windowsApplier, type Applier } from "./update/apply";
+import { freshFakeUpdate, fakeSource } from "./update/fake";
+import { targetFor } from "./update/releases";
+import { UpdateActions } from "./update/service";
+import { type UpdateNotice, Updater } from "./update/updater";
+import { httpSource } from "./update/source";
+import { UpdateStore } from "./update/store";
 import { TrayView } from "./tray";
 import { type PanelWindow, createPanelWindow, installSessionHardening, installWebContentsHardening } from "./window";
 
@@ -91,7 +98,70 @@ async function start(): Promise<void> {
     "disabled-by-user": t("hint.loginItem.disabledByUser"),
   };
 
+  const calls: RecordedCall[] = [];
+  // The updater reads the running nodes from the controller (only when an update runs), and the controller starts from its state.
+  const updateNotice = (n: UpdateNotice): void =>
+    notify([{ key: `update.${n.kind}.${n.version}`, text: t(n.kind === "available" ? "notice.updateAvailable" : n.kind === "updated" ? "notice.updated" : "notice.updateFailed", { version: n.version }) }]);
+  // CI runs the end-to-end tests on Windows and macOS; on Linux, where no installer exists, the test pretends to be Windows.
+  const fakeAsWindows = TEST_MODE && targetFor(process.platform, process.arch) === undefined;
+  const updatePlatform = fakeAsWindows ? "win32" : process.platform;
+  const arch = fakeAsWindows ? "x64" : process.arch;
+  const target = targetFor(updatePlatform, arch);
+  const fakeUpdate = TEST_MODE ? freshFakeUpdate() : undefined;
+  const feed = process.env.XMESH_UPDATE_FEED;
+  const applier: Applier | undefined = TEST_MODE
+    ? { blocked: () => "", start: async (h) => void calls.push({ op: "update-handover", arg: path.basename(h.installer) }) }
+    : process.platform === "win32"
+      ? windowsApplier()
+      : process.platform === "darwin"
+        ? macApplier(process.execPath)
+        : undefined;
+  const updater = new Updater({
+    version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
+    packaged: app.isPackaged || TEST_MODE,
+    platform: updatePlatform,
+    arch,
+    kernelBundled: bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN,
+    execPath: process.execPath,
+    pid: process.pid,
+    dataDir: path.join(app.getPath("userData"), "updates"),
+    source:
+      fakeUpdate && target
+        ? fakeSource(fakeUpdate, target)
+        : httpSource({
+            fetch: (url, init) => net.fetch(url, init),
+            // XMESH_UPDATE_FEED: a directory that serves `releases` and `download/<tag>/<file>` like GitHub does (for trying an update without a release).
+            ...(feed && /^https?:\/\//.test(feed) && { apiBase: feed, downloadBase: `${feed.replace(/\/+$/, "")}/download` }),
+          }),
+    applier,
+    store: new UpdateStore(path.join(app.getPath("userData"), "update.json")),
+    runningNodes: () => controller.snapshot.instances.map((i) => i.id),
+    stopNode: async (node) => {
+      if (TEST_MODE) {
+        calls.push({ op: "update-stop", arg: node });
+        return "stopped";
+      }
+      const r = await runXmeshRaw("stop", node);
+      if (r.code === 0) return "stopped";
+      // A kernel started by hand has no service to stop; whether it blocks the installer is for the installer to say.
+      if (/not_installed|未安装/.test(`${r.stdout}\n${r.stderr}`)) return "absent";
+      throw new Error(t("update.stopFailed", { name: node }));
+    },
+    startNode: async (node) => {
+      if (TEST_MODE) {
+        calls.push({ op: "update-start", arg: node });
+        return;
+      }
+      await runXmesh("start", node);
+    },
+    quit: () => (TEST_MODE ? void calls.push({ op: "quit" }) : app.quit()),
+    openPath: (p) => shell.openPath(p),
+    notify: updateNotice,
+    // A test drives the checks itself; none may start behind its back.
+    ...(TEST_MODE && { firstCheckMs: 3_600_000 }),
+  });
   const controller = new ShellController({
+    getUpdate: () => updater.state,
     discover: () => discoverInstances(roots),
     configured: () => discoverConfigured(roots),
     cliCommand: cliCommandText(),
@@ -110,7 +180,6 @@ async function start(): Promise<void> {
     ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, streamIdleMs: 2000 }),
   });
 
-  const calls: RecordedCall[] = [];
   const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
@@ -147,7 +216,9 @@ async function start(): Promise<void> {
     setup: (params) => runSetup(params, setupHost),
     mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
+    update: new UpdateActions(updater),
   });
+  updater.on("change", (state) => controller.setUpdate(state));
 
   let prev: Snapshot = controller.snapshot;
   tray.update(prev);
@@ -172,6 +243,7 @@ async function start(): Promise<void> {
   }
 
   controller.start();
+  void updater.finishPending().finally(() => updater.start());
 
   if (TEST_MODE) {
     // Reachable only from Playwright's main-process evaluate; never set in a packaged app.
@@ -182,6 +254,7 @@ async function start(): Promise<void> {
       notices: () => notified.slice(),
       answers,
       mesh: fakeMesh,
+      update: fakeUpdate,
       showPanel,
       panelWebContents: () => panel?.window.webContents,
       panelPreferences: () => panel?.webPreferences,

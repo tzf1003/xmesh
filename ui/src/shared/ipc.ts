@@ -27,6 +27,7 @@ import type {
   SessionsResponse,
 } from "./control";
 import type { DisplayPrefs } from "./display";
+import type { UpdatePrefs } from "./update";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
@@ -52,6 +53,10 @@ export const CHANNELS = {
   setLoginItem: "xmesh:set-login-item",
   setDisplay: "xmesh:set-display",
   openExternal: "xmesh:open-external",
+  checkUpdate: "xmesh:check-update",
+  installUpdate: "xmesh:install-update",
+  cancelUpdate: "xmesh:cancel-update",
+  setUpdatePrefs: "xmesh:set-update-prefs",
   getSessions: "xmesh:get-sessions",
   getConfig: "xmesh:get-config",
   putConfig: "xmesh:put-config",
@@ -111,6 +116,7 @@ export type PathKind = (typeof PATH_KINDS)[number];
 /** Link targets are chosen by key, never by URL, so the renderer cannot open arbitrary sites. */
 export const EXTERNAL_LINKS = {
   docs: "https://github.com/tzf1003/xmesh#readme",
+  releases: "https://github.com/tzf1003/xmesh/releases",
 } as const;
 export type ExternalKey = keyof typeof EXTERNAL_LINKS;
 
@@ -237,6 +243,13 @@ export interface PanelApi {
   /** Saves the panel's text size and typefaces on this machine and applies them at once. */
   setDisplay(prefs: DisplayPrefs): Promise<ActionResult>;
   openExternal(key: ExternalKey): Promise<ActionResult>;
+  /** Looks for a newer release now; the answer arrives in the snapshot's `update`. */
+  checkForUpdate(): Promise<ActionResult>;
+  /** Downloads, verifies and installs the release the last check found, then restarts the app and its kernels. The caller confirms first. */
+  installUpdate(): Promise<ActionResult>;
+  /** Stops a running download. */
+  cancelUpdate(): Promise<ActionResult>;
+  setUpdatePrefs(prefs: UpdatePrefs): Promise<ActionResult>;
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
@@ -298,6 +311,10 @@ export const PANEL_API_METHODS = [
   "setLoginItem",
   "setDisplay",
   "openExternal",
+  "checkForUpdate",
+  "installUpdate",
+  "cancelUpdate",
+  "setUpdatePrefs",
   "getSessions",
   "getConfig",
   "putConfig",

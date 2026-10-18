@@ -81,6 +81,9 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
 
   out.push(sep("sep.actions"));
   if (c.kind !== "mismatch") out.push(item("action.openPanel", t("menu.openPanel"), { type: "open-panel" }));
+  if (snap.update.phase === "available" && snap.update.latest !== undefined) {
+    out.push(item("action.update", t("menu.updateAvailable", { version: snap.update.latest.version }), { type: "open-panel" }));
+  }
   if (c.kind === "offline") {
     for (const node of snap.unresponsiveNodes) {
       const label = snap.unresponsiveNodes.length === 1 ? t("menu.restartKernel") : t("menu.restartKernelNamed", { name: node });
