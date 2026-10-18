@@ -42,6 +42,8 @@ npm start             # 另开终端，启动 Electron
 
 ## 面板页面
 
+首页采用设备拓扑与右侧详情区，连接和运行配置可切换查看。左侧导航按任务分组，高级功能默认折叠，Ctrl/Cmd+K 可搜索设备或功能。配置页默认表单，提供 YAML 源码标签并保护切换前的草稿。交互与数据语义见 [拓扑面板](../docs/design/16-topology-panel.md)。
+
 渲染进程只通过 `window.xmesh`（预加载白名单）与外界交互，没有 `fetch`、没有 Node。依赖只有 `preact` 和 `esbuild`，都是 devDependency：esbuild 把 preact 打进 `app.js`，安装包里不带 `node_modules`。页面不使用内联脚本和样式表，`index.html` 自带与响应头同等严格的 CSP。
 
 | 页面 | 内容 | 需要的能力 |

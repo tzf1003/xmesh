@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
 import { hasCapability } from "../shared/control";
 import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
@@ -16,7 +16,6 @@ import { About, outcomeText } from "./pages/About";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Ci } from "./pages/Ci";
-import { Config } from "./pages/Config";
 import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
@@ -24,29 +23,20 @@ import { Overview } from "./pages/Overview";
 import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
+import { Configuration } from "./pages/Configuration";
+import { Icon } from "./icons";
+import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
 export type PageId = "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
-  section: Section;
+  section?: Section;
   role?: Role;
+  peer?: string;
+  meshTab?: "devices" | "onboard" | "policy" | "matrix" | "derp";
+  configView?: "form" | "source";
 }
-
-const NAV: { id: PageId; label: Key }[] = [
-  { id: "overview", label: "nav.overview" },
-  { id: "devices", label: "nav.devices" },
-  { id: "sessions", label: "nav.sessions" },
-  { id: "authz", label: "nav.authz" },
-  { id: "ingress", label: "nav.ingress" },
-  { id: "ci", label: "nav.ci" },
-  { id: "settings", label: "nav.settings" },
-  { id: "config", label: "nav.config" },
-  { id: "audit", label: "nav.audit" },
-  { id: "mesh", label: "nav.mesh" },
-  { id: "about", label: "nav.about" },
-  { id: "setup", label: "nav.setup" },
-];
 
 const STATUS_KEY: Record<TrayIcon, Key> = {
   offline: "status.offline",
@@ -73,6 +63,8 @@ function outstanding(o: SaveOutcome): boolean {
 /** What a page needs from the kernel before it is worth showing. */
 export interface PageContext {
   snapshot: Snapshot;
+  /** UI-only positions kept per instance across page navigation. */
+  topologySlots: Map<string, Map<string, number>>;
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
@@ -89,6 +81,7 @@ export interface PageContext {
 
 export function App(): JSX.Element {
   const snapshot = useSnapshot();
+  const topologySlots = useRef(new Map<string, Map<string, number>>());
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
   const [page, setPage] = useState<PageId | undefined>(undefined);
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
@@ -107,6 +100,15 @@ export function App(): JSX.Element {
   }, [snapshot.settings.locale]);
 
   const [showDisplay, setShowDisplay] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  useEffect(() => {
+    const key = (e: KeyboardEvent): void => {
+      if (document.querySelector('.dialog:not([data-testid="command-palette"])')) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setShowSearch((open) => !open); }
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
   const { display } = snapshot.settings;
   useEffect(() => applyDisplay(display), [display.uiFont, display.codeFont]);
 
@@ -117,6 +119,7 @@ export function App(): JSX.Element {
 
   const ctx: PageContext = {
     snapshot,
+    topologySlots: topologySlots.current,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
     applied: (outcome) => setFresh((last) => outcome ?? (last && outstanding(last) ? last : undefined)),
@@ -127,7 +130,7 @@ export function App(): JSX.Element {
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <TopBar snapshot={snapshot} onDisplay={() => setShowDisplay(true)} />
+        <TopBar snapshot={snapshot} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} />
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
@@ -140,11 +143,12 @@ export function App(): JSX.Element {
               onClear={() => setFresh(undefined)}
               toast={push}
             />
-            <PageSwitch page={current} ctx={ctx} />
+            <PageSwitch key={snapshot.selectedInstance} page={current} ctx={ctx} />
           </main>
         </div>
       </div>
       {showDisplay && <DisplayDialog prefs={display} onClose={() => setShowDisplay(false)} />}
+      {showSearch && <CommandPalette snapshot={snapshot} onClose={() => setShowSearch(false)} go={navigate}/>}
       <Toasts toasts={toasts} />
     </I18nContext.Provider>
   );
@@ -154,22 +158,18 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   const t = useT();
   // The wizard is for a node that has no config yet; once one exists, its settings live on the settings page.
   const configured = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0;
+  const [advanced, setAdvanced] = useState(false);
+  useEffect(() => { if (NAVIGATION.find((n) => n.id === current)?.group === "advanced") setAdvanced(true); }, [current]);
+  const item = (n: (typeof NAVIGATION)[number]): JSX.Element => <button key={n.id} type="button" class="nav-item" title={t(n.label)} data-testid={`nav-${n.id}`} aria-current={current === n.id ? "page" : undefined} disabled={!pageAvailable(n.id, connected)} onClick={() => onSelect(n.id)}><Icon name={n.icon}/><span>{t(n.label)}</span></button>;
   return (
     <nav class="sidebar" aria-label={t("nav.label")}>
-      {NAV.filter((n) => n.id !== "setup" || !configured).map((n) => (
-        <button
-          key={n.id}
-          type="button"
-          class="nav-item"
-          data-testid={`nav-${n.id}`}
-          aria-current={current === n.id ? "page" : undefined}
-          disabled={!connected && n.id !== "setup" && n.id !== "overview" && n.id !== "mesh" && n.id !== "about"}
-          onClick={() => onSelect(n.id)}
-        >
-          {t(n.label)}
-        </button>
-      ))}
+      {(["network", "access", "runtime"] as const).map((group) => <div class="nav-group" key={group}><div class="nav-group-label">{t(`nav.${group}`)}</div>{NAVIGATION.filter((n) => n.group === group).map(item)}</div>)}
+      <details class="nav-advanced" open={advanced} onToggle={(e) => setAdvanced(e.currentTarget.open)}>
+        <summary data-testid="nav-advanced" aria-label={t("nav.advanced")}><Icon name="sliders"/><span>{t("nav.advanced")}</span><Icon name="chevron"/></summary>
+        {NAVIGATION.filter((n) => n.group === "advanced").map(item)}
+      </details>
       <div class="spacer" />
+      <div class="nav-footer">{NAVIGATION.filter((n) => n.group === "settings" && (n.id !== "setup" || !configured)).map(item)}</div>
       {snapshot.instances.length > 1 && (
         <div class="node-switch">
           <label>
@@ -192,7 +192,7 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   );
 }
 
-function TopBar({ snapshot, onDisplay }: { snapshot: Snapshot; onDisplay: () => void }): JSX.Element {
+function TopBar({ snapshot, onDisplay, onSearch }: { snapshot: Snapshot; onDisplay: () => void; onSearch(): void }): JSX.Element {
   const t = useT();
   const icon = deriveIcon(snapshot.connection);
   const c = snapshot.connection;
@@ -202,6 +202,7 @@ function TopBar({ snapshot, onDisplay }: { snapshot: Snapshot; onDisplay: () => 
       <div class="title">
         <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
       </div>
+      <button type="button" class="search-trigger" onClick={onSearch} aria-label={t("nav.find")} data-testid="open-search"><Icon name="search"/><span>{t("nav.find")}</span><kbd>⌘/Ctrl K</kbd></button>
       <button type="button" class="icon-btn" onClick={onDisplay} title={t("display.open")} aria-label={t("display.open")} data-testid="open-display">
         Aa
       </button>
@@ -264,7 +265,7 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
     case "settings":
       return <Settings ctx={ctx} />;
     case "config":
-      return <Config ctx={ctx} />;
+      return <Configuration ctx={ctx} />;
     case "audit":
       return <Audit ctx={ctx} />;
   }
