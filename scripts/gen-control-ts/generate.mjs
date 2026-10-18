@@ -159,7 +159,7 @@ export const CONTROL_ERROR_STATUS = ${json(errorSchema["x-http-status"])} as con
 
 export interface ControlRouteInfo {
   id: keyof ControlRouteTypes;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   capability: Capability;
   since: string;

@@ -6,6 +6,7 @@
 import type {
   AuditQuery,
   AuditResponse,
+  BackendEnvResponse,
   CallEventData,
   ConfigDiagnostic,
   ConfigPutResponse,
@@ -16,13 +17,17 @@ import type {
   GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
+  PairConnectResponse,
+  PairDiscoveredResponse,
   PairDocument,
   PairExportResponse,
   PairImportResponse,
+  PairPasswordState,
   PatList,
   PatSecret,
   SessionsResponse,
 } from "./control";
+import type { DisplayPrefs } from "./display";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
@@ -46,10 +51,14 @@ export const CHANNELS = {
   rotateGatewayPat: "xmesh:rotate-gateway-pat",
   openPath: "xmesh:open-path",
   setLoginItem: "xmesh:set-login-item",
+  setDisplay: "xmesh:set-display",
   openExternal: "xmesh:open-external",
   getSessions: "xmesh:get-sessions",
   getConfig: "xmesh:get-config",
   putConfig: "xmesh:put-config",
+  patchConfig: "xmesh:patch-config",
+  patchBackendEnv: "xmesh:patch-backend-env",
+  clearBackendEnv: "xmesh:clear-backend-env",
   listPats: "xmesh:list-pats",
   createPat: "xmesh:create-pat",
   rotatePat: "xmesh:rotate-pat",
@@ -59,6 +68,11 @@ export const CHANNELS = {
   rotateIngressPassword: "xmesh:rotate-ingress-password",
   exportPair: "xmesh:export-pair",
   importPair: "xmesh:import-pair",
+  getPairPassword: "xmesh:get-pair-password",
+  setPairPassword: "xmesh:set-pair-password",
+  clearPairPassword: "xmesh:clear-pair-password",
+  discoverPairs: "xmesh:discover-pairs",
+  connectPair: "xmesh:connect-pair",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
   previewSetup: "xmesh:preview-setup",
@@ -114,6 +128,8 @@ export interface ActionError {
   reason?: string;
   field?: string;
   current_etag?: string;
+  /** rate_limited: how long to wait before trying again. */
+  retry_after_ms?: number;
   diagnostics?: ConfigDiagnostic[];
 }
 
@@ -129,6 +145,40 @@ export interface ConfigSaveRequest {
   dryRun: boolean;
 }
 
+/**
+ * One edit of `PATCH /v1/config`. `value` is any JSON value (the schema does not constrain it), so it is
+ * typed `unknown` here; the generated `ConfigEdit` narrows it to an object, which arrays and strings are not.
+ */
+export interface ConfigPatchEdit {
+  /** JSON Pointer that starts with "/" and names at least one key. */
+  path: string;
+  value?: unknown;
+  delete?: boolean;
+}
+
+/** Generic write helper: edits in, the kernel's diff out. Callers never see the HTTP details. */
+export interface ConfigPatchRequest {
+  /** 1 to 64 edits, applied in order to the file on disk; all or nothing. */
+  edits: ConfigPatchEdit[];
+  /** The `etag` of the `ConfigResponse` the edits were computed from; sent as `If-Match`. */
+  etag: string;
+  /** Validate and diff only; nothing is written. */
+  dryRun: boolean;
+}
+
+/**
+ * Variables of one stdio backend (`PATCH /v1/backends/{name}/env`). The values are write-only: they go to the
+ * kernel and are never returned, so nothing here comes back out of the panel's own state.
+ */
+export interface BackendEnvRequest {
+  /** The backend the variables belong to; it does not have to be in the config yet. */
+  name: string;
+  /** Variables to add or overwrite. */
+  set: Record<string, string>;
+  /** Variables to remove; applied before `set`. */
+  unset: string[];
+}
+
 export interface PatCreateArgs {
   name: string;
   scopes: string[];
@@ -139,6 +189,15 @@ export interface PairImportArgs {
   /** The fingerprint the user typed after reading it on the other device. */
   fingerprint: string;
   tags?: string[];
+}
+
+/** Pairing with a device found on the LAN or typed in. The password is the other device's connection password. */
+export interface PairConnectArgs {
+  /** Host or host:port; the kernel uses port 7433 when none is given. */
+  address?: string;
+  /** The certificate fingerprint the user saw in discovery; the kernel refuses any other certificate. */
+  fingerprint?: string;
+  password: string;
 }
 
 export interface SetupParams {
@@ -191,10 +250,18 @@ export interface PanelApi {
   copyGateway(request: GatewayCopyRequest): Promise<ActionResult>;
   openPath(kind: PathKind): Promise<ActionResult>;
   setLoginItem(enabled: boolean): Promise<ActionResult>;
+  /** Saves the panel's text size and typefaces on this machine and applies them at once. */
+  setDisplay(prefs: DisplayPrefs): Promise<ActionResult>;
   openExternal(key: ExternalKey): Promise<ActionResult>;
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** Applies JSON Pointer edits to the config on disk (`PATCH /v1/config`); the form-style settings write through here. */
+  patchConfig(request: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** Sets and removes environment variables of a stdio backend (control API 1.7). The kernel restarts only that backend; the answer lists names, never values. */
+  patchBackendEnv(request: BackendEnvRequest): Promise<DataResult<BackendEnvResponse>>;
+  /** Removes every variable of a backend. */
+  clearBackendEnv(name: string): Promise<ActionResult>;
   /** The deny list file the config names; the renderer never supplies its path. */
   readDenyFile(): Promise<DataResult<DenyFileResponse>>;
   writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
@@ -215,6 +282,12 @@ export interface PanelApi {
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>>;
   exportPair(): Promise<DataResult<PairExportResponse>>;
   importPair(args: PairImportArgs): Promise<DataResult<PairImportResponse>>;
+  getPairPassword(): Promise<DataResult<PairPasswordState>>;
+  /** Sets or changes this node's connection password. The value is write-only: nothing comes back that contains it. */
+  setPairPassword(password: string): Promise<DataResult<PairPasswordState>>;
+  clearPairPassword(): Promise<ActionResult>;
+  discoverPairs(): Promise<DataResult<PairDiscoveredResponse>>;
+  connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>>;
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
@@ -243,10 +316,14 @@ export const PANEL_API_METHODS = [
   "copyGateway",
   "openPath",
   "setLoginItem",
+  "setDisplay",
   "openExternal",
   "getSessions",
   "getConfig",
   "putConfig",
+  "patchConfig",
+  "patchBackendEnv",
+  "clearBackendEnv",
   "listPats",
   "createPat",
   "rotatePat",
@@ -258,6 +335,11 @@ export const PANEL_API_METHODS = [
   "rotateIngressPassword",
   "exportPair",
   "importPair",
+  "getPairPassword",
+  "setPairPassword",
+  "clearPairPassword",
+  "discoverPairs",
+  "connectPair",
   "queryAudit",
   "getRecentCalls",
   "onCalls",
@@ -410,6 +492,8 @@ export interface ConfigReloadResponse {
   changed_paths: string[];
   restart_required: boolean;
   restart_paths: string[];
+  /** Valid settings the running kernel could not put into effect, such as a listen address that is taken (control API 1.6). Absent from older kernels. */
+  apply_errors?: { section: string; message: string }[];
 }
 
 export const DENY_FILE_MAX_BYTES = 64 * 1024;
@@ -436,6 +520,81 @@ export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {
   if (typeof etag !== "string" || !ETAG.test(etag)) return undefined;
   if (typeof dryRun !== "boolean") return undefined;
   return { content, etag, dryRun };
+}
+
+/** The contract's limit on edits per PATCH. */
+export const CONFIG_PATCH_MAX_EDITS = 64;
+const POINTER_MAX = 512;
+
+/** A JSON value with finite numbers only, nested at most 64 levels deep. Only arrays and plain objects count as containers. */
+export function isJsonValue(v: unknown, depth = 0): boolean {
+  if (depth > 64) return false;
+  if (v === null || typeof v === "string" || typeof v === "boolean") return true;
+  if (typeof v === "number") return Number.isFinite(v);
+  if (Array.isArray(v)) return v.every((x) => isJsonValue(x, depth + 1));
+  if (!isRecord(v)) return false;
+  const proto = Object.getPrototypeOf(v) as unknown;
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.values(v).every((x) => isJsonValue(x, depth + 1));
+}
+
+/** One edit: a pointer with at least one segment, then either `value` or `delete: true`, never both. */
+function parsePatchEdit(v: unknown): ConfigPatchEdit | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["path", "value", "delete"])) return undefined;
+  const { path } = v;
+  if (typeof path !== "string" || !path.startsWith("/") || path.length < 2 || path.length > POINTER_MAX) return undefined;
+  if (/[\x00-\x1f\x7f]/.test(path)) return undefined;
+  if (v.delete !== undefined && typeof v.delete !== "boolean") return undefined;
+  const remove = v.delete === true;
+  if (remove) return "value" in v ? undefined : { path, delete: true };
+  if (!("value" in v) || !isJsonValue(v.value)) return undefined;
+  return { path, value: v.value };
+}
+
+/** Structural check only: the kernel validates the resulting configuration and answers 422 when it is wrong. */
+export function parseConfigPatch(v: unknown): ConfigPatchRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["edits", "etag", "dryRun"])) return undefined;
+  const { edits, etag, dryRun } = v;
+  if (!Array.isArray(edits) || edits.length === 0 || edits.length > CONFIG_PATCH_MAX_EDITS) return undefined;
+  const parsed: ConfigPatchEdit[] = [];
+  for (const e of edits) {
+    const edit = parsePatchEdit(e);
+    if (edit === undefined) return undefined;
+    parsed.push(edit);
+  }
+  if (typeof etag !== "string" || !ETAG.test(etag)) return undefined;
+  if (typeof dryRun !== "boolean") return undefined;
+  const out: ConfigPatchRequest = { edits: parsed, etag, dryRun };
+  // The body is sent as JSON, so the same byte limit as a whole-file save applies.
+  if (new TextEncoder().encode(JSON.stringify(out)).length > CONFIG_MAX_BYTES) return undefined;
+  return out;
+}
+
+/** The contract's bounds on one backend's variables (`BackendEnvPatch`). */
+export const BACKEND_ENV_MAX_VARS = 64;
+export const BACKEND_ENV_MAX_VALUE_BYTES = 8192;
+export const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+/** Structural check; the kernel also applies the node's policy to the names and answers `env_denied`. */
+export function parseBackendEnv(v: unknown): BackendEnvRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["name", "set", "unset"])) return undefined;
+  const name = parseNodeName(v.name);
+  if (name === undefined || !isRecord(v.set) || !Array.isArray(v.unset)) return undefined;
+  if (Object.getPrototypeOf(v.set) !== Object.prototype && Object.getPrototypeOf(v.set) !== null) return undefined;
+  const set: Record<string, string> = {};
+  for (const [k, value] of Object.entries(v.set)) {
+    if (!ENV_VAR_NAME.test(k) || typeof value !== "string" || value.includes("\0")) return undefined;
+    if (new TextEncoder().encode(value).length > BACKEND_ENV_MAX_VALUE_BYTES) return undefined;
+    set[k] = value;
+  }
+  const unset: string[] = [];
+  for (const k of v.unset) {
+    if (typeof k !== "string" || !ENV_VAR_NAME.test(k) || unset.includes(k) || k in set) return undefined;
+    unset.push(k);
+  }
+  const n = Object.keys(set).length;
+  if (n > BACKEND_ENV_MAX_VARS || unset.length > BACKEND_ENV_MAX_VARS || n + unset.length === 0) return undefined;
+  return { name, set, unset };
 }
 
 export function parsePatCreate(v: unknown): PatCreateArgs | undefined {
@@ -468,6 +627,40 @@ export function parsePassword(v: unknown): string | undefined {
   if (typeof v !== "string" || hasEdgeSpace(v)) return undefined;
   const n = [...v].length;
   return n >= PASSWORD_MIN && n <= PASSWORD_MAX ? v : undefined;
+}
+
+/** The kernel's connection-password rules (docs/contracts/control.md CTR-CTL-08): 10 to 128 characters, no edge whitespace. */
+export const PAIR_PASSWORD_MIN = 10;
+export const PAIR_PASSWORD_MAX = 128;
+
+export function parsePairPassword(v: unknown): string | undefined {
+  if (typeof v !== "string" || hasEdgeSpace(v)) return undefined;
+  const n = [...v].length;
+  return n >= PAIR_PASSWORD_MIN && n <= PAIR_PASSWORD_MAX ? v : undefined;
+}
+
+/** A fingerprint as the user may copy it, with or without colons and in any case; returned in the kernel's form. */
+function cleanFingerprint(v: unknown): string | undefined {
+  if (typeof v !== "string" || !FINGERPRINT.test(v)) return undefined;
+  return v.replace(/:/g, "").toLowerCase();
+}
+
+export function parsePairConnect(v: unknown): PairConnectArgs | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["address", "fingerprint", "password"])) return undefined;
+  const password = parsePairPassword(v.password);
+  if (password === undefined) return undefined;
+  const out: PairConnectArgs = { password };
+  if (v.address !== undefined) {
+    if (typeof v.address !== "string" || v.address.trim() === "" || v.address.length > 260) return undefined;
+    out.address = v.address.trim();
+  }
+  if (v.fingerprint !== undefined) {
+    const fp = cleanFingerprint(v.fingerprint);
+    if (fp === undefined) return undefined;
+    out.fingerprint = fp;
+  }
+  if (out.address === undefined && out.fingerprint === undefined) return undefined;
+  return out;
 }
 
 export function parsePairImport(v: unknown): PairImportArgs | undefined {

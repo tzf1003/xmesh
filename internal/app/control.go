@@ -9,8 +9,10 @@ import (
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -25,26 +27,37 @@ var Version = "dev"
 // controlDeps is what Run hands the control channel. The channel is a window
 // onto the running node, never a dependency of it (CON-ARCH-10).
 type controlDeps struct {
-	store     *config.Store
-	stateDir  string
-	auditDir  string
-	log       *audit.Logger
-	agent     *agent.Agent // nil on a node without the agent role
-	network   mesh.Network // nil in --local mode
-	self      identity.Principal
-	mode      string
-	allowSIDs []string
-	ingress   control.IngressAdmin // nil on a node without the ingress role
-	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
-	resume    func()
-	// peerInfo is the gateways' sys.info readings by device; nil on a node without a gateway.
-	peerInfo func() map[string]gateway.DeviceInfo
+	store      *config.Store
+	backendEnv *backendenv.Store // nil: the node cannot keep backend variables
+	stateDir   string
+	auditDir   string
+	log        *audit.Logger
+	agent      *agent.Agent // nil on a node without the agent role
+	network    mesh.Network // nil in --local mode
+	self       identity.Principal
+	mode       string
+	allowSIDs  []string
+	pairing    control.PairingAdmin // nil unless the node runs the LAN network
+	drain      func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
+	resume     func()
+	// peerInfo is the gateways' sys.info readings by device; ok is false while the node runs no gateway.
+	peerInfo func() (readings map[string]gateway.DeviceInfo, ok bool)
+	// roles starts, stops and moves the roles that follow the configuration.
+	roles *roleRuntime
 }
 
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
-	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress}
+	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Pairing: d.pairing}
+	options.BackendEnv = d.backendEnv
+	if d.agent != nil {
+		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
+	}
+	if d.roles != nil {
+		options.Applier = d.roles
+		options.IngressNow = d.roles.ingressAdmin
+	}
 	s, e := control.Start(options)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "控制通道未启动:", e)
@@ -86,15 +99,26 @@ func (h *controlHost) Status() v1.StatusResponse {
 		st.Home, _ = os.UserHomeDir()
 	}
 	st.Roles = cfg.Node.Roles
+	st.PolicyReloadFailures += int(h.d.roles.failureCount())
 	st.AuthkeyReadable = authkeyReadable(cfg)
 	st.Warnings = h.warnings(cfg, st)
-	if hasRole(cfg.Node.Roles, "gateway") {
-		st.Gateway = gatewayInfo(cfg, h.d.network)
+	if listen, serving := h.d.roles.gatewayListen(); serving {
+		// What the gateway answers on is where it is bound, which differs from the configuration while
+		// a move to a new listen address has failed.
+		shown := *cfg
+		shown.Gateway.Listen = listen
+		st.Gateway = gatewayInfo(&shown, h.d.network)
 	}
 	if hasRole(cfg.Node.Roles, "ingress") {
-		info := &v1.IngressInfo{Listen: cfg.Ingress.Listen}
-		if cfg.Ingress.OAuth.Issuer != "" {
-			info.Issuer = &cfg.Ingress.OAuth.Issuer
+		// What the ingress answers on is the section it runs with, which differs from the file while a
+		// move to a new section has failed.
+		section := cfg.Ingress
+		if running, ok := h.d.roles.ingressConfig(); ok {
+			section = running
+		}
+		info := &v1.IngressInfo{Listen: section.Listen}
+		if section.OAuth.Issuer != "" {
+			info.Issuer = &section.OAuth.Issuer
 		}
 		st.Ingress = info
 	}
@@ -113,6 +137,12 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 	}
 	if h.d.store.Failing() {
 		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "配置文件当前无法加载，继续使用最近有效配置")
+	}
+	for _, message := range h.d.roles.problemMessages() {
+		add(v1.WarnPolicyReloadFailed, v1.SeverityError, message)
+	}
+	if h.d.agent != nil && cwd.DenyFailing(cfg.Agent.CWDPolicy.DenyFile) {
+		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "禁止目录文件当前无法加载，继续使用最近有效内容")
 	}
 	if h.d.agent != nil && cfg.Agent.Policy.AllowDangerous {
 		add(v1.WarnAllowDangerous, v1.SeverityInfo, "allow_dangerous 已启用")
@@ -181,8 +211,9 @@ func (h *controlHost) Peers(ctx context.Context) ([]v1.Peer, error) {
 		return nil, e
 	}
 	var readings map[string]gateway.DeviceInfo
+	haveInfo := false
 	if h.d.peerInfo != nil {
-		readings = h.d.peerInfo()
+		readings, haveInfo = h.d.peerInfo()
 	}
 	for _, p := range peers {
 		if p.Name == cfg.Node.Name || (p.ID != "" && p.ID == h.d.self.Node) {
@@ -207,7 +238,7 @@ func (h *controlHost) Peers(ctx context.Context) ([]v1.Peer, error) {
 			system := p.OS
 			row.OS = &system
 		}
-		if p.Online && h.d.peerInfo != nil {
+		if p.Online && haveInfo {
 			row.Info = deviceInfoView(readings[p.Name])
 		}
 		out = append(out, row)

@@ -792,13 +792,16 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
 // ---- helpers for the page ----
 
 /**
- * Terminal commands the page shows when no credential is saved. They run as written (no shell metacharacters);
- * the secret is typed at the prompt or piped on stdin, never into this app. The Headscale URL is a placeholder to edit.
+ * Terminal commands the page shows when no credential is saved, run through the CLI at `cli` (see cliCommandText).
+ * They run as written (no shell metacharacters beyond the CLI path); the secret is typed at the prompt or piped
+ * on stdin, never into this app. The Headscale URL is a placeholder to edit.
  */
-export const MESH_LOGIN_COMMANDS = {
-  read: "xmesh mesh login --kind tailscale --access read",
-  write: "xmesh mesh login --kind tailscale --access write",
-  readHeadscale: "xmesh mesh login --kind headscale --url https://headscale.example.com --access read",
-  writeHeadscale: "xmesh mesh login --kind headscale --url https://headscale.example.com --access write",
-} as const;
-export type MeshLoginKind = keyof typeof MESH_LOGIN_COMMANDS;
+export function meshLoginCommands(cli = "xmesh") {
+  return {
+    read: `${cli} mesh login --kind tailscale --access read`,
+    write: `${cli} mesh login --kind tailscale --access write`,
+    readHeadscale: `${cli} mesh login --kind headscale --url https://headscale.example.com --access read`,
+    writeHeadscale: `${cli} mesh login --kind headscale --url https://headscale.example.com --access write`,
+  };
+}
+export type MeshLoginKind = keyof ReturnType<typeof meshLoginCommands>;

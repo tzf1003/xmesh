@@ -1,0 +1,7 @@
+{
+  "edits": [
+    {"path": "/agent/backends/docs", "delete": true},
+    {"path": "/agent/authz/tag:ops/backends", "value": []}
+  ],
+  "dry_run": true
+}

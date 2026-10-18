@@ -4,10 +4,13 @@ import type { Capability } from "../shared/control";
 import { hasCapability } from "../shared/control";
 import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
 import { getApi } from "./api";
+import { ApplyBar } from "./apply-bar";
 import { Badge, Banner, Toasts, useToasts } from "./components";
+import { DisplayDialog, applyDisplay } from "./display";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
 import type { Key } from "./messages";
+import type { SaveOutcome } from "./lib/reload";
 import type { Role, Section } from "./lib/settings";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
@@ -58,12 +61,23 @@ const STATUS_KIND: Record<TrayIcon, "" | "ok" | "warn" | "danger"> = {
   restart: "warn",
 };
 
+/** A save that left something to do: a restart, a setting the kernel did not take, a file it could not load. */
+function outstanding(o: SaveOutcome): boolean {
+  return o.restart || o.applyErrors.length > 0 || o.loadError !== undefined;
+}
+
 /** What a page needs from the kernel before it is worth showing. */
 export interface PageContext {
   snapshot: Snapshot;
   /** `undefined` while the kernel is not connected. */
   can(capability: Capability): boolean;
   toast(text: string, error?: boolean): void;
+  /**
+   * A page reports what its save returned, and the shell says whether the kernel has taken it: applied, waiting for a
+   * restart (with the restart button), or not applied. `undefined` withdraws the "applied" of the last save, for a form
+   * that changed again; what is still outstanding from it stays.
+   */
+  applied(outcome: SaveOutcome | undefined): void;
   /** Where the page opens, when the link to it named a place. Cleared by any other navigation. */
   focus: PageFocus | undefined;
   go(page: PageId, focus?: PageFocus): void;
@@ -75,14 +89,22 @@ export function App(): JSX.Element {
   const [page, setPage] = useState<PageId | undefined>(undefined);
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
   const { toasts, push } = useToasts();
+  // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
+  const [fresh, setFresh] = useState<SaveOutcome | undefined>(undefined);
   const navigate = (next: PageId, nextFocus?: PageFocus): void => {
     setFocus(nextFocus);
     setPage(next);
+    setFresh(undefined);
   };
+  useEffect(() => setFresh(undefined), [snapshot.selectedInstance]);
 
   useEffect(() => {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
   }, [snapshot.settings.locale]);
+
+  const [showDisplay, setShowDisplay] = useState(false);
+  const { display } = snapshot.settings;
+  useEffect(() => applyDisplay(display), [display.uiFont, display.codeFont]);
 
   const connected = snapshot.connection.kind === "connected";
   // With no node configured at all, the first thing worth showing is the setup wizard.
@@ -93,6 +115,7 @@ export function App(): JSX.Element {
     snapshot,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
+    applied: (outcome) => setFresh((last) => outcome ?? (last && outstanding(last) ? last : undefined)),
     focus,
     go: navigate,
   };
@@ -100,14 +123,22 @@ export function App(): JSX.Element {
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
-        <div class="main">
-          <TopBar snapshot={snapshot} />
+        <TopBar snapshot={snapshot} onDisplay={() => setShowDisplay(true)} />
+        <div class="body">
+          <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
+            <ApplyBar
+              fresh={connected ? fresh : undefined}
+              status={snapshot.connection.kind === "connected" ? snapshot.connection.status : undefined}
+              writable={ctx.can("config.write")}
+              onClear={() => setFresh(undefined)}
+              toast={push}
+            />
             <PageSwitch page={current} ctx={ctx} />
           </main>
         </div>
       </div>
+      {showDisplay && <DisplayDialog prefs={display} onClose={() => setShowDisplay(false)} />}
       <Toasts toasts={toasts} />
     </I18nContext.Provider>
   );
@@ -119,7 +150,6 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   const configured = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0;
   return (
     <nav class="sidebar" aria-label={t("nav.label")}>
-      <div class="brand">xmesh</div>
       {NAV.filter((n) => n.id !== "setup" || !configured).map((n) => (
         <button
           key={n.id}
@@ -156,15 +186,19 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   );
 }
 
-function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
+function TopBar({ snapshot, onDisplay }: { snapshot: Snapshot; onDisplay: () => void }): JSX.Element {
   const t = useT();
   const icon = deriveIcon(snapshot.connection);
   const c = snapshot.connection;
   return (
     <header class="topbar">
+      <span class="brand">xmesh</span>
       <div class="title">
         <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
       </div>
+      <button type="button" class="icon-btn" onClick={onDisplay} title={t("display.open")} aria-label={t("display.open")} data-testid="open-display">
+        Aa
+      </button>
       <Badge kind={STATUS_KIND[icon]}>
         <span data-testid="state" data-state={icon}>
           {t(icon === "offline" && snapshot.unresponsiveNodes.length > 0 ? "status.unresponsive" : STATUS_KEY[icon])}

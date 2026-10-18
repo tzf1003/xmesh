@@ -11,6 +11,7 @@ import { ControlRequestError } from "../shared/control";
 import type {
   AuditQuery,
   AuditResponse,
+  BackendEnvResponse,
   CallEventData,
   ConfigPutResponse,
   ConfigResponse,
@@ -19,8 +20,11 @@ import type {
   GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
+  PairConnectResponse,
+  PairDiscoveredResponse,
   PairExportResponse,
   PairImportResponse,
+  PairPasswordState,
   PatList,
   PatSecret,
   SessionsResponse,
@@ -29,6 +33,8 @@ import {
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
+  type BackendEnvRequest,
+  type ConfigPatchRequest,
   type ConfigReloadResponse,
   type ConfigSaveRequest,
   type DataResult,
@@ -38,6 +44,7 @@ import {
   type DenyFileSaveRequest,
   type DenyFileSaved,
   type GatewayPatRotated,
+  type PairConnectArgs,
   type PairImportArgs,
   type PatCreateArgs,
 } from "../shared/ipc";
@@ -77,6 +84,7 @@ function toError(e: unknown): ActionError {
     if (e.reason !== undefined) out.reason = e.reason;
     if (e.details.field !== undefined) out.field = e.details.field;
     if (e.details.current_etag !== undefined) out.current_etag = e.details.current_etag;
+    if (e.details.retry_after_ms !== undefined) out.retry_after_ms = e.details.retry_after_ms;
     if (e.details.diagnostics !== undefined) out.diagnostics = e.details.diagnostics;
     return out;
   }
@@ -126,6 +134,28 @@ export class PanelService {
     return this.data("config.write", (c) =>
       c.call("PUT", "/v1/config", { body: { content: req.content, dry_run: req.dryRun }, ifMatch: req.etag }),
     );
+  }
+
+  /** `PATCH /v1/config` through the generic client call: If-Match from the etag, the same error mapping as PUT. */
+  patchConfig(req: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>> {
+    return this.data("config.write", (c) =>
+      c.call("PATCH", "/v1/config", { body: { edits: req.edits, dry_run: req.dryRun }, ifMatch: req.etag }),
+    );
+  }
+
+  /**
+   * Variables of one stdio backend. `name` is a validated backend name, so it is safe as a path segment. The values
+   * travel in the request body only: they are not kept, logged or returned, and the kernel answers with names.
+   */
+  patchBackendEnv(req: BackendEnvRequest): Promise<DataResult<BackendEnvResponse>> {
+    const body: { set?: Record<string, string>; unset?: string[] } = {};
+    if (Object.keys(req.set).length > 0) body.set = req.set;
+    if (req.unset.length > 0) body.unset = req.unset;
+    return this.data("config.write", (c) => c.call("PATCH", `/v1/backends/${encodeURIComponent(req.name)}/env`, { body }));
+  }
+
+  clearBackendEnv(name: string): Promise<ActionResult> {
+    return this.action("config.write", (c) => c.call("DELETE", `/v1/backends/${encodeURIComponent(name)}/env`));
   }
 
   /** The deny list file the config names. The path comes from the config, so the renderer cannot point this at another file. */
@@ -250,6 +280,29 @@ export class PanelService {
     const body: Record<string, unknown> = { pair: args.pair, fingerprint: args.fingerprint };
     if (args.tags !== undefined) body.tags = args.tags;
     return this.data("pair", (c) => c.call("POST", "/v1/pair/import", { body }));
+  }
+
+  getPairPassword(): Promise<DataResult<PairPasswordState>> {
+    return this.data("pair", (c) => c.call("GET", "/v1/pair/password"));
+  }
+
+  setPairPassword(password: string): Promise<DataResult<PairPasswordState>> {
+    return this.data("pair", (c) => c.call("PUT", "/v1/pair/password", { body: { password } }));
+  }
+
+  clearPairPassword(): Promise<ActionResult> {
+    return this.action("pair", (c) => c.call("DELETE", "/v1/pair/password"));
+  }
+
+  discoverPairs(): Promise<DataResult<PairDiscoveredResponse>> {
+    return this.data("pair", (c) => c.call("GET", "/v1/pair/discovered"));
+  }
+
+  connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>> {
+    const body: Record<string, unknown> = { password: args.password };
+    if (args.address !== undefined) body.address = args.address;
+    if (args.fingerprint !== undefined) body.fingerprint = args.fingerprint;
+    return this.data("pair", (c) => c.call("POST", "/v1/pair/connect", { body }));
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {

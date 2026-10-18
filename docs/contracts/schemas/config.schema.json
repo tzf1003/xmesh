@@ -259,7 +259,7 @@
           "properties": {
             "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "deny": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "deny_file": { "type": "string", "minLength": 1, "description": "禁止目录列表文件的绝对路径，内容是字符串列表；其中的目录始终拒绝，与允许列表是否为空无关。" }
+            "deny_file": { "type": "string", "minLength": 1, "description": "禁止目录列表文件的绝对路径，内容是字符串列表（空列表写成 []）；其中的目录始终拒绝，与允许列表是否为空无关。每次工具调用重读，改动无需重启；运行中文件无法加载时沿用上一份成功的列表。" }
           }
         },
         "exec": {
@@ -320,6 +320,12 @@
               }
             ]
           }
+        },
+        "disabled_tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "被关闭的内置工具名。缺省或空数组表示全部开启；调用被关闭的工具返回 policy_denied。",
+          "items": {"enum": ["backend.acquire", "backend.release", "backend.renew", "exec.output", "exec.run", "fs.delete", "fs.edit", "fs.glob", "fs.grep", "fs.list", "fs.mkdir", "fs.move", "fs.read", "fs.sha256", "fs.stat", "fs.write", "pty.close", "pty.list", "pty.open", "pty.read", "pty.resize", "pty.signal", "pty.transfer", "pty.write", "sys.info"]}
         },
         "authz": {
           "type": "object",

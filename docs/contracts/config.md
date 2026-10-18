@@ -14,7 +14,7 @@
 | `ingress.pty_budget_file` | 可选绝对路径；默认使用状态目录中的 `ingress-pty.json`。同一主机的入口可指定同一文件进行跨进程准入，且 `max_pty_per_client` 必须一致 |
 | `ingress.pty_budget_authority` | 可选设备名（与 `node.name` 同样的字符集）；多台主机上的入口须配置同一设备，由该 Agent 托管跨主机准入租约，详见 [CTR-GW-06](gateway.md#ctr-gw-06)。留空只在本机协调 |
 | `roles` 含 `agent` | `agent.cwd_policy.allow` 必须存在，可以为空；空表示除 `deny` 外的全部目录都可访问 |
-| `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件缺失时 agent 不能启动，不会视为空列表。向导默认创建该文件并写入凭证目录 |
+| `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件在每次工具调用时重读，改动在下一次调用生效，不需要重启。空列表要写成 `[]`，没有内容的文件按写了一半处理。启动时文件缺失或无法解析，agent 不能启动，不会视为空列表；运行中文件不再能加载（缺失、不可读、不是字符串列表），继续使用上一份成功的列表，`policy_reload_failed` 计数加一，状态里出现同名警告，文件恢复后清除。向导默认创建该文件并写入凭证目录 |
 | `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
 | `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
 | `mesh.mode = lan` | `mesh.lan.mdns` 为 true，且不读取 auth key。可选 `mesh.lan.interface` 指定监听、mDNS 通告和浏览用的网卡名，mDNS 组播只经这块网卡收发（Windows 上显式固定组播出口，不受 Clash/Tailscale 等低 metric 隧道网卡影响）；缺省选第一块带私有 IPv4 的启用网卡，并跳过名字像虚拟机、容器、WSL、Hyper-V、VPN 隧道的网卡（只有它们时才退回使用）。指定的网卡不存在或没有私有 IPv4 时拒绝启动 |
@@ -31,16 +31,61 @@
 
 ### 热加载与冷加载
 
+配置文件的生效方式有两条路，结果相同：
+
+- 文件监视：内核约每秒重读一次文件，有效的新内容立即成为生效的配置，并通过控制通道发 `config` 事件。
+- 显式重读：`POST /v1/config/reload`（见 [CTR-CTL-07](control.md#post-v1configreload)）立即重读，返回本次是否生效、变更路径、需重启的段与没能热应用的部分。
+
+内容无法通过校验时，继续使用上一份有效配置，`policy_reload_failed` 计数加一，`load_error` 给出第一条错误。
+
+运行中的 Agent 与 Gateway 在每次调用或每个新代次上读取配置，因此下表的热加载段在下一次调用或下一个代次生效，不需要重启进程。下表中的需重启段由 `config.RestartPaths` 统一列出，控制通道的 diff 与 `restart_required` 都以它为准。
+
 | 配置段 | 变更如何生效 |
 | --- | --- |
 | `agent.policy` | 下一次工具调用，见 [CON-SEC-06](../constraints/security.md#con-sec-06) |
-| `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载 |
-| `agent.exec` 的配额数字、`agent.pty` 的上限、`agent.quota` | 热加载，`agent.quota` 对之后的调用生效。`gateway.quota` 不热加载，随 `gateway` 一起需要重启。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
+| `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载。`deny_file` 指向的文件也在每次工具调用时重读，不需要重启；该文件无法加载时保留上一份成功的列表，见字段速查 |
+| `agent.disabled_tools` | 可选的内置工具名数组，取值限定为内置工具表（见 config.schema.json）。列出的工具不出现在 `tools/list` 中，调用返回 `policy_denied`；缺省或空数组表示全部开启。与 `agent.authz` 一样热加载，无需重启 |
+| `agent.exec` 的配额数字、`agent.pty` 的上限、`agent.quota` | 热加载，`agent.quota` 对之后的调用生效。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
-| `agent.policy.windows_appcontainer` | 不热加载。只在启动时读取，变更后 `status` 提示需要重启；见下方 [Windows L2 开关](#windows-l2-开关) |
+| `gateway.quota` | 热加载。对之后的调用生效，已经放行的调用保留原来的截止时间 |
+| `gateway.expose_backends` | 热加载。已连接的客户端会被通知重新读取工具列表 |
 | `gateway.access`、`gateway.hosts` | 每个请求读取，立即生效；见 [CTR-GW-07](gateway.md#ctr-gw-07) |
-| `node`、`mesh`、`ingress`、`gateway.listen`、`gateway.expose_backends` | 不热加载。`status` 提示需要重启，运行中的进程继续使用启动时的值。`gateway.listen` 的变更也要重启 |
+| `gateway.listen` | 热加载。运行中的 Gateway 先绑定新地址，成功后再放弃旧地址，Agent、PTY 与 exec 会话不受影响；新地址被占用时 Gateway 留在旧地址上，在 `apply_errors` 与状态警告里报告。同一个端口只是放宽绑定范围（例如 `127.0.0.1:8080` 改为 `:8080`）而系统不允许两个监听并存时，先关旧监听再绑新的，新的失败就恢复旧的 |
+| `node.roles` 中的 `gateway` | 热加载。加入时创建 Gateway（令牌不存在才创建，见 [CTR-GW-07](gateway.md#ctr-gw-07)）并开始监听，去掉时停止监听并关闭它的 MCP 会话；Agent、网络和其他角色不受影响。启动失败（例如端口被占用）时节点照常运行，在 `apply_errors` 与状态警告里报告 |
+| `node.roles` 中的 `ingress` 与 `ingress` 段 | 热加载。加入时检查 `tag:ingress`、登录口令文件并开始监听，去掉时停止监听并关闭它的 MCP 会话；`ingress` 段有任何改动时入口先停再按新配置启动，因为新的监听可能要用同一个端口。已通过入口登录的客户端需要重新授权（OAuth 令牌只在入口进程内存里，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01)）。新配置在启动前就能判定不可用（例如读不到证书）时，入口保持原样；启动时才失败则恢复原来的配置，两种情况都在 `apply_errors` 与状态警告里报告。Agent、网络和其他角色不受影响 |
+| `node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
+
+#### 热应用失败时
+
+有效的配置可以在应用时失败：新的监听地址被占用，Gateway 没能启动，入口的证书读不到或端口拿不到。此时运行中的进程保持原样，该段不进入 `restart_paths`（重启也不会让占用的端口变空），而是：
+
+- `POST /v1/config/reload` 的 `apply_errors` 列出 `{section, message}`；
+- 状态警告 `policy_reload_failed` 带同样的文字，`policy_reload_failures` 计数加一，并写一条 `policy_reload_failed` 审计事件；
+- 之后的新配置，或再次调用 `POST /v1/config/reload`（它会重试上一次失败的部分），应用成功时清除。
+
+文件监视不会自行反复重试，所以端口一直被占用时不会刷屏。
+
+#### 为什么这几段需要重启
+
+`node.name`、`mesh` 决定本节点的身份与网络；`node.roles` 里的 `agent` 持有 PTY、exec、租约与沙箱运行器；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈或正在服务的会话，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。Gateway 与入口只是进来的路径，不保存会话状态（[INV-03](../constraints/invariants.md#inv-03)），所以可以在进程内启停和换地址；入口只丢掉自己进程里的 OAuth 令牌。
+
+#### 字段速查
+
+| 字段 | 热加载 | 需重启 |
+| --- | --- | --- |
+| `node.name` | | 是 |
+| `node.roles`（`gateway` 的增减） | 是 | |
+| `node.roles`（`agent`、`ingress` 的增减） | | 是 |
+| `mesh.*` | | 是 |
+| `gateway.listen`、`gateway.expose_backends` | 是 | |
+| `gateway.quota` | 是 | |
+| `gateway.access`、`gateway.hosts` | 是 | |
+| `ingress.*` | | 是 |
+| `agent.policy.windows_appcontainer` | | 是 |
+| `agent.policy.*`（除上一项）、`agent.cwd_policy`、`agent.authz`、`agent.exec`、`agent.pty`、`agent.quota`、`agent.backends`、`agent.workspaces`、`agent.default_cwd` | 是 | |
+| `gateway.pats` | 是 | |
+| `audit.*` | | 是 |
 
 ### Windows L2 开关
 

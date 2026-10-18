@@ -225,7 +225,8 @@ func TestIngressPTYBudgetAuthorityConfiguration(t *testing.T) {
 	}
 }
 
-func Test_CTRCFG01_ExposeBackendsNeedsRestart(t *testing.T) {
+// gateway.quota and gateway.expose_backends apply in the next generation and ask for no restart.
+func Test_CTRCFG01_GatewayQuotaAndExposeHot(t *testing.T) {
 	b, e := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
 	if e != nil {
 		t.Fatal(e)
@@ -251,22 +252,20 @@ func Test_CTRCFG01_ExposeBackendsNeedsRestart(t *testing.T) {
 		next = "all"
 	}
 	gateway["expose_backends"] = next
+	gateway["quota"] = map[string]any{"calls_per_hour": 42}
 	changed, _ := json.Marshal(doc)
 	if e = os.WriteFile(path, changed, 0600); e != nil {
 		t.Fatal(e)
 	}
-	if got := s.Get().Gateway.ExposeBackends; got != started {
-		t.Fatal("expose_backends took effect without a restart", got)
+	got := s.Get()
+	if got.Gateway.Quota.CallsPerHour != 42 {
+		t.Fatal("gateway.quota did not apply", got.Gateway.Quota)
 	}
-	if restart, _ := s.State(); !restart {
-		t.Fatal("changed expose_backends is not reported as restart_required")
+	if got.Gateway.ExposeBackends != next {
+		t.Fatal("gateway.expose_backends did not apply", got.Gateway.ExposeBackends)
 	}
-	if e = os.WriteFile(path, b, 0600); e != nil {
-		t.Fatal(e)
-	}
-	s.Get()
-	if restart, _ := s.State(); restart {
-		t.Fatal("reverted expose_backends still needs restart")
+	if pending := s.RestartPending(); len(pending) != 0 {
+		t.Fatalf("a hot section asked for a restart: %v", pending)
 	}
 }
 

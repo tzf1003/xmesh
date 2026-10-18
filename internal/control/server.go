@@ -19,6 +19,7 @@ import (
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -37,6 +38,26 @@ type Options struct {
 	Heartbeat time.Duration
 	// Ingress serves the ingress routes; nil on a node that does not run the ingress.
 	Ingress IngressAdmin
+	// BackendEnv keeps the environment variables of stdio backends; nil answers the env routes
+	// with unavailable. ApplyBackendEnv, when set, makes the running backends pick up a change at once.
+	BackendEnv      *backendenv.Store
+	ApplyBackendEnv func()
+	// IngressNow, when set, replaces Ingress: it returns the ingress running now, nil while none
+	// runs, for a node whose ingress comes and goes with the configuration.
+	IngressNow func() IngressAdmin
+	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
+	Pairing PairingAdmin
+	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
+	// nil on a node that has none.
+	Applier Applier
+}
+
+// Applier is the part of the node that puts a new configuration generation into effect in the
+// running process, such as moving the gateway to a new listen address.
+type Applier interface {
+	// Settle waits until every generation adopted so far has been applied and returns what could
+	// not be. With retry it first tries again what failed last time.
+	Settle(ctx context.Context, retry bool) []v1.ApplyError
 }
 
 func (o Options) heartbeat() time.Duration {
@@ -269,14 +290,23 @@ func (s *Server) table() map[string]handler {
 		"control.drain.resume":  s.resume,
 		"control.config.get":    s.getConfig,
 		"control.config.put":    s.putConfig,
+		"control.config.reload": s.reloadConfig,
+		"control.config.patch":  s.patchConfig,
 		"control.audit.list":    s.auditList,
 
 		"control.pair.export":            s.pairExport,
 		"control.pair.import":            s.pairImport,
+		"control.pair.password.get":      s.getPairPassword,
+		"control.pair.password.put":      s.putPairPassword,
+		"control.pair.password.delete":   s.deletePairPassword,
+		"control.pair.discovered":        s.listPairDiscovered,
+		"control.pair.connect":           s.connectPair,
 		"control.pats.list":              s.listPats,
 		"control.pats.create":            s.createPat,
 		"control.pats.rotate":            s.rotatePat,
 		"control.pats.delete":            s.deletePat,
+		"control.backends.env.patch":     s.patchBackendEnv,
+		"control.backends.env.delete":    s.deleteBackendEnv,
 		"control.gateway.update":         s.updateGateway,
 		"control.ingress.clients.list":   s.listIngressClients,
 		"control.ingress.clients.delete": s.deleteIngressClient,
@@ -356,7 +386,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := int64(v1.MaxRequestBytes)
-	if matched.ID == "control.config.put" {
+	if matched.ID == "control.config.put" || matched.ID == "control.config.patch" {
 		limit = v1.MaxConfigBytes
 	}
 	c := &call{route: matched.Route}

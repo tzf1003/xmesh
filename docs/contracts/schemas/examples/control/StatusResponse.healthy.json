@@ -55,6 +55,13 @@
       "policy": "exclusive",
       "state": "running",
       "favorite": true
+    },
+    {
+      "name": "github",
+      "policy": "shared",
+      "state": "running",
+      "favorite": false,
+      "env_names": ["GITHUB_TOKEN"]
     }
   ],
   "limits": {

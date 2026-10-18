@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type GatewayCopyKind, type PathKind, type PickKind, isGatewayCopyKind } from "../shared/ipc";
+import type { DisplayPrefs } from "../shared/display";
 import type { Translate } from "../shared/i18n";
 import { ControlRequestError, type DrainMode, type StatusResponse } from "../shared/control";
 import { CliError, type CliCommand } from "./cli";
@@ -99,6 +100,11 @@ export class Actions {
     return ok;
   }
 
+  async setDisplay(prefs: DisplayPrefs): Promise<ActionResult> {
+    this.controller.setDisplay(prefs);
+    return ok;
+  }
+
   async setLoginItem(enabled: boolean): Promise<ActionResult> {
     this.controller.setLoginItem(enabled);
     return ok;
@@ -111,7 +117,7 @@ export class Actions {
       if (gateway === undefined) return fail("unavailable", "no gateway address");
       return this.copyGateway(kind, gateway.url);
     }
-    const text = clipboardText(kind, undefined);
+    const text = clipboardText(kind, undefined, undefined, this.controller.snapshot.cliCommand);
     if (text === undefined) return fail("invalid_args", "copy kind");
     this.platform.writeClipboard(text);
     return ok;

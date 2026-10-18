@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -68,6 +69,10 @@ type Gateway struct {
 	draining     map[string]bool
 	meshDraining bool
 	quota        *quota.Limiter
+	// quotaApplied is the gateway.quota in force, so an unchanged generation leaves the limiter alone.
+	quotaApplied config.Quota
+	// favorite mirrors gateway.expose_backends; Reconfigure may change it while requests run.
+	favorite atomic.Bool
 	// info holds the background sys.info readings behind the control channel's device state.
 	info        map[string]*infoRecord
 	infoWorkers sync.WaitGroup
@@ -117,12 +122,31 @@ func New(o Options) *Gateway {
 		o.PTYBudget, _ = NewPTYBudget(8, "")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, info: map[string]*infoRecord{}, quota: quota.New(o.Quota.Limits())}
+	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, info: map[string]*infoRecord{}, quota: quota.New(o.Quota.Limits()), quotaApplied: o.Quota}
+	g.favorite.Store(o.Favorite)
 	if o.LocalPeer.Name != "" {
 		g.devices[o.LocalPeer.Name] = device{o.LocalPeer, true, time.Now()}
 	}
 	go g.discover()
 	return g
+}
+
+// Reconfigure applies the gateway.quota and gateway.expose_backends of a new
+// configuration generation. Calls already admitted keep the limits they were
+// given; later calls use the new ones. A change of expose_backends refreshes the
+// tool lists of the connected clients.
+func (g *Gateway) Reconfigure(q config.Quota, favorite bool) {
+	changed := g.favorite.Swap(favorite) != favorite
+	g.mu.Lock()
+	if q != g.quotaApplied {
+		g.quota.SetLimits(q.Limits())
+		g.quotaApplied = q
+	}
+	g.mu.Unlock()
+	if changed {
+		// Which tools tools/list shows depends on it, so connected clients are told to read the list again.
+		g.refreshViews()
+	}
 }
 func (g *Gateway) discover() {
 	defer close(g.done)
@@ -417,7 +441,7 @@ func (g *Gateway) newView(p Principal) *view {
 							}
 							v.mu.Lock()
 							d := v.down[device]
-							shown := !g.opts.Favorite || builtin(tool) || (d != nil && favorite(d.info, tool))
+							shown := !g.favorite.Load() || builtin(tool) || (d != nil && favorite(d.info, tool))
 							v.mu.Unlock()
 							if shown {
 								visible = append(visible, t)
@@ -652,7 +676,7 @@ func (v *view) publish(generation uint64) {
 				continue
 			}
 			entries[full] = tool
-			visibility[full] = !v.g.opts.Favorite || builtin(tool.Name) || favorite(d.info, tool.Name)
+			visibility[full] = !v.g.favorite.Load() || builtin(tool.Name) || favorite(d.info, tool.Name)
 		}
 	}
 	v.names = nil

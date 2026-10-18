@@ -96,6 +96,8 @@ type Backend struct {
 	Policy   string `json:"policy"`
 	State    string `json:"state"`
 	Favorite bool   `json:"favorite"`
+	// EnvNames are the names of the environment variables set for a stdio backend; never their values.
+	EnvNames []string `json:"env_names,omitempty"`
 }
 
 type Limits struct {
@@ -135,12 +137,15 @@ type GatewayUpdateRequest struct {
 	Hosts  []string `json:"hosts"`
 }
 
-// GatewayUpdateResponse echoes what was written. RestartRequired is true when Listen changed.
+// GatewayUpdateResponse echoes what was written. Since API 1.6 the running gateway moves to a new Listen
+// itself, so RestartRequired stays false; a move that failed is in ApplyErrors and the gateway is still
+// where it was.
 type GatewayUpdateResponse struct {
-	Listen          string   `json:"listen"`
-	Access          []string `json:"access"`
-	Hosts           []string `json:"hosts"`
-	RestartRequired bool     `json:"restart_required"`
+	Listen          string       `json:"listen"`
+	Access          []string     `json:"access"`
+	Hosts           []string     `json:"hosts"`
+	RestartRequired bool         `json:"restart_required"`
+	ApplyErrors     []ApplyError `json:"apply_errors"`
 }
 
 // GatewayAddress is one address the gateway answers on right now.
@@ -312,6 +317,54 @@ type ConfigPutResponse struct {
 	RestartRequired bool           `json:"restart_required"`
 }
 
+// ConfigReloadResponse is the outcome of re-reading the configuration file now. Applied is
+// true when this call made the file's content the generation in effect. Invalid content
+// keeps the last good generation and sets LoadError.
+type ConfigReloadResponse struct {
+	Applied         bool             `json:"applied"`
+	Valid           bool             `json:"valid"`
+	LoadError       *ConfigLoadError `json:"load_error"`
+	ETag            string           `json:"etag"`
+	EffectiveETag   string           `json:"effective_etag"`
+	ChangedPaths    []string         `json:"changed_paths"`
+	RestartRequired bool             `json:"restart_required"`
+	RestartPaths    []string         `json:"restart_paths"`
+	ApplyErrors     []ApplyError     `json:"apply_errors"`
+}
+
+// ApplyError is a part of the configuration that is valid but could not be put into effect in the
+// running process, for example a gateway.listen whose port is taken. The process keeps running
+// as it was and the failure stays reported until a later reload succeeds.
+type ApplyError struct {
+	Section string `json:"section"`
+	Message string `json:"message"`
+}
+
+// ConfigEdit is one JSON Pointer edit of the configuration file (ConfigEdit in control-config.schema.json).
+type ConfigEdit struct {
+	Path   string `json:"path"`
+	Value  any    `json:"value,omitempty"`
+	Delete bool   `json:"delete,omitempty"`
+}
+
+// ConfigEditRequest is PATCH /v1/config: the edits apply in order, all or none.
+type ConfigEditRequest struct {
+	Edits  []ConfigEdit `json:"edits"`
+	DryRun bool         `json:"dry_run,omitempty"`
+}
+
+// BackendEnvPatch is PATCH /v1/backends/{name}/env: Unset is applied first, then Set.
+type BackendEnvPatch struct {
+	Set   map[string]string `json:"set,omitempty"`
+	Unset []string          `json:"unset,omitempty"`
+}
+
+// BackendEnvResponse lists the variable names a backend has after a change. Values are never returned.
+type BackendEnvResponse struct {
+	Name  string   `json:"name"`
+	Names []string `json:"names"`
+}
+
 // PairDocument is the public pairing file; it matches mesh.Trusted.
 type PairDocument struct {
 	Name           string   `json:"name"`
@@ -335,6 +388,47 @@ type PairImportResponse struct {
 	Fingerprint     string   `json:"fingerprint"`
 	Tags            []string `json:"tags"`
 	RestartRequired bool     `json:"restart_required"`
+}
+
+// PairPasswordRequest sets or changes the connection password. The password is write-only: no
+// response ever carries it or anything derived from it.
+type PairPasswordRequest struct {
+	Password string `json:"password"`
+}
+
+// PairPasswordState is what the panel shows about the connection password.
+type PairPasswordState struct {
+	Set            bool  `json:"set"`
+	UpdatedAt      *Time `json:"updated_at"`
+	FailedAttempts int   `json:"failed_attempts"`
+	LockedUntil    *Time `json:"locked_until"`
+}
+
+// PairDiscoveredDevice is an unpaired device seen on the LAN.
+type PairDiscoveredDevice struct {
+	Name        string `json:"name"`
+	Fingerprint string `json:"fingerprint"`
+	Address     string `json:"address"`
+	SeenAt      Time   `json:"seen_at"`
+}
+
+type PairDiscoveredResponse struct {
+	Devices []PairDiscoveredDevice `json:"devices"`
+}
+
+// PairConnectRequest pairs with a device on the LAN. Address or Fingerprint must be set. When only
+// Fingerprint is set the address comes from the discovery list.
+type PairConnectRequest struct {
+	Address     string `json:"address,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Password    string `json:"password"`
+}
+
+type PairConnectResponse struct {
+	Name        string   `json:"name"`
+	Fingerprint string   `json:"fingerprint"`
+	Address     string   `json:"address"`
+	Tags        []string `json:"tags"`
 }
 
 type PatInfo struct {

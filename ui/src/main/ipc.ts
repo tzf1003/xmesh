@@ -5,8 +5,10 @@ import {
   SNAPSHOT_EVENT,
   type ActionResult,
   parseAuditQuery,
+  parseBackendEnv,
   parseBoolean,
   parseClientId,
+  parseConfigPatch,
   parseConfigSave,
   parseDenyFileCreate,
   parseDenyFileSave,
@@ -17,13 +19,16 @@ import {
   parseExternalKey,
   parseInstanceId,
   parseNodeName,
+  parsePairConnect,
   parsePairImport,
+  parsePairPassword,
   parsePassword,
   parsePatCreate,
   parsePathKind,
   parsePickKind,
 } from "../shared/ipc";
 import type { CallEventData } from "../shared/control";
+import { parseDisplay } from "../shared/display";
 import type { PanelService } from "./panel-service";
 import type { SetupPreview, SetupReport } from "../shared/ipc";
 import type { DataResult } from "../shared/ipc";
@@ -107,6 +112,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
     const v = parseBoolean(enabled);
     return v === undefined ? bad("flag") : actions.setLoginItem(v);
   });
+  handle(CHANNELS.setDisplay, (prefs: unknown) => {
+    const v = parseDisplay(prefs);
+    return v === undefined ? bad("display preferences") : actions.setDisplay(v);
+  });
   handle(CHANNELS.openExternal, (key: unknown) => {
     const v = parseExternalKey(key);
     return v === undefined ? bad("link key") : actions.openExternal(v);
@@ -117,6 +126,18 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.putConfig, (req: unknown) => {
     const v = parseConfigSave(req);
     return v === undefined ? bad("config request") : service.putConfig(v);
+  });
+  handle(CHANNELS.patchConfig, (req: unknown) => {
+    const v = parseConfigPatch(req);
+    return v === undefined ? bad("config edit request") : service.patchConfig(v);
+  });
+  handle(CHANNELS.patchBackendEnv, (req: unknown) => {
+    const v = parseBackendEnv(req);
+    return v === undefined ? bad("backend env request") : service.patchBackendEnv(v);
+  });
+  handle(CHANNELS.clearBackendEnv, (name: unknown) => {
+    const v = parseNodeName(name);
+    return v === undefined ? bad("backend name") : service.clearBackendEnv(v);
   });
   handle(CHANNELS.readDenyFile, () => service.readDenyFile());
   handle(CHANNELS.writeDenyFile, (req: unknown) => {
@@ -159,6 +180,17 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.importPair, (args: unknown) => {
     const v = parsePairImport(args);
     return v === undefined ? bad("pair request") : service.importPair(v);
+  });
+  handle(CHANNELS.getPairPassword, () => service.getPairPassword());
+  handle(CHANNELS.setPairPassword, (password: unknown) => {
+    const v = parsePairPassword(password);
+    return v === undefined ? bad("pair password") : service.setPairPassword(v);
+  });
+  handle(CHANNELS.clearPairPassword, () => service.clearPairPassword());
+  handle(CHANNELS.discoverPairs, () => service.discoverPairs());
+  handle(CHANNELS.connectPair, (args: unknown) => {
+    const v = parsePairConnect(args);
+    return v === undefined ? bad("pair connect request") : service.connectPair(v);
   });
   handle(CHANNELS.queryAudit, (query: unknown) => {
     const v = parseAuditQuery(query);

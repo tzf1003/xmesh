@@ -10,6 +10,10 @@
 export type Timestamp = string;
 export type NodeName = string;
 /**
+ * 环境变量名。
+ */
+export type EnvName = string;
+/**
  * 控制 API 版本，主版本.次版本。响应头 X-Xmesh-Control-Version 与 control.json 使用同一写法。
  */
 export type ApiVersion = string;
@@ -79,7 +83,9 @@ export type ControlErrorCode =
   | "payload_too_large"
   | "config_invalid"
   | "fingerprint_mismatch"
+  | "pair_rejected"
   | "precondition_required"
+  | "rate_limited"
   | "internal"
   | "not_implemented"
   | "unavailable";
@@ -123,6 +129,14 @@ export type ControlEvent =
  * 证书 SHA-256，小写十六进制，无分隔符。
  */
 export type PairFingerprint = string;
+/**
+ * 主机或 主机:端口。省略端口时使用 7433。IPv6 地址放在方括号中。
+ */
+export type PairAddress = string;
+/**
+ * 连接密码。长度按 Unicode 码点计，首尾不能是空白。
+ */
+export type PairPassword = string;
 
 /**
  * 查询串参数。所有值都是字符串，数字与时间在服务端解析。多个条件取交集。
@@ -211,6 +225,27 @@ export interface AuditEvent {
   duration_ms: number;
   output_sha256?: string;
 }
+export interface BackendEnvPatch {
+  /**
+   * 新增或覆盖的变量。值不能含空字符。节点策略不允许的变量名返回 invalid_args，reason 为 env_denied。
+   */
+  set?: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * 要删除的变量。先于 set 生效，同一个变量不能同时出现在两处。
+   *
+   * @maxItems 64
+   */
+  unset?: EnvName[];
+}
+export interface BackendEnvResponse {
+  name: NodeName;
+  /**
+   * 修改之后这个后端还有哪些变量，按字母序。只有名字，没有值。
+   */
+  names: EnvName[];
+}
 export interface Warning {
   code: WarningCode;
   severity: Severity;
@@ -278,6 +313,37 @@ export interface ConfigChange {
    */
   weakens_security: boolean;
 }
+/**
+ * 对配置文件的一处修改，按 JSON Pointer 定位；数组整体替换，映射不存在时自动创建。
+ */
+export interface ConfigEdit {
+  /**
+   * JSON Pointer，例如 /agent/backends/fs。
+   */
+  path: string;
+  /**
+   * 新值，任意 JSON；delete 为 true 时忽略。
+   */
+  value?: {} | unknown[] | string | number | boolean | null;
+  /**
+   * 删除该路径。
+   */
+  delete?: boolean;
+}
+/**
+ * PATCH /v1/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。
+ */
+export interface ConfigEditRequest {
+  /**
+   * @minItems 1
+   * @maxItems 64
+   */
+  edits: [ConfigEdit, ...ConfigEdit[]];
+  /**
+   * 只校验并计算 diff，不写文件。
+   */
+  dry_run?: boolean;
+}
 export interface ConfigPutRequest {
   content: string;
   /**
@@ -299,6 +365,51 @@ export interface ConfigPutResponse {
    * 写入后的配置是否有变更需要重启才生效。
    */
   restart_required: boolean;
+}
+export interface ConfigReloadResponse {
+  /**
+   * 本次调用是否使磁盘上的新内容成为生效的配置。内容未变、或已被文件监视器采纳时为 false。
+   */
+  applied: boolean;
+  /**
+   * 磁盘上的内容能否通过校验。为 false 时 load_error 给出第一条错误，生效的配置保持不变。
+   */
+  valid: boolean;
+  load_error: ConfigLoadError | null;
+  /**
+   * 磁盘上当前内容的 ETag。
+   */
+  etag: string;
+  /**
+   * 正在生效的那份配置所对应的文件 ETag。
+   */
+  effective_etag: string;
+  /**
+   * 本次生效的变更对应的 JSON Pointer。未生效时为空数组。
+   */
+  changed_paths: string[];
+  /**
+   * 磁盘上是否有需要重启才生效的段（RestartPaths）尚未运行。
+   */
+  restart_required: boolean;
+  /**
+   * 需要重启的段，例如 /mesh、/audit。
+   */
+  restart_paths: string[];
+  /**
+   * 有效但没能在运行中的进程里生效的部分。没有时为空数组。
+   */
+  apply_errors: ApplyError[];
+}
+export interface ApplyError {
+  /**
+   * 没能生效的部分，目前是 gateway。
+   */
+  section: string;
+  /**
+   * 给人看的原因，例如监听地址被占用，以及运行中的进程现在是什么状态。
+   */
+  message: string;
 }
 export interface DrainState {
   draining: boolean;
@@ -608,6 +719,10 @@ export interface Backend {
   policy: "shared" | "exclusive";
   state: "stopped" | "running" | "crashed";
   favorite: boolean;
+  /**
+   * stdio 后端已设置的环境变量名，按字母序。从不包含值。没有变量时省略。
+   */
+  env_names?: EnvName[];
 }
 export interface Limits {
   exec_shared: number;
@@ -754,9 +869,13 @@ export interface GatewayUpdateResponse {
   access: GatewayAccess[];
   hosts: string[];
   /**
-   * listen 与写入前不同时为真。access 与 hosts 立即生效。
+   * 自 API 1.5 起恒为 false：listen、access 与 hosts 都在运行中生效。字段保留给旧的客户端。
    */
   restart_required: boolean;
+  /**
+   * 写入已完成，但运行中的 Gateway 没能移到新的 listen（例如端口被占用）时给出原因；Gateway 仍在原来的地址上。没有时为空数组。
+   */
+  apply_errors: ApplyError[];
 }
 export interface IngressClient {
   client_id: string;
@@ -806,6 +925,59 @@ export interface PairImportResponse {
    * 与 xmesh pair 一致，重启节点后信任才生效时为 true。
    */
   restart_required: boolean;
+}
+export interface PairPasswordRequest {
+  password: PairPassword;
+}
+export interface PairPasswordState {
+  /**
+   * 未设置时为 false，此时对端无法通过密码配对本机。
+   */
+  set: boolean;
+  /**
+   * 最近一次设置或修改的时间，未设置时为 null。
+   */
+  updated_at: Timestamp | null;
+  /**
+   * 对端连续失败次数。成功配对后清零。
+   */
+  failed_attempts: number;
+  /**
+   * 限流锁定截止时间，未锁定时为 null。从不包含口令或派生值。
+   */
+  locked_until: Timestamp | null;
+}
+export interface PairDiscoveredDevice {
+  name: NodeName;
+  fingerprint: PairFingerprint;
+  /**
+   * 内网中发现的地址，主机:端口。
+   */
+  address: string;
+  seen_at: Timestamp;
+}
+export interface PairDiscoveredResponse {
+  /**
+   * 尚未配对、且宣告了 pairing=1 的设备。已配对的设备不出现在这里。
+   */
+  devices: PairDiscoveredDevice[];
+}
+/**
+ * address 与 fingerprint 至少给一个。
+ */
+export interface PairConnectRequest {
+  address?: PairAddress;
+  /**
+   * 证书 SHA-256，小写十六进制，无分隔符。
+   */
+  fingerprint?: string;
+  password: PairPassword;
+}
+export interface PairConnectResponse {
+  name: NodeName;
+  fingerprint: PairFingerprint;
+  address: PairAddress;
+  tags: Tag[];
 }
 export interface PatInfo {
   name: NodeName;
@@ -882,7 +1054,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.2" as const;
+export const CONTROL_API_VERSION = "1.7" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -926,7 +1098,9 @@ export const CONTROL_ERROR_STATUS = {
   "payload_too_large": 413,
   "config_invalid": 422,
   "fingerprint_mismatch": 422,
+  "pair_rejected": 422,
   "precondition_required": 428,
+  "rate_limited": 429,
   "internal": 500,
   "not_implemented": 501,
   "unavailable": 503
@@ -934,7 +1108,7 @@ export const CONTROL_ERROR_STATUS = {
 
 export interface ControlRouteInfo {
   id: keyof ControlRouteTypes;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   capability: Capability;
   since: string;
@@ -1052,6 +1226,26 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "errors": []
   },
   {
+    "id": "control.config.patch",
+    "method": "PATCH",
+    "path": "/v1/config",
+    "capability": "config.write",
+    "since": "1.3",
+    "query": null,
+    "body": "ConfigEditRequest",
+    "response": "ConfigPutResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "required",
+    "errors": [
+      "invalid_args",
+      "config_invalid",
+      "precondition_failed",
+      "precondition_required",
+      "conflict"
+    ]
+  },
+  {
     "id": "control.config.put",
     "method": "PUT",
     "path": "/v1/config",
@@ -1069,6 +1263,20 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
       "precondition_failed",
       "precondition_required"
     ]
+  },
+  {
+    "id": "control.config.reload",
+    "method": "POST",
+    "path": "/v1/config/reload",
+    "capability": "config.write",
+    "since": "1.4",
+    "query": null,
+    "body": null,
+    "response": "ConfigReloadResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
   },
   {
     "id": "control.pair.export",
@@ -1101,6 +1309,91 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "errors": [
       "invalid_args",
       "fingerprint_mismatch",
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.password.get",
+    "method": "GET",
+    "path": "/v1/pair/password",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": null,
+    "response": "PairPasswordState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.password.put",
+    "method": "PUT",
+    "path": "/v1/pair/password",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": "PairPasswordRequest",
+    "response": "PairPasswordState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.password.delete",
+    "method": "DELETE",
+    "path": "/v1/pair/password",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.discovered",
+    "method": "GET",
+    "path": "/v1/pair/discovered",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": null,
+    "response": "PairDiscoveredResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.pair.connect",
+    "method": "POST",
+    "path": "/v1/pair/connect",
+    "capability": "pair",
+    "since": "1.5",
+    "query": null,
+    "body": "PairConnectRequest",
+    "response": "PairConnectResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "pair_rejected",
+      "rate_limited",
       "unsupported_mode"
     ]
   },
@@ -1165,6 +1458,38 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "if_match": "none",
     "errors": [
       "not_found"
+    ]
+  },
+  {
+    "id": "control.backends.env.patch",
+    "method": "PATCH",
+    "path": "/v1/backends/{name}/env",
+    "capability": "config.write",
+    "since": "1.7",
+    "query": null,
+    "body": "BackendEnvPatch",
+    "response": "BackendEnvResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args"
+    ]
+  },
+  {
+    "id": "control.backends.env.delete",
+    "method": "DELETE",
+    "path": "/v1/backends/{name}/env",
+    "capability": "config.write",
+    "since": "1.7",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args"
     ]
   },
   {
@@ -1263,13 +1588,22 @@ export interface ControlRouteTypes {
   "control.drain.start": { query: undefined; body: DrainRequest; response: DrainResponse };
   "control.drain.resume": { query: undefined; body: undefined; response: DrainResponse };
   "control.config.get": { query: undefined; body: undefined; response: ConfigResponse };
+  "control.config.patch": { query: undefined; body: ConfigEditRequest; response: ConfigPutResponse };
   "control.config.put": { query: undefined; body: ConfigPutRequest; response: ConfigPutResponse };
+  "control.config.reload": { query: undefined; body: undefined; response: ConfigReloadResponse };
   "control.pair.export": { query: undefined; body: undefined; response: PairExportResponse };
   "control.pair.import": { query: undefined; body: PairImportRequest; response: PairImportResponse };
+  "control.pair.password.get": { query: undefined; body: undefined; response: PairPasswordState };
+  "control.pair.password.put": { query: undefined; body: PairPasswordRequest; response: PairPasswordState };
+  "control.pair.password.delete": { query: undefined; body: undefined; response: undefined };
+  "control.pair.discovered": { query: undefined; body: undefined; response: PairDiscoveredResponse };
+  "control.pair.connect": { query: undefined; body: PairConnectRequest; response: PairConnectResponse };
   "control.pats.list": { query: undefined; body: undefined; response: PatList };
   "control.pats.create": { query: undefined; body: PatCreateRequest; response: PatSecret };
   "control.pats.rotate": { query: undefined; body: undefined; response: PatSecret };
   "control.pats.delete": { query: undefined; body: undefined; response: undefined };
+  "control.backends.env.patch": { query: undefined; body: BackendEnvPatch; response: BackendEnvResponse };
+  "control.backends.env.delete": { query: undefined; body: undefined; response: undefined };
   "control.gateway.update": { query: undefined; body: GatewayUpdateRequest; response: GatewayUpdateResponse };
   "control.ingress.clients.list": { query: undefined; body: undefined; response: IngressClientsResponse };
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };

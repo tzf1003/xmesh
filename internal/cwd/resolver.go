@@ -2,14 +2,12 @@
 package cwd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/tzf1003/xmesh/internal/toolerr"
-	"go.yaml.in/yaml/v3"
 )
 
 type Workspace struct {
@@ -24,19 +22,16 @@ type Policy struct {
 	DenyFile string `json:"deny_file,omitempty" yaml:"deny_file,omitempty"`
 }
 
-// WithDenyFile returns the policy with the entries of DenyFile added to Deny. A missing or
-// unreadable file is an error rather than an empty list, so the boundary never widens silently.
+// WithDenyFile returns the policy with the entries of DenyFile added to Deny. The file is read on
+// every call, so an edit applies to the next one. A file that has never loaded is an error rather
+// than an empty list; one that stops loading keeps the list that last loaded (see DenyFailing).
 func (p Policy) WithDenyFile() (Policy, error) {
 	if p.DenyFile == "" {
 		return p, nil
 	}
-	raw, err := os.ReadFile(p.DenyFile)
+	extra, err := loadDenyFile(p.DenyFile)
 	if err != nil {
-		return p, fmt.Errorf("读取禁止目录文件: %w", err)
-	}
-	var extra []string
-	if err := yaml.Unmarshal(raw, &extra); err != nil {
-		return p, fmt.Errorf("禁止目录文件不是字符串列表: %w", err)
+		return p, err
 	}
 	p.Deny = append(append([]string{}, p.Deny...), extra...)
 	return p, nil

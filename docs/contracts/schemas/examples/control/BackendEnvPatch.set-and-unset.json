@@ -1,0 +1,9 @@
+{
+  "set": {
+    "OPENAI_API_KEY": "example-value",
+    "API_BASE": "https://api.example.com/v1"
+  },
+  "unset": [
+    "OLD_KEY"
+  ]
+}

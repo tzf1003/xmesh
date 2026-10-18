@@ -35,12 +35,13 @@
     "GatewayUpdateResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["listen", "access", "hosts", "restart_required"],
+      "required": ["listen", "access", "hosts", "restart_required", "apply_errors"],
       "properties": {
         "listen": { "type": "string" },
         "access": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-status:1#/$defs/GatewayAccess" } },
         "hosts": { "type": "array", "items": { "type": "string" } },
-        "restart_required": { "type": "boolean", "description": "listen 与写入前不同时为真。access 与 hosts 立即生效。" }
+        "restart_required": { "type": "boolean", "description": "自 API 1.5 起恒为 false：listen、access 与 hosts 都在运行中生效。字段保留给旧的客户端。" },
+        "apply_errors": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-config:1#/$defs/ApplyError" }, "description": "写入已完成，但运行中的 Gateway 没能移到新的 listen（例如端口被占用）时给出原因；Gateway 仍在原来的地址上。没有时为空数组。" }
       }
     }
   }

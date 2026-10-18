@@ -4,6 +4,7 @@ import type { PageContext } from "../../app";
 import { getApi } from "../../api";
 import { Banner, ErrorBanner } from "../../components";
 import { useT } from "../../i18n";
+import { outcomeOf } from "../../lib/reload";
 import { checkAccessEntry, checkHostEntry, draftFrom, listenPort, listenScope, requestFrom, sameReach, withScope, type ReachDraft } from "../../lib/gateway";
 import type { GatewayInfo } from "../../../shared/control";
 import type { ActionError } from "../../../shared/ipc";
@@ -21,7 +22,8 @@ const HOST_PROBLEM_KEY: Record<"invalid" | "duplicate", Key> = {
 
 /**
  * The gateway's reach as quick controls: which sources may connect, which domain names it answers to,
- * and whether it listens on every interface. Access and hosts apply at once; the listen scope needs a restart.
+ * and whether it listens on every interface. All of it applies at once (control API 1.5); a kernel that cannot
+ * move the running gateway to the new listen scope says why. The shell shows what the kernel answered.
  */
 export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: GatewayInfo }): JSX.Element {
   const t = useT();
@@ -32,7 +34,6 @@ export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: Gatew
   const [hostInput, setHostInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ActionError | undefined>(undefined);
-  const [restart, setRestart] = useState(false);
 
   // The kernel's reach changed (this save or another): start from what it now says.
   useEffect(() => {
@@ -56,7 +57,7 @@ export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: Gatew
       return;
     }
     setDraft(draftFrom(r.data));
-    if (r.data.restart_required) setRestart(true);
+    ctx.applied(outcomeOf(r.data));
     ctx.toast(t("reach.saved"));
   };
 
@@ -222,11 +223,6 @@ export function ReachEditor({ ctx, gateway }: { ctx: PageContext; gateway: Gatew
         <span class="hint">{t("reach.listenHint", { port })}</span>
       </fieldset>
 
-      {restart && (
-        <Banner kind="warn" testid="gateway-restart">
-          {t("reach.restartRequired")}
-        </Banner>
-      )}
       {error && <ErrorBanner error={error} testid="reach-error" />}
       <div class="row end">
         {dirty && <span class="hint">{t("config.unsaved")}</span>}

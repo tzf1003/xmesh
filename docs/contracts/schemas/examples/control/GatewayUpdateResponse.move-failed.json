@@ -1,0 +1,9 @@
+{
+  "listen": ":8080",
+  "access": ["localhost", "lan", "tailnet"],
+  "hosts": [],
+  "restart_required": false,
+  "apply_errors": [
+    { "section": "gateway", "message": "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上：listen tcp :8080: bind: address already in use" }
+  ]
+}

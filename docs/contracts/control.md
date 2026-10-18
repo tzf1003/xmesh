@@ -15,6 +15,7 @@
 | [schemas/control-drain.schema.json](schemas/control-drain.schema.json) | drain 与 resume |
 | [schemas/control-config.schema.json](schemas/control-config.schema.json) | 配置读写 |
 | [schemas/control-pair.schema.json](schemas/control-pair.schema.json)、[control-pats](schemas/control-pats.schema.json)、[control-ingress](schemas/control-ingress.schema.json)、[control-audit](schemas/control-audit.schema.json) | 配对、PAT、入口、审计 |
+| [schemas/control-backends.schema.json](schemas/control-backends.schema.json) | stdio 后端的环境变量 |
 | [schemas/control-routes.json](schemas/control-routes.json) | 路由表：方法、路径、能力、请求与响应类型、错误码 |
 
 下文引用的类型名（如 `StatusResponse`）就是这些文件 `$defs` 里的定义名，全局唯一。
@@ -103,7 +104,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | code | severity | 何时 |
 | --- | --- | --- |
 | `restart_required` | `info` | `restart_required` 为真 |
-| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
+| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置；或 `agent.cwd_policy.deny_file` 指向的文件无法加载，继续使用上一份成功的禁止目录列表（`message` 说明是哪一个）。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
 | `allow_dangerous` | `info` | 配置启用了 `allow_dangerous`（[CON-SEC-10](../constraints/security.md#con-sec-10) 要求提示） |
 | `tailnet_not_ready` | `warning` | 模式是 tailnet 但尚未加入 |
 | `authkey_unreadable` | `warning` | tailnet 模式下 `authkey_file` 不可读 |
@@ -204,7 +205,32 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 4. 写同目录临时文件（保持原文件权限）、`fsync`、重命名覆盖。Windows 使用等价的原子替换。注释与格式由客户端提交的 `content` 原样保留，内核不重新序列化。
 5. 返回 `applied: true`、新 `etag`、`diff`、`restart_required`，发 `config` 事件（`actor: control`），写审计。
 
-写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的字段（`node`、`mesh`、`ingress`、`gateway.listen`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
+### PATCH /v1/config
+
+请求 `ConfigEditRequest`，必须带 `If-Match`，与 `PUT` 的 ETag 规则相同。`edits` 是按 JSON Pointer 依次应用到磁盘当前文件上的修改（数组整体替换，缺失的映射自动创建，`delete: true` 删除路径），注释与未修改的部分原样保留。内核先在当前文件上应用全部修改，再走与 `PUT` 相同的 `config.Parse` 校验、diff、原子写入与事件；任一步失败整批都不写入。无法应用的修改（例如路径穿过标量）返回 `conflict`（409）。`dry_run: true` 只返回 diff。UI 的表单式设置（MCP 服务器、内置工具开关、授权）都经此路由写入，避免客户端整文件改写 YAML。
+
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。`gateway.listen`、`gateway.expose_backends`、`ingress` 段和 `node.roles` 里 `gateway`、`ingress` 的增减不在其中：运行中的进程自己应用它们。diff 里 `node.roles` 是一项变更（整个数组），`restart_required` 只看哪些角色变了。
+
+### POST /v1/config/reload
+
+请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.4 起；`apply_errors` 自 1.6 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
+
+| 字段 | 含义 |
+| --- | --- |
+| `applied` | 本次调用是否使磁盘上的新内容成为生效的配置。内容未变，或文件监视器已经采纳过，为 `false` |
+| `valid` | 磁盘上的内容能否通过与启动相同的校验。为 `false` 时 `load_error` 给出第一条错误，生效的配置保持不变 |
+| `etag`、`effective_etag` | 磁盘上当前内容，与正在生效的那份对应的文件 ETag。需重启的段待生效时两者不同 |
+| `changed_paths` | 本次生效的变更的 JSON Pointer，与 `config` 事件的 `changed_paths` 相同；未生效时为空数组 |
+| `restart_required`、`restart_paths` | 磁盘上是否有需重启的段尚未运行，以及它们的路径（`config.RestartPaths` 中的一项或多项，例如 `/mesh`） |
+| `apply_errors` | 有效但没能在运行中的进程里生效的部分，`{section, message}`；目前 `section` 只有 `gateway`（新的 `listen` 绑不上，或 Gateway 没能启动）。进程保持原样，不进入 `restart_paths`。调用本接口时会先重试上一次失败的部分，再等本代次应用完（最多约 10 秒）。没有时为空数组 |
+
+行为：
+
+- 有效的新内容：`applied: true`，发 `config` 事件（`change: reloaded`，`actor: control`）。
+- 无效的内容：`applied: false`、`valid: false`、给出 `load_error`，继续使用上一份有效配置；首次出现时发 `config` 事件（`change: reload_failed`），`policy_reload_failed` 计数加一。
+- 没有变化：`applied: false`，不发事件，只返回当前状态。
+
+`POST /v1/config/reload` 是幂等的：连续两次调用，第二次的 `applied` 为 `false`。
 
 ### diff 与 `weakens_security`
 
@@ -220,7 +246,25 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ## CTR-CTL-08
 
-### 配对
+### 连接密码（1.5 起）
+
+每台 `lan` 节点可以设置一个连接密码。另一台设备输入它即可直接配对，无需交换文件。
+
+- `GET /v1/pair/password` 返回 `PairPasswordState`：`set`、`updated_at`、`failed_attempts`、`locked_until`。从不包含口令或派生值。
+- `PUT /v1/pair/password` 的请求是 `PairPasswordRequest {password}`，长度 10 到 128 个 Unicode 码点，首尾不能有空白，违反返回 `invalid_args`（字段 `password`）。设置或修改立即生效，并清除锁定。
+- `DELETE /v1/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
+- 口令只写不读：没有任何响应包含它。磁盘上只保存 Argon2id 的派生密钥与盐。
+
+### 内网发现与连接（1.5 起）
+
+- `GET /v1/pair/discovered` 返回 `PairDiscoveredResponse {devices[]}`：尚未配对、宣告了 `pairing=1` 的设备，每项 `name`、`fingerprint`、`address`（主机:端口）、`seen_at`。不含证书，已配对的设备不出现。
+- `POST /v1/pair/connect` 的请求是 `PairConnectRequest {address?, fingerprint?, password}`，`address` 与 `fingerprint` 至少给一个。只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`。同时给出时，对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`），不会钉入任何证书。成功返回 `PairConnectResponse {name, fingerprint, address, tags}`，立即生效，无需重启。
+
+连接失败时，`pair_rejected`（422）的 `reason` 为 `wrong_password`、`no_password`、`unsupported_peer`、`unreachable` 或 `bad_peer`。`wrong_password` 同时表示对端不是待配对的 xmesh 设备，客户端无法区分两者。`rate_limited`（429）带 `retry_after_ms`，表示对端正在限流：每台节点按连续失败次数锁定，最长 30 分钟，成功配对后清零。
+
+这些路由只在 `mesh.mode` 为 `lan` 时可用，否则返回 `unsupported_mode`。
+
+### 配对文档（高级用法）
 
 `POST /v1/pair/export`（无请求体）返回本机公开配对文档 `PairDocument`，等价于 `xmesh pair --export`，只含节点名、证书指纹、公开证书与 `tags`（导出时为空数组）。
 
@@ -289,4 +333,21 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 ### PUT /v1/gateway
 
-`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`restart_required` 在 `listen` 与运行中的值不同时为真。`access` 与 `hosts` 立即生效（每个请求读取）；`listen` 要重启。能力为 `gateway`（API 1.2 起）。
+`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`access` 与 `hosts` 立即生效（每个请求读取）；自 API 1.6 起 `listen` 也在运行中生效：Gateway 先绑定新地址再放弃旧地址，Agent 与会话不受影响，所以 `restart_required` 恒为 `false`（字段保留给旧客户端）。新地址绑不上（例如端口被占用）时写入仍然完成，Gateway 留在旧地址，原因在 `apply_errors`，之后再调用一次 `POST /v1/config/reload` 可重试。能力为 `gateway`（API 1.2 起）。
+
+## CTR-CTL-14
+
+### 后端环境变量
+
+给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.7 起）。
+
+| 路由 | 作用 |
+| --- | --- |
+| `PATCH /v1/backends/{name}/env` | 请求体 `BackendEnvPatch`：`unset`（变量名列表，先生效）与 `set`（变量名到值的对象）。至少一项；每次最多 64 项，每个后端最多 64 个变量，值不含空字符且不超过 8192 字节。响应 `BackendEnvResponse`：修改之后这个后端还有哪些变量名，按字母序 |
+| `DELETE /v1/backends/{name}/env` | 清空这个后端的所有变量，`204`；没有变量也是 `204` |
+
+后端名要符合配置里的后端名语法，但不要求已经在配置里：先存变量、再添加后端的客户端，后端第一次启动就带着变量。变量名是 `[A-Za-z_][A-Za-z0-9_]{0,127}`。节点策略不允许的名字（见 [CON-TOOL-12](../constraints/tools.md#con-tool-12)）返回 `invalid_args`，`field` 指到那个变量，`reason` 为 `env_denied`，整个请求不生效。内核没有环境变量存储时（状态目录不可写、文件损坏）返回 `unavailable`。
+
+存储在状态目录的 `backend-env.json`，`0600`，原子替换，不是 `xmesh.yaml` 的一部分：`GET/PUT/PATCH /v1/config`、配置差异、`config` 事件都不含它。变量改动立即生效，只重启受影响的后端；手工编辑这个文件的结果内核在一秒内应用。通过控制通道把后端从配置里删除时，它的变量一并删除；从没出现在配置里的名字保持原样，由 `DELETE` 清理。
+
+`StatusResponse.backends[].env_names` 列出 stdio 后端已设置的变量名（没有时省略）。审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名（`set`、`unset`）与大小，不含变量名与值。

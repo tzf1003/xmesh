@@ -96,6 +96,8 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   const page = await open({ kernel: { status: LAN_STATUS } }, "devices");
   await expect(page.getByTestId("peers-table")).toBeVisible();
 
+  // The document flow is the advanced fallback, collapsed by default.
+  await page.getByTestId("pair-advanced").locator("summary").click();
   await page.getByTestId("pair-export").click();
   await expect(page.getByTestId("pair-my-fingerprint")).toContainText(h.kernel.panel.localPair.fingerprint.slice(0, 2));
 
@@ -113,6 +115,9 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   await page.getByTestId("pair-import").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("pair-done")).toBeVisible();
+  // A pairing certificate is read at start, so the bar asks for the restart in place.
+  await expect(page.getByTestId("apply-restart-needed")).toBeVisible();
+  await expect(page.getByTestId("apply-restart")).toBeEnabled();
   expect(h.kernel.panel.imported.map((i) => i.name)).toEqual(["peer-2"]);
 });
 
@@ -201,7 +206,7 @@ test("config: review shows the diff and the weakening warning, then saves with t
   expect(h.kernel.panel.writes).toEqual([]);
 
   await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("config-saved")).toBeVisible();
+  await expect(page.getByTestId("apply-applied")).toBeVisible();
   expect(h.kernel.panel.writes.length).toBe(1);
   expect(h.kernel.panel.content).toContain("allow_dangerous: true");
 });
@@ -217,7 +222,7 @@ test("config: a change to comments only can be saved", async () => {
   await expect(page.getByTestId("config-comments-only")).toBeVisible();
   await expect(page.getByTestId("config-weakens")).toHaveCount(0);
   await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("config-saved")).toBeVisible();
+  await expect(page.getByTestId("apply-applied")).toBeVisible();
   expect(h.kernel.panel.writes).toEqual([`# my note\n${original}`]);
 });
 

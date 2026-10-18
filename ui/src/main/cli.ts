@@ -26,6 +26,28 @@ export function xmeshBinary(
   return env.XMESH_BIN || bundledXmesh(resourcesPath, platform) || resolveXmeshBinary({ ...defaultLookup(), env, platform });
 }
 
+/**
+ * Writes a binary path so a terminal runs it as written. Windows terminals default to PowerShell, which
+ * needs `&` before a quoted path; POSIX shells take a plain path or single quotes.
+ */
+export function quoteForTerminal(file: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return `& '${file.replace(/'/g, "''")}'`;
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(file) ? file : `'${file.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The CLI as the user should type it in a terminal, naming the binary the app runs: `XMESH_BIN`, then the
+ * kernel bundled with the app (inside the app bundle, so not on PATH), else the bare name PATH provides.
+ */
+export function cliCommandText(
+  env: NodeJS.ProcessEnv = process.env,
+  resourcesPath: string | undefined = (process as { resourcesPath?: string }).resourcesPath,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const bin = env.XMESH_BIN || bundledXmesh(resourcesPath, platform);
+  return bin ? quoteForTerminal(bin, platform) : "xmesh";
+}
+
 export class CliError extends Error {
   constructor(
     readonly command: string,

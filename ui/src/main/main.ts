@@ -4,6 +4,7 @@ import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
 import { ShellController } from "./controller";
+import { DisplayStore } from "./display-store";
 import { GatewayCredentials } from "./gateway-token";
 import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
@@ -11,7 +12,7 @@ import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import { MeshService, execMeshRunner } from "./mesh-service";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { runXmeshSetup } from "./cli";
+import { cliCommandText, runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -55,8 +56,15 @@ async function start(): Promise<void> {
   const t = translator(locale);
   const roots = stateRoots();
   let panel: PanelWindow | undefined;
+  const display = new DisplayStore(path.join(app.getPath("userData"), "display.json"));
   const showPanel = (): void => {
-    if (!panel || panel.window.isDestroyed()) panel = createPanelWindow();
+    if (!panel || panel.window.isDestroyed()) {
+      // Ctrl/Cmd +, - and 0 in the panel go through the same path as the display dialog.
+      panel = createPanelWindow(undefined, {
+        get: () => display.get().zoom,
+        set: (zoom) => controller.setDisplay({ ...display.get(), zoom }),
+      });
+    }
     panel.show();
   };
   app.on("second-instance", showPanel);
@@ -86,8 +94,14 @@ async function start(): Promise<void> {
   const controller = new ShellController({
     discover: () => discoverInstances(roots),
     configured: () => discoverConfigured(roots),
+    cliCommand: cliCommandText(),
     locale,
     getLoginItem: () => autostart.get().enabled,
+    getDisplay: () => display.get(),
+    setDisplay: (prefs) => {
+      if (!display.set(prefs)) notify([{ key: "display.save", text: t("display.saveFailed") }]);
+      if (panel && !panel.window.isDestroyed()) panel.window.webContents.setZoomFactor(prefs.zoom);
+    },
     setLoginItem: (enabled) => {
       const hint = autostart.set(enabled).hint;
       const text = hint === undefined ? undefined : loginHints[hint];

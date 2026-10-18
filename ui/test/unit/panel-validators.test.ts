@@ -7,7 +7,9 @@ import {
   parseClientId,
   parseConfigSave,
   parseDrainMode,
+  parsePairConnect,
   parsePairImport,
+  parsePairPassword,
   parsePassword,
   parsePatCreate,
   parsePickKind,
@@ -86,6 +88,38 @@ test("ingress password length is counted in characters, 12 to 256", () => {
   assert.equal(parsePassword("a".repeat(12) + "\u3000"), undefined);
   assert.equal(parsePassword("\ufeff" + "a".repeat(12)), "\ufeff" + "a".repeat(12), "Go does not trim a BOM");
   assert.equal(parsePassword("a b c d e f g h"), "a b c d e f g h", "inner spaces are fine");
+});
+
+test("connection password follows the kernel's rules: 10 to 128 characters, no edge spaces", () => {
+  assert.equal(parsePairPassword("a".repeat(10)), "a".repeat(10));
+  assert.equal(parsePairPassword("a".repeat(9)), undefined);
+  assert.equal(parsePairPassword("a".repeat(128)), "a".repeat(128));
+  assert.equal(parsePairPassword("a".repeat(129)), undefined);
+  assert.equal(parsePairPassword(" " + "a".repeat(10)), undefined);
+  assert.equal(parsePairPassword("a".repeat(10) + "\n"), undefined);
+  assert.equal(parsePairPassword("🔑".repeat(10)), "🔑".repeat(10), "counted in code points, not UTF-16 units");
+  assert.equal(parsePairPassword("🔑".repeat(9)), undefined);
+  assert.equal(parsePairPassword(12345), undefined);
+});
+
+test("pair connect needs a password and an address or a fingerprint; the fingerprint comes back in the kernel's form", () => {
+  const password = "correct horse battery";
+  assert.deepEqual(parsePairConnect({ address: "192.168.31.15:7433", password }), { address: "192.168.31.15:7433", password });
+  assert.deepEqual(parsePairConnect({ fingerprint: FP.match(/../g)!.join(":").toUpperCase(), password }), { password, fingerprint: FP });
+  assert.deepEqual(parsePairConnect({ address: " 10.0.0.2 ", fingerprint: FP, password }), { address: "10.0.0.2", fingerprint: FP, password });
+  for (const bad of [
+    { password },
+    { address: "", password },
+    { address: "   ", password },
+    { address: "10.0.0.2", password: "short" },
+    { address: "10.0.0.2", password: " " + password },
+    { address: "10.0.0.2", fingerprint: "abcd", password },
+    { address: "10.0.0.2", password, certificate_pem: "x" },
+    { address: 7, password },
+    { fingerprint: FP, password, tags: ["tag:admin"] },
+  ]) {
+    assert.equal(parsePairConnect(bad), undefined, JSON.stringify(bad).slice(0, 80));
+  }
 });
 
 test("pair import requires the typed fingerprint and a well-formed document", () => {

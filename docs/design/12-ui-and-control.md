@@ -92,7 +92,8 @@ flowchart LR
 | `GET /v1/sessions` | PTY、进行中 exec、后端租约，只读 | 新增只读视图 |
 | `POST /v1/drain`、`POST /v1/resume` | 排空（keep / kill）与恢复 | drain 已有；resume 新增 |
 | `GET/PUT /v1/config` | 读取当前生效配置；写入前经 `config.Parse` 校验，临时文件加重命名原子写，返回 diff 与 `restart_required` | 新增。保留 YAML 注释，使用 yaml.Node 往返 |
-| `POST /v1/pair/export`、`POST /v1/pair/import` | LAN 配对；导入必须带 UI 用户确认过的指纹 | 逻辑已有（`xmesh pair`），抽成库 |
+| `GET/PUT/DELETE /v1/pair/password`、`GET /v1/pair/discovered`、`POST /v1/pair/connect` | LAN 连接密码配对与内网发现（1.2）；口令只写不读，见 [14](../design/14-password-pairing.md) | 新增，底层是 `internal/mesh` 的 SPAKE2 配对 |
+| `POST /v1/pair/export`、`POST /v1/pair/import` | LAN 配对文档（高级用法）；导入必须带 UI 用户确认过的指纹 | 逻辑已有（`xmesh pair`），抽成库 |
 | `GET/POST/DELETE /v1/pats` | 列出、创建、轮转、撤销本机 Gateway PAT。令牌正文只在创建响应里出现一次，并直接写入 `0600` 文件，之后不可读回 | 新增 |
 | `GET/DELETE /v1/ingress/clients` | 查看已注册 OAuth 客户端，撤销；口令轮转只写不读 | 新增 |
 | `GET /v1/audit` | 按时间与过滤条件读审计元数据 | 新增只读视图，沿用 [CTR-AUD-01](../contracts/audit.md) 字段，禁止正文 |
@@ -160,12 +161,14 @@ Electron 实施约束（写入 U0 的裁定，由 U3 与 U4 的验收覆盖）�
 - 打包时启用 Electron Fuses（关闭 `RunAsNode` 等）与 ASAR 完整性校验。依赖锁定版本，保持最小依赖面，并持续跟进 Electron 的安全补丁版本，因为只有最近几个大版本会收到修补。
 - UI 进程以用户身份持有控制通道，被攻破等于获得节点控制权，上述约束是它的主要防线，不是可选项。
 
+配置是否生效：任何页面保存后，面板顶部同一处（所有页面共用的“应用状态条”）给出内核的结论，页面自己不判断。三种结论：已应用（保存已在运行的内核里生效）；需要重启内核（这次改动里有仍需重启的设置，条里写出是哪些，并在原地给「重启内核」按钮，确认后重启）；没能应用（设置已保存，但运行中的内核没能采用，条里写内核给的原因，内核仍按原来的方式运行）。页面只把保存返回的结果交给壳层。需要重启与没能应用以 `GET /v1/status` 的 `restart_required` 和 `policy_reload_failed` 告警为准，所以手改文件、导入配对证书这类不经过面板保存的变更，也会在每个页面顶部出现同样的条，直到内核重启或重新读取成功；“已应用”只对应刚做的那次保存，换页或再改表单就收起。
+
 页面：
 
 | 页面 | 内容 |
 | --- | --- |
 | 概览 | 状态、角色、配额、最近调用的元数据 |
-| 设备 | 对端、tag、直连或 DERP、在线状态；LAN 配对向导（显示指纹，用户确认后才导入） |
+| 设备 | 对端、tag、直连或 DERP、在线状态；LAN 配对：设置连接密码、查看内网发现的设备并用密码连接；配对文档折叠在高级用法里（显示指纹，用户确认后才导入） |
 | 会话 | PTY、exec、后端租约；终端 owner；一键关闭孤儿终端 |
 | 授权 | `authz`、tag 与工具授权的只读视图和编辑；PAT 创建与撤销 |
 | 入口 | OAuth issuer、已注册客户端、撤销、口令轮转；公网入口状态 |

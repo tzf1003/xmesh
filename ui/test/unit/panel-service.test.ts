@@ -9,7 +9,7 @@ import { GatewayCredentials } from "../../src/main/gateway-token";
 import { PanelService } from "../../src/main/panel-service";
 import type { Capability, StatusResponse } from "../../src/shared/control";
 import { statusFixture } from "../../testserver/fixtures";
-import { etagOf } from "../../testserver/panel-routes";
+import { PEER_PASSWORD, etagOf } from "../../testserver/panel-routes";
 import { FakeKernel } from "../../testserver/server";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "gateway", "ingress", "audit"];
@@ -176,6 +176,41 @@ test("pair export, and import only with a matching fingerprint", async () => {
   assert.deepEqual(k.panel.imported, [{ name: "peer-2", tags: ["tag:device"] }]);
 });
 
+test("connection password: set, read back without the value, clear; connect to a discovered device", async () => {
+  const { k, service } = await setup();
+  const before = await service.getPairPassword();
+  assert.ok(before.ok);
+  assert.equal(before.data.set, false);
+  const set = await service.setPairPassword("correct horse battery");
+  assert.ok(set.ok);
+  assert.equal(set.data.set, true);
+  assert.equal(JSON.stringify(set).includes("correct horse"), false, "the password is never echoed back");
+  assert.deepEqual(last(k, "PUT", "/v1/pair/password")?.body, { password: "correct horse battery" });
+
+  const found = await service.discoverPairs();
+  assert.ok(found.ok);
+  const device = found.data.devices[0]!;
+  const wrong = await service.connectPair({ address: device.address, fingerprint: device.fingerprint, password: "wrong password here" });
+  assert.ok(!wrong.ok);
+  assert.equal(wrong.error.code, "pair_rejected");
+  assert.equal(wrong.error.reason, "wrong_password");
+  const limited = await service.connectPair({ address: "10.0.0.9.limited", password: PEER_PASSWORD });
+  assert.ok(!limited.ok);
+  assert.equal(limited.error.code, "rate_limited");
+  assert.equal(limited.error.retry_after_ms, 30000);
+
+  const good = await service.connectPair({ fingerprint: device.fingerprint, password: PEER_PASSWORD });
+  assert.ok(good.ok, JSON.stringify(good));
+  assert.equal(good.data.name, device.name);
+  assert.ok(last(k, "POST", "/v1/pair/connect"));
+  const after = await service.discoverPairs();
+  assert.ok(after.ok);
+  assert.equal(after.data.devices.some((d) => d.name === device.name), false, "a paired device leaves the discovery list");
+
+  assert.deepEqual(await service.clearPairPassword(), { ok: true });
+  assert.equal(k.panel.pairPassword.set, false);
+});
+
 test("pairing outside lan mode is reported as unsupported_mode", async () => {
   const { k, service } = await setup();
   k.panel.mode = "tailnet";
@@ -217,20 +252,158 @@ test("call events feed the recent-calls ring, newest last", async () => {
   assert.ok(seen.length >= 1);
 });
 
-test("the gateway reach is replaced as a whole: access and hosts apply now, a listen change asks for a restart", async () => {
+test("PATCH /v1/config: edits apply to the document, If-Match is sent, and a stale, invalid or unappliable patch writes nothing", async () => {
+  const { k, service } = await setup();
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  const edits = [
+    { path: "/agent/backends/git-tools", value: { transport: "stdio", command: ["git", "mcp-server"], policy: "shared" } },
+    { path: "/agent/authz/tag:ops", value: { backends: ["git-tools"], tools: ["fs.read"] } },
+  ];
+  const stale = await service.patchConfig({ edits, etag: `sha256-${"0".repeat(64)}`, dryRun: false });
+  assert.ok(!stale.ok);
+  assert.equal(stale.error.code, "precondition_failed");
+  assert.equal(stale.error.current_etag, cfg.data.etag);
+
+  const dry = await service.patchConfig({ edits, etag: cfg.data.etag, dryRun: true });
+  assert.ok(dry.ok);
+  assert.equal(dry.data.applied, false);
+  assert.equal(k.panel.writes.length, 0, "a dry run writes nothing");
+  const sent = last(k, "PATCH", "/v1/config");
+  assert.deepEqual(sent?.body, { edits, dry_run: true });
+  assert.equal(sent?.ifMatch, `"${cfg.data.etag}"`);
+
+  const saved = await service.patchConfig({ edits, etag: cfg.data.etag, dryRun: false });
+  assert.ok(saved.ok);
+  assert.equal(saved.data.applied, true);
+  assert.equal(saved.data.restart_required, false, "agent settings reload without a restart");
+  assert.equal(k.panel.writes.length, 1);
+  const after = await service.getConfig();
+  assert.ok(after.ok);
+  const agent = (after.data.parsed as { agent: { backends: Record<string, unknown>; authz: Record<string, unknown> } }).agent;
+  assert.deepEqual(agent.backends["git-tools"], { transport: "stdio", command: ["git", "mcp-server"], policy: "shared" });
+  assert.deepEqual(agent.authz["tag:ops"], { backends: ["git-tools"], tools: ["fs.read"] });
+
+  // An edit that goes through a list is refused whole, and nothing from the batch is written.
+  const through = await service.patchConfig({
+    edits: [{ path: "/agent/disabled_tools", value: ["exec.run"] }, { path: "/agent/backends/git-tools/command/0", value: "x" }],
+    etag: after.data.etag,
+    dryRun: false,
+  });
+  assert.ok(!through.ok);
+  assert.equal(through.error.code, "conflict");
+  assert.equal(k.panel.writes.length, 1);
+
+  // A document the kernel would reject answers config_invalid with nothing written.
+  const broken = await service.patchConfig({ edits: [{ path: "/agent/backends/BROKEN", value: { transport: "stdio", command: ["x"], policy: "shared" } }], etag: after.data.etag, dryRun: false });
+  assert.ok(!broken.ok);
+  assert.equal(broken.error.code, "config_invalid");
+  assert.equal(k.panel.writes.length, 1);
+});
+
+test("backend env: values go to the kernel's private store and come back as names only", async () => {
+  const { k, service } = await setup();
+  const secret = "sk-test-secret-value";
+  const first = await service.patchBackendEnv({ name: "github", set: { GITHUB_TOKEN: secret, DEBUG: "1" }, unset: [] });
+  assert.deepEqual(first, { ok: true, data: { name: "github", names: ["DEBUG", "GITHUB_TOKEN"] } });
+  const sent = last(k, "PATCH", "/v1/backends/github/env");
+  assert.deepEqual(sent?.body, { set: { GITHUB_TOKEN: secret, DEBUG: "1" } }, "an empty unset is left out of the body");
+  assert.deepEqual(k.panel.envValues("github"), { GITHUB_TOKEN: secret, DEBUG: "1" });
+  assert.ok(!JSON.stringify(first).includes(secret));
+
+  const second = await service.patchBackendEnv({ name: "github", set: {}, unset: ["DEBUG"] });
+  assert.deepEqual(second, { ok: true, data: { name: "github", names: ["GITHUB_TOKEN"] } });
+  assert.deepEqual(last(k, "PATCH", "/v1/backends/github/env")?.body, { unset: ["DEBUG"] });
+  assert.deepEqual(k.panel.envValues("github"), { GITHUB_TOKEN: secret });
+
+  // Neither the status nor the config the panel reads ever carries a value.
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  assert.ok(!JSON.stringify(cfg.data).includes(secret));
+  assert.ok(!JSON.stringify(k.currentStatus).includes(secret));
+});
+
+test("backend env: a name the policy refuses answers env_denied with the variable named, and nothing is stored", async () => {
+  const { k, service } = await setup();
+  const r = await service.patchBackendEnv({ name: "github", set: { LD_PRELOAD: "/tmp/x.so" }, unset: [] });
+  assert.ok(!r.ok);
+  assert.equal(r.error.code, "invalid_args");
+  assert.equal(r.error.reason, "env_denied");
+  assert.equal(r.error.field, "set.LD_PRELOAD");
+  assert.deepEqual(k.panel.envValues("github"), {});
+});
+
+test("backend env: clearing a backend removes every variable and is not an error when there were none", async () => {
+  const { k, service } = await setup();
+  assert.ok((await service.patchBackendEnv({ name: "git-tools", set: { A: "1" }, unset: [] })).ok);
+  assert.deepEqual(await service.clearBackendEnv("git-tools"), { ok: true });
+  assert.equal(last(k, "DELETE", "/v1/backends/git-tools/env")?.path, "/v1/backends/git-tools/env");
+  assert.deepEqual(k.panel.envValues("git-tools"), {});
+  assert.deepEqual(await service.clearBackendEnv("git-tools"), { ok: true });
+});
+
+test("backend env needs config.write", async () => {
+  const { service } = await setup(ALL.filter((c) => c !== "config.write"));
+  const r = await service.patchBackendEnv({ name: "github", set: { A: "1" }, unset: [] });
+  assert.ok(!r.ok);
+  assert.ok(!(await service.clearBackendEnv("github")).ok);
+});
+
+test("the status lists the configured backends with their variable names, and a removed backend loses its variables", async () => {
+  const { k, c, service } = await setup();
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  const stdio = { transport: "stdio", command: ["npx", "srv"], policy: "shared" };
+  assert.ok((await service.patchBackendEnv({ name: "github", set: { GITHUB_TOKEN: "t" }, unset: [] })).ok);
+  const added = await service.patchConfig({ edits: [{ path: "/agent/backends/github", value: stdio }, { path: "/agent/backends/remote", value: { transport: "http", url: "http://localhost:9/mcp", policy: "shared" } }], etag: cfg.data.etag, dryRun: false });
+  assert.ok(added.ok);
+  const names = (): string[][] => {
+    const s = c.snapshot.connection;
+    return s.kind === "connected" ? s.status.backends.map((b) => [b.name, ...(b.env_names ?? [])]) : [];
+  };
+  const wait = async (want: string[][]): Promise<void> => {
+    const deadline = Date.now() + 3000;
+    while (JSON.stringify(names()) !== JSON.stringify(want) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(names(), want);
+  };
+  await wait([["github", "GITHUB_TOKEN"], ["remote"]]);
+
+  const mid = await service.getConfig();
+  assert.ok(mid.ok);
+  assert.ok((await service.patchConfig({ edits: [{ path: "/agent/backends/github", delete: true }], etag: mid.data.etag, dryRun: false })).ok);
+  assert.deepEqual(k.panel.envValues("github"), {}, "deleting the backend drops its variables");
+  await wait([["remote"]]);
+});
+
+test("PATCH /v1/config delete removes a key and leaves the rest of the document alone", async () => {
+  const { k, service } = await setup();
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  const first = await service.patchConfig({ edits: [{ path: "/agent/disabled_tools", value: ["exec.run"] }], etag: cfg.data.etag, dryRun: false });
+  assert.ok(first.ok);
+  const mid = await service.getConfig();
+  assert.ok(mid.ok);
+  const gone = await service.patchConfig({ edits: [{ path: "/agent/disabled_tools", delete: true }], etag: mid.data.etag, dryRun: false });
+  assert.ok(gone.ok);
+  assert.equal(gone.data.diff[0]?.op, "remove");
+  const end = JSON.parse(k.panel.content) as Record<string, unknown>;
+  assert.equal("disabled_tools" in ((end.agent as Record<string, unknown>) ?? {}), false);
+  assert.deepEqual(end.node, { name: "win-dev-01", roles: ["agent"] });
+});
+test("the gateway reach is replaced as a whole: access, hosts and the listen scope all apply now", async () => {
   const { k, service } = await setup();
   const hot = await service.updateGateway({ listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
   assert.deepEqual(hot, {
     ok: true,
-    data: { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"], restart_required: false },
+    data: { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"], restart_required: false, apply_errors: [] },
   });
   assert.deepEqual(last(k, "PUT", "/v1/gateway")?.body, { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
   assert.ok(k.currentStatus.gateway?.addresses.some((a) => a.url === "http://xmesh.home.example:8080/mcp"), "the status follows the new reach");
 
   const cold = await service.updateGateway({ listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
   assert.ok(cold.ok);
-  assert.equal(cold.data.restart_required, true);
-  assert.equal(k.currentStatus.restart_required, true);
+  assert.equal(cold.data.restart_required, false);
+  assert.equal(k.currentStatus.restart_required, false);
   assert.deepEqual(k.currentStatus.gateway?.addresses.map((a) => a.kind), ["localhost"], "loopback only: one address");
 
   const bad = await service.updateGateway({ listen: ":8080", access: ["192.168.1.999"], hosts: [] });

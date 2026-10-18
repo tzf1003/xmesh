@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backend"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	runexec "github.com/tzf1003/xmesh/internal/exec"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -54,6 +56,7 @@ type Agent struct {
 	views           map[string]*mcp.Server
 	viewMu          sync.Mutex
 	backendNames    map[*mcp.Server][]string
+	backendEnv      *backendenv.Store // nil: stdio backends get no configured variables
 	auditLog        atomic.Pointer[audit.Logger]
 	networkInfo     atomic.Pointer[NetworkInfo]
 	sandbox         atomic.Pointer[sandboxState]
@@ -68,7 +71,16 @@ type NetworkInfo struct {
 	Tags []string `json:"tags"`
 }
 
-func New(store *config.Store) (*Agent, error) {
+// Option adjusts an Agent before its backends start.
+type Option func(*Agent)
+
+// WithBackendEnv gives stdio backends the variables kept in env. The Agent applies later changes
+// of the file itself, restarting only the backends whose variables changed.
+func WithBackendEnv(env *backendenv.Store) Option {
+	return func(a *Agent) { a.backendEnv = env }
+}
+
+func New(store *config.Store, options ...Option) (*Agent, error) {
 	c := store.Get()
 	if _, e := cwd.New(c.Agent.DefaultCWD, c.Agent.Workspaces, c.Agent.CWDPolicy); e != nil {
 		return nil, e
@@ -84,12 +96,19 @@ func New(store *config.Store) (*Agent, error) {
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
+	for _, option := range options {
+		option(a)
+	}
+	var backendOptions []backend.Option
+	if a.backendEnv != nil {
+		backendOptions = append(backendOptions, backend.WithEnv(a.backendEnv.Snapshot()))
+	}
 	a.Backends = backend.New(c, a.Leases, a.upstream, func() {
 		select {
 		case a.backendChanged <- struct{}{}:
 		default:
 		}
-	})
+	}, backendOptions...)
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	a.Backends.WaitReady(ctx)
@@ -110,7 +129,10 @@ func (a *Agent) supervise(previous *config.Config) {
 			a.refreshBackends()
 		case <-ticker.C:
 			cfg := a.store.Get()
+			// Read the deny file as well, so an edit that breaks it is noticed without a tool call.
+			cwd.DenyFailing(cfg.Agent.CWDPolicy.DenyFile)
 			_, failures := a.store.State()
+			failures += cwd.DenyFailures()
 			if failures > recordedFailures {
 				if log := a.auditLog.Load(); log != nil {
 					if err := log.Write(map[string]any{"time": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "event": "policy_reload_failed", "caller": "config/internal", "device": cfg.Node.Name, "tool": "config.reload", "status": "error", "error": "internal", "duration_ms": 0}); err == nil {
@@ -121,9 +143,24 @@ func (a *Agent) supervise(previous *config.Config) {
 			if cfg != previous {
 				a.Backends.Configure(cfg)
 				a.refreshBackends()
+				a.refreshBuiltins()
 				previous = cfg
 			}
+			// A file edited by hand is picked up here; the control channel applies its own writes at once.
+			if a.backendEnv != nil {
+				if changed, _ := a.backendEnv.Reload(); changed {
+					a.ApplyBackendEnv()
+				}
+			}
 		}
+	}
+}
+
+// ApplyBackendEnv hands the variables now in the file to the backends. Only a backend whose own
+// variables changed restarts.
+func (a *Agent) ApplyBackendEnv() {
+	if a.backendEnv != nil {
+		a.Backends.SetEnv(a.backendEnv.Snapshot())
 	}
 }
 func (a *Agent) SetAudit(log *audit.Logger) { a.auditLog.Store(log) }
@@ -307,16 +344,16 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 		protected.ServeHTTP(w, r)
 	})
 }
-func (a *Agent) server(p Principal) *mcp.Server {
-	a.viewMu.Lock()
-	defer a.viewMu.Unlock()
-	keyBytes, _ := json.Marshal(p)
-	key := string(keyBytes)
-	if view := a.views[key]; view != nil {
-		return view
-	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "xmesh-agent", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, req *mcp.InitializedRequest) { a.bind(req.Session, p) }})
+
+// installBuiltins lists the built-in tools that agent.disabled_tools leaves on and removes the others
+// from the view, so a tool switched off in the configuration disappears from tools/list on reload.
+func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
+	disabled := a.store.Get().Agent.DisabledTools
 	for name, spec := range builtinSpecs() {
+		if slices.Contains(disabled, name) {
+			server.RemoveTools(name)
+			continue
+		}
 		name, spec := name, spec
 		server.AddTool(&mcp.Tool{Name: name, Description: spec.desc, InputSchema: spec.schema}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			caller := a.bind(req.Session, p)
@@ -324,6 +361,9 @@ func (a *Agent) server(p Principal) *mcp.Server {
 				caller = c
 			}
 			cfg := a.store.Get()
+			if slices.Contains(cfg.Agent.DisabledTools, name) {
+				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
+			}
 			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
 			}
@@ -381,6 +421,18 @@ func (a *Agent) server(p Principal) *mcp.Server {
 			return Result(out, e), nil
 		})
 	}
+}
+
+func (a *Agent) server(p Principal) *mcp.Server {
+	a.viewMu.Lock()
+	defer a.viewMu.Unlock()
+	keyBytes, _ := json.Marshal(p)
+	key := string(keyBytes)
+	if view := a.views[key]; view != nil {
+		return view
+	}
+	server := mcp.NewServer(&mcp.Implementation{Name: "xmesh-agent", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, req *mcp.InitializedRequest) { a.bind(req.Session, p) }})
+	a.installBuiltins(server, p)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
@@ -481,6 +533,10 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	if a.store.Failing() {
 		warnings = append(warnings, "配置文件当前无法加载，继续使用最近有效配置")
 	}
+	if cwd.DenyFailing(c.Agent.CWDPolicy.DenyFile) {
+		warnings = append(warnings, "禁止目录文件当前无法加载，继续使用最近有效内容")
+	}
+	failures += cwd.DenyFailures()
 	if c.Agent.Policy.AllowDangerous {
 		warnings = append(warnings, "allow_dangerous 已启用")
 	}

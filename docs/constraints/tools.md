@@ -49,3 +49,13 @@ deny 优先于 allow。路径同时匹配两边时拒绝。
 ## CON-TOOL-11
 
 后端 `policy` 为 `exclusive` 时，缺少 `_lease_token` 返回 `lease_required`；token 与当前租约不一致或已过期返回 `resource_busy`。校验通过后必须删除该字段再转发。`shared` 与 `per-caller` 若调用方仍传入 `_lease_token`，同样剥离，但不要求必须携带。
+
+## CON-TOOL-12
+
+stdio 后端可以带环境变量（API Key 之类），由节点的用户通过本机控制通道为单个后端设置（[CTR-CTL-14](../contracts/control.md#ctr-ctl-14)）。
+
+- 值保存在状态目录的 `backend-env.json`（`0600`，原子替换），不写入 `xmesh.yaml`，所以配置的读取、差异、导出和备份都不带值。值不出现在任何读接口、状态、事件、审计记录和日志里；读接口只给变量名。
+- 后端进程的环境是继承的最小环境（[CON-SEC-04](security.md#con-sec-04) 的构造顺序）加上这些变量，只对 `transport: stdio` 的后端生效。
+- 变量变化只重启该后端：它的进程、租约与会话被替换，其他后端不动。不变的变量集合（即使顺序不同）不触发重启。
+- 对调用方 `env` 被拒绝的服务商凭据名（`AWS_*`、`AZURE_*`、`GOOGLE_*`、`OPENAI_*`、`ANTHROPIC_*`）在这里允许，因为这些变量是节点的用户有意交给某个后端的。装载器与外壳劫持类名（`LD_*`、`DYLD_*`、`BASH_ENV`、`ENV`、`ZDOTDIR`、`PYTHONPATH`、`NODE_OPTIONS`、`SSH_AUTH_SOCK`、`TS_AUTHKEY`、`TAILSCALE_*`、`XMESH_*`）、策略 `env.deny_names` 与指向凭据目录的值仍然拒绝；保存时就被拒绝并返回原因，而不是等后端启动失败。
+- 从配置删除后端时，它的变量一并删除。文件损坏时内核保持原样、后端不带变量启动，并在标准错误报告，不覆盖文件。
