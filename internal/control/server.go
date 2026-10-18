@@ -271,6 +271,7 @@ func (s *Server) table() map[string]handler {
 		"control.drain.resume":  s.resume,
 		"control.config.get":    s.getConfig,
 		"control.config.put":    s.putConfig,
+		"control.config.reload": s.reloadConfig,
 		"control.config.patch":  s.patchConfig,
 		"control.audit.list":    s.auditList,
 

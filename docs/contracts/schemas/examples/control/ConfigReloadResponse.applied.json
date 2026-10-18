@@ -1,0 +1,10 @@
+{
+  "applied": true,
+  "valid": true,
+  "load_error": null,
+  "etag": "sha256-c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+  "effective_etag": "sha256-c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+  "changed_paths": ["/agent/policy/allow_dangerous", "/gateway/quota/calls_per_hour"],
+  "restart_required": true,
+  "restart_paths": ["/mesh"]
+}

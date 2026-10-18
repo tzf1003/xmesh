@@ -1,0 +1,10 @@
+{
+  "applied": false,
+  "valid": false,
+  "load_error": { "message": "/gateway/quota/calls_per_hour: 类型错误", "line": 14, "column": 5 },
+  "etag": "sha256-d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+  "effective_etag": "sha256-a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "changed_paths": [],
+  "restart_required": false,
+  "restart_paths": []
+}
