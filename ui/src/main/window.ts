@@ -1,6 +1,7 @@
-import { BrowserWindow, app, session, shell, type WebContents, type WebPreferences } from "electron";
+import { BrowserWindow, app, nativeTheme, session, shell, type WebContents, type WebPreferences } from "electron";
 import * as path from "node:path";
 import { EXTERNAL_LINKS } from "../shared/ipc";
+import { overlayColors, windowChrome } from "./chrome";
 import { PANEL_ENTRY, panelWebPreferences } from "./policy";
 
 /**
@@ -53,8 +54,15 @@ export function createPanelWindow(onClosedByUser: () => void = () => {}): PanelW
     show: false,
     title: "xmesh",
     autoHideMenuBar: true,
+    ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
     webPreferences,
   });
+  if (process.platform === "win32") {
+    // The caption area takes the page's colour, so it follows the system theme with it.
+    nativeTheme.on("updated", () => {
+      if (!win.isDestroyed()) win.setTitleBarOverlay(overlayColors(nativeTheme.shouldUseDarkColors));
+    });
+  }
   let quitting = false;
   app.on("before-quit", () => {
     quitting = true;
