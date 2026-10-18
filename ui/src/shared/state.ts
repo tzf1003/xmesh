@@ -1,3 +1,4 @@
+import { ciCounts } from "./ci";
 import { type Peer, type StatusResponse, isDegrading } from "./control";
 import { DEFAULT_DISPLAY, type DisplayPrefs } from "./display";
 import type { Locale } from "./i18n";
@@ -45,8 +46,9 @@ export interface Snapshot {
 /**
  * CTR-CTL-03 / RUL-18, first match wins: not running, version mismatch,
  * draining, restart required, degraded, healthy. Degraded looks only at
- * warnings of severity `warning` or `error`; `info` ones (restart_required,
- * allow_dangerous) do not turn the icon yellow.
+ * warnings of severity `warning` or `error`, and at CI runners that need the
+ * user; `info` warnings (restart_required, allow_dangerous) do not turn the
+ * icon yellow.
  */
 export function deriveIcon(c: Connection): TrayIcon {
   switch (c.kind) {
@@ -58,7 +60,8 @@ export function deriveIcon(c: Connection): TrayIcon {
       const s = c.status;
       if (s.drain.draining) return "draining";
       if (s.restart_required) return "restart";
-      if (s.warnings.some(isDegrading)) return "degraded";
+      // A runner that waits for the user (a stolen session, a runner GitHub removed) is as degraded as an offline peer.
+      if (s.warnings.some(isDegrading) || ciCounts(s.ci?.bindings).broken > 0) return "degraded";
       return "ok";
     }
   }
