@@ -284,6 +284,25 @@ test("a hand-over that cannot start restarts the kernels and drops the pending n
   assert.ok(!r.events.includes("quit"));
 });
 
+test("kernels come back when the pending note cannot be written", async () => {
+  const ref: { data?: string } = {};
+  const r = rig({
+    stopNode: async (n) => {
+      // The disk turns unwritable once the nodes are stopped: a directory sits where the note must go.
+      fs.mkdirSync(path.join(ref.data!, "pending.json"), { recursive: true });
+      return n === "" ? "absent" : "stopped";
+    },
+  });
+  ref.data = r.data;
+  await r.updater.check(true);
+  const res = await r.updater.install();
+  assert.equal(!res.ok && res.error.code, "install_failed");
+  assert.equal(r.handovers.length, 0);
+  assert.ok(r.events.includes("start node-a") && r.events.includes("start node-b"));
+  assert.equal(r.updater.state.phase, "available");
+  assert.ok(!r.events.includes("quit"));
+});
+
 test("an app folder the user cannot write to opens the installer for a manual copy", async () => {
   const r = rig();
   r.applier.fail = new ApplyError("not_writable", "/Applications is not writable");
@@ -305,6 +324,23 @@ test("after the update the new app restarts the kernels, reports success and cle
   assert.deepEqual(after.updater.state.outcome, { ok: true, version: "0.1.0-beta.3" });
   assert.deepEqual(after.notices, [{ kind: "updated", version: "0.1.0-beta.3" }]);
   assert.deepEqual(fs.readdirSync(r.data), []);
+});
+
+test("a kernel that will not start after the update is reported, the others still start", async () => {
+  const r = rig();
+  await r.updater.check(true);
+  await r.updater.install();
+  const after = rig({
+    version: "0.1.0-beta.3",
+    dataDir: r.data,
+    startNode: async (n) => {
+      if (n === "node-a") throw new Error("service refused");
+      after.events.push(`start ${n}`);
+    },
+  });
+  await after.updater.finishPending();
+  assert.deepEqual(after.events, ["start node-b"]);
+  assert.deepEqual(after.updater.state.outcome, { ok: true, version: "0.1.0-beta.3", unstarted: ["node-a"] });
 });
 
 test("if the app comes back at the old version the update failed; the reason the script left is shown and kernels still restart", async () => {

@@ -201,16 +201,15 @@ export class Updater extends EventEmitter<UpdaterEvents> {
         if ((await this.env.stopNode(node)) === "stopped") stopped.push(node);
       }
     } catch (e) {
-      await this.restart(stopped);
-      const error = { code: "stop_failed", message: e instanceof Error ? e.message : String(e) };
+      const error = { code: "stop_failed", message: await this.withRestart(e instanceof Error ? e.message : String(e), stopped) };
       this.set({ phase: "available", error });
       return { ok: false, error };
     }
 
     const pending: Pending = { from: this.env.version, to: found.release.version, nodes: stopped };
-    fs.writeFileSync(path.join(this.env.dataDir, PENDING_FILE), JSON.stringify(pending));
-    fs.rmSync(path.join(this.env.dataDir, RESULT_FILE), { force: true });
     try {
+      fs.writeFileSync(path.join(this.env.dataDir, PENDING_FILE), JSON.stringify(pending));
+      fs.rmSync(path.join(this.env.dataDir, RESULT_FILE), { force: true });
       await applier.start({
         installer,
         execPath: this.env.execPath,
@@ -219,15 +218,18 @@ export class Updater extends EventEmitter<UpdaterEvents> {
         resultFile: path.join(this.env.dataDir, RESULT_FILE),
       });
     } catch (e) {
-      fs.rmSync(path.join(this.env.dataDir, PENDING_FILE), { force: true });
-      await this.restart(stopped);
+      try {
+        fs.rmSync(path.join(this.env.dataDir, PENDING_FILE), { force: true });
+      } catch {
+        // the disk that refused the write may refuse this too; the next start tolerates a stale record
+      }
       let error: UpdateError;
       if (e instanceof ApplyError && e.code === "not_writable") {
         // No right to replace the app: show the disk image so the user can drag it over by hand.
         void this.env.openPath(installer);
-        error = { code: "not_writable", message: e.message };
+        error = { code: "not_writable", message: await this.withRestart(e.message, stopped) };
       } else {
-        error = { code: "install_failed", message: e instanceof Error ? e.message : String(e) };
+        error = { code: "install_failed", message: await this.withRestart(e instanceof Error ? e.message : String(e), stopped) };
       }
       this.set({ phase: "available", error });
       return { ok: false, error };
@@ -264,8 +266,23 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     this.set({ progress: { received: p.received, total: p.total > 0 ? p.total : (this.st.latest?.size ?? 0) } });
   }
 
-  private async restart(nodes: string[]): Promise<void> {
-    for (const n of nodes) await this.env.startNode(n).catch(() => {});
+  /** Starts the given nodes again and returns those that would not start. */
+  private async restart(nodes: string[]): Promise<string[]> {
+    const failed: string[] = [];
+    for (const n of nodes) {
+      try {
+        await this.env.startNode(n);
+      } catch {
+        failed.push(n);
+      }
+    }
+    return failed;
+  }
+
+  /** `message`, with the nodes that could not be brought back named when there are any. */
+  private async withRestart(message: string, nodes: string[]): Promise<string> {
+    const failed = await this.restart(nodes);
+    return failed.length === 0 ? message : `${message} (could not restart: ${failed.join(", ")})`;
   }
 
   /**
@@ -291,9 +308,10 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     }
     this.cleanup();
     if (pending === undefined) return;
-    await this.restart(pending.nodes);
+    const unstarted = await this.restart(pending.nodes);
     const ok = sameVersion(this.env.version, pending.to);
     const outcome: UpdateOutcome = ok ? { ok, version: pending.to } : { ok, version: pending.to, message: reason || `still ${this.env.version}` };
+    if (unstarted.length > 0) outcome.unstarted = unstarted;
     this.set({ outcome });
     this.env.notify({ kind: ok ? "updated" : "failed", version: pending.to });
   }

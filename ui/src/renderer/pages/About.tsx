@@ -96,6 +96,11 @@ export function About({ ctx }: { ctx: PageContext }): JSX.Element {
             {outcomeText(t, u.outcome)}
           </Banner>
         )}
+        {u.outcome?.unstarted && u.outcome.unstarted.length > 0 && (
+          <Banner kind="warn" testid="update-unstarted">
+            {t("update.outcomeUnstarted", { nodes: u.outcome.unstarted.join(", ") })}
+          </Banner>
+        )}
         {u.error && (
           <Banner kind="danger" testid="update-error">
             {updateErrorText(t, u.error)}

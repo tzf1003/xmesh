@@ -35,6 +35,8 @@ export const GITHUB_DOWNLOAD = "https://github.com/tzf1003/xmesh/releases/downlo
 
 /** An installer is about 150 MB; this only stops a runaway answer. */
 export const MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
+/** Checksum files are a few hundred bytes; anything near this is not one. */
+export const MAX_TEXT_BYTES = 1024 * 1024;
 /** No data for this long counts as a dead connection. */
 export const STALL_MS = 30_000;
 const TAG = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -92,10 +94,27 @@ export function httpSource(opts: HttpSourceOptions): UpdateSource {
     async text(tag, name, signal) {
       const res = await get(assetUrl(tag, name), signal);
       const len = Number(res.headers.get("content-length") ?? 0);
-      if (len > 1024 * 1024) throw new SourceError("too_large", `${name} is too large`);
+      if (len > MAX_TEXT_BYTES) throw new SourceError("too_large", `${name} is too large`);
+      if (res.body === null) return "";
+      // content-length can be absent (chunked, some proxies), so the cap is enforced on what is actually read.
+      const decoder = new TextDecoder();
+      const reader = res.body.getReader();
+      let text = "";
+      let bytes = 0;
       try {
-        return await res.text();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.byteLength;
+          if (bytes > MAX_TEXT_BYTES) {
+            void reader.cancel().catch(() => {});
+            throw new SourceError("too_large", `${name} is too large`);
+          }
+          text += decoder.decode(value, { stream: true });
+        }
+        return text + decoder.decode();
       } catch (e) {
+        if (e instanceof SourceError) throw e;
         throw new SourceError(signal.aborted ? "cancelled" : "network", e instanceof Error ? e.message : String(e));
       }
     },

@@ -31,6 +31,10 @@ before(async () => {
       setTimeout(() => res.end(BODY.subarray(100_000)), 20);
     } else if (req.url === "/download/v0.1.0/SHA256SUMS.txt") {
       res.end("abc  file.bin\n");
+    } else if (req.url === "/download/v0.1.0/huge.txt") {
+      // chunked: no content-length to check up front
+      res.write(Buffer.alloc(600_000, 97));
+      setTimeout(() => res.end(Buffer.alloc(600_000, 97)), 10);
     } else {
       res.statusCode = 500;
       res.end();
@@ -93,6 +97,10 @@ test("only plain tags and file names are fetched", async () => {
     await assert.rejects(source().text(tag, name, sig()), (e: SourceError) => e.code === "http", `${tag}/${name}`);
   }
   assert.equal(await source().text("v0.1.0", "SHA256SUMS.txt", sig()), "abc  file.bin\n");
+});
+
+test("a text file without a content-length is still capped while it is read", async () => {
+  await assert.rejects(source().text("v0.1.0", "huge.txt", sig()), (e: SourceError) => e.code === "too_large");
 });
 
 test("an unreachable host is a network error", async () => {

@@ -56,6 +56,8 @@ export interface UpdateOutcome {
   /** The version the update was heading to. */
   version: string;
   message?: string;
+  /** Nodes the update stopped that would not start again. */
+  unstarted?: string[];
 }
 
 export interface UpdateState {
