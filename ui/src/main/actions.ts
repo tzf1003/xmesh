@@ -1,10 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type PathKind, type PickKind } from "../shared/ipc";
+import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type GatewayCopyKind, type PathKind, type PickKind, isGatewayCopyKind } from "../shared/ipc";
 import type { Translate } from "../shared/i18n";
-import { ControlRequestError, type DrainMode } from "../shared/control";
+import { ControlRequestError, type DrainMode, type StatusResponse } from "../shared/control";
 import { CliError, type CliCommand } from "./cli";
-import { clipboardText } from "./connect";
+import { clipboardText, isSafeGatewayUrl } from "./connect";
 import type { ShellController } from "./controller";
 import type { Action } from "./menu";
 
@@ -22,6 +22,11 @@ export interface Platform {
   pickPath(kind: PickKind): Promise<string | undefined>;
 }
 
+/** Supplies the gateway token that the copied connect commands carry. Throws when there is none. */
+export interface GatewayCredentialSource {
+  read(): Promise<string>;
+}
+
 const CONFIG_EXTENSIONS = new Set([".yaml", ".yml", ".json", ".toml", ".txt"]);
 
 const ok: ActionResult = { ok: true };
@@ -36,6 +41,7 @@ export class Actions {
     private readonly controller: ShellController,
     private readonly platform: Platform,
     private readonly t: Translate,
+    private readonly credentials: GatewayCredentialSource,
   ) {}
 
   dispatch(a: Action): Promise<ActionResult> {
@@ -47,7 +53,11 @@ export class Actions {
       case "resume":
         return this.resume();
       case "copy":
-        return this.copy(a.kind);
+        // The tray has no panel to show an error in, so a failed copy becomes a notification.
+        return this.copy(a.kind).then((r) => {
+          if (!r.ok) this.platform.notifyError(this.t("menu.copyFailed"));
+          return r;
+        });
       case "open-path":
         return this.openPath(a.kind);
       case "open-external":
@@ -94,13 +104,43 @@ export class Actions {
     return ok;
   }
 
+  /** Copies a terminal command (mesh login) or, for a gateway kind, the local gateway's own address. */
   async copy(kind: CopyKind): Promise<ActionResult> {
-    const c = this.controller.snapshot.connection;
-    const gateway = c.kind === "connected" ? c.status.gateway : undefined;
-    const text = clipboardText(kind, gateway?.url, gateway?.auth);
-    if (text === undefined) return fail("unavailable", "no gateway address");
+    if (isGatewayCopyKind(kind)) {
+      const gateway = this.gatewayStatus();
+      if (gateway === undefined) return fail("unavailable", "no gateway address");
+      return this.copyGateway(kind, gateway.url);
+    }
+    const text = clipboardText(kind, undefined);
+    if (text === undefined) return fail("invalid_args", "copy kind");
     this.platform.writeClipboard(text);
     return ok;
+  }
+
+  /**
+   * Copies one of the gateway's addresses with the token in it. `url` must be an address the kernel
+   * reports right now, so the page cannot make the clipboard carry anything else.
+   */
+  async copyGateway(kind: GatewayCopyKind, url: string): Promise<ActionResult> {
+    const gateway = this.gatewayStatus();
+    if (gateway === undefined) return fail("unavailable", "no gateway address");
+    const known = gateway.url === url || gateway.addresses.some((a) => a.url === url);
+    if (!known || !isSafeGatewayUrl(url)) return fail("invalid_args", "not a gateway address");
+    let token: string;
+    try {
+      token = await this.credentials.read();
+    } catch (e) {
+      return fail("token_unavailable", e instanceof Error ? e.message : String(e));
+    }
+    const text = clipboardText(kind, url, token);
+    if (text === undefined) return fail("token_unavailable", "token is not usable");
+    this.platform.writeClipboard(text);
+    return ok;
+  }
+
+  private gatewayStatus(): StatusResponse["gateway"] {
+    const c = this.controller.snapshot.connection;
+    return c.kind === "connected" ? c.status.gateway : undefined;
   }
 
   async openPath(kind: PathKind): Promise<ActionResult> {

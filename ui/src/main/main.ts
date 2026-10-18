@@ -4,12 +4,13 @@ import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
 import { ShellController } from "./controller";
+import { GatewayCredentials } from "./gateway-token";
 import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import { MeshService, execMeshRunner } from "./mesh-service";
 import { PanelService } from "./panel-service";
-import { fsSetupHost, runSetup } from "./setup";
+import { fsSetupHost, previewSetup, runSetup } from "./setup";
 import { runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
@@ -101,7 +102,7 @@ async function start(): Promise<void> {
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
     : electronPlatform(showPanel, notifyError);
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
 
   const runAction = (a: Action): void => {
     void actions.dispatch(a);
@@ -128,6 +129,7 @@ async function start(): Promise<void> {
     controller,
     actions,
     service: new PanelService(controller),
+    previewSetup: (params) => previewSetup(params, setupHost),
     setup: (params) => runSetup(params, setupHost),
     mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),

@@ -22,7 +22,7 @@ caller_id = node_id + "/" + mcp_session_id
 - `mcp_session_id` 是 Streamable HTTP 的 `Mcp-Session-Id`。没有会话头的初始化请求使用 `init` 这个字面量，且不能持有 PTY 或租约。
 - 经公网入口转发时，Agent 看到的 `node_id` 是入口节点的节点 ID，`mcp_session_id` 是入口与该上游 OAuth 会话对应的下游 MCP 会话。入口必须为每个上游 OAuth 会话使用独立的下游 MCP 会话，使不同云端会话不会共享 owner。入口在每条下游 MCP 请求上带请求头 `X-Xmesh-Oauth-Client`，值是 OAuth `client_id`。Agent 只在对端 tag 含 `tag:ingress` 时采信这个头，并记在该 MCP 会话上；tag 是 ingress 但头缺失时拒绝会话，错误码 `unauthenticated`。其他 tag 送来的这个头忽略。审计在入口侧另记 `oauth_client`。
 
-本机 Claude Code / Codex CLI → 本机 Gateway（`gateway.listen` 永远是回环地址）→ 本机 Agent 这条路，在本节点已经有 tailnet 身份之后，`node_id` 用本节点自己的 Tailscale 稳定节点 ID，不用字面量 `local`。Gateway 与 Agent 同进程转发时，Agent 从本进程的 tsnet 身份读取这个 ID，不依赖对 `127.0.0.1` 做 WhoIs。不同的本机 MCP 会话仍靠 `mcp_session_id` 区分，所以两份本机对话不会共享 PTY owner 或租约。
+本机 Claude Code / Codex CLI → 本机 Gateway（每个请求都要令牌，来源与 Host 按 [CTR-GW-07](gateway.md#ctr-gw-07)）→ 本机 Agent 这条路，在本节点已经有 tailnet 身份之后，`node_id` 用本节点自己的 Tailscale 稳定节点 ID，不用字面量 `local`。Gateway 与 Agent 同进程转发时，Agent 从本进程的 tsnet 身份读取这个 ID，不依赖对 `127.0.0.1` 做 WhoIs。不同的本机 MCP 会话仍靠 `mcp_session_id` 区分，所以两份本机对话不会共享 PTY owner 或租约。
 
 只有节点还没有 tailnet 身份时（阶段 1 的本机验收，或 tailnet 尚未连上），并且对端是 `127.0.0.1` 或调用来自进程内 Gateway，`node_id` 才用字面量 `local`。tailnet 身份一旦可用，同一条环回路径立刻改用本节点 ID。已经发出的 `local/...` owner 不迁移，随那些会话结束消失。
 

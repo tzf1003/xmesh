@@ -106,6 +106,9 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.runSetup!({ any: 1 });
   await api.pickPath!("workspace");
   await api.mesh!({ op: "status" });
+  await api.copyGateway!({ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" });
+  await api.updateGateway!({ listen: ":8080", access: ["localhost"], hosts: [] });
+  await api.rotateGatewayPat!();
   assert.deepEqual(
     invoked.map((i) => i.channel),
     [
@@ -114,10 +117,13 @@ test("panel data methods use their own fixed channels and forward only the calle
       CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.getPairPassword,
       CHANNELS.setPairPassword, CHANNELS.clearPairPassword, CHANNELS.discoverPairs, CHANNELS.connectPair,
       CHANNELS.queryAudit, CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
+      CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat,
     ],
   );
   assert.deepEqual(invoked[2]!.args, [cfg]);
   assert.deepEqual(invoked[5]!.args, ["ci"]);
+  assert.deepEqual(invoked.at(-3)!.args, [{ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" }]);
+  assert.deepEqual(invoked.at(-1)!.args, [], "rotation takes no argument from the page");
 });
 
 test("onCalls hands the page the calls only and unsubscribes", () => {

@@ -92,7 +92,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | `started_at`、`pid` | 进程启动时间与进程号 |
 | `drain` | `DrainState`，见 [CTR-CTL-06](#ctr-ctl-06) |
 | `paths` | `config_file`、`state_dir`、`log_dir`、`audit_dir`（不可用时为 `null`），供「打开配置文件、日志目录、审计目录」 |
-| `gateway` | `roles` 含 `gateway` 时存在：`listen`、`url`（MCP 地址，UI 用它生成 Claude Code 与 Codex 的连接命令）、`auth`（`gateway.pats` 非空为 `pat`） |
+| `gateway` | `roles` 含 `gateway` 时存在：`listen`（配置原样）、`url`（本机 MCP 地址）、`auth`（恒为 `pat`，每个请求都要令牌）、`access` 与 `hosts`（配置原样）、`addresses`（当前真正可达的地址，见 [CTR-GW-07](gateway.md#ctr-gw-07)） |
 | `ingress` | `roles` 含 `ingress` 时存在：`listen`、`issuer` |
 | `peers` | 不含本机的对端总数与在线数 |
 
@@ -220,7 +220,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ## CTR-CTL-08
 
-### 连接密码（1.2 起）
+### 连接密码（1.3 起）
 
 每台 `lan` 节点可以设置一个连接密码。另一台设备输入它即可直接配对，无需交换文件。
 
@@ -229,7 +229,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 - `DELETE /v1/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
 - 口令只写不读：没有任何响应包含它。磁盘上只保存 Argon2id 的派生密钥与盐。
 
-### 内网发现与连接（1.2 起）
+### 内网发现与连接（1.3 起）
 
 - `GET /v1/pair/discovered` 返回 `PairDiscoveredResponse {devices[]}`：尚未配对、宣告了 `pairing=1` 的设备，每项 `name`、`fingerprint`、`address`（主机:端口）、`seen_at`。不含证书，已配对的设备不出现。
 - `POST /v1/pair/connect` 的请求是 `PairConnectRequest {address?, fingerprint?, password}`，`address` 与 `fingerprint` 至少给一个。只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`。同时给出时，对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`），不会钉入任何证书。成功返回 `PairConnectResponse {name, fingerprint, address, tags}`，立即生效，无需重启。
@@ -257,9 +257,11 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 | `GET /v1/pats` | `PatList`：名字、scope、令牌文件路径、文件修改时间；`enforced` 表示 `gateway.pats` 非空。不含令牌 |
 | `POST /v1/pats` | 创建。`name` 同节点名字符集，`scopes` 用 [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) 的语法。内核生成至少 32 字符的 URL 安全随机令牌，写入 `0600` 文件，并在配置里加条目。名字已存在返回 `conflict`。响应 `201 PatSecret` |
 | `POST /v1/pats/{name}/rotate` | 生成新令牌并原子替换令牌文件，配置不变，旧令牌立即失效。响应 `PatSecret` |
-| `DELETE /v1/pats/{name}` | 删除配置条目与令牌文件，`204` |
+| `DELETE /v1/pats/{name}` | 删除配置条目与令牌文件，`204`。这是最后一个 PAT 时返回 `conflict`，`reason` 为 `last_pat`：Gateway 每个请求都要令牌，至少保留一个 |
 
-令牌正文**只**出现在 `PatSecret` 里，即创建与轮转的那一次响应；之后任何接口都读不回。UI 只能在内存里展示一次，不得写入日志、事件或磁盘。`PatSecret` 以外的类型不得出现 `token` 字段，由 Go 与 TS 两侧的测试把关。
+令牌正文**只**出现在 `PatSecret` 里，即创建与轮转的那一次响应；之后任何接口都读不回。
+
+**默认令牌。** 配置里没有任何 PAT 而节点有 `gateway` 角色时，内核启动时自动创建名为 `default` 的 PAT（scope 为 `devices:read`、`exec:*`、`pty:*`、`fs:*`、`sys:*`、`backend:*:*`），令牌文件在状态目录的 `pats/` 下。已经有 PAT 时从不创建，也从不改动：升级、更新、重装保留原有令牌，只有用户要求的轮转才会替换它。重装与卸载不删除状态目录，除非用户明确选择删除数据。UI 只能在内存里展示一次，不得写入日志、事件或磁盘。`PatSecret` 以外的类型不得出现 `token` 字段，由 Go 与 TS 两侧的测试把关。
 
 ## CTR-CTL-10
 
@@ -300,3 +302,9 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 - 内核的路由注册必须与 `schemas.ControlRoutes`（`control-routes.json` 的嵌入）一一对应，路径与方法相同，未声明的能力返回 501。
 - 假内核（`ui/testserver`）按 `examples/control/` 的夹具回放，走与真实内核相同的传输。
 - 隐私：向事件流与视图注入含 stdout 的对象必须被编码器拒绝（沿用 INV-10 的测试方法）。
+
+## CTR-CTL-13
+
+### PUT /v1/gateway
+
+`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`restart_required` 在 `listen` 与运行中的值不同时为真。`access` 与 `hosts` 立即生效（每个请求读取）；`listen` 要重启。能力为 `gateway`（API 1.2 起）。

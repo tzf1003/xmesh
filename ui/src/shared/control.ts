@@ -111,6 +111,13 @@ export function parseStatus(raw: unknown): StatusResponse {
   const status = raw as unknown as StatusResponse;
   // Tolerate a `control.capabilities` that is missing: treat as none.
   if (!Array.isArray(status.control.capabilities)) status.control.capabilities = [];
+  // Kernels before CTR-CTL-13 send no reach fields: the list is then just the localhost address.
+  if (status.gateway !== undefined) {
+    const gw = status.gateway;
+    if (!Array.isArray(gw.access)) gw.access = [];
+    if (!Array.isArray(gw.hosts)) gw.hosts = [];
+    if (!Array.isArray(gw.addresses)) gw.addresses = [];
+  }
   status.warnings = status.warnings.filter(
     (w): w is Warning => isRecord(w) && typeof w.code === "string" && typeof w.message === "string",
   );

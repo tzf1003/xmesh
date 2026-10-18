@@ -12,6 +12,8 @@ import type {
   ConfigResponse,
   DrainMode,
   DrainResponse,
+  GatewayUpdateRequest,
+  GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
   PairConnectResponse,
@@ -24,6 +26,7 @@ import type {
   PatSecret,
   SessionsResponse,
 } from "./control";
+import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { Snapshot } from "./state";
 
@@ -31,11 +34,19 @@ import type { Snapshot } from "./state";
 export const CHANNELS = {
   getSnapshot: "xmesh:get-snapshot",
   drain: "xmesh:drain",
+  restartKernel: "xmesh:restart-kernel",
+  readDenyFile: "xmesh:read-deny-file",
+  writeDenyFile: "xmesh:write-deny-file",
+  createDenyFile: "xmesh:create-deny-file",
+  reloadConfig: "xmesh:reload-config",
   resume: "xmesh:resume",
   startKernel: "xmesh:start-kernel",
   restartUnresponsive: "xmesh:restart-unresponsive",
   selectInstance: "xmesh:select-instance",
   copy: "xmesh:copy",
+  copyGateway: "xmesh:copy-gateway",
+  updateGateway: "xmesh:update-gateway",
+  rotateGatewayPat: "xmesh:rotate-gateway-pat",
   openPath: "xmesh:open-path",
   setLoginItem: "xmesh:set-login-item",
   openExternal: "xmesh:open-external",
@@ -58,6 +69,7 @@ export const CHANNELS = {
   connectPair: "xmesh:connect-pair",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
+  previewSetup: "xmesh:preview-setup",
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
   mesh: "xmesh:mesh",
@@ -68,11 +80,27 @@ export const SNAPSHOT_EVENT = "xmesh:snapshot";
 /** Main -> renderer push channel: the newest `call` events (metadata only), newest last. */
 export const CALLS_EVENT = "xmesh:calls";
 
-/** Environment variable the copied Codex config reads the gateway PAT from; the token itself never passes through the UI. */
-export const CODEX_PAT_ENV = "XMESH_PAT";
+/**
+ * Connect text for the local gateway. Each one carries the gateway token, which the main process reads
+ * from the token file; the renderer only names the kind and the address.
+ */
+export const GATEWAY_COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig"] as const;
+export type GatewayCopyKind = (typeof GATEWAY_COPY_KINDS)[number];
 
-export const COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig", "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
+export const COPY_KINDS = [...GATEWAY_COPY_KINDS, "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
+
+/** Copy one gateway address in one of the connect formats. `url` must be an address the kernel reports now. */
+export interface GatewayCopyRequest {
+  kind: GatewayCopyKind;
+  url: string;
+}
+
+/** What rotating the gateway token reports: the PAT and its new modification time. The token itself is written to the file and never returned. */
+export interface GatewayPatRotated {
+  name: string;
+  modified_at: string | null;
+}
 
 export const PATH_KINDS = ["config", "logs", "audit"] as const;
 export type PathKind = (typeof PATH_KINDS)[number];
@@ -156,6 +184,14 @@ export interface SetupReport {
   steps: SetupStep[];
 }
 
+/** What the first run would write, exactly as `runSetup` writes it. Nothing is written by asking. */
+export interface SetupPreview {
+  configPath: string;
+  /** The deny list file the config names; written with the defaults when it does not exist yet. */
+  denyPath: string;
+  config: string;
+}
+
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
   getSnapshot(): Promise<Snapshot>;
@@ -165,20 +201,34 @@ export interface PanelApi {
   resume(): Promise<ActionResult>;
   /** Starts the service of a node whose config exists but whose kernel is not running. */
   startKernel(node: string): Promise<ActionResult>;
+  /** Restarts the kernel of the selected node, as the tray menu does. Asks nothing: the caller confirms first. */
+  restartKernel(): Promise<ActionResult>;
   /** Restarts the service of a node whose kernel does not answer. */
   restartUnresponsive(node: string): Promise<ActionResult>;
   selectInstance(id: string): Promise<ActionResult>;
   copy(kind: CopyKind): Promise<ActionResult>;
+  copyGateway(request: GatewayCopyRequest): Promise<ActionResult>;
   openPath(kind: PathKind): Promise<ActionResult>;
   setLoginItem(enabled: boolean): Promise<ActionResult>;
   openExternal(key: ExternalKey): Promise<ActionResult>;
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** The deny list file the config names; the renderer never supplies its path. */
+  readDenyFile(): Promise<DataResult<DenyFileResponse>>;
+  writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
+  /** Creates the deny list file beside the config, for a config that names none yet; the path is the kernel config's directory plus `cwd-deny.yaml`. */
+  createDenyFile(request: DenyFileCreateRequest): Promise<DataResult<DenyFileCreated>>;
+  /** Asks the kernel to reload its config in place (control API 1.2). A kernel without the route answers with an error. */
+  reloadConfig(): Promise<DataResult<ConfigReloadResponse>>;
   listPats(): Promise<DataResult<PatList>>;
   createPat(args: PatCreateArgs): Promise<DataResult<PatSecret>>;
   rotatePat(name: string): Promise<DataResult<PatSecret>>;
+  /** Rotates the PAT named "default" (the gateway token). The new token is never returned to the page. */
+  rotateGatewayPat(): Promise<DataResult<GatewayPatRotated>>;
   deletePat(name: string): Promise<ActionResult>;
+  /** Replaces the gateway's reach settings (PUT /v1/gateway). */
+  updateGateway(request: GatewayUpdateRequest): Promise<DataResult<GatewayUpdateResponse>>;
   listIngressClients(): Promise<DataResult<IngressClientsResponse>>;
   revokeIngressClient(clientId: string): Promise<ActionResult>;
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>>;
@@ -193,6 +243,7 @@ export interface PanelApi {
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
+  previewSetup(params: SetupParams): Promise<DataResult<SetupPreview>>;
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
   /** Opens the system file chooser; `path` is null when the user cancels. */
   pickPath(kind: PickKind): Promise<DataResult<{ path: string | null }>>;
@@ -206,9 +257,15 @@ export const PANEL_API_METHODS = [
   "drain",
   "resume",
   "startKernel",
+  "restartKernel",
+  "readDenyFile",
+  "writeDenyFile",
+  "createDenyFile",
+  "reloadConfig",
   "restartUnresponsive",
   "selectInstance",
   "copy",
+  "copyGateway",
   "openPath",
   "setLoginItem",
   "openExternal",
@@ -218,7 +275,9 @@ export const PANEL_API_METHODS = [
   "listPats",
   "createPat",
   "rotatePat",
+  "rotateGatewayPat",
   "deletePat",
+  "updateGateway",
   "listIngressClients",
   "revokeIngressClient",
   "rotateIngressPassword",
@@ -232,6 +291,7 @@ export const PANEL_API_METHODS = [
   "queryAudit",
   "getRecentCalls",
   "onCalls",
+  "previewSetup",
   "runSetup",
   "pickPath",
   "mesh",
@@ -249,6 +309,38 @@ export function parseInstanceId(v: unknown): string | undefined {
 
 export function parseCopyKind(v: unknown): CopyKind | undefined {
   return (COPY_KINDS as readonly unknown[]).includes(v) ? (v as CopyKind) : undefined;
+}
+
+export function isGatewayCopyKind(v: unknown): v is GatewayCopyKind {
+  return (GATEWAY_COPY_KINDS as readonly unknown[]).includes(v);
+}
+
+export function parseGatewayCopy(v: unknown): GatewayCopyRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["kind", "url"])) return undefined;
+  if (!isGatewayCopyKind(v.kind) || typeof v.url !== "string" || v.url.length > 512) return undefined;
+  return { kind: v.kind, url: v.url };
+}
+
+const GATEWAY_LIST_MAX = 64;
+
+function uniqueStrings(v: unknown, valid: (s: string) => boolean): string[] | undefined {
+  if (!Array.isArray(v) || v.length > GATEWAY_LIST_MAX) return undefined;
+  const out: string[] = [];
+  for (const x of v) {
+    if (typeof x !== "string" || !valid(x) || out.includes(x)) return undefined;
+    out.push(x);
+  }
+  return out;
+}
+
+/** The whole reach replacement: a listen value the contract allows, and valid, distinct access entries and host names. */
+export function parseGatewayUpdate(v: unknown): GatewayUpdateRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["listen", "access", "hosts"])) return undefined;
+  if (typeof v.listen !== "string" || !isListen(v.listen)) return undefined;
+  const access = uniqueStrings(v.access, isAccessEntry);
+  const hosts = uniqueStrings(v.hosts, isGatewayHost);
+  if (access === undefined || hosts === undefined) return undefined;
+  return { listen: v.listen, access, hosts };
 }
 
 export function parsePathKind(v: unknown): PathKind | undefined {
@@ -309,6 +401,62 @@ export function parseNodeName(v: unknown): string | undefined {
 
 export function parseScope(v: unknown): string | undefined {
   return typeof v === "string" && SCOPE.test(v) ? v : undefined;
+}
+
+/** The deny list file as the config names it. `path` is absent when the config names none. */
+export interface DenyFileResponse {
+  path?: string;
+  /** Whether the file exists; a configured file that is missing stops the agent role from starting. */
+  exists: boolean;
+  text: string;
+  /** Empty when the file does not exist, otherwise `sha256-<hex>` of `text`. */
+  etag: string;
+}
+
+export interface DenyFileSaveRequest {
+  /** Complete file text, at most 64 KiB. */
+  text: string;
+  /** The `etag` the edit started from; the save fails if the file changed since. */
+  etag: string;
+}
+
+export interface DenyFileSaved {
+  etag: string;
+}
+export interface DenyFileCreateRequest {
+  /** Complete file text, at most 64 KiB. */
+  text: string;
+}
+export interface DenyFileCreated {
+  /** Absolute path of the new file; the config names it in `agent.cwd_policy.deny_file`. */
+  path: string;
+  etag: string;
+}
+/** The kernel's answer to a reload (control API 1.2): what it applied and what still needs a restart. */
+export interface ConfigReloadResponse {
+  applied: boolean;
+  valid: boolean;
+  load_error?: string | null;
+  changed_paths: string[];
+  restart_required: boolean;
+  restart_paths: string[];
+}
+
+export const DENY_FILE_MAX_BYTES = 64 * 1024;
+
+export function parseDenyFileSave(v: unknown): DenyFileSaveRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["text", "etag"])) return undefined;
+  const { text, etag } = v;
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
+  if (typeof etag !== "string" || !/^(sha256-[0-9a-f]{64})?$/.test(etag)) return undefined;
+  return { text, etag };
+}
+
+export function parseDenyFileCreate(v: unknown): DenyFileCreateRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["text"])) return undefined;
+  const { text } = v;
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > DENY_FILE_MAX_BYTES) return undefined;
+  return { text };
 }
 
 export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {

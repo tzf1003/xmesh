@@ -90,11 +90,7 @@ func (h *controlHost) Status() v1.StatusResponse {
 	st.AuthkeyReadable = authkeyReadable(cfg)
 	st.Warnings = h.warnings(cfg, st)
 	if hasRole(cfg.Node.Roles, "gateway") {
-		auth := "none"
-		if len(cfg.Gateway.PATs) > 0 {
-			auth = "pat"
-		}
-		st.Gateway = &v1.GatewayInfo{Listen: cfg.Gateway.Listen, URL: "http://" + cfg.Gateway.Listen + "/mcp", Auth: auth}
+		st.Gateway = gatewayInfo(cfg, h.d.network)
 	}
 	if hasRole(cfg.Node.Roles, "ingress") {
 		info := &v1.IngressInfo{Listen: cfg.Ingress.Listen}

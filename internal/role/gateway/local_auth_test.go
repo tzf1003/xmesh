@@ -31,6 +31,7 @@ func Test_PATRotationAndFileProtection(t *testing.T) {
 	request := func(token, remote string) (Principal, error) {
 		r := httptest.NewRequest("POST", "/mcp", nil)
 		r.RemoteAddr = remote
+		r.Host = "127.0.0.1:8080"
 		if token != "" {
 			r.Header.Set("Authorization", "Bearer "+token)
 		}
@@ -81,9 +82,10 @@ func Test_PATRotationAndFileProtection(t *testing.T) {
 	if _, err := request(second, "127.0.0.1:2345"); err == nil {
 		t.Fatal("missing file accepted")
 	}
+	// Without any PAT nothing is served, not even a request that presents no token (CTR-GW-07).
 	c.Gateway.PATs = nil
-	if p, err := request("", "127.0.0.1:2345"); err != nil || !p.Local {
-		t.Fatal(p, err)
+	if _, err := request("", "127.0.0.1:2345"); err == nil {
+		t.Fatal("request without a token served with no PAT configured")
 	}
 	if _, err := request(second, "127.0.0.1:2345"); err == nil {
 		t.Fatal("unknown bearer downgraded to local")

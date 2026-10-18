@@ -23,6 +23,7 @@
 - 2026-10-15，#1。`ingress.listen` 的 `tunnel` 与 [入口方式](03-mesh.md) 里的反向隧道是同一种暴露方式，配置注释与模式取值一致。
 - 2026-10-16。[RUL-20](../contracts/rulings.md#rul-20)、[RUL-21](../contracts/rulings.md#rul-21)、[RUL-22](../contracts/rulings.md#rul-22)：控制面管理库 `meshadmin` 的 Provider 边界、策略写入的版本检查强度（Headscale 非原子）、读写凭据分离。约束见 [CON-MESH-01 到 06](../constraints/meshadmin.md)。
 - 2026-10-16。用户决定内部小范围使用的 DERP 先不处理法律问题，因此 U10 的法律前置在内部自建准入范围内取消；计量、计费、多租户目录仍未做，对外提供前须另行评估。
+- 2026-10-17，本 PR。[CTR-GW-07](../contracts/gateway.md#ctr-gw-07)、[RUL-02](../contracts/rulings.md#rul-02)、[CTR-CFG-01](../contracts/config.md#ctr-cfg-01)：推翻「Gateway 永远只监听回环、没有令牌时不认证」。改为：默认来源为本机、内网与 Tailscale 网段，可在面板增删 IP、CIDR 与域名；每个请求都要令牌（含本机），令牌在首次启动或升级且没有任何令牌时自动创建，之后只由用户轮转；升级、更新、重装从不改动已有令牌。绑定的地址仍由 `gateway.listen` 决定，回环绑定时只有本机可达。
 
 ## 风险
 

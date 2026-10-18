@@ -143,7 +143,7 @@ func Start(o Options) (*Server, error) {
 func capabilities(o Options) []v1.Capability {
 	caps := []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain}
 	if o.Store.Path() != "" {
-		caps = append(caps, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPats)
+		caps = append(caps, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPats, v1.CapGateway)
 	}
 	return append(caps, v1.CapPair, v1.CapIngress, v1.CapAudit)
 }
@@ -284,6 +284,7 @@ func (s *Server) table() map[string]handler {
 		"control.pats.create":            s.createPat,
 		"control.pats.rotate":            s.rotatePat,
 		"control.pats.delete":            s.deletePat,
+		"control.gateway.update":         s.updateGateway,
 		"control.ingress.clients.list":   s.listIngressClients,
 		"control.ingress.clients.delete": s.deleteIngressClient,
 		"control.ingress.password.put":   s.putIngressPassword,
