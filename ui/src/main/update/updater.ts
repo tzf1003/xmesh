@@ -208,7 +208,10 @@ export class Updater extends EventEmitter<UpdaterEvents> {
 
     const pending: Pending = { from: this.env.version, to: found.release.version, nodes: stopped };
     try {
-      fs.writeFileSync(path.join(this.env.dataDir, PENDING_FILE), JSON.stringify(pending));
+      // Written whole under another name and then moved over, so a crash leaves either no note or a complete one.
+      const note = path.join(this.env.dataDir, PENDING_FILE);
+      fs.writeFileSync(`${note}.tmp`, JSON.stringify(pending));
+      fs.renameSync(`${note}.tmp`, note);
       fs.rmSync(path.join(this.env.dataDir, RESULT_FILE), { force: true });
       await applier.start({
         installer,
@@ -220,6 +223,7 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     } catch (e) {
       try {
         fs.rmSync(path.join(this.env.dataDir, PENDING_FILE), { force: true });
+        fs.rmSync(path.join(this.env.dataDir, `${PENDING_FILE}.tmp`), { force: true });
       } catch {
         // the disk that refused the write may refuse this too; the next start tolerates a stale record
       }
