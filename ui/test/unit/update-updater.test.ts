@@ -396,6 +396,9 @@ test("the store keeps preferences and the announced tag, and reads a damaged fil
   const b = new UpdateStore(file);
   assert.deepEqual(b.prefs, { auto: false, prerelease: false });
   assert.equal(b.announced, "v0.2.0");
+  // a second save replaces the file that is already there (the rename must overwrite on Windows too)
+  assert.equal(b.set({ announced: "v0.3.0" }), true);
+  assert.equal(new UpdateStore(file).announced, "v0.3.0");
   fs.writeFileSync(file, "{not json");
   assert.deepEqual(new UpdateStore(file).prefs, { auto: true, prerelease: true });
   fs.writeFileSync(file, JSON.stringify({ prefs: { auto: "yes" }, announced: 5 }));
