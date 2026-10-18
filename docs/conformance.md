@@ -59,6 +59,7 @@ Windows Server 2025 的原生进程、ConPTY、文件及 HTTP MCP 测试已通�
 | 编号 | 观察点 |
 | --- | --- |
 | CON-TOOL-10 CON-TOOL-11 | 透传；`_lease_token` 不进入后端 |
+| CON-TOOL-12 | stdio 后端按配置带上环境变量，服务商凭据名在这里允许、在调用方 `env` 里仍被拒绝，劫持类名与 `env.deny_names` 仍拒绝；改动只重启该后端，相同的变量集合不重启，远程后端不受影响；值只写入 `0600` 文件，从不出现在响应、状态、配置、审计里；手改文件内核下一秒应用，文件损坏不被覆盖（`Test_BackendEnvReachesTheProcessAndRestartsOnlyThatBackend`、`Test_BackendEnvNamesInOverviewAndHandEditsApply`、`TestBackendEnvironmentRelaxesOnlyProviderCredentialNames`） |
 | CON-CONC-02 CON-CONC-06 CON-CONC-07 CON-CONC-08 CON-CONC-11 CON-CONC-12 | 身份、actor 串行、token、重启清空、断线 Orphan、id 重映射 |
 | CON-IMPL-02 | 映射测试不依赖真实后端二进制与 tsnet |
 | INV-01 INV-04 | 一个持有者；剥离 token |
@@ -141,6 +142,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-CTL-04 | 事件：九种类型的夹具各有一个；载荷解码进类型化结构；SSE 帧是 `id`、`event`、`data`；含 stdout 的调用事件、含终端数据的会话事件被拒绝 |
 | CTR-CTL-05 CTR-CTL-06 CTR-CTL-07 | 对端、会话、drain、配置读写的请求与响应夹具；终端缓冲字段被拒绝；`replace` 缺 `before` 被拒绝 |
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 CTR-CTL-11 | 配对（文档、连接密码、发现、连接）、PAT、入口、审计夹具；令牌与 `secret_hash` 泄漏的反例失败；口令出现在响应里的反例失败；`PatSecret` 之外的类型没有令牌字段；审计元素含 stdout 的反例失败 |
+| CTR-CTL-14 | 后端环境变量的请求、响应夹具；`env_names` 夹具；含值的响应与状态被拒绝 |
 | CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`contracts.yml`） |
 
 内核实现（U1）追加：
@@ -151,6 +153,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CON-ARCH-09 | 运行中的节点：端点是套接字或管道而不是 TCP 地址；Agent 与 Gateway 的 TCP 监听都不应答控制路径；任何 MCP 工具列表都不含控制或 drain 工具 |
 | CON-ARCH-10 | 事件订阅者不告而别（模拟 UI 崩溃）后，终端会话、节点状态与通道本身不变，终端仍可正常关闭 |
 | CON-SEC-12 | Unix：只接受内核同一 euid 的对端（别的 uid 被丢弃），套接字 0600、目录 0700；Windows：描述符只含当前用户、SYSTEM、管理员与显式追加的 SID，别名与宽泛主体被拒，运行中的管道不含 Everyone 与 AppContainer；L2 工作区含套接字时被拒绝；非 GET 请求以 `actor=control` 写审计（`Test_ControlCallsAreAudited`） |
+| CTR-CTL-14 | 内核实现：值只写不读，响应、配置、状态、审计、事件里都没有值；非法变量名、含空字符或过长的值、同名同时 set 与 unset、超过 64 个、被策略拒绝的名字（`reason` 为 `env_denied`）返回 `invalid_args` 且不写文件；没有存储时 `unavailable`；删除配置里的后端时一并清掉它的变量，先于后端存放的变量保留（`Test_ControlBackendEnvKeepsValuesWriteOnly`、`Test_ControlBackendEnvRejectsWithoutWriting`、`Test_ControlBackendEnvGoesWithItsBackend`） |
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 | 内核实现：连接密码只写不读、长度与首尾空白规则、限流锁定与清零、连接错误映射到 `pair_rejected` / `rate_limited` / `invalid_args`，并在确认前核对指定指纹（`Test_CTRCTL08_*`）；配对导入同时核对用户确认的、文件里的与证书算出的三处指纹，非 lan 模式 `unsupported_mode`；PAT 创建、轮转、删除后正在运行的 Gateway 立即按新凭据认证，令牌正文只出现在 `PatSecret`，配置外的令牌文件删除时保留；入口路由无角色 `role_disabled`，撤销客户端使其 token 全部失效，口令只写不读（`Test_ControlPairExportImport`、`Test_ControlPats`、`Test_ControlIngress`、`Test_ControlPatsReachTheGateway`） |
 
 ## 模式夹具

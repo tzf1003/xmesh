@@ -177,7 +177,9 @@ func (s *Server) storeConfigLocked(next []byte, diff []v1.ConfigChange) (etag st
 		return "", false, err
 	}
 	s.digest = sum(next)
+	before := s.lastParsed
 	s.lastParsed = parsedOf(next)
+	s.pruneBackendEnv(before, s.lastParsed)
 	// Reload now so restart_required is the store's own verdict, not the prefix heuristic.
 	s.o.Store.Get()
 	restart, s.failures = s.o.Store.State()

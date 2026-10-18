@@ -39,6 +39,8 @@ Windows 保留 `PSModulePath` 中经过拒绝规则的模块搜索目录；缺�
 
 禁止把 Agent 进程里的 auth key、OAuth 客户端密钥、云凭证文件路径、`SSH_AUTH_SOCK` 继承给 `exec` 或 PTY。调用方显式传入被拒绝的键时，返回 `policy_denied`，规则名 `env.denied`，命令不启动。
 
+节点的用户通过控制通道为 stdio 后端设置的变量是一个受限的例外（[CON-TOOL-12](tools.md#con-tool-12)）：服务商凭据名（`AWS_*`、`AZURE_*`、`GOOGLE_*`、`OPENAI_*`、`ANTHROPIC_*`）允许交给那一个后端，其余拒绝规则不变。该例外不适用于 `exec`、PTY 和调用方传入的 `env`。
+
 ## CON-SEC-05
 
 `cwd_policy` 只在解析工具参数里的路径时执行。PTY 会话启动时的 `cwd` 要检查；会话启动之后，用户或模型在 shell 里执行的 `cd` 不再次经过策略引擎。这是已知边界：交互式终端的后续路径由命令策略和隔离级别约束，不由 cwd 前缀约束。

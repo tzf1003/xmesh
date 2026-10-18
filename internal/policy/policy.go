@@ -126,8 +126,24 @@ func (e *Engine) Command(cmd string, args []string) error {
 	}
 	return nil
 }
-func (e *Engine) denyEnv(k, v string) bool {
-	for _, p := range append([]string{"AWS_*", "AZURE_*", "GOOGLE_*", "SSH_AUTH_SOCK", "TS_AUTHKEY", "TAILSCALE_*", "XMESH_*", "OPENAI_*", "ANTHROPIC_*", "LD_*", "DYLD_*", "BASH_ENV", "ENV", "ZDOTDIR", "PYTHONPATH", "NODE_OPTIONS"}, e.config.Env.DenyNames...) {
+
+// providerCredentialNames are refused for inherited and per-call variables so a caller cannot reach
+// the node user's cloud credentials. The operator may still pass them to one backend on purpose.
+var providerCredentialNames = []string{"AWS_*", "AZURE_*", "GOOGLE_*", "OPENAI_*", "ANTHROPIC_*"}
+
+var hijackEnvNames = []string{"SSH_AUTH_SOCK", "TS_AUTHKEY", "TAILSCALE_*", "XMESH_*", "LD_*", "DYLD_*", "BASH_ENV", "ENV", "ZDOTDIR", "PYTHONPATH", "NODE_OPTIONS"}
+
+func (e *Engine) denyEnv(k, v string) bool { return e.denyEnvFor(k, v, false) }
+
+// denyEnvFor is denyEnv; operator relaxes only providerCredentialNames, for variables the node's own
+// user configured for a backend. Loader and shell hijack names, the operator's own deny rules and
+// values that point into credential directories stay refused.
+func (e *Engine) denyEnvFor(k, v string, operator bool) bool {
+	names := append([]string{}, hijackEnvNames...)
+	if !operator {
+		names = append(names, providerCredentialNames...)
+	}
+	for _, p := range append(names, e.config.Env.DenyNames...) {
 		if ok, _ := path.Match(strings.ToUpper(p), strings.ToUpper(k)); ok {
 			return true
 		}
@@ -143,7 +159,31 @@ func (e *Engine) Environment(extra map[string]string) ([]string, error) {
 	return e.environment(os.Environ(), extra, runtime.GOOS == "windows")
 }
 
+// BackendEnvironment is Environment for a stdio backend: extra holds variables the node's own user
+// configured for that backend, such as an API key, so provider credential names (AWS_*, OPENAI_*,
+// ...) are allowed. Everything else is checked as in Environment.
+func (e *Engine) BackendEnvironment(extra map[string]string) ([]string, error) {
+	return e.environmentFor(os.Environ(), extra, runtime.GOOS == "windows", true)
+}
+
+// CheckBackendEnv reports whether BackendEnvironment would accept the variable under policy p, so
+// a setting is refused when it is saved rather than when the backend fails to start.
+func CheckBackendEnv(p config.Policy, name, value string) error {
+	e := &Engine{config: p}
+	if name == "" || strings.ContainsAny(name, "=\x00") || strings.ContainsRune(value, 0) {
+		return toolerr.Args("env")
+	}
+	if e.denyEnvFor(name, value, true) {
+		return denied("env.denied")
+	}
+	return nil
+}
+
 func (e *Engine) environment(inherited []string, extra map[string]string, foldCase bool) ([]string, error) {
+	return e.environmentFor(inherited, extra, foldCase, false)
+}
+
+func (e *Engine) environmentFor(inherited []string, extra map[string]string, foldCase, operator bool) ([]string, error) {
 	normalize := func(k string) string {
 		if foldCase {
 			return strings.ToUpper(k)
@@ -187,7 +227,7 @@ func (e *Engine) environment(inherited []string, extra map[string]string, foldCa
 		if k == "" || strings.ContainsAny(k, "=\x00") || strings.ContainsRune(v, 0) {
 			return nil, toolerr.Args("env")
 		}
-		if e.denyEnv(k, v) {
+		if e.denyEnvFor(k, v, operator) {
 			return nil, denied("env.denied")
 		}
 		k = normalize(k)

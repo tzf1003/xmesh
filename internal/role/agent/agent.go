@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backend"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	runexec "github.com/tzf1003/xmesh/internal/exec"
@@ -55,6 +56,7 @@ type Agent struct {
 	views           map[string]*mcp.Server
 	viewMu          sync.Mutex
 	backendNames    map[*mcp.Server][]string
+	backendEnv      *backendenv.Store // nil: stdio backends get no configured variables
 	auditLog        atomic.Pointer[audit.Logger]
 	networkInfo     atomic.Pointer[NetworkInfo]
 	sandbox         atomic.Pointer[sandboxState]
@@ -69,7 +71,16 @@ type NetworkInfo struct {
 	Tags []string `json:"tags"`
 }
 
-func New(store *config.Store) (*Agent, error) {
+// Option adjusts an Agent before its backends start.
+type Option func(*Agent)
+
+// WithBackendEnv gives stdio backends the variables kept in env. The Agent applies later changes
+// of the file itself, restarting only the backends whose variables changed.
+func WithBackendEnv(env *backendenv.Store) Option {
+	return func(a *Agent) { a.backendEnv = env }
+}
+
+func New(store *config.Store, options ...Option) (*Agent, error) {
 	c := store.Get()
 	if _, e := cwd.New(c.Agent.DefaultCWD, c.Agent.Workspaces, c.Agent.CWDPolicy); e != nil {
 		return nil, e
@@ -85,12 +96,19 @@ func New(store *config.Store) (*Agent, error) {
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
+	for _, option := range options {
+		option(a)
+	}
+	var backendOptions []backend.Option
+	if a.backendEnv != nil {
+		backendOptions = append(backendOptions, backend.WithEnv(a.backendEnv.Snapshot()))
+	}
 	a.Backends = backend.New(c, a.Leases, a.upstream, func() {
 		select {
 		case a.backendChanged <- struct{}{}:
 		default:
 		}
-	})
+	}, backendOptions...)
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	a.Backends.WaitReady(ctx)
@@ -128,7 +146,21 @@ func (a *Agent) supervise(previous *config.Config) {
 				a.refreshBuiltins()
 				previous = cfg
 			}
+			// A file edited by hand is picked up here; the control channel applies its own writes at once.
+			if a.backendEnv != nil {
+				if changed, _ := a.backendEnv.Reload(); changed {
+					a.ApplyBackendEnv()
+				}
+			}
 		}
+	}
+}
+
+// ApplyBackendEnv hands the variables now in the file to the backends. Only a backend whose own
+// variables changed restarts.
+func (a *Agent) ApplyBackendEnv() {
+	if a.backendEnv != nil {
+		a.Backends.SetEnv(a.backendEnv.Snapshot())
 	}
 }
 func (a *Agent) SetAudit(log *audit.Logger) { a.auditLog.Store(log) }

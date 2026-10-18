@@ -33,6 +33,7 @@ import {
   toolEnabled,
   toolToggleEdits,
 } from "../lib/mcp";
+import { type EnvChange, type EnvRow, blankRow, namesAfter, storedRows } from "../lib/mcp-env";
 import { type ImportResult, parseMcpImport } from "../lib/mcp-import";
 import { formatTime } from "../lib/format";
 import { SCOPE_PRESETS, checkScopes, isBroadScope } from "../lib/scopes";
@@ -40,6 +41,18 @@ import { BUILTIN_TOOLS, isBuiltinTool } from "../../shared/builtin-tools";
 import { parseNodeName } from "../../shared/ipc";
 import type { ActionError, ConfigPatchEdit } from "../../shared/ipc";
 import type { ConfigResponse, PatInfo, PatSecret } from "../../shared/control";
+
+/**
+ * What saving a backend does: the variables of each backend go to the kernel first, then one config PATCH. A
+ * backend the save creates (`fresh`) has its variables removed again when the PATCH fails, so a refused add
+ * leaves no secret behind. Variables of a backend that already exists stay as written.
+ */
+interface BackendSave {
+  edits: ConfigPatchEdit[];
+  env: { name: string; change: EnvChange }[];
+  fresh: readonly string[];
+}
+type SaveBackends = (save: BackendSave) => Promise<ActionError | undefined>;
 
 export function Authorization({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
@@ -353,6 +366,27 @@ function McpCard({ ctx, cfg, editable, apply }: CardProps): JSX.Element {
   const [deleting, setDeleting] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const existing = editing?.name === undefined ? undefined : backends.find((b) => b.name === editing.name);
+  // The variable names the kernel reports for each backend; the values are never known to the panel.
+  const connection = ctx.snapshot.connection;
+  const envNames = (name: string): string[] => (connection.kind === "connected" ? (connection.status.backends.find((b) => b.name === name)?.env_names ?? []) : []);
+
+  const saveBackends: SaveBackends = async (save) => {
+    const written: string[] = [];
+    const undo = async (): Promise<void> => {
+      for (const name of written) if (save.fresh.includes(name)) await getApi().clearBackendEnv(name);
+    };
+    for (const { name, change } of save.env) {
+      const r = await getApi().patchBackendEnv({ name, set: change.set, unset: change.unset });
+      if (!r.ok) {
+        await undo();
+        return r.error;
+      }
+      written.push(name);
+    }
+    const err = await apply(save.edits);
+    if (err) await undo();
+    return err;
+  };
 
   const remove = async (name: string): Promise<void> => {
     setBusy(true);
@@ -407,7 +441,14 @@ function McpCard({ ctx, cfg, editable, apply }: CardProps): JSX.Element {
                     <td>
                       <Badge kind="info">{b.transport}</Badge>
                     </td>
-                    <td class="mono">{b.transport === "http" ? b.url : b.command.join(" ")}</td>
+                    <td class="mono">
+                      {b.transport === "http" ? b.url : b.command.join(" ")}
+                      {envNames(b.name).length > 0 && (
+                        <p class="hint" data-testid={`backend-env-${b.name}`}>
+                          {t("mcp.env.names", { names: envNames(b.name).join(", ") })}
+                        </p>
+                      )}
+                    </td>
                     <td>{b.policy}</td>
                     <td>
                       <div class="row">
@@ -446,8 +487,9 @@ function McpCard({ ctx, cfg, editable, apply }: CardProps): JSX.Element {
           existing={existing}
           rows={rows}
           names={names}
-          onSave={async (edits) => {
-            const err = await apply(edits);
+          envNames={existing ? envNames(existing.name) : []}
+          onSave={async (save) => {
+            const err = await saveBackends(save);
             if (!err) setEditing(undefined);
             return err;
           }}
@@ -458,8 +500,8 @@ function McpCard({ ctx, cfg, editable, apply }: CardProps): JSX.Element {
         <ImportDialog
           rows={rows}
           names={names}
-          onSave={async (edits) => {
-            const err = await apply(edits);
+          onSave={async (save) => {
+            const err = await saveBackends(save);
             if (!err) setImporting(false);
             return err;
           }}
@@ -498,6 +540,7 @@ function formFromRow(row: BackendRow, rows: readonly AuthzRow[]): BackendForm {
     grants: exactGrants(rows, row.name),
     newTag: "",
     favorite: row.favorite,
+    env: [],
   };
 }
 
@@ -512,6 +555,7 @@ const EMPTY_BACKEND_FORM: BackendForm = {
   grants: [],
   newTag: "",
   favorite: false,
+  env: [],
 };
 
 /** The tags a form grants: the checked ones plus the new tag, when it is valid. */
@@ -566,15 +610,72 @@ function GrantFields({ rows, grants, newTag, onGrants, onNewTag, invalid }: {
   );
 }
 
-function BackendDialog({ existing, rows, names, onSave, onClose }: {
+/**
+ * The variables of an stdio backend. Stored ones show a name and an empty value box: the value is not
+ * known here, so leaving the box empty keeps it, typing replaces it. A new variable needs both fields.
+ */
+function EnvFields({ rows, onRows, invalid }: { rows: EnvRow[]; onRows: (next: EnvRow[]) => void; invalid: boolean }): JSX.Element {
+  const t = useT();
+  const update = (id: number, p: Partial<EnvRow>): void => onRows(rows.map((r) => (r.id === id ? { ...r, ...p } : r)));
+  return (
+    <fieldset data-testid="mcp-env">
+      <legend>{t("mcp.env")}</legend>
+      <p class="hint">{t("mcp.env.hint")}</p>
+      {rows.map((r, i) => (
+        <div class="row env-row" key={r.id} data-testid={`mcp-env-row-${i}`}>
+          <input
+            type="text"
+            class="mono"
+            value={r.name}
+            disabled={r.stored}
+            placeholder="API_KEY"
+            spellcheck={false}
+            autocomplete="off"
+            aria-label={t("mcp.env.name")}
+            aria-invalid={invalid && !r.stored && r.name.trim() !== "" && !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(r.name.trim())}
+            onInput={(e) => update(r.id, { name: (e.currentTarget as HTMLInputElement).value })}
+            data-testid={`mcp-env-name-${i}`}
+          />
+          <input
+            type="password"
+            class="mono"
+            value={r.value}
+            disabled={r.removed}
+            placeholder={r.removed ? t("mcp.env.removed") : r.stored ? t("mcp.env.keep") : t("mcp.env.value")}
+            spellcheck={false}
+            autocomplete="new-password"
+            aria-label={t("mcp.env.value")}
+            onInput={(e) => update(r.id, { value: (e.currentTarget as HTMLInputElement).value })}
+            data-testid={`mcp-env-value-${i}`}
+          />
+          {r.stored ? (
+            <button type="button" class="btn small" onClick={() => update(r.id, { removed: !r.removed, value: "" })} data-testid={`mcp-env-remove-${i}`}>
+              {r.removed ? t("mcp.env.undo") : t("mcp.env.remove")}
+            </button>
+          ) : (
+            <button type="button" class="btn small" onClick={() => onRows(rows.filter((x) => x.id !== r.id))} data-testid={`mcp-env-remove-${i}`}>
+              {t("mcp.env.remove")}
+            </button>
+          )}
+        </div>
+      ))}
+      <button type="button" class="btn small" onClick={() => onRows([...rows, blankRow()])} data-testid="mcp-env-add">
+        {t("mcp.env.add")}
+      </button>
+    </fieldset>
+  );
+}
+
+function BackendDialog({ existing, rows, names, envNames, onSave, onClose }: {
   existing?: BackendRow;
   rows: readonly AuthzRow[];
   names: readonly string[];
-  onSave: (edits: ConfigPatchEdit[]) => Promise<ActionError | undefined>;
+  envNames: readonly string[];
+  onSave: SaveBackends;
   onClose: () => void;
 }): JSX.Element {
   const t = useT();
-  const [form, setForm] = useState<BackendForm>(() => (existing ? formFromRow(existing, rows) : EMPTY_BACKEND_FORM));
+  const [form, setForm] = useState<BackendForm>(() => ({ ...(existing ? formFromRow(existing, rows) : EMPTY_BACKEND_FORM), env: storedRows(envNames) }));
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError | undefined>();
@@ -592,7 +693,9 @@ function BackendDialog({ existing, rows, names, onSave, onClose }: {
     setBusy(true);
     setErr(undefined);
     const edits = backendEdits(authzState(rows), c.name, c.value, c.tags, true);
-    const failed = await onSave(edits);
+    // A backend turned into a remote one has no process to give variables to: drop what it kept rather than leave it behind.
+    const env = c.env ? { name: c.name, change: c.env } : form.transport === "http" && envNames.length > 0 ? { name: c.name, change: { set: {}, unset: [...envNames] } } : undefined;
+    const failed = await onSave({ edits, env: env ? [env] : [], fresh: existing ? [] : [c.name] });
     setBusy(false);
     if (failed) setErr(failed);
   };
@@ -647,6 +750,7 @@ function BackendDialog({ existing, rows, names, onSave, onClose }: {
         <Field label={t("mcp.cwd")}>
           <input type="text" value={form.cwd} spellcheck={false} onInput={(e) => patch({ cwd: (e.currentTarget as HTMLInputElement).value })} data-testid="mcp-cwd" />
         </Field>
+        {form.transport === "stdio" && <EnvFields rows={form.env} onRows={(env) => patch({ env })} invalid={touched && hasProblem(problems, "env")} />}
         <Field label={t("mcp.policy")} hint={t("mcp.policyHint")}>
           <select value={form.policy} onChange={(e) => patch({ policy: (e.currentTarget as HTMLSelectElement).value })} data-testid="mcp-policy">
             {BACKEND_POLICIES.map((p) => (
@@ -692,7 +796,7 @@ function BackendDialog({ existing, rows, names, onSave, onClose }: {
 function ImportDialog({ rows, names, onSave, onClose }: {
   rows: readonly AuthzRow[];
   names: readonly string[];
-  onSave: (edits: ConfigPatchEdit[]) => Promise<ActionError | undefined>;
+  onSave: SaveBackends;
   onClose: () => void;
 }): JSX.Element {
   const t = useT();
@@ -716,7 +820,8 @@ function ImportDialog({ rows, names, onSave, onClose }: {
     if (!canImport) return;
     setBusy(true);
     setErr(undefined);
-    const failed = await onSave(edits);
+    const env = entries.flatMap((e) => (e.env ? [{ name: e.name, change: { set: e.env, unset: [] } }] : []));
+    const failed = await onSave({ edits, env, fresh: entries.filter((e) => !names.includes(e.name)).map((e) => e.name) });
     setBusy(false);
     if (failed) setErr(failed);
   };
@@ -784,6 +889,11 @@ function ImportDialog({ rows, names, onSave, onClose }: {
                         <td>{e.value.policy}</td>
                         <td>
                           <Badge kind={names.includes(e.name) ? "warn" : "ok"}>{names.includes(e.name) ? t("mcp.import.replace") : t("mcp.import.new")}</Badge>
+                          {e.env && (
+                            <p class="hint" data-testid={`import-env-${e.name}`}>
+                              {t("mcp.import.env", { names: Object.keys(e.env).join(", ") })}
+                            </p>
+                          )}
                           {e.warnings.map((w, i) => (
                             <p class="hint" key={i}>
                               {t(`mcp.warn.${w.code}` as Key, { names: w.detail ?? "" })}

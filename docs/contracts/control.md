@@ -15,6 +15,7 @@
 | [schemas/control-drain.schema.json](schemas/control-drain.schema.json) | drain 与 resume |
 | [schemas/control-config.schema.json](schemas/control-config.schema.json) | 配置读写 |
 | [schemas/control-pair.schema.json](schemas/control-pair.schema.json)、[control-pats](schemas/control-pats.schema.json)、[control-ingress](schemas/control-ingress.schema.json)、[control-audit](schemas/control-audit.schema.json) | 配对、PAT、入口、审计 |
+| [schemas/control-backends.schema.json](schemas/control-backends.schema.json) | stdio 后端的环境变量 |
 | [schemas/control-routes.json](schemas/control-routes.json) | 路由表：方法、路径、能力、请求与响应类型、错误码 |
 
 下文引用的类型名（如 `StatusResponse`）就是这些文件 `$defs` 里的定义名，全局唯一。
@@ -333,3 +334,20 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 ### PUT /v1/gateway
 
 `roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`access` 与 `hosts` 立即生效（每个请求读取）；自 API 1.6 起 `listen` 也在运行中生效：Gateway 先绑定新地址再放弃旧地址，Agent 与会话不受影响，所以 `restart_required` 恒为 `false`（字段保留给旧客户端）。新地址绑不上（例如端口被占用）时写入仍然完成，Gateway 留在旧地址，原因在 `apply_errors`，之后再调用一次 `POST /v1/config/reload` 可重试。能力为 `gateway`（API 1.2 起）。
+
+## CTR-CTL-14
+
+### 后端环境变量
+
+给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.7 起）。
+
+| 路由 | 作用 |
+| --- | --- |
+| `PATCH /v1/backends/{name}/env` | 请求体 `BackendEnvPatch`：`unset`（变量名列表，先生效）与 `set`（变量名到值的对象）。至少一项；每次最多 64 项，每个后端最多 64 个变量，值不含空字符且不超过 8192 字节。响应 `BackendEnvResponse`：修改之后这个后端还有哪些变量名，按字母序 |
+| `DELETE /v1/backends/{name}/env` | 清空这个后端的所有变量，`204`；没有变量也是 `204` |
+
+后端名要符合配置里的后端名语法，但不要求已经在配置里：先存变量、再添加后端的客户端，后端第一次启动就带着变量。变量名是 `[A-Za-z_][A-Za-z0-9_]{0,127}`。节点策略不允许的名字（见 [CON-TOOL-12](../constraints/tools.md#con-tool-12)）返回 `invalid_args`，`field` 指到那个变量，`reason` 为 `env_denied`，整个请求不生效。内核没有环境变量存储时（状态目录不可写、文件损坏）返回 `unavailable`。
+
+存储在状态目录的 `backend-env.json`，`0600`，原子替换，不是 `xmesh.yaml` 的一部分：`GET/PUT/PATCH /v1/config`、配置差异、`config` 事件都不含它。变量改动立即生效，只重启受影响的后端；手工编辑这个文件的结果内核在一秒内应用。通过控制通道把后端从配置里删除时，它的变量一并删除；从没出现在配置里的名字保持原样，由 `DELETE` 清理。
+
+`StatusResponse.backends[].env_names` 列出 stdio 后端已设置的变量名（没有时省略）。审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名（`set`、`unset`）与大小，不含变量名与值。

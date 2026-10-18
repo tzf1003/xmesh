@@ -47,6 +47,7 @@ const ERROR_KEYS: Record<string, Key> = {
 export function errorText(t: T, e: ActionError): string {
   if (e.code === "conflict" && e.reason === "drain_downgrade") return t("err.drain_downgrade");
   if (e.code === "conflict" && e.reason === "password_source_not_file") return t("err.password_source_not_file");
+  if (e.code === "invalid_args" && e.reason === "env_denied") return t("err.env_denied", { name: (e.field ?? "").replace(/^set\./, "") });
   const key = ERROR_KEYS[e.code];
   if (key !== undefined && e.code !== "conflict" && e.code !== "not_found" && e.code !== "invalid_args") return t(key);
   return e.message || (key !== undefined ? t(key) : e.code);

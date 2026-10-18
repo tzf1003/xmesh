@@ -9,6 +9,10 @@
 export type Timestamp = string;
 export type NodeName = string;
 /**
+ * 环境变量名。
+ */
+export type EnvName = string;
+/**
  * 控制 API 版本，主版本.次版本。响应头 X-Xmesh-Control-Version 与 control.json 使用同一写法。
  */
 export type ApiVersion = string;
@@ -219,6 +223,27 @@ export interface AuditEvent {
   error?: string | null;
   duration_ms: number;
   output_sha256?: string;
+}
+export interface BackendEnvPatch {
+  /**
+   * 新增或覆盖的变量。值不能含空字符。节点策略不允许的变量名返回 invalid_args，reason 为 env_denied。
+   */
+  set?: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * 要删除的变量。先于 set 生效，同一个变量不能同时出现在两处。
+   *
+   * @maxItems 64
+   */
+  unset?: EnvName[];
+}
+export interface BackendEnvResponse {
+  name: NodeName;
+  /**
+   * 修改之后这个后端还有哪些变量，按字母序。只有名字，没有值。
+   */
+  names: EnvName[];
 }
 export interface Warning {
   code: WarningCode;
@@ -693,6 +718,10 @@ export interface Backend {
   policy: "shared" | "exclusive";
   state: "stopped" | "running" | "crashed";
   favorite: boolean;
+  /**
+   * stdio 后端已设置的环境变量名，按字母序。从不包含值。没有变量时省略。
+   */
+  env_names?: EnvName[];
 }
 export interface Limits {
   exec_shared: number;
@@ -1024,7 +1053,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.6" as const;
+export const CONTROL_API_VERSION = "1.7" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -1431,6 +1460,38 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.backends.env.patch",
+    "method": "PATCH",
+    "path": "/v1/backends/{name}/env",
+    "capability": "config.write",
+    "since": "1.7",
+    "query": null,
+    "body": "BackendEnvPatch",
+    "response": "BackendEnvResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args"
+    ]
+  },
+  {
+    "id": "control.backends.env.delete",
+    "method": "DELETE",
+    "path": "/v1/backends/{name}/env",
+    "capability": "config.write",
+    "since": "1.7",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args"
+    ]
+  },
+  {
     "id": "control.gateway.update",
     "method": "PUT",
     "path": "/v1/gateway",
@@ -1540,6 +1601,8 @@ export interface ControlRouteTypes {
   "control.pats.create": { query: undefined; body: PatCreateRequest; response: PatSecret };
   "control.pats.rotate": { query: undefined; body: undefined; response: PatSecret };
   "control.pats.delete": { query: undefined; body: undefined; response: undefined };
+  "control.backends.env.patch": { query: undefined; body: BackendEnvPatch; response: BackendEnvResponse };
+  "control.backends.env.delete": { query: undefined; body: undefined; response: undefined };
   "control.gateway.update": { query: undefined; body: GatewayUpdateRequest; response: GatewayUpdateResponse };
   "control.ingress.clients.list": { query: undefined; body: undefined; response: IngressClientsResponse };
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };

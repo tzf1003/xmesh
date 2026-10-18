@@ -5,6 +5,7 @@ import {
   SNAPSHOT_EVENT,
   type ActionResult,
   parseAuditQuery,
+  parseBackendEnv,
   parseBoolean,
   parseClientId,
   parseConfigPatch,
@@ -129,6 +130,14 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.patchConfig, (req: unknown) => {
     const v = parseConfigPatch(req);
     return v === undefined ? bad("config edit request") : service.patchConfig(v);
+  });
+  handle(CHANNELS.patchBackendEnv, (req: unknown) => {
+    const v = parseBackendEnv(req);
+    return v === undefined ? bad("backend env request") : service.patchBackendEnv(v);
+  });
+  handle(CHANNELS.clearBackendEnv, (name: unknown) => {
+    const v = parseNodeName(name);
+    return v === undefined ? bad("backend name") : service.clearBackendEnv(v);
   });
   handle(CHANNELS.readDenyFile, () => service.readDenyFile());
   handle(CHANNELS.writeDenyFile, (req: unknown) => {
