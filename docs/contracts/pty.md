@@ -46,7 +46,7 @@ idle 的定义：`lastIO` 距今超过 `idle_timeout`。`open`、`write`、`read
 
 ### pty.read
 
-参数：`session_id`、`cursor`（默认 0）、`max_bytes`（默认 32768，最大 1 MiB）、`wait_ms`（默认 1000，最大 30000）。
+参数：`session_id`、`cursor`（默认 0）、`max_bytes`（默认 32768，最大 1 MiB）、`wait_ms`（默认 1000，最大 30000）。超过上限的 `max_bytes` / `wait_ms` 按上限钳制，不报错；负数 → `invalid_args`。这与 `exec.output` 的 `limit` 语义一致。
 
 任何通过工具授权的调用方都可以读。不要求是 owner。
 

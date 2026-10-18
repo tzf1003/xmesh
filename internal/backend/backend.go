@@ -457,8 +457,11 @@ func (m *Manager) Control(ctx context.Context, caller, name string, raw json.Raw
 	m.mu.Lock()
 	cfg, ok := m.cfg.Agent.Backends[args.Name]
 	m.mu.Unlock()
-	if !ok || cfg.Policy != "exclusive" {
-		return nil, toolerr.Args("name")
+	if !ok {
+		return nil, toolerr.New("invalid_args", "后端不存在", "field", "name", "reason", "unknown_backend")
+	}
+	if cfg.Policy != "exclusive" {
+		return nil, toolerr.New("invalid_args", "后端不是 exclusive，无需租约", "field", "name", "reason", "not_exclusive")
 	}
 	resource := "backend:" + args.Name
 	maxTTL := 30 * time.Minute
