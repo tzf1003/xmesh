@@ -52,6 +52,9 @@ type Options struct {
 	Applier Applier
 	// CI supervises the GitHub Actions runners; nil on a node that cannot host them.
 	CI CIAdmin
+	// CIAccounts keeps GitHub accounts and talks to GitHub with them; nil answers the account
+	// routes with unavailable.
+	CIAccounts CIAccounts
 	// CIVisibility replaces the public-repository check; nil asks GitHub.
 	CIVisibility CIVisibility
 }
@@ -321,9 +324,9 @@ func (s *Server) table() map[string]handler {
 		"control.ingress.password.put":   s.putIngressPassword,
 
 		"control.ci.get":              s.getCI,
-		"control.ci.accounts.create":  s.ciAccountsUnavailable,
-		"control.ci.accounts.delete":  s.ciAccountsUnavailable,
-		"control.ci.accounts.repos":   s.ciAccountsUnavailable,
+		"control.ci.accounts.create":  s.createCIAccount,
+		"control.ci.accounts.delete":  s.deleteCIAccount,
+		"control.ci.accounts.repos":   s.ciReposOfAccount,
 		"control.ci.bindings.create":  s.createCIBinding,
 		"control.ci.bindings.patch":   s.patchCIBinding,
 		"control.ci.bindings.delete":  s.deleteCIBinding,

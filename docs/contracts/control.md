@@ -359,7 +359,7 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 内核在本机监督官方 `actions/runner` 进程：一台机器可以绑定多个仓库，每个绑定可以有多个并发实例，进程崩溃自动重启，随内核服务开机拉起。方案见 [15 GitHub Actions 运行器托管](../design/15-github-runner.md)。能力为 `ci`（API 1.8 起）；内核没有这项能力时整组路由返回 `not_implemented`。类型在 [control-ci.schema.json](schemas/control-ci.schema.json)。
 
-绑定与账号的非密钥部分存在 `xmesh.yaml` 的 `ci` 段（[CTR-CFG-01](config.md#ctr-cfg-01)），经与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入修改，并发 `config` 事件；GitHub 凭据存在系统钥匙串，没有钥匙串时存在状态目录里 `0600` 的文件，不在配置、响应、状态、事件、审计和日志里出现。运行状态不另设事件：`GET /v1/status` 的 `ci`（`CiSummary`）随每次状态采样变化，UI 从 `status` 事件得到更新。
+绑定与账号的非密钥部分存在 `xmesh.yaml` 的 `ci` 段（[CTR-CFG-01](config.md#ctr-cfg-01)），经与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入修改，并发 `config` 事件；GitHub 凭据存在状态目录的 `ci-accounts/` 私有文件里（与网关 PAT 同样的目录保护），不在配置、响应、状态、事件、审计和日志里出现。运行状态不另设事件：`GET /v1/status` 的 `ci`（`CiSummary`）随每次状态采样变化，UI 从 `status` 事件得到更新。
 
 | 路由 | 作用 |
 | --- | --- |

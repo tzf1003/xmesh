@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -148,9 +149,11 @@ func (i *instance) problem(code v1.CiProblemCode, message string) *v1.CiProblem 
 
 // wantRunning is whether a listener should be running right now.
 func (i *instance) wantRunning() bool {
+	// The manager's lock is taken before an instance's (Apply, Bindings), never the other way.
+	draining := i.m.isDraining()
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	return !i.shutting && !i.spec.Paused && !i.m.isDraining()
+	return !i.shutting && !i.spec.Paused && !draining
 }
 
 func (i *instance) flags() (shutting, force, restart bool) {
@@ -378,6 +381,40 @@ func (i *instance) configure(spec config.CIBinding, token string) *v1.CiProblem 
 	mu.Lock()
 	defer mu.Unlock()
 	return i.registrationProblem(lines)
+}
+
+// unregister runs the runner's own removal script, which deletes the runner at GitHub and the
+// local registration files.
+func (i *instance) unregister(ctx context.Context, token string) error {
+	env := append(i.m.o.Env(), "ACTIONS_RUNNER_INPUT_TOKEN="+token)
+	if runtime.GOOS != "windows" && os.Geteuid() == 0 {
+		env = append(env, "RUNNER_ALLOW_RUNASROOT=1")
+	}
+	var mu sync.Mutex
+	var last string
+	p, err := startProcess(i.dir, filepath.Join(i.dir, scriptName("config")), []string{"remove"}, env, func(line string) {
+		mu.Lock()
+		if strings.TrimSpace(line) != "" {
+			last = strings.ReplaceAll(line, token, "***")
+		}
+		mu.Unlock()
+	})
+	if err != nil {
+		return err
+	}
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+		p.kill()
+		<-p.done
+		return ctx.Err()
+	}
+	if p.exit != 0 {
+		mu.Lock()
+		defer mu.Unlock()
+		return fmt.Errorf("退出码 %d: %s", p.exit, short(last))
+	}
+	return nil
 }
 
 func (i *instance) registrationProblem(lines []string) *v1.CiProblem {

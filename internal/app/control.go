@@ -46,7 +46,8 @@ type controlDeps struct {
 	// roles starts, stops and moves the roles that follow the configuration.
 	roles *roleRuntime
 	// ci supervises the GitHub Actions runners; nil when the node cannot host them.
-	ci *ci.Manager
+	ci         *ci.Manager
+	ciAccounts *ci.Service
 }
 
 // startControl opens the channel. A failure is reported and otherwise ignored:
@@ -59,6 +60,7 @@ func startControl(d controlDeps) (stop func()) {
 	}
 	if d.ci != nil {
 		options.CI = d.ci
+		options.CIAccounts = d.ciAccounts
 	}
 	if d.roles != nil {
 		options.Applier = d.roles

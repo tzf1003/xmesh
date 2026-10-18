@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,16 @@ type CIAdmin interface {
 	ForgetForce(id string)
 	Restart(id string) error
 	Repair(id, token string) error
+}
+
+// CIAccounts is the GitHub side of the saved accounts. *ci.Service implements it.
+type CIAccounts interface {
+	Verify(ctx context.Context, host, token string) (login string, err error)
+	Save(id, token string) error
+	Delete(id string) error
+	Hint(id string) string
+	Repos(ctx context.Context, account config.CIAccount, q string, page int) (repos []ci.Repo, next int, err error)
+	RegistrationToken(ctx context.Context, account config.CIAccount, repo string) (string, error)
 }
 
 // CIVisibility says whether a repository is public. Tests replace it; the default asks GitHub.
@@ -62,12 +73,255 @@ func (s *Server) getCI(w http.ResponseWriter, _ *http.Request, _ *call) {
 	if admin == nil {
 		return
 	}
-	writeJSON(w, 200, admin.Overview())
+	ov := admin.Overview()
+	ov.Accounts = s.ciAccountViews()
+	writeJSON(w, 200, ov)
 }
 
-// ciAccountsUnavailable answers the account routes until GitHub accounts are available.
-func (s *Server) ciAccountsUnavailable(w http.ResponseWriter, _ *http.Request, _ *call) {
-	failWith(w, reasoned(newError(v1.ErrUnavailable, "此内核还不能保存 GitHub 账号"), "accounts_unavailable"))
+func (s *Server) ciAccountViews() []v1.CiAccount {
+	out := []v1.CiAccount{}
+	if s.o.CIAccounts == nil {
+		return out
+	}
+	for _, a := range s.o.Store.Get().CI.Accounts {
+		out = append(out, ciAccountView(a, s.o.CIAccounts.Hint(a.ID)))
+	}
+	return out
+}
+
+func ciAccountView(a config.CIAccount, hint string) v1.CiAccount {
+	host := a.Host
+	if host == "" {
+		host = "github.com"
+	}
+	if hint == "" {
+		hint = "…none"
+	}
+	return v1.CiAccount{ID: a.ID, Host: host, Login: a.Login, TokenHint: hint}
+}
+
+// ciGitHubError turns a failure of a GitHub call into the contract's error.
+func ciGitHubError(err error, field string) *v1.Error {
+	switch {
+	case errors.Is(err, ci.ErrRejected):
+		return reasoned(argError(field, "GitHub 不接受这个令牌：可能已过期、被撤销或权限不足"), "github_rejected")
+	case errors.Is(err, ci.ErrNoAdmin):
+		return reasoned(argError("target", err.Error()), "no_admin_permission")
+	case errors.Is(err, ci.ErrNoToken):
+		return reasoned(argError(field, err.Error()), "account_without_token")
+	default:
+		return reasoned(newError(v1.ErrUnavailable, "连不上 GitHub，请检查网络后重试"), "github_unreachable")
+	}
+}
+
+func (s *Server) ciAccounts(w http.ResponseWriter) CIAccounts {
+	if s.o.CIAccounts == nil {
+		failWith(w, reasoned(newError(v1.ErrUnavailable, "此内核还不能保存 GitHub 账号"), "accounts_unavailable"))
+		return nil
+	}
+	return s.o.CIAccounts
+}
+
+func ciAccountsOf(raw []byte) []map[string]any {
+	section, _ := parsedOf(raw)["ci"].(map[string]any)
+	list, _ := section["accounts"].([]any)
+	out := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+var ciHostPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`)
+
+func (s *Server) createCIAccount(w http.ResponseWriter, r *http.Request, _ *call) {
+	admin := s.ciAdmin(w)
+	accounts := s.ciAccounts(w)
+	if admin == nil || accounts == nil {
+		return
+	}
+	var req v1.CiAccountCreate
+	if e := decode(r, &req, true); e != nil {
+		failWith(w, e)
+		return
+	}
+	host := strings.ToLower(req.Host)
+	if host == "" {
+		host = "github.com"
+	}
+	if !ciHostPattern.MatchString(host) {
+		failWith(w, argError("host", "host 应是 GitHub 的主机名"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), ciVisibilityTimeout)
+	login, err := accounts.Verify(ctx, host, req.Token)
+	cancel()
+	if err != nil {
+		failWith(w, ciGitHubError(err, "token"))
+		return
+	}
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	old, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		return
+	}
+	existing := ciAccountsOf(old)
+	used := map[string]bool{}
+	for _, a := range existing {
+		used[ciString(a, "id")] = true
+		accountHost := ciString(a, "host")
+		if accountHost == "" {
+			accountHost = "github.com"
+		}
+		if accountHost == host && strings.EqualFold(ciString(a, "login"), login) {
+			// The same login again: this is a new token for the account.
+			id := ciString(a, "id")
+			if err = accounts.Save(id, req.Token); err != nil {
+				failWith(w, newError(v1.ErrInternal, "无法保存令牌"))
+				return
+			}
+			for _, b := range s.o.Store.Get().CI.Bindings {
+				if b.Account == id {
+					_ = admin.Restart(b.ID)
+				}
+			}
+			writeJSON(w, 200, ciAccountView(config.CIAccount{ID: id, Host: host, Login: ciString(a, "login")}, accounts.Hint(id)))
+			return
+		}
+	}
+	if len(existing) >= 8 {
+		failWith(w, reasoned(newError(v1.ErrConflict, "最多保存 8 个账号"), "too_many_accounts"))
+		return
+	}
+	base := ciSlug(login)
+	if host != "github.com" {
+		base = ciSlug(login + "-" + strings.SplitN(host, ".", 2)[0])
+	}
+	id := base
+	for n := 2; used[id]; n++ {
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+	if err = accounts.Save(id, req.Token); err != nil {
+		failWith(w, newError(v1.ErrInternal, "无法保存令牌"))
+		return
+	}
+	list := make([]any, 0, len(existing)+1)
+	for _, a := range existing {
+		list = append(list, a)
+	}
+	list = append(list, map[string]any{"id": id, "host": host, "login": login})
+	if !s.editConfigLocked(w, old, []Edit{{Path: "/ci/accounts", Value: list}}) {
+		_ = accounts.Delete(id)
+		return
+	}
+	writeJSON(w, 200, ciAccountView(config.CIAccount{ID: id, Host: host, Login: login}, accounts.Hint(id)))
+}
+
+func (s *Server) deleteCIAccount(w http.ResponseWriter, r *http.Request, _ *call) {
+	if s.ciAdmin(w) == nil {
+		return
+	}
+	accounts := s.ciAccounts(w)
+	if accounts == nil {
+		return
+	}
+	id := pathPart(r, 3)
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	old, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		return
+	}
+	list := make([]any, 0)
+	found := false
+	for _, a := range ciAccountsOf(old) {
+		if ciString(a, "id") == id {
+			found = true
+			continue
+		}
+		list = append(list, a)
+	}
+	if !found {
+		failWith(w, newError(v1.ErrNotFound, "没有这个账号"))
+		return
+	}
+	for _, b := range ciBindingsOf(old) {
+		if ciString(b, "account") == id {
+			failWith(w, reasoned(newError(v1.ErrConflict, "还有绑定在用这个账号：先解绑或换账号"), "account_in_use"))
+			return
+		}
+	}
+	edit := Edit{Path: "/ci/accounts", Value: list}
+	if len(list) == 0 {
+		edit = Edit{Path: "/ci/accounts", Delete: true}
+	}
+	if !s.editConfigLocked(w, old, []Edit{edit}) {
+		return
+	}
+	_ = accounts.Delete(id)
+	w.WriteHeader(204)
+}
+
+func (s *Server) ciReposOfAccount(w http.ResponseWriter, r *http.Request, _ *call) {
+	if s.ciAdmin(w) == nil {
+		return
+	}
+	accounts := s.ciAccounts(w)
+	if accounts == nil {
+		return
+	}
+	id := pathPart(r, 3)
+	var account config.CIAccount
+	found := false
+	for _, a := range s.o.Store.Get().CI.Accounts {
+		if a.ID == id {
+			account, found = a, true
+		}
+	}
+	if !found {
+		failWith(w, newError(v1.ErrNotFound, "没有这个账号"))
+		return
+	}
+	query := r.URL.Query()
+	q := query.Get("q")
+	if len(q) > 100 {
+		failWith(w, argError("q", "q 最长 100 个字符"))
+		return
+	}
+	page := 1
+	if p := query.Get("page"); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 9999 {
+			failWith(w, argError("page", "page 应是上一次响应的 next_page"))
+			return
+		}
+		page = n
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), ciVisibilityTimeout)
+	defer cancel()
+	repos, next, err := accounts.Repos(ctx, account, q, page)
+	if err != nil {
+		failWith(w, ciGitHubError(err, "account"))
+		return
+	}
+	bound := map[string]string{}
+	for _, b := range s.o.Store.Get().CI.Bindings {
+		bound[strings.ToLower(b.Target)] = b.ID
+	}
+	out := v1.CiReposResponse{Repos: []v1.CiRepo{}}
+	for _, repo := range repos {
+		out.Repos = append(out.Repos, v1.CiRepo{FullName: repo.FullName, Private: repo.Private, Binding: bound[strings.ToLower(repo.FullName)]})
+	}
+	if next > 0 {
+		n := strconv.Itoa(next)
+		out.NextPage = &n
+	}
+	writeJSON(w, 200, out)
 }
 
 // ciBindingsOf is the ci.bindings list of the file as maps, in file order.
@@ -162,6 +416,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	}
 
 	host, target, source := "github.com", req.Target, "token"
+	var account config.CIAccount
 	var imported ci.Inspection
 	switch {
 	case req.ImportDir != "":
@@ -177,17 +432,22 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		host, target, source = imported.Host, imported.Target, "import"
 	case req.Account != "":
 		source = "account"
+		found := false
+		for _, a := range s.o.Store.Get().CI.Accounts {
+			if a.ID == req.Account {
+				account, found = a, true
+			}
+		}
+		if !found {
+			failWith(w, reasoned(newError(v1.ErrNotFound, "没有这个账号"), "account_not_found"))
+			return
+		}
+		host = hostOfAccount(account)
 	}
 	if !ciTargetPattern.MatchString(target) {
 		failWith(w, argError("target", "target 应为 owner/name"))
 		return
 	}
-	if source == "account" {
-		// Accounts arrive with the GitHub login; until then no account exists.
-		failWith(w, reasoned(newError(v1.ErrNotFound, "没有这个账号"), "account_not_found"))
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), ciVisibilityTimeout)
 	public, err := s.ciVisible(ctx, host, target)
 	cancel()
@@ -199,6 +459,23 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		e := argError("confirm_public", "这是公开仓库：它的 fork PR 可以在这台机器上执行代码，需要再确认一次")
 		failWith(w, reasoned(e, "public_repo_requires_confirm"))
 		return
+	}
+
+	var registration string
+	if source == "account" {
+		// Asking now proves the account may manage runners of this repository, and the instances
+		// register with this token instead of asking again.
+		accounts := s.ciAccounts(w)
+		if accounts == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), ciVisibilityTimeout)
+		registration, err = accounts.RegistrationToken(ctx, account, target)
+		cancel()
+		if err != nil {
+			failWith(w, ciGitHubError(err, "account"))
+			return
+		}
 	}
 
 	s.configMu.Lock()
@@ -249,6 +526,9 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	if source == "import" {
 		entry["dir"] = filepath.Clean(req.ImportDir)
 	}
+	if source == "account" {
+		admin.HoldToken(id, registration)
+	}
 	if source == "token" {
 		// Held before the binding exists so its instances find the token when they start; it
 		// expires with the hour GitHub gives it and is written nowhere.
@@ -277,6 +557,13 @@ func (s *Server) ciBindingView(admin CIAdmin, id string) v1.CiBinding {
 		}
 	}
 	return v1.CiBinding{ID: id, Instances: []v1.CiInstance{}, Labels: []string{}}
+}
+
+func hostOfAccount(a config.CIAccount) string {
+	if a.Host == "" {
+		return "github.com"
+	}
+	return a.Host
 }
 
 func ciInspectError(err error, field string) *v1.Error {
@@ -324,9 +611,15 @@ func (s *Server) patchCIBinding(w http.ResponseWriter, r *http.Request, _ *call)
 			return
 		}
 	}
-	if req.Account != nil && !ciIDPattern.MatchString(*req.Account) {
-		failWith(w, argError("account", "account 无效"))
-		return
+	if req.Account != nil {
+		known := false
+		for _, a := range s.o.Store.Get().CI.Accounts {
+			known = known || a.ID == *req.Account
+		}
+		if !known {
+			failWith(w, reasoned(newError(v1.ErrNotFound, "没有这个账号"), "account_not_found"))
+			return
+		}
 	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()

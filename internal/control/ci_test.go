@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +18,7 @@ const ciRegistrationToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 // ciFixture serves the CI routes over a real supervisor. No runner package is available, so the
 // instances stay broken; the routes under test do not depend on them running.
-func ciFixture(t *testing.T, public map[string]bool) *fixture {
+func ciFixture(t *testing.T, public map[string]bool, more ...func(*Options)) *fixture {
 	t.Helper()
 	var f *fixture
 	f = newFixture(t, func(o *Options) {
@@ -32,6 +34,9 @@ func ciFixture(t *testing.T, public map[string]bool) *fixture {
 		o.Store.Subscribe(func(next *config.Config) { m.Apply(next.CI) })
 		o.CI = m
 		o.CIVisibility = func(_ context.Context, _, repo string) (bool, error) { return public[repo], nil }
+		for _, m := range more {
+			m(o)
+		}
 	})
 	return f
 }
@@ -255,8 +260,8 @@ func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	}
 }
 
-// conformance: CTR-CTL-15 the account routes answer unavailable until accounts exist
-func Test_CTRCTL15_AccountRoutesUnavailable(t *testing.T) {
+// conformance: CTR-CTL-15 a kernel without the account store answers the account routes unavailable
+func Test_CTRCTL15_AccountRoutesUnavailableWithoutAccounts(t *testing.T) {
 	f := ciFixture(t, nil)
 	for _, c := range []struct{ method, path string }{
 		{"POST", "/v1/ci/accounts"}, {"DELETE", "/v1/ci/accounts/a"}, {"GET", "/v1/ci/accounts/a/repos"},
@@ -266,4 +271,144 @@ func Test_CTRCTL15_AccountRoutesUnavailable(t *testing.T) {
 			t.Errorf("%s %s: %+v", c.method, c.path, e)
 		}
 	}
+}
+
+const ciAccountToken = "github_pat_11AAAAAAAAAAAAAAAAAAAAAA"
+
+// githubStub is just enough of GitHub for the account routes.
+func githubStub(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	allowed := func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Header.Get("Authorization") != "Bearer "+ciAccountToken && r.Header.Get("Authorization") != "Bearer "+ciAccountToken+"B" {
+			http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+			return false
+		}
+		return true
+	}
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		if allowed(w, r) {
+			_, _ = w.Write([]byte(`{"login":"Octo"}`))
+		}
+	})
+	mux.HandleFunc("/user/repos", func(w http.ResponseWriter, r *http.Request) {
+		if allowed(w, r) {
+			_, _ = w.Write([]byte(`[{"full_name":"octo/app","private":true,"permissions":{"admin":true}},{"full_name":"octo/ro","private":false,"permissions":{"admin":false}}]`))
+		}
+	})
+	mux.HandleFunc("/repos/octo/app/actions/runners/registration-token", func(w http.ResponseWriter, r *http.Request) {
+		if allowed(w, r) {
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"REGTOKEN"}`))
+		}
+	})
+	mux.HandleFunc("/repos/octo/ro/actions/runners/registration-token", func(w http.ResponseWriter, r *http.Request) {
+		if allowed(w, r) {
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func accountFixture(t *testing.T) (*fixture, ci.Accounts) {
+	t.Helper()
+	srv := githubStub(t)
+	store := ci.Accounts{Dir: filepath.Join(t.TempDir(), "ci-accounts")}
+	f := ciFixture(t, nil, func(o *Options) {
+		o.CIAccounts = ci.Service{Store: store, API: ci.API{APIBase: srv.URL}}
+	})
+	return f, store
+}
+
+// conformance: CTR-CTL-15 accounts: the token is verified, kept apart from the configuration and never returned
+func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
+	f, store := accountFixture(t)
+	r := f.do("POST", "/v1/ci/accounts", v1.CiAccountCreate{Token: ciAccountToken}, nil)
+	if r.Status != 200 {
+		t.Fatalf("create: %d %s", r.Status, r.Body)
+	}
+	valid(t, "CiAccount", r.Body)
+	var acct v1.CiAccount
+	decodeAs(t, r, &acct)
+	if acct.ID != "octo" || acct.Login != "Octo" || acct.Host != "github.com" || acct.TokenHint != "github_pat_1…AAAA" {
+		t.Fatalf("account = %+v", acct)
+	}
+	if strings.Contains(string(r.Body), ciAccountToken) || strings.Contains(f.configText(), ciAccountToken) {
+		t.Fatal("the token was echoed or written to the configuration")
+	}
+	if got, err := store.Token("octo"); err != nil || got != ciAccountToken {
+		t.Fatalf("stored token = %q, %v", got, err)
+	}
+	if !strings.Contains(f.configText(), "login: Octo") {
+		t.Fatalf("account missing from the file:\n%s", f.configText())
+	}
+
+	// The same login again replaces the token and adds no account.
+	r = f.do("POST", "/v1/ci/accounts", v1.CiAccountCreate{Token: ciAccountToken + "B"}, nil)
+	if r.Status != 200 {
+		t.Fatalf("replace: %d %s", r.Status, r.Body)
+	}
+	if n := len(f.store.Get().CI.Accounts); n != 1 {
+		t.Fatalf("%d accounts after replacing the token", n)
+	}
+	if got, _ := store.Token("octo"); got != ciAccountToken+"B" {
+		t.Fatalf("token not replaced: %q", got)
+	}
+	var ov v1.CiOverview
+	decodeAs(t, f.ok("GET", "/v1/ci", nil, "CiOverview"), &ov)
+	if len(ov.Accounts) != 1 || ov.Accounts[0].ID != "octo" {
+		t.Fatalf("overview accounts = %+v", ov.Accounts)
+	}
+
+	// GitHub refuses a bad token: nothing is saved.
+	e := apiError(t, f.do("POST", "/v1/ci/accounts", v1.CiAccountCreate{Token: "github_pat_ZZZZZZZZZZZZZZZZZZZZZZZZ"}, nil), v1.ErrInvalidArgs)
+	if e.Field != "token" || e.Reason != "github_rejected" {
+		t.Fatalf("rejected = %+v", e)
+	}
+
+	// Repositories: only those the token administers, with the binding that already covers them.
+	r = f.ok("GET", "/v1/ci/accounts/octo/repos", nil, "CiReposResponse")
+	var repos v1.CiReposResponse
+	decodeAs(t, r, &repos)
+	if len(repos.Repos) != 1 || repos.Repos[0].FullName != "octo/app" || !repos.Repos[0].Private || repos.NextPage != nil {
+		t.Fatalf("repos = %+v", repos)
+	}
+	apiError(t, f.do("GET", "/v1/ci/accounts/nobody/repos", nil, nil), v1.ErrNotFound)
+
+	// Binding with the account: GitHub issues the registration token, and the account is in use.
+	r = f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "octo/app", Account: "octo"}, nil)
+	if r.Status != 201 {
+		t.Fatalf("bind: %d %s", r.Status, r.Body)
+	}
+	valid(t, "CiBinding", r.Body)
+	var b v1.CiBinding
+	decodeAs(t, r, &b)
+	if b.Source != v1.CiSourceAccount || b.Account != "octo" {
+		t.Fatalf("binding = %+v", b)
+	}
+	if strings.Contains(string(r.Body), "REGTOKEN") || strings.Contains(f.configText(), "REGTOKEN") {
+		t.Fatal("the registration token escaped")
+	}
+	e = apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "octo/ro", Account: "octo"}, nil), v1.ErrInvalidArgs)
+	if e.Reason != "no_admin_permission" {
+		t.Fatalf("read-only repo: %+v", e)
+	}
+	e = apiError(t, f.do("DELETE", "/v1/ci/accounts/octo", nil, nil), v1.ErrConflict)
+	if e.Reason != "account_in_use" {
+		t.Fatalf("in use: %+v", e)
+	}
+
+	f.do("DELETE", "/v1/ci/bindings/octo-app?force=true", nil, nil)
+	if r = f.do("DELETE", "/v1/ci/accounts/octo", nil, nil); r.Status != 204 {
+		t.Fatalf("delete account: %d %s", r.Status, r.Body)
+	}
+	if _, err := store.Token("octo"); err == nil {
+		t.Fatal("token kept after deleting the account")
+	}
+	if len(f.store.Get().CI.Accounts) != 0 {
+		t.Fatalf("account still configured: %+v", f.store.Get().CI.Accounts)
+	}
+	apiError(t, f.do("DELETE", "/v1/ci/accounts/octo", nil, nil), v1.ErrNotFound)
 }

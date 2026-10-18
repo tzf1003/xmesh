@@ -289,9 +289,9 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if lan, ok := network.(*mesh.LAN); ok {
 		pairing = lan
 	}
-	ciMgr, stopCI := startCI(store, o.StateDir, c.Node.Name)
+	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)
 	defer stopCI()
-	defer startControl(controlDeps{ci: ciMgr, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
+	defer startControl(controlDeps{ci: ciMgr, ciAccounts: ciAccounts, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
 		drain:  func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },
 		resume: func() { registry.resume(c.Node.Name, ""); ciMgr.SetDraining(false) }})()
 	select {

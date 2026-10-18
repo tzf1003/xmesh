@@ -28,6 +28,10 @@ type Options struct {
 	// Token returns a registration token for a binding that registers through an account. Nil
 	// until GitHub accounts are available; such a binding then reports auth_failed.
 	Token func(ctx context.Context, b config.CIBinding) (string, error)
+	// RemoveToken returns a token that removes a runner of the binding's repository from GitHub.
+	// Nil, or a failure, leaves the runner registered there (GitHub drops an offline runner after
+	// 14 days, and the web page can delete it sooner).
+	RemoveToken func(ctx context.Context, b config.CIBinding) (string, error)
 	// Backoff is the wait before restart number attempt (1 for the first). Default 1s doubling to 5m.
 	Backoff func(attempt int) time.Duration
 	// StableAfter is how long a runner must have run for its backoff to start over. Default 10m.
@@ -218,6 +222,7 @@ func (m *Manager) removeLocked(id string, b *binding) {
 		for _, in := range instances {
 			<-in.finished
 		}
+		m.deregister(b.spec, instances...)
 		if m.managedDir(b.spec) {
 			if err := os.RemoveAll(b.dir); err != nil {
 				m.o.Logf("ci: 删除 %s 失败: %v", b.dir, err)
@@ -240,6 +245,7 @@ func (m *Manager) cleanupAfter(b *binding, in *instance, _ bool) {
 	go func() {
 		defer m.wg.Done()
 		<-in.finished
+		m.deregister(b.spec, in)
 		_ = os.RemoveAll(dir)
 	}()
 }
@@ -536,6 +542,35 @@ func (m *Manager) RemoveOrphans(c config.CI) {
 			if err := os.RemoveAll(filepath.Join(m.root(), e.Name())); err != nil {
 				m.o.Logf("ci: 清理遗留目录 %s 失败: %v", e.Name(), err)
 			}
+		}
+	}
+}
+
+// deregister removes the runners of instances from GitHub when the binding has an account to ask
+// for a remove token with. It is best effort: what cannot be removed is reported in the log.
+func (m *Manager) deregister(spec config.CIBinding, instances ...*instance) {
+	if spec.Source == "import" || spec.Account == "" || m.o.RemoveToken == nil {
+		return
+	}
+	var registered []*instance
+	for _, in := range instances {
+		if _, err := os.Stat(filepath.Join(in.dir, ".runner")); err == nil {
+			registered = append(registered, in)
+		}
+	}
+	if len(registered) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	for _, in := range registered {
+		token, err := m.o.RemoveToken(ctx, spec)
+		if err != nil {
+			m.o.Logf("ci: 无法向 GitHub 注销 %s: %v", in.name, err)
+			return
+		}
+		if err = in.unregister(ctx, token); err != nil {
+			m.o.Logf("ci: 注销 %s 失败: %v", in.name, err)
 		}
 	}
 }

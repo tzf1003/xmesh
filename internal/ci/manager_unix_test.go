@@ -3,6 +3,7 @@
 package ci
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 )
 
 const fakeConfigSh = `#!/bin/sh
+if [ "$1" = remove ]; then echo "$ACTIONS_RUNNER_INPUT_TOKEN" >> "$CI_REMOVED_LOG"; rm -f .runner .credentials; exit 0; fi
 echo "$@" > config-args
 env | grep ACTIONS_RUNNER_INPUT_TOKEN= > config-env
 if [ "$ACTIONS_RUNNER_INPUT_TOKEN" = bad ]; then echo "Http response code: Unauthorized from 'POST https://api.github.com/actions/runner-registration'"; exit 1; fi
@@ -497,4 +499,67 @@ func Test_CTRCTL15_ChangedLabelsRegisterAgain(t *testing.T) {
 	r.wait("registered with the new labels", func() bool {
 		return strings.Contains(r.read(filepath.Join(dir, "config-args")), "xmesh,xmesh-node,gpu") && r.state("a", 1) == v1.CiIdle
 	})
+}
+
+// conformance: CTR-CTL-15
+func Test_CTRCTL15_AccountBindingGetsItsTokenFromGitHubAndDeregistersOnUnbind(t *testing.T) {
+	removed := filepath.Join(t.TempDir(), "removed")
+	t.Setenv("CI_REMOVED_LOG", removed)
+	r := newRig(t)
+	var asked atomic.Int32
+	r.m.o.Token = func(_ context.Context, b config.CIBinding) (string, error) {
+		asked.Add(1)
+		return "REG-" + b.Account, nil
+	}
+	r.m.o.RemoveToken = func(_ context.Context, b config.CIBinding) (string, error) { return "REMOVE-" + b.Account, nil }
+	spec := config.CIBinding{ID: "a", Scope: "repo", Target: "o/a", Source: "account", Account: "me", Concurrency: 1}
+	r.apply(spec)
+	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	env, err := os.ReadFile(filepath.Join(r.dirOf("a", 1), "config-env"))
+	if err != nil || !strings.Contains(string(env), "REG-me") {
+		t.Fatalf("registered with %q (%v)", env, err)
+	}
+	if asked.Load() != 1 {
+		t.Fatalf("token asked %d times", asked.Load())
+	}
+	// Restarting does not ask again: the runner stays registered.
+	if err = r.m.Restart("a"); err != nil {
+		t.Fatal(err)
+	}
+	r.wait("idle again", func() bool { return r.state("a", 1) == v1.CiIdle })
+	if asked.Load() != 1 {
+		t.Fatalf("token asked %d times after restart", asked.Load())
+	}
+
+	r.apply()
+	r.wait("binding gone", func() bool { return r.m.Gone("a") })
+	log, err := os.ReadFile(removed)
+	if err != nil || strings.TrimSpace(string(log)) != "REMOVE-me" {
+		t.Fatalf("removal log = %q (%v)", log, err)
+	}
+}
+
+// conformance: CTR-CTL-15
+func Test_CTRCTL15_ImportedRunnerIsNotDeregisteredOnUnbind(t *testing.T) {
+	removed := filepath.Join(t.TempDir(), "removed")
+	t.Setenv("CI_REMOVED_LOG", removed)
+	r := newRig(t)
+	r.m.o.RemoveToken = func(context.Context, config.CIBinding) (string, error) { return "REMOVE", nil }
+	dir := t.TempDir()
+	r.write(filepath.Join(dir, ".runner"), `{"agentName":"old","gitHubUrl":"https://github.com/o/a","workFolder":"_work"}`)
+	r.write(filepath.Join(dir, "config.sh"), fakeConfigSh)
+	r.write(filepath.Join(dir, "run.sh"), fakeRunSh)
+	for _, f := range []string{"config.sh", "run.sh"} {
+		_ = os.Chmod(filepath.Join(dir, f), 0o755)
+	}
+	r.apply(config.CIBinding{ID: "old", Scope: "repo", Target: "o/a", Source: "import", Account: "me", Dir: dir, Concurrency: 1})
+	r.wait("idle", func() bool { return r.state("old", 1) == v1.CiIdle })
+	r.apply()
+	r.wait("binding gone", func() bool { return r.m.Gone("old") })
+	if _, err := os.Stat(removed); err == nil {
+		t.Fatal("an imported runner was removed from GitHub")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".runner")); err != nil {
+		t.Fatalf("the imported runner was changed: %v", err)
+	}
 }
