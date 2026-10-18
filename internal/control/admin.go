@@ -329,11 +329,15 @@ func (s *Server) ingressAdmin(w http.ResponseWriter) IngressAdmin {
 		failWith(w, newError(v1.ErrRoleDisabled, "此节点没有 ingress 角色"))
 		return nil
 	}
-	if s.o.Ingress == nil {
+	admin := s.o.Ingress
+	if s.o.IngressNow != nil {
+		admin = s.o.IngressNow()
+	}
+	if admin == nil {
 		failWith(w, newError(v1.ErrUnavailable, "入口尚未就绪"))
 		return nil
 	}
-	return s.o.Ingress
+	return admin
 }
 
 func (s *Server) listIngressClients(w http.ResponseWriter, _ *http.Request, _ *call) {

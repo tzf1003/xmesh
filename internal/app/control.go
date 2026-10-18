@@ -35,7 +35,6 @@ type controlDeps struct {
 	self      identity.Principal
 	mode      string
 	allowSIDs []string
-	ingress   control.IngressAdmin // nil on a node without the ingress role
 	pairing   control.PairingAdmin // nil unless the node runs the LAN network
 	drain     func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume    func()
@@ -48,9 +47,10 @@ type controlDeps struct {
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
-	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress, Pairing: d.pairing}
+	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Pairing: d.pairing}
 	if d.roles != nil {
 		options.Applier = d.roles
+		options.IngressNow = d.roles.ingressAdmin
 	}
 	s, e := control.Start(options)
 	if e != nil {
@@ -104,9 +104,15 @@ func (h *controlHost) Status() v1.StatusResponse {
 		st.Gateway = gatewayInfo(&shown, h.d.network)
 	}
 	if hasRole(cfg.Node.Roles, "ingress") {
-		info := &v1.IngressInfo{Listen: cfg.Ingress.Listen}
-		if cfg.Ingress.OAuth.Issuer != "" {
-			info.Issuer = &cfg.Ingress.OAuth.Issuer
+		// What the ingress answers on is the section it runs with, which differs from the file while a
+		// move to a new section has failed.
+		section := cfg.Ingress
+		if running, ok := h.d.roles.ingressConfig(); ok {
+			section = running
+		}
+		info := &v1.IngressInfo{Listen: section.Listen}
+		if section.OAuth.Issuer != "" {
+			info.Issuer = &section.OAuth.Issuer
 		}
 		st.Ingress = info
 	}

@@ -20,11 +20,11 @@ import (
 //
 // /node/roles is on the list for the roles that cannot start or stop in process; the roles in
 // HotRoles come and go with the generation and are not part of what needs a restart.
-var RestartPaths = []string{"/node/name", "/node/roles", "/mesh", "/ingress", "/audit", "/agent/policy/windows_appcontainer"}
+var RestartPaths = []string{"/node/name", "/node/roles", "/mesh", "/audit", "/agent/policy/windows_appcontainer"}
 
 // HotRoles are the node roles that a running process starts and stops itself when node.roles
 // changes, without touching the network or the other roles.
-var HotRoles = []string{"gateway"}
+var HotRoles = []string{"gateway", "ingress"}
 
 // IsHotRole reports whether role comes and goes with the generation.
 func IsHotRole(role string) bool { return slices.Contains(HotRoles, role) }
@@ -232,7 +232,6 @@ func (s *Store) load() (*Config, bool) {
 	c.Node.Name = s.startup.Node.Name
 	c.Node.Roles = mergeRoles(s.startup.Node.Roles, c.Node.Roles)
 	c.Mesh = s.startup.Mesh
-	c.Ingress = s.startup.Ingress
 	c.Audit = s.startup.Audit
 	c.Agent.Policy.WindowsAppContainer = s.startup.Agent.Policy.WindowsAppContainer
 	s.current = c
@@ -255,7 +254,6 @@ func restartChanged(startup, next *Config) []string {
 	add("/node/name", startup.Node.Name != next.Node.Name)
 	add("/node/roles", RolesNeedRestart(startup.Node.Roles, next.Node.Roles))
 	add("/mesh", !reflect.DeepEqual(startup.Mesh, next.Mesh))
-	add("/ingress", !reflect.DeepEqual(startup.Ingress, next.Ingress))
 	add("/audit", !reflect.DeepEqual(startup.Audit, next.Audit))
 	add("/agent/policy/windows_appcontainer", startup.Agent.Policy.WindowsAppContainer != next.Agent.Policy.WindowsAppContainer)
 	return out

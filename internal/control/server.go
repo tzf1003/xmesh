@@ -37,6 +37,9 @@ type Options struct {
 	Heartbeat time.Duration
 	// Ingress serves the ingress routes; nil on a node that does not run the ingress.
 	Ingress IngressAdmin
+	// IngressNow, when set, replaces Ingress: it returns the ingress running now, nil while none
+	// runs, for a node whose ingress comes and goes with the configuration.
+	IngressNow func() IngressAdmin
 	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
 	Pairing PairingAdmin
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;

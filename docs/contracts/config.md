@@ -53,11 +53,12 @@
 | `gateway.access`、`gateway.hosts` | 每个请求读取，立即生效；见 [CTR-GW-07](gateway.md#ctr-gw-07) |
 | `gateway.listen` | 热加载。运行中的 Gateway 先绑定新地址，成功后再放弃旧地址，Agent、PTY 与 exec 会话不受影响；新地址被占用时 Gateway 留在旧地址上，在 `apply_errors` 与状态警告里报告。同一个端口只是放宽绑定范围（例如 `127.0.0.1:8080` 改为 `:8080`）而系统不允许两个监听并存时，先关旧监听再绑新的，新的失败就恢复旧的 |
 | `node.roles` 中的 `gateway` | 热加载。加入时创建 Gateway（令牌不存在才创建，见 [CTR-GW-07](gateway.md#ctr-gw-07)）并开始监听，去掉时停止监听并关闭它的 MCP 会话；Agent、网络和其他角色不受影响。启动失败（例如端口被占用）时节点照常运行，在 `apply_errors` 与状态警告里报告 |
-| `node.name`、`node.roles` 里 `agent` 与 `ingress` 的增减、`mesh`、`ingress`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
+| `node.roles` 中的 `ingress` 与 `ingress` 段 | 热加载。加入时检查 `tag:ingress`、登录口令文件并开始监听，去掉时停止监听并关闭它的 MCP 会话；`ingress` 段有任何改动时入口先停再按新配置启动，因为新的监听可能要用同一个端口。已通过入口登录的客户端需要重新授权（OAuth 令牌只在入口进程内存里，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01)）。新配置在启动前就能判定不可用（例如读不到证书）时，入口保持原样；启动时才失败则恢复原来的配置，两种情况都在 `apply_errors` 与状态警告里报告。Agent、网络和其他角色不受影响 |
+| `node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
 
 #### 热应用失败时
 
-有效的配置可以在应用时失败：新的监听地址被占用，Gateway 没能启动。此时运行中的进程保持原样，该段不进入 `restart_paths`（重启也不会让占用的端口变空），而是：
+有效的配置可以在应用时失败：新的监听地址被占用，Gateway 没能启动，入口的证书读不到或端口拿不到。此时运行中的进程保持原样，该段不进入 `restart_paths`（重启也不会让占用的端口变空），而是：
 
 - `POST /v1/config/reload` 的 `apply_errors` 列出 `{section, message}`；
 - 状态警告 `policy_reload_failed` 带同样的文字，`policy_reload_failures` 计数加一，并写一条 `policy_reload_failed` 审计事件；
@@ -67,7 +68,7 @@
 
 #### 为什么这几段需要重启
 
-`node.name`、`mesh` 决定本节点的身份与网络；`node.roles` 里的 `agent` 持有 PTY、exec、租约与沙箱运行器；`ingress` 持有入口的 OAuth 状态、公网监听与证书；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈或正在服务的会话，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。Gateway 只是进来的路径，不保存会话状态（[INV-03](../constraints/invariants.md#inv-03)），所以可以在进程内启停和换地址。
+`node.name`、`mesh` 决定本节点的身份与网络；`node.roles` 里的 `agent` 持有 PTY、exec、租约与沙箱运行器；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈或正在服务的会话，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。Gateway 与入口只是进来的路径，不保存会话状态（[INV-03](../constraints/invariants.md#inv-03)），所以可以在进程内启停和换地址；入口只丢掉自己进程里的 OAuth 令牌。
 
 #### 字段速查
 

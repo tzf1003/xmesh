@@ -421,7 +421,7 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 - `GET /v1/ingress/clients`、`DELETE /v1/ingress/clients/{client_id}`、`PUT /v1/ingress/password`：没有 `ingress` 角色返回 `role_disabled`。撤销客户端同时清掉它的授权码、access 与 refresh token 并持久化；写在 `ingress.oauth.clients` 里的客户端下次启动会重新登记，但旧 token 不会复活。轮转口令先原子重写口令文件（`0600`）再让运行中的服务切换，已签发的 token 不受影响；口令长度 12 到 256 个字符，首尾不能有空白。
 - `GET /v1/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
 
-经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 时只能按路径前缀（`/node/name`、`/node/roles`、`/mesh`、`/ingress`）估计。
+经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 时只能按路径前缀（`/node/name`、`/node/roles`、`/mesh`、`/audit`）估计。
 
 ### 命令行
 
