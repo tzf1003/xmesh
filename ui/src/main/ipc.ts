@@ -29,11 +29,13 @@ import {
 } from "../shared/ipc";
 import type { CallEventData } from "../shared/control";
 import { parseDisplay } from "../shared/display";
+import { parseUpdatePrefs } from "../shared/update";
 import type { PanelService } from "./panel-service";
 import type { SetupPreview, SetupReport } from "../shared/ipc";
 import type { DataResult } from "../shared/ipc";
 import type { Snapshot } from "../shared/state";
 import type { Actions } from "./actions";
+import type { UpdateActions } from "./update/service";
 import type { ShellController } from "./controller";
 import { isPanelUrl } from "./policy";
 
@@ -61,9 +63,10 @@ export interface IpcDeps {
   /** Validates and runs one tailnet-administration request; `request` is whatever the renderer sent. */
   mesh: (request: unknown) => Promise<DataResult<unknown>>;
   panel: () => WebContents | undefined;
+  update: UpdateActions;
 }
 
-export function registerIpc({ controller, actions, service, previewSetup, setup, mesh, panel }: IpcDeps): () => void {
+export function registerIpc({ controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -119,6 +122,14 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.openExternal, (key: unknown) => {
     const v = parseExternalKey(key);
     return v === undefined ? bad("link key") : actions.openExternal(v);
+  });
+
+  handle(CHANNELS.checkUpdate, () => update.check());
+  handle(CHANNELS.installUpdate, () => update.install());
+  handle(CHANNELS.cancelUpdate, () => update.cancel());
+  handle(CHANNELS.setUpdatePrefs, (prefs: unknown) => {
+    const v = parseUpdatePrefs(prefs);
+    return v === undefined ? bad("update preferences") : update.setPrefs(v);
   });
 
   handle(CHANNELS.getSessions, () => service.getSessions());

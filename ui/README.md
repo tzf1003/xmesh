@@ -57,6 +57,17 @@ npm start             # 另开终端，启动 Electron
 
 内核缺某项能力时，对应页面显示「内核不支持」，不会发出请求。`weakens_security` 只是 UI 层的二次确认，不是内核边界（契约如此规定）。
 
+### 关于与更新
+
+面板的「关于与更新」页和顶部提示条负责版本检测与一键更新，不需要终端，内核没在运行时也能用。面板和内核在同一个安装包里，所以一起更新。
+
+- 检测：主进程（Electron 的 `net.fetch`，跟随系统代理）读 `https://api.github.com/repos/tzf1003/xmesh/releases`，按语义化版本选出比当前新、并且带有本机安装包和 `SHA256SUMS.txt` 的最新一版。启动 20 秒后检查一次，之后每 6 小时一次；「自动检查」可关，「包含测试版」默认开（现在发布的都是 beta）。发现新版本时，面板顶部出现提示条，托盘菜单多一项，并发一条系统通知（每个版本只通知一次）。
+- 下载与校验：只从 `github.com/tzf1003/xmesh/releases/download/<tag>/` 取 `xmesh-ui-<版本>-<win|mac>-<x64|arm64>.<exe|dmg>`，边下边算 SHA-256，必须和 `SHA256SUMS.txt`（以及 API 给出的 digest，两者都在时必须一致）相符才继续；不符就丢弃，不会停任何东西。
+- 替换：先对每个在运行的节点执行 `xmesh stop`，记下停掉的节点；写下 `pending.json`；启动一个脱离的脚本后退出。Windows 的脚本（`cmd`）等应用进程结束，静默运行 NSIS 安装程序（沿用原安装目录），成功后启动新应用；macOS 的脚本（`/bin/sh`）等应用退出，挂载 dmg，把 `xmesh.app` 换成新的（先改名保留旧的，复制失败就放回去），清除隔离属性后打开。路径都经环境变量或参数传入，脚本文本里没有路径。
+- 恢复：新应用启动时读 `pending.json`，重新启动被停掉的节点（`xmesh start`），版本对上就提示「已更新到 X」，没对上就带着脚本留下的原因提示失败，旧版本仍可用。配置、令牌、节点状态都在安装目录之外，更新不碰它们。
+- 限制：macOS 要求应用在可写的位置（通常是「应用程序」）；从 dmg 或 AppTranslocation 运行时只提示先拖进「应用程序」；没有写权限时打开 dmg 让用户手动覆盖。内核若来自 `XMESH_BIN` 或 `PATH`（不是安装包里的那个），面板会说明它不会被更换。Linux 没有 UI 安装包，不在范围内。
+- 试用：`XMESH_UPDATE_FEED=<地址>` 把检测和下载指向一个仿 GitHub 的目录（`<地址>/releases` 返回发布列表，`<地址>/download/<tag>/<文件>` 提供文件），用来不发版本就演练一次更新。
+
 ### Tailnet 管理页面
 
 侧栏的「Tailnet 管理」不依赖本机内核：它通过控制面（Tailscale 或 Headscale）管理整个 tailnet，实现方式是调用 `xmesh mesh … --json`（meshadmin）。凭据留在命令行的系统钥匙串配置里，**从不经过 Electron**：界面没有输入密钥的地方，没有凭据时只给出可复制的终端命令（`xmesh mesh login --kind … --access read|write`）。
