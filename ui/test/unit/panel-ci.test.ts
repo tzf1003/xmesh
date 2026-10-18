@@ -11,7 +11,9 @@ import { PanelService } from "../../src/main/panel-service";
 import { CI_OPS, ciBusy, ciCounts, ciNextStep, parseCiRequest } from "../../src/shared/ci";
 import type { Capability, CiBinding, CiInstance, CiProblemCode } from "../../src/shared/control";
 import { ciFailure, needsPublicConfirm, needsRegistrationToken, parseLabelInput, parseRepo, registrationTokenValid, githubTokenValid, stepOf } from "../../src/renderer/lib/ci";
-import { fixture } from "../../testserver/fixtures";
+import Ajv2020 from "ajv/dist/2020";
+import { CiFake } from "../../testserver/ci-routes";
+import { fixture, schemaDir } from "../../testserver/fixtures";
 import { FakeKernel } from "../../testserver/server";
 
 const GOOD = "github_pat_11AAAAAAA0abcdefghij_klmnopqrstuvwxyz0123456789";
@@ -237,4 +239,46 @@ test("a kernel without the ci route answers with an error the page can show", as
   const r = await service.ci({ op: "get" });
   assert.ok(!r.ok);
   assert.equal(r.error.code, "not_implemented");
+});
+
+// ---- the fake speaks the contract ----
+
+test("everything the fake kernel answers on the ci routes validates against the contract's schemas", () => {
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  for (const f of fs.readdirSync(schemaDir()).filter((n) => n.endsWith(".schema.json"))) {
+    ajv.addSchema(JSON.parse(fs.readFileSync(path.join(schemaDir(), f), "utf8")));
+  }
+  const check = (def: string, value: unknown): void => {
+    const v = ajv.getSchema(`urn:xmesh:schema:control-ci:1#/$defs/${def}`);
+    assert.ok(v, def);
+    assert.ok(v(value), `${def} invalid: ${ajv.errorsText(v.errors)}\n${JSON.stringify(value).slice(0, 300)}`);
+  };
+  const fake = new CiFake();
+  const call = (method: string, p: string, body?: unknown, query = "") => {
+    const r = fake.handle(method, p, new URLSearchParams(query), body ?? null);
+    assert.ok(r, `${method} ${p}`);
+    return r;
+  };
+
+  check("CiOverview", call("GET", "/v1/ci").body);
+  const account = call("POST", "/v1/ci/accounts", { token: GOOD });
+  check("CiAccount", account.body);
+  const id = (account.body as { id: string }).id;
+  check("CiReposResponse", call("GET", `/v1/ci/accounts/${id}/repos`).body);
+  check("CiReposResponse", call("GET", `/v1/ci/accounts/${id}/repos`, undefined, "page=2").body);
+  for (const dir of ["clean", "service", "running", "ephemeral"]) check("CiImportInspectResponse", call("POST", "/v1/ci/import/inspect", { dir: `/runners/${dir}` }).body);
+
+  const created = call("POST", "/v1/ci/bindings", { target: "tzf1003/xmesh", account: id, concurrency: 2, labels: ["gpu"] });
+  assert.equal(created.status, 201);
+  check("CiBinding", created.body);
+  const taken = call("POST", "/v1/ci/bindings", { import_dir: "/runners/clean" });
+  check("CiBinding", taken.body);
+  check("CiBinding", call("PATCH", "/v1/ci/bindings/xmesh", { paused: true }).body);
+  check("CiBinding", call("POST", "/v1/ci/bindings/xmesh/repair", {}).body);
+  check("CiBinding", call("DELETE", "/v1/ci/bindings/xmesh").body);
+  check("CiOverview", call("GET", "/v1/ci").body);
+  for (const r of [call("POST", "/v1/ci/accounts", { token: "short" }), call("GET", "/v1/ci/accounts/none/repos"), call("POST", "/v1/ci/bindings", {})]) {
+    const e = r.body as { error: string; message: string };
+    assert.ok(r.status >= 400 && typeof e.error === "string" && typeof e.message === "string");
+  }
 });
