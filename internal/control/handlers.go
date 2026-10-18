@@ -23,6 +23,9 @@ func (s *Server) snapshot() v1.StatusResponse {
 	if s.o.AuditDir != "" {
 		st.Paths.AuditDir = ptr(s.o.AuditDir)
 	}
+	if s.o.CI != nil {
+		st.CI = s.o.CI.Summary()
+	}
 	peers := s.cachedPeers()
 	offline := 0
 	for _, p := range peers {

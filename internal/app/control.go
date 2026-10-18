@@ -10,6 +10,7 @@ import (
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backendenv"
+	"github.com/tzf1003/xmesh/internal/ci"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/cwd"
@@ -44,6 +45,9 @@ type controlDeps struct {
 	peerInfo func() (readings map[string]gateway.DeviceInfo, ok bool)
 	// roles starts, stops and moves the roles that follow the configuration.
 	roles *roleRuntime
+	// ci supervises the GitHub Actions runners; nil when the node cannot host them.
+	ci         *ci.Manager
+	ciAccounts *ci.Service
 }
 
 // startControl opens the channel. A failure is reported and otherwise ignored:
@@ -53,6 +57,10 @@ func startControl(d controlDeps) (stop func()) {
 	options.BackendEnv = d.backendEnv
 	if d.agent != nil {
 		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
+	}
+	if d.ci != nil {
+		options.CI = d.ci
+		options.CIAccounts = d.ciAccounts
 	}
 	if d.roles != nil {
 		options.Applier = d.roles

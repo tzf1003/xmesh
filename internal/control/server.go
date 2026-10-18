@@ -50,6 +50,13 @@ type Options struct {
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
 	// nil on a node that has none.
 	Applier Applier
+	// CI supervises the GitHub Actions runners; nil on a node that cannot host them.
+	CI CIAdmin
+	// CIAccounts keeps GitHub accounts and talks to GitHub with them; nil answers the account
+	// routes with unavailable.
+	CIAccounts CIAccounts
+	// CIVisibility replaces the public-repository check; nil asks GitHub.
+	CIVisibility CIVisibility
 }
 
 // Applier is the part of the node that puts a new configuration generation into effect in the
@@ -164,7 +171,11 @@ func capabilities(o Options) []v1.Capability {
 	if o.Store.Path() != "" {
 		caps = append(caps, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPats, v1.CapGateway)
 	}
-	return append(caps, v1.CapPair, v1.CapIngress, v1.CapAudit)
+	caps = append(caps, v1.CapPair, v1.CapIngress, v1.CapAudit)
+	if o.CI != nil && o.Store.Path() != "" {
+		caps = append(caps, v1.CapCI)
+	}
+	return caps
 }
 
 func (s *Server) hasCapability(c v1.Capability) bool {
@@ -312,16 +323,16 @@ func (s *Server) table() map[string]handler {
 		"control.ingress.clients.delete": s.deleteIngressClient,
 		"control.ingress.password.put":   s.putIngressPassword,
 
-		"control.ci.get":              s.ciNotImplemented,
-		"control.ci.accounts.create":  s.ciNotImplemented,
-		"control.ci.accounts.delete":  s.ciNotImplemented,
-		"control.ci.accounts.repos":   s.ciNotImplemented,
-		"control.ci.bindings.create":  s.ciNotImplemented,
-		"control.ci.bindings.patch":   s.ciNotImplemented,
-		"control.ci.bindings.delete":  s.ciNotImplemented,
-		"control.ci.bindings.restart": s.ciNotImplemented,
-		"control.ci.bindings.repair":  s.ciNotImplemented,
-		"control.ci.import.inspect":   s.ciNotImplemented,
+		"control.ci.get":              s.getCI,
+		"control.ci.accounts.create":  s.createCIAccount,
+		"control.ci.accounts.delete":  s.deleteCIAccount,
+		"control.ci.accounts.repos":   s.ciReposOfAccount,
+		"control.ci.bindings.create":  s.createCIBinding,
+		"control.ci.bindings.patch":   s.patchCIBinding,
+		"control.ci.bindings.delete":  s.deleteCIBinding,
+		"control.ci.bindings.restart": s.restartCIBinding,
+		"control.ci.bindings.repair":  s.repairCIBinding,
+		"control.ci.import.inspect":   s.inspectCIImport,
 	}
 }
 
