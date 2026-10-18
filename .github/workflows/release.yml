@@ -1,9 +1,10 @@
-name: 发布 beta
-# 推送形如 v0.2.0-beta.1 或 v0.2.0-rc.1 的标签时，为 Windows、Linux、macOS 构建二进制与桌面 UI 安装包，并发布 GitHub 预发布版。
-# 发布说明取自 .github/release-notes/beta.md（英文，__TAG__ 替换为标签）。
+name: 发布
+# 推送标签时，为 Windows、Linux、macOS 构建二进制与桌面 UI 安装包，并发布为正式版（Latest）。
+# 所有标签都是正式发布，包括 beta；发布说明取自 .github/release-notes/release.md（英文，__TAG__ 替换为标签），
+# 再附上 GitHub 按提交自动生成的更新列表。
 on:
   push:
-    tags: ['v*-beta*', 'v*-rc*']
+    tags: ['v*.*.*']
 permissions:
   contents: write
 jobs:
@@ -17,10 +18,10 @@ jobs:
     steps:
       - name: 标签格式
         run: |
-          case "$GITHUB_REF_NAME" in
-            v[0-9]*.[0-9]*.[0-9]*-beta.[0-9]*|v[0-9]*.[0-9]*.[0-9]*-rc.[0-9]*) ;;
-            *) echo "tag $GITHUB_REF_NAME must look like v0.1.0-beta.1 or v0.1.0-rc.1" >&2; exit 1 ;;
-          esac
+          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[0-9]+)?$'; then
+            echo "tag $GITHUB_REF_NAME must look like v0.1.0, v0.1.0-beta.1 or v0.1.0-rc.1" >&2
+            exit 1
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -99,10 +100,10 @@ jobs:
           merge-multiple: true
       - name: 校验和
         run: cd dist && sha256sum * > SHA256SUMS.txt
-      - name: 发布预发布版
+      - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/beta.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --prerelease --generate-notes \
+          sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/release.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --latest --generate-notes \
             --title "$GITHUB_REF_NAME" --notes-file notes.md
