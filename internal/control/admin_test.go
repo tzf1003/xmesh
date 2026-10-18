@@ -174,22 +174,27 @@ func Test_ControlPats(t *testing.T) {
 		}
 	}
 
+	// The gateway always needs a token, so the last PAT cannot be deleted (CTR-CTL-09).
+	if r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
 	if r = f.do("DELETE", "/v1/pats/ci", nil, nil); r.Status != 204 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
+	apiError(t, f.do("DELETE", "/v1/pats/spare", nil, nil), v1.ErrConflict)
 	if _, err := os.Stat(file); err == nil {
 		t.Fatal("token file kept")
 	}
 	if _, ok := f.store.Get().Gateway.PATs["ci"]; ok {
 		t.Fatal("entry kept")
 	}
-	if raw, _ := os.ReadFile(f.path); strings.Contains(string(raw), "pats") {
-		t.Fatalf("empty pats left behind:\n%s", raw)
+	if raw, _ := os.ReadFile(f.path); strings.Contains(string(raw), "    ci:") {
+		t.Fatalf("entry left behind:\n%s", raw)
 	}
 	apiError(t, f.do("DELETE", "/v1/pats/ci", nil, nil), v1.ErrNotFound)
 	var after v1.PatList
 	decodeAs(t, f.ok("GET", "/v1/pats", nil, "PatList"), &after)
-	if after.Enforced {
+	if !after.Enforced || len(after.Pats) != 1 || after.Pats[0].Name != "spare" {
 		t.Fatalf("%+v", after)
 	}
 }
@@ -209,6 +214,9 @@ func Test_ControlPatsKeepForeignTokenFile(t *testing.T) {
 	f.ok("POST", "/v1/pats/own/rotate", nil, "PatSecret")
 	if got, _ := os.ReadFile(foreign); strings.TrimSpace(string(got)) == strings.Repeat("a", 40) {
 		t.Fatal("not rotated")
+	}
+	if r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+		t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	if r := f.do("DELETE", "/v1/pats/own", nil, nil); r.Status != 204 {
 		t.Fatalf("%d %s", r.Status, r.Body)

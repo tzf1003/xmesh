@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import pathlib
 import time
 import uuid
 
@@ -16,14 +17,17 @@ def main():
     parser.add_argument("--expected-os", required=True, choices=["darwin", "linux", "windows"])
     parser.add_argument("--expected-mode", default="tailnet", choices=["tailnet", "lan"],
                         help="network.mode the peer reports; lan for peers paired with `xmesh pair`")
+    parser.add_argument("--token-file", required=True, type=pathlib.Path,
+                        help="the Gateway's default token file, <state-dir>/pats/default.token")
     options = parser.parse_args()
-    print(json.dumps(verify_peer(options.gateway, options.device, options.expected_os, options.expected_mode)))
+    print(json.dumps(verify_peer(options.gateway, options.device, options.expected_os, options.expected_mode,
+                                 options.token_file.read_text().strip())))
 
 
-def verify_peer(gateway, device, expected_os, expected_mode="tailnet"):
+def verify_peer(gateway, device, expected_os, expected_mode="tailnet", token=None):
     assert gateway.startswith("127.0.0.1:"), "Gateway must use loopback"
     assert device != "local", "Choose the peer node name"
-    client = MCP(gateway)
+    client = MCP(gateway, token)
     terminal = None
     created = False
     filename = "xmesh-peer-smoke-" + uuid.uuid4().hex

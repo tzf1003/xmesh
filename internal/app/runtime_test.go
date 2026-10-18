@@ -62,7 +62,7 @@ func Test_Runtime_AgentGatewaySharedState(t *testing.T) {
 		for time.Now().Before(deadline) {
 			client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 			attempt, stop := context.WithTimeout(context.Background(), time.Second)
-			s, e := client.Connect(attempt, &mcp.StreamableClientTransport{Endpoint: endpoint}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+			s, e := client.Connect(attempt, &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: gatewayHTTPClient(filepath.Join(root, "state"))}, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 			stop()
 			if e == nil {
 				return s

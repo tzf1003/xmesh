@@ -40,6 +40,7 @@ const ERROR_KEYS: Record<string, Key> = {
   forbidden: "err.forbidden",
   keychain_unavailable: "err.keychain_unavailable",
   payload_too_large: "err.payload_too_large",
+  token_unavailable: "err.token_unavailable",
 };
 
 /** A sentence for an error. Known codes get the panel's own wording; others show the kernel's message. */

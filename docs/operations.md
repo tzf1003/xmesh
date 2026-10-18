@@ -64,7 +64,7 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --json
 两端运行后，可在各自 Gateway 验证对端：
 
 ```bash
-python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux
+python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux --token-file <state-dir>/pats/default.token
 ```
 
 脚本检查发现、身份、文件、exec 和 PTY，最后关闭会话并清理测试文件。配置 PAT 的 Gateway 应使用具备对应 scope 的 MCP 客户端执行同等调用；此脚本面向默认本机访问。
@@ -91,18 +91,23 @@ go test ./internal/mesh -run Test_TailnetPeerConnectivity -v -timeout=60s
 python3 scripts/smoke_sandbox.py --binary /opt/xmesh \
   --auth-key-file /run/secrets/xmesh-authkey \
   --peer mac-dev:darwin --peer linux-dev:linux \
-  --observer-gateway 127.0.0.1:8080
+  --observer-gateway 127.0.0.1:8080 --observer-token-file /path/to/observer-state/pats/default.token
 ```
 
-`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
+`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
 
 ## 本机 Gateway PAT
 
-在 `gateway.pats` 中按凭据名称配置文件和 scope：
+Gateway 每个请求都要令牌，包括本机。节点有 `gateway` 角色而配置里没有任何 PAT 时，内核启动时自动创建名为 `default` 的令牌，文件在状态目录的 `pats/default.token`。升级、更新与重装不会改动已有令牌，只有在面板里轮换（或 `xmesh control pats rotate`）才会替换。删除最后一个 PAT 会被拒绝。
+
+谁能连接由 `gateway.access` 决定（`localhost`、`lan`、`tailnet`，或 IP、CIDR），域名由 `gateway.hosts` 列出；`gateway.listen` 为 `:8080` 绑全部网卡，为 `127.0.0.1:8080` 只绑本机。下面的例子演示额外配置一个只读令牌：
+
+
 
 ```yaml
 gateway:
-  listen: 127.0.0.1:8080
+  listen: ":8080"
+  access: [localhost, lan, tailnet]
   pats:
     reader:
       token_file: /secure/xmesh-reader.pat
@@ -394,7 +399,7 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 
 接口、字段、错误码和事件格式以 [控制通道契约](contracts/control.md) 为准，内核的路由注册与它的路由表一一对应（`Test_ControlRegistersEveryContractRoute`），每个响应和事件在测试里都过契约模式。这里只写运维上需要知道的。
 
-内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`pair`、`ingress`、`audit`，以及有配置文件时的 `config.read`、`config.write`、`pats`。
+内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`pair`、`ingress`、`audit`，以及有配置文件时的 `config.read`、`config.write`、`pats`、`gateway`。
 
 - `GET /v1/status`：`sys.info` 的超集，不按调用方 tag 过滤，另含 `control`、`lifecycle`、`drain`、`paths`、`gateway`、`peers`。`warnings` 是 `{code, severity, message}`。
 - `GET /v1/events`：SSE，首条 `hello`；`Last-Event-ID`（`<boot_id>.<seq>`）续传，保留最近 1024 条，id 属于上一次启动或已滚出缓存时先发 `reset`。事件由每秒一次的状态采样推导，短于一个采样周期的 exec 可能不会出现，`call` 事件来自审计记录，不受此限。字段是白名单，带 stdout 等内容的事件被拒绝（INV-10）。

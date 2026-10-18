@@ -4,7 +4,7 @@
 
 一次工具调用在产生副作用之前要经过两层允许：
 
-1. 入口或 Gateway：入口上是 OAuth scope；本机（回环）Gateway 上是节点身份或 PAT。
+1. 入口或 Gateway：入口上是 OAuth scope；Gateway 上是 PAT，每个请求都要（[CTR-GW-07](../contracts/gateway.md#ctr-gw-07)）。
 2. Agent：`WhoIs` 得到的 tag 命中 `agent.authz`，且工具名与后端名都在允许列表内。
 
 本机 Gateway 把请求转到本机 Agent 时，第二层仍然执行。禁止因为「来自 localhost」跳过 Agent 授权。localhost 在 `lan`/`tailnet` 建成之前的阶段 1，使用显式的开发 tag `tag:peer`，并且该例外只允许绑定在 `127.0.0.1`。
@@ -17,7 +17,7 @@
 
 动态注册不需要管理员点击，所以它不能默认拿到全部权限：动态注册客户端的 scope 上限是 `ingress.oauth.dynamic_client_scopes`，缺省只有 `devices:read`。更多权限须由运维显式写进该上限，或预注册客户端。
 
-绑定在 `127.0.0.1` 的本机 Gateway 可以用 PAT 或节点身份代替 OAuth，与 `mesh.mode` 无关；入口不接受 PAT。PAT 绑定的 scope 语法与 OAuth scope 相同。
+Gateway 用 PAT 代替 OAuth，与 `mesh.mode` 无关，不论绑定在哪个地址；入口不接受 PAT。PAT 绑定的 scope 语法与 OAuth scope 相同。
 
 ## CON-SEC-03
 

@@ -1,4 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { parse } from "yaml";
 import type {
   AuditEvent,
@@ -7,12 +9,18 @@ import type {
   ConfigDiagnostic,
   ConfigPutResponse,
   ConfigResponse,
+  GatewayAddress,
+  GatewayInfo,
+  GatewayUpdateResponse,
   IngressClient,
   PairDocument,
   PatInfo,
+  PatList,
+  PatSecret,
   SessionsResponse,
 } from "../src/shared/control";
 import type { ConfigReloadResponse } from "../src/shared/ipc";
+import { isAccessEntry, isGatewayHost, isListen, listenPort, listenScope } from "../src/shared/gateway";
 import { fixture } from "./fixtures";
 
 // The panel's data routes for the fake kernel: config, PATs, ingress, pairing,
@@ -26,6 +34,21 @@ import { fixture } from "./fixtures";
 //     replaced whole, missing maps are created, a scalar on the path is 409), all or
 //     nothing, then writes the document back as JSON text (JSON is valid YAML). Comments
 //     are not kept by the fake; the real kernel keeps them.
+//   - PATs keep their token in a file under `tokenDir`, like the kernel's 0600 files: create,
+//     rotate and delete rewrite or remove it, and nothing else ever returns the token body;
+//   - PUT /v1/gateway validates the reach settings; the addresses follow from listen and access.
+
+/** Addresses the fake reports for a LAN and a tailnet, so the panel has something to list. */
+export const FAKE_LAN_IP = "192.168.1.20";
+export const FAKE_TAILNET_IP = "100.101.102.103";
+export const FAKE_TAILNET_NAME = "win-dev-01.tail1234.ts.net";
+
+/** The reach settings the gateway answers with (what `gateway.listen`, `access` and `hosts` say). */
+export interface GatewayReach {
+  listen: string;
+  access: string[];
+  hosts: string[];
+}
 
 export interface RouteResult {
   status: number;
@@ -42,6 +65,13 @@ export function etagOf(content: string): string {
   return `sha256-${createHash("sha256").update(content, "utf8").digest("hex")}`;
 }
 
+/** The PAT files the kernel keeps: one token per file, with a trailing newline like a hand-edited file. */
+function writeTokenFile(file: string, token: string): void {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, `${token}\n`, { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
 export class PanelData {
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
   private diskContent: string;
@@ -50,8 +80,8 @@ export class PanelData {
   private effectiveEtag: string;
   /** The parsed document `GET /v1/config` returns. PATCH edits it; a PUT adopts it only when the text is JSON. */
   private model: Record<string, unknown>;
-  pats: PatInfo[] = fixture<{ pats: PatInfo[] }>("PatList.one").pats;
-  patsEnforced = true;
+  pats: PatInfo[];
+  gateway: GatewayReach;
   clients: IngressClient[] = fixture<{ clients: IngressClient[] }>("IngressClientsResponse.two").clients;
   issuer: string | null = "https://win-dev-01.tail1234.ts.net";
   localPair: PairDocument = fixture<{ pair: PairDocument }>("PairExportResponse.ok").pair;
@@ -66,11 +96,35 @@ export class PanelData {
   mode: "lan" | "tailnet" | "local" = "lan";
   hasIngress = true;
 
-  constructor() {
-    const fx = fixture<ConfigResponse>("ConfigResponse.valid");
-    this.diskContent = fx.content;
+  constructor(
+    readonly tokenDir: string,
+    gateway: GatewayReach,
+  ) {
+    this.diskContent = fixture<ConfigResponse>("ConfigResponse.valid").content;
     this.effectiveEtag = etagOf(this.diskContent);
-    this.model = (fx.parsed ?? {}) as Record<string, unknown>;
+    this.model = (fixture<ConfigResponse>("ConfigResponse.valid").parsed ?? {}) as Record<string, unknown>;
+    this.gateway = { listen: gateway.listen, access: [...gateway.access], hosts: [...gateway.hosts] };
+    // The fixture PAT is kept, with its token file moved under the fake's own directory, and the kernel's
+    // "default" PAT (the gateway token that rotation targets) beside it.
+    const claude = fixture<{ pats: PatInfo[] }>("PatList.one").pats[0]!;
+    this.pats = [
+      this.issue(claude.name, claude.scopes),
+      this.issue("default", ["devices:read", "exec:*", "fs:read:*"]),
+    ];
+  }
+
+  /** Creates or replaces a PAT's token file and returns the PAT info for it. */
+  private issue(name: string, scopes: string[]): PatInfo {
+    const token = randomBytes(32).toString("base64url");
+    const file = path.join(this.tokenDir, `${name}.pat`);
+    writeTokenFile(file, token);
+    return { name, scopes: scopes as PatInfo["scopes"], token_file: file, modified_at: iso() };
+  }
+
+  /** The token body of a PAT, for the e2e tests that check what the clipboard received. */
+  tokenOf(name: string): string | undefined {
+    const pat = this.pats.find((p) => p.name === name);
+    return pat ? fs.readFileSync(pat.token_file, "utf8").trim() : undefined;
   }
 
   get content(): string {
@@ -92,6 +146,7 @@ export class PanelData {
     if (method === "PATCH" && p === "/v1/config") return this.patchConfig(body, ifMatch);
     if (method === "POST" && p === "/v1/config/reload") return ok(this.reload());
     if (p === "/v1/pats" || p.startsWith("/v1/pats/")) return this.pats_(method, p, body);
+    if (method === "PUT" && p === "/v1/gateway") return this.putGateway(body);
     if (p.startsWith("/v1/ingress/")) return this.ingress(method, p, body);
     if (p.startsWith("/v1/pair/")) return this.pair(method, p, body);
     if (method === "GET" && p === "/v1/audit") return this.auditQuery(u.searchParams);
@@ -224,20 +279,18 @@ export class PanelData {
   }
 
   private pats_(method: string, p: string, body: unknown): RouteResult {
-    if (method === "GET" && p === "/v1/pats") return ok({ pats: this.pats, enforced: this.patsEnforced });
+    if (method === "GET" && p === "/v1/pats") {
+      const list: PatList = { pats: this.pats, enforced: this.pats.length > 0 };
+      return ok(list);
+    }
     if (method === "POST" && p === "/v1/pats") {
       const b = body as { name?: string; scopes?: string[] } | null;
       if (!b?.name || !Array.isArray(b.scopes)) return err(400, "invalid_args", "name 和 scopes 必填");
       if (this.pats.some((x) => x.name === b.name)) return err(409, "conflict", "名字已存在");
-      const info: PatInfo = {
-        name: b.name,
-        scopes: b.scopes as PatInfo["scopes"],
-        token_file: `C:\\Users\\x\\.xmesh\\${b.name}.pat`,
-        modified_at: iso(),
-      };
+      const info = this.issue(b.name, b.scopes);
       this.pats = [...this.pats, info];
-      this.patsEnforced = true;
-      return ok({ pat: info, token: randomBytes(24).toString("base64url") }, 201);
+      const secret: PatSecret = { pat: info, token: this.tokenOf(b.name)! };
+      return ok(secret, 201);
     }
     const m = /^\/v1\/pats\/([^/]+)(\/rotate)?$/.exec(p);
     if (m) {
@@ -245,17 +298,66 @@ export class PanelData {
       const i = this.pats.findIndex((x) => x.name === name);
       if (i === -1) return err(404, "not_found", "没有这个 PAT");
       if (method === "POST" && m[2]) {
-        const info: PatInfo = { ...this.pats[i]!, modified_at: iso() };
+        const info = this.issue(name, this.pats[i]!.scopes);
         this.pats = this.pats.map((x, j) => (j === i ? info : x));
-        return ok({ pat: info, token: randomBytes(24).toString("base64url") });
+        const secret: PatSecret = { pat: info, token: this.tokenOf(name)! };
+        return ok(secret);
       }
       if (method === "DELETE" && !m[2]) {
+        fs.rmSync(this.pats[i]!.token_file, { force: true });
         this.pats = this.pats.filter((_, j) => j !== i);
-        this.patsEnforced = this.pats.length > 0;
         return { status: 204 };
       }
     }
     return err(404, "not_found", "没有这个接口");
+  }
+
+  /** The gateway's reach as the kernel reports it: the addresses follow from listen (which interfaces) and access (which sources). */
+  gatewayInfo(): GatewayInfo {
+    const { listen, access, hosts } = this.gateway;
+    const port = listenPort(listen) ?? "8080";
+    const url = (host: string): string => `http://${host}:${port}/mcp`;
+    const addresses: GatewayAddress[] = [{ kind: "localhost", host: "127.0.0.1", url: url("127.0.0.1") }];
+    if (listenScope(listen) === "all") {
+      if (access.includes("lan")) addresses.push({ kind: "lan", host: FAKE_LAN_IP, url: url(FAKE_LAN_IP) });
+      if (access.includes("tailnet")) {
+        addresses.push({ kind: "tailnet_ip", host: FAKE_TAILNET_IP, url: url(FAKE_TAILNET_IP) });
+        addresses.push({ kind: "tailnet_name", host: FAKE_TAILNET_NAME, url: url(FAKE_TAILNET_NAME) });
+      }
+      for (const h of hosts) addresses.push({ kind: "host", host: h, url: url(h) });
+    }
+    return { listen, url: addresses[0]!.url, auth: "pat", access: [...access], hosts: [...hosts], addresses };
+  }
+
+  /** PUT /v1/gateway: whole-replacement validation, then the new reach. Hot fields apply at once; the caller sets restart for listen. */
+  putGateway(body: unknown): RouteResult {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return err(400, "invalid_args", "请求体必须是对象");
+    const b = body as Record<string, unknown>;
+    const extra = Object.keys(b).find((k) => !["listen", "access", "hosts"].includes(k));
+    if (extra !== undefined) return err(400, "invalid_args", `未知字段 ${extra}`, { field: extra });
+    const diagnostics: ConfigDiagnostic[] = [];
+    if (typeof b.listen !== "string" || !isListen(b.listen)) diagnostics.push({ pointer: "/gateway/listen", message: "监听地址只能是 :端口、127.0.0.1:端口 或 [::1]:端口 等形式" });
+    const list = (value: unknown, pointer: string, valid: (s: string) => boolean, message: string): string[] => {
+      if (!Array.isArray(value)) {
+        diagnostics.push({ pointer, message: "必须是数组" });
+        return [];
+      }
+      const out: string[] = [];
+      value.forEach((x, i) => {
+        if (typeof x !== "string" || !valid(x)) diagnostics.push({ pointer: `${pointer}/${i}`, message });
+        else if (out.includes(x)) diagnostics.push({ pointer: `${pointer}/${i}`, message: "重复的条目" });
+        else out.push(x);
+      });
+      return out;
+    };
+    const access = list(b.access, "/gateway/access", isAccessEntry, "只能是 localhost、lan、tailnet、单个 IP 或 CIDR");
+    const hosts = list(b.hosts, "/gateway/hosts", isGatewayHost, "必须是域名，不能是 IP 地址");
+    if (diagnostics.length > 0) return err(422, "config_invalid", "配置未通过校验", { diagnostics });
+    const listen = b.listen as string;
+    const restart = listen !== this.gateway.listen;
+    this.gateway = { listen, access, hosts };
+    const res: GatewayUpdateResponse = { listen, access, hosts, restart_required: restart };
+    return ok(res);
   }
 
   private ingress(method: string, p: string, body: unknown): RouteResult {

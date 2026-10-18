@@ -7,7 +7,8 @@ import { errorText, useLocale, useT } from "../i18n";
 import { useRecentCalls } from "../hooks";
 import { formatDuration, formatTime } from "../lib/format";
 import { isDegrading } from "../../shared/control";
-import { CODEX_PAT_ENV, type ActionResult, type CopyKind, type PathKind } from "../../shared/ipc";
+import type { ActionResult, PathKind } from "../../shared/ipc";
+import { GatewayCard } from "./gateway/GatewayCard";
 
 export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
   const t = useT();
@@ -26,7 +27,6 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
     if (!r.ok) ctx.toast(errorText(t, r.error), true);
     else if (ok) ctx.toast(ok);
   };
-  const copy = (kind: CopyKind): Promise<void> => run(getApi().copy(kind), t("overview.copied"));
   const open = (kind: PathKind): Promise<void> => run(getApi().openPath(kind));
 
   return (
@@ -107,30 +107,7 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
         </p>
       </section>
 
-      {s.gateway && (
-        <section class="card">
-          <h2>{t("overview.gateway")}</h2>
-          <p>
-            <code data-testid="gateway-url">{s.gateway.url}</code> <Badge>{s.gateway.auth === "pat" ? t("overview.authPat") : t("overview.authNone")}</Badge>
-          </p>
-          <div class="row">
-            <button type="button" class="btn" onClick={() => void copy("gatewayUrl")}>
-              {t("overview.copyUrl")}
-            </button>
-            <button type="button" class="btn" onClick={() => void copy("claudeCodeCommand")}>
-              {t("overview.copyClaude")}
-            </button>
-            <button type="button" class="btn" onClick={() => void copy("codexConfig")}>
-              {t("overview.copyCodex")}
-            </button>
-          </div>
-          {s.gateway.auth === "pat" && (
-            <p class="hint" style={{ marginTop: "8px" }} data-testid="copy-pat-hint">
-              {t("overview.copyPatHint", { env: CODEX_PAT_ENV })}
-            </p>
-          )}
-        </section>
-      )}
+      {s.gateway && <GatewayCard ctx={ctx} gateway={s.gateway} />}
 
       <section class="card">
         <h2>{t("overview.files")}</h2>

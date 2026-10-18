@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import { Actions, type Platform, checkOpenablePath } from "../../src/main/actions";
-import { clipboardText, isSafeGatewayUrl } from "../../src/main/connect";
+import { isSafeGatewayUrl } from "../../src/main/connect";
 import type { ShellController } from "../../src/main/controller";
 import { translator } from "../../src/shared/i18n";
 import { ControlRequestError } from "../../src/shared/control";
@@ -14,6 +14,13 @@ import { EMPTY_SNAPSHOT, type Snapshot } from "../../src/shared/state";
 import { peersFixture, statusWith } from "../../testserver/fixtures";
 
 const t = translator("zh");
+const TOKEN = "tok-0123456789abcdefABCDEF";
+const OK_CREDENTIALS = { read: async () => TOKEN };
+const NO_CREDENTIALS = {
+  read: async () => {
+    throw new Error("gateway token unavailable: the kernel has no PAT");
+  },
+};
 
 function fakeController(snapshot: Snapshot, overrides: Partial<Record<"drain" | "resume", () => Promise<void>>> = {}) {
   const calls: string[] = [];
@@ -25,6 +32,22 @@ function fakeController(snapshot: Snapshot, overrides: Partial<Record<"drain" | 
     setLoginItem: (v: boolean) => void calls.push(`login:${v}`),
   });
   return { controller: c as unknown as ShellController, calls };
+}
+
+/** A gateway as the kernel reports it: a localhost address, plus whatever extra addresses the test lists. */
+function gatewayWith(extra: { kind: "lan" | "host"; host: string; url: string }[] = [], url = "http://127.0.0.1:8080/mcp") {
+  return {
+    listen: ":8080",
+    url,
+    auth: "pat" as const,
+    access: ["localhost", "lan"],
+    hosts: [],
+    addresses: [{ kind: "localhost" as const, host: "127.0.0.1", url }, ...extra],
+  };
+}
+
+function connectedController() {
+  return fakeController(connected({ gateway: gatewayWith() })).controller;
 }
 
 function fakePlatform(confirm = true) {
@@ -55,41 +78,90 @@ const connected = (patch: Partial<StatusResponse> = {}): Snapshot => ({
   connection: { kind: "connected", status: statusWith(patch), peers: peersFixture() },
 });
 
-test("copy writes the gateway address and ready-made connect text", async () => {
-  const { controller } = fakeController(connected({ gateway: { listen: "x", auth: "none", url: "http://127.0.0.1:8080/mcp" } }));
+test("copy writes each gateway address with the bearer token in every connect format", async () => {
+  const { controller } = fakeController(connected({ gateway: gatewayWith() }));
   const { platform, log } = fakePlatform();
-  const a = new Actions(controller, platform, t);
+  const a = new Actions(controller, platform, t, OK_CREDENTIALS);
   assert.deepEqual(await a.copy("gatewayUrl"), { ok: true });
   assert.deepEqual(await a.copy("claudeCodeCommand"), { ok: true });
   assert.deepEqual(await a.copy("codexConfig"), { ok: true });
   assert.deepEqual(log, [
-    "clip:http://127.0.0.1:8080/mcp",
-    "clip:claude mcp add --transport http xmesh http://127.0.0.1:8080/mcp",
-    'clip:[mcp_servers.xmesh]\nurl = "http://127.0.0.1:8080/mcp"\n',
+    `clip:http://127.0.0.1:8080/mcp\nAuthorization: Bearer ${TOKEN}`,
+    `clip:claude mcp add --transport http xmesh http://127.0.0.1:8080/mcp --header "Authorization: Bearer ${TOKEN}"`,
+    `clip:[mcp_servers.xmesh]\nurl = "http://127.0.0.1:8080/mcp"\nhttp_headers = { Authorization = "Bearer ${TOKEN}" }\n`,
   ]);
 });
 
-test("copy of connect text leaves a token placeholder when the gateway requires a PAT", async () => {
-  const { controller } = fakeController(connected({ gateway: { listen: "x", auth: "pat", url: "http://127.0.0.1:8080/mcp" } }));
+test("copyGateway copies a LAN address the kernel reports, and nothing it does not report", async () => {
+  const lan = { kind: "lan" as const, host: "192.168.1.20", url: "http://192.168.1.20:8080/mcp" };
+  const { controller } = fakeController(connected({ gateway: gatewayWith([lan]) }));
   const { platform, log } = fakePlatform();
-  const a = new Actions(controller, platform, t);
-  assert.deepEqual(await a.copy("gatewayUrl"), { ok: true });
-  assert.deepEqual(await a.copy("claudeCodeCommand"), { ok: true });
-  assert.deepEqual(await a.copy("codexConfig"), { ok: true });
-  assert.deepEqual(log, [
-    "clip:http://127.0.0.1:8080/mcp",
-    'clip:claude mcp add --transport http xmesh http://127.0.0.1:8080/mcp --header "Authorization: Bearer <PAT>"',
-    'clip:[mcp_servers.xmesh]\nurl = "http://127.0.0.1:8080/mcp"\nbearer_token_env_var = "XMESH_PAT"\n',
-  ]);
+  const a = new Actions(controller, platform, t, OK_CREDENTIALS);
+  assert.deepEqual(await a.copyGateway("gatewayUrl", lan.url), { ok: true });
+  assert.equal(log[0], `clip:${lan.url}\nAuthorization: Bearer ${TOKEN}`);
+
+  const refused = await a.copyGateway("claudeCodeCommand", "http://10.9.9.9:8080/mcp");
+  assert.equal(refused.ok, false);
+  assert.equal(refused.ok === false && refused.error.code, "invalid_args");
+  assert.equal(log.length, 1, "an address the kernel does not report is never copied");
+});
+
+test("a token that cannot be read copies nothing and fails with token_unavailable", async () => {
+  const { controller } = fakeController(connected({ gateway: gatewayWith() }));
+  const { platform, log } = fakePlatform();
+  const a = new Actions(controller, platform, t, NO_CREDENTIALS);
+  for (const kind of ["gatewayUrl", "claudeCodeCommand", "codexConfig"] as const) {
+    const r = await a.copy(kind);
+    assert.equal(r.ok, false);
+    assert.equal(r.ok === false && r.error.code, "token_unavailable");
+  }
+  assert.deepEqual(log, [], "never a tokenless command");
+});
+
+test("a token with characters a connect command cannot carry is refused, not pasted", async () => {
+  const { controller } = fakeController(connected({ gateway: gatewayWith() }));
+  const { platform, log } = fakePlatform();
+  const bad = { read: async () => 'abc"; rm -rf ~; "' };
+  const r = await new Actions(controller, platform, t, bad).copy("claudeCodeCommand");
+  assert.equal(r.ok === false && r.error.code, "token_unavailable");
+  assert.deepEqual(log, []);
+});
+
+test("the tray's gateway copy uses the localhost address, and a failure becomes a notification", async () => {
+  const { controller } = fakeController(connected({ gateway: gatewayWith() }));
+  const { platform, log } = fakePlatform();
+  const a = new Actions(controller, platform, t, NO_CREDENTIALS);
+  const r = await a.dispatch({ type: "copy", kind: "codexConfig" });
+  assert.equal(r.ok, false);
+  assert.deepEqual(log, [`err:${t("menu.copyFailed")}`]);
+
+  const ok = fakePlatform();
+  await new Actions(connectedController(), ok.platform, t, OK_CREDENTIALS).dispatch({ type: "copy", kind: "gatewayUrl" });
+  assert.deepEqual(ok.log, [`clip:http://127.0.0.1:8080/mcp\nAuthorization: Bearer ${TOKEN}`]);
+});
+
+test("mesh login commands are copied without reading any token", async () => {
+  const { controller } = fakeController(EMPTY_SNAPSHOT);
+  const { platform, log } = fakePlatform();
+  let read = 0;
+  const a = new Actions(controller, platform, t, {
+    read: async () => {
+      read++;
+      return TOKEN;
+    },
+  });
+  assert.deepEqual(await a.copy("meshLoginRead"), { ok: true });
+  assert.equal(log.length, 1);
+  assert.equal(read, 0);
 });
 
 test("copy refuses when there is no gateway, when offline, or when the URL is not plain", async () => {
   const noGateway = connected();
   if (noGateway.connection.kind === "connected") delete noGateway.connection.status.gateway;
-  for (const snap of [EMPTY_SNAPSHOT, noGateway, connected({ gateway: { listen: "x", auth: "none", url: 'http://x/"; rm -rf ~; "' } })]) {
+  for (const snap of [EMPTY_SNAPSHOT, noGateway, connected({ gateway: gatewayWith([], 'http://x/"; rm -rf ~; "') })]) {
     const { controller } = fakeController(snap);
     const { platform, log } = fakePlatform();
-    const r = await new Actions(controller, platform, t).copy("claudeCodeCommand");
+    const r = await new Actions(controller, platform, t, OK_CREDENTIALS).copy("claudeCodeCommand");
     assert.equal(r.ok, false);
     assert.deepEqual(log, []);
   }
@@ -100,7 +172,6 @@ test("clipboard text only embeds plain http(s) URLs", () => {
   assert.equal(isSafeGatewayUrl("http://127.0.0.1:7433/mcp"), true);
   for (const bad of ["javascript:alert(1)", "http://x y", "http://x/$(id)", "http://x/`id`", "http://x/\"", "http://x/'", "ftp://x", "", "http://x/\n"]) {
     assert.equal(isSafeGatewayUrl(bad), false, bad);
-    assert.equal(clipboardText("claudeCodeCommand", bad), undefined);
   }
 });
 
@@ -121,7 +192,7 @@ test("openPath checks the path first", async () => {
 
     const { controller } = fakeController(connected({ paths: { config_file: cfg, state_dir: dir, log_dir: dir, audit_dir: exe } }));
     const { platform, log } = fakePlatform();
-    const a = new Actions(controller, platform, t);
+    const a = new Actions(controller, platform, t, OK_CREDENTIALS);
     assert.deepEqual(await a.openPath("config"), { ok: true });
     assert.deepEqual(await a.openPath("logs"), { ok: true });
     assert.equal((await a.openPath("audit")).ok, false);
@@ -138,7 +209,7 @@ test("stopping the kernel runs the CLI only after a yes", async () => {
   ] as const) {
     const { controller } = fakeController(connected());
     const { platform, log } = fakePlatform(answer);
-    await new Actions(controller, platform, t).dispatch({ type: "stop-kernel" });
+    await new Actions(controller, platform, t, OK_CREDENTIALS).dispatch({ type: "stop-kernel" });
     assert.deepEqual(log, expected);
   }
 });
@@ -149,7 +220,7 @@ test("restart runs the CLI without asking, and a CLI failure is reported not thr
   platform.runCli = async () => {
     throw new Error("exit 1");
   };
-  const r = await new Actions(controller, platform, t).dispatch({ type: "restart-kernel" });
+  const r = await new Actions(controller, platform, t, OK_CREDENTIALS).dispatch({ type: "restart-kernel" });
   assert.equal(r.ok, false);
   assert.deepEqual(log, ["err:命令执行失败：xmesh restart"]);
 });
@@ -161,7 +232,7 @@ test("restart and stop name the selected node's service, so the CLI does not rea
   platform.runCli = async (_command, node) => {
     seen.push(node);
   };
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, OK_CREDENTIALS);
   await actions.dispatch({ type: "restart-kernel" });
   await actions.dispatch({ type: "stop-kernel" });
   assert.deepEqual(seen, ["office-pc", "office-pc"]);
@@ -174,7 +245,7 @@ test("start runs the CLI for a stopped node only; any other name is refused with
   platform.runCli = async (command, node) => {
     seen.push(`${command}:${node}`);
   };
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, NO_CREDENTIALS);
   assert.deepEqual(await actions.dispatch({ type: "start-kernel", node: "beta2-mac" }), { ok: true });
   assert.deepEqual(await actions.startKernel("office-pc"), { ok: false, error: { code: "not_found", message: "no stopped node with that name" } });
   assert.deepEqual(seen, ["start:beta2-mac"]);
@@ -187,7 +258,7 @@ test("restart of an unresponsive node runs the CLI for that node only; any other
   platform.runCli = async (command, node) => {
     seen.push(`${command}:${node}`);
   };
-  const actions = new Actions(controller, platform, t);
+  const actions = new Actions(controller, platform, t, NO_CREDENTIALS);
   assert.deepEqual(await actions.dispatch({ type: "restart-unresponsive", node: "n1" }), { ok: true });
   assert.deepEqual(await actions.restartUnresponsive("office-pc"), { ok: false, error: { code: "not_found", message: "no unresponsive node with that name" } });
   assert.deepEqual(seen, ["restart:n1"]);
@@ -199,13 +270,13 @@ test("kernel errors become results with the kernel's code", async () => {
       throw new ControlRequestError("conflict", "already draining", 409);
     },
   });
-  const r = await new Actions(controller, fakePlatform().platform, t).drain();
+  const r = await new Actions(controller, fakePlatform().platform, t, OK_CREDENTIALS).drain();
   assert.deepEqual(r, { ok: false, error: { code: "conflict", message: "already draining" } });
 });
 
 test("selectInstance only accepts instances that exist", async () => {
   const { controller, calls } = fakeController(connected());
-  const a = new Actions(controller, fakePlatform().platform, t);
+  const a = new Actions(controller, fakePlatform().platform, t, OK_CREDENTIALS);
   assert.equal((await a.selectInstance("ghost")).ok, false);
   assert.deepEqual(await a.selectInstance("n1"), { ok: true });
   assert.deepEqual(calls, ["select:n1"]);
@@ -214,6 +285,6 @@ test("selectInstance only accepts instances that exist", async () => {
 test("openExternal resolves the key to the fixed URL", async () => {
   const { controller } = fakeController(connected());
   const { platform, log } = fakePlatform();
-  await new Actions(controller, platform, t).openExternal("docs");
+  await new Actions(controller, platform, t, OK_CREDENTIALS).openExternal("docs");
   assert.deepEqual(log, ["ext:https://github.com/tzf1003/xmesh#readme"]);
 });

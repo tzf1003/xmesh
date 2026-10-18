@@ -152,3 +152,9 @@ pre.preview { background: var(--surface-2); border-radius: 6px; padding: 10px 12
 .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 ul.plain { list-style: none; margin: 0; padding: 0; }
 tr[data-mismatch="true"] { background: var(--warn-bg); }
+.stack { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.stack > h3 { margin: 0; }
+ul.entry-list { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+ul.entry-list li { display: flex; align-items: center; gap: 8px; }
+.reach { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
+.reach > fieldset { margin-top: 10px; }

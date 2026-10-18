@@ -10,6 +10,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import time
 import tempfile
 import time
 
@@ -95,6 +96,17 @@ class MCP:
             connection.close()
 
 
+def wait_for_default_token(state, seconds=15):
+    # The kernel creates the gateway token when the configuration has none, before it listens (CTR-CTL-09).
+    path = state / "pats" / "default.token"
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if path.exists() and path.read_text().strip():
+            return path.read_text().strip()
+        time.sleep(0.1)
+    raise AssertionError("the gateway did not create its default token")
+
+
 def wait_for_gateway(process, gateway, log, token=None, seconds=15, host=None):
     """Return an MCP session once the Gateway answers, or raise with the runtime log."""
     deadline = time.monotonic() + seconds
@@ -157,6 +169,8 @@ def main():
             process = subprocess.Popen([str(binary), "serve", "--local", "--config", str(config),
                                         "--state-dir", str(state), "--listen", direct], stdout=log, stderr=log)
             try:
+                if not options.pat:
+                    token = wait_for_default_token(state)
                 client = wait_for_gateway(process, gateway, log, token)
                 status = subprocess.check_output([str(binary), "status", "--endpoint", f"http://{direct}/mcp", "--json"])
                 info = json.loads(status)
