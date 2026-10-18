@@ -973,7 +973,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.4" as const;
+export const CONTROL_API_VERSION = "1.5" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -1297,7 +1297,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "PATCH",
     "path": "/v1/backends/{name}/env",
     "capability": "config.write",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": "BackendEnvPatch",
     "response": "BackendEnvResponse",
@@ -1313,7 +1313,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "DELETE",
     "path": "/v1/backends/{name}/env",
     "capability": "config.write",
-    "since": "1.4",
+    "since": "1.5",
     "query": null,
     "body": null,
     "response": null,

@@ -320,7 +320,7 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 ### 后端环境变量
 
-给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.4 起）。
+给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.5 起）。
 
 | 路由 | 作用 |
 | --- | --- |
