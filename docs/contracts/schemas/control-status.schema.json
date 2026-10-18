@@ -51,7 +51,13 @@
         "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,62}$" },
         "policy": { "enum": ["shared", "exclusive"] },
         "state": { "enum": ["stopped", "running", "crashed"] },
-        "favorite": { "type": "boolean" }
+        "favorite": { "type": "boolean" },
+        "env_names": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-backends:1#/$defs/EnvName" },
+          "description": "stdio 后端已设置的环境变量名，按字母序。从不包含值。没有变量时省略。"
+        }
       }
     },
     "Limits": {

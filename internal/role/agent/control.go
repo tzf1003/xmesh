@@ -77,7 +77,11 @@ func (a *Agent) Overview() v1.StatusResponse {
 	}
 	states := a.Backends.States()
 	for name, b := range cfg.Agent.Backends {
-		out.Backends = append(out.Backends, v1.Backend{Name: name, Policy: b.Policy, Favorite: b.Favorite, State: states[name]})
+		row := v1.Backend{Name: name, Policy: b.Policy, Favorite: b.Favorite, State: states[name]}
+		if a.backendEnv != nil && b.Transport == "stdio" {
+			row.EnvNames = a.backendEnv.Names(name)
+		}
+		out.Backends = append(out.Backends, row)
 	}
 	sort.Slice(out.Backends, func(i, j int) bool { return out.Backends[i].Name < out.Backends[j].Name })
 	return out

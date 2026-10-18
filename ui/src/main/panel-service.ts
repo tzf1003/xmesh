@@ -11,6 +11,7 @@ import { ControlRequestError } from "../shared/control";
 import type {
   AuditQuery,
   AuditResponse,
+  BackendEnvResponse,
   CallEventData,
   ConfigPutResponse,
   ConfigResponse,
@@ -29,6 +30,7 @@ import {
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
+  type BackendEnvRequest,
   type ConfigPatchRequest,
   type ConfigReloadResponse,
   type ConfigSaveRequest,
@@ -134,6 +136,21 @@ export class PanelService {
     return this.data("config.write", (c) =>
       c.call("PATCH", "/v1/config", { body: { edits: req.edits, dry_run: req.dryRun }, ifMatch: req.etag }),
     );
+  }
+
+  /**
+   * Variables of one stdio backend. `name` is a validated backend name, so it is safe as a path segment. The values
+   * travel in the request body only: they are not kept, logged or returned, and the kernel answers with names.
+   */
+  patchBackendEnv(req: BackendEnvRequest): Promise<DataResult<BackendEnvResponse>> {
+    const body: { set?: Record<string, string>; unset?: string[] } = {};
+    if (Object.keys(req.set).length > 0) body.set = req.set;
+    if (req.unset.length > 0) body.unset = req.unset;
+    return this.data("config.write", (c) => c.call("PATCH", `/v1/backends/${encodeURIComponent(req.name)}/env`, { body }));
+  }
+
+  clearBackendEnv(name: string): Promise<ActionResult> {
+    return this.action("config.write", (c) => c.call("DELETE", `/v1/backends/${encodeURIComponent(name)}/env`));
   }
 
   /** The deny list file the config names. The path comes from the config, so the renderer cannot point this at another file. */

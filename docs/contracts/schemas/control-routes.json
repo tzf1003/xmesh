@@ -1,5 +1,5 @@
 {
-  "api_version": "1.3",
+  "api_version": "1.4",
   "routes": [
     {
       "id": "control.status.get",
@@ -236,6 +236,38 @@
       "if_match": "none",
       "errors": [
         "not_found"
+      ]
+    },
+    {
+      "id": "control.backends.env.patch",
+      "method": "PATCH",
+      "path": "/v1/backends/{name}/env",
+      "capability": "config.write",
+      "since": "1.4",
+      "query": null,
+      "body": "urn:xmesh:schema:control-backends:1#/$defs/BackendEnvPatch",
+      "response": "urn:xmesh:schema:control-backends:1#/$defs/BackendEnvResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args"
+      ]
+    },
+    {
+      "id": "control.backends.env.delete",
+      "method": "DELETE",
+      "path": "/v1/backends/{name}/env",
+      "capability": "config.write",
+      "since": "1.4",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args"
       ]
     },
     {

@@ -46,6 +46,7 @@ const RING = 1024;
 /** Panel route prefixes and the capability that gates each (PUT and PATCH /v1/config need config.write instead). */
 const PANEL_ROUTE_CAPS: [string, Capability][] = [
   ["/v1/config", "config.read"],
+  ["/v1/backends", "config.write"],
   ["/v1/pats", "pats"],
   ["/v1/ingress", "ingress"],
   ["/v1/pair", "pair"],
@@ -230,12 +231,21 @@ export class FakeKernel {
     fs.rmSync(this.tokenDir, { recursive: true, force: true });
   }
 
+  /** A config or environment change can change the backends the status lists: derive them again and tell the streams if they differ. */
+  private publishBackends(): void {
+    const before = JSON.stringify(this.status.backends);
+    this.refreshDerived();
+    if (JSON.stringify(this.status.backends) !== before) this.emit("status", this.status);
+  }
+
   private refreshDerived(): void {
     const others = this.peers.filter((p) => !p.self);
     this.status = {
       ...this.status,
       // The gateway block always follows the reach the panel data holds, as the kernel's status does.
       ...(this.status.gateway !== undefined && { gateway: this.panel.gatewayInfo() }),
+      // So do the backends: the configured ones, with the names (never the values) of their environment variables.
+      backends: this.panel.backendRows(),
       control: {
         ...this.status.control,
         api_version: this.controlVersion,
@@ -339,6 +349,7 @@ export class FakeKernel {
     if (cap && this.requires(res, method !== "GET" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
       const r = this.panel.handle(method, url, body, ifMatch);
       if (r) {
+        if (method !== "GET" && r.status < 300 && (url.startsWith("/v1/config") || url.startsWith("/v1/backends"))) this.publishBackends();
         if (r.status === 204) {
           res.writeHead(204, { [CONTROL_VERSION_HEADER]: this.controlVersion });
           res.end();

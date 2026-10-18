@@ -6,6 +6,7 @@
 import type {
   AuditQuery,
   AuditResponse,
+  BackendEnvResponse,
   CallEventData,
   ConfigDiagnostic,
   ConfigPutResponse,
@@ -51,6 +52,8 @@ export const CHANNELS = {
   getConfig: "xmesh:get-config",
   putConfig: "xmesh:put-config",
   patchConfig: "xmesh:patch-config",
+  patchBackendEnv: "xmesh:patch-backend-env",
+  clearBackendEnv: "xmesh:clear-backend-env",
   listPats: "xmesh:list-pats",
   createPat: "xmesh:create-pat",
   rotatePat: "xmesh:rotate-pat",
@@ -151,6 +154,19 @@ export interface ConfigPatchRequest {
   dryRun: boolean;
 }
 
+/**
+ * Variables of one stdio backend (`PATCH /v1/backends/{name}/env`). The values are write-only: they go to the
+ * kernel and are never returned, so nothing here comes back out of the panel's own state.
+ */
+export interface BackendEnvRequest {
+  /** The backend the variables belong to; it does not have to be in the config yet. */
+  name: string;
+  /** Variables to add or overwrite. */
+  set: Record<string, string>;
+  /** Variables to remove; applied before `set`. */
+  unset: string[];
+}
+
 export interface PatCreateArgs {
   name: string;
   scopes: string[];
@@ -219,6 +235,10 @@ export interface PanelApi {
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
   /** Applies JSON Pointer edits to the config on disk (`PATCH /v1/config`); the form-style settings write through here. */
   patchConfig(request: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>>;
+  /** Sets and removes environment variables of a stdio backend (control API 1.4). The kernel restarts only that backend; the answer lists names, never values. */
+  patchBackendEnv(request: BackendEnvRequest): Promise<DataResult<BackendEnvResponse>>;
+  /** Removes every variable of a backend. */
+  clearBackendEnv(name: string): Promise<ActionResult>;
   /** The deny list file the config names; the renderer never supplies its path. */
   readDenyFile(): Promise<DataResult<DenyFileResponse>>;
   writeDenyFile(request: DenyFileSaveRequest): Promise<DataResult<DenyFileSaved>>;
@@ -272,6 +292,8 @@ export const PANEL_API_METHODS = [
   "getConfig",
   "putConfig",
   "patchConfig",
+  "patchBackendEnv",
+  "clearBackendEnv",
   "listPats",
   "createPat",
   "rotatePat",
@@ -509,6 +531,33 @@ export function parseConfigPatch(v: unknown): ConfigPatchRequest | undefined {
   // The body is sent as JSON, so the same byte limit as a whole-file save applies.
   if (new TextEncoder().encode(JSON.stringify(out)).length > CONFIG_MAX_BYTES) return undefined;
   return out;
+}
+
+/** The contract's bounds on one backend's variables (`BackendEnvPatch`). */
+export const BACKEND_ENV_MAX_VARS = 64;
+export const BACKEND_ENV_MAX_VALUE_BYTES = 8192;
+export const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+/** Structural check; the kernel also applies the node's policy to the names and answers `env_denied`. */
+export function parseBackendEnv(v: unknown): BackendEnvRequest | undefined {
+  if (!isRecord(v) || !onlyKeys(v, ["name", "set", "unset"])) return undefined;
+  const name = parseNodeName(v.name);
+  if (name === undefined || !isRecord(v.set) || !Array.isArray(v.unset)) return undefined;
+  if (Object.getPrototypeOf(v.set) !== Object.prototype && Object.getPrototypeOf(v.set) !== null) return undefined;
+  const set: Record<string, string> = {};
+  for (const [k, value] of Object.entries(v.set)) {
+    if (!ENV_VAR_NAME.test(k) || typeof value !== "string" || value.includes("\0")) return undefined;
+    if (new TextEncoder().encode(value).length > BACKEND_ENV_MAX_VALUE_BYTES) return undefined;
+    set[k] = value;
+  }
+  const unset: string[] = [];
+  for (const k of v.unset) {
+    if (typeof k !== "string" || !ENV_VAR_NAME.test(k) || unset.includes(k) || k in set) return undefined;
+    unset.push(k);
+  }
+  const n = Object.keys(set).length;
+  if (n > BACKEND_ENV_MAX_VARS || unset.length > BACKEND_ENV_MAX_VARS || n + unset.length === 0) return undefined;
+  return { name, set, unset };
 }
 
 export function parsePatCreate(v: unknown): PatCreateArgs | undefined {

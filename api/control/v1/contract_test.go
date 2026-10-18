@@ -37,6 +37,8 @@ var typeFor = map[string]func() any{
 	"PatList":                 func() any { return new(v1.PatList) },
 	"PatCreateRequest":        func() any { return new(v1.PatCreateRequest) },
 	"PatSecret":               func() any { return new(v1.PatSecret) },
+	"BackendEnvPatch":         func() any { return new(v1.BackendEnvPatch) },
+	"BackendEnvResponse":      func() any { return new(v1.BackendEnvResponse) },
 	"GatewayUpdateRequest":    func() any { return new(v1.GatewayUpdateRequest) },
 	"GatewayUpdateResponse":   func() any { return new(v1.GatewayUpdateResponse) },
 	"IngressClientsResponse":  func() any { return new(v1.IngressClientsResponse) },
@@ -296,8 +298,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v1.APIVersion != "1.3" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 1.3", v1.APIVersion)
+	if v1.APIVersion != "1.4" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 1.4", v1.APIVersion)
 	}
 }
 

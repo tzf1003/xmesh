@@ -2,6 +2,7 @@ package policy
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -208,5 +209,56 @@ func Test_L0EqualsL1(t *testing.T) {
 	}
 	if !reflect.DeepEqual(launchers[0], launchers[1]) {
 		t.Fatal(launchers)
+	}
+}
+
+// conformance: CON-TOOL-12
+//
+// The node's own user may hand a provider credential to one backend, but loader hijack names, the
+// operator's own deny rules and values that point into credential directories stay refused.
+func TestBackendEnvironmentRelaxesOnlyProviderCredentialNames(t *testing.T) {
+	e, _ := New(config.Policy{})
+	if _, err := e.Environment(map[string]string{"OPENAI_API_KEY": "k"}); err == nil {
+		t.Fatal("a caller-supplied provider credential must stay refused")
+	}
+	got, err := e.BackendEnvironment(map[string]string{"OPENAI_API_KEY": "k", "AWS_REGION": "eu", "API_BASE": "https://example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"OPENAI_API_KEY=k", "AWS_REGION=eu", "API_BASE=https://example.com"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("%q missing from %q", want, got)
+		}
+	}
+	for name, extra := range map[string]map[string]string{
+		"loader":          {"LD_PRELOAD": "/tmp/x.so"},
+		"node options":    {"NODE_OPTIONS": "--require x"},
+		"python path":     {"PYTHONPATH": "/tmp"},
+		"ssh agent":       {"SSH_AUTH_SOCK": "/tmp/agent"},
+		"credential path": {"CREDENTIALS_FILE": "/home/u/.aws/credentials"},
+		"nul":             {"TOKEN": "a\x00b"},
+		"equals":          {"A=B": "x"},
+	} {
+		if _, err := e.BackendEnvironment(extra); err == nil {
+			t.Errorf("%s: BackendEnvironment accepted %v", name, extra)
+		}
+	}
+	strict := config.Policy{}
+	strict.Env.DenyNames = []string{"OPENAI_*"}
+	e, _ = New(strict)
+	if _, err := e.BackendEnvironment(map[string]string{"OPENAI_API_KEY": "k"}); err == nil {
+		t.Fatal("the operator's own deny rule must still apply to a backend")
+	}
+}
+
+func TestCheckBackendEnvMatchesBackendEnvironment(t *testing.T) {
+	p := config.Policy{}
+	p.Env.DenyNames = []string{"BLOCKED_*"}
+	for name, value := range map[string]string{"OPENAI_API_KEY": "k", "API_BASE": "https://example.com", "BLOCKED_ONE": "x", "LD_PRELOAD": "x", "TOKEN": "~/.ssh/id"} {
+		e, _ := New(p)
+		_, want := e.BackendEnvironment(map[string]string{name: value})
+		if got := CheckBackendEnv(p, name, value); (got == nil) != (want == nil) {
+			t.Errorf("%s: CheckBackendEnv = %v, BackendEnvironment = %v", name, got, want)
+		}
 	}
 }

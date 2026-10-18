@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-backends:1",
+  "title": "ControlBackends",
+  "description": "CTR-CTL-14。stdio 后端的环境变量（API Key 之类）。值只能写入，之后任何接口都读不回：响应和 status 只给变量名。内核把值存在状态目录里的 0600 文件，不进配置文件、日志、事件和审计记录。",
+  "$defs": {
+    "EnvName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+      "description": "环境变量名。"
+    },
+    "BackendEnvPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "set": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "propertyNames": {
+            "$ref": "#/$defs/EnvName"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 8192,
+            "not": {
+              "pattern": "\\x00"
+            }
+          },
+          "description": "新增或覆盖的变量。值不能含空字符。节点策略不允许的变量名返回 invalid_args，reason 为 env_denied。"
+        },
+        "unset": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/EnvName"
+          },
+          "description": "要删除的变量。先于 set 生效，同一个变量不能同时出现在两处。"
+        }
+      }
+    },
+    "BackendEnvResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "names"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName"
+        },
+        "names": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/EnvName"
+          },
+          "description": "修改之后这个后端还有哪些变量，按字母序。只有名字，没有值。"
+        }
+      }
+    }
+  }
+}

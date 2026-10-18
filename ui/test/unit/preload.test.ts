@@ -89,6 +89,8 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.getConfig!();
   await api.putConfig!(cfg);
   await api.patchConfig!(patch);
+  await api.patchBackendEnv!({ name: "github", set: { GITHUB_TOKEN: "t" }, unset: [] });
+  await api.clearBackendEnv!("github");
   await api.listPats!();
   await api.createPat!({ name: "ci" });
   await api.rotatePat!("ci");
@@ -109,8 +111,8 @@ test("panel data methods use their own fixed channels and forward only the calle
   assert.deepEqual(
     invoked.map((i) => i.channel),
     [
-      CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.patchConfig, CHANNELS.listPats, CHANNELS.createPat,
-      CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
+      CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.patchConfig, CHANNELS.patchBackendEnv, CHANNELS.clearBackendEnv,
+      CHANNELS.listPats, CHANNELS.createPat, CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
       CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.queryAudit,
       CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
       CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat,
@@ -118,7 +120,9 @@ test("panel data methods use their own fixed channels and forward only the calle
   );
   assert.deepEqual(invoked[2]!.args, [cfg]);
   assert.deepEqual(invoked[3]!.args, [patch]);
-  assert.deepEqual(invoked[6]!.args, ["ci"]);
+  assert.deepEqual(invoked[4]!.args, [{ name: "github", set: { GITHUB_TOKEN: "t" }, unset: [] }]);
+  assert.deepEqual(invoked[5]!.args, ["github"]);
+  assert.deepEqual(invoked[8]!.args, ["ci"]);
   assert.deepEqual(invoked.at(-3)!.args, [{ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" }]);
   assert.deepEqual(invoked.at(-1)!.args, [], "rotation takes no argument from the page");
 });

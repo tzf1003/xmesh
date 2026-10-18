@@ -94,6 +94,9 @@ a { color: var(--accent); }
 .btn.small { padding: 2px 8px; font-size: 12.5px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row.end { justify-content: flex-end; }
+.env-row { flex-wrap: nowrap; margin-bottom: 6px; }
+.env-row input { flex: 1 1 0; min-width: 0; }
+.env-row input:first-child { flex: 0 0 12em; }
 
 .banner { border-radius: var(--radius); padding: 10px 14px; border: 1px solid var(--border); background: var(--info-bg); }
 .banner.warn { background: var(--warn-bg); border-color: var(--warn); }

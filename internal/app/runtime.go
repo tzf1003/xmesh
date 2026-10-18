@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tzf1003/xmesh/internal/audit"
+	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/identity"
@@ -95,6 +96,13 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return e
 		}
 	}
+	// The variables of stdio backends (API keys) live in the state directory, apart from the
+	// configuration. A file that cannot be read is left alone and backends start without variables.
+	envStore, envErr := backendenv.Open(filepath.Join(o.StateDir, backendenv.FileName))
+	if envErr != nil {
+		fmt.Fprintln(os.Stderr, "后端环境变量文件无法读取，后端将不带环境变量启动，文件保持原样:", filepath.Join(o.StateDir, backendenv.FileName))
+		envStore = nil
+	}
 	var a *agent.Agent
 	if c.HasRole("agent") {
 		// Registered before the agent's own Close, so the runner is released
@@ -103,7 +111,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if runner != nil {
 			defer func() { runErr = errors.Join(runErr, closeSandbox(runner)) }()
 		}
-		a, e = agent.New(store)
+		a, e = agent.New(store, agent.WithBackendEnv(envStore))
 		if e != nil {
 			return e
 		}
@@ -379,7 +387,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return readings(current)
 		}
 	}
-	defer startControl(controlDeps{store: store, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, peerInfo: peerInfo,
+	defer startControl(controlDeps{store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, peerInfo: peerInfo,
 		drain: func(kill bool) {
 			gatewaysMu.Lock()
 			pendingDrain[c.Node.Name] = true

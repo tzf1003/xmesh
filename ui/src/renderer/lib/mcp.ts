@@ -6,6 +6,7 @@
 import { BUILTIN_TOOLS, BUILTIN_TOOL_NAMES } from "../../shared/builtin-tools";
 import type { ConfigPatchEdit } from "../../shared/ipc";
 import type { AuthzRow } from "./config";
+import { type EnvChange, type EnvRow, checkEnvRows, envChangeOf } from "./mcp-env";
 
 /** The schema's backendName and nodeName grammar. */
 export const BACKEND_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
@@ -20,7 +21,7 @@ export type Transport = "stdio" | "http";
 /** The contract's limit on edits in one PATCH. */
 export const MAX_EDITS = 64;
 
-/** The stored shape of one `agent.backends` entry, as this page writes it. There is no env field: the kernel has none. */
+/** The stored shape of one `agent.backends` entry, as this page writes it. Environment variables are not part of it: they go to the kernel's private file, never into the config. */
 export interface BackendValue {
   transport: Transport;
   command?: string[];
@@ -262,9 +263,12 @@ export interface BackendForm {
   newTag: string;
   /** Kept from the stored entry: the form does not show it, but saving must not drop it. */
   favorite: boolean;
+  /** The environment variables of an stdio backend; ignored for http. */
+  env: EnvRow[];
 }
 
-export type BackendCheck = { ok: true; name: string; value: BackendValue; tags: string[] } | { ok: false; problems: Problem[] };
+/** `env` is what saving sends to the kernel for the backend's variables; undefined when they do not change. */
+export type BackendCheck = { ok: true; name: string; value: BackendValue; tags: string[]; env: EnvChange | undefined } | { ok: false; problems: Problem[] };
 
 /** Non-empty lines, trimmed. Blank lines are dropped; an argv item cannot be a blank line. */
 export function argvLines(text: string): string[] {
@@ -289,6 +293,7 @@ export function checkBackendForm(form: BackendForm, existingNames: readonly stri
   const argv = argvLines(form.command);
   if (form.transport === "stdio") {
     if (argv.length === 0) problems.push({ field: "command", code: "command.required" });
+    problems.push(...checkEnvRows(form.env));
   } else if (url === "") {
     problems.push({ field: "url", code: "url.required" });
   } else {
@@ -309,7 +314,7 @@ export function checkBackendForm(form: BackendForm, existingNames: readonly stri
   if (form.cwd.trim() !== "") value.cwd = form.cwd.trim();
   if (idle !== "") value.idle_timeout = idle;
   if (form.favorite) value.favorite = true;
-  return { ok: true, name, value, tags };
+  return { ok: true, name, value, tags, env: form.transport === "stdio" ? envChangeOf(form.env) : undefined };
 }
 
 // ---- Edit batches ----

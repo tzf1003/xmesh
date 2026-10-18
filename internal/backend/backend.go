@@ -23,6 +23,7 @@ type Manager struct {
 	mu        sync.Mutex
 	instances map[string]*actor
 	cfg       *config.Config
+	env       map[string]map[string]string // per-backend variables of stdio backends, never logged
 	leases    *lease.Manager
 	upstream  func(string) *mcp.ServerSession
 	changed   func()
@@ -34,6 +35,7 @@ type actor struct {
 	mu           sync.Mutex
 	name, caller string
 	cfg          config.Backend
+	env          map[string]string // fixed for the life of the actor: a change replaces the actor
 	root         *config.Config
 	gate         chan struct{}
 	bridge       *mcpmux.Bridge
@@ -46,9 +48,20 @@ type actor struct {
 	lastUse      time.Time
 }
 
-func New(c *config.Config, leases *lease.Manager, upstream func(string) *mcp.ServerSession, changed func()) *Manager {
+// Option adjusts a Manager before its first Configure.
+type Option func(*Manager)
+
+// WithEnv gives stdio backends their environment variables, by backend name.
+func WithEnv(env map[string]map[string]string) Option {
+	return func(m *Manager) { m.env = env }
+}
+
+func New(c *config.Config, leases *lease.Manager, upstream func(string) *mcp.ServerSession, changed func(), options ...Option) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{instances: map[string]*actor{}, leases: leases, upstream: upstream, changed: changed, ctx: ctx, cancel: cancel}
+	for _, option := range options {
+		option(m)
+	}
 	m.Configure(c)
 	m.wg.Add(1)
 	go func() {
@@ -95,10 +108,37 @@ func (m *Manager) reap(now time.Time) {
 func (m *Manager) Configure(c *config.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.configureLocked(c)
+}
+
+// SetEnv replaces the variables of every stdio backend. Only a backend whose own variables changed
+// restarts; the others keep their process.
+func (m *Manager) SetEnv(env map[string]map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.env = env
+	m.configureLocked(m.cfg)
+}
+
+// envOf is the variables a new actor of the named backend starts with; nil for none. Only a stdio
+// process has an environment, so a remote backend never restarts for a variable change.
+func (m *Manager) envOf(name string, cfg config.Backend) map[string]string {
+	vars := m.env[name]
+	if len(vars) == 0 || cfg.Transport != "stdio" {
+		return nil
+	}
+	out := make(map[string]string, len(vars))
+	for k, v := range vars {
+		out[k] = v
+	}
+	return out
+}
+
+func (m *Manager) configureLocked(c *config.Config) {
 	m.cfg = c
 	for key, a := range m.instances {
 		cfg, ok := c.Agent.Backends[a.name]
-		if !ok || !reflect.DeepEqual(cfg, a.cfg) {
+		if !ok || !reflect.DeepEqual(cfg, a.cfg) || !reflect.DeepEqual(m.envOf(a.name, cfg), a.env) {
 			a.cancel()
 			delete(m.instances, key)
 			_ = m.leases.Invalidate("backend:" + a.name)
@@ -122,7 +162,7 @@ func (m *Manager) Configure(c *config.Config) {
 }
 func (m *Manager) spawnLocked(key, name, caller string, cfg config.Backend, c *config.Config) *actor {
 	ctx, cancel := context.WithCancel(m.ctx)
-	a := &actor{name: name, caller: caller, cfg: cfg, root: c, gate: make(chan struct{}, 1), state: "stopped", cancel: cancel, ready: make(chan struct{}), manager: m, lastUse: time.Now()}
+	a := &actor{name: name, caller: caller, cfg: cfg, env: m.envOf(name, cfg), root: c, gate: make(chan struct{}, 1), state: "stopped", cancel: cancel, ready: make(chan struct{}), manager: m, lastUse: time.Now()}
 	m.instances[key] = a
 	m.wg.Add(1)
 	go func() { defer m.wg.Done(); a.supervise(ctx) }()
@@ -176,7 +216,7 @@ func (a *actor) connect(ctx context.Context) (*mcpmux.Bridge, error) {
 		if e != nil {
 			return nil, e
 		}
-		env, e := engine.Environment(nil)
+		env, e := engine.BackendEnvironment(a.env)
 		if e != nil {
 			return nil, e
 		}
