@@ -204,11 +204,15 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 4. 写同目录临时文件（保持原文件权限）、`fsync`、重命名覆盖。Windows 使用等价的原子替换。注释与格式由客户端提交的 `content` 原样保留，内核不重新序列化。
 5. 返回 `applied: true`、新 `etag`、`diff`、`restart_required`，发 `config` 事件（`actor: control`），写审计。
 
-写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node`、`mesh`、`gateway.listen`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
+### PATCH /v1/config
+
+请求 `ConfigEditRequest`，必须带 `If-Match`，与 `PUT` 的 ETag 规则相同。`edits` 是按 JSON Pointer 依次应用到磁盘当前文件上的修改（数组整体替换，缺失的映射自动创建，`delete: true` 删除路径），注释与未修改的部分原样保留。内核先在当前文件上应用全部修改，再走与 `PUT` 相同的 `config.Parse` 校验、diff、原子写入与事件；任一步失败整批都不写入。无法应用的修改（例如路径穿过标量）返回 `conflict`（409）。`dry_run: true` 只返回 diff。UI 的表单式设置（MCP 服务器、内置工具开关、授权）都经此路由写入，避免客户端整文件改写 YAML。
+
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node`、`mesh`、`gateway.listen`、`gateway.expose_backends`、`ingress`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
 
 ### POST /v1/config/reload
 
-请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.3 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
+请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.4 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
 
 | 字段 | 含义 |
 | --- | --- |

@@ -162,9 +162,9 @@ def 检查路由(注册表: Registry, 索引: dict[str, tuple[str, dict]], 已�
         if 路由["method"] == "GET" and 路由["body"] is not None:
             失败 += 1
             print(f"GET 路由不应有 body {路由['id']}")
-        if 路由["if_match"] == "required" and 路由["method"] != "PUT":
+        if 路由["if_match"] == "required" and 路由["method"] not in ("PUT", "PATCH"):
             失败 += 1
-            print(f"If-Match 只用于 PUT {路由['id']}")
+            print(f"If-Match 只用于 PUT 与 PATCH {路由['id']}")
         for 字段 in ("query", "body", "response"):
             引用 = 路由[字段]
             if 引用 is None:

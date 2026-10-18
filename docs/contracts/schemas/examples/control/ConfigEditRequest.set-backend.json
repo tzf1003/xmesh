@@ -1,0 +1,9 @@
+{
+  "edits": [
+    {
+      "path": "/agent/backends/docs",
+      "value": {"transport": "stdio", "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/srv/docs"], "policy": "shared"}
+    },
+    {"path": "/agent/disabled_tools", "value": ["exec.run", "pty.open"]}
+  ]
+}

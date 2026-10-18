@@ -67,6 +67,27 @@
         }
       ]
     },
+    "ConfigEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "description": "对配置文件的一处修改，按 JSON Pointer 定位；数组整体替换，映射不存在时自动创建。",
+      "properties": {
+        "path": {"type": "string", "pattern": "^/", "maxLength": 512, "description": "JSON Pointer，例如 /agent/backends/fs。"},
+        "value": {"type": ["object", "array", "string", "number", "boolean", "null"], "description": "新值，任意 JSON；delete 为 true 时忽略。"},
+        "delete": {"type": "boolean", "default": false, "description": "删除该路径。"}
+      }
+    },
+    "ConfigEditRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edits"],
+      "description": "PATCH /v1/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。",
+      "properties": {
+        "edits": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/ConfigEdit"}},
+        "dry_run": {"type": "boolean", "default": false, "description": "只校验并计算 diff，不写文件。"}
+      }
+    },
     "ConfigPutRequest": {
       "type": "object",
       "additionalProperties": false,
