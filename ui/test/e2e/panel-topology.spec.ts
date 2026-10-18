@@ -184,7 +184,9 @@ test("a disconnected kernel removes the live graph and still offers independent 
 
 test("leaving the topology preserves slots when a colliding device joins", async () => {
   const page = await open();
-  const before = await page.locator('[data-node="mac-dev-01"]').getAttribute("style");
+  const mac = page.locator('[data-node="mac-dev-01"]');
+  await expect(mac).toHaveAttribute("style", /--x:/);
+  const before = await mac.getAttribute("style");
   await navigate(page, "sessions");
   const joined = { ...peersFixture()[1]!, name: "aa", node_id: "aa" };
   h.kernel.setPeers([...peersFixture(), joined]);
@@ -192,7 +194,7 @@ test("leaving the topology preserves slots when a colliding device joins", async
   await expect.poll(() => h.kernel.requests.filter((r) => r.path === "/v1/peers").length).toBeGreaterThan(1);
   await navigate(page, "overview");
   await expect(page.locator('[data-node="aa"]')).toBeVisible();
-  expect(await page.locator('[data-node="mac-dev-01"]').getAttribute("style")).toBe(before);
+  await expect(mac).toHaveAttribute("style", before!);
 });
 
 test("the complete device list stays reachable when filters hide overflow peers", async () => {
