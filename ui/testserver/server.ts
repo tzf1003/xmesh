@@ -203,7 +203,8 @@ export class FakeKernel {
       api_version: this.controlVersion,
       kernel_version: this.kernelVersion,
       node: this.status.hostname,
-      pid: this.status.pid,
+      // The test process hosts the fake kernel; publish its PID for process liveness checks.
+      pid: process.pid,
       boot_id: this.bootId,
       transport: process.platform === "win32" ? "pipe" : "unix",
       endpoint: this.endpoint,

@@ -168,6 +168,7 @@ test("panel calls reach the kernel through the main process, with validated argu
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("node")).toHaveText("win-dev-01");
 
+  await page.getByTestId("overview-advanced").locator("summary").click();
   await page.getByRole("button", { name: "暂停接收新调用" }).click();
   await expect.poll(() => h.kernel.requests.some((r) => r.path === "/v1/drain")).toBe(true);
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");

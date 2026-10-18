@@ -31,10 +31,11 @@ async function kernel(opts: Parameters<typeof FakeKernel.start>[0] = {}): Promis
   return k;
 }
 
-function controller(): ShellController {
+function controller(opts: { kernelGone?: (pid: number) => boolean; protected?: boolean } = {}): ShellController {
   let login = false;
   const c = new ShellController({
-    discover: () => discoverInstances(root),
+    ...(opts.kernelGone && { kernelGone: opts.kernelGone }),
+    discover: () => discoverInstances(root, opts.protected ? [root] : []),
     configured: () => discoverConfigured(root),
     getLoginItem: () => login,
     setLoginItem: (v) => {
@@ -105,11 +106,40 @@ test("a manifest whose kernel does not answer is listed as unresponsive, not as 
   const k = await kernel();
   k.writeManifest(root, "n1");
   await k.stop();
-  const c = controller();
+  // The endpoint is closed while the hosting process is still alive.
+  const c = controller({ kernelGone: () => false });
   c.start();
   const s = await until(c, (x) => x.connection.kind === "offline" && x.unresponsiveNodes.length === 1, "unresponsive node");
   assert.deepEqual(s.unresponsiveNodes, ["n1"]);
+  assert.deepEqual(s.staleNodes, []);
   assert.deepEqual(s.stoppedNodes, []);
+});
+
+test("a failed endpoint with an exited process is stale and the node stays startable", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "n1");
+  await k.stop();
+  fs.writeFileSync(path.join(root, "n1", "xmesh.yaml"), "node:\n  name: n1\n");
+  const c = controller({ kernelGone: () => true });
+  c.start();
+  const s = await until(c, (x) => x.connection.kind === "offline" && x.staleNodes.length === 1, "stale node");
+  assert.deepEqual(s.staleNodes, ["n1"]);
+  assert.deepEqual(s.unresponsiveNodes, []);
+  assert.deepEqual(s.stoppedNodes, ["n1"], "the config is still there, so starting is what helps");
+  const replacement = await kernel();
+  replacement.writeManifest(root, "n1");
+  await ready(c, replacement);
+  assert.deepEqual(c.snapshot.staleNodes, []);
+  assert.deepEqual(c.snapshot.stoppedNodes, []);
+});
+
+test("a successful control response takes precedence over the manifest PID", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "n1");
+  const c = controller({ kernelGone: () => true });
+  c.start();
+  await ready(c, k);
+  assert.deepEqual(c.snapshot.staleNodes, []);
 });
 
 test("status changes pushed over the event stream reach the snapshot", async () => {
@@ -342,4 +372,26 @@ test("nudge drops a live event stream and the controller resubscribes at once", 
   const deadline = Date.now() + 3000;
   while (eventRequests() === opened && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
   assert.ok(eventRequests() > opened, "stream reopened after nudge");
+});
+
+
+test("an incompatible manifest with an exited process and missing transport can be cleaned", async () => {
+  const k = await kernel({ controlVersion: "99.0" });
+  k.writeManifest(root, "old");
+  await k.stop();
+  const c = controller({ kernelGone: () => true, protected: true });
+  c.start();
+  const s = await until(c, (s) => s.staleNodes.includes("old"), "stale incompatible kernel");
+  assert.equal(s.connection.kind, "offline");
+  assert.deepEqual(s.protectedStaleNodes, ["old"]);
+});
+
+test("a reachable incompatible kernel stays a mismatch even when the manifest PID looks gone", async () => {
+  const k = await kernel({ controlVersion: "99.0" });
+  k.writeManifest(root, "old");
+  const c = controller({ kernelGone: () => true });
+  c.start();
+  const s = await until(c, (s) => s.connection.kind === "mismatch", "reachable incompatible kernel");
+  assert.deepEqual(s.staleNodes, []);
+  assert.deepEqual(k.requests, []);
 });

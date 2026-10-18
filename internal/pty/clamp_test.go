@@ -15,8 +15,9 @@ func Test_CTRPTY02_MaxBytesClamps(t *testing.T) {
 	owner := identity.Caller{ID: "node/owner"}
 	_ = reg.Add(owner)
 	term := newGateTerminal(false)
-	addSession(m, "p-clamp0001", owner.ID, term)
-	term.output("hello")
+	s := addSession(m, "p-clamp0001", owner.ID, term)
+	// Seed the scrollback synchronously: wait_ms=0 must read data already available.
+	s.append([]byte("hello"))
 	if out, err := call(m, owner, "pty.read", Object{"session_id": "p-clamp0001", "max_bytes": 2 << 20, "wait_ms": 0}); err != nil || out["data"] != "hello" {
 		t.Fatalf("oversized max_bytes rejected: %v %v", out, err)
 	}

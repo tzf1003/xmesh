@@ -15,7 +15,7 @@ interface Preview {
   content: string;
 }
 
-export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
+export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange?(dirty: boolean): void }): JSX.Element {
   const t = useT();
   const supported = ctx.can("config.read");
   const writable = ctx.can("config.write");
@@ -26,6 +26,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { onDirtyChange?.(loaded !== undefined && isDirty(loaded.content, draft)); }, [loaded, draft, onDirtyChange]);
 
   const load = async (): Promise<void> => {
     const r = await getApi().getConfig();
@@ -90,7 +91,7 @@ export function Config({ ctx }: { ctx: PageContext }): JSX.Element {
   const weak = preview ? weakening(preview.changes) : [];
 
   return (
-    <div class="page" data-testid="page-config">
+    <div class="page" data-testid="config-source">
       <PageHead title={t("nav.config")} sub={loaded ? loaded.etag.slice(0, 19) + "…" : undefined}>
         <div class="row">
           <button type="button" class="btn" onClick={() => (dirty ? setAskDiscard(true) : void load())} data-testid="config-reload">

@@ -61,6 +61,7 @@ test("each method calls its own channel with only the caller's argument", async 
   await api.resume!();
   await api.startKernel!("n1");
   await api.restartUnresponsive!("n1");
+  await api.cleanupStale!("n1");
   await api.selectInstance!("n1");
   await api.copy!("gatewayUrl");
   await api.openPath!("logs");
@@ -73,6 +74,7 @@ test("each method calls its own channel with only the caller's argument", async 
     { channel: CHANNELS.resume, args: [] },
     { channel: CHANNELS.startKernel, args: ["n1"] },
     { channel: CHANNELS.restartUnresponsive, args: ["n1"] },
+    { channel: CHANNELS.cleanupStale, args: ["n1"] },
     { channel: CHANNELS.selectInstance, args: ["n1"] },
     { channel: CHANNELS.copy, args: ["gatewayUrl"] },
     { channel: CHANNELS.openPath, args: ["logs"] },

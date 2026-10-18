@@ -1,8 +1,8 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 
 /** Page colours behind the window; they match `--bg` in renderer/styles.css. */
-export const CHROME_BG = { light: "#f4f4f6", dark: "#1a1a1e" } as const;
-const SYMBOL = { light: "#1c1c21", dark: "#ededf1" } as const;
+export const CHROME_BG = { light: "#f7f8f7", dark: "#0f1211" } as const;
+const SYMBOL = { light: "#161b18", dark: "#e8ece9" } as const;
 
 /** Height of the panel's top bar in CSS pixels; the Windows caption buttons are drawn to this height. */
 export const TOPBAR_HEIGHT = 46;
