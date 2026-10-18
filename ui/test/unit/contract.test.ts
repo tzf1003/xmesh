@@ -87,13 +87,13 @@ test("the copied TypeScript types are the contract's generated file", () => {
 });
 
 test("the UI speaks the contract's API version", () => {
-  assert.equal(CONTROL_API_VERSION, "1.2");
+  assert.equal(CONTROL_API_VERSION, "1.3");
 });
 
 test("status, peers, sessions and control.json from the fake validate against the schemas", async () => {
   const status = await call(k.endpoint, "GET", "/v1/status");
   assert.equal(status.status, 200);
-  assert.equal(status.headers["x-xmesh-control-version"], "1.2");
+  assert.equal(status.headers["x-xmesh-control-version"], "1.3");
   validate("control-status", "StatusResponse", status.body);
   validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v1/peers")).body);
   validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v1/sessions")).body);
@@ -208,7 +208,38 @@ test("routes the UI calls exist in the contract route table with the capability 
   assert.equal(find("POST", "/v1/drain")?.capability, "drain");
   assert.equal(find("POST", "/v1/resume")?.capability, "drain");
   assert.equal(find("POST", "/v1/resume")?.body, null, "resume takes no body");
+  assert.equal(find("PUT", "/v1/gateway")?.capability, "gateway");
+  assert.equal(find("PUT", "/v1/gateway")?.body, "GatewayUpdateRequest");
+  assert.equal(find("PUT", "/v1/gateway")?.response, "GatewayUpdateResponse");
   for (const t of ["hello", "reset", "status", "peer", "call", "session", "warning", "config", "lifecycle"]) {
     assert.ok((CONTROL_EVENT_TYPES as readonly string[]).includes(t), t);
+  }
+});
+
+test("PUT /v1/gateway: the reach replacement validates, answers restart_required for a listen change only, and the status follows", async () => {
+  const gw = await FakeKernel.start({ pingMs: 50, capabilities: ["status", "events", "peers", "sessions", "drain", "pats", "gateway"] });
+  try {
+    const ok = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
+    assert.equal(ok.status, 200);
+    validate("control-gateway", "GatewayUpdateResponse", ok.body);
+    assert.equal((ok.body as { restart_required: boolean }).restart_required, false, "access and hosts apply at once");
+    const status = await call(gw.endpoint, "GET", "/v1/status");
+    validate("control-status", "StatusResponse", status.body);
+    const info = (status.body as { gateway: { access: string[]; hosts: string[]; addresses: { kind: string; url: string }[] } }).gateway;
+    assert.deepEqual(info.access, ["localhost", "lan", "10.0.0.0/8"]);
+    assert.deepEqual(info.hosts, ["xmesh.home.example"]);
+    assert.ok(info.addresses.some((a) => a.kind === "host" && a.url === "http://xmesh.home.example:8080/mcp"));
+
+    const loopback = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
+    assert.equal((loopback.body as { restart_required: boolean }).restart_required, true, "a listen change needs a restart");
+
+    const bad = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["192.168.1.999"], hosts: [] });
+    assert.equal(bad.status, 422);
+    validate("control-error", "ControlError", bad.body);
+    assert.equal((bad.body as { error: string }).error, "config_invalid");
+    const hostIp = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["localhost"], hosts: ["192.168.1.5"] });
+    assert.equal(hostIp.status, 422, "an IP address is not a host name");
+  } finally {
+    await gw.stop();
   }
 });

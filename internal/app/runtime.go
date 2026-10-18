@@ -257,13 +257,30 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	// Both the catalogue refresh and the device info read dial through here; the pacing is per peer.
 	dial := gateway.Paced(dialPeer, time.Now)
 	if c.HasRole("gateway") {
+		// Every gateway request needs a token (CTR-GW-07). The token is created only when none exists.
+		created, e := control.EnsureDefaultPAT(store, o.StateDir)
+		if e != nil {
+			return fmt.Errorf("无法创建本机 Gateway 令牌: %w", e)
+		}
+		if created {
+			fmt.Fprintln(os.Stderr, "gateway: 已创建本机 Gateway 令牌（PAT default），令牌文件在状态目录的 pats 下")
+		}
 		g := gateway.New(gateway.Options{Quota: c.Gateway.Quota, NodeName: c.Node.Name, NodeID: self.Node, LocalPeer: localPeer, Favorite: c.Gateway.ExposeBackends == "favorite", Discover: discover, Changed: changed, Dial: dial, Audit: log})
 		addGateway(g)
+		handler := g.HTTP(gateway.LocalAuthentication(store))
 		listener, e := net.Listen("tcp", c.Gateway.Listen)
 		if e != nil {
 			return e
 		}
-		launch(listener, g.HTTP(gateway.LocalAuthentication(store)), "Gateway MCP", nil)
+		launch(listener, handler, "Gateway MCP", nil)
+		// In tailnet mode the tailnet address is served by the tsnet netstack, not by the OS (CON-NET).
+		if tn, ok := network.(tailnetGatewayListener); ok && c.Mesh.Mode == "tailnet" && !gatewayLoopbackOnly(c.Gateway.Listen) {
+			tailnetListener, e := tn.ListenPort(gatewayPort(c.Gateway.Listen))
+			if e != nil {
+				return e
+			}
+			launch(tailnetListener, handler, "Gateway MCP (tailnet)", nil)
+		}
 	}
 	var ingress control.IngressAdmin
 	if c.HasRole("ingress") {

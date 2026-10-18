@@ -4,11 +4,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { CliError } from "../../src/main/cli";
-import { type SetupHost, fsSetupHost, runSetup } from "../../src/main/setup";
-import { DEFAULT_CONTROL_URL, generateConfig, isAbsolutePath, parseSetup } from "../../src/shared/setup";
+import { parse } from "yaml";
+import { type SetupHost, fsSetupHost, previewSetup, runSetup } from "../../src/main/setup";
+import { DEFAULT_CONTROL_URL, DEFAULT_DENY, DENY_FILE_NAME, denyListText, generateConfig, generateDenyFile, isAbsolutePath, parseSetup } from "../../src/shared/setup";
 
 const lan = { nodeName: "dev-1", mode: "lan", roles: ["agent", "gateway"], workspace: "/home/me/work" };
 const tailnet = { ...lan, mode: "tailnet", authkeyFile: "/home/me/authkey" };
+/** The deny list file the first run writes next to `dev-1`'s config. */
+const deny = path.join("/state", "dev-1", DENY_FILE_NAME);
 
 function must(v: unknown) {
   const r = parseSetup(v);
@@ -56,7 +59,7 @@ test("parseSetup refuses bad input and names the first offending field", () => {
 test("a gateway-only node still gets the agent section the config schema requires", () => {
   const bad = parseSetup({ nodeName: "gw", mode: "lan", roles: ["gateway"], workspace: "" });
   assert.ok(!bad.ok && bad.problem === "workspace");
-  const text = generateConfig(must({ nodeName: "gw", mode: "lan", roles: ["gateway"], workspace: "/home/me/work" }));
+  const text = generateConfig(must({ nodeName: "gw", mode: "lan", roles: ["gateway"], workspace: "/home/me/work" }), deny);
   assert.match(text, /roles: \[gateway\]/);
   assert.match(text, /gateway:/);
   assert.match(text, /^agent:\n/m);
@@ -64,21 +67,20 @@ test("a gateway-only node still gets the agent section the config schema require
 });
 
 test("trusted callers: LAN peers by pairing tag, tailnet devices by the tag the control plane grants", () => {
-  assert.match(generateConfig(must(lan)), /^ {4}"tag:peer":/m);
-  assert.doesNotMatch(generateConfig(must(lan)), /tag:device/);
-  const tn = generateConfig(must({ ...lan, mode: "tailnet", authkeyFile: "/k" }));
+  assert.match(generateConfig(must(lan), deny), /^ {4}"tag:peer":/m);
+  assert.doesNotMatch(generateConfig(must(lan), deny), /tag:device/);
+  const tn = generateConfig(must({ ...lan, mode: "tailnet", authkeyFile: "/k" }), deny);
   assert.match(tn, /^ {4}"tag:device":/m);
   assert.doesNotMatch(tn, /tag:peer/);
 });
 
 test("generated config carries the values and the safe defaults", () => {
-  const text = generateConfig(must(lan));
+  const text = generateConfig(must(lan), deny);
   assert.match(text, /^node:\n {2}name: "dev-1"\n {2}roles: \[agent, gateway\]\n/m);
   assert.match(text, /mdns: true/);
   assert.match(text, /default_cwd: "\/home\/me\/work"/);
-  assert.match(text, /deny: \["~\/\.ssh"/);
-  assert.match(text, /listen: "127\.0\.0\.1:8080"/);
-  const tn = generateConfig(must(tailnet));
+  assert.match(text, /listen: ":8080"/);
+  const tn = generateConfig(must(tailnet), deny);
   assert.match(tn, /control_url: "https:\/\/controlplane\.tailscale\.com"/);
   assert.match(tn, /authkey_file: "\/home\/me\/authkey"/);
   assert.doesNotMatch(tn, /mdns/);
@@ -87,11 +89,11 @@ test("generated config carries the values and the safe defaults", () => {
 test("quoting keeps hostile paths inside their scalar", () => {
   const evil = '/home/me/", deny: [] # \\n x: !!python/object';
   assert.equal(isAbsolutePath(evil), true, "a path with quotes is still a path");
-  const text = generateConfig(must({ ...lan, workspace: evil }));
+  const text = generateConfig(must({ ...lan, workspace: evil }), deny);
   // Each user value sits on one line, as a JSON string.
   const line = text.split("\n").find((l) => l.startsWith("  default_cwd:"))!;
   assert.equal(JSON.parse(line.slice("  default_cwd:".length)), evil);
-  assert.equal(text.split("\n").filter((l) => /^\s*deny:/.test(l)).length, 1);
+  assert.equal(text.split("\n").filter((l) => /^\s*deny_file:/.test(l)).length, 1);
   assert.equal(parseSetup({ ...lan, workspace: "/w\ndeny: []" }).ok, false, "a newline never reaches the generator");
 });
 
@@ -122,7 +124,45 @@ test("runSetup validates, writes the regenerated config, then installs and start
   assert.equal(r.data.configPath, cfg);
   assert.deepEqual(r.data.steps.map((s) => [s.id, s.ok]), [["write-config", true], ["install", true], ["start", true]]);
   assert.deepEqual(calls, [`install --config ${cfg}`, `start --config ${cfg}`]);
-  assert.equal(written[cfg], generateConfig(must(lan)));
+  assert.equal(written[cfg], generateConfig(must(lan), deny));
+  assert.equal(written[deny], generateDenyFile(), "the default deny list is written beside the config");
+});
+
+test("the default deny list file is the defaults, in a form that reads back to them", () => {
+  assert.deepEqual(parse(generateDenyFile()), DEFAULT_DENY);
+  assert.deepEqual(parse(denyListText([])), []);
+  // An entry with quotes and a backslash stays one entry, and cannot end its line early.
+  const tricky = 'C:\\Users\\me\\"x": 1';
+  assert.deepEqual(parse(denyListText([tricky])), [tricky]);
+});
+
+test("runSetup keeps a deny list that is already there and still writes the config", async () => {
+  const { host, calls, written } = recordingHost("/state");
+  const create = host.writeNew;
+  host.writeNew = (file, content) => {
+    if (file === deny) throw Object.assign(new Error("exists"), { code: "EEXIST" });
+    create(file, content);
+  };
+  const r = await runSetup(lan, host);
+  assert.ok(r.ok);
+  assert.deepEqual(r.data.steps.map((s) => [s.id, s.ok]), [["write-config", true], ["install", true], ["start", true]]);
+  assert.equal(written[deny], undefined, "the user's list is not replaced");
+  assert.equal(calls.length, 2);
+});
+
+test("the review text is what runSetup writes, and asking for it writes nothing", async () => {
+  const asked = recordingHost("/state");
+  const preview = previewSetup(lan, asked.host);
+  assert.ok(preview.ok);
+  assert.deepEqual(asked.written, {});
+  assert.equal(preview.data.denyPath, deny);
+  const ran = recordingHost("/state");
+  await runSetup(lan, ran.host);
+  assert.equal(preview.data.config, ran.written[preview.data.configPath]);
+  assert.deepEqual(previewSetup({ ...lan, nodeName: "../../etc" }, asked.host), {
+    ok: false,
+    error: { code: "invalid_args", message: "节点名只能含字母、数字和连字符，且以字母或数字开头", field: "node_name" },
+  });
 });
 
 test("runSetup stops after a failed step and reports it", async () => {
@@ -142,7 +182,7 @@ test("runSetup never overwrites an existing config and runs nothing", async () =
 });
 
 test("runSetup retries after a failed install: the identical file it wrote before is reused, anything else is not", async () => {
-  const same = recordingHost("/state", { existing: generateConfig(must(lan)) });
+  const same = recordingHost("/state", { existing: generateConfig(must(lan), deny) });
   const r = await runSetup(lan, same.host);
   assert.ok(r.ok);
   const cfg = path.join("/state", "dev-1", "xmesh.yaml");

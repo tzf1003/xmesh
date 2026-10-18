@@ -5,8 +5,8 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"runtime"
 	"strings"
@@ -15,20 +15,21 @@ import (
 	"github.com/tzf1003/xmesh/internal/oauth"
 )
 
-// LocalAuthentication authenticates each request against the current PAT files.
-// A configured PAT set requires a bearer even on the loopback listener.
+// LocalAuthentication authenticates each request against the current PAT files (CTR-GW-07). The source
+// must be in gateway.access, the Host header must name an address or a configured host, and the bearer
+// token is required on every listener, loopback included. With no PAT configured nothing is served.
 func LocalAuthentication(store *config.Store) func(*http.Request) (Principal, error) {
 	return func(r *http.Request) (Principal, error) {
 		fail := func() (Principal, error) { return Principal{}, fmt.Errorf("Gateway 身份无效") }
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil || host != "127.0.0.1" {
+		cfg := store.Get()
+		if !sourceAllowed(cfg.Gateway, r.RemoteAddr) || !config.HostAllowed(r.Host, cfg.Gateway.Hosts) {
 			return fail()
 		}
-		pats := store.Get().Gateway.PATs
-		headers := r.Header.Values("Authorization")
-		if len(pats) == 0 && len(headers) == 0 {
-			return Principal{Local: true}, nil
+		pats := cfg.Gateway.PATs
+		if len(pats) == 0 {
+			return fail()
 		}
+		headers := r.Header.Values("Authorization")
 		if len(headers) != 1 {
 			return fail()
 		}
@@ -76,4 +77,15 @@ func LocalAuthentication(store *config.Store) func(*http.Request) (Principal, er
 		}
 		return Principal{CredentialID: "pat:" + matched, Scopes: expanded}, nil
 	}
+}
+
+// sourceAllowed parses the remote address and checks it against gateway.access. A malformed address
+// or access list is refused.
+func sourceAllowed(g config.Gateway, remote string) bool {
+	ap, e := netip.ParseAddrPort(remote)
+	if e != nil {
+		return false
+	}
+	access, e := config.ParseAccess(g.Access)
+	return e == nil && access.AllowsSource(ap.Addr())
 }

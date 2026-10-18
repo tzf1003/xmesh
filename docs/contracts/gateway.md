@@ -140,3 +140,21 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 - 权威设备必须是所有入口都能连到的 Agent，且应长期在线。它同时是 Agent，其自身的终端也计入总额。未配置 `ingress.pty_budget_authority` 时行为与此前一致：只在本机协调。
 
 跨主机协调只约束 `pty.open` 与 `pty.transfer` 的准入顺序；不影响 exec 配额，也不改变 Agent 上的设备与主体限额。
+
+## CTR-GW-07
+
+本机 Gateway 的每个请求都要令牌，包括回环地址。它按三层判断，任一层拒绝即返回 `401`，不返回 MCP 内容：
+
+1. **来源。** 对端地址必须在 `gateway.access` 允许的范围内。回环地址恒开，不论列表如何。`lan` 指 RFC 1918 的 IPv4 私网与 `fc00::/7`，`tailnet` 指 `100.64.0.0/10` 与 `fd7a:115c:a1e0::/48`，其余条目是单个 IP 或 CIDR。缺省 `[localhost, lan, tailnet]`。
+2. **Host 头。** 必须是 IP 字面量、`localhost`，或 `gateway.hosts` 里列出的主机名。其余名字一律拒绝，这也挡住 DNS rebinding。
+3. **令牌。** 恰好一个 `Authorization: Bearer`，与 `gateway.pats` 中某个令牌文件的内容匹配。没有任何 PAT 时，任何请求都被拒绝。
+
+`gateway.listen` 决定实际绑定：`:8080` 绑全部网卡，`127.0.0.1:8080` 只绑本机，此时地址列表只有 `localhost`。tailnet 地址由 tsnet 在 tailnet 上提供，不经过操作系统网卡（CON-NET）。
+
+**地址列表（`GatewayInfo.addresses`）。** 内核列出当前真正可达的地址，每项带 `kind`、`host` 与 `url`：`localhost`（恒有）、`lan`（`lan` 条目开启时，每个启用网卡的私网 IPv4）、`tailnet_ip` 与 `tailnet_name`（`tailnet` 条目开启、节点已入网时，tailnet 的 IP 与 MagicDNS 名）、`host`（每个 `gateway.hosts`）。绑定回环时只有 `localhost`。自定义 IP 与 CIDR 只是来源，不作为地址列出。
+
+**域名。** `gateway.hosts` 只用于 Host 头校验与地址展示，不带 TLS，也不改变来源范围。
+
+**令牌的生命周期。** 首次启动或升级时若没有任何 PAT，内核创建 `default`。已有令牌从不因启动、升级、更新或重装而改动。轮转只能由用户经 [CTR-CTL-09](../contracts/control.md#ctr-ctl-09) 的轮转路由发起。删除最后一个 PAT 被拒绝。
+
+验收：`internal/config/access_test.go` 覆盖来源与 Host 判定；`internal/role/gateway/gateway_access_test.go` 覆盖三层拒绝；`internal/control/gateway_token_test.go` 覆盖升级不轮换与 `PUT /v1/gateway`；`internal/app/gateway_info_test.go` 覆盖地址列表。

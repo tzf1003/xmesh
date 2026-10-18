@@ -38,7 +38,7 @@ func Test_CONSEC10_GatewayQuotaFromConfig(t *testing.T) {
 	}
 }
 
-// gateway.quota and gateway.expose_backends apply to a running gateway; the next generation
+// gateway.quota applies to a running gateway; the next generation
 // is the one that counts.
 func Test_GatewayReconfigureAppliesQuotaAndExpose(t *testing.T) {
 	g := New(Options{NodeName: "test-node", Quota: config.Quota{CallsPerHour: 2}})

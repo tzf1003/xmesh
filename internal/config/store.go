@@ -17,7 +17,7 @@ import (
 // start. A change to them is written to the file and reported through
 // restart_required; the running values stay until the next start. Every other
 // section takes effect in the next generation (docs/contracts/config.md).
-var RestartPaths = []string{"/node", "/mesh", "/gateway/listen", "/ingress", "/audit", "/agent/policy/windows_appcontainer"}
+var RestartPaths = []string{"/node", "/mesh", "/gateway/listen", "/gateway/expose_backends", "/ingress", "/audit", "/agent/policy/windows_appcontainer"}
 
 // NeedsRestart reports whether a change at the JSON Pointer ptr, or at a
 // section nested below it, falls under RestartPaths. A pointer above a restart
@@ -186,6 +186,7 @@ func (s *Store) load() (*Config, bool) {
 	c.Node = s.startup.Node
 	c.Mesh = s.startup.Mesh
 	c.Gateway.Listen = s.startup.Gateway.Listen
+	c.Gateway.ExposeBackends = s.startup.Gateway.ExposeBackends
 	c.Ingress = s.startup.Ingress
 	c.Audit = s.startup.Audit
 	c.Agent.Policy.WindowsAppContainer = s.startup.Agent.Policy.WindowsAppContainer
@@ -209,6 +210,7 @@ func restartChanged(startup, next *Config) []string {
 	add("/node", !reflect.DeepEqual(startup.Node, next.Node))
 	add("/mesh", !reflect.DeepEqual(startup.Mesh, next.Mesh))
 	add("/gateway/listen", startup.Gateway.Listen != next.Gateway.Listen)
+	add("/gateway/expose_backends", startup.Gateway.ExposeBackends != next.Gateway.ExposeBackends)
 	add("/ingress", !reflect.DeepEqual(startup.Ingress, next.Ingress))
 	add("/audit", !reflect.DeepEqual(startup.Audit, next.Audit))
 	add("/agent/policy/windows_appcontainer", startup.Agent.Policy.WindowsAppContainer != next.Agent.Policy.WindowsAppContainer)

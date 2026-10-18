@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-gateway:1",
+  "title": "ControlGateway",
+  "description": "CTR-CTL-13。本机 Gateway 的监听地址与来源设置（PUT /v1/gateway）。来源与域名可以热加载；监听地址要重启才生效（CTR-CFG-01）。",
+  "$defs": {
+    "GatewayUpdateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen", "access", "hosts"],
+      "properties": {
+        "listen": {
+          "type": "string",
+          "pattern": "^(:|0\\.0\\.0\\.0:|\\[::\\]:|127\\.0\\.0\\.1:|\\[::1\\]:)([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+          "description": "与 config.schema.json 的 gateway.listen 相同。"
+        },
+        "access": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "urn:xmesh:schema:control-status:1#/$defs/GatewayAccess" },
+          "description": "整份替换 gateway.access。"
+        },
+        "hosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+          },
+          "description": "整份替换 gateway.hosts。"
+        }
+      }
+    },
+    "GatewayUpdateResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["listen", "access", "hosts", "restart_required"],
+      "properties": {
+        "listen": { "type": "string" },
+        "access": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-status:1#/$defs/GatewayAccess" } },
+        "hosts": { "type": "array", "items": { "type": "string" } },
+        "restart_required": { "type": "boolean", "description": "listen 与写入前不同时为真。access 与 hosts 立即生效。" }
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -225,9 +226,9 @@ func TestIngressPTYBudgetAuthorityConfiguration(t *testing.T) {
 	}
 }
 
-// gateway.quota and gateway.expose_backends apply in the next generation; only the
-// startup-bound sections keep their running values.
-func Test_CTRCFG01_GatewayQuotaAndExposeAreHot(t *testing.T) {
+// gateway.quota applies in the next generation; gateway.expose_backends is read once by the
+// Gateway at start, so it is reported as restart_required and keeps its running value.
+func Test_CTRCFG01_GatewayQuotaHotExposeNeedsRestart(t *testing.T) {
 	b, e := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
 	if e != nil {
 		t.Fatal(e)
@@ -259,11 +260,14 @@ func Test_CTRCFG01_GatewayQuotaAndExposeAreHot(t *testing.T) {
 		t.Fatal(e)
 	}
 	got := s.Get()
-	if got.Gateway.ExposeBackends != next || got.Gateway.Quota.CallsPerHour != 42 {
-		t.Fatal("gateway.expose_backends or gateway.quota did not apply", got.Gateway.ExposeBackends, got.Gateway.Quota)
+	if got.Gateway.Quota.CallsPerHour != 42 {
+		t.Fatal("gateway.quota did not apply", got.Gateway.Quota)
 	}
-	if restart, _ := s.State(); restart {
-		t.Fatal("gateway.expose_backends or gateway.quota reported as restart_required")
+	if got.Gateway.ExposeBackends != started {
+		t.Fatal("gateway.expose_backends took effect without a restart", got.Gateway.ExposeBackends)
+	}
+	if pending := s.RestartPending(); !slices.Equal(pending, []string{"/gateway/expose_backends"}) {
+		t.Fatalf("RestartPending = %v", pending)
 	}
 	if e = os.WriteFile(path, b, 0600); e != nil {
 		t.Fatal(e)

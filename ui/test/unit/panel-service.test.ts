@@ -5,12 +5,14 @@ import * as path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { ShellController } from "../../src/main/controller";
 import { discoverInstances } from "../../src/main/discovery";
+import { GatewayCredentials } from "../../src/main/gateway-token";
 import { PanelService } from "../../src/main/panel-service";
-import type { Capability } from "../../src/shared/control";
+import type { Capability, StatusResponse } from "../../src/shared/control";
+import { statusFixture } from "../../testserver/fixtures";
 import { etagOf } from "../../testserver/panel-routes";
 import { FakeKernel } from "../../testserver/server";
 
-const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
+const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "gateway", "ingress", "audit"];
 const FP = "ab".repeat(32);
 const PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
 
@@ -30,8 +32,8 @@ afterEach(async () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(capabilities: Capability[] = ALL) {
-  const k = await FakeKernel.start({ pingMs: 100, capabilities });
+async function setup(capabilities: Capability[] = ALL, status: Partial<StatusResponse> = {}) {
+  const k = await FakeKernel.start({ pingMs: 100, capabilities, status });
   kernels.push(k);
   k.writeManifest(root, "n1");
   const c = new ShellController({
@@ -70,6 +72,35 @@ test("sessions and config reads return the kernel's documents", async () => {
   const c = await service.getConfig();
   assert.ok(c.ok);
   assert.equal(c.data.etag, etagOf(k.panel.content));
+});
+
+test("the deny list file goes beside the config the kernel reports, and an existing file with other text is kept", async () => {
+  const node = path.join(root, "n1");
+  const { service } = await setup(ALL, { paths: { ...statusFixture().paths, config_file: path.join(node, "xmesh.yaml") } });
+  const text = '- "~/.ssh"\n';
+  const made = await service.createDenyFile({ text });
+  assert.ok(made.ok);
+  assert.equal(made.data.path, path.join(node, "cwd-deny.yaml"));
+  assert.equal(fs.readFileSync(made.data.path, "utf8"), text);
+  if (process.platform !== "win32") assert.equal(fs.statSync(made.data.path).mode & 0o777, 0o600);
+
+  assert.ok((await service.createDenyFile({ text })).ok, "the same text is the same file");
+  const other = await service.createDenyFile({ text: '- "/x"\n' });
+  assert.ok(!other.ok);
+  assert.equal(other.error.code, "exists");
+  assert.equal(fs.readFileSync(made.data.path, "utf8"), text);
+});
+
+test("a reload goes to the kernel's reload route; a kernel without it answers with an error", async () => {
+  const { k, service } = await setup();
+  const r = await service.reloadConfig();
+  assert.ok(r.ok);
+  assert.equal(r.data.restart_required, false);
+  assert.deepEqual(r.data.restart_paths, []);
+  assert.equal(last(k, "POST", "/v1/config/reload")?.path, "/v1/config/reload");
+
+  k.failNext("/v1/config/reload", 404, "not_found", "没有这个接口");
+  assert.ok(!(await service.reloadConfig()).ok);
 });
 
 test("config save sends If-Match and dry_run; a stale etag comes back with the current one", async () => {
@@ -185,3 +216,56 @@ test("call events feed the recent-calls ring, newest last", async () => {
   assert.deepEqual(service.recentCalls().map((x) => x.duration_ms), [1, 2, 3]);
   assert.ok(seen.length >= 1);
 });
+
+test("the gateway reach is replaced as a whole: access and hosts apply now, a listen change asks for a restart", async () => {
+  const { k, service } = await setup();
+  const hot = await service.updateGateway({ listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
+  assert.deepEqual(hot, {
+    ok: true,
+    data: { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"], restart_required: false },
+  });
+  assert.deepEqual(last(k, "PUT", "/v1/gateway")?.body, { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
+  assert.ok(k.currentStatus.gateway?.addresses.some((a) => a.url === "http://xmesh.home.example:8080/mcp"), "the status follows the new reach");
+
+  const cold = await service.updateGateway({ listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
+  assert.ok(cold.ok);
+  assert.equal(cold.data.restart_required, true);
+  assert.equal(k.currentStatus.restart_required, true);
+  assert.deepEqual(k.currentStatus.gateway?.addresses.map((a) => a.kind), ["localhost"], "loopback only: one address");
+
+  const bad = await service.updateGateway({ listen: ":8080", access: ["192.168.1.999"], hosts: [] });
+  assert.ok(!bad.ok);
+  assert.equal(bad.error.code, "config_invalid");
+  assert.ok((bad.error.diagnostics?.length ?? 0) >= 1);
+});
+
+test("rotating the gateway token rewrites its file; the page only learns the name and the time", async () => {
+  const { k, service } = await setup();
+  const file = path.join(k.tokenDir, "default.pat");
+  const before = fs.readFileSync(file, "utf8").trim();
+  const r = await service.rotateGatewayPat();
+  assert.ok(r.ok);
+  assert.deepEqual(Object.keys(r.data).sort(), ["modified_at", "name"]);
+  assert.equal(r.data.name, "default");
+  const after = fs.readFileSync(file, "utf8").trim();
+  assert.notEqual(after, before, "the token file has the new token");
+  assert.equal(JSON.stringify(r).includes(after), false, "the new token is not in what the page receives");
+  assert.ok(last(k, "POST", "/v1/pats/default/rotate"));
+});
+
+test("without a default PAT, rotation is refused and nothing is rotated", async () => {
+  const { k, service } = await setup();
+  assert.deepEqual(await service.deletePat("default"), { ok: true });
+  const r = await service.rotateGatewayPat();
+  assert.ok(!r.ok);
+  assert.equal(r.error.code, "not_found");
+  assert.equal(last(k, "POST", "/v1/pats/default/rotate"), undefined);
+});
+
+test("the copy path reads the default PAT's token from its file, the same one the kernel stores", async () => {
+  const { k, c } = await setup();
+  const token = await new GatewayCredentials(c).read();
+  assert.equal(token, k.panel.tokenOf("default"));
+  assert.ok(token.length >= 32, "the kernel's tokens are long");
+});
+

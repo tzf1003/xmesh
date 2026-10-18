@@ -58,13 +58,13 @@ func section(doc map[string]any, name string) map[string]any {
 }
 
 func Test_NeedsRestartPointers(t *testing.T) {
-	restart := []string{"", "/node", "/node/name", "/mesh/mode", "/gateway/listen", "/ingress/oauth/issuer", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy", "/gateway"}
+	restart := []string{"", "/node", "/node/name", "/mesh/mode", "/gateway/listen", "/gateway/expose_backends", "/ingress/oauth/issuer", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy", "/gateway"}
 	for _, ptr := range restart {
 		if !NeedsRestart(ptr) {
 			t.Errorf("%q should need a restart", ptr)
 		}
 	}
-	hot := []string{"/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway/quota/calls_per_hour", "/gateway/expose_backends", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer"}
+	hot := []string{"/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer"}
 	for _, ptr := range hot {
 		if NeedsRestart(ptr) {
 			t.Errorf("%q should apply without a restart", ptr)

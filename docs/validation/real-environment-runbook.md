@@ -76,7 +76,7 @@ python3 scripts/accept_collect.py --binary ./xmesh --state-dir $ACC/<节点名>/
 6. 每台对另外两台各验证一次，共六次。`--expected-os` 填被验证那台的系统（`linux`、`darwin` 或 `windows`）：
 
    ```bash
-   python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device lan-b --expected-os linux --expected-mode lan
+   python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device lan-b --expected-os linux --expected-mode lan --token-file <state-dir>/pats/default.token
    ```
 
    通过时最后一行是 `{"result": "PASS", ...}`。mDNS 发现需要几秒，脚本最多等 20 秒。

@@ -129,7 +129,9 @@ func (s *Server) pairImport(w http.ResponseWriter, r *http.Request, _ *call) {
 
 var patNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,62}$`)
 
-func (s *Server) patDir() string { return filepath.Join(s.o.StateDir, "pats") }
+func (s *Server) patDir() string { return patDirOf(s.o.StateDir) }
+
+func patDirOf(stateDir string) string { return filepath.Join(stateDir, "pats") }
 
 func newPatToken() (string, error) {
 	b := make([]byte, 32)
@@ -301,6 +303,13 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	pat, ok := patEntries(old)[name]
 	if !ok {
 		failWith(w, newError(v1.ErrNotFound, "没有这个 PAT"))
+		return
+	}
+	if len(patEntries(old)) == 1 {
+		// The gateway always requires a token (CTR-GW-07), so the last one stays until it is rotated.
+		e := newError(v1.ErrConflict, "至少保留一个令牌：本机 Gateway 每个请求都需要令牌")
+		e.Reason = "last_pat"
+		failWith(w, e)
 		return
 	}
 	if !s.editConfigLocked(w, old, []Edit{{Path: "/gateway/pats/" + name, Delete: true}}) {

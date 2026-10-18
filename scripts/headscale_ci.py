@@ -29,7 +29,7 @@ import tempfile
 import time
 import urllib.request
 
-from smoke_local import MCP, address, stop_runtime, wait_for_gateway
+from smoke_local import MCP, address, stop_runtime, wait_for_default_token, wait_for_gateway
 from smoke_peer import verify_peer
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -161,11 +161,12 @@ def main():
                 (node / "config.json").write_text(json.dumps(cfg))
                 process, log = spawn(command, name)
                 nodes[name] = (process, log, f"127.0.0.1:{port}")
-            clients = {name: wait_for_gateway(process, gateway, log, seconds=90)
+            tokens = {name: wait_for_default_token(work / name / "state") for name in nodes}
+            clients = {name: wait_for_gateway(process, gateway, log, tokens[name], seconds=90)
                        for name, (process, log, gateway) in nodes.items()}
             results = []
             for source, target in (("hs-a", "hs-b"), ("hs-b", "hs-a")):
-                results.append(verify_peer(nodes[source][2], target, options.expected_os))
+                results.append(verify_peer(nodes[source][2], target, options.expected_os, token=tokens[source]))
             for client in clients.values():
                 client.close()
 

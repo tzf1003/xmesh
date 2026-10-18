@@ -161,6 +161,9 @@ func controlPats(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		if err := flags.Parse(rest); err != nil {
 			return err
 		}
+		if flags.NArg() > 0 {
+			return fmt.Errorf("%s", usage)
+		}
 		c, err := target.client()
 		if err != nil {
 			return err
