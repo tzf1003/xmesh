@@ -288,6 +288,37 @@ export interface ConfigChange {
    */
   weakens_security: boolean;
 }
+/**
+ * 对配置文件的一处修改，按 JSON Pointer 定位；数组整体替换，映射不存在时自动创建。
+ */
+export interface ConfigEdit {
+  /**
+   * JSON Pointer，例如 /agent/backends/fs。
+   */
+  path: string;
+  /**
+   * 新值，任意 JSON；delete 为 true 时忽略。
+   */
+  value?: {} | unknown[] | string | number | boolean | null;
+  /**
+   * 删除该路径。
+   */
+  delete?: boolean;
+}
+/**
+ * PATCH /v1/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。
+ */
+export interface ConfigEditRequest {
+  /**
+   * @minItems 1
+   * @maxItems 64
+   */
+  edits: [ConfigEdit, ...ConfigEdit[]];
+  /**
+   * 只校验并计算 diff，不写文件。
+   */
+  dry_run?: boolean;
+}
 export interface ConfigPutRequest {
   content: string;
   /**
@@ -945,7 +976,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.3" as const;
+export const CONTROL_API_VERSION = "1.4" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -999,7 +1030,7 @@ export const CONTROL_ERROR_STATUS = {
 
 export interface ControlRouteInfo {
   id: keyof ControlRouteTypes;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   capability: Capability;
   since: string;
@@ -1117,6 +1148,26 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "errors": []
   },
   {
+    "id": "control.config.patch",
+    "method": "PATCH",
+    "path": "/v1/config",
+    "capability": "config.write",
+    "since": "1.3",
+    "query": null,
+    "body": "ConfigEditRequest",
+    "response": "ConfigPutResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "required",
+    "errors": [
+      "invalid_args",
+      "config_invalid",
+      "precondition_failed",
+      "precondition_required",
+      "conflict"
+    ]
+  },
+  {
     "id": "control.config.put",
     "method": "PUT",
     "path": "/v1/config",
@@ -1174,7 +1225,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "GET",
     "path": "/v1/pair/password",
     "capability": "pair",
-    "since": "1.3",
+    "since": "1.4",
     "query": null,
     "body": null,
     "response": "PairPasswordState",
@@ -1190,7 +1241,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "PUT",
     "path": "/v1/pair/password",
     "capability": "pair",
-    "since": "1.3",
+    "since": "1.4",
     "query": null,
     "body": "PairPasswordRequest",
     "response": "PairPasswordState",
@@ -1207,7 +1258,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "DELETE",
     "path": "/v1/pair/password",
     "capability": "pair",
-    "since": "1.3",
+    "since": "1.4",
     "query": null,
     "body": null,
     "response": null,
@@ -1223,7 +1274,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "GET",
     "path": "/v1/pair/discovered",
     "capability": "pair",
-    "since": "1.3",
+    "since": "1.4",
     "query": null,
     "body": null,
     "response": "PairDiscoveredResponse",
@@ -1239,7 +1290,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "method": "POST",
     "path": "/v1/pair/connect",
     "capability": "pair",
-    "since": "1.3",
+    "since": "1.4",
     "query": null,
     "body": "PairConnectRequest",
     "response": "PairConnectResponse",
@@ -1413,6 +1464,7 @@ export interface ControlRouteTypes {
   "control.drain.start": { query: undefined; body: DrainRequest; response: DrainResponse };
   "control.drain.resume": { query: undefined; body: undefined; response: DrainResponse };
   "control.config.get": { query: undefined; body: undefined; response: ConfigResponse };
+  "control.config.patch": { query: undefined; body: ConfigEditRequest; response: ConfigPutResponse };
   "control.config.put": { query: undefined; body: ConfigPutRequest; response: ConfigPutResponse };
   "control.pair.export": { query: undefined; body: undefined; response: PairExportResponse };
   "control.pair.import": { query: undefined; body: PairImportRequest; response: PairImportResponse };

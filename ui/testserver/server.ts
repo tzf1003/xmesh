@@ -38,11 +38,12 @@ export interface RecordedRequest {
   path: string;
   body: unknown;
   lastEventId?: string;
+  ifMatch?: string;
 }
 
 const RING = 1024;
 
-/** Panel route prefixes and the capability that gates each (PUT /v1/config needs config.write instead). */
+/** Panel route prefixes and the capability that gates each (PUT and PATCH /v1/config need config.write instead). */
 const PANEL_ROUTE_CAPS: [string, Capability][] = [
   ["/v1/config", "config.read"],
   ["/v1/pats", "pats"],
@@ -282,13 +283,14 @@ export class FakeKernel {
       }
       const url = req.url ?? "/";
       const lastEventId = typeof req.headers["last-event-id"] === "string" ? req.headers["last-event-id"] : undefined;
+      const ifMatch = typeof req.headers["if-match"] === "string" ? req.headers["if-match"] : undefined;
       const rec: RecordedRequest = { method: req.method ?? "GET", path: url, body };
       if (lastEventId !== undefined) rec.lastEventId = lastEventId;
+      if (ifMatch !== undefined) rec.ifMatch = ifMatch;
       this.requests.push(rec);
       if (req.headers.origin !== undefined) {
         return this.error(res, 403, "forbidden", "带 Origin 的请求被拒绝");
       }
-      const ifMatch = typeof req.headers["if-match"] === "string" ? req.headers["if-match"] : undefined;
       this.route(rec.method, url, body, lastEventId, res, ifMatch);
     });
   }

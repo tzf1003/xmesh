@@ -204,6 +204,10 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 4. 写同目录临时文件（保持原文件权限）、`fsync`、重命名覆盖。Windows 使用等价的原子替换。注释与格式由客户端提交的 `content` 原样保留，内核不重新序列化。
 5. 返回 `applied: true`、新 `etag`、`diff`、`restart_required`，发 `config` 事件（`actor: control`），写审计。
 
+### PATCH /v1/config
+
+请求 `ConfigEditRequest`，必须带 `If-Match`，与 `PUT` 的 ETag 规则相同。`edits` 是按 JSON Pointer 依次应用到磁盘当前文件上的修改（数组整体替换，缺失的映射自动创建，`delete: true` 删除路径），注释与未修改的部分原样保留。内核先在当前文件上应用全部修改，再走与 `PUT` 相同的 `config.Parse` 校验、diff、原子写入与事件；任一步失败整批都不写入。无法应用的修改（例如路径穿过标量）返回 `conflict`（409）。`dry_run: true` 只返回 diff。UI 的表单式设置（MCP 服务器、内置工具开关、授权）都经此路由写入，避免客户端整文件改写 YAML。
+
 写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的字段（`node`、`mesh`、`ingress`、`gateway.listen`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。
 
 ### diff 与 `weakens_security`
@@ -220,7 +224,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ## CTR-CTL-08
 
-### 连接密码（1.3 起）
+### 连接密码（1.4 起）
 
 每台 `lan` 节点可以设置一个连接密码。另一台设备输入它即可直接配对，无需交换文件。
 
@@ -229,7 +233,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 - `DELETE /v1/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
 - 口令只写不读：没有任何响应包含它。磁盘上只保存 Argon2id 的派生密钥与盐。
 
-### 内网发现与连接（1.3 起）
+### 内网发现与连接（1.4 起）
 
 - `GET /v1/pair/discovered` 返回 `PairDiscoveredResponse {devices[]}`：尚未配对、宣告了 `pairing=1` 的设备，每项 `name`、`fingerprint`、`address`（主机:端口）、`seen_at`。不含证书，已配对的设备不出现。
 - `POST /v1/pair/connect` 的请求是 `PairConnectRequest {address?, fingerprint?, password}`，`address` 与 `fingerprint` 至少给一个。只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`。同时给出时，对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`），不会钉入任何证书。成功返回 `PairConnectResponse {name, fingerprint, address, tags}`，立即生效，无需重启。

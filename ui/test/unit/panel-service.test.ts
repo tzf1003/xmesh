@@ -252,6 +252,70 @@ test("call events feed the recent-calls ring, newest last", async () => {
   assert.ok(seen.length >= 1);
 });
 
+test("PATCH /v1/config: edits apply to the document, If-Match is sent, and a stale, invalid or unappliable patch writes nothing", async () => {
+  const { k, service } = await setup();
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  const edits = [
+    { path: "/agent/backends/git-tools", value: { transport: "stdio", command: ["git", "mcp-server"], policy: "shared" } },
+    { path: "/agent/authz/tag:ops", value: { backends: ["git-tools"], tools: ["fs.read"] } },
+  ];
+  const stale = await service.patchConfig({ edits, etag: `sha256-${"0".repeat(64)}`, dryRun: false });
+  assert.ok(!stale.ok);
+  assert.equal(stale.error.code, "precondition_failed");
+  assert.equal(stale.error.current_etag, cfg.data.etag);
+
+  const dry = await service.patchConfig({ edits, etag: cfg.data.etag, dryRun: true });
+  assert.ok(dry.ok);
+  assert.equal(dry.data.applied, false);
+  assert.equal(k.panel.writes.length, 0, "a dry run writes nothing");
+  const sent = last(k, "PATCH", "/v1/config");
+  assert.deepEqual(sent?.body, { edits, dry_run: true });
+  assert.equal(sent?.ifMatch, `"${cfg.data.etag}"`);
+
+  const saved = await service.patchConfig({ edits, etag: cfg.data.etag, dryRun: false });
+  assert.ok(saved.ok);
+  assert.equal(saved.data.applied, true);
+  assert.equal(saved.data.restart_required, false, "agent settings reload without a restart");
+  assert.equal(k.panel.writes.length, 1);
+  const after = await service.getConfig();
+  assert.ok(after.ok);
+  const agent = (after.data.parsed as { agent: { backends: Record<string, unknown>; authz: Record<string, unknown> } }).agent;
+  assert.deepEqual(agent.backends["git-tools"], { transport: "stdio", command: ["git", "mcp-server"], policy: "shared" });
+  assert.deepEqual(agent.authz["tag:ops"], { backends: ["git-tools"], tools: ["fs.read"] });
+
+  // An edit that goes through a list is refused whole, and nothing from the batch is written.
+  const through = await service.patchConfig({
+    edits: [{ path: "/agent/disabled_tools", value: ["exec.run"] }, { path: "/agent/backends/git-tools/command/0", value: "x" }],
+    etag: after.data.etag,
+    dryRun: false,
+  });
+  assert.ok(!through.ok);
+  assert.equal(through.error.code, "conflict");
+  assert.equal(k.panel.writes.length, 1);
+
+  // A document the kernel would reject answers config_invalid with nothing written.
+  const broken = await service.patchConfig({ edits: [{ path: "/agent/backends/BROKEN", value: { transport: "stdio", command: ["x"], policy: "shared" } }], etag: after.data.etag, dryRun: false });
+  assert.ok(!broken.ok);
+  assert.equal(broken.error.code, "config_invalid");
+  assert.equal(k.panel.writes.length, 1);
+});
+
+test("PATCH /v1/config delete removes a key and leaves the rest of the document alone", async () => {
+  const { k, service } = await setup();
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  const first = await service.patchConfig({ edits: [{ path: "/agent/disabled_tools", value: ["exec.run"] }], etag: cfg.data.etag, dryRun: false });
+  assert.ok(first.ok);
+  const mid = await service.getConfig();
+  assert.ok(mid.ok);
+  const gone = await service.patchConfig({ edits: [{ path: "/agent/disabled_tools", delete: true }], etag: mid.data.etag, dryRun: false });
+  assert.ok(gone.ok);
+  assert.equal(gone.data.diff[0]?.op, "remove");
+  const end = JSON.parse(k.panel.content) as Record<string, unknown>;
+  assert.equal("disabled_tools" in ((end.agent as Record<string, unknown>) ?? {}), false);
+  assert.deepEqual(end.node, { name: "win-dev-01", roles: ["agent"] });
+});
 test("the gateway reach is replaced as a whole: access and hosts apply now, a listen change asks for a restart", async () => {
   const { k, service } = await setup();
   const hot = await service.updateGateway({ listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });

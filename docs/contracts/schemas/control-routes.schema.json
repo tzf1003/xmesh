@@ -18,7 +18,7 @@
           "pattern": "^control\\.[a-z]+(\\.[a-z]+)*$",
           "description": "路由编号。审计记录的 tool 字段使用它。"
         },
-        "method": { "enum": ["GET", "POST", "PUT", "DELETE"] },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
         "path": { "type": "string", "pattern": "^/v1/[a-z/{}_-]+$", "description": "{name} 形式的路径参数。" },
         "capability": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Capability" },
         "since": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/ApiVersion", "description": "引入该路由的控制 API 版本。" },
