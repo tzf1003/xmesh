@@ -290,6 +290,9 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 			http.NotFound(w, r)
 			return
 		}
+		if e := precheck(w, r); e {
+			return
+		}
 		p, e := auth(r)
 		if e != nil {
 			http.Error(w, "身份无效", 401)
@@ -441,7 +444,11 @@ func (g *Gateway) newView(p Principal) *view {
 							}
 							v.mu.Lock()
 							d := v.down[device]
-							shown := !g.favorite.Load() || builtin(tool) || (d != nil && favorite(d.info, tool))
+							// The default device is what an unprefixed call
+							// reaches, so its whole table stays visible with
+							// schemas even when favorites hide the rest
+							// (CTR-GW-02). Other devices stay on favorites.
+							shown := !g.favorite.Load() || builtin(tool) || (d != nil && favorite(d.info, tool)) || device == v.defaultDeviceLocked()
 							v.mu.Unlock()
 							if shown {
 								visible = append(visible, t)
@@ -458,6 +465,19 @@ func (g *Gateway) newView(p Principal) *view {
 	})
 	return v
 }
+
+// defaultDeviceLocked returns the session's default device; the caller holds
+// v.mu.
+func (v *view) defaultDeviceLocked() string {
+	raw := v.defaults["device"]
+	if raw == nil {
+		return ""
+	}
+	var device string
+	_ = json.Unmarshal(raw, &device)
+	return device
+}
+
 func (v *view) bind(s *mcp.ServerSession) {
 	v.mu.Lock()
 	if v.session != nil {
