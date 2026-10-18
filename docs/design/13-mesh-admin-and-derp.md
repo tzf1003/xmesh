@@ -52,7 +52,7 @@ UI 端的目标是把这三件事变成可预览、可校验、可回滚的操�
 flowchart LR
   subgraph ui["xmesh-ui / xmesh CLI"]
     admin["meshadmin<br/>（控制面客户端库）"]
-    kc["系统钥匙串<br/>管理凭据"]
+    kc["0600 凭据文件<br/>管理凭据"]
     admin --- kc
   end
   subgraph cp["控制面"]
@@ -71,7 +71,7 @@ flowchart LR
 要点：
 
 1. **新增 `meshadmin` 库**（根 module 的公开包，不依赖 `internal/`），封装控制面 Provider 接口，两个实现：Tailscale（API v2）和 Headscale。新的 `xmesh mesh ... --json` 子命令是它的入口，Electron 主进程调用该子命令，不用 TypeScript 重写一份，所以管理动作既能点按钮，也能脚本化，将来服务端控制台也能复用。
-2. **管理凭据不进内核。** OAuth client 密钥、Headscale API key 存系统钥匙串（Windows 凭据管理器、macOS 钥匙串），只由 `xmesh mesh` 子命令读取（UI 经该子命令间接使用），禁止写进 `xmesh.yaml`，禁止经 Control API 读回，内核进程不持有它们。UI 的登录表单只在保存时把密钥经标准输入交给 `xmesh mesh login --secret-file=-`，主进程与渲染进程不保存、不记录、不回显它，参数里不出现密钥（见 `ui/README.md`）。读写分开签发两份凭据：日常只带只读 scope，要改动时才临时使用写凭据。
+2. **管理凭据不进内核。** 桌面面板把 API token、OAuth client 或 Headscale API key 存入本机 `0600` JSON 文件，经 `--credential-file` 交给 `xmesh mesh`。表单默认读写权限，选择只读时保存该权限并在写操作前校验。密钥只经 stdin 输入，禁止进入 `xmesh.yaml`、Control API 响应、日志和命令行参数。CLI 旧有钥匙串 profile 兼容入口继续保留。设备浏览器登录单独保存 tsnet 节点身份，不获得控制面管理权限。
 3. **不新增身份体系。** xmesh 是控制面的客户端，不是第二套节点身份，符合 [CON-NET-03](../constraints/network.md#con-net-03)。[CON-NET-04](../constraints/network.md#con-net-04) 禁止业务代码里按官方或 Headscale 分支，`meshadmin` 是管理工具，不是业务路径，Provider 的差异只允许出现在这个包里，内核与 Gateway 保持不变。需要在裁定里写明这个界限。
 
 ## 能力分期

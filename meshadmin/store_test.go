@@ -148,3 +148,32 @@ func TestWriteSecretFile(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialFileRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mesh", "mesh-credential.json")
+	c := Credential{Kind: KindTailscale, Type: CredToken, URL: DefaultTailscaleURL, Secret: "tskey-api-example"}
+	if err := WriteCredentialFile(p, c); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("credential file is readable by others: %v", st.Mode().Perm())
+		}
+	}
+	back, err := ReadCredentialFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Kind != c.Kind || back.Type != c.Type || back.Secret != c.Secret || back.URL != c.URL {
+		t.Fatalf("round trip: %+v", back)
+	}
+	// An invalid credential is refused before anything is written.
+	if err := WriteCredentialFile(filepath.Join(dir, "bad.json"), Credential{Kind: KindTailscale, Type: CredToken}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty secret accepted: %v", err)
+	}
+}

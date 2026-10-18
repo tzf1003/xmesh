@@ -273,6 +273,8 @@ function Admission({ ctx }: { ctx: MeshTabProps["ctx"] }): JSX.Element {
   const [mode, setMode] = useState<SyncMode>("allowlist");
   const [allowlist, setAllowlist] = useState("");
   const [url, setUrl] = useState("");
+  // Either a pasted token (kept only until submit) or the path of a file that holds it.
+  const [token, setToken] = useState("");
   const [tokenFile, setTokenFile] = useState("");
   const [allDevices, setAllDevices] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -284,13 +286,18 @@ function Admission({ ctx }: { ctx: MeshTabProps["ctx"] }): JSX.Element {
     const r = await getApi().pickPath(kind);
     if (r.ok && r.data.path) set(r.data.path);
   };
-  const ready = mode === "allowlist" ? allowlist !== "" : /^https?:\/\//.test(url) && tokenFile !== "";
+  const ready = mode === "allowlist" ? allowlist !== "" : /^https?:\/\//.test(url) && (token !== "" || tokenFile !== "");
 
   const run = async (): Promise<void> => {
     setBusy(true);
     setErr(undefined);
     setDone(undefined);
-    const r = await getApi().mesh({ op: "derp.sync", target: mode === "allowlist" ? { allowlist } : { url, tokenFile }, allDevices });
+    const r = await getApi().mesh({
+      op: "derp.sync",
+      target: mode === "allowlist" ? { allowlist } : token !== "" ? { url, token } : { url, tokenFile },
+      allDevices,
+    });
+    setToken("");
     setBusy(false);
     setAsking(false);
     if (r.ok) {
@@ -314,9 +321,18 @@ function Admission({ ctx }: { ctx: MeshTabProps["ctx"] }): JSX.Element {
         </label>
       </fieldset>
       {mode === "allowlist" ? (
-        <Field label={t("mesh.admission.allowlist")}>
+        <Field label={t("mesh.admission.allowlist")} hint={t("mesh.admission.allowlistHint")}>
           <div class="row">
-            <input type="text" readOnly value={allowlist} placeholder="—" aria-label={t("mesh.admission.allowlist")} data-testid="mesh-admission-allowlist" />
+            <input
+              type="text"
+              value={allowlist}
+              onInput={(e) => setAllowlist((e.currentTarget as HTMLInputElement).value)}
+              placeholder="/etc/derp/allow.json"
+              aria-label={t("mesh.admission.allowlist")}
+              autocomplete="off"
+              spellcheck={false}
+              data-testid="mesh-admission-allowlist"
+            />
             <button type="button" class="btn" onClick={() => void pick("allowlistFile", setAllowlist)} data-testid="mesh-admission-pick-allowlist">
               {t("wizard.choose")}
             </button>
@@ -328,8 +344,28 @@ function Admission({ ctx }: { ctx: MeshTabProps["ctx"] }): JSX.Element {
             <input type="text" value={url} onInput={(e) => setUrl((e.currentTarget as HTMLInputElement).value)} placeholder="https://derp.example.com:8480" autocomplete="off" data-testid="mesh-admission-url" />
           </Field>
           <Field label={t("mesh.admission.token")} hint={t("mesh.admission.tokenHint")}>
+            <input
+              type="password"
+              value={token}
+              onInput={(e) => setToken((e.currentTarget as HTMLInputElement).value)}
+              placeholder={t("mesh.admission.tokenPlaceholder")}
+              autocomplete="off"
+              spellcheck={false}
+              data-testid="mesh-admission-token"
+            />
+          </Field>
+          <Field label={t("mesh.admission.tokenFile")} hint={t("mesh.admission.tokenFileHint")}>
             <div class="row">
-              <input type="text" readOnly value={tokenFile} placeholder="—" aria-label={t("mesh.admission.token")} data-testid="mesh-admission-tokenfile" />
+              <input
+                type="text"
+                value={tokenFile}
+                onInput={(e) => setTokenFile((e.currentTarget as HTMLInputElement).value)}
+                placeholder="—"
+                aria-label={t("mesh.admission.tokenFile")}
+                autocomplete="off"
+                spellcheck={false}
+                data-testid="mesh-admission-tokenfile"
+              />
               <button type="button" class="btn" onClick={() => void pick("tokenFile", setTokenFile)} data-testid="mesh-admission-pick-token">
                 {t("wizard.choose")}
               </button>

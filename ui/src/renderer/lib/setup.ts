@@ -8,6 +8,11 @@ export interface WizardForm {
   gateway: boolean;
   workspace: string;
   controlUrl: string;
+  /** `auto`: mint a preauthorised key with the saved credential. */
+  authkeySource: "browser" | "auto" | "paste" | "file";
+  authkeyUser: string;
+  /** A pasted key; only sent when `authkeySource` is `paste`. */
+  authkey: string;
   authkeyFile: string;
 }
 
@@ -18,6 +23,9 @@ export const INITIAL_FORM: WizardForm = {
   gateway: true,
   workspace: "",
   controlUrl: DEFAULT_CONTROL_URL,
+  authkeySource: "browser",
+  authkeyUser: "",
+  authkey: "",
   authkeyFile: "",
 };
 
@@ -28,7 +36,14 @@ export function toParams(f: WizardForm): unknown {
   const p: Record<string, unknown> = { nodeName: f.nodeName.trim(), mode: f.mode, roles, workspace: f.workspace.trim() };
   if (f.mode === "tailnet") {
     p.controlUrl = f.controlUrl.trim();
-    p.authkeyFile = f.authkeyFile.trim();
+    // One source at a time, so the main process never has to pick.
+    if (f.authkeySource === "browser") p.browserLogin = true;
+    else if (f.authkeySource === "auto") {
+      p.autoAuthkey = true;
+      if (f.authkeyUser.trim()) p.authkeyUser = f.authkeyUser.trim();
+    }
+    else if (f.authkeySource === "paste") p.authkey = f.authkey.trim();
+    else p.authkeyFile = f.authkeyFile.trim();
   }
   return p;
 }

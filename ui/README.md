@@ -70,7 +70,9 @@ npm start             # 另开终端，启动 Electron
 
 ### Tailnet 管理页面
 
-侧栏的「Tailnet 管理」不依赖本机内核：它通过控制面（Tailscale 或 Headscale）管理整个 tailnet，实现方式是调用 `xmesh mesh … --json`（meshadmin）。凭据存在系统钥匙串里，由 `xmesh mesh` 命令行写入和读取。页面顶部的「保存控制面凭据」表单可以保存一份凭据（Tailscale 或 Headscale，只读或读写）：密钥经主进程通过标准输入交给 `xmesh mesh login --secret-file=-`，命令行验证后存进钥匙串，密钥不进命令行参数，主进程和渲染进程都不保存、不记录、不回显它，提交后输入框立即清空。除此之外，界面仍然给出可复制的终端命令（`xmesh mesh login --kind … --access read|write`），两种方式任选。读取凭据的所有调用都不经过密钥。
+首次运行向导默认提供「浏览器登录 Tailscale」：主进程运行 `xmesh login --json`，识别经过控制面来源校验的授权地址并自动打开系统浏览器。完成登录后，节点身份保存在节点的 `network/tsnet` 目录，再安装服务，之后复用该身份连接。启用设备审批或标签限制的 tailnet 需要管理员批准；只有获得 `tag:device` 后才继续安装。浏览器登录用于设备入网，管理整个 tailnet 仍需管理凭据。向导同时支持粘贴已有 key、选择 key 文件，或用管理凭据创建预授权 key。
+
+侧栏的「Tailnet 管理」通过 `xmesh mesh … --json` 管理控制面。登录表单默认选择读写权限；密钥经主进程通过 stdin 交给 CLI，验证通过后原子保存到 `<状态根>/mesh/mesh-credential.json`（Unix `0600`）。每次调用带 `--credential-file`，页面展示凭据文件路径与权限。复制的登录命令带 `--panel`，使用同一个文件。选择只读权限时，CLI 在写操作前拒绝该凭据；控制面的实际 scope 和标签限制仍生效。密钥不进入配置、命令行参数或日志。
 
 | 标签页 | 内容 |
 | --- | --- |
@@ -185,7 +187,7 @@ UI 以 [docs/contracts/control.md](../docs/contracts/control.md) 为准。
 ## 还没做
 
 - 面板的结构化配置表单：目前是 YAML 编辑 + 差异预览；终端会话没有关闭路由（契约未定义），孤儿终端只展示
-- tailnet 管理页面目前只用默认凭据配置（profile `default`），没有多配置切换；没有系统钥匙串的机器（例如无桌面的 Linux）要在终端里带 `--credential-file` 使用命令行
+- Tailnet 管理页使用一个当前控制面的凭据文件；切换控制面时重新保存对应凭据。Headscale 多用户入网在向导中填写用户名。
 - 有证书后的签名与公证只差配置 secrets，尚未用真实证书验证过
 - 登录项和通知的运行时部分已在 `src/main/system/`，但只有安装版才生效，真机验证要等安装包
 - `xmesh restart` / `stop` 子命令由内核通道线程提供，托盘只在菜单里调用 `xmesh <cmd> --json`

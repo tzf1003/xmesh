@@ -220,6 +220,21 @@ export interface SetupParams {
   controlUrl?: string;
   /** tailnet only: absolute path of a file that holds the auth key. */
   authkeyFile?: string;
+  /**
+   * tailnet only: a pasted auth key, as an alternative to `authkeyFile`. The
+   * main process writes it to a 0600 file inside the node's state directory and
+   * puts that path in the config; the value itself never reaches the file.
+   */
+  authkey?: string;
+  /**
+   * tailnet only: create a preauthorised key with the saved control-plane
+   * credential instead of asking for one. Requires a read-write credential
+   * from the Tailnet page; the file lands at `authkeyFile` in the preview.
+   */
+  autoAuthkey?: boolean;
+  browserLogin?: boolean;
+  /** Headscale username for managed key creation. */
+  authkeyUser?: string;
 }
 
 export interface SetupStep {
@@ -240,6 +255,8 @@ export interface SetupPreview {
   /** The deny list file the config names; written with the defaults when it does not exist yet. */
   denyPath: string;
   config: string;
+  /** Where a pasted auth key is written (0600); absent when the user named an existing file. */
+  authkeyPath?: string;
 }
 
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */

@@ -167,7 +167,7 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 		if h.d.network == nil {
 			add(v1.WarnTailnetNotReady, v1.SeverityWarning, "尚未加入 tailnet")
 		}
-		if !st.AuthkeyReadable {
+		if cfg.Mesh.AuthMethod != "browser" && !st.AuthkeyReadable {
 			add(v1.WarnAuthkeyUnreadable, v1.SeverityWarning, "无法读取 authkey_file")
 		}
 	}

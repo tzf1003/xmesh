@@ -39,6 +39,7 @@ type Mesh struct {
 	Mode        string `json:"mode"`
 	ControlURL  string `json:"control_url"`
 	AuthkeyFile string `json:"authkey_file"`
+	AuthMethod  string `json:"auth_method,omitempty"`
 	Ephemeral   bool   `json:"ephemeral"`
 	LAN         struct {
 		MDNS bool `json:"mdns"`

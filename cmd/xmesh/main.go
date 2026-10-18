@@ -51,6 +51,7 @@ const usage = `用法: xmesh <子命令> [参数]
   uninstall / start / stop / restart
            卸载、启动、停止、重启已安装的服务
            --config 路径（或 --name 服务名）  --system（仅 Windows）  --json
+  login    在浏览器授权此节点  --config 路径  --state-dir 目录  --json
   mesh     管理 tailnet 控制面：tag、权限矩阵、策略、DERP；见 xmesh mesh help
   version  打印版本号（也可写作 --version）`
 
@@ -74,6 +75,8 @@ func run(args []string) error {
 		return withJSON("pair", args[1:], pair)
 	case "status":
 		return status(args[1:])
+	case "login":
+		return login(args[1:], os.Stdout)
 	case "mesh":
 		return meshCmd(args[1:])
 	case "control":

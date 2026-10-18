@@ -59,32 +59,66 @@ func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 // meshCommon holds the flags shared by every subcommand.
 type meshCommon struct {
 	profile  string
+	panel    bool
 	credFile string
 	json     bool
 }
 
 func (c *meshCommon) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.profile, "profile", "default", "凭据配置名")
+	fs.BoolVar(&c.panel, "panel", false, "使用桌面面板的 0600 凭据文件")
 	fs.StringVar(&c.credFile, "credential-file", "", "凭据 JSON 文件（0600），用于没有系统钥匙串的主机")
 	fs.BoolVar(&c.json, "json", false, "输出 JSON")
 }
 
-func (c *meshCommon) provider(access meshadmin.Access) (meshadmin.Provider, meshadmin.Credential, error) {
+func (c *meshCommon) resolveCredentialFile() error {
+	if !c.panel || c.credFile != "" {
+		return nil
+	}
+	root := os.Getenv("XMESH_UI_STATE_ROOT")
+	if root == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return err
+		}
+		root = filepath.Join(base, "xmesh")
+	}
+	c.credFile = filepath.Join(root, "mesh", "mesh-credential.json")
+	return nil
+}
+
+// provider builds the control-plane client. used is the access level that
+// actually answered (a read call falls back to the write credential), and
+// source says where the credential came from. Neither value carries the secret.
+func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, used meshadmin.Access, source string, err error) {
+	if err := c.resolveCredentialFile(); err != nil {
+		return nil, access, "file", err
+	}
 	var cred meshadmin.Credential
-	var err error
+	used, source = access, "keychain"
 	if c.credFile != "" {
 		cred, err = meshadmin.ReadCredentialFile(c.credFile)
+		source = "file"
+		if errors.Is(err, os.ErrNotExist) {
+			err = meshadmin.ErrNoCredential
+		}
+		if err == nil && cred.Access != "" {
+			if access == meshadmin.AccessWrite && cred.Access == meshadmin.AccessRead {
+				return nil, access, source, fmt.Errorf("meshadmin: insufficient_scope: saved credential is read-only")
+			}
+			used = cred.Access
+		}
 	} else {
-		cred, access, err = meshadmin.Resolve(meshCredentials, c.profile, access)
+		cred, used, err = meshadmin.Resolve(meshCredentials, c.profile, access)
 	}
 	if err != nil {
 		if errors.Is(err, meshadmin.ErrNoCredential) {
-			return nil, cred, fmt.Errorf("没有保存的凭据（profile %q）。先运行: xmesh mesh login --kind tailscale|headscale --url ... --access read|write", c.profile)
+			return nil, used, source, fmt.Errorf("没有保存的凭据（profile %q）。先运行: xmesh mesh login --kind tailscale|headscale --url ... --access read|write", c.profile)
 		}
-		return nil, cred, err
+		return nil, used, source, err
 	}
-	p, err := meshadmin.NewProvider(cred, access)
-	return p, cred, err
+	p, err = meshadmin.NewProvider(cred, used)
+	return p, used, source, err
 }
 
 func (c *meshCommon) snapshots(dir string) (meshadmin.SnapshotStore, error) {
@@ -206,6 +240,9 @@ func meshLogin(args []string, out io.Writer, in io.Reader) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	if err := c.resolveCredentialFile(); err != nil {
+		return err
+	}
 	if *access != "read" && *access != "write" {
 		return fmt.Errorf("--access 必须是 read 或 write")
 	}
@@ -230,6 +267,7 @@ func meshLogin(args []string, out io.Writer, in io.Reader) error {
 		return err
 	}
 	acc := meshadmin.Access(*access)
+	cred.Access = acc
 	if !*noVerify {
 		p, err := meshadmin.NewProvider(cred, acc)
 		if err != nil {
@@ -241,11 +279,17 @@ func meshLogin(args []string, out io.Writer, in io.Reader) error {
 			return fmt.Errorf("凭据验证失败（用 --no-verify 跳过）: %w", err)
 		}
 	}
-	if err := meshCredentials.Put(c.profile, acc, cred); err != nil {
+	storedAt := "系统钥匙串"
+	if c.credFile != "" {
+		if err := meshadmin.WriteCredentialFile(c.credFile, cred); err != nil {
+			return err
+		}
+		storedAt = c.credFile
+	} else if err := meshCredentials.Put(c.profile, acc, cred); err != nil {
 		return err
 	}
-	return emit(out, c.json, map[string]any{"profile": c.profile, "access": acc, "kind": cred.Kind, "stored": true}, func(w io.Writer) {
-		fmt.Fprintf(w, "已保存 %s 凭据（profile %s，%s）到系统钥匙串\n", cred.Kind, c.profile, acc)
+	return emit(out, c.json, map[string]any{"profile": c.profile, "access": acc, "kind": cred.Kind, "stored": true, "file": c.credFile}, func(w io.Writer) {
+		fmt.Fprintf(w, "已保存 %s 凭据（profile %s，%s）到%s\n", cred.Kind, c.profile, acc, storedAt)
 	})
 }
 
@@ -265,6 +309,17 @@ func meshLogout(args []string, out io.Writer) error {
 		which = []meshadmin.Access{meshadmin.Access(*access)}
 	default:
 		return fmt.Errorf("--access 必须是 read 或 write")
+	}
+	if err := c.resolveCredentialFile(); err != nil {
+		return err
+	}
+	if c.credFile != "" {
+		if err := os.Remove(c.credFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return emit(out, c.json, map[string]any{"profile": c.profile, "deleted": true, "file": c.credFile}, func(w io.Writer) {
+			fmt.Fprintf(w, "已删除凭据文件 %s\n", c.credFile)
+		})
 	}
 	for _, a := range which {
 		if err := meshCredentials.Delete(c.profile, a); err != nil {
@@ -301,7 +356,7 @@ func meshStatus(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	p, _, err := c.provider(meshadmin.AccessRead)
+	p, used, source, err := c.provider(meshadmin.AccessRead)
 	if err != nil {
 		return err
 	}
@@ -313,7 +368,14 @@ func meshStatus(args []string, out io.Writer) error {
 	}
 	reports := meshadmin.Analyze(devs, nodes, time.Now())
 	caps, _ := p.Capabilities(ctx)
-	doc := map[string]any{"provider": p.Kind(), "capabilities": caps, "devices": reports}
+	// The UI shows which credential answered: a read-only profile explains why
+	// every change is refused, and a file-backed one explains where it lives.
+	// The secret is never part of this: only where it lives and what it may do.
+	cred := map[string]any{"access": string(used), "profile": c.profile, "source": source}
+	if c.credFile != "" {
+		cred["file"] = c.credFile
+	}
+	doc := map[string]any{"provider": p.Kind(), "capabilities": caps, "devices": reports, "credential": cred}
 	return emit(out, c.json, doc, func(w io.Writer) {
 		fmt.Fprintf(w, "控制面: %s，设备 %d 台，策略写入: %s\n", p.Kind(), len(reports), yesNo(caps.PolicyWrite))
 		for _, r := range reports {
@@ -380,7 +442,7 @@ func meshTags(args []string, out io.Writer) error {
 	if setGiven {
 		access = meshadmin.AccessWrite
 	}
-	p, _, err := c.provider(access)
+	p, _, _, err := c.provider(access)
 	if err != nil {
 		return err
 	}
@@ -498,6 +560,13 @@ func meshAuthKey(args []string, out io.Writer) error {
 }
 
 func createAuthKey(c *meshCommon, out io.Writer, tags string, ttl time.Duration, reusable, ephemeral bool, user, file string, overwrite bool) error {
+	if file != "-" && !overwrite {
+		if _, err := os.Lstat(file); err == nil {
+			return fmt.Errorf("auth key 文件已存在，请复用该文件或明确选择覆盖")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
 	want, err := meshadmin.CanonicalTags(splitTags(tags))
 	if err != nil {
 		return err
@@ -505,7 +574,7 @@ func createAuthKey(c *meshCommon, out io.Writer, tags string, ttl time.Duration,
 	if len(want) == 0 {
 		return fmt.Errorf("需要至少一个 tag")
 	}
-	p, _, err := c.provider(meshadmin.AccessWrite)
+	p, _, _, err := c.provider(meshadmin.AccessWrite)
 	if err != nil {
 		return err
 	}
@@ -606,7 +675,7 @@ func meshPolicy(args []string, out io.Writer) error {
 			}
 		})
 	case *show:
-		p, _, err := c.provider(meshadmin.AccessRead)
+		p, _, _, err := c.provider(meshadmin.AccessRead)
 		if err != nil {
 			return err
 		}
@@ -617,7 +686,7 @@ func meshPolicy(args []string, out io.Writer) error {
 		secs, _ := meshadmin.ManagedSections(doc.Text)
 		return emit(out, c.json, map[string]any{"policy": doc, "managed_sections": secs}, func(w io.Writer) { fmt.Fprint(w, doc.Text) })
 	}
-	p, _, err := c.provider(meshadmin.AccessWrite)
+	p, _, _, err := c.provider(meshadmin.AccessWrite)
 	if err != nil {
 		return err
 	}
@@ -717,7 +786,7 @@ func meshMatrix(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	p, _, err := c.provider(meshadmin.AccessRead)
+	p, _, _, err := c.provider(meshadmin.AccessRead)
 	if err != nil {
 		return err
 	}
@@ -851,7 +920,7 @@ func derpPlanApply(apply bool, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	p, _, err := c.provider(meshadmin.AccessWrite)
+	p, _, _, err := c.provider(meshadmin.AccessWrite)
 	if err != nil {
 		return err
 	}
@@ -1146,7 +1215,7 @@ func derpSync(args []string, out io.Writer) error {
 	if (*list == "") == (*url == "") {
 		return fmt.Errorf("--allowlist 与 --admission-url 二选一")
 	}
-	p, _, err := c.provider(meshadmin.AccessRead)
+	p, _, _, err := c.provider(meshadmin.AccessRead)
 	if err != nil {
 		return err
 	}

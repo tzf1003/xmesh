@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -384,5 +385,91 @@ func Test_MeshUsageAndUnknown(t *testing.T) {
 	}
 	if !strings.Contains(usage, "mesh ") {
 		t.Fatal("main usage must list mesh")
+	}
+}
+
+// A credential file replaces the keychain profile, so a headless host works
+// through the same code path the desktop panel uses.
+func Test_MeshLoginWritesCredentialFile(t *testing.T) {
+	_, url := newCLITailscale(t)
+	old := meshCredentials
+	meshCredentials = &meshadmin.MemoryStore{}
+	defer func() { meshCredentials = old }()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "mesh", "mesh-credential.json")
+	out, err := runMesh(t, cliSecret+"\n", "login", "--kind", "tailscale", "--url", url, "--access", "write", "--credential-file", file, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, cliSecret) {
+		t.Fatalf("login echoed the secret: %s", out)
+	}
+	cred, err := meshadmin.ReadCredentialFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cred.Secret != cliSecret || cred.Kind != meshadmin.KindTailscale {
+		t.Fatalf("stored credential: %+v", cred)
+	}
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("credential file mode %v", st.Mode().Perm())
+		}
+	}
+	// Status reads the same file without consulting the keychain store.
+	if _, err := runMesh(t, "", "status", "--json", "--credential-file", file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runMesh(t, "", "logout", "--credential-file", file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("logout kept the credential file: %v", err)
+	}
+}
+
+func TestMeshCredentialFileAccessAndMissingLogin(t *testing.T) {
+	_, url := newCLITailscale(t)
+	file := filepath.Join(t.TempDir(), "credential.json")
+	if _, err := runMesh(t, "", "status", "--credential-file", file); err == nil || !strings.Contains(err.Error(), "没有保存的凭据") {
+		t.Fatalf("missing: %v", err)
+	}
+	if _, err := runMesh(t, cliSecret+"\n", "login", "--kind", "tailscale", "--url", url, "--access", "read", "--credential-file", file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runMesh(t, "", "authkey", "--tags", "tag:device", "--out", filepath.Join(t.TempDir(), "key"), "--credential-file", file); err == nil || !strings.Contains(err.Error(), "insufficient_scope") {
+		t.Fatalf("read-only: %v", err)
+	}
+	out, err := runMesh(t, "", "status", "--json", "--credential-file", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Credential struct {
+			Access string `json:"access"`
+			Source string `json:"source"`
+		} `json:"credential"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Credential.Access != "read" || doc.Credential.Source != "file" {
+		t.Fatalf("status: %s", out)
+	}
+}
+
+func TestMeshPanelCredentialLocation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XMESH_UI_STATE_ROOT", root)
+	c := meshCommon{panel: true}
+	if err := c.resolveCredentialFile(); err != nil {
+		t.Fatal(err)
+	}
+	if c.credFile != filepath.Join(root, "mesh", "mesh-credential.json") {
+		t.Fatalf("panel credential path: %s", c.credFile)
 	}
 }

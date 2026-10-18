@@ -179,7 +179,7 @@ test("the login commands copy the CLI as the app runs it, quoted for a terminal"
   const { controller } = fakeController({ ...EMPTY_SNAPSHOT, cliCommand: "'/Applications/My Tools/xmesh'" });
   const { platform, log } = fakePlatform();
   assert.deepEqual(await new Actions(controller, platform, t, NO_CREDENTIALS).copy("meshLoginRead"), { ok: true });
-  assert.deepEqual(log, ["clip:'/Applications/My Tools/xmesh' mesh login --kind tailscale --access read"]);
+  assert.deepEqual(log, ["clip:'/Applications/My Tools/xmesh' mesh login --kind tailscale --access read --panel"]);
 });
 
 test("openPath checks the path first", async () => {

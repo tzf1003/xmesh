@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { CliError } from "../../src/main/cli";
 import { parse } from "yaml";
 import { type SetupHost, fsSetupHost, previewSetup, runSetup } from "../../src/main/setup";
-import { DEFAULT_CONTROL_URL, DEFAULT_DENY, DENY_FILE_NAME, denyListText, generateConfig, generateDenyFile, isAbsolutePath, parseSetup } from "../../src/shared/setup";
+import { AUTHKEY_FILE_NAME, DEFAULT_CONTROL_URL, DEFAULT_DENY, DENY_FILE_NAME, denyListText, generateConfig, generateDenyFile, isAbsolutePath, parseSetup, resolveAuthkey } from "../../src/shared/setup";
 
 const lan = { nodeName: "dev-1", mode: "lan", roles: ["agent", "gateway"], workspace: "/home/me/work" };
 const tailnet = { ...lan, mode: "tailnet", authkeyFile: "/home/me/authkey" };
@@ -222,4 +222,113 @@ test("fsSetupHost writes 0600 and refuses to replace a file", () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a pasted auth key is validated, written to a 0600 file, and never reaches the config", async () => {
+  const key = "tskey-auth-K7exampleKEY";
+  const r = parseSetup({ ...lan, mode: "tailnet", authkey: key });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.value.authkey, key);
+  assert.equal(r.value.authkeyFile, undefined, "the key is not also a path");
+
+  // The generator only ever sees the path.
+  const resolved = resolveAuthkey(r.value, `/state/dev-1/${AUTHKEY_FILE_NAME}`);
+  assert.equal(resolved.authkeyFile, `/state/dev-1/${AUTHKEY_FILE_NAME}`);
+  assert.equal(resolved.authkey, undefined);
+  assert.doesNotMatch(generateConfig(resolved, deny), new RegExp(key));
+
+  const { host, written } = recordingHost("/state");
+  const ran = await runSetup({ ...lan, mode: "tailnet", authkey: key }, host);
+  assert.ok(ran.ok);
+  const keyFile = path.join("/state", "dev-1", AUTHKEY_FILE_NAME);
+  assert.equal(written[keyFile], `${key}\n`);
+  assert.doesNotMatch(written[path.join("/state", "dev-1", "xmesh.yaml")]!, new RegExp(key));
+  assert.equal(parse(written[path.join("/state", "dev-1", "xmesh.yaml")]!).mesh.authkey_file, keyFile);
+});
+
+test("auth key sources are exclusive and each is checked", () => {
+  const problem = (v: unknown): string | undefined => {
+    const r = parseSetup(v);
+    return r.ok ? undefined : r.problem;
+  };
+  assert.equal(problem({ ...lan, mode: "tailnet", authkey: "short" }), "authkey");
+  assert.equal(problem({ ...lan, mode: "tailnet", authkey: "has space in it" }), "authkey");
+  assert.equal(problem({ ...lan, mode: "tailnet", authkey: "tskey-auth-a", authkeyFile: "/k" }), "authkey");
+  assert.equal(problem({ ...lan, mode: "tailnet", autoAuthkey: true, authkeyFile: "/k" }), "authkey");
+  assert.equal(problem({ ...lan, mode: "tailnet", autoAuthkey: false }), "auto_authkey");
+  assert.equal(problem({ ...lan, mode: "lan", autoAuthkey: true }), "mode");
+  assert.equal(problem({ ...lan, mode: "tailnet", authkeyFile: undefined }), "authkey_file");
+});
+
+test("automatic admission mints a tagged key with the saved credential", async () => {
+  const { host, calls, written } = recordingHost("/state");
+  const asked: { file: string; tags: string[] }[] = [];
+  host.createAuthkey = async (file, tags) => {
+    asked.push({ file, tags });
+    written[file] = "tskey-auth-created\n";
+  };
+  const r = await runSetup({ ...lan, mode: "tailnet", autoAuthkey: true }, host);
+  assert.ok(r.ok);
+  const keyFile = path.join("/state", "dev-1", AUTHKEY_FILE_NAME);
+  assert.deepEqual(asked, [{ file: keyFile, tags: ["tag:device"] }]);
+  assert.deepEqual(calls, [`install --config ${path.join("/state", "dev-1", "xmesh.yaml")}`, `start --config ${path.join("/state", "dev-1", "xmesh.yaml")}`]);
+  assert.equal(parse(written[path.join("/state", "dev-1", "xmesh.yaml")]!).mesh.authkey_file, keyFile);
+
+  // Without the hook the run stops before touching install or start.
+  const plain = recordingHost("/state");
+  const none = await runSetup({ ...lan, mode: "tailnet", autoAuthkey: true }, plain.host);
+  assert.ok(!none.ok);
+  if (!none.ok) assert.equal(none.error.reason, "no_mesh_service");
+  assert.deepEqual(plain.calls, []);
+
+  // A control plane that refuses the key is reported, not swallowed.
+  const failing = recordingHost("/state");
+  failing.host.createAuthkey = async () => {
+    throw new Error("没有保存的凭据");
+  };
+  const bad = await runSetup({ ...lan, mode: "tailnet", autoAuthkey: true }, failing.host);
+  assert.ok(!bad.ok);
+  if (!bad.ok) assert.equal(bad.error.code, "mesh_failed");
+  assert.deepEqual(failing.calls, []);
+});
+
+test("retries reuse the generated key and never mint another after an install failure", async () => {
+  const host = fsSetupHost(fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-setup-retry-")), async () => { throw new Error("install failed"); });
+  let keys = 0;
+  host.createAuthkey = async (file) => { keys++; host.writeNew(file, "tskey-auth-created\n"); };
+  const params = { ...lan, mode: "tailnet", autoAuthkey: true };
+  try {
+    await runSetup(params, host);
+    const retry = await runSetup(params, host);
+    assert.ok(retry.ok);
+    assert.equal(keys, 1);
+    const mismatch = await runSetup({ ...lan, mode: "tailnet", authkey: "tskey-auth-different" }, host);
+    assert.ok(!mismatch.ok);
+    if (!mismatch.ok) assert.equal(mismatch.error.field, "authkey");
+  } finally { fs.rmSync(host.stateRoot, { recursive: true, force: true }); }
+});
+
+test("browser login completes before installation and failures permit a retry", async () => {
+  const h = recordingHost("/state");
+  const params = { ...lan, mode: "tailnet", browserLogin: true };
+  const preview = previewSetup(params, h.host);
+  assert.ok(preview.ok);
+  if (!preview.ok) return;
+  const config = parse(preview.data.config);
+  assert.equal(config.mesh.auth_method, "browser");
+  assert.equal(config.mesh.authkey_file, undefined);
+  h.host.loginTailnet = async (file, state, url) => {
+    assert.deepEqual(h.calls, []);
+    assert.equal(file, preview.data.configPath);
+    assert.equal(state, path.dirname(file));
+    assert.equal(url, DEFAULT_CONTROL_URL);
+  };
+  assert.ok((await runSetup(params, h.host)).ok);
+  assert.equal(h.calls.length, 2);
+  assert.ok(h.calls[0]!.includes("--state-dir"));
+  const failure = recordingHost("/state");
+  failure.host.loginTailnet = async () => { throw new Error("cancelled"); };
+  assert.equal((await runSetup(params, failure.host)).ok, false);
+  assert.deepEqual(failure.calls, []);
 });

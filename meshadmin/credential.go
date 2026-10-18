@@ -34,6 +34,7 @@ const (
 // Credential is everything needed to reach one control plane. Secret is the
 // only sensitive field; the type refuses to print it.
 type Credential struct {
+	Access   Access   `json:"access,omitempty"`
 	Kind     Kind     `json:"kind"`
 	Type     CredType `json:"type"`
 	URL      string   `json:"url,omitempty"`
@@ -51,6 +52,9 @@ func (c Credential) GoString() string { return c.String() }
 
 // Validate checks the combination of fields.
 func (c Credential) Validate() error {
+	if c.Access != "" && c.Access != AccessRead && c.Access != AccessWrite {
+		return fmt.Errorf("%w: credential access", ErrInvalid)
+	}
 	if strings.TrimSpace(c.Secret) == "" {
 		return fmt.Errorf("%w: credential has no secret", ErrInvalid)
 	}
@@ -248,6 +252,20 @@ func ReadCredentialFile(path string) (Credential, error) {
 		return Credential{}, fmt.Errorf("%w: %s is not a credential file", ErrInvalid, path)
 	}
 	return c, c.Validate()
+}
+
+// WriteCredentialFile stores c as JSON at path with mode 0600, replacing an
+// existing file atomically. It is the file-backed alternative to the keychain
+// for hosts whose desktop session cannot reach the OS secret store.
+func WriteCredentialFile(path string, c Credential) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, append(b, '\n'))
 }
 
 // Resolve returns the credential for an operation. Reads prefer the read

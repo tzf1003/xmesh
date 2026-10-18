@@ -29,12 +29,18 @@ func OpenTailnet(ctx context.Context, c *config.Config, stateDir string) (*Tailn
 }
 
 func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf func(string, ...any)) (*Tailnet, error) {
-	key, e := os.ReadFile(c.Mesh.AuthkeyFile)
-	if e != nil {
-		return nil, fmt.Errorf("无法读取 mesh.authkey_file")
-	}
-	if strings.TrimSpace(string(key)) == "" {
-		return nil, fmt.Errorf("mesh.authkey_file 为空")
+	var key []byte
+	var e error
+	if c.Mesh.AuthMethod != "browser" {
+		key, e = os.ReadFile(c.Mesh.AuthkeyFile)
+		if e != nil {
+			return nil, fmt.Errorf("无法读取 mesh.authkey_file")
+		}
+		if strings.TrimSpace(string(key)) == "" {
+			return nil, fmt.Errorf("mesh.authkey_file 为空")
+		}
+	} else if _, err := os.Stat(filepath.Join(stateDir, "tsnet", "tailscaled.state")); err != nil {
+		return nil, fmt.Errorf("请先运行 xmesh login 完成浏览器授权")
 	}
 	if e = os.MkdirAll(stateDir, 0700); e != nil {
 		return nil, e
@@ -45,10 +51,17 @@ func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf fu
 	redactedLog := func(string, ...any) {}
 	if logf != nil {
 		redactedLog = func(format string, args ...any) {
-			logf("%s", strings.ReplaceAll(fmt.Sprintf(format, args...), strings.TrimSpace(string(key)), "[REDACTED_SECRET]"))
+			message := fmt.Sprintf(format, args...)
+			if secret := strings.TrimSpace(string(key)); secret != "" {
+				message = strings.ReplaceAll(message, secret, "[REDACTED_SECRET]")
+			}
+			logf("%s", message)
 		}
 	}
 	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AuthKey: strings.TrimSpace(string(key)), UserLogf: redactedLog, Logf: redactedLog}
+	if c.Mesh.AuthMethod == "browser" {
+		server.AdvertiseTags = []string{"tag:device"}
+	}
 	if c.Mesh.Ephemeral {
 		server.Ephemeral = true
 		server.Store = new(mem.Store)

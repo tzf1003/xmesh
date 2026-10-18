@@ -1,10 +1,6 @@
-// Tailnet administration from the panel. Everything here goes through the
-// `xmesh mesh ... --json` command line (meshadmin): the control-plane
-// credential lives in the OS keychain that the CLI writes and reads. Only
-// `login` carries a secret, and it reaches the CLI on stdin, never argv (see
-// src/main/mesh-service.ts). The renderer sends one validated request object;
-// the main process turns it into fixed argv and returns the CLI's JSON after
-// the tolerant normalisers below.
+// Tailnet administration uses fixed xmesh mesh commands. A login submits its
+// secret once through stdin; the CLI validates and stores it in a private file.
+// Other requests carry validated values and the credential file path.
 
 import { isAbsolutePath } from "./setup";
 
@@ -43,7 +39,7 @@ export type MeshRequest =
   | { op: "derp.plan"; regions: DerpRegionInput[]; omitDefault: boolean; apply: boolean; expectVersion?: string; skipStun: boolean }
   | { op: "derp.probe"; regions: DerpRegionInput[]; skipStun: boolean; compareOfficial: boolean }
   | { op: "derp.headscale"; regions: DerpRegionInput[]; omitDefault: boolean }
-  | { op: "derp.sync"; target: { allowlist: string } | { url: string; tokenFile: string }; allDevices: boolean };
+  | { op: "derp.sync"; target: { allowlist: string } | { url: string; tokenFile: string } | { url: string; token: string }; allDevices: boolean };
 
 export type MeshOp = MeshRequest["op"];
 
@@ -321,9 +317,15 @@ export function parseMeshRequest(v: unknown): MeshParse {
         if (p === undefined) return bad("allowlist");
         return { ok: true, value: { op: "derp.sync", target: { allowlist: p }, allDevices: v.allDevices } };
       }
-      if (onlyKeys(t, ["url", "tokenFile"])) {
+      // A pasted token is an alternative to a file; the main process writes it
+      // to a 0600 temp file before the CLI sees it, so argv never carries it.
+      if (onlyKeys(t, ["url", "tokenFile", "token"])) {
         const url = parseAdmissionUrl(t.url);
         if (url === undefined) return bad("url");
+        if (t.token !== undefined) {
+          if (t.tokenFile !== undefined || typeof t.token !== "string" || !SECRET.test(t.token)) return bad("token");
+          return { ok: true, value: { op: "derp.sync", target: { url, token: t.token }, allDevices: v.allDevices } };
+        }
         const tokenFile = absPath(t.tokenFile);
         if (tokenFile === undefined) return bad("tokenFile");
         return { ok: true, value: { op: "derp.sync", target: { url, tokenFile }, allDevices: v.allDevices } };
@@ -372,10 +374,19 @@ export interface MeshCapabilities {
   derpViaPolicy: boolean;
 }
 
+/** Which credential answered `status`: the file or keychain, and its access level. */
+export interface MeshStatusCredential {
+  access: MeshAccess | "";
+  profile: string;
+  source: "file" | "keychain" | "";
+  file?: string;
+}
+
 export interface MeshStatus {
   provider: string;
   capabilities: MeshCapabilities;
   devices: MeshDeviceReport[];
+  credential?: MeshStatusCredential;
 }
 
 export interface MeshTagPlan {
@@ -569,6 +580,16 @@ function severity(v: unknown): MeshIssue["severity"] {
 export function normalizeStatus(v: unknown): MeshStatus {
   const r = rec(v);
   const caps = rec(r.capabilities);
+  const c = rec(r.credential);
+  const access = str(c.access);
+  const source = str(c.source);
+  const credential: MeshStatusCredential = {
+    access: access === "read" || access === "write" ? access : "",
+    profile: str(c.profile),
+    source: source === "file" || source === "keychain" ? source : "",
+  };
+  const file = optStr(c.file);
+  if (file !== undefined) credential.file = file;
   return {
     provider: str(r.provider),
     capabilities: {
@@ -576,6 +597,7 @@ export function normalizeStatus(v: unknown): MeshStatus {
       atomicPolicyWrite: bool(caps.atomic_policy_write),
       derpViaPolicy: bool(caps.derp_via_policy),
     },
+    credential,
     devices: list(r.devices).map((x) => {
       const d = rec(x);
       const out: MeshDeviceReport = {
@@ -794,14 +816,14 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
 /**
  * Terminal commands the page shows when no credential is saved, run through the CLI at `cli` (see cliCommandText).
  * They run as written (no shell metacharacters beyond the CLI path); the secret is typed at the prompt or piped
- * on stdin, never into this app. The Headscale URL is a placeholder to edit.
+ * on stdin. The --panel flag selects the desktop credential file. The Headscale URL is a placeholder to edit.
  */
 export function meshLoginCommands(cli = "xmesh") {
   return {
-    read: `${cli} mesh login --kind tailscale --access read`,
-    write: `${cli} mesh login --kind tailscale --access write`,
-    readHeadscale: `${cli} mesh login --kind headscale --url https://headscale.example.com --access read`,
-    writeHeadscale: `${cli} mesh login --kind headscale --url https://headscale.example.com --access write`,
+    read: `${cli} mesh login --kind tailscale --access read --panel`,
+    write: `${cli} mesh login --kind tailscale --access write --panel`,
+    readHeadscale: `${cli} mesh login --kind headscale --url https://headscale.example.com --access read --panel`,
+    writeHeadscale: `${cli} mesh login --kind headscale --url https://headscale.example.com --access write --panel`,
   };
 }
 export type MeshLoginKind = keyof ReturnType<typeof meshLoginCommands>;

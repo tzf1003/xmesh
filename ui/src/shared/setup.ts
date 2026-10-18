@@ -20,7 +20,9 @@ export type SetupProblem =
   | "roles"
   | "workspace"
   | "control_url"
-  | "authkey_file";
+  | "authkey_file"
+  | "authkey"
+  | "auto_authkey";
 
 /** Absolute POSIX path or Windows drive/UNC path, no control characters, no `..` segments. */
 export function isAbsolutePath(p: string): boolean {
@@ -39,12 +41,22 @@ export function isHttpsUrl(v: string): boolean {
   }
 }
 
+/**
+ * A pasted Tailscale/Headscale auth key. Printable ASCII only, bounded length:
+ * the same shape the CLI accepts on stdin.
+ */
+const AUTHKEY = /^[\x21-\x7e]{8,4096}$/;
+
+export function isAuthKey(v: string): boolean {
+  return AUTHKEY.test(v);
+}
+
 /** Returns the parameters when valid, or the first offending field. */
 export function parseSetup(v: unknown): { ok: true; value: SetupParams } | { ok: false; problem: SetupProblem } {
   const bad = (problem: SetupProblem) => ({ ok: false as const, problem });
   if (typeof v !== "object" || v === null || Array.isArray(v)) return bad("node_name");
   const r = v as Record<string, unknown>;
-  const allowed = ["nodeName", "mode", "roles", "workspace", "controlUrl", "authkeyFile"];
+  const allowed = ["nodeName", "mode", "roles", "workspace", "controlUrl", "authkeyFile", "authkey", "autoAuthkey", "browserLogin", "authkeyUser"];
   if (!Object.keys(r).every((k) => allowed.includes(k))) return bad("node_name");
   if (typeof r.nodeName !== "string" || !NODE_NAME.test(r.nodeName)) return bad("node_name");
   if (r.mode !== "lan" && r.mode !== "tailnet") return bad("mode");
@@ -60,13 +72,46 @@ export function parseSetup(v: unknown): { ok: true; value: SetupParams } | { ok:
   if (r.mode === "tailnet") {
     const url = r.controlUrl === undefined ? DEFAULT_CONTROL_URL : r.controlUrl;
     if (typeof url !== "string" || !isHttpsUrl(url)) return bad("control_url");
-    if (typeof r.authkeyFile !== "string" || !isAbsolutePath(r.authkeyFile)) return bad("authkey_file");
+    // Exactly one source: create one with the saved credential, paste one, or
+    // name a file the user already has.
+    const sources = [r.authkey !== undefined, r.authkeyFile !== undefined, r.autoAuthkey === true, r.browserLogin === true].filter(Boolean).length;
+    if (sources > 1) return bad("authkey");
+    if (r.browserLogin !== undefined) {
+      if (r.browserLogin !== true) return bad("auto_authkey");
+      value.browserLogin = true;
+    } else if (r.autoAuthkey !== undefined) {
+      if (typeof r.autoAuthkey !== "boolean" || !r.autoAuthkey) return bad("auto_authkey");
+      value.autoAuthkey = true;
+    } else if (r.authkey !== undefined) {
+      if (typeof r.authkey !== "string" || !isAuthKey(r.authkey)) return bad("authkey");
+      value.authkey = r.authkey;
+    } else {
+      if (typeof r.authkeyFile !== "string" || !isAbsolutePath(r.authkeyFile)) return bad("authkey_file");
+      value.authkeyFile = r.authkeyFile;
+    }
+    if (r.authkeyUser !== undefined) {
+      if (r.autoAuthkey !== true || typeof r.authkeyUser !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/.test(r.authkeyUser)) return bad("auto_authkey");
+      value.authkeyUser = r.authkeyUser;
+    }
     value.controlUrl = url;
-    value.authkeyFile = r.authkeyFile;
-  } else if (r.controlUrl !== undefined || r.authkeyFile !== undefined) {
+  } else if (r.controlUrl !== undefined || r.authkeyFile !== undefined || r.authkey !== undefined || r.autoAuthkey !== undefined || r.browserLogin !== undefined || r.authkeyUser !== undefined) {
     return bad("mode");
   }
   return { ok: true, value };
+}
+
+/** Where the first run writes a pasted auth key, beside the config it belongs to. */
+export const AUTHKEY_FILE_NAME = "authkey";
+
+/**
+ * The parameters as `generateConfig` needs them: a pasted key is replaced by
+ * the path it will be written to. The returned value is what goes into the
+ * config, so the key text itself never reaches it.
+ */
+export function resolveAuthkey(p: SetupParams, file: string): SetupParams {
+  if (p.authkey === undefined && p.autoAuthkey !== true) return p;
+  const { authkey: _authkey, autoAuthkey: _auto, ...rest } = p;
+  return { ...rest, authkeyFile: file };
 }
 
 /** The deny list file's name, beside the config file it belongs to. */
@@ -107,7 +152,9 @@ export function generateConfig(p: SetupParams, denyFile: string): string {
     `  mode: ${p.mode}`,
   ];
   if (p.mode === "tailnet") {
-    lines.push(`  control_url: ${q(p.controlUrl ?? DEFAULT_CONTROL_URL)}`, `  authkey_file: ${q(p.authkeyFile ?? "")}`);
+    lines.push(`  control_url: ${q(p.controlUrl ?? DEFAULT_CONTROL_URL)}`);
+    if (p.browserLogin === true) lines.push("  auth_method: browser");
+    else lines.push(`  authkey_file: ${q(p.authkeyFile ?? "")}`);
   } else {
     lines.push("  lan:", "    mdns: true");
   }
