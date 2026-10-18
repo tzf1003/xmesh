@@ -53,8 +53,8 @@ export interface ZoomControl {
 export function createPanelWindow(onClosedByUser: () => void = () => {}, zoom?: ZoomControl): PanelWindow {
   const webPreferences = panelWebPreferences(path.join(__dirname, "..", "preload", "index.js"), app.isPackaged);
   const win = new BrowserWindow({
-    width: 960,
-    height: 640,
+    width: 1320,
+    height: 860,
     minWidth: 640,
     minHeight: 420,
     show: false,

@@ -24,9 +24,9 @@ test("the top bar spans the window and the page takes its colours from the theme
 
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   await page.emulateMedia({ colorScheme: "light" });
-  expect(await bg()).toBe("rgb(244, 244, 246)");
+  expect(await bg()).toBe("rgb(247, 248, 247)");
   await page.emulateMedia({ colorScheme: "dark" });
-  expect(await bg()).toBe("rgb(26, 26, 30)");
+  expect(await bg()).toBe("rgb(15, 18, 17)");
 });
 
 async function zoomFactor(h: Harness): Promise<number> {

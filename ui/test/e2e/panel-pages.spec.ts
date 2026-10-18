@@ -5,7 +5,7 @@ import { type Page, expect, test } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Capability } from "../../src/shared/control";
-import { type Harness, launch } from "./helpers";
+import { type Harness, launch, navigate } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit", "gateway"];
 const LAN_STATUS = { network: { mode: "lan" as const, node_id: "win-dev-01", tags: ["tag:device"] } };
@@ -22,9 +22,11 @@ async function open(opts: Parameters<typeof launch>[0] = {}, nav?: string): Prom
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
   if (nav) {
-    await page.getByTestId(`nav-${nav}`).click();
+    await navigate(page, nav);
     await expect(page.getByTestId(`page-${nav}`)).toBeVisible();
+    if (nav === "config") await page.getByTestId("config-source-tab").click();
   }
+  if (!nav || nav === "overview") await page.getByTestId("overview-advanced").locator("summary").click();
   return page;
 }
 
@@ -42,7 +44,7 @@ test("every page renders under the CSP without violations", async () => {
   const page = await open({ kernel: { status: LAN_STATUS } });
   const violations = await watchCsp(page);
   for (const id of ["overview", "devices", "sessions", "authz", "ingress", "settings", "config", "audit", "mesh"]) {
-    await page.getByTestId(`nav-${id}`).click();
+    await navigate(page, id);
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }
   // Once a node has a config the wizard leaves the navigation; it is checked on its own below.

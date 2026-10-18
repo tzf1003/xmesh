@@ -2,13 +2,16 @@
 // switching `XMESH_UI_LANG=en` shows no Chinese. test/unit/panel-messages.test.ts
 // checks that both tables have the same keys and the same {placeholders}.
 
+import { topologyEn, topologyZh } from "./topology-messages";
+
 export const zh = {
+  ...topologyZh,
   "nav.label": "主导航",
   "nav.overview": "概览",
   "nav.devices": "设备",
   "nav.sessions": "会话",
-  "nav.authz": "授权",
-  "nav.ingress": "入口",
+  "nav.authz": "访问与授权",
+  "nav.ingress": "公网入口",
   "nav.settings": "设置",
   "settings.sub": "首次运行之后也能改的设置：节点名、网络模式、角色、工作目录和禁止目录。保存时由内核校验配置。工作目录、禁止目录、网关与入口角色立即生效；节点名、网络模式和 Agent 角色的改动需要重启内核。",
   "settings.invalidDisk": "配置文件无法解析，设置页暂不可用。请先到「配置」页修正文件。",
@@ -926,6 +929,7 @@ export const zh = {
 export type Key = keyof typeof zh;
 
 export const en: Record<Key, string> = {
+  ...topologyEn,
   "nav.label": "Main navigation",
   "nav.overview": "Overview",
   "nav.devices": "Devices",

@@ -30,6 +30,7 @@ async function open(opts: Parameters<typeof launch>[0] = {}): Promise<Page> {
   h = await launch({ ...opts, kernel: { capabilities: ALL, ...opts.kernel } });
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
+  await page.getByTestId("overview-advanced").locator("summary").click();
   // The rotate button shows once the PAT list has loaded, so the card's data is in.
   await expect(page.getByTestId("gateway-rotate")).toBeVisible();
   return page;
@@ -110,6 +111,7 @@ test("the upgrade notice stays dismissed across reloads and comes back when the 
   await expect(notice).toHaveCount(0);
 
   await page.reload();
+  await page.getByTestId("overview-advanced").locator("summary").click();
   await expect(page.getByTestId("gateway-rotate")).toBeVisible();
   await expect(page.getByTestId("token-notice")).toHaveCount(0);
 
