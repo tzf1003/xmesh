@@ -231,7 +231,12 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 				}
 			}))
 		}
-		launch(listener, mux, "Agent MCP", nil)
+		var handler http.Handler = mux
+		if lan, ok := network.(*mesh.LAN); ok {
+			// Pairing handshakes reach only the pairing routes (docs/design/14-password-pairing.md).
+			handler = lan.ServeAgent(mux)
+		}
+		launch(listener, handler, "Agent MCP", nil)
 	}
 	localPeer := mesh.Peer{}
 	if a != nil {
@@ -405,7 +410,11 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return readings(current)
 		}
 	}
-	defer startControl(controlDeps{store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, peerInfo: peerInfo,
+	var pairing control.PairingAdmin
+	if lan, ok := network.(*mesh.LAN); ok {
+		pairing = lan
+	}
+	defer startControl(controlDeps{store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, ingress: ingress, pairing: pairing, peerInfo: peerInfo,
 		drain: func(kill bool) {
 			gatewaysMu.Lock()
 			pendingDrain[c.Node.Name] = true

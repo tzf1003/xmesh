@@ -1,5 +1,5 @@
 {
-  "api_version": "1.5",
+  "api_version": "1.6",
   "routes": [
     {
       "id": "control.status.get",
@@ -190,6 +190,91 @@
       ]
     },
     {
+      "id": "control.pair.password.get",
+      "method": "GET",
+      "path": "/v1/pair/password",
+      "capability": "pair",
+      "since": "1.5",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pair:1#/$defs/PairPasswordState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.pair.password.put",
+      "method": "PUT",
+      "path": "/v1/pair/password",
+      "capability": "pair",
+      "since": "1.5",
+      "query": null,
+      "body": "urn:xmesh:schema:control-pair:1#/$defs/PairPasswordRequest",
+      "response": "urn:xmesh:schema:control-pair:1#/$defs/PairPasswordState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.pair.password.delete",
+      "method": "DELETE",
+      "path": "/v1/pair/password",
+      "capability": "pair",
+      "since": "1.5",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.pair.discovered",
+      "method": "GET",
+      "path": "/v1/pair/discovered",
+      "capability": "pair",
+      "since": "1.5",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pair:1#/$defs/PairDiscoveredResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.pair.connect",
+      "method": "POST",
+      "path": "/v1/pair/connect",
+      "capability": "pair",
+      "since": "1.5",
+      "query": null,
+      "body": "urn:xmesh:schema:control-pair:1#/$defs/PairConnectRequest",
+      "response": "urn:xmesh:schema:control-pair:1#/$defs/PairConnectResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "pair_rejected",
+        "rate_limited",
+        "unsupported_mode"
+      ]
+    },
+    {
       "id": "control.pats.list",
       "method": "GET",
       "path": "/v1/pats",
@@ -257,7 +342,7 @@
       "method": "PATCH",
       "path": "/v1/backends/{name}/env",
       "capability": "config.write",
-      "since": "1.5",
+      "since": "1.6",
       "query": null,
       "body": "urn:xmesh:schema:control-backends:1#/$defs/BackendEnvPatch",
       "response": "urn:xmesh:schema:control-backends:1#/$defs/BackendEnvResponse",
@@ -273,7 +358,7 @@
       "method": "DELETE",
       "path": "/v1/backends/{name}/env",
       "capability": "config.write",
-      "since": "1.5",
+      "since": "1.6",
       "query": null,
       "body": null,
       "response": null,

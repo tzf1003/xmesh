@@ -104,7 +104,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | code | severity | 何时 |
 | --- | --- | --- |
 | `restart_required` | `info` | `restart_required` 为真 |
-| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
+| `policy_reload_failed` | `error` | 配置文件当前无法加载，继续使用上一份有效配置；或 `agent.cwd_policy.deny_file` 指向的文件无法加载，继续使用上一份成功的禁止目录列表（`message` 说明是哪一个）。文件重新可加载（改回合法内容，或恢复成生效中的那一份）后清除，不保留到重启 |
 | `allow_dangerous` | `info` | 配置启用了 `allow_dangerous`（[CON-SEC-10](../constraints/security.md#con-sec-10) 要求提示） |
 | `tailnet_not_ready` | `warning` | 模式是 tailnet 但尚未加入 |
 | `authkey_unreadable` | `warning` | tailnet 模式下 `authkey_file` 不可读 |
@@ -245,7 +245,25 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ## CTR-CTL-08
 
-### 配对
+### 连接密码（1.5 起）
+
+每台 `lan` 节点可以设置一个连接密码。另一台设备输入它即可直接配对，无需交换文件。
+
+- `GET /v1/pair/password` 返回 `PairPasswordState`：`set`、`updated_at`、`failed_attempts`、`locked_until`。从不包含口令或派生值。
+- `PUT /v1/pair/password` 的请求是 `PairPasswordRequest {password}`，长度 10 到 128 个 Unicode 码点，首尾不能有空白，违反返回 `invalid_args`（字段 `password`）。设置或修改立即生效，并清除锁定。
+- `DELETE /v1/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
+- 口令只写不读：没有任何响应包含它。磁盘上只保存 Argon2id 的派生密钥与盐。
+
+### 内网发现与连接（1.5 起）
+
+- `GET /v1/pair/discovered` 返回 `PairDiscoveredResponse {devices[]}`：尚未配对、宣告了 `pairing=1` 的设备，每项 `name`、`fingerprint`、`address`（主机:端口）、`seen_at`。不含证书，已配对的设备不出现。
+- `POST /v1/pair/connect` 的请求是 `PairConnectRequest {address?, fingerprint?, password}`，`address` 与 `fingerprint` 至少给一个。只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`。同时给出时，对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`），不会钉入任何证书。成功返回 `PairConnectResponse {name, fingerprint, address, tags}`，立即生效，无需重启。
+
+连接失败时，`pair_rejected`（422）的 `reason` 为 `wrong_password`、`no_password`、`unsupported_peer`、`unreachable` 或 `bad_peer`。`wrong_password` 同时表示对端不是待配对的 xmesh 设备，客户端无法区分两者。`rate_limited`（429）带 `retry_after_ms`，表示对端正在限流：每台节点按连续失败次数锁定，最长 30 分钟，成功配对后清零。
+
+这些路由只在 `mesh.mode` 为 `lan` 时可用，否则返回 `unsupported_mode`。
+
+### 配对文档（高级用法）
 
 `POST /v1/pair/export`（无请求体）返回本机公开配对文档 `PairDocument`，等价于 `xmesh pair --export`，只含节点名、证书指纹、公开证书与 `tags`（导出时为空数组）。
 
@@ -320,7 +338,7 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 ### 后端环境变量
 
-给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.5 起）。
+给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.6 起）。
 
 | 路由 | 作用 |
 | --- | --- |

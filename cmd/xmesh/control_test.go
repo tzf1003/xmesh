@@ -44,6 +44,12 @@ func startKernelStub(t *testing.T) (state, configPath string) {
 
 func startKernelStubWith(t *testing.T, configText string, ingress control.IngressAdmin) (state, configPath string) {
 	t.Helper()
+	return startKernelStubOptions(t, configText, func(o *control.Options) { o.Ingress = ingress })
+}
+
+// startKernelStubOptions is startKernelStubWith with the rest of the kernel options chosen by mutate.
+func startKernelStubOptions(t *testing.T, configText string, mutate func(*control.Options)) (state, configPath string) {
+	t.Helper()
 	dir := t.TempDir()
 	state = filepath.Join(dir, "s")
 	if err := os.Mkdir(state, 0700); err != nil {
@@ -57,7 +63,9 @@ func startKernelStubWith(t *testing.T, configText string, ingress control.Ingres
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := control.Start(control.Options{Host: &cliHost{}, Store: store, Version: "t", StateDir: state, AuditDir: filepath.Join(dir, "audit"), Ingress: ingress})
+	o := control.Options{Host: &cliHost{}, Store: store, Version: "t", StateDir: state, AuditDir: filepath.Join(dir, "audit")}
+	mutate(&o)
+	s, err := control.Start(o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +277,7 @@ func Test_CLIUsageMentionsControlChannel(t *testing.T) {
 			t.Errorf("usage 缺少 %q", word)
 		}
 	}
-	for _, word := range []string{"drain", "config set", "pair import", "pats create", "pats rotate", "ingress revoke", "ingress password"} {
+	for _, word := range []string{"drain", "config set", "pair password set", "pair discover", "pair connect", "pair import", "pats create", "pats rotate", "ingress revoke", "ingress password"} {
 		if !strings.Contains(controlUsage, word) {
 			t.Errorf("control usage 缺少 %q", word)
 		}

@@ -125,14 +125,24 @@ python3 scripts/smoke_local.py --binary bin/xmesh --pat
 
 ## LAN 配对
 
-LAN 模式通过 mDNS 发现，配对记录中的公钥用于 mTLS 验证。双方交换公开导出文件，并通过独立可信渠道核对指纹：
+LAN 模式通过 mDNS 发现，配对记录中的证书用于 mTLS 验证。最常用的方式是连接密码，在面板的「设备」页完成：
+
+1. 在 A 设备上设置一个连接密码（10 到 128 个字符，首尾不能有空白）。
+2. 在 B 设备的「内网中的设备」里看到 A，点「连接」，输入 A 的连接密码。或者在「手动添加设备」里输入 A 的地址和密码。
+3. 密码正确即刻互信，无需重启。
+
+连接密码不会在界面上再次显示，也不写入配置文件。错误的密码会被计数，连续失败后对端暂停接受密码配对一段时间，成功一次即清零。清除连接密码后，对方不能再用它配对，已配对的设备不受影响。
+
+命令行等价于：`xmesh control pair password set --password-stdin`（口令从标准输入读取，不接受命令行参数），`xmesh control pair discover`，`xmesh control pair connect --address 地址 --password-stdin`。
+
+配对文档（`xmesh pair --export` / `--import`，面板里的「高级」）保留作为后备：无法使用连接密码时，双方交换公开导出文件，并通过独立可信渠道核对指纹：
 
 ```bash
 bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --export /tmp/node-public.json
 bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-public.json --fingerprint VERIFIED_SHA256 --tags tag:peer,tag:device
 ```
 
-两端分别导入对方，重启使配对生效。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。LAN 模式的 Agent 固定监听 TCP 7433（`mesh.AgentPort`，没有配置项），同一台机器上无法同时运行两个 LAN 节点。
+两种方式完成后，文档导入需要重启才生效，密码配对不需要。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。LAN 模式的 Agent 固定监听 TCP 7433（`mesh.AgentPort`，没有配置项），同一台机器上无法同时运行两个 LAN 节点。
 
 ## 状态目录权限
 
@@ -418,6 +428,8 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 ```
 xmesh status --control [--node 名 | --state-dir 目录] [--json]
 xmesh control status|peers|sessions|events|audit|drain|resume|config get|config set ...
+xmesh control pair password show | set (--password-stdin | --password-file 文件) | clear
+xmesh control pair discover | connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)
 xmesh control pair export [--out 文件] | pair import --file 文件 --fingerprint 指纹 [--tags ...]
 xmesh control pats list | create --name 名字 --scope S[,S...] | rotate 名字 | delete 名字
 xmesh control ingress clients | revoke 客户端ID | password [--password-file 文件]
@@ -428,6 +440,7 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 
 `pair`、`pats`、`ingress` 三组命令调用上面同名的接口，节点不需要停：
 
+- `pair password set` 设置或修改连接密码，口令只从标准输入或 `--password-file` 读取，与 `ingress password` 相同；`pair password show` 只报告是否设置、最近修改时间与失败计数，不回显口令；`pair password clear` 清除。`pair discover` 列出内网中尚未配对的设备。`pair connect` 用对端的连接密码配对，`--address` 与 `--fingerprint` 至少给一个：只给指纹时地址取自发现列表，同时给出时核对对端证书。
 - `pair export` 打印本机公开配对文档（`{"pair": {...}}`）；加 `--out 文件` 则把文档写成 `0600` 的文件，stdout 只给出节点名与指纹，该文件可直接交给对端的 `xmesh pair --import` 或 `xmesh control pair import`。`pair import --file 文件 --fingerprint 指纹` 导入对端文件，`--fingerprint` 必须是从对端另行拿到的值（冒号与大小写不限），不能从配对文件里抄；`--tags` 缺省为 `tag:peer,tag:device`。两者都只在 `lan` 模式可用，导入后要重启节点才生效。`pair import` 也接受 `pair export` 的完整输出作文件。
 - `pats create` 的 `--scope` 可重复或用逗号分隔（语法见 [CTR-OAUTH-02](contracts/oauth-authz.md#ctr-oauth-02)，如 `devices:read`、`exec:<设备>`、`fs:read:<设备>`）；`pats rotate`、`pats delete` 的名字写在子命令后面或用 `--name`。令牌正文只在 `create` 和 `rotate` 的输出里出现一次，`list` 不含令牌，请在拿到时保存。删除成功输出 `{"deleted": true, "name": …}`。
 - `ingress clients` 列出 issuer 和已注册的 OAuth 客户端，`ingress revoke 客户端ID` 撤销并使其令牌失效，输出 `{"revoked": true, "client_id": …}`。`ingress password` 从 `--password-file` 或标准输入读新登录口令（交互终端下不回显），口令不接受命令行参数，以免进入 shell 历史和进程列表；长度 12 到 256 个字符，首尾空白会被去掉。口令不是来自文件时节点返回 `conflict`（`password_source_not_file`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。服务或登录任务没安装时，`start`、`stop`、`restart`、`uninstall` 返回 `error: "not_found"`、`reason: "not_installed"` 和 `name`，不转述 `schtasks` 等系统工具的原文（它们按系统语言输出）。

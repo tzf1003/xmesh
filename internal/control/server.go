@@ -42,6 +42,8 @@ type Options struct {
 	// with unavailable. ApplyBackendEnv, when set, makes the running backends pick up a change at once.
 	BackendEnv      *backendenv.Store
 	ApplyBackendEnv func()
+	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
+	Pairing PairingAdmin
 }
 
 func (o Options) heartbeat() time.Duration {
@@ -280,6 +282,11 @@ func (s *Server) table() map[string]handler {
 
 		"control.pair.export":            s.pairExport,
 		"control.pair.import":            s.pairImport,
+		"control.pair.password.get":      s.getPairPassword,
+		"control.pair.password.put":      s.putPairPassword,
+		"control.pair.password.delete":   s.deletePairPassword,
+		"control.pair.discovered":        s.listPairDiscovered,
+		"control.pair.connect":           s.connectPair,
 		"control.pats.list":              s.listPats,
 		"control.pats.create":            s.createPat,
 		"control.pats.rotate":            s.rotatePat,

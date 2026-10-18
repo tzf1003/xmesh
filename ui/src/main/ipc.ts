@@ -19,7 +19,9 @@ import {
   parseExternalKey,
   parseInstanceId,
   parseNodeName,
+  parsePairConnect,
   parsePairImport,
+  parsePairPassword,
   parsePassword,
   parsePatCreate,
   parsePathKind,
@@ -173,6 +175,17 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
   handle(CHANNELS.importPair, (args: unknown) => {
     const v = parsePairImport(args);
     return v === undefined ? bad("pair request") : service.importPair(v);
+  });
+  handle(CHANNELS.getPairPassword, () => service.getPairPassword());
+  handle(CHANNELS.setPairPassword, (password: unknown) => {
+    const v = parsePairPassword(password);
+    return v === undefined ? bad("pair password") : service.setPairPassword(v);
+  });
+  handle(CHANNELS.clearPairPassword, () => service.clearPairPassword());
+  handle(CHANNELS.discoverPairs, () => service.discoverPairs());
+  handle(CHANNELS.connectPair, (args: unknown) => {
+    const v = parsePairConnect(args);
+    return v === undefined ? bad("pair connect request") : service.connectPair(v);
   });
   handle(CHANNELS.queryAudit, (query: unknown) => {
     const v = parseAuditQuery(query);

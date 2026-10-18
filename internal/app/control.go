@@ -12,6 +12,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -37,6 +38,7 @@ type controlDeps struct {
 	mode       string
 	allowSIDs  []string
 	ingress    control.IngressAdmin // nil on a node without the ingress role
+	pairing    control.PairingAdmin // nil unless the node runs the LAN network
 	drain      func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume     func()
 	// peerInfo is the gateways' sys.info readings by device; nil on a node without a gateway.
@@ -46,7 +48,7 @@ type controlDeps struct {
 // startControl opens the channel. A failure is reported and otherwise ignored:
 // a node without a working UI channel must keep serving.
 func startControl(d controlDeps) (stop func()) {
-	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress}
+	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Ingress: d.ingress, Pairing: d.pairing}
 	options.BackendEnv = d.backendEnv
 	if d.agent != nil {
 		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
@@ -119,6 +121,9 @@ func (h *controlHost) warnings(cfg *config.Config, st v1.StatusResponse) []v1.Wa
 	}
 	if h.d.store.Failing() {
 		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "配置文件当前无法加载，继续使用最近有效配置")
+	}
+	if h.d.agent != nil && cwd.DenyFailing(cfg.Agent.CWDPolicy.DenyFile) {
+		add(v1.WarnPolicyReloadFailed, v1.SeverityError, "禁止目录文件当前无法加载，继续使用最近有效内容")
 	}
 	if h.d.agent != nil && cfg.Agent.Policy.AllowDangerous {
 		add(v1.WarnAllowDangerous, v1.SeverityInfo, "allow_dangerous 已启用")
