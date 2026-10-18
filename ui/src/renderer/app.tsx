@@ -100,9 +100,9 @@ export function App(): JSX.Element {
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
-        <div class="main">
-          <TopBar snapshot={snapshot} />
+        <TopBar snapshot={snapshot} />
+        <div class="body">
+          <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
             <PageSwitch page={current} ctx={ctx} />
           </main>
@@ -119,7 +119,6 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   const configured = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0;
   return (
     <nav class="sidebar" aria-label={t("nav.label")}>
-      <div class="brand">xmesh</div>
       {NAV.filter((n) => n.id !== "setup" || !configured).map((n) => (
         <button
           key={n.id}
@@ -162,6 +161,7 @@ function TopBar({ snapshot }: { snapshot: Snapshot }): JSX.Element {
   const c = snapshot.connection;
   return (
     <header class="topbar">
+      <span class="brand">xmesh</span>
       <div class="title">
         <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
       </div>
