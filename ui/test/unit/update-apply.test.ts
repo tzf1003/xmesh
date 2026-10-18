@@ -57,7 +57,8 @@ test("macOS hands /bin/sh the script and four plain arguments", async () => {
   assert.equal(s.opts.detached, true);
   assert.equal(s.opts.stdio, "ignore");
   assert.equal(fs.readFileSync(s.args[0]!, "utf8"), MAC_SCRIPT);
-  assert.equal(fs.statSync(s.args[0]!).mode & 0o100, 0o100);
+  // Windows has no execute bit.
+  if (process.platform !== "win32") assert.equal(fs.statSync(s.args[0]!).mode & 0o100, 0o100);
 });
 
 test("Windows hands cmd a script that holds no path, and passes every path through the environment", async () => {
