@@ -269,6 +269,7 @@ func (s *Server) table() map[string]handler {
 		"control.drain.resume":  s.resume,
 		"control.config.get":    s.getConfig,
 		"control.config.put":    s.putConfig,
+		"control.config.patch":  s.patchConfig,
 		"control.audit.list":    s.auditList,
 
 		"control.pair.export":            s.pairExport,
@@ -356,7 +357,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := int64(v1.MaxRequestBytes)
-	if matched.ID == "control.config.put" {
+	if matched.ID == "control.config.put" || matched.ID == "control.config.patch" {
 		limit = v1.MaxConfigBytes
 	}
 	c := &call{route: matched.Route}

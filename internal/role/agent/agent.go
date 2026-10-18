@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -121,6 +122,7 @@ func (a *Agent) supervise(previous *config.Config) {
 			if cfg != previous {
 				a.Backends.Configure(cfg)
 				a.refreshBackends()
+				a.refreshBuiltins()
 				previous = cfg
 			}
 		}
@@ -307,16 +309,16 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 		protected.ServeHTTP(w, r)
 	})
 }
-func (a *Agent) server(p Principal) *mcp.Server {
-	a.viewMu.Lock()
-	defer a.viewMu.Unlock()
-	keyBytes, _ := json.Marshal(p)
-	key := string(keyBytes)
-	if view := a.views[key]; view != nil {
-		return view
-	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "xmesh-agent", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, req *mcp.InitializedRequest) { a.bind(req.Session, p) }})
+
+// installBuiltins lists the built-in tools that agent.disabled_tools leaves on and removes the others
+// from the view, so a tool switched off in the configuration disappears from tools/list on reload.
+func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
+	disabled := a.store.Get().Agent.DisabledTools
 	for name, spec := range builtinSpecs() {
+		if slices.Contains(disabled, name) {
+			server.RemoveTools(name)
+			continue
+		}
 		name, spec := name, spec
 		server.AddTool(&mcp.Tool{Name: name, Description: spec.desc, InputSchema: spec.schema}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			caller := a.bind(req.Session, p)
@@ -324,6 +326,9 @@ func (a *Agent) server(p Principal) *mcp.Server {
 				caller = c
 			}
 			cfg := a.store.Get()
+			if slices.Contains(cfg.Agent.DisabledTools, name) {
+				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
+			}
 			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
 			}
@@ -381,6 +386,18 @@ func (a *Agent) server(p Principal) *mcp.Server {
 			return Result(out, e), nil
 		})
 	}
+}
+
+func (a *Agent) server(p Principal) *mcp.Server {
+	a.viewMu.Lock()
+	defer a.viewMu.Unlock()
+	keyBytes, _ := json.Marshal(p)
+	key := string(keyBytes)
+	if view := a.views[key]; view != nil {
+		return view
+	}
+	server := mcp.NewServer(&mcp.Implementation{Name: "xmesh-agent", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, req *mcp.InitializedRequest) { a.bind(req.Session, p) }})
+	a.installBuiltins(server, p)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()

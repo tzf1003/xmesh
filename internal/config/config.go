@@ -121,8 +121,10 @@ type Agent struct {
 	PTY        PTY                      `json:"pty"`
 	Backends   map[string]Backend       `json:"backends"`
 	Authz      map[string]Grant         `json:"authz"`
-	Policy     Policy                   `json:"policy"`
-	Quota      Quota                    `json:"quota"`
+	// DisabledTools names built-in tools that are switched off; absent means all are on.
+	DisabledTools []string `json:"disabled_tools"`
+	Policy        Policy   `json:"policy"`
+	Quota         Quota    `json:"quota"`
 }
 type Exec struct {
 	MaxConcurrent     int    `json:"max_concurrent"`

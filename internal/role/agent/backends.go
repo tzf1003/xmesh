@@ -100,3 +100,15 @@ func (a *Agent) refreshBackends() {
 		a.installBackends(view, p)
 	}
 }
+
+// refreshBuiltins applies agent.disabled_tools to every open view. It runs only when the configuration
+// changes, so a backend coming or going does not re-announce the built-in tools.
+func (a *Agent) refreshBuiltins() {
+	a.viewMu.Lock()
+	defer a.viewMu.Unlock()
+	for key, view := range a.views {
+		var p Principal
+		_ = json.Unmarshal([]byte(key), &p)
+		a.installBuiltins(view, p)
+	}
+}
