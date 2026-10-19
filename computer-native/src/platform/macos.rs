@@ -3,7 +3,9 @@ use std::ffi::c_void;
 
 #[path = "macos_background.rs"]
 mod background;
+pub use background::initialize as initialize_background;
 pub use background::{available as background_available, execute as execute_background, targets};
+pub use background::{run_loop as run_background_loop, stop_loop as stop_background_loop};
 pub fn target_input_serial(id: &str) -> u64 {
     if id.is_empty() {
         super::user_input_serial()

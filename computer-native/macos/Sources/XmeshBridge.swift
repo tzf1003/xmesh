@@ -5,17 +5,30 @@ import Foundation
 
 // The pinned upstream dispatchers call these hooks at every delivery boundary.
 // The Rust executor supplies the lease, deadline, permission and target guard.
-public typealias SessionCheck = @convention(c) (UnsafeMutableRawPointer?) -> Bool
+public typealias SessionCheck = @convention(c) (UnsafeMutableRawPointer?, Bool) -> Bool
 private var sessionCheck: SessionCheck?
 private var sessionContext: UnsafeMutableRawPointer?
 private var releasingInput = false
 private var sessionTargetPID: pid_t?
+private var sessionTarget: Action?
 private let bridgeLock = NSLock()
-private enum BridgeStop: Error { case userIntervention }
+private enum BridgeStop: Error { case userIntervention, targetChanged }
 
 func requireUsableComputerUseSession() throws {
-    guard releasingInput || sessionCheck?(sessionContext) == true else { throw ComputerUseError.stateUnavailable("session_cancelled") }
+    guard sessionCheck?(sessionContext,releasingInput) == true else { throw ComputerUseError.stateUnavailable("session_cancelled") }
+    if let target=sessionTarget{
+        let windows=currentWindowInfo()
+        guard skyKeyWindowMatchesTarget(windowInfo:windows,windowID:target.window,pid:target.pid) else{throw BridgeStop.targetChanged}
+        if !releasingInput && !targetMatchesWindow(target,windows){throw BridgeStop.targetChanged}
+    }
     if !releasingInput, let target=sessionTargetPID, xmeshFrontmostPID()==target {throw BridgeStop.userIntervention}
+}
+
+func xmeshReleaseInput(_ operation:()->Void){
+    let previous=releasingInput;releasingInput=true
+    defer{releasingInput=previous}
+    guard (try? requireUsableComputerUseSession()) != nil else{return}
+    operation()
 }
 
 enum TimingLog {
@@ -31,7 +44,7 @@ enum InputTiming {
     static func milliseconds(_ name: String, default value: Double) -> TimeInterval { value / 1000 }
 }
 
-private struct Action: Decodable {
+struct Action: Decodable {
     let type: String
     let pid: Int32
     let window: UInt32
@@ -63,6 +76,24 @@ public func xmeshBackgroundAvailable() -> Int32 {
     SkyLightSPI.shared.capability.isAvailable ? 1 : 0
 }
 
+@_cdecl("xmesh_background_initialize")
+public func xmeshBackgroundInitialize(){
+    // The native executor has no windows. Initialize AppKit on its main thread
+    // with activation prohibited before capture or input libraries register it.
+    NSApplication.shared.setActivationPolicy(.prohibited)
+}
+
+@_cdecl("xmesh_background_run_loop")
+public func xmeshBackgroundRunLoop(){
+    NSApplication.shared.finishLaunching()
+    CFRunLoopRun()
+}
+
+@_cdecl("xmesh_background_stop_loop")
+public func xmeshBackgroundStopLoop(){
+    DispatchQueue.main.async{CFRunLoopStop(CFRunLoopGetMain())}
+}
+
 @_cdecl("xmesh_background_event_target")
 public func xmeshBackgroundEventTarget(_ raw:UnsafeMutableRawPointer?,_ kind:UInt32)->Int32 {
     guard let raw else{return 0}
@@ -83,15 +114,18 @@ public func xmeshBackgroundEventTarget(_ raw:UnsafeMutableRawPointer?,_ kind:UIn
 
 @_cdecl("xmesh_background_dispatch")
 public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int, _ check: SessionCheck?, _ context: UnsafeMutableRawPointer?) -> Int32 {
+    // Delivery runs on Rust's serial input worker. Keep AppKit's main loop free
+    // to refresh foreground identity and service read-only monitor queries.
     guard let bytes, count > 0, count <= 1_048_576, let check else { return 1 }
     bridgeLock.lock()
     defer { bridgeLock.unlock() }
     sessionCheck = check
     sessionContext = context
-    defer { sessionCheck = nil; sessionContext = nil; releasingInput = false; sessionTargetPID = nil }
+    defer { sessionCheck = nil; sessionContext = nil; releasingInput = false; sessionTargetPID = nil;sessionTarget=nil }
     do {
         let action = try JSONDecoder().decode(Action.self, from: Data(bytes: bytes, count: count))
         sessionTargetPID=action.pid
+        sessionTarget=action
         guard action.pid > 0, action.window > 0, action.bounds.width > 0, action.bounds.height > 0,
               [action.originX, action.originY, action.width, action.height].allSatisfy(\.isFinite)
         else { return 1 }
@@ -102,8 +136,10 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
         guard skyKeyWindowMatchesTarget(windowInfo: windowInfo, windowID: action.window, pid: action.pid) else { return 4 }
         switch action.type {
         case "click":
-            guard (action.button ?? "left") == "left", (1...2).contains(action.clicks ?? 1) else { return 5 }
             let point = try action.point(action.x, action.y)
+            let semantic=try xmeshAccessibilityClick(pid:action.pid,window:action.window,point:point,button:action.button ?? "left",count:action.clicks ?? 1)
+            if semantic{break}
+            guard (action.button ?? "left") == "left", (1...2).contains(action.clicks ?? 1) else { return 5 }
             do {try SkyClickDispatcher.click(target: SkyClickTarget(
                 screenPoint: point,
                 windowPoint: CGPoint(x: point.x-action.originX, y: point.y-action.originY),
@@ -112,9 +148,11 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
             catch {try? releasePointer(action,point);throw error}
         case "text":
             guard let text=action.text, !text.isEmpty, text.utf8.count<=65536 else {return 1}
+            if try xmeshAccessibilityText(pid:action.pid,window:action.window,text:text){break}
             try SkyKeyboardDispatcher.typeText(target: SkyKeyboardTarget(windowID: action.window, pid: action.pid), text: text)
         case "key":
             guard let keys=action.keys, !keys.isEmpty, keys.count<=8 else{return 1}
+            if try xmeshAccessibilitySelectAll(pid:action.pid,window:action.window,keys:keys){break}
             let normalized=keys.map { key -> String in
                 switch key.lowercased() {case "delete":return "forwarddelete";case "space":return "space";default:return key}
             }.joined(separator:"+")
@@ -125,24 +163,46 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
                   let event=CGEvent(mouseEventSource:source,mouseType:.mouseMoved,mouseCursorPosition:point,mouseButton:.left) else{return 2}
             try stamp(event,point,action)
             try SkyLightSPI.shared.postToPid(event,pid:action.pid)
-        case "drag", "scroll":
+        case "scroll":
+            try withTargetFocus(action) {try dispatchPointer(action)}
+        case "drag":
             try withTargetFocus(action) { try dispatchPointer(action) }
         default:return 5
         }
-        guard frontmostPID() == before else {return 6}
+        // A user may switch between unrelated apps while this action runs.
+        // Only activation of the controlled app is an interference boundary;
+        // another foreground app is normal concurrent user activity.
+        guard let after=frontmostPID() else{return 6}
+        guard after != action.pid else {return 6}
         return 0
     } catch BridgeStop.userIntervention {return 3}
+      catch BridgeStop.targetChanged {return 4}
       catch { return 2 }
 }
 
+private func currentWindowInfo()->[[String:Any]]{
+    CGWindowListCopyWindowInfo([.optionAll],kCGNullWindowID) as? [[String:Any]] ?? []
+}
+
+func targetMatchesWindow(_ target:Action,_ windows:[[String:Any]])->Bool{
+    windows.contains{window in
+        guard let number=window[kCGWindowNumber as String] as? NSNumber,number.uint32Value==target.window,
+              let owner=window[kCGWindowOwnerPID as String] as? NSNumber,owner.int32Value==target.pid,
+              let bounds=window[kCGWindowBounds as String] as? [String:Any],
+              let rect=CGRect(dictionaryRepresentation:bounds as CFDictionary) else{return false}
+        return rect==target.bounds
+    }
+}
+
 func xmeshFrontmostPID() -> pid_t? {
-    // AX asks the current WindowServer state rather than a run-loop cached
-    // NSWorkspace value. No app is activated or brought forward by this query.
-    let system=AXUIElementCreateSystemWide()
-    var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(system,kAXFocusedApplicationAttribute as CFString,&value) == .success,let value else{return nil}
-    var pid:pid_t=0
-    return AXUIElementGetPid(value as! AXUIElement,&pid) == .success ? pid : nil
+    // The executor services AppKit's main run loop. Query the workspace on that
+    // thread so its KVO state advances and window z-order is not mistaken for
+    // keyboard focus (nonactivating windows can be above the active app).
+    let query:()->pid_t?={
+        guard let app=NSWorkspace.shared.frontmostApplication,!app.isTerminated else{return nil}
+        return app.processIdentifier
+    }
+    return Thread.isMainThread ? query() : DispatchQueue.main.sync(execute:query)
 }
 
 private func frontmostPID() -> pid_t? { xmeshFrontmostPID() }
@@ -151,8 +211,10 @@ private func withTargetFocus(_ action:Action,_ operation:() throws -> Void) thro
     let spi=SkyLightSPI.shared
     let focus=try spi.beginSyntheticTargetFocus(targetPID:action.pid,targetWindowID:action.window)
     do {
-        try spi.makeSyntheticTargetWindowKey(focus)
+        // Mouse delivery uses the upstream click path's target-active record.
+        // Key-window records are reserved for the keyboard dispatcher.
         try operation()
+        Thread.sleep(forTimeInterval:SkyKeyboardDispatcher.releaseSettle)
     } catch {try? spi.endSyntheticTargetFocus(focus);throw error}
     try spi.endSyntheticTargetFocus(focus)
 }
@@ -163,30 +225,65 @@ private func withTargetFocus(_ action:Action,_ operation:() throws -> Void) thro
 // routing and finite xmesh action budget. No process/global fallback is selected.
 private func dispatchPointer(_ action:Action) throws {
     let start=try action.point(action.x,action.y)
-    guard let source=CGEventSource(stateID:.privateState) else{throw ComputerUseError.message("event_source")}
+    // Adapted from open-computer-use appHasLazyWebAccessibility: detect the
+    // renderer by shipped frameworks instead of an application-name list.
+    let frameworks=NSRunningApplication(processIdentifier:action.pid)?.bundleURL?.appendingPathComponent("Contents/Frameworks")
+    let names=frameworks.flatMap{try? FileManager.default.contentsOfDirectory(atPath:$0.path)} ?? []
+    let chromium=names.contains{let name=$0.lowercased();return name.contains("chrom") || name.contains("electron") || name.contains("cef")}
+    guard let source=CGEventSource(stateID:chromium ? .hidSystemState : .privateState) else{throw ComputerUseError.message("event_source")}
     source.localEventsSuppressionInterval=0
     func post(_ type:CGEventType,_ point:CGPoint,_ cleanup:Bool=false) throws {
         let wasReleasing=releasingInput
         if cleanup{releasingInput=true}
         defer{releasingInput=wasReleasing}
-        if !cleanup {try requireUsableComputerUseSession()}
+        try requireUsableComputerUseSession()
         guard let event=CGEvent(mouseEventSource:source,mouseType:type,mouseCursorPosition:point,mouseButton:.left) else{throw ComputerUseError.message("event")}
         try stamp(event,point,action)
-        try SkyLightSPI.shared.postToPid(event,pid:action.pid)
+        if chromium{try SkyLightSPI.shared.postToPid(event,pid:action.pid)}
         event.postToPid(action.pid)
     }
     if action.type=="scroll"{
         let dx=action.deltaX ?? 0,dy=action.deltaY ?? 0
         guard abs(dx)<=10000,abs(dy)<=10000 else{throw ComputerUseError.invalidArguments("scroll")}
-        try requireUsableComputerUseSession()
-        guard let event=CGEvent(scrollWheelEvent2Source:source,units:.line,wheelCount:2,wheel1:Int32(-dy),wheel2:Int32(-dx),wheel3:0) else{throw ComputerUseError.message("event")}
-        event.location=start
-        try stamp(event,start,action)
-        try SkyLightSPI.shared.postToPid(event,pid:action.pid)
+        // Reuse computer-use-mcp's pixel/phase recipe. A xmesh discrete step is
+        // represented as 40 pixels; the native scroll event remains PID-bound.
+        func postScroll(_ x:Int,_ y:Int,_ phase:CGScrollPhase)throws{
+            try requireUsableComputerUseSession()
+            guard let event=CGEvent(scrollWheelEvent2Source:source,units:.pixel,wheelCount:2,wheel1:Int32(-y),wheel2:Int32(-x),wheel3:0) else{throw ComputerUseError.message("event")}
+            event.location=start
+            try stamp(event,start,action)
+            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1,value:Int64(-y))
+            event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2,value:Int64(-x))
+            event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1,value:Int64(-y*65536))
+            event.setIntegerValueField(.scrollWheelEventFixedPtDeltaAxis2,value:Int64(-x*65536))
+            event.setIntegerValueField(.scrollWheelEventScrollPhase,value:Int64(phase.rawValue))
+            event.setIntegerValueField(.scrollWheelEventMomentumPhase,value:Int64(CGMomentumScrollPhase.none.rawValue))
+            event.setIntegerValueField(.scrollWheelEventScrollCount,value:1)
+            event.setIntegerValueField(.scrollWheelEventIsContinuous,value:1)
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointer,value:Int64(action.window))
+            event.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent,value:Int64(action.window))
+            event.postToPid(action.pid)
+        }
+        try postScroll(dx*40,dy*40,.began)
+        try postScroll(0,0,.ended)
         return
     }
     guard (action.button ?? "left")=="left" else{throw ComputerUseError.invalidArguments("button")}
     let end=try action.point(action.toX,action.toY)
+    if chromium{
+        let group=Int64(DispatchTime.now().uptimeNanoseconds % 1_000_000_000)
+        for step in try skyClickEventRecipe(clickCount:1).prefix(3){
+            try requireUsableComputerUseSession()
+            let point=step.pointKind == .target ? start : CGPoint(x:-1,y:-1)
+            guard let event=CGEvent(mouseEventSource:source,mouseType:step.kind.cgEventType,mouseCursorPosition:point,mouseButton:.left) else{throw ComputerUseError.message("event")}
+            try stamp(event,point,action)
+            for (field,value) in [(UInt32(0),step.phase),(1,step.clickState),(3,Int64(0)),(7,Int64(3)),(58,group)]{try SkyLightSPI.shared.setIntegerField(event,field:field,value:value)}
+            if step.pointKind == .primer{try SkyLightSPI.shared.setWindowLocation(event,point:CGPoint(x:-1,y:-1))}
+            try SkyLightSPI.shared.postToPid(event,pid:action.pid)
+            event.postToPid(action.pid)
+            Thread.sleep(forTimeInterval:step.delayAfter)
+        }
+    }
     var aborted=true
     defer{try? post(.leftMouseUp,aborted ? start : end,true)}
     try post(.leftMouseDown,start)
@@ -198,8 +295,10 @@ private func dispatchPointer(_ action:Action) throws {
         guard let event=CGEvent(mouseEventSource:source,mouseType:.leftMouseDragged,mouseCursorPosition:point,mouseButton:.left) else{throw ComputerUseError.message("event")}
         event.setDoubleValueField(.mouseEventDeltaX,value:point.x-previous.x)
         event.setDoubleValueField(.mouseEventDeltaY,value:point.y-previous.y)
+        event.setIntegerValueField(.mouseEventDeltaX,value:Int64((point.x-previous.x).rounded()))
+        event.setIntegerValueField(.mouseEventDeltaY,value:Int64((point.y-previous.y).rounded()))
         try stamp(event,point,action)
-        try SkyLightSPI.shared.postToPid(event,pid:action.pid)
+        if chromium{try SkyLightSPI.shared.postToPid(event,pid:action.pid)}
         event.postToPid(action.pid)
         previous=point
         Thread.sleep(forTimeInterval:Double(min(2000,max(200,action.durationMS ?? 300)))/24000)

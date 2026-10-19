@@ -741,7 +741,7 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         {
             error = Some("human_intervention");
         }
-        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled"|"human_intervention"|"focus_changed")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
+        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled"|"human_intervention"|"focus_changed"|"execution_target_changed")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
         cache.insert(q.action_id.clone(), (payload, result.clone()));
         runtime.reply(id, result);
     }
@@ -769,9 +769,28 @@ fn main() {
     };
     let authorize = std::env::args().any(|a| a == "--authorize");
     #[cfg(target_os = "macos")]
+    platform::initialize_background();
+    #[cfg(target_os = "macos")]
     if authorize && !platform::screen_permission() {
         platform::request_screen_permission();
     }
+    #[cfg(target_os = "macos")]
+    {
+        let worker = thread::spawn(move || {
+            let result = std::panic::catch_unwind(|| serve_stdio(authorize));
+            platform::stop_background_loop();
+            if let Err(error) = result {
+                std::panic::resume_unwind(error);
+            }
+        });
+        platform::run_background_loop();
+        worker.join().expect("native protocol thread failed");
+    }
+    #[cfg(not(target_os = "macos"))]
+    serve_stdio(authorize);
+}
+
+fn serve_stdio(authorize: bool) {
     let runtime = Arc::new(Runtime {
         epoch: format!(
             "{}-{}",

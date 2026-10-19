@@ -45,6 +45,7 @@ fn build_macos_background() {
     for file in [
         "Sources/XmeshBridge.swift",
         "Sources/UpstreamKeyboard.swift",
+        "Sources/AccessibilityClick.swift",
         "vendor/open-computer-use/Errors.swift",
         "vendor/open-computer-use/SkyLightSPI.swift",
         "vendor/open-computer-use/SkyClickSimulation.swift",
@@ -53,8 +54,8 @@ fn build_macos_background() {
     ] {
         let file = root.join("macos").join(file);
         println!("cargo:rerun-if-changed={}", file.display());
-        // Keep upstream snapshots byte-for-byte intact. Stage two small,
-        // explicit integration changes in Cargo's shared build cache.
+        // Keep upstream snapshots byte-for-byte intact. Stage the synchronous
+        // foreground query in Cargo's shared build cache.
         if file.file_name().is_some_and(|name| {
             name == "SkyClickSimulation.swift" || name == "SkyKeyboardSimulation.swift"
         }) {
@@ -66,21 +67,6 @@ fn build_macos_background() {
                 "upstream foreground lookup changed"
             );
             let source = source.replace(original, "xmeshFrontmostPID()");
-            let source = if file.file_name().unwrap() == "SkyClickSimulation.swift" {
-                assert_eq!(
-                    source
-                        .matches("CGEventSource(stateID: .hidSystemState)")
-                        .count(),
-                    1,
-                    "upstream event source changed"
-                );
-                source.replace(
-                    "CGEventSource(stateID: .hidSystemState)",
-                    "CGEventSource(stateID: .privateState)",
-                )
-            } else {
-                source
-            };
             let staged = output.join(file.file_name().unwrap());
             std::fs::write(&staged, source).unwrap();
             compiler.arg(staged);

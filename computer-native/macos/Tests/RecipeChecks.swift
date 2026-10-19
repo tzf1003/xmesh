@@ -2,9 +2,12 @@
 // and no desktop screenshot is taken by this test executable.
 import Foundation
 import CoreGraphics
+import AppKit
 
 @main struct RecipeChecks {
     static func main() throws {
+        xmeshBackgroundInitialize()
+        precondition(NSApplication.shared.activationPolicy() == .prohibited)
         let single=try skyClickEventRecipe(clickCount:1)
         precondition(single.count==5 && single.last?.kind == .up)
         let double=try skyClickEventRecipe(clickCount:2)
@@ -24,10 +27,25 @@ import CoreGraphics
         let chunks=InputSimulation.keyboardUnicodeChunks(for:"中🙂文",maxUTF16Units:2)
         precondition(chunks.map(\.count)==[1,2,1])
         precondition(chunks.flatMap{$0}==Array("中🙂文".utf16))
+        let replaced=try xmeshSpliceText("中🙂文",selection:CFRange(location:1,length:2),text:"测试")
+        let inserted=try xmeshSpliceText("ab",selection:CFRange(location:1,length:0),text:"🙂")
+        precondition(replaced=="中测试文" && inserted=="a🙂b")
+        for range in [CFRange(location:-1,length:0),CFRange(location:4,length:1),CFRange(location:1,length:Int.max),CFRange(location:2,length:1)]{
+            do{_ = try xmeshSpliceText("中🙂文",selection:range,text:"x");preconditionFailure("invalid UTF-16 selection accepted")}catch{}
+        }
+        do{_ = try xmeshSpliceText(String(repeating:"x",count:1_048_576),selection:CFRange(location:0,length:0),text:"y");preconditionFailure("unbounded replacement accepted")}catch{}
         precondition(xmeshBackgroundDispatch(nil,0,nil,nil)==1)
         let request=Data("{\"type\":\"click\",\"pid\":42,\"window\":4,\"originX\":0,\"originY\":0,\"width\":100,\"height\":80,\"x\":10,\"y\":10}".utf8)
-        let cancelled=request.withUnsafeBytes{buffer in xmeshBackgroundDispatch(buffer.bindMemory(to:UInt8.self).baseAddress,request.count,{_ in false},nil)}
+        let cancelled=request.withUnsafeBytes{buffer in xmeshBackgroundDispatch(buffer.bindMemory(to:UInt8.self).baseAddress,request.count,{_,_ in false},nil)}
         precondition(cancelled==2)
+        let target=try JSONDecoder().decode(Action.self,from:request)
+        let matching:[[String:Any]]=[[kCGWindowNumber as String:NSNumber(value:4),kCGWindowOwnerPID as String:NSNumber(value:42),kCGWindowBounds as String:CGRect(x:0,y:0,width:100,height:80).dictionaryRepresentation]]
+        precondition(targetMatchesWindow(target,matching))
+        let moved:[[String:Any]]=[[kCGWindowNumber as String:NSNumber(value:4),kCGWindowOwnerPID as String:NSNumber(value:42),kCGWindowBounds as String:CGRect(x:1,y:0,width:100,height:80).dictionaryRepresentation]]
+        precondition(!targetMatchesWindow(target,moved))
+        precondition(!targetMatchesWindow(target,[]))
+        let wrongOwner:[[String:Any]]=[[kCGWindowNumber as String:NSNumber(value:4),kCGWindowOwnerPID as String:NSNumber(value:43),kCGWindowBounds as String:CGRect(x:0,y:0,width:100,height:80).dictionaryRepresentation]]
+        precondition(!targetMatchesWindow(target,wrongOwner))
         print("PASS: upstream click/focus/window-owner/key/Unicode recipes and pre-dispatch cancellation; no native input emitted")
     }
 }

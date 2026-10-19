@@ -27,7 +27,7 @@ enum InputSimulation {
                 up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
             }
             down.postToPid(pid)
-            up.postToPid(pid)
+            xmeshReleaseInput {up.postToPid(pid)}
             if InputTiming.typeChunkDelay > 0 {
                 Thread.sleep(forTimeInterval: InputTiming.typeChunkDelay)
             }
@@ -68,7 +68,7 @@ enum InputSimulation {
                 activeFlags.remove(modifier.flag)
                 if let event=CGEvent(keyboardEventSource:source,virtualKey:modifier.keyCode,keyDown:false){
                     event.flags=activeFlags
-                    event.postToPid(pid)
+                    xmeshReleaseInput {event.postToPid(pid)}
                 }
             }
         }
@@ -94,7 +94,7 @@ enum InputSimulation {
         keyDown.flags = activeFlags
         keyUp.flags = activeFlags
         keyDown.postToPid(pid)
-        keyUp.postToPid(pid)
+        xmeshReleaseInput {keyUp.postToPid(pid)}
 
         if InputTiming.pressKeySettle > 0 {
             Thread.sleep(forTimeInterval: InputTiming.pressKeySettle)

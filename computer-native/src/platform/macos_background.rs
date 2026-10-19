@@ -190,8 +190,18 @@ pub fn capture(target: &Target) -> Result<(i32, i32, Vec<u8>), &'static str> {
         let windows = content.windows();
         let window = windows
             .iter()
-            .find(|window| snapshot(window).is_some_and(|actual| same_window(&expected, &actual)))
+            .find(|window| window.id() == expected.window)
             .ok_or("target_unavailable")?;
+        let actual = snapshot(window).ok_or("target_hidden")?;
+        if actual.pid != expected.pid
+            || actual.started != expected.started
+            || actual.view.app_id != expected.view.app_id
+        {
+            return Err("target_replaced");
+        }
+        if !same_window(&expected, &actual) {
+            return Err("layout_changed");
+        }
         if expected.view.layout_version != target.layout_version {
             return Err("layout_changed");
         }
@@ -204,14 +214,33 @@ pub fn capture(target: &Target) -> Result<(i32, i32, Vec<u8>), &'static str> {
 }
 
 extern "C" {
+    fn xmesh_background_initialize();
+    fn xmesh_background_run_loop();
+    fn xmesh_background_stop_loop();
     fn xmesh_background_available() -> i32;
     fn xmesh_background_dispatch(
         bytes: *const u8,
         count: usize,
-        check: extern "C" fn(*mut c_void) -> bool,
+        check: extern "C" fn(*mut c_void, bool) -> bool,
         context: *mut c_void,
     ) -> i32;
     fn xmesh_background_event_target(event: *mut c_void, kind: u32) -> i32;
+}
+
+pub fn initialize() {
+    unsafe {
+        xmesh_background_initialize();
+    }
+}
+pub fn run_loop() {
+    unsafe {
+        xmesh_background_run_loop();
+    }
+}
+pub fn stop_loop() {
+    unsafe {
+        xmesh_background_stop_loop();
+    }
 }
 
 pub fn event_target(event: *mut c_void, kind: u32) -> i32 {
@@ -228,14 +257,15 @@ struct Guard<'a> {
     start: std::time::Instant,
     target: &'a WindowTarget,
 }
-extern "C" fn check(context: *mut c_void) -> bool {
+extern "C" fn check(context: *mut c_void, cleanup: bool) -> bool {
     // The Swift bridge calls this synchronously; execute owns the stack frame
     // and all references until xmesh_background_dispatch returns.
     let guard = unsafe { &*(context.cast::<Guard<'_>>()) };
-    guard
-        .runtime
-        .live(guard.token, guard.start, &guard.target.view.id)
-        && process_start(guard.target.pid) == Some(guard.target.started)
+    process_start(guard.target.pid) == Some(guard.target.started)
+        && (cleanup
+            || guard
+                .runtime
+                .live(guard.token, guard.start, &guard.target.view.id))
 }
 
 pub fn execute(
@@ -293,7 +323,7 @@ pub fn execute(
         0 => Ok(()),
         1 => Err("invalid_action"),
         3 => Err("human_intervention"),
-        4 => Err("target_unavailable"),
+        4 => Err("execution_target_changed"),
         5 => Err("background_action_unsupported"),
         6 => Err("focus_changed"),
         _ => Err("input_failed"),

@@ -90,7 +90,8 @@ SOFTWARE.
 Computer Use MCP
 Source: https://github.com/minghinmatthewlam/computer-use-mcp
 Revision: 82dd8093e44819c51537f489059e172777d7f1d7
-Adapted process/window pointer delivery in Sources/XmeshBridge.swift
+Adapted process/window pointer delivery in Sources/XmeshBridge.swift and
+Accessibility hit-testing, click route selection and text/selection helpers in Sources/AccessibilityClick.swift.
 
 MIT License
 
