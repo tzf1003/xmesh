@@ -1,9 +1,12 @@
 import pathlib
 import plistlib
+import struct
 import tempfile
 import unittest
+from unittest import mock
 
 from package_computer import package
+from verify_computer import verify
 
 
 class NativePackageTests(unittest.TestCase):
@@ -38,7 +41,7 @@ class NativePackageTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), binary.read_bytes())
 
     def test_macos_release_metadata_is_numeric_for_stable_beta_and_rc(self):
-        for version in ["v0.1.0", "0.1.0-beta.7", "v0.1.0-rc.2"]:
+        for version in ["v0.1.0", "0.1.0-beta.7", "v0.1.0-rc.2", "0.0.0-pr.98"]:
             with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 binary = root / "native"
@@ -46,9 +49,29 @@ class NativePackageTests(unittest.TestCase):
                 output = root / "helper.app"
                 package(binary, output, "darwin", version)
                 info = plistlib.loads((output / "Contents/Info.plist").read_bytes())
-                self.assertEqual(info["CFBundleVersion"], "0.1.0")
-                self.assertEqual(info["CFBundleShortVersionString"], "0.1.0")
+                numeric = version.removeprefix("v").split("-", 1)[0]
+                self.assertEqual(info["CFBundleVersion"], numeric)
+                self.assertEqual(info["CFBundleShortVersionString"], numeric)
                 self.assertEqual(info["XmeshReleaseVersion"], version.removeprefix("v"))
+
+    def test_macos_package_verifier_accepts_release_metadata_and_rejects_mismatches(self):
+        for version in ["v0.1.0", "v0.1.0-beta.7", "v0.1.0-rc.2", "0.0.0-pr.98"]:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                binary = root / "native"
+                binary.write_bytes(struct.pack("<II", 0xFEEDFACF, 0x0100000C) + bytes(56))
+                output = root / "bundle/xmesh-computer.app"
+                package(binary, output, "darwin", version)
+                with mock.patch("verify_computer.platform.system", return_value="Darwin"), mock.patch("verify_computer.platform.machine", return_value="arm64"), mock.patch("verify_computer.subprocess.run", return_value=mock.Mock(stdout=f"xmesh-computer {version} protocol=1\n")):
+                    verify(root / "bundle", "darwin", "arm64", version)
+                    plist = output / "Contents/Info.plist"
+                    original = plistlib.loads(plist.read_bytes())
+                    for key in ["CFBundleVersion", "CFBundleShortVersionString", "XmeshReleaseVersion"]:
+                        info = dict(original)
+                        info[key] = "9.9.9"
+                        plist.write_bytes(plistlib.dumps(info))
+                        with self.assertRaises(AssertionError):
+                            verify(root / "bundle", "darwin", "arm64", version)
 
 
 if __name__ == "__main__":
