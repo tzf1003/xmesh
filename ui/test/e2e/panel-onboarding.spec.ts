@@ -13,6 +13,13 @@ async function review(page: Page): Promise<void> {
   await expect(page.getByTestId("setup-plan")).toBeVisible();
   await expect(page.getByTestId("wizard-run")).toBeEnabled();
 }
+test("first launch opens setup automatically when no device is configured", async () => {
+  h = await launch({ publish: false, lang: "en" });
+  await expect.poll(() => h.app.windows().length).toBe(1);
+  const page = h.app.windows()[0]!;
+  await expect(page.getByTestId("wizard-purpose")).toBeVisible();
+  await expect.poll(() => h.app.evaluate(() => (globalThis as unknown as { __xmeshUiTest: { panelState(): { visible: boolean } } }).__xmeshUiTest.panelState().visible)).toBe(true);
+});
 for (const purpose of ["local", "multi-device", "cloud"]) test(`purpose ${purpose}: review shows intended setup and collapsed YAML`, async () => {
   h = await launch({ publish: false, lang: "en" });
   const page = await h.openPanel();
