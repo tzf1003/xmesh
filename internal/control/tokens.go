@@ -1,6 +1,7 @@
 package control
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -39,6 +40,16 @@ func EnsureDefaultPAT(store *config.Store, stateDir string) (bool, error) {
 	file := filepath.Join(patDirOf(stateDir), DefaultPATName+".token")
 	if err == nil {
 		err = writeManagedPatFile(file, DefaultPATName, token)
+		if errors.Is(err, os.ErrExist) {
+			// A prior interrupted install or an operator may own the fixed path.
+			// Keep it intact and register a fresh, exclusively created file.
+			var suffix string
+			suffix, err = newPatToken()
+			if err == nil {
+				file = filepath.Join(patDirOf(stateDir), DefaultPATName+"-"+suffix+".token")
+				err = writeManagedPatFile(file, DefaultPATName, token)
+			}
+		}
 	}
 	if err != nil {
 		return false, err

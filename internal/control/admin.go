@@ -128,10 +128,27 @@ func (s *Server) pairImport(w http.ResponseWriter, r *http.Request, _ *call) {
 // --- personal access tokens (CTR-CTL-09) ---
 
 var patNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,62}$`)
+var patFileSuffixPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 func (s *Server) patDir() string { return patDirOf(s.o.StateDir) }
 
 func patDirOf(stateDir string) string { return filepath.Join(stateDir, "pats") }
+
+func managedPatPath(dir, name, file string) bool {
+	if filepath.Dir(filepath.Clean(file)) != filepath.Clean(dir) {
+		return false
+	}
+	base := filepath.Base(file)
+	if base == name+".token" {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(base, name+"-")
+	if !ok {
+		return false
+	}
+	suffix, ok = strings.CutSuffix(suffix, ".token")
+	return ok && patFileSuffixPattern.MatchString(suffix)
+}
 
 // Create the token and its receipt together for both explicit and automatic PATs.
 func writeManagedPatFile(file, name, token string) error {
@@ -357,7 +374,7 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 		return
 	}
 	// Only a file the channel created is removed; a token file the operator pointed at stays.
-	if filepath.Clean(pat.TokenFile) == filepath.Join(s.patDir(), name+".token") {
+	if managedPatPath(s.patDir(), name, pat.TokenFile) {
 		if owner, err := os.ReadFile(pat.TokenFile + ".owner"); err == nil && string(owner) == name+"\n" {
 			_ = os.Remove(pat.TokenFile)
 			_ = os.Remove(pat.TokenFile + ".owner")
