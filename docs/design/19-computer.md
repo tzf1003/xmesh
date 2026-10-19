@@ -145,3 +145,5 @@ Wayland EIS 输入适配接入同一 Portal grant，支持 resumed 设备、mapp
 新增 macOS 独立节点验收脚本，标准 MCP SDK 驱动原生点击、中文、组合键、拖动、滚动、动作去重 / 查询、续租和关闭通过。首次组合输入验收未达到最终窗口状态，后续带逐字段断言的复测通过；稳定性复测尚未完成。所有本机原生输入验收要求桌面用户明确同意及显式输入开关，真实面板验收另要求打开窗口的显式开关；普通检查不驱动系统输入。
 
 第十五轮：后台会话增加 interaction / target_id、窗口范围的 frame layout 与用户介入序号，默认后台控制要求指定执行器提供的目标。Go 目标绑定、旧帧、窗口关闭、其他应用输入与权限能力撤销测试通过；全仓库竞态检查通过（31 个含测试包，另有 3 个包无测试文件）。Swift 上游配方和 C ABI 的投递前取消检查通过；Rust 本机编译及 clippy 通过，Linux arm64 容器 clippy 通过；UI 483 项单元测试通过。macOS 编译产物的 Swift 动态依赖读回均为系统路径。补充了 release 元数据省略空 actions 的回归，避免原生 Vec<Action> 拒绝 null 导致租约回收请求失败。该轮未发出真实桌面输入；后台单窗口采集、原生操作结果、用户鼠标及前台焦点保持仍未做实桌面验收。
+
+提交 `8e4d334` 的原生工作流 39231328800 在 Windows 源码哈希检查失败（job 117989723377，SkyLightSPI.swift）。本机使用 `core.autocrlf=true` 的 Git checkout 过滤复现：396 行被转换为 CRLF，偏离固定上游字节。为该快照目录增加局部 `-text` 属性后，同一过滤检查验证七个源文件 / 许可文件的原始 SHA-256 全部保留；Windows 实际运行结果由后续提交继续验证。原生只读 info 探测返回 ready、默认 background、四项后台 capability 和十个窗口目标，未请求 capture 或 execute。
