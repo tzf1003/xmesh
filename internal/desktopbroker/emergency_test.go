@@ -3,6 +3,7 @@ package desktopbroker
 import (
 	"context"
 	"github.com/tzf1003/xmesh/internal/computer"
+	"github.com/tzf1003/xmesh/internal/toolerr"
 	"testing"
 )
 
@@ -37,6 +38,11 @@ func TestLocalEmergencyStopsWithoutKernelAndRequiresLocalResume(t *testing.T) {
 	if _, err := owner.Info(ctx); err == nil {
 		t.Fatal("suspended host restarted native executor")
 	}
+	if err := local.Authorize(ctx); err == nil {
+		t.Fatal("authorization restarted an emergency-stopped executor")
+	} else if e, ok := err.(*toolerr.Error); !ok || e.Code != "policy_denied" || e.Fields["reason"] != "host_suspended" {
+		t.Fatal("authorization did not preserve the suspension reason", err)
+	}
 	if status, err := local.HostStatus(ctx); err != nil || !status.Suspended || status.NativePID != 0 {
 		t.Fatal(status, err)
 	}
@@ -70,6 +76,7 @@ func TestEmergencyStopPersistsAcrossHostRestart(t *testing.T) {
 	}
 	_ = local.Close()
 	_ = b.Close()
+	options.Authorize = true
 	b, err = Start(options)
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +89,9 @@ func TestEmergencyStopPersistsAcrossHostRestart(t *testing.T) {
 	}
 	if _, err := client.Info(context.Background()); err == nil {
 		t.Fatal("restarted host accepted desktop access")
+	}
+	if err := client.Authorize(context.Background()); err == nil {
+		t.Fatal("authorization bypassed persistent suspension")
 	}
 	if err := client.ResumeHost(context.Background()); err != nil {
 		t.Fatal(err)

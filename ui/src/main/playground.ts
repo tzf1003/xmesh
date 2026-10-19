@@ -16,6 +16,7 @@ export function localGatewayUrl(raw: string): URL {
 export class PlaygroundService {
   private readonly connections = new Map<string, { key: string; client: Client; transport: StreamableHTTPClientTransport }>();
   private readonly connecting = new Map<string, Promise<Client>>();
+  private readonly users = new Map<string, number>();
   private epoch = 0;
   private revision = 0;
   private readonly waiting = new Map<string, { cancelled: boolean }>();
@@ -52,6 +53,19 @@ export class PlaygroundService {
     if (!s.connection.status.roles.includes("gateway")) throw new Error("Enable the Gateway role to use the playground");
   }
 
+  private async withClient<T>(instance: string, pat: string | undefined, use: (client: Client) => Promise<T>): Promise<T> {
+    const slot = pat ?? "";
+    // Pin before awaiting credentials or connection setup so another request
+    // cannot evict the connection between acquisition and its first RPC.
+    this.users.set(slot, (this.users.get(slot) ?? 0) + 1);
+    try { return await use(await this.client(instance, pat)); }
+    finally {
+      const remaining = (this.users.get(slot) ?? 1) - 1;
+      if (remaining) this.users.set(slot, remaining);
+      else this.users.delete(slot);
+    }
+  }
+
   private async client(instance: string, pat?: string): Promise<Client> {
     this.check(instance);
     const slot = pat ?? "";
@@ -68,15 +82,27 @@ export class PlaygroundService {
     if (epoch !== this.epoch) throw new Error("Gateway connection changed");
     const key = JSON.stringify([instance, c.status.control.boot_id, url.href, token]);
     const current = this.connections.get(slot);
-    if (current?.key === key) return current.client;
+    if (current?.key === key) {
+      this.connections.delete(slot);
+      this.connections.set(slot, current);
+      return current.client;
+    }
     const connecting = this.connecting.get(slot);
     if (connecting) { await connecting; return this.client(instance, pat); }
-    if (!current && this.connections.size + this.connecting.size >= 8) throw new Error("Too many Gateway credentials are connected");
+    let evicted: typeof current;
+    const occupied = new Set([...this.connections.keys(), ...this.connecting.keys()]).size;
+    if (!current && occupied >= 8) {
+      const idle = [...this.connections].find(([name]) => !this.users.has(name) && !this.connecting.has(name));
+      if (!idle) throw new Error("Too many Gateway credentials are connected");
+      this.connections.delete(idle[0]);
+      evicted = idle[1];
+    }
     const opening = (async () => {
       this.connections.delete(slot);
-      if (current) {
-        await current.transport.terminateSession().catch(() => undefined);
-        await current.client.close().catch(() => undefined);
+      for (const old of [current, evicted]) {
+        if (!old) continue;
+        await old.transport.terminateSession().catch(() => undefined);
+        await old.client.close().catch(() => undefined);
       }
       if (epoch !== this.epoch) throw new Error("Gateway connection changed");
       const generation = epoch;
@@ -103,16 +129,17 @@ export class PlaygroundService {
     this.waiting.set(id, pending);
     const started = Date.now();
     try {
-      const client = await this.client(instance, pat);
-      if (pending.cancelled) throw new Error("Call cancelled");
-      this.waiting.delete(id);
-      const abort = new AbortController();
-      this.running.set(id, abort);
-      const result = await client.callTool({ name, arguments: args }, undefined, {
-        signal: abort.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs,
-        onprogress: (p) => { this.progress[id] = { progress: p.progress, total: p.total, message: p.message }; },
+      return await this.withClient(instance, pat, async (client) => {
+        if (pending.cancelled) throw new Error("Call cancelled");
+        this.waiting.delete(id);
+        const abort = new AbortController();
+        this.running.set(id, abort);
+        const result = await client.callTool({ name, arguments: args }, undefined, {
+          signal: abort.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs,
+          onprogress: (p) => { this.progress[id] = { progress: p.progress, total: p.total, message: p.message }; },
+        });
+        return { result: result as ToolResult, durationMs: Date.now() - started };
       });
-      return { result: result as ToolResult, durationMs: Date.now() - started };
     } catch (e) {
       if ((e as { code?: number }).code === 404 || (e instanceof Error && /session.*(not found|expired|invalid)/i.test(e.message))) await this.closeCredential(pat ?? "");
       throw e;
@@ -137,26 +164,27 @@ export class PlaygroundService {
         case "status": data = { revision: this.revision, progress: { ...this.progress } }; break;
         case "call": data = await this.call(req.instance, req.id, req.name, req.arguments, req.timeoutMs, req.pat); break;
         case "list": {
-          const client = await this.client(req.instance);
-          if (req.device === "gateway") {
-            const tools: ToolDescriptor[] = [];
-            let cursor: string | undefined;
-            do {
-              const page = await client.listTools({ cursor });
-              tools.push(...page.tools.filter((t) => !t.name.includes("/")) as ToolDescriptor[]);
-              cursor = page.nextCursor;
-            } while (cursor);
-            data = { tools, truncated: false, revision: this.revision };
-          } else {
-            const out = await client.callTool({ name: "tools.search", arguments: { device: req.device, pattern: req.pattern ?? "*" } }) as ToolResult;
-            const raw: Record<string, unknown> = out.structuredContent ?? JSON.parse(out.content.filter((c) => c.type === "text").map((c) => c.text).join("")) as Record<string, unknown>;
-            if (out.isError) {
-              const error = new Error(String(raw.message ?? JSON.stringify(raw))) as Error & { code: string };
-              error.code = typeof raw.error === "string" ? raw.error : "tool_error";
-              throw error;
+          data = await this.withClient(req.instance, undefined, async (client) => {
+            if (req.device === "gateway") {
+              const tools: ToolDescriptor[] = [];
+              let cursor: string | undefined;
+              do {
+                const page = await client.listTools({ cursor });
+                tools.push(...page.tools.filter((t) => !t.name.includes("/")) as ToolDescriptor[]);
+                cursor = page.nextCursor;
+              } while (cursor);
+              return { tools, truncated: false, revision: this.revision };
+            } else {
+              const out = await client.callTool({ name: "tools.search", arguments: { device: req.device, pattern: req.pattern ?? "*" } }) as ToolResult;
+              const raw: Record<string, unknown> = out.structuredContent ?? JSON.parse(out.content.filter((c) => c.type === "text").map((c) => c.text).join("")) as Record<string, unknown>;
+              if (out.isError) {
+                const error = new Error(String(raw.message ?? JSON.stringify(raw))) as Error & { code: string };
+                error.code = typeof raw.error === "string" ? raw.error : "tool_error";
+                throw error;
+              }
+              return { tools: raw.tools ?? [], truncated: raw.truncated === true, revision: this.revision };
             }
-            data = { tools: raw.tools ?? [], truncated: raw.truncated === true, revision: this.revision };
-          }
+          });
           break;
         }
       }

@@ -71,7 +71,7 @@ func Start(o Options) (*Broker, error) {
 		_ = l.Close()
 		return nil, err
 	}
-	if o.Authorize {
+	if o.Authorize && !b.suspended {
 		p, e := computer.StartAuthorizedProcess(o.HelperPath)
 		if e != nil {
 			_ = l.Close()
@@ -232,6 +232,11 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 		if b.closed {
 			b.mu.Unlock()
 			fail(toolerr.New("desktop_unavailable", "桌面服务已退出"))
+			return
+		}
+		if b.suspended {
+			b.mu.Unlock()
+			fail(toolerr.New("policy_denied", "请先在本机恢复桌面共享，再进行授权", "reason", "host_suspended"))
 			return
 		}
 		old := b.provider

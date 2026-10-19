@@ -216,8 +216,22 @@ impl Runtime {
     }
 }
 
+fn capture_error_code(reason: &str) -> &'static str {
+    match reason {
+        "permission_required" => "permission_required",
+        "desktop_locked" => "desktop_locked",
+        "layout_changed" | "target_unavailable" => "conflict",
+        "invalid_region" | "invalid_display" | "display_not_found" => "invalid_args",
+        "capture_busy" | "portal_busy" => "resource_busy",
+        _ => "desktop_unavailable",
+    }
+}
+
 fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> {
-    if !platform::screen_permission() || platform::locked() {
+    if platform::locked() {
+        return Err("desktop_locked");
+    }
+    if !platform::screen_permission() {
         return Err("permission_required");
     }
     let displays = platform::displays();
@@ -339,7 +353,13 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     } else {
         platform::layout(&platform::displays())
     };
-    if current_layout != layout || platform::locked() {
+    if platform::locked() {
+        return Err("desktop_locked");
+    }
+    if !platform::screen_permission() {
+        return Err("permission_required");
+    }
+    if current_layout != layout {
         return Err("layout_changed");
     }
     Ok(
@@ -657,7 +677,8 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // Native desktop permissions and display connections can become
                 // ready after process startup. Retry without opening prompts;
-                // Wayland grants are renewed through explicit local setup.
+                // Wayland closes this child after a lost session is cleaned up;
+                // the broker restores it with a new desktop epoch.
                 let retry_native =
                     !cfg!(target_os = "linux") || std::env::var_os("WAYLAND_DISPLAY").is_none();
                 if input.is_none()
@@ -885,7 +906,7 @@ fn serve_stdio(authorize: bool) {
                     match serde_json::from_value(q.params) {
                         Ok(r) => match capture(&rt, r) {
                             Ok(v) => rt.reply(q.id, v),
-                            Err(reason) => rt.error(q.id, "desktop_unavailable", reason),
+                            Err(reason) => rt.error(q.id, capture_error_code(reason), reason),
                         },
                         Err(_) => rt.error(q.id, "invalid_args", "capture"),
                     };
@@ -903,6 +924,20 @@ fn serve_stdio(authorize: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capture_errors_preserve_the_callers_recovery_path() {
+        for (reason, code) in [
+            ("permission_required", "permission_required"),
+            ("desktop_locked", "desktop_locked"),
+            ("layout_changed", "conflict"),
+            ("target_unavailable", "conflict"),
+            ("invalid_region", "invalid_args"),
+            ("capture_busy", "resource_busy"),
+            ("pipewire_connect", "desktop_unavailable"),
+        ] {
+            assert_eq!(capture_error_code(reason), code);
+        }
+    }
     #[test]
     fn permission_loss_fences_the_active_lease_across_permission_restoration() {
         let runtime = Runtime {
