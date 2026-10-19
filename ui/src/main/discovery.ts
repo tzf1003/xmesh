@@ -154,7 +154,7 @@ function processBirth(pid:number): number|undefined {
 export function removeStaleControl(
   roots: string | string[],
   id: string,
-  gone: (pid: number) => boolean = kernelGone,
+  gone: (pid: number, startedAt?: string) => boolean = kernelGone,
   protectedRoots: readonly string[] = protectedStateRoots(),
 ): boolean {
   if (parseNodeName(id) === undefined) return false;
@@ -170,7 +170,7 @@ export function removeStaleControl(
     }
     if (!manifest) continue;
     // The first root determines the selected node; later roots can contain other installations.
-    if (protectedRoots.includes(root) || !gone(manifest.pid)) return false;
+    if (protectedRoots.includes(root) || !gone(manifest.pid, manifest.started_at)) return false;
     const pending = fs.mkdtempSync(path.join(root, id, ".control-cleanup-"));
     const captured = path.join(pending, "control.json");
     let moved = false;
@@ -181,7 +181,7 @@ export function removeStaleControl(
       fs.linkSync(file, path.join(pending, "backup.json"));
       fs.renameSync(file, captured);
       moved = true;
-      if (fs.readFileSync(captured, "utf8") !== raw || !gone(manifest.pid)) return false;
+      if (fs.readFileSync(captured, "utf8") !== raw || !gone(manifest.pid, manifest.started_at)) return false;
       fs.unlinkSync(captured);
       removed = true;
       return true;

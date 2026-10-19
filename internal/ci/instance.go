@@ -649,7 +649,7 @@ func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duratio
 		// The runner is updating itself or refreshed its configuration: start it again at once.
 		return 0, nil, false
 	case e.code == 127 && ranFor < time.Second:
-		return time.Second, i.problem(v2.CiProblemStartFailed, "无法启动运行器: "+short(strings.Join(e.tailLines, " "))), false
+		return time.Second, i.problem(v2.CiProblemStartFailed, "运行器启动失败（退出码 127），请检查运行器程序及其依赖命令是否可用。"), false
 	}
 	msg := fmt.Sprintf("运行器退出（退出码 %d），稍后自动重启。", e.code)
 	return time.Second, i.problem(v2.CiProblemUnclassified, msg), false

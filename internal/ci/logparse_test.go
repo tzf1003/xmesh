@@ -47,6 +47,14 @@ func Test_RunnerOutputRetainsOnlyClassifications(t *testing.T) {
 	}
 }
 
+func Test_RunnerExit127HasActionableDiagnosis(t *testing.T) {
+	i := &instance{}
+	_, problem, _ := i.classify(i.exitOf(127, false), 0)
+	if problem == nil || !strings.Contains(problem.Message, "127") || !strings.Contains(problem.Message, "依赖命令") {
+		t.Fatalf("missing startup diagnosis: %+v", problem)
+	}
+}
+
 func Test_RegistrationDiagnosticsDropRawOutput(t *testing.T) {
 	i := &instance{}
 	for _, line := range []string{"arbitrary-secret", "credential-secret libicu failure", "secret 401"} {
