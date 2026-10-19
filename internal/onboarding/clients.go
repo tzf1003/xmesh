@@ -387,7 +387,7 @@ func readClientFile(path string) ([]byte, bool, error) {
 	if err := checkClientPath(path); err != nil {
 		return nil, false, err
 	}
-	f, err := os.Open(path)
+	f, err := openClientFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
 	}
