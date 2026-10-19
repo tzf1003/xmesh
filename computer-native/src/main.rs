@@ -354,9 +354,7 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     }
     let mut img = DynamicImage::ImageRgba8(full).crop_imm(x, y, crop_width, crop_height);
     let max_width = if q.max_width == 0 { 1600 } else { q.max_width };
-    if img.width() > max_width {
-        img = img.resize(max_width, 8192, image::imageops::FilterType::Triangle);
-    }
+    img = fit_capture_image(img, max_width);
     let mut encoded = Cursor::new(Vec::new());
     img.write_to(&mut encoded, ImageFormat::Png)
         .map_err(|_| "encode_failed")?;
@@ -386,6 +384,14 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
         json!({"desktop_epoch":runtime.epoch,"display_id":display.id,"layout_version":layout,"image_width":img.width(),"image_height":img.height(),
         "capture_region":{"x":region.x,"y":region.y,"width":region.width,"height":region.height},"target_id":q.target_id,"mime_type":mime,"image":STANDARD.encode(encoded.into_inner())}),
     )
+}
+
+fn fit_capture_image(img: DynamicImage, max_width: u32) -> DynamicImage {
+    if img.width() > max_width || img.height() > 8192 {
+        img.resize(max_width, 8192, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    }
 }
 
 fn capture_raw(display: &platform::Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
@@ -951,6 +957,18 @@ fn serve_stdio(authorize: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capture_output_fits_both_dimensions_without_upscaling() {
+        for (width, height, expected) in [
+            (100, 9000, (91, 8192)),
+            (2000, 1000, (1600, 800)),
+            (1600, 8192, (1600, 8192)),
+            (400, 600, (400, 600)),
+        ] {
+            let img = fit_capture_image(DynamicImage::new_rgba8(width, height), 1600);
+            assert_eq!((img.width(), img.height()), expected);
+        }
+    }
     #[test]
     fn capture_timeout_keeps_the_supervisors_retirement_signal() {
         for (screen, locked) in [(true, false), (false, false), (true, true), (false, true)] {

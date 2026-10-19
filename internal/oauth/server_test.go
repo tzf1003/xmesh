@@ -67,9 +67,13 @@ func registerClient(t *testing.T, h *httptest.Server) string {
 	_ = json.Unmarshal([]byte(body), &v)
 	return v["client_id"].(string)
 }
-func authCode(t *testing.T, h *httptest.Server, id, verifier string) (string, string) {
+func authCode(t *testing.T, h *httptest.Server, id, verifier string, requestedScope ...string) (string, string) {
 	t.Helper()
-	q := url.Values{"response_type": {"code"}, "client_id": {id}, "redirect_uri": {"http://127.0.0.1:1234/callback"}, "state": {"test-state"}, "code_challenge_method": {"S256"}, "code_challenge": {digest(verifier)}, "scope": {"devices:read fs:read:*"}}
+	scope := "devices:read fs:read:*"
+	if len(requestedScope) > 0 {
+		scope = requestedScope[0]
+	}
+	q := url.Values{"response_type": {"code"}, "client_id": {id}, "redirect_uri": {"http://127.0.0.1:1234/callback"}, "state": {"test-state"}, "code_challenge_method": {"S256"}, "code_challenge": {digest(verifier)}, "scope": {scope}}
 	path := "/oauth/authorize?" + q.Encode()
 	status, headers, body := request(t, h, "GET", path, "", "")
 	if status != 200 {
