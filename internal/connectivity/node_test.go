@@ -211,6 +211,14 @@ func TestRetiredListenerRejectsRequestsAfterReplacementIsReady(t *testing.T) {
 	}
 }
 
+func TestPathHostMatchesOutgoingAndIncomingTailnetAddresses(t *testing.T) {
+	for endpoint, want := range map[string]string{"https://100.64.0.1:7433": "100.64.0.1", "100.64.0.1:31872": "100.64.0.1", "https://[fd7a:115c:a1e0::1]:7433": "fd7a:115c:a1e0::1", "[fd7a:115c:a1e0::1]:31872": "fd7a:115c:a1e0::1"} {
+		if got := pathHost(endpoint); got != want {
+			t.Fatal(endpoint, got, want)
+		}
+	}
+}
+
 func TestRemoteDrainUsesDeviceTrustAndPersistentTargetID(t *testing.T) {
 	a, _ := node(t, "admin")
 	b, cfg := node(t, "workstation")

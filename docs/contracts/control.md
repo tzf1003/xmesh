@@ -387,3 +387,9 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 - 公开仓库默认拒绝（见上），因为公开仓库的 fork PR 可以在这台机器上执行代码。CI 任务以内核运行用户的完整权限执行，不受 `cwd_policy`、禁止目录和 L2 沙箱约束；这些只约束 MCP 工具调用。运行器目录默认写入禁止目录文件，工具读不到运行器自己的凭据。
 
 审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名与大小，不含令牌；绑定、解绑、重启、重新注册各记一条。job 的开始与结束只出现在 `GET /v2/status` 的 `ci`，不写审计：运行器自己的日志留在运行器目录。
+
+## 桌面管理（API v2）
+
+能力 `computer` 表示节点持有 Computer Manager。`GET /v2/computer` 返回开启 / 暂停状态、系统权限和显示器信息以及本机所有桌面会话；该视图省略控制租约 token、截图和输入正文。`POST /v2/computer/pause` 接受 `{ "paused": true|false }`，暂停立即撤销所有会话与排队输入；恢复允许调用方重新获取租约。`POST /v2/computer/revoke` 接受 `{ "session_id": "cs-…" }`，关闭指定会话。两条写路由返回当前状态，均经本机控制通道身份校验并记录元数据审计。
+
+类型、路由和模式见 `control-computer.schema.json` 与 `control-routes.json`。远程桌面工具及执行器协议见 [Computer](computer.md)。

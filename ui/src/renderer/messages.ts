@@ -5,6 +5,7 @@ import { playgroundZh, playgroundEn } from "./playground-messages";
 // checks that both tables have the same keys and the same {placeholders}.
 
 import { topologyEn, topologyZh } from "./topology-messages";
+import { computerEn, computerZh } from "./computer-messages";
 
 export const zh = {
   "device.preferLan": "连接时优先局域网，断线后自动尝试其他路径；已建立的连接保持当前路径。",
@@ -18,9 +19,11 @@ export const zh = {
   "device.revokeHint": "撤销 {name} 的设备信任？该设备的所有连接和会话都会结束。",
   "device.revoked": "设备信任已撤销",
 
+  ...computerZh,
   ...playgroundZh,
   ...workspaceZh,
   ...topologyZh,
+  "nav.features": "功能中心",
   "nav.label": "主导航",
   "nav.overview": "概览",
   "nav.devices": "设备",
@@ -1016,9 +1019,11 @@ export const en: Record<Key, string> = {
   "mode.coexist": "LAN and Tailnet",
   "mode.offline": "Device networking disabled",
 
+  ...computerEn,
   ...playgroundEn,
   ...workspaceEn,
   ...topologyEn,
+  "nav.features": "Feature center",
   "nav.label": "Main navigation",
   "nav.overview": "Overview",
   "nav.devices": "Devices",
@@ -1098,7 +1103,7 @@ export const en: Record<Key, string> = {
   "roles.noChanges": "Nothing to save.",
   "nav.config": "Config",
   "nav.audit": "Audit",
-  "nav.setup": "First-run setup",
+  "nav.setup": "Set up xmesh",
   "nav.node": "Node",
   "status.offline": "Kernel not running",
   "status.unresponsive": "Kernel not responding",

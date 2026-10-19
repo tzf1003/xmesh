@@ -40,6 +40,10 @@ jobs:
       - run: npm ci
       # 契约的 TS 生成物（api/control/v2/ts/control.ts）变了而 UI 里的副本没跟上，这里会失败。
       - run: npm run check-types
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python ../scripts/gen-onboarding-types.py --check
       - run: npm run typecheck
       - run: npm test
       - name: Release fuse profile can be applied and verified

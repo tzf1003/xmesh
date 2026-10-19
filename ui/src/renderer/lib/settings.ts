@@ -21,7 +21,7 @@ export type TLSMode = (typeof TLS_MODES)[number];
 
 /** The sections of the settings page; a link to the page names one. */
 export const SECTIONS = ["node", "roles", "workdirs", "transfers", "denylist"] as const;
-export type Section = (typeof SECTIONS)[number];
+export type Section = (typeof SECTIONS)[number] | "mcp";
 
 export interface SettingsForm {
   nodeName: string;

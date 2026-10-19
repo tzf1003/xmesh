@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "paused": false,
+  "info": {
+    "protocol_version": 1,
+    "available": true,
+    "state": "ready",
+    "desktop_id": "desktop",
+    "desktop_epoch": "epoch",
+    "layout_version": "layout",
+    "capabilities": [
+      "screenshot",
+      "pointer",
+      "keyboard",
+      "text"
+    ],
+    "displays": []
+  },
+  "sessions": [
+    {
+      "session_id": "cs-12345678",
+      "desktop_id": "desktop",
+      "desktop_epoch": "epoch",
+      "mode": "control",
+      "expires_at": "2026-10-19T06:00:00Z",
+      "owner": "node/session"
+    }
+  ]
+}

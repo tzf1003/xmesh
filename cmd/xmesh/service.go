@@ -15,6 +15,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/filelock"
 	"github.com/tzf1003/xmesh/internal/privdir"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -97,6 +98,8 @@ func install(args []string) error {
 	state := flags.String("state-dir", "", "状态目录")
 	password := flags.String("oauth-password-file", "", "OAuth 口令文件")
 	system := flags.Bool("system", false, "Windows：安装为管理员 SCM 服务")
+	localOnly := flags.Bool("local-only", false, "仅通过本机 Gateway 提供工具")
+	autostart := flags.Bool("autostart", true, "登录后自动启动")
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
@@ -130,6 +133,9 @@ func install(args []string) error {
 		return fmt.Errorf("请先构建持久路径中的 xmesh 二进制，再执行 install")
 	}
 	arguments := []string{"serve"}
+	if *localOnly {
+		arguments = append(arguments, "--local-only")
+	}
 	if runtime.GOOS != "windows" || *system {
 		arguments = append(arguments, "--service")
 	}
@@ -154,7 +160,7 @@ func install(args []string) error {
 		}
 		arguments = append(arguments, "--oauth-password-file", p)
 	}
-	serviceConfig := &service.Config{Name: "xmesh-" + cfg.Node.Name, DisplayName: "XmeSh " + cfg.Node.Name, Description: "XmeSh 设备 MCP 服务", Executable: exe, Arguments: arguments, WorkingDirectory: filepath.Dir(absolute), Option: service.KeyValue{"UserService": true, "RunAtLoad": true, "KeepAlive": true}}
+	serviceConfig := &service.Config{Name: "xmesh-" + cfg.Node.Name, DisplayName: "XmeSh " + cfg.Node.Name, Description: "XmeSh 设备 MCP 服务", Executable: exe, Arguments: arguments, WorkingDirectory: filepath.Dir(absolute), Option: service.KeyValue{"UserService": true, "RunAtLoad": *autostart, "KeepAlive": *autostart}}
 	if runtime.GOOS == "windows" && !*system {
 		return installUserService(serviceConfig)
 	}
@@ -164,6 +170,11 @@ func install(args []string) error {
 	}
 	if e = s.Install(); e != nil {
 		return e
+	}
+	if runtime.GOOS == "linux" && !*autostart {
+		if e = exec.Command("systemctl", "--user", "disable", serviceConfig.Name).Run(); e != nil {
+			return e
+		}
 	}
 	fmt.Println("已安装服务:", serviceConfig.Name)
 	return nil

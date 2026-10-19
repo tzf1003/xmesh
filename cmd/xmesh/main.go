@@ -49,11 +49,14 @@ const usage = `用法: xmesh <子命令> [参数]
            --control [--node 节点名 | --state-dir 目录]  经本机控制通道读取，不需要 PAT
   control  本机控制通道客户端：status、peers、sessions、events、audit、drain、resume、config、
            pair、pats、ingress（xmesh control help 查看参数）
+  computer 图形用户会话桌面服务：host、info（xmesh computer help 查看参数）
   uninstall / start / stop / restart
            卸载、启动、停止、重启已安装的服务
            --config 路径（或 --name 服务名）  --system（仅 Windows）  --json
   login    在浏览器授权此节点  --config 路径  --state-dir 目录  --json
   mesh     管理 tailnet 控制面：tag、权限矩阵、策略、DERP；见 xmesh mesh help
+  setup    首次配置计划、执行、恢复和实际连接验证；见 xmesh setup help
+  doctor   只读诊断设备配置和服务，支持 --json
   version  打印版本号（也可写作 --version）`
 
 func run(args []string) error {
@@ -62,12 +65,21 @@ func run(args []string) error {
 	}
 	switch args[0] {
 	case "help", "--help", "-h":
+		if len(args) > 1 && args[1] == "--agent" {
+			return agentHelp(os.Stdout)
+		}
 		fmt.Println(usage)
 		return nil
 	case "__sandbox-supervisor":
 		return winbox.RunProcessSupervisor(args[1:])
 	case "__sandbox-guard":
 		return winbox.RunGuardKeeper(args[1:])
+	case "setup":
+		return setupCommand(args[1:])
+	case "doctor":
+		return setupCommand(append([]string{"doctor"}, args[1:]...))
+	case "__setup-run":
+		return runSetupWorker(args[1:])
 	case "serve":
 		return serve(args[1:])
 	case "install":
@@ -84,6 +96,8 @@ func run(args []string) error {
 		return meshCmd(args[1:])
 	case "control":
 		return controlCommand(args[1:])
+	case "computer":
+		return computerCommand(args[1:])
 	case "uninstall", "start", "stop", "restart":
 		return withJSON(args[0], args[1:], func(rest []string) error { return serviceCommand(args[0], rest) })
 	case "drain":
@@ -99,6 +113,7 @@ func serve(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	path := flags.String("config", "xmesh.yaml", "配置路径")
 	local := flags.Bool("local", false, "显式启用本机开发模式")
+	localOnly := flags.Bool("local-only", false, "本机用途：仅通过需认证的 Gateway 提供工具")
 	listen := flags.String("listen", "127.0.0.1:7433", "本机开发 Agent 地址")
 	state := flags.String("state-dir", "", "节点状态目录")
 	password := flags.String("oauth-password-file", "", "OAuth 单主体口令文件")
@@ -113,7 +128,7 @@ func serve(args []string) error {
 	if e != nil {
 		return e
 	}
-	options := app.Options{Local: *local, Listen: *listen, StateDir: *state, PasswordFile: *password, Ingress: *ingress, TunnelListen: *tunnel}
+	options := app.Options{Local: *local || *localOnly, InternalAgent: *localOnly, Listen: *listen, StateDir: *state, PasswordFile: *password, Ingress: *ingress, TunnelListen: *tunnel}
 	if *controlSIDs != "" {
 		options.ControlAllowSIDs = strings.Split(*controlSIDs, ",")
 	}

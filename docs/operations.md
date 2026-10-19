@@ -212,7 +212,7 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-
 
 后端启动命令、工作目录和策略配置在 `agent.backends`。exclusive 后端先 `backend.acquire`，后续请求以 `_lease_token` 携带返回的 fencing token；Agent 转发业务参数前剥离此字段。普通业务 `token` 字段照常转发。续期必须显式调用 `backend.renew`。只改策略时有效后端进程和租约保留，后端配置变更或故障会使旧租约失效。
 
-公网入口节点需要控制面授予 `tag:ingress`，并配置对应 Agent 权限。登录口令来自 `--oauth-password-file`，默认状态目录内的 `oauth-password`，建议权限 `0600`。`ingress.oauth.issuer` 必须匹配客户端访问的 HTTPS 外部地址。Funnel 需要官方控制面；反向隧道监听回环地址，外层隧道负责 HTTPS；public:443 使用证书文件或 ACME。
+公网入口节点须在目标设备的 xmesh 信任中获授 `tag:ingress`，并配置对应 Agent 权限。网络准入由控制面单独管理。登录口令来自 `--oauth-password-file`，默认状态目录内的 `oauth-password`，建议权限 `0600`。`ingress.oauth.issuer` 必须匹配客户端访问的 HTTPS 外部地址。Funnel 需要官方控制面；反向隧道监听回环地址，外层隧道负责 HTTPS；public:443 使用证书文件或 ACME。
 
 动态注册客户端提供允许的回调 URI，只获得 `ingress.oauth.dynamic_client_scopes`（缺省 `devices:read`）里的 scope；要让 claude.ai 或 Codex 的动态注册客户端调用工具，须把需要的 scope 写进该上限，或把客户端预注册在 `clients`。入口只响应 issuer 主机上的请求（其他 `Host` 返回 421）；`tunnel` 的外层隧道须转发真实 `Host` 或 `X-Forwarded-Host`，并追加 `X-Forwarded-For`，限速才按真实客户端计数。配置文件中的客户端只定义 scope，其首次通过口令与 CSRF 校验的授权会绑定并持久化回调 URI。授权码采用 PKCE S256、一次性、最长 60 秒；访问令牌有效 1 小时，刷新令牌 30 天且轮转。令牌保存在内存，入口重启后须重新授权。scope 收窄后建立新的 MCP 会话，使工具表和 owner 使用新的权限上下文。
 
@@ -588,3 +588,30 @@ xmesh mesh derp sync --profile home --admission-url http://127.0.0.1:8480 --admi
 `--verify-client-url-fail-open=false` 不能省：上游默认在准入服务不可达时放行。准入只在连接建立时判断，已有连接要重连才受影响。
 
 验证状态：Headscale 一侧用真实 v0.29.5 做过集成测试（`policy.mode=database`，含生成的 DERP 文件被其加载）；Tailscale 一侧只对照官方客户端的请求形状做了夹具测试，没有联调真实 tailnet；第三方 DERP 的探测与准入在本机回环验证过，没有跨公网验证。计量、计费、多租户目录没有实现。
+## Computer 桌面接入
+
+macOS 的 computer 控制默认绑定应用窗口并在后台执行；Windows 与 Linux 当前使用目标设备的活跃用户桌面，鼠标和键盘焦点与目标设备用户共享。Agent 的输入发生在被控制的设备。具体能力与平台验收见[设计与验收记录](design/19-computer.md#macos-应用后台执行)。
+
+macOS 后台后端已接入窗口列表、单窗口采集及固定版本的开源输入实现。Agent 先调用 `computer.info`，从 `targets` 选择窗口，再用 `computer.open` 的 `mode: control`、`interaction: background`、`target_id` 建立会话；后续 observe / act 沿用同一目标。macOS 控制的默认 interaction 为 background，缺少目标时报错。显式 foreground 会使用共享桌面输入。单击优先使用目标控件的 AXPress / AXShowMenu，事件路径支持左键单击 / 双击。文本优先使用目标字段的辅助功能接口；其余输入复用固定版本的上游 SkyLight 配方。本机 AppKit 与 Electron 临时窗口已通过完整输入和指针 / 前台应用监测，其他应用兼容性按验收记录确认。
+
+在目标设备的图形用户会话中打开面板“桌面控制”，开启桌面能力，再点击“安装桌面服务并授权”。系统会请求屏幕录制与输入控制权限。桌面 host 独立于面板运行，用户注销后按平台会话规则退出。
+
+CLI 对应步骤：`xmesh computer setup` 安装并启动当前用户的桌面服务并请求系统授权；`xmesh computer info` 查询执行器状态；`xmesh computer stop|start|restart|uninstall` 管理用户服务。需要前台诊断时运行 `xmesh computer host --authorize`。这些命令要求发行包中同时存在 `xmesh` 与原生桌面执行器；macOS 原生执行器位于同目录的 `xmesh-computer.app`。
+
+在节点配置中设置 `agent.computer.enabled: true`，并按用途向节点 tag 授予 `computer.info`、`computer.open`、`computer.observe`、`computer.sessions`、`computer.renew`、`computer.close`；控制还需要 `computer.act` 和 `computer.action_status`。Gateway PAT / Ingress OAuth 使用 `computer:observe:<设备名>` 或 `computer:control:<设备名>`。
+
+面板预览须显式选择具有目标设备观察权限的凭据。默认 Gateway PAT 未包含桌面 scope 时，到“授权”页创建观察凭据，再回到桌面页选择它。页面只接触凭据名称，令牌由主进程读取；控制 scope 也可观察，剪贴板 scope 不授予预览权限。
+
+Windows SYSTEM 内核需要显式配置 `agent.computer.endpoint` 指向登录用户 SID 的 `\\.\pipe\xmesh-<SID>-computer` 管道，桌面 host 由该用户的登录任务启动。Linux 服务绑定 `graphical-session.target`；Wayland 还需要 RemoteDesktop 与 ScreenCast Portal、PipeWire，以及支持对应接口的桌面后端。Linux 二进制运行时依赖 libdbus、libxkbcommon 和 libpipewire。
+
+本机接管可在面板暂停 Agent，或执行 `xmesh control computer --action pause --node <节点名>`；`--action resume` 恢复，Agent 随后重新获取控制会话。紧急快捷键在面板应用运行期间有效。各平台实测进度见 [Computer 方案](design/19-computer.md)，工具参数见 [契约](contracts/computer.md)。
+
+内核不可用时，执行 `xmesh computer emergency-stop` 直接停止用户桌面 Host 的画面和输入共享；自定义用户目录使用 `--state-dir <目录>`。停止状态保留到 Host 重启之后。执行 `xmesh computer resume` 清除本机停止状态，再按需恢复节点控制；面板的恢复操作会依次恢复本机 Host 和内核。新的远程会话须重新截图和获取租约。
+
+原生输入验收会共用目标桌面的系统指针和键盘，须先取得该桌面用户的明确同意，再设置 `XMESH_TEST_ALLOW_DESKTOP_INPUT=1` 运行 `ui/scripts/test-native-desktop.mjs`。普通本机测试保留此变量未设置，输入用例自动跳过，启动器会在创建窗口之前拒绝运行。CI 的一次性 runner 显式启用该开关。
+
+macOS 的真实内核与面板预览验收脚本为 `ui/scripts/accept-computer-macos.mjs`。它要求预先构建 UI、测试配置的 Electron fuses，以及绝对路径的 `XMESH_TEST_COMPUTER_SERVICE_BINARY` 和 `XMESH_TEST_COMPUTER_HELPER`；打开窗口前须取得本机用户同意，并设置 `XMESH_TEST_ALLOW_DESKTOP_UI=1`。脚本使用独立节点、PAT、Host 和用户数据目录，结束后清理。与输入夹具组合运行时还要求输入验收开关；单独运行只观察桌面和验证控制状态。可选 `XMESH_TEST_COMPUTER_UI_EVIDENCE` 仅在清除画面后保存面板截图，原始桌面图像保留在内存。
+
+后台临时窗口验收使用 `scripts/accept_computer_background.py --helper <原生执行器绝对路径> --binary <xmesh绝对路径> --fixture appkit|electron`，须预先取得用户批准并设置 `XMESH_TEST_ALLOW_BACKGROUND_INPUT=1`。该脚本通过真实 Gateway / Agent / Host 执行并验证实际控件变化，监测系统指针和前台应用；AppKit 的 `--occluded` 使用同一测试应用的第二个窗口覆盖目标。桌面验收须串行运行，以遵守每用户单执行器约束。
+
+macOS 升级验收使用 `ui/scripts/accept-computer-upgrade-macos.mjs`，显式设置 `XMESH_TEST_ALLOW_COMPUTER_UPGRADE=1`，并传入绝对路径的 `--old-binary`、`--new-binary`、`--old-helper`、`--new-helper`；两组内核 / 原生执行器的版本须匹配且前后不同。先构建 UI，使脚本运行实际 Updater、macApplier 和 computerHostServices。验收要求本机用户桌面服务未安装，使用临时 bundle、无窗口入口、真实 hdiutil DMG 和原生二进制，校验交接失败后的旧 Host 恢复及成功替换后的新版本 / PID / epoch，最后卸载自己的服务和临时文件。该脚本不请求系统授权；ad-hoc 包升级后报告 permission_required 时，需要本机显式授权，不能据此声明签名发行包的权限延续已通过。

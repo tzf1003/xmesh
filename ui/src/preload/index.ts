@@ -79,11 +79,13 @@ const api: PanelApi = {
       ipcRenderer.removeListener("xmesh:calls", handler);
     };
   },
+  onboarding: (request) => invoke("xmesh:onboarding", request),
   previewSetup: (params) => invoke("xmesh:preview-setup", params),
   runSetup: (params) => invoke("xmesh:run-setup", params),
   pickPath: (kind) => invoke("xmesh:pick-path", kind),
   mesh: (request) => invoke("xmesh:mesh", request),
   ci: (request) => invoke("xmesh:ci", request),
+  computer: (request) => invoke("xmesh:computer", request),
 };
 
 contextBridge.exposeInMainWorld("xmesh", Object.freeze(api));

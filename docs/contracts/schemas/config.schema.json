@@ -48,7 +48,7 @@
     },
     "scope": {
       "type": "string",
-      "pattern": "^(devices:read|exec:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|pty:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(read|write):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|sys:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|backend:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}))$"
+      "pattern": "^(devices:read|exec:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|pty:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|fs:(read|write):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|sys:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|computer:(observe|control|clipboard-read|clipboard-write):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})|backend:(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}):(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62}))$"
     },
     "ciId": {
       "type": "string",
@@ -281,19 +281,8 @@
               "lan"
             ],
             "properties": {
-              "ephemeral": {
-                "const": false
-              },
-              "lan": {
-                "required": [
-                  "mdns"
-                ],
-                "properties": {
-                  "mdns": {
-                    "const": true
-                  }
-                }
-              }
+              "ephemeral": { "const": false },
+              "lan": { "required": ["mdns"] }
             }
           }
         }
@@ -428,6 +417,19 @@
       "additionalProperties": false,
       "required": ["cwd_policy"],
       "properties": {
+        "computer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "pause_on_user_input": { "type": "boolean", "default": false },
+            "allow_foreground": { "type": "boolean", "default": false, "description": "Permit explicit foreground control when the executor defaults to background. Configured locally; remote open requests cannot enable it." },
+            "endpoint": { "type": "string", "minLength": 1, "description": "用户桌面执行器的本机套接字或命名管道；改变需要重启。" },
+            "max_sessions": { "type": "integer", "minimum": 1, "maximum": 32, "default": 16 },
+            "lease_seconds": { "type": "integer", "minimum": 10, "maximum": 600, "default": 120 },
+            "max_image_bytes": { "type": "integer", "minimum": 1024, "maximum": 4194304, "default": 4194304 }
+          }
+        },
         "default_cwd": { "type": "string", "minLength": 1 },
         "workspaces": {
           "type": "object",
@@ -528,7 +530,7 @@
           "type": "array",
           "uniqueItems": true,
           "description": "被关闭的内置工具名。缺省或空数组表示全部开启；调用被关闭的工具返回 policy_denied。",
-          "items": {"enum": ["backend.acquire", "backend.release", "backend.renew", "exec.output", "exec.run", "fs.delete", "fs.download", "fs.edit", "fs.glob", "fs.grep", "fs.list", "fs.mkdir", "fs.move", "fs.read", "fs.sha256", "fs.stat", "fs.upload", "fs.write", "pty.close", "pty.list", "pty.open", "pty.read", "pty.resize", "pty.signal", "pty.transfer", "pty.write", "sys.info"]}
+          "items": {"enum": ["backend.acquire", "backend.release", "backend.renew", "computer.act", "computer.action_status", "computer.close", "computer.info", "computer.observe", "computer.open", "computer.renew", "computer.sessions", "exec.output", "exec.run", "fs.delete", "fs.download", "fs.edit", "fs.glob", "fs.grep", "fs.list", "fs.mkdir", "fs.move", "fs.read", "fs.sha256", "fs.stat", "fs.upload", "fs.write", "pty.close", "pty.list", "pty.open", "pty.read", "pty.resize", "pty.signal", "pty.transfer", "pty.write", "sys.info"]}
         },
         "authz": {
           "type": "object",

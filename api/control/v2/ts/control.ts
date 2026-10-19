@@ -110,7 +110,8 @@ export type Capability =
   | "gateway"
   | "ingress"
   | "audit"
-  | "ci";
+  | "ci"
+  | "computer";
 export type Severity = "info" | "warning" | "error";
 /**
  * 次版本可以增加取值。客户端遇到未知取值按 unclassified 处理。
@@ -169,6 +170,9 @@ export type ToolErrorCode =
   | "lease_required"
   | "resource_busy"
   | "backend_unavailable"
+  | "desktop_unavailable"
+  | "desktop_locked"
+  | "permission_required"
   | "unauthenticated"
   | "unauthorized"
   | "not_found"
@@ -285,6 +289,7 @@ export interface AuditEvent {
     args_len?: number;
     stdin_sha256?: string | null;
     session_id?: string;
+    action_id?: string;
     signal?: "INT" | "TERM" | "KILL";
     mode?: "shared" | "exclusive";
     backend?: string;
@@ -765,6 +770,63 @@ export interface Warning {
    * 中文，一行。给人读，客户端不得据此分支。
    */
   message: string;
+}
+export interface ComputerDisplay {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  scale: number;
+}
+export interface ComputerInfo {
+  protocol_version: number;
+  available: boolean;
+  state: string;
+  reason?: string;
+  desktop_id: string;
+  desktop_epoch: string;
+  layout_version: string;
+  capabilities: string[];
+  displays: ComputerDisplay[];
+  user_input_monitor?: boolean;
+  user_input_serial?: number;
+  targets?: ComputerTarget[];
+  default_interaction?: "background" | "foreground";
+}
+export interface ComputerTarget {
+  id: string;
+  app_id: string;
+  name: string;
+  layout_version: string;
+  width: number;
+  height: number;
+  user_input_serial: number;
+}
+export interface ComputerSession {
+  session_id: string;
+  desktop_id: string;
+  desktop_epoch: string;
+  mode: "observe" | "control";
+  expires_at: string;
+  owner: string;
+  target_id?: string;
+  interaction?: "background" | "foreground";
+}
+export interface ComputerState {
+  enabled: boolean;
+  paused: boolean;
+  info: ComputerInfo;
+  sessions: ComputerSession[];
+  pause_on_user_input?: boolean;
+}
+export interface ComputerPauseRequest {
+  paused: boolean;
+}
+export interface ComputerRevokeRequest {
+  session_id: string;
 }
 export interface ConfigLoadError {
   message: string;
@@ -1617,7 +1679,8 @@ export const CONTROL_CAPABILITIES = [
   "gateway",
   "ingress",
   "audit",
-  "ci"
+  "ci",
+  "computer"
 ] as const;
 
 /** Event "type" values on GET /v2/events, in schema order. */
@@ -2310,6 +2373,56 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
       "not_found",
       "internal"
     ]
+  },
+  {
+    "id": "control.computer.get",
+    "method": "GET",
+    "path": "/v2/computer",
+    "capability": "computer",
+    "since": "1.9",
+    "query": null,
+    "body": null,
+    "response": "ComputerState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unavailable"
+    ]
+  },
+  {
+    "id": "control.computer.pause",
+    "method": "POST",
+    "path": "/v2/computer/pause",
+    "capability": "computer",
+    "since": "1.9",
+    "query": null,
+    "body": "ComputerPauseRequest",
+    "response": "ComputerState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "unavailable"
+    ]
+  },
+  {
+    "id": "control.computer.revoke",
+    "method": "POST",
+    "path": "/v2/computer/revoke",
+    "capability": "computer",
+    "since": "1.9",
+    "query": null,
+    "body": "ComputerRevokeRequest",
+    "response": "ComputerState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "unavailable"
+    ]
   }
 ];
 
@@ -2354,4 +2467,7 @@ export interface ControlRouteTypes {
   "control.ingress.password.put": { query: undefined; body: IngressPasswordRequest; response: IngressPasswordResponse };
   "control.audit.list": { query: AuditQuery; body: undefined; response: AuditResponse };
   "control.pair.trust.delete": { query: undefined; body: undefined; response: undefined };
+  "control.computer.get": { query: undefined; body: undefined; response: ComputerState };
+  "control.computer.pause": { query: undefined; body: ComputerPauseRequest; response: ComputerState };
+  "control.computer.revoke": { query: undefined; body: ComputerRevokeRequest; response: ComputerState };
 }

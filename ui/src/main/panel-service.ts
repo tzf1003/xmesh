@@ -9,6 +9,7 @@ import * as path from "node:path";
 
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
+import type { ComputerRequest, ComputerResult } from "../shared/computer";
 import type {
   AuditQuery,
   AuditResponse,
@@ -52,6 +53,7 @@ import {
 import { DENY_FILE_NAME } from "../shared/setup";
 import type { ControlClient } from "./client";
 import type { ShellController } from "./controller";
+import { resumeComputerHost, setupComputerHost } from "./computer-host";
 
 export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain" | "snapshot">;
 
@@ -94,7 +96,7 @@ function toError(e: unknown): ActionError {
 }
 
 export class PanelService {
-  constructor(private readonly controller: CapabilityClient) {}
+  constructor(private readonly controller: CapabilityClient, private readonly setupDesktop: () => Promise<void> = setupComputerHost, private readonly resumeDesktop: () => Promise<void> = resumeComputerHost) {}
 
   private async data<T>(capability: Parameters<CapabilityClient["requireCapable"]>[0], run: (c: ControlClient) => Promise<unknown>): Promise<DataResult<T>> {
     try {
@@ -353,6 +355,20 @@ export class PanelService {
       case "import.inspect":
         return run((c) => c.call("POST", "/v2/ci/import/inspect", { body: { dir: r.dir } }));
     }
+  }
+
+  computer(request: ComputerRequest): Promise<DataResult<ComputerResult>> {
+    return this.data("computer", async (client) => {
+      switch (request.op) {
+        case "get": return client.call("GET", "/v2/computer");
+        case "setup": await this.setupDesktop(); return client.call("GET", "/v2/computer");
+        case "pause": {
+          if (!request.paused) await this.resumeDesktop();
+          return client.call("POST", "/v2/computer/pause", { body: { paused: request.paused } });
+        }
+        case "revoke": return client.call("POST", "/v2/computer/revoke", { body: { session_id: request.session_id } });
+      }
+    });
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {

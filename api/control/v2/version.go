@@ -47,6 +47,7 @@ const (
 	CapIngress     Capability = "ingress"
 	CapAudit       Capability = "audit"
 	CapCI          Capability = "ci"
+	CapComputer    Capability = "computer"
 )
 
 // Severity of a Warning.

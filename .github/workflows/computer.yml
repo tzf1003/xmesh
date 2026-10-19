@@ -1,0 +1,136 @@
+name: Computer native executor
+on:
+  push:
+    branches: [master, 'codex/**']
+    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', 'scripts/test_computer_background.py', 'ui/src/main/computer-host.ts', 'ui/src/main/update/**', 'ui/scripts/accept-computer-upgrade-macos.mjs', '.github/workflows/computer.yml']
+  pull_request:
+    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', 'scripts/test_computer_background.py', 'ui/src/main/computer-host.ts', 'ui/src/main/update/**', 'ui/scripts/accept-computer-upgrade-macos.mjs', '.github/workflows/computer.yml']
+permissions:
+  contents: read
+concurrency:
+  group: computer-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    env:
+      # These runners provide disposable desktops for native input acceptance.
+      XMESH_TEST_ALLOW_DESKTOP_INPUT: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: computer-native
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev xvfb
+      - run: cargo fmt --manifest-path computer-native/Cargo.toml --check
+      - run: cargo clippy --manifest-path computer-native/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path computer-native/Cargo.toml --locked
+      - name: Pinned background input sources and pure recipes
+        run: python3 scripts/test_computer_background.py
+      - run: cargo build --manifest-path computer-native/Cargo.toml --locked
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libgtk-3-0 libnss3 libasound2t64 libgbm1
+      - name: Native input fixture dependencies
+        if: runner.os != 'macOS'
+        run: npm ci --prefix ui
+      - name: Linux native desktop input
+        if: runner.os == 'Linux'
+        env:
+          XMESH_TEST_COMPUTER_HELPER: ${{ github.workspace }}/computer-native/target/debug/xmesh-computer
+        run: xvfb-run -a -s '-screen 0 1600x1000x24' node ui/scripts/test-native-desktop.mjs
+      - name: Windows native desktop input
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:XMESH_TEST_COMPUTER_HELPER = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          node ui/scripts/test-native-desktop.mjs
+      - name: Windows native DPI manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\mt.exe" | Sort-Object FullName | Select-Object -Last 1
+          if (!$mt) { throw 'Windows manifest tool is unavailable' }
+          $helper = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          $manifest = Join-Path $env:RUNNER_TEMP 'computer-embedded.manifest'
+          & $mt.FullName -nologo "-inputresource:$helper;#1" "-out:$manifest"
+          if ($LASTEXITCODE -ne 0) { throw 'Native executor manifest extraction failed' }
+          if (!(Get-Content -Raw $manifest).Contains('PerMonitorV2')) { throw 'Native executor is not per-monitor DPI aware' }
+      - name: Windows SYSTEM kernel to user desktop
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:XMESH_TEST_COMPUTER_HELPER = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          $env:XMESH_TEST_WINDOWS_BINARY = Join-Path $env:RUNNER_TEMP 'xmesh-computer-service-test.exe'
+          $env:XMESH_TEST_WINDOWS_SYSTEM_SERVICE = '1'
+          go build -o $env:XMESH_TEST_WINDOWS_BINARY ./cmd/xmesh
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -race ./cmd/xmesh -run WindowsSystemServiceRuntime -v -count=1 -timeout=180s
+      - name: Installed user desktop host lifecycle
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        shell: bash
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
+          export XMESH_TEST_COMPUTER_SERVICE_BINARY="$RUNNER_TEMP/xmesh-computer-lifecycle$ext"
+          export XMESH_TEST_COMPUTER_HELPER="$GITHUB_WORKSPACE/computer-native/target/debug/xmesh-computer$ext"
+          go build -o "$XMESH_TEST_COMPUTER_SERVICE_BINARY" ./cmd/xmesh
+          go test -race ./cmd/xmesh -run '^TestComputerInstalledHostLifecycle$' -v -count=1 -timeout=180s
+      - name: macOS isolated DMG and desktop host upgrade recovery
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          XMESH_TEST_ALLOW_COMPUTER_UPGRADE: '1'
+        run: |
+          ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --prefix ui
+          npm run build --prefix ui
+          cp computer-native/target/debug/xmesh-computer "$RUNNER_TEMP/xmesh-upgrade-old-helper"
+          go build -ldflags '-X main.buildVersion=0.1.1' -o "$RUNNER_TEMP/xmesh-upgrade-new" ./cmd/xmesh
+          XMESH_BUILD_VERSION=0.1.1 cargo build --manifest-path computer-native/Cargo.toml --locked
+          node ui/scripts/accept-computer-upgrade-macos.mjs \
+            --old-binary "$RUNNER_TEMP/xmesh-computer-lifecycle" \
+            --new-binary "$RUNNER_TEMP/xmesh-upgrade-new" \
+            --old-helper "$RUNNER_TEMP/xmesh-upgrade-old-helper" \
+            --new-helper "$GITHUB_WORKSPACE/computer-native/target/debug/xmesh-computer"
+      - name: Native desktop over tailnet and OAuth ingress
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/headscale" 'https://github.com/juanfont/headscale/releases/download/v0.29.5/headscale_0.29.5_linux_amd64'
+          echo 'e979d27fe17d924d33bb6ab7504f6338d0635989a0cfdcfbc0ceb637dbcbe980  '"$RUNNER_TEMP/headscale" | sha256sum --check -
+          chmod +x "$RUNNER_TEMP/headscale"
+          go build -o "$RUNNER_TEMP/xmesh-computer-mesh" ./cmd/xmesh
+          xvfb-run -a -s '-screen 0 1600x1000x24' node ui/scripts/test-native-desktop.mjs python3 scripts/headscale_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh-computer-mesh" --computer-helper "$GITHUB_WORKSPACE/computer-native/target/debug/xmesh-computer" --ingress --skip-go-test
+      - name: Native desktop through DERP with UDP disabled
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a -s '-screen 0 1600x1000x24' node ui/scripts/test-native-desktop.mjs python3 scripts/headscale_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh-computer-mesh" --computer-helper "$GITHUB_WORKSPACE/computer-native/target/debug/xmesh-computer" --ingress --skip-go-test --force-derp
+      - name: Native IPC
+        if: runner.os != 'Windows'
+        env:
+          XMESH_TEST_COMPUTER_HELPER: ${{ github.workspace }}/computer-native/target/debug/xmesh-computer
+        run: go test -race ./internal/desktopbroker -run TestNativeDesktopRoundTrip -v
+      - name: Native IPC Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:XMESH_TEST_COMPUTER_HELPER = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          go test -race ./internal/desktopbroker -run TestNativeDesktopRoundTrip -v

@@ -86,7 +86,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 
 ## 接口与验收
 
-控制 API、Schema、Go/TypeScript 类型、CLI 和 UI 统一升级到 v2。
+控制 API、Schema、Go/TypeScript 类型、CLI 和 UI 统一升级到 v2，包含 Computer 管理接口。首次设置生成 v2 网络配置并支持共存。
 设备返回设备 ID、alias、信任、路径集合、活动路径和连接状态；
 设备列表与拓扑使用设备 ID 合并显示。远程排空通过运行节点的本机控制通道转发，使用已验证设备路径和 xmesh `tag:admin` 授权，按设备 ID 定位目标并逐台报告结果。外部 MCP 客户端继续使用 `/mcp` 的 PAT/OAuth。
 
@@ -107,7 +107,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 - [x] 真实 Agent 的终端、exec、租约、后端和分块传输在受控链路重建中恢复；实际多机路径验收见末项。
 - [x] 控制 v2、UI、设备列表和拓扑。
 - [x] 并发 dial、后台信息、配对、管理状态、恢复期限和停机的回归覆盖。
-- [x] Go race、控制契约及生成类型一致性、492 项 UI 单元检查、11 项上游组合 Electron 检查与 2 项 UI-MCP 真实/模拟内核检查。
+- [x] Go race、控制契约及生成类型一致性、510 项本地组合 UI 单元检查、159 项完整 Electron 检查与 2 项 UI-MCP 真实/模拟内核检查。
 - [x] Linux 独立网络空间的真实 LAN / Tailnet 与强制 DERP 验收。
 - [ ] 不同物理主机的 macOS、Linux、Windows 网络验收。
 

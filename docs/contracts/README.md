@@ -63,6 +63,8 @@
 | [CTR-CTL-14](control.md#ctr-ctl-14) | 控制通道 | stdio 后端的环境变量 |
 | [CTR-CTL-15](control.md#ctr-ctl-15) | 控制通道 | GitHub Actions 运行器托管 |
 
+Computer 的开发中契约见 [computer.md](computer.md)，验收进度见 [三端方案](../design/19-computer.md)。
+
 ## 模式文件
 
 | 文件 | 对应契约 |

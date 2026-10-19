@@ -9,6 +9,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backend"
 	"github.com/tzf1003/xmesh/internal/backendenv"
+	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	runexec "github.com/tzf1003/xmesh/internal/exec"
@@ -36,8 +37,11 @@ import (
 type Principal = identity.Principal
 type Authenticate func(*http.Request) (Principal, error)
 type Agent struct {
-	store *config.Store
-	PTY   *pty.Manager
+	Computer          *computer.Manager
+	computerProvider  computer.Provider
+	computerUnprotect func()
+	store             *config.Store
+	PTY               *pty.Manager
 	// BudgetAuthority hosts the cross-host PTY admission lease for ingress nodes.
 	BudgetAuthority *pty.BudgetAuthority
 	Exec            *runexec.Manager
@@ -101,6 +105,22 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	for _, option := range options {
 		option(a)
 	}
+	if a.computerProvider == nil {
+		a.computerProvider = computer.NewClient(c.Agent.Computer.Endpoint)
+	}
+	a.Computer = computer.New(a.computerProvider, c.Agent.Computer)
+	if runtime.GOOS != "windows" {
+		endpoint := c.Agent.Computer.Endpoint
+		if endpoint == "" {
+			endpoint = computer.DefaultEndpoint()
+		}
+		a.computerUnprotect = policy.ProtectPath(endpoint)
+	}
+	a.Computer.SetAuthorization(func(owner string) bool {
+		caller, ok := a.Callers.Get(owner)
+		cfg := a.store.Get()
+		return ok && cfg.Agent.Computer.Enabled && !slices.Contains(cfg.Agent.DisabledTools, "computer.act") && Allowed(cfg, caller, "computer.act", "")
+	})
 	var backendOptions []backend.Option
 	if a.backendEnv != nil {
 		backendOptions = append(backendOptions, backend.WithEnv(a.backendEnv.Snapshot()))
@@ -143,6 +163,7 @@ func (a *Agent) supervise(previous *config.Config) {
 				}
 			}
 			if cfg != previous {
+				a.Computer.Configure(cfg.Agent.Computer)
 				a.Backends.Configure(cfg)
 				a.refreshBackends()
 				a.refreshBuiltins()
@@ -297,6 +318,7 @@ func (a *Agent) bind(session *mcp.ServerSession, p Principal) identity.Caller {
 	if !seen {
 		go func() {
 			_ = session.Wait()
+			a.Computer.Disconnect(id)
 			a.PTY.Orphan(id)
 			a.Callers.Remove(id)
 			a.mu.Lock()
@@ -352,7 +374,7 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 	disabled := a.store.Get().Agent.DisabledTools
 	for name, spec := range builtinSpecs() {
-		if slices.Contains(disabled, name) {
+		if slices.Contains(disabled, name) || (strings.HasPrefix(name, "computer.") && !a.store.Get().Agent.Computer.Enabled) {
 			server.RemoveTools(name)
 			continue
 		}
@@ -363,10 +385,16 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 				caller = c
 			}
 			cfg := a.store.Get()
+			if strings.HasPrefix(name, "computer.") {
+				a.Computer.Configure(cfg.Agent.Computer)
+				if !cfg.Agent.Computer.Enabled {
+					return Result(nil, toolerr.New("policy_denied", "桌面能力已关闭", "rule", "computer.disabled")), nil
+				}
+			}
 			if slices.Contains(cfg.Agent.DisabledTools, name) {
 				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
 			}
-			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire") {
+			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
 			}
 			if !Allowed(cfg, caller, name, "") {
@@ -379,6 +407,9 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			}
 			if e := spec.validate(raw); e != nil {
 				return Result(nil, e), nil
+			}
+			if strings.HasPrefix(name, "computer.") {
+				return a.callComputer(ctx, cfg, caller, name, raw), nil
 			}
 			resolver, e := cwd.New(cfg.Agent.DefaultCWD, cfg.Agent.Workspaces, cfg.Agent.CWDPolicy)
 			if e != nil {
@@ -419,6 +450,11 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 					return Result(nil, toolerr.New("unauthenticated", "租约需要已建立的 MCP 会话")), nil
 				}
 				out, e = a.Backends.Control(ctx, caller.ID, name, raw)
+				if e == nil && name == "backend.acquire" {
+					// A ready lease must expose the restarted backend's tool catalog
+					// before its caller can send the next tools/call request.
+					a.refreshBackends()
+				}
 			}
 			return Result(out, e), nil
 		})
@@ -573,6 +609,10 @@ func (a *Agent) Close() {
 			_ = s.Close()
 		}
 		a.PTY.Shutdown()
+		_ = a.Computer.Close()
+		if a.computerUnprotect != nil {
+			a.computerUnprotect()
+		}
 		a.Exec.Close()
 		a.Backends.Close()
 		a.Leases.Close()
