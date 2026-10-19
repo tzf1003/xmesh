@@ -1,5 +1,13 @@
 name: Package native desktop executor
 on:
+  pull_request:
+    paths: ['computer-native/**', 'scripts/package_computer.py', '.github/workflows/computer-release.yml']
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        default: v0.0.0-validation.1
+        type: string
   workflow_call:
     inputs:
       version:
@@ -20,6 +28,8 @@ jobs:
           - { runner: windows-latest, goos: windows, goarch: amd64, target: x86_64-pc-windows-msvc }
           - { runner: windows-latest, goos: windows, goarch: arm64, target: aarch64-pc-windows-msvc }
     runs-on: ${{ matrix.runner }}
+    env:
+      NATIVE_VERSION: ${{ inputs.version || format('v0.0.0-pr.{0}', github.event.pull_request.number) }}
     defaults:
       run:
         shell: bash
@@ -36,18 +46,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev
       - run: cargo build --manifest-path computer-native/Cargo.toml --locked --release --target '${{ matrix.target }}'
         env:
-          XMESH_BUILD_VERSION: ${{ inputs.version }}
+          XMESH_BUILD_VERSION: ${{ env.NATIVE_VERSION }}
       - name: Assemble native executor
         env:
           TARGET_OS: ${{ matrix.goos }}
           TARGET: ${{ matrix.target }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ env.NATIVE_VERSION }}
         run: |
           ext=""; [ "$TARGET_OS" = windows ] && ext=".exe"
           output="native/xmesh-computer$ext"
           [ "$TARGET_OS" = darwin ] && output="native/xmesh-computer.app"
           python3 scripts/package_computer.py --binary "computer-native/target/$TARGET/release/xmesh-computer$ext" --output "$output" --platform "$TARGET_OS" --version "$VERSION"
           if [ "$TARGET_OS" = darwin ]; then codesign --force --sign - "$output"; fi
+      - name: Verify native artifact
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: python3 scripts/verify_computer.py --root native --platform "$TARGET_OS" --arch "$TARGET_ARCH" --version "$NATIVE_VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: computer-native-${{ matrix.goos }}-${{ matrix.goarch }}
