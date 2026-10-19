@@ -60,8 +60,8 @@ func waitTailnetLogin(ctx context.Context, status func(context.Context) (*ipnsta
 			next = LoginProgress{State: "needs_approval"}
 		}
 		if st.BackendState == "Running" && st.Self != nil && len(st.TailscaleIPs) > 0 {
-			if st.Self.Tags == nil || !slices.Contains(st.Self.Tags.AsSlice(), "tag:device") {
-				return fmt.Errorf("设备已登录，但尚未获得 tag:device。请在控制面允许当前用户使用该标签后重试")
+			if err := requireBrowserRole(st); err != nil {
+				return err
 			}
 			next = LoginProgress{State: "ready"}
 		}
@@ -80,4 +80,13 @@ func waitTailnetLogin(ctx context.Context, status func(context.Context) (*ipnsta
 		case <-ticker.C:
 		}
 	}
+}
+
+// requireBrowserRole checks the control plane's granted tags for both initial
+// authorization and service startup using an existing identity.
+func requireBrowserRole(st *ipnstate.Status) error {
+	if st == nil || st.Self == nil || st.Self.Tags == nil || !slices.Contains(st.Self.Tags.AsSlice(), "tag:device") {
+		return fmt.Errorf("设备已登录，但尚未获得 tag:device。请在控制面允许当前用户使用该标签后重试")
+	}
+	return nil
 }

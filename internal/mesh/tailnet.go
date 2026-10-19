@@ -66,9 +66,16 @@ func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf fu
 		server.Ephemeral = true
 		server.Store = new(mem.Store)
 	}
-	if _, e = server.Up(ctx); e != nil {
+	status, e := server.Up(ctx)
+	if e != nil {
 		_ = server.Close()
 		return nil, fmt.Errorf("tailnet 入网失败: %w", e)
+	}
+	if c.Mesh.AuthMethod == "browser" {
+		if err := requireBrowserRole(status); err != nil {
+			_ = server.Close()
+			return nil, err
+		}
 	}
 	return &Tailnet{server: server, ephemeral: c.Mesh.Ephemeral}, nil
 }
