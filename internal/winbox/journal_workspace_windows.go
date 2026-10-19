@@ -276,7 +276,25 @@ func releaseJournalWorkspace(j *grantJournal, sid *windows.SID, maxObjects int) 
 	return releaseJournalWorkspaceContext(context.Background(), j, sid, maxObjects)
 }
 
-func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects int) error {
+// Keep the ordinary-principal descriptor invariant through live reclamation.
+// Other AppContainer grants can coexist, and this profile's ACE removal is checked
+// separately by the journal's completeness proof.
+type workspaceReclaimCheck struct {
+	baseline map[fileIdentity][]byte
+	observed error
+}
+
+func (c *workspaceReclaimCheck) check(object treeObject, sd *windows.SECURITY_DESCRIPTOR) {
+	if c == nil || c.baseline[object.id] == nil {
+		return
+	}
+	actual, err := fingerprintSecurityDescriptor(sd, true, nil)
+	if err != nil || !bytes.Equal(actual, c.baseline[object.id]) {
+		c.observed = fmt.Errorf("%w: descriptor changed during reclamation", errWorkspaceSecurityChanged)
+	}
+}
+
+func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *windows.SID, maxObjects int, checks ...*workspaceReclaimCheck) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -334,7 +352,7 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 		}
 		object := census.objects[index]
 		intent := census.intents[object.id]
-		if err := releaseJournalWorkspaceObjectContext(ctx, object, sid, !census.initial[object.id], intent); err != nil {
+		if err := releaseJournalWorkspaceObjectContext(ctx, object, sid, !census.initial[object.id], intent, checks...); err != nil {
 			return fail(err)
 		}
 		if intent.Grant != nil {
@@ -363,6 +381,24 @@ func releaseJournalWorkspaceContext(ctx context.Context, j *grantJournal, sid *w
 	if j.state.changeCursor != nil {
 		if err := proveWorkspaceReclaimed(ctx, j, sid, maxObjects); err != nil {
 			return err
+		}
+	}
+	if len(checks) > 0 {
+		for _, object := range census.objects {
+			sd, err := readObjectSecurity(object.handle)
+			if err != nil {
+				return err
+			}
+			for _, check := range checks {
+				check.check(object, sd)
+			}
+			acl, _, err := sd.DACL()
+			if err != nil {
+				return err
+			}
+			if _, residual, err := editJournalWorkspaceACL(acl, sid, object, !census.initial[object.id], journalRecord{}); err != nil || residual {
+				return fmt.Errorf("%w: profile access changed during final descriptor proof: %v", errWorkspaceReclaimRaced, err)
+			}
 		}
 	}
 	_, err = j.append(journalRecord{Kind: "workspace-released"})
@@ -624,7 +660,7 @@ func releaseJournalWorkspaceObject(object treeObject, sid *windows.SID, created 
 	return releaseJournalWorkspaceObjectContext(context.Background(), object, sid, created, intent)
 }
 
-func releaseJournalWorkspaceObjectContext(ctx context.Context, object treeObject, sid *windows.SID, created bool, intent journalRecord) error {
+func releaseJournalWorkspaceObjectContext(ctx context.Context, object treeObject, sid *windows.SID, created bool, intent journalRecord, checks ...*workspaceReclaimCheck) error {
 	lock, err := acquireObjectACLContext(ctx, object.id, 30000)
 	if err != nil {
 		return err
@@ -633,6 +669,9 @@ func releaseJournalWorkspaceObjectContext(ctx context.Context, object treeObject
 	sd, err := readObjectSecurity(object.handle)
 	if err != nil {
 		return err
+	}
+	for _, check := range checks {
+		check.check(object, sd)
 	}
 	acl, defaulted, err := sd.DACL()
 	if err != nil {

@@ -23,6 +23,7 @@ const (
 	lineRunnerRemoved
 	lineVersionDeprecated
 	lineAuthFailed
+	lineMissingDependency
 )
 
 type runnerLine struct {
@@ -54,6 +55,8 @@ func parseLine(line string) runnerLine {
 		return runnerLine{kind: lineVersionDeprecated}
 	case strings.Contains(line, "Failed to create a session") && strings.Contains(line, "Unauthorized"):
 		return runnerLine{kind: lineAuthFailed}
+	case dependencyMissing(line):
+		return runnerLine{kind: lineMissingDependency}
 	}
 	if m := jobDonePattern.FindStringSubmatch(line); m != nil {
 		return runnerLine{kind: lineJobDone, job: m[1], result: resultOf(m[2])}

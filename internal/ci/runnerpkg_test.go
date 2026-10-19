@@ -204,3 +204,73 @@ func Test_CTRCTL15_ExtractRefusesEscapes(t *testing.T) {
 		}
 	}
 }
+
+func Test_ExtractContainsSymlinkChains(t *testing.T) {
+	// a resolves to the root; a/b's lexical parent is a but its real parent is the root.
+	archive := filepath.Join(t.TempDir(), "chain.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range []*tar.Header{
+		{Name: "a", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0755},
+		{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "../outside", Mode: 0755},
+		{Name: "b/victim", Typeflag: tar.TypeReg, Size: 4, Mode: 0600},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			if _, err := tw.Write([]byte("evil")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gz.Close()
+	f.Close()
+	parent := t.TempDir()
+	dst, outside := filepath.Join(parent, "runner"), filepath.Join(parent, "outside")
+	if err := os.Mkdir(outside, 0700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(archive, dst); err == nil {
+		t.Fatal("chain escaped root")
+	}
+	if got, err := os.ReadFile(victim); err != nil || string(got) != "keep" {
+		t.Fatalf("outside overwritten: %q %v", got, err)
+	}
+}
+
+func Test_ExtractReplacesHardlinkedFile(t *testing.T) {
+	dst := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(victim, filepath.Join(dst, "run.sh")); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "runner.tar.gz")
+	if err := os.WriteFile(archive, tarGz(t, map[string]string{"!run.sh": "updated"}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(archive, dst); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(victim)
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("hardlink target changed: %q %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "run.sh")); err != nil || string(got) != "updated" {
+		t.Fatalf("install failed: %q %v", got, err)
+	}
+}

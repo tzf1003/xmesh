@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,5 +99,41 @@ func Test_RPCGetWithoutSessionIsJSON(t *testing.T) {
 	errObj, _ := out["error"].(map[string]any)
 	if res.StatusCode != http.StatusBadRequest || errObj["code"] != float64(-32600) {
 		t.Fatalf("want 400/-32600, got %d %v", res.StatusCode, out)
+	}
+}
+
+// Authentication must reject a request before inspecting its untrusted body.
+func Test_RPCAuthenticationPrecedesParsing(t *testing.T) {
+	g, _ := fixture(t, false)
+	h := g.HTTP(func(*http.Request) (Principal, error) { return Principal{}, errors.New("invalid") })
+	for _, body := range []string{"{bad", `{"method":"no/such"}`, ""} {
+		for _, method := range []string{"POST", "GET", "DELETE"} {
+			req := httptest.NewRequest(method, "/mcp", strings.NewReader(body))
+			unread := &countedBody{Reader: req.Body}
+			req.Body = unread
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized || unread.read != 0 {
+				t.Fatalf("%s %q: status=%d read=%d", method, body, w.Code, unread.read)
+			}
+		}
+	}
+}
+
+type countedBody struct {
+	io.Reader
+	read int
+}
+
+func (b *countedBody) Read(p []byte) (int, error) { n, e := b.Reader.Read(p); b.read += n; return n, e }
+func (b *countedBody) Close() error               { return nil }
+
+func Test_RPCPrecheckBoundsUnknownLengthBody(t *testing.T) {
+	body := &countedBody{Reader: strings.NewReader(strings.Repeat(" ", maxRPCBodyBytes+4096))}
+	req := httptest.NewRequest("POST", "/mcp", body)
+	req.ContentLength = -1
+	w := httptest.NewRecorder()
+	if !precheck(w, req) || w.Code != http.StatusRequestEntityTooLarge || body.read != maxRPCBodyBytes+1 {
+		t.Fatalf("status=%d read=%d", w.Code, body.read)
 	}
 }

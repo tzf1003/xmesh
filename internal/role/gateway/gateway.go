@@ -289,19 +289,19 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 			p.Origin = "panel"
 		}
 		return g.newView(p).server
-	}, &mcp.StreamableHTTPOptions{SessionTimeout: 30 * time.Minute, MaxRequestBodyBytes: 16 << 20})
+	}, &mcp.StreamableHTTPOptions{SessionTimeout: 30 * time.Minute, MaxRequestBodyBytes: maxRPCBodyBytes})
 	protected := http.NewCrossOriginProtection().Handler(handler)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/mcp" {
 			http.NotFound(w, r)
 			return
 		}
-		if e := precheck(w, r); e {
-			return
-		}
 		p, e := auth(r)
 		if e != nil {
 			http.Error(w, "身份无效", 401)
+			return
+		}
+		if e := precheck(w, r); e {
 			return
 		}
 		id := r.Header.Get("Mcp-Session-Id")

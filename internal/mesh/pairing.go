@@ -342,8 +342,8 @@ func (l *LAN) trustedRequest(r *http.Request) bool {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) != 1 {
 		return false
 	}
-	_, ok := l.trust.Find(fingerprint(r.TLS.PeerCertificates[0]))
-	return ok
+	_, err := l.trust.verifyPeer(r.TLS.PeerCertificates[0], "")
+	return err == nil
 }
 
 // PairingHandler serves the routes under PairPath.

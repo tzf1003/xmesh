@@ -133,6 +133,26 @@ func (s *Server) patDir() string { return patDirOf(s.o.StateDir) }
 
 func patDirOf(stateDir string) string { return filepath.Join(stateDir, "pats") }
 
+// A pre-existing credential or receipt belongs to its current owner.
+func writeNewPatFile(path string, body []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(body)
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
+
 func newPatToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -250,7 +270,13 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	}
 	file := filepath.Join(s.patDir(), req.Name+".token")
 	if err == nil {
-		err = writeAtomic(file, []byte(token+"\n"))
+		err = writeNewPatFile(file, []byte(token+"\n"))
+		if err == nil {
+			err = writeNewPatFile(file+".owner", []byte(req.Name+"\n"))
+			if err != nil {
+				_ = os.Remove(file)
+			}
+		}
 	}
 	if err != nil {
 		failWith(w, newError(v1.ErrInternal, "无法写入令牌文件"))
@@ -261,6 +287,7 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	scopes := append([]string{}, req.Scopes...)
 	if !s.editConfigLocked(w, old, []Edit{{Path: "/gateway/pats/" + req.Name, Value: map[string]any{"token_file": file, "scopes": scopes}}}) {
 		_ = os.Remove(file)
+		_ = os.Remove(file + ".owner")
 		return
 	}
 	writeJSON(w, 201, v1.PatSecret{Pat: patInfo(req.Name, config.PAT{TokenFile: file, Scopes: scopes}), Token: token})
@@ -268,6 +295,10 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 
 func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	name := pathPart(r, 2)
+	if !patNamePattern.MatchString(name) {
+		failWith(w, argError("name", "PAT 名称无效"))
+		return
+	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
@@ -293,6 +324,10 @@ func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
 
 func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	name := pathPart(r, 2)
+	if !patNamePattern.MatchString(name) {
+		failWith(w, argError("name", "PAT 名称无效"))
+		return
+	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
@@ -316,8 +351,11 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 		return
 	}
 	// Only a file the channel created is removed; a token file the operator pointed at stays.
-	if filepath.Dir(filepath.Clean(pat.TokenFile)) == filepath.Clean(s.patDir()) {
-		_ = os.Remove(pat.TokenFile)
+	if filepath.Clean(pat.TokenFile) == filepath.Join(s.patDir(), name+".token") {
+		if owner, err := os.ReadFile(pat.TokenFile + ".owner"); err == nil && string(owner) == name+"\n" {
+			_ = os.Remove(pat.TokenFile)
+			_ = os.Remove(pat.TokenFile + ".owner")
+		}
 	}
 	w.WriteHeader(204)
 }

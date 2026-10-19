@@ -413,8 +413,8 @@ func (l *LAN) Authenticate(r *http.Request) (identity.Principal, error) {
 		return identity.Principal{}, toolerr.New("unauthenticated", "需要已配对的 mTLS 身份")
 	}
 	fp := fingerprint(r.TLS.PeerCertificates[0])
-	p, ok := l.trust.Find(fp)
-	if !ok {
+	p, err := l.trust.verifyPeer(r.TLS.PeerCertificates[0], "")
+	if err != nil {
 		return identity.Principal{}, toolerr.New("unauthenticated", "对端尚未配对")
 	}
 	return identity.FromPeer("lan-"+fp[:24], p.Tags, r.Header.Get("X-Xmesh-Oauth-Client"))

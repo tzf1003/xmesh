@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 )
@@ -12,6 +13,7 @@ import (
 // text, which strict clients treat as a transport failure instead of a
 // protocol error, so they never learn that the method or body was at fault.
 const (
+	maxRPCBodyBytes    = 16 << 20
 	codeParseError     = -32700
 	codeInvalidRequest = -32600
 	codeMethodNotFound = -32601
@@ -47,8 +49,13 @@ func precheck(w http.ResponseWriter, r *http.Request) bool {
 		}
 		return false
 	}
-	body, e := io.ReadAll(r.Body)
+	body, e := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRPCBodyBytes))
 	if e != nil {
+		var limit *http.MaxBytesError
+		if errors.As(e, &limit) {
+			writeRPCError(w, http.StatusRequestEntityTooLarge, nil, codeInvalidRequest, "request body exceeds 16 MiB")
+			return true
+		}
 		writeRPCError(w, http.StatusBadRequest, nil, codeParseError, "cannot read request body")
 		return true
 	}

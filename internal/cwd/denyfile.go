@@ -33,13 +33,13 @@ type denyState struct {
 // returned instead; only a file that has never loaded is an error, so the boundary is never
 // opened by a file that cannot be read.
 func loadDenyFile(path string) ([]string, error) {
+	denyFiles.Lock()
+	defer denyFiles.Unlock()
 	raw, readErr := os.ReadFile(path)
 	var digest [32]byte
 	if readErr == nil {
 		digest = sha256.Sum256(raw)
 	}
-	denyFiles.Lock()
-	defer denyFiles.Unlock()
 	st := denyFiles.byPath[path]
 	if st == nil {
 		st = &denyState{}

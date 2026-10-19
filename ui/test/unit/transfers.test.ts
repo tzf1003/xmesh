@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import type { ShellController } from "../../src/main/controller";
 import { PlaygroundService } from "../../src/main/playground";
-import { TransferService } from "../../src/main/transfers";
+import { TransferService, publishDownload } from "../../src/main/transfers";
 import { parseTransfer, type TransferState } from "../../src/shared/transfers";
 import { EMPTY_SNAPSHOT } from "../../src/shared/state";
 import { FakeKernel } from "../../testserver/server";
@@ -156,4 +156,53 @@ test("chunked binary roundtrip, empty files, conflict, corruption, cancellation 
     await kernel.stop();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("download publication preserves concurrent creators and replaced destinations", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(),"xmesh-publish-"));
+  const file = path.join(dir,"out"), temp = path.join(dir,"verified");
+  try {
+    fs.writeFileSync(temp,"download");
+    fs.writeFileSync(file,"concurrent creator");
+    await assert.rejects(publishDownload(temp,file), {code:"EEXIST"});
+    assert.equal(fs.readFileSync(file,"utf8"),"concurrent creator");
+    const previous = fs.statSync(file);
+    fs.renameSync(file,path.join(dir,"original"));
+    fs.writeFileSync(file,"replacement");
+    await assert.rejects(publishDownload(temp,file,previous),/changed/);
+    assert.equal(fs.readFileSync(file,"utf8"),"replacement");
+    const approved = fs.statSync(file);
+    const rename = fs.promises.rename.bind(fs.promises);
+    const stub = mock.method(fs.promises,"rename",async (...args: Parameters<typeof fs.promises.rename>) => {
+      await rename(...args);
+      if (args[0] === file) fs.writeFileSync(file,"late replacement");
+    });
+    try { await assert.rejects(publishDownload(temp,file,approved),/retained at/); } finally { stub.mock.restore(); }
+    assert.equal(fs.readFileSync(file,"utf8"),"late replacement");
+    const retained = fs.readdirSync(dir).find(name => name.startsWith(".xmesh-replaced-"))!;
+    assert.equal(fs.readFileSync(path.join(dir,retained,"original"),"utf8"),"replacement");
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+});
+
+test("download replacement uses private permissions, keeps hardlinks and restores publication failures", async () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"xmesh-replace-"));
+  const file=path.join(dir,"out"),temp=path.join(dir,"verified"),other=path.join(dir,"other");
+  try {
+    fs.writeFileSync(file,"original",{mode:0o644});
+    fs.linkSync(file,other);
+    fs.writeFileSync(temp,"private download",{mode:0o600});
+    await publishDownload(temp,file,fs.statSync(file));
+    assert.equal(fs.readFileSync(file,"utf8"),"private download");
+    assert.equal(fs.readFileSync(other,"utf8"),"original");
+    if(process.platform!=="win32") assert.equal(fs.statSync(file).mode & 0o777,0o600);
+    const link=fs.promises.link.bind(fs.promises);
+    const stub=mock.method(fs.promises,"link",async (...args: Parameters<typeof fs.promises.link>)=>{
+      if(args[0]===temp) throw Object.assign(new Error("disk full"),{code:"ENOSPC"});
+      return link(...args);
+    });
+    try { await assert.rejects(publishDownload(temp,file,fs.statSync(file)),{code:"ENOSPC"}); } finally {stub.mock.restore();}
+    assert.equal(fs.readFileSync(file,"utf8"),"private download");
+    assert.equal(fs.readFileSync(temp,"utf8"),"private download");
+    assert.equal(fs.readdirSync(dir).some(name=>name.startsWith(".xmesh-replaced-")),false);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });

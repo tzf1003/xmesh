@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"strings"
 	"testing"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
@@ -28,6 +29,34 @@ func Test_CTRCTL15_RunnerStatusLines(t *testing.T) {
 	for _, c := range cases {
 		if got := parseLine(c.line); got != c.want {
 			t.Errorf("parseLine(%q) = %+v, want %+v", c.line, got, c.want)
+		}
+	}
+}
+
+func Test_RunnerOutputRetainsOnlyClassifications(t *testing.T) {
+	i := &instance{snap: v1.CiInstance{State: v1.CiIdle}}
+	i.onLine("job-secret-value")
+	i.onLine("job-secret-value: A session for this runner already exists")
+	i.onLine("job-secret-value: missing libicu")
+	if len(i.tail) != 2 {
+		t.Fatalf("retained unknown output: %v", i.tail)
+	}
+	info := i.exitOf(1, false)
+	if !info.conflict || !info.missingDependency || len(info.tailLines) != 0 {
+		t.Fatalf("%+v", info)
+	}
+}
+
+func Test_RegistrationDiagnosticsDropRawOutput(t *testing.T) {
+	i := &instance{}
+	for _, line := range []string{"arbitrary-secret", "credential-secret libicu failure", "secret 401"} {
+		marker := registrationMarker(line)
+		if marker == line {
+			t.Fatal("raw output retained")
+		}
+		p := i.registrationProblem([]string{marker})
+		if strings.Contains(p.Message, "secret") {
+			t.Fatalf("output disclosed: %s", p.Message)
 		}
 	}
 }

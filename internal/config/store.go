@@ -171,10 +171,19 @@ func (s *Store) Subscribe(fn func(*Config)) (unsubscribe func()) {
 	}
 }
 
-func (s *Store) reload() (*Config, bool) {
+// RefreshBytes adopts exactly the immutable file snapshot inspected by the caller.
+// Subscribers must not call this method from their notification callback.
+func (s *Store) RefreshBytes(raw []byte) bool {
+	_, adopted := s.reloadBytes(raw, true)
+	return adopted
+}
+
+func (s *Store) reload() (*Config, bool) { return s.reloadBytes(nil, false) }
+
+func (s *Store) reloadBytes(raw []byte, supplied bool) (*Config, bool) {
 	s.notify.Lock()
 	defer s.notify.Unlock()
-	c, adopted := s.load()
+	c, adopted := s.load(raw, supplied)
 	if adopted {
 		s.mu.Lock()
 		ids := slices.Sorted(maps.Keys(s.subscribers))
@@ -190,13 +199,16 @@ func (s *Store) reload() (*Config, bool) {
 	return c, adopted
 }
 
-func (s *Store) load() (*Config, bool) {
+func (s *Store) load(b []byte, supplied bool) (*Config, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.path == "" {
 		return s.current, false
 	}
-	b, e := os.ReadFile(s.path)
+	var e error
+	if !supplied {
+		b, e = os.ReadFile(s.path)
+	}
 	if e != nil {
 		if !s.readFailed {
 			s.failures++

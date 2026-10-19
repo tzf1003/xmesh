@@ -40,7 +40,7 @@ export class TransferService {
       if (job.active)
         void this.playground.request({
           op: "cancel",
-          instance: this.controller.snapshot.selectedInstance,
+          instance: job.request.instance,
           id: job.active,
         });
     }
@@ -297,26 +297,59 @@ export class TransferService {
         handle = undefined;
         job.abort.signal.throwIfAborted();
         this.check(req.instance);
-        const current = await fs.promises.lstat(file).catch((e: NodeJS.ErrnoException) => {
-          if (e.code === "ENOENT") return undefined;
-          throw e;
-        });
-        if (
-          !!current !== !!previous ||
-          (current &&
-            previous &&
-            (current.ino !== previous.ino ||
-              current.dev !== previous.dev ||
-              current.size !== previous.size ||
-              current.mtimeMs !== previous.mtimeMs))
-        )
-          throw new Error("Local destination changed during download");
-        await fs.promises.rename(temp, file);
+        await publishDownload(temp, file, previous);
       } finally {
         await handle?.close();
         await fs.promises.rm(temp, { force: true });
       }
     }
     job.state.phase = "complete";
+  }
+}
+
+const sameDestination = (a: fs.Stats, b: fs.Stats): boolean =>
+  a.isFile() && b.isFile() && a.ino === b.ino && a.dev === b.dev &&
+  a.size === b.size && a.mtimeMs === b.mtimeMs;
+
+/** Publish a private inode; retain the captured destination until publication succeeds. */
+export async function publishDownload(temp: string, file: string, previous?: fs.Stats): Promise<void> {
+  if (!previous) {
+    await fs.promises.link(temp, file);
+    return;
+  }
+  const before = await fs.promises.lstat(file);
+  if (!sameDestination(before, previous) || before.ctimeMs !== previous.ctimeMs)
+    throw new Error("Local destination changed during download");
+  const dir = await fs.promises.mkdtemp(path.join(path.dirname(file), ".xmesh-replaced-"));
+  const backup = path.join(dir, "original");
+  let captured = false;
+  try {
+    // Check exclusive-link support before moving the existing destination.
+    const probe = path.join(dir,"probe");
+    await fs.promises.link(temp,probe);
+    await fs.promises.unlink(probe);
+    await fs.promises.rename(file, backup);
+    captured = true;
+    const current = await fs.promises.lstat(backup);
+    if (!sameDestination(current, previous))
+      throw new Error("Local destination changed during download");
+    // Exclusive publication preserves a file created after the capture.
+    await fs.promises.link(temp, file);
+    await fs.promises.unlink(backup);
+    captured = false;
+  } catch (error) {
+    if (captured) {
+      try {
+        // Restore only into an empty name; retain both files if another writer won.
+        await fs.promises.link(backup, file);
+        await fs.promises.unlink(backup);
+        captured = false;
+      } catch {
+        throw new Error(`Local destination changed; captured file retained at ${backup}`, { cause: error });
+      }
+    }
+    throw error;
+  } finally {
+    if (!captured) await fs.promises.rmdir(dir);
   }
 }

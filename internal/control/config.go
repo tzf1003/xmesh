@@ -229,7 +229,7 @@ func (s *Server) reloadConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 func (s *Server) adoptFileLocked(ctx context.Context, raw []byte, actor v1.Actor, retry bool) v1.ConfigReloadResponse {
 	changed := sum(raw) != s.digest
 	s.digest = sum(raw)
-	adopted := s.o.Store.Refresh()
+	adopted := s.o.Store.RefreshBytes(raw)
 	_, failures := s.o.Store.State()
 	failed := failures > s.failures
 	s.failures = failures

@@ -202,7 +202,10 @@ func Test_ControlPats(t *testing.T) {
 // A token file the operator pointed at from the configuration is rotated in place but never deleted.
 func Test_ControlPatsKeepForeignTokenFile(t *testing.T) {
 	f := newFixtureConfig(t, gatewayConfig)
-	foreign := filepath.Join(f.dir, "own.token")
+	foreign := filepath.Join(f.server.patDir(), "own.token")
+	if err := os.MkdirAll(filepath.Dir(foreign), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(foreign, []byte(strings.Repeat("a", 40)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -311,4 +314,27 @@ func otherFingerprint(fp string) string {
 		return "1" + fp[1:]
 	}
 	return "0" + fp[1:]
+}
+
+func Test_ControlPatsRejectPointerNames(t *testing.T) {
+	f := newFixtureConfig(t, gatewayConfig)
+	for _, name := range []string{"~1", "~0", "bad.name"} {
+		apiError(t, f.do("POST", "/v1/pats/"+name+"/rotate", nil, nil), v1.ErrInvalidArgs)
+		apiError(t, f.do("DELETE", "/v1/pats/"+name, nil, nil), v1.ErrInvalidArgs)
+	}
+}
+
+func Test_ControlPatCreationPreservesUnconfiguredCredential(t *testing.T) {
+	f := newFixtureConfig(t, gatewayConfig)
+	if err := os.MkdirAll(f.server.patDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(f.server.patDir(), "ci.token")
+	if err := os.WriteFile(file, []byte("operator-owned"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	apiError(t, f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil), v1.ErrInternal)
+	if body, err := os.ReadFile(file); err != nil || string(body) != "operator-owned" {
+		t.Fatalf("%q %v", body, err)
+	}
 }
