@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Controller } from "../../src/controller.js";
-import { cleanup, config, finished } from "../helpers.js";
+import { cleanup, config, finished, executable } from "../helpers.js";
+import { chromium } from "@playwright/test";
 
 test(
   "Electron dedicated instance navigates, confirms and captures evidence",
@@ -17,6 +18,7 @@ test(
     c.environments.electron = {
       driver: "electron",
       background_capable: true,
+      mask: ['[data-testid="applied"]'],
       executable: process.env.XMESH_UI_TEST_ELECTRON,
       args: [...(process.platform === "linux" ? ["--no-sandbox"] : []), app],
       fixtures: "mock",
@@ -61,6 +63,49 @@ test(
       const snapshot = (await controller.snapshot(session)) as { aria: string };
       assert.match(snapshot.aria, /mcp-node/);
       assert.ok(result.artifacts.find((a) => a.mime_type === "image/png"));
+      const screenshot = result.artifacts.find(
+        (a) => a.mime_type === "image/png",
+      )!;
+      const encoded = controller.artifact(screenshot.id, 0, 262144)
+        .data as string;
+      const browser = await chromium.launch({
+        executablePath: executable(),
+        headless: true,
+      });
+      try {
+        const page = await browser.newPage();
+        const masked = await page.evaluate(async (data) => {
+          const image = new Image();
+          image.src = `data:image/png;base64,${data}`;
+          await image.decode();
+          const canvas = document.createElement("canvas");
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const context = canvas.getContext("2d")!;
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(
+            0,
+            0,
+            image.width,
+            image.height,
+          ).data;
+          let count = 0;
+          for (let i = 0; i < pixels.length; i += 4)
+            if (
+              pixels[i] === 255 &&
+              pixels[i + 1] === 0 &&
+              pixels[i + 2] === 255
+            )
+              count++;
+          return count;
+        }, encoded);
+        assert.ok(
+          masked > 100,
+          "configured screenshot mask is missing from captured bitmap",
+        );
+      } finally {
+        await browser.close();
+      }
       assert.throws(
         () =>
           controller.submit(

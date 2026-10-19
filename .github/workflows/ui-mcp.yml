@@ -12,7 +12,7 @@ jobs:
   verify:
     timeout-minutes: 30
     env:
-      XMESH_UI_TEST_OUTPUT: ${{ runner.temp }}/ui-mcp-evidence
+      XMESH_UI_TEST_OUTPUT: ${{ github.workspace }}/packages/ui-mcp/.evidence
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +71,6 @@ jobs:
           path: |
             packages/ui-mcp/*.tgz
             packages/ui-mcp/*.sha256
-            ${{ runner.temp }}/ui-mcp-evidence
+            packages/ui-mcp/.evidence
           if-no-files-found: ignore
           retention-days: 7

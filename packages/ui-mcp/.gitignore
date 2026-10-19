@@ -3,4 +3,5 @@ dist/
 *.tgz
 *.sha256
 .runs/
+.evidence/
 benchmark-result.json

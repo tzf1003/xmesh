@@ -400,38 +400,10 @@ export class Driver {
           const bounds = await item.boundingBox({ timeout });
           if (bounds) rectangles.push(bounds);
         }
-      const marker = `xmesh-mask-${randomUUID()}`;
       const window = await this.electronApp.browserWindow(this.page);
       let timer: NodeJS.Timeout | undefined;
       try {
-        await this.page.evaluate(
-          async ({ rectangles, marker }) => {
-            const container = document.createElement("div");
-            container.id = marker;
-            for (const rect of rectangles) {
-              const overlay = document.createElement("div");
-              Object.assign(overlay.style, {
-                position: "fixed",
-                left: `${rect.x}px`,
-                top: `${rect.y}px`,
-                width: `${rect.width}px`,
-                height: `${rect.height}px`,
-                backgroundColor: "#FF00FF",
-                zIndex: "2147483647",
-                pointerEvents: "none",
-              });
-              container.appendChild(overlay);
-            }
-            document.documentElement.appendChild(container);
-            if (rectangles.length)
-              await new Promise<void>((resolve) =>
-                requestAnimationFrame(() =>
-                  requestAnimationFrame(() => resolve()),
-                ),
-              );
-          },
-          { rectangles, marker },
-        );
+        const windowId = await window.evaluate((win: { id: number }) => win.id);
         const clip = box
           ? {
               x: Math.floor(box.x),
@@ -440,29 +412,46 @@ export class Driver {
               height: Math.ceil(box.height),
             }
           : undefined;
-        // capturePage's stayHidden option avoids the compositor wakeup/focus
-        // dependency of a DevTools screenshot on a hidden Electron window.
-        const capture = window.evaluate(
-          async (
-            win: {
-              webContents: {
-                capturePage(
-                  rect: unknown,
-                  opts: { stayHidden: boolean; stayAwake: boolean },
-                ): Promise<{ isEmpty(): boolean; toPNG(): Buffer }>;
-              };
-            },
-            rect,
-          ) => {
-            const image = await win.webContents.capturePage(rect, {
+        // Mask the captured bitmap itself, so the page's CSP and styles cannot
+        // suppress redaction. Capture remains hidden and uses scale factor 1.
+        const capture = this.electronApp.evaluate(
+          async ({ BrowserWindow, nativeImage }, args) => {
+            const win = BrowserWindow.fromId(args.windowId);
+            if (!win) throw new Error("test window no longer exists");
+            const image = await win.webContents.capturePage(args.clip, {
               stayHidden: true,
               stayAwake: false,
             });
             if (image.isEmpty())
               throw new Error("Electron returned an empty screenshot");
-            return image.toPNG().toString("base64");
+            const { width, height } = image.getSize(),
+              bitmap = image.toBitmap({ scaleFactor: 1 });
+            for (const rect of args.rectangles) {
+              const x0 = Math.max(0, Math.floor(rect.x - (args.clip?.x ?? 0)));
+              const y0 = Math.max(0, Math.floor(rect.y - (args.clip?.y ?? 0)));
+              const x1 = Math.min(
+                width,
+                Math.ceil(rect.x + rect.width - (args.clip?.x ?? 0)),
+              );
+              const y1 = Math.min(
+                height,
+                Math.ceil(rect.y + rect.height - (args.clip?.y ?? 0)),
+              );
+              for (let y = y0; y < y1; y++)
+                for (let x = x0; x < x1; x++) {
+                  const offset = (y * width + x) * 4;
+                  bitmap[offset] = 255;
+                  bitmap[offset + 1] = 0;
+                  bitmap[offset + 2] = 255;
+                  bitmap[offset + 3] = 255;
+                }
+            }
+            return nativeImage
+              .createFromBitmap(bitmap, { width, height, scaleFactor: 1 })
+              .toPNG()
+              .toString("base64");
           },
-          clip,
+          { windowId, clip, rectangles },
         );
         const data = await Promise.race([
           capture,
@@ -480,12 +469,6 @@ export class Driver {
       } finally {
         clearTimeout(timer);
         await window.dispose();
-        await this.page
-          .evaluate(
-            (marker) => document.getElementById(marker)?.remove(),
-            marker,
-          )
-          .catch(() => {});
       }
       await this.assertBackground();
     } else if (target) await target.screenshot({ path: file, mask, timeout });
