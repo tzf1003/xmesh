@@ -23,6 +23,11 @@ const exec=promisify(execFile);
 const rootRepo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../..");
 const args=process.argv.slice(2);
 const option=(name)=>{const i=args.indexOf("--"+name);return i<0?undefined:args[i+1];};
+const signingIdentity=option("signing-identity");
+assert.ok(signingIdentity===undefined||/^[0-9a-f]{40}$/i.test(signingIdentity),"signing identity must be an exact certificate SHA-1");
+const notaryProfile=option("notary-profile");
+assert.ok(notaryProfile===undefined||(signingIdentity&&notaryProfile.trim()),"notarization requires a signing identity and Keychain profile reference");
+const requireReady=args.includes("--require-ready");
 assert.equal(process.platform,"darwin");
 assert.equal(process.env.XMESH_TEST_ALLOW_COMPUTER_UPGRADE,"1","explicit isolated upgrade acceptance opt-in required");
 const inputs={oldBinary:option("old-binary"),newBinary:option("new-binary"),oldHelper:option("old-helper"),newHelper:option("new-helper")};
@@ -44,7 +49,11 @@ try{await exec("launchctl",["print",`gui/${process.getuid()}/${label}`],{timeout
 catch(error){assert.match(String(error.stderr),/Could not find service/,"desktop service absence could not be established");}
 assert.equal(registered,false,"a loaded user desktop service must be preserved");
 
-const root=fs.mkdtempSync("/tmp/xmesh-upgrade-accept-");
+// LaunchServices excludes temporary-directory applications from bundle lookup.
+// Permission acceptance therefore installs its owned fixture under user Apps.
+const parent=requireReady?path.join(os.homedir(),"Applications"):"/tmp";
+fs.mkdirSync(parent,{recursive:true});
+const root=fs.mkdtempSync(path.join(parent,"xmesh-upgrade-accept-"));
 const app=path.join(root,"installed","Xmesh Upgrade Fixture.app");
 const receipt=path.join(root,"launch.json"),state=path.join(root,"host"),data=path.join(root,"updates");
 const mounts=path.join(root,"mounts");fs.mkdirSync(mounts);
@@ -66,6 +75,25 @@ async function writePlist(destination,value){
   fs.writeFileSync(destination,JSON.stringify(value));
   await exec("plutil",["-convert","xml1",destination]);
 }
+async function sign(destination){
+  await exec("codesign",["--force","--sign",signingIdentity??"-",...(signingIdentity?["--options","runtime","--timestamp"]:[]),destination],{timeout:60000});
+}
+async function designatedRequirement(destination){
+  const {stdout,stderr}=await exec("codesign",["--display","--requirements","-",destination]);
+  const requirement=(stdout+"\n"+stderr).split(/\r?\n/).find(line=>/^#?\s*designated => /.test(line));
+  assert.ok(requirement,"missing designated requirement");
+  if(signingIdentity){
+    const details=(await exec("codesign",["--display","--verbose=4",destination])).stderr;
+    assert.match(details,/Authority=Developer ID Application:/);
+    assert.match(details,/flags=.*\bruntime\b/);
+    assert.match(details,/Timestamp=/);
+  }
+  return requirement;
+}
+async function notarize(destination){
+  const {stdout}=await exec("xcrun",["notarytool","submit",destination,"--keychain-profile",notaryProfile,"--wait","--output-format","json"],{timeout:1200000,maxBuffer:65536});
+  assert.equal(JSON.parse(stdout).status,"Accepted","notarization did not accept the fixture");
+}
 async function bundle(destination,binary,helper,bundleVersion,wait){
   const macos=path.join(destination,"Contents/MacOS");
   const bin=path.join(destination,"Contents/Resources/bin");
@@ -74,7 +102,11 @@ async function bundle(destination,binary,helper,bundleVersion,wait){
   fs.copyFileSync(binary,path.join(bin,"xmesh"));fs.chmodSync(path.join(bin,"xmesh"),0o755);
   await exec("python3",[path.join(rootRepo,"scripts/package_computer.py"),"--binary",helper,"--output",path.join(bin,"xmesh-computer.app"),"--platform","darwin","--version",bundleVersion]);
   await writePlist(path.join(destination,"Contents/Info.plist"),{CFBundleIdentifier:appID,CFBundleExecutable:"fixture",CFBundleName:"Xmesh Upgrade Fixture",CFBundlePackageType:"APPL",CFBundleVersion:bundleVersion,LSBackgroundOnly:true,XmeshUpgradeReceipt:receipt,XmeshUpgradeWait:wait});
-  await exec("codesign",["--force","--deep","--sign","-",destination]);
+  // Sign nested executables before sealing their containing application.
+  await sign(path.join(bin,"xmesh"));
+  await sign(path.join(bin,"xmesh-computer.app"));
+  await sign(destination);
+  await exec("codesign",["--verify","--deep","--strict",destination]);
 }
 const installedBinary=path.join(app,"Contents/Resources/bin/xmesh");
 const installedHelper=path.join(app,"Contents/Resources/bin/xmesh-computer.app/Contents/MacOS/xmesh-computer");
@@ -100,8 +132,31 @@ try{
   await bundle(app,inputs.oldBinary,inputs.oldHelper,beforeVersion,true);
   const staging=path.join(root,"image-source"),newApp=path.join(staging,path.basename(app));
   await bundle(newApp,inputs.newBinary,inputs.newHelper,afterVersion,false);
+  if(signingIdentity){
+    for(const relative of ["", "Contents/Resources/bin/xmesh", "Contents/Resources/bin/xmesh-computer.app"]){
+      assert.equal(await designatedRequirement(path.join(app,relative)),await designatedRequirement(path.join(newApp,relative)),"upgrade changed designated identity");
+    }
+    events.push("developer-id-requirements-runtime-and-timestamps-verified");
+  }
+  if(notaryProfile){
+    const archive=path.join(root,"new-app.zip");
+    await exec("ditto",["-c","-k","--sequesterRsrc","--keepParent",newApp,archive]);
+    await notarize(archive);
+    await exec("xcrun",["stapler","staple",newApp],{timeout:60000});
+    await exec("xcrun",["stapler","validate",newApp]);
+    await exec("spctl",["--assess","--type","execute",newApp]);
+    events.push("new-app-notarized-stapled-and-assessed");
+  }
   const dmg=path.join(root,"installer.dmg");
   await exec("hdiutil",["create","-quiet","-format","UDZO","-srcfolder",staging,dmg],{timeout:120000});
+  if(signingIdentity){await sign(dmg);await exec("codesign",["--verify","--strict",dmg]);}
+  if(notaryProfile){
+    await notarize(dmg);
+    await exec("xcrun",["stapler","staple",dmg],{timeout:60000});
+    await exec("xcrun",["stapler","validate",dmg]);
+    await exec("spctl",["--assess","--type","open","--context","context:primary-signature",dmg]);
+    events.push("dmg-notarized-stapled-and-assessed");
+  }
   const installer=fs.readFileSync(dmg),sha=createHash("sha256").update(installer).digest("hex");
   const name=installerName(parseVersion(afterVersion),{platform:"mac",arch:process.arch});
   const source={
@@ -115,6 +170,16 @@ try{
   let before=await command("status");assert.ok(before.native_pid>0);assert.equal(before.version.replace(/^v/,""),beforeVersion);
   ownedProcesses.add(before.pid);ownedProcesses.add(before.native_pid);
   heartbeat=setInterval(()=>void host("heartbeat").catch(()=>{}),2000);
+  if(requireReady){
+    const ready=info=>info.state==="ready"&&["background:screenshot","background:pointer","background:keyboard"].every(cap=>info.capabilities?.includes(cap));
+    if(!ready(beforeInfo))console.log(JSON.stringify({phase:"authorization_required",helper_app:path.dirname(path.dirname(path.dirname(installedHelper))),application:app,deadline_seconds:600}));
+    await waitFor(async()=>{beforeInfo=await host("info",{protocol_version:1});return ready(beforeInfo);},"local screen and Accessibility authorization",600000);
+    before=await command("status");
+    assert.ok(before.running&&before.native_pid>0);
+    ownedProcesses.add(before.pid);ownedProcesses.add(before.native_pid);
+    events.push("old-native-authorized-for-background-input");
+  }
+  const initialNativeState=beforeInfo.state;
   oldApp=spawn(path.join(app,"Contents/MacOS/fixture"),[],{stdio:"ignore"});
   await waitFor(()=>fs.existsSync(receipt),"old app receipt");
   const oldServices=services(beforeVersion),newServices=services(afterVersion);
@@ -143,15 +208,25 @@ try{
   events.push("dmg-replaced-bundle-and-launched-new-entry");
   assert.equal(await version(installedBinary),afterVersion);assert.equal(await version(installedHelper,true),afterVersion);
   await exec("codesign",["--verify","--deep","--strict",app]);
+  if(notaryProfile){
+    await exec("xcrun",["stapler","validate",app]);
+    await exec("spctl",["--assess","--type","execute",app]);
+    events.push("installed-app-notarization-retained");
+  }
   const after=new Updater({...env,version:afterVersion,startComputer:async()=>{await newServices.start();events.push("new-host-version-verified");},quit:()=>{}});
   await after.finishPending();assert.equal(after.state.outcome?.ok,true);
   const afterInfo=await host("info",{protocol_version:1}),afterStatus=await command("status");
   ownedProcesses.add(afterStatus.pid);ownedProcesses.add(afterStatus.native_pid);
   assert.notEqual(afterStatus.pid,before.pid);assert.ok(afterStatus.native_pid>0&&afterStatus.native_pid!==before.native_pid);
   assert.notEqual(afterInfo.desktop_epoch,beforeInfo.desktop_epoch);assert.equal(afterStatus.version.replace(/^v/,""),afterVersion);
+  if(requireReady){
+    assert.equal(afterInfo.state,"ready","upgraded native executor lost screen authorization");
+    assert.ok(["background:screenshot","background:pointer","background:keyboard"].every(cap=>afterInfo.capabilities?.includes(cap)),"upgraded native executor lost Accessibility authorization");
+    events.push("background-permissions-retained-after-upgrade");
+  }
   assert.equal(fs.existsSync(app+".update-old"),false);
   assert.equal(fs.existsSync(path.join(data,"pending.json")),false);
-  outcome={result:"PASS",from:beforeVersion,to:afterVersion,checks:events,host_pid_changed:true,native_pid_changed:true,desktop_epoch_changed:true,restored_native_state:afterInfo.state,application_entry:"windowless-fixture",installer:"real-hdiutil-dmg"};
+  outcome={result:"PASS",from:beforeVersion,to:afterVersion,checks:events,host_pid_changed:true,native_pid_changed:true,desktop_epoch_changed:true,initial_native_state:initialNativeState,restored_native_state:afterInfo.state,signing:signingIdentity?"developer-id":"ad-hoc",notarized:Boolean(notaryProfile),application_entry:"windowless-fixture",installer:"real-hdiutil-dmg"};
 }finally{
   cleaning=true;
   if(heartbeat)clearInterval(heartbeat);

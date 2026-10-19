@@ -45,7 +45,11 @@ macOS 执行器现在报告 `default_interaction: background`。控制会话省�
 
 默认后台的设备还要求本机配置 `agent.computer.allow_foreground: true` 才接受显式前台控制。该值默认 false，远程工具参数不能开启；本机撤销该配置会立即回收受其授权的前台会话。后台操作能力缺失时返回错误。
 
+后台拖动与滚动另以 `background:drag` 和 `background:scroll` 声明，和文字、键盘及截图能力分开报告。能力表示后端提供该路由；每个应用与动作形式仍可能返回 `background_action_unsupported`，动作后的实际结果须重新观察。
+
 后台 frame 另有 `target_id`，布局版本属于目标窗口，坐标相对返回窗口图片。执行器校验窗口归属、进程启动身份、窗口布局及会话代次，目标关闭或切换身份后旧会话失效。目标窗口移动 / 缩放后需重新观察。单次左键 / 右键优先选择目标窗口控件的 AXPress / AXShowMenu；未选到语义动作时使用上游左键单击 / 双击配方，其余形式明确返回 `background_action_unsupported`。语义动作一旦尝试，失败不再触发另一路点击。输入已经提交后出错、用户进入目标应用、窗口执行中变化、前台状态变化或取消可能返回 unknown，调用方重新观察。
+
+每个原生动作步骤同时复查录屏权限、辅助功能权限与锁屏状态；任一条件失效时停止继续投递。已经持有的键 / 按钮仍使用进程身份受限的清理路径释放。AX 全选在写入选区前再次确认焦点对象和窗口归属，避免异步界面变化后写到已失去焦点的控件。
 
 后台输入复用固定提交的 MIT Swift 代码，经内部 C ABI 静态链接进 Rust 执行器。原始来源、哈希、集成变更和兼容性验收边界见 [macOS 后端说明](../../computer-native/macos/README.md)。本机 AppKit / Electron 临时窗口已通过真实 MCP 链路的点击、中文输入、全选替换、拖动与滚动，并由独立观察进程监测系统指针和前台应用。最终线程实现同时通过同应用双窗口完全遮挡的 AppKit 目标和 Electron MCP 复测；原生拖拽执行中取消后返回 unknown 并释放按钮。原生 AppKit 在确认当前辅助功能焦点属于绑定窗口后使用直接 PID 键盘投递，Chromium / Electron 使用上游合成 key-window 流程；两类窗口的原生 Meta+Backspace、连续输入及既有操作已通过。AppKit 焦点属于另一窗口时在投递前明确返回不支持。兼容性结论限于该主机和测试窗口，其他应用和系统版本按验收记录逐项确认。
 
@@ -77,8 +81,12 @@ Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道�
 
 本机显式执行 `xmesh computer host --authorize` 请求系统权限。普通远程请求遇到未授权状态直接失败。权限初始化和自动启动仍按三端验收清单逐项验证。
 
+macOS TCC 会按启动链中的 responsible host 归属权限；直接在终端 / MCP 客户端启动 helper 的权限结果，不代表 LaunchAgent 服务已经获准。打包服务可能归属外层 `xmesh.app`，应在「隐私与安全性」的辅助功能及屏幕与系统音频录制中授权系统提示的宿主应用。helper 启动注册其应用及外层应用身份；安装路径应持久存在。临时目录里的 bundle 即使调用注册返回成功，也可能无法被系统权限页解析。验收以安装服务的实际 `info` / 截图 / 输入结果为准。
+
 `xmesh computer emergency-stop` 通过用户 Host 的受保护本机 IPC 紧急停止画面和输入，关闭当前原生执行器并拒绝后续创建。此操作独立于管理内核，暂停标记写入用户 Host 状态目录，Host 重启后继续生效。只有本机 `xmesh computer resume` 或面板恢复操作清除此状态；恢复后的执行器生成新 epoch，旧会话失效。UI 紧急快捷键同时请求内核暂停与直接 Host 停止。普通“暂停 Agent”仅暂停控制，紧急停止同时终止观察。
 
 Wayland 在同一 RemoteDesktop / ScreenCast grant 上优先请求 EIS。输入仅使用 compositor 已 resumed 的设备；画面流的 mapping_id 必须匹配 EIS region，多屏缺少映射时拒绝选择。单屏可在唯一 region 上映射逻辑坐标。每次键、按钮、滚轮或移动均提交独立 EI frame，时间使用 CLOCK_MONOTONIC；设备暂停 / 移除立即取消其可用性。控制链通过 ei_text keysym 支持组合键和 Unicode，compositor 缺少这组能力时关闭该 EIS 会话，再以新 Portal 会话使用 Notify 兼容路径；同一会话内不混用 EIS 与 Notify。info.capabilities 可报告 input:eis、input:portal 或 input:xtest，表示实际选择的 Linux 输入路径。Portal 初始化失败或超时后显式关闭已创建的会话。
 
 隔离 macOS DMG 验收还运行实际更新器的失败交接回滚与成功替换，确认 Host / 原生子进程先退出、失败后重建旧 Host，成功后恢复新版本并产生新 PID / desktop_epoch。应用入口使用无窗口回执夹具；此证据覆盖安装脚本和 Host 生命周期，系统授权延续及正式签名 / 公证另行验收。
+
+`ui/scripts/accept-computer-upgrade-macos.mjs` 可通过 `--signing-identity <证书 SHA-1>` 验证 Developer ID、嵌套代码的指定要求一致性、hardened runtime 与时间戳；`--notary-profile <钥匙串引用>` 还提交应用和 DMG 公证，验证装订和 Gatekeeper，并在真实替换后复查应用票据。凭据由 notarytool 从钥匙串读取。`--require-ready` 等待本机用户为旧 helper 授权后才开始升级，并要求新 helper 仍具有后台截图和输入能力；授权等待超时会清理测试资源，不计为授权延续通过。

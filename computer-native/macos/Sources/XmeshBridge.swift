@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import CoreServices
 import Foundation
 
 // The pinned upstream dispatchers call these hooks at every delivery boundary.
@@ -81,6 +82,11 @@ public func xmeshBackgroundInitialize(){
     // The native executor has no windows. Initialize AppKit on its main thread
     // with activation prohibited before capture or input libraries register it.
     NSApplication.shared.setActivationPolicy(.prohibited)
+    var app=Bundle.main.bundleURL
+    while app.path != "/"{
+        if app.pathExtension=="app"{_ = LSRegisterURL(app as CFURL,true)}
+        app.deleteLastPathComponent()
+    }
     // This sets only this executor's default AX timeout. An application AX
     // object's timeout does not apply to the child objects returned by AX.
     AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(),0.1)
