@@ -14,7 +14,6 @@ import (
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/identity"
-	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 	"golang.org/x/crypto/acme/autocert"
@@ -72,13 +71,14 @@ func validateIngress(deps ingressDeps, cfg *config.Config) error {
 	if deps.local {
 		return fmt.Errorf("入口需要已入网的节点身份")
 	}
+	_, deviceNetwork := deps.network.(interface{ MultiPath() bool })
 	tagged := false
 	for _, tag := range deps.self.Tags {
 		if tag == "tag:ingress" {
 			tagged = true
 		}
 	}
-	if !tagged {
+	if !tagged && !deviceNetwork {
 		return fmt.Errorf("入口节点需要控制面授予 tag:ingress")
 	}
 	if _, e := os.ReadFile(deps.password()); e != nil {
@@ -86,7 +86,7 @@ func validateIngress(deps ingressDeps, cfg *config.Config) error {
 	}
 	switch cfg.Ingress.Listen {
 	case "funnel":
-		if _, ok := deps.network.(*mesh.Tailnet); !ok {
+		if _, ok := deps.network.(interface{ Funnel() (net.Listener, error) }); !ok {
 			return fmt.Errorf("Funnel 需要 tailnet")
 		}
 	case "tunnel":
@@ -141,7 +141,7 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 	var tlsConfig *tls.Config
 	switch cfg.Ingress.Listen {
 	case "funnel":
-		listener, e = deps.network.(*mesh.Tailnet).Funnel()
+		listener, e = deps.network.(interface{ Funnel() (net.Listener, error) }).Funnel()
 	case "tunnel":
 		listener, e = net.Listen("tcp", deps.tunnel())
 	case "public:443":

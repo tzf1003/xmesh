@@ -23,13 +23,14 @@ import (
 )
 
 type Config struct {
-	Node    Node    `json:"node"`
-	Mesh    Mesh    `json:"mesh"`
-	Gateway Gateway `json:"gateway"`
-	Ingress Ingress `json:"ingress"`
-	Agent   Agent   `json:"agent"`
-	Audit   Audit   `json:"audit"`
-	CI      CI      `json:"ci"`
+	SchemaVersion int     `json:"schema_version,omitempty"`
+	Node          Node    `json:"node"`
+	Mesh          Mesh    `json:"mesh"`
+	Gateway       Gateway `json:"gateway"`
+	Ingress       Ingress `json:"ingress"`
+	Agent         Agent   `json:"agent"`
+	Audit         Audit   `json:"audit"`
+	CI            CI      `json:"ci"`
 }
 type Node struct {
 	Name  string   `json:"name"`
@@ -42,11 +43,37 @@ type Mesh struct {
 	AuthMethod  string `json:"auth_method,omitempty"`
 	Ephemeral   bool   `json:"ephemeral"`
 	LAN         struct {
-		MDNS bool `json:"mdns"`
+		Enabled *bool `json:"enabled,omitempty"`
+		MDNS    bool  `json:"mdns"`
 		// Interface pins the network interface the LAN node listens and advertises on.
 		Interface string `json:"interface"`
 	} `json:"lan"`
+	Tailnet Tailnet `json:"tailnet,omitempty"`
 }
+
+type Tailnet struct {
+	Enabled     bool   `json:"enabled"`
+	ControlURL  string `json:"control_url,omitempty"`
+	AuthkeyFile string `json:"authkey_file,omitempty"`
+	AuthMethod  string `json:"auth_method,omitempty"`
+	Ephemeral   bool   `json:"ephemeral,omitempty"`
+}
+
+func (m Mesh) LANEnabled() bool     { return m.LAN.Enabled == nil || *m.LAN.Enabled }
+func (m Mesh) TailnetEnabled() bool { return m.Tailnet.Enabled }
+func (m Mesh) NetworkMode() string {
+	if m.LANEnabled() && m.TailnetEnabled() {
+		return "coexist"
+	}
+	if m.TailnetEnabled() {
+		return "tailnet"
+	}
+	if m.LANEnabled() {
+		return "lan"
+	}
+	return "offline"
+}
+
 type Gateway struct {
 	// Listen is the local bind address. Its host is "" or 0.0.0.0 or [::] for every interface, or a
 	// loopback address to serve this machine only (CTR-CFG-01).
@@ -325,6 +352,14 @@ func Parse(b []byte) (*Config, error) {
 	if e = json.Unmarshal(raw, c); e != nil {
 		return nil, e
 	}
+	if c.SchemaVersion == 2 {
+		if mesh, ok := doc["mesh"].(map[string]any); ok {
+			lan, _ := mesh["lan"].(map[string]any)
+			if _, set := lan["mdns"]; !set {
+				c.Mesh.LAN.MDNS = true
+			}
+		}
+	}
 	for i := range c.CI.Bindings {
 		b := &c.CI.Bindings[i]
 		if b.Scope == "" {
@@ -360,6 +395,12 @@ func listenHostAllowed(host string) bool {
 
 func (c *Config) Validate() error {
 	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
+	if c.SchemaVersion == 2 && c.Mesh.Tailnet.Enabled {
+		u, err := url.Parse(c.Mesh.Tailnet.ControlURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+			return fail("/mesh/tailnet/control_url")
+		}
+	}
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
 	}
@@ -383,11 +424,18 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.HasRole("ingress") {
-		if c.Mesh.Mode == "lan" {
+		if c.SchemaVersion != 2 && c.Mesh.Mode == "lan" {
 			return fail("/ingress: lan 模式不提供 OAuth 或 Funnel")
 		}
 		if c.Ingress.Listen == "funnel" {
-			u, e := url.Parse(c.Mesh.ControlURL)
+			controlURL := c.Mesh.ControlURL
+			if c.SchemaVersion == 2 {
+				if !c.Mesh.Tailnet.Enabled {
+					return fail("/ingress: Funnel 需要启用 Tailnet")
+				}
+				controlURL = c.Mesh.Tailnet.ControlURL
+			}
+			u, e := url.Parse(controlURL)
 			if e != nil || !officialControlURL(u) {
 				return fail("/mesh/control_url: Funnel 要求官方控制面")
 			}

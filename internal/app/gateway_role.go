@@ -143,7 +143,11 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 		return nil, err
 	}
 	out := []net.Listener{listener}
-	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && r.deps.mode == "tailnet" && !gatewayLoopbackOnly(listen) {
+	multiPath := false
+	if network, ok := r.deps.network.(interface{ MultiPath() bool }); ok {
+		multiPath = network.MultiPath()
+	}
+	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && (r.deps.mode == "tailnet" || multiPath) && !gatewayLoopbackOnly(listen) {
 		tailnet, err := tn.ListenPort(gatewayPort(listen))
 		if err != nil {
 			_ = listener.Close()

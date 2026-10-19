@@ -123,6 +123,13 @@ func (d *Directory) SetProvider(kind PathKind, generation uint64, enabled bool) 
 	return nil
 }
 
+func (d *Directory) Provider(kind PathKind) (uint64, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	p := d.providers[kind]
+	return p.generation, p.enabled && !d.closed
+}
+
 // Observe accepts evidence only after mTLS identity verification, with the exact trust generation
 // the probe was authorized against. The boot ID is read over that authenticated connection.
 func (d *Directory) Observe(cert *x509.Certificate, trustGeneration uint64, path Path) error {

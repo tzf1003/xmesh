@@ -328,6 +328,7 @@ func verifyBootstrapCertificate(cert *x509.Certificate) error {
 // the pairing routes. Application handlers must revalidate trust on each request as well.
 func (p *Pairing) Handler(next http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+PairPath+"identity", func(w http.ResponseWriter, r *http.Request) { pairResponse(w, p.document, nil) })
 	mux.HandleFunc("POST "+PairPath+"challenge", func(w http.ResponseWriter, r *http.Request) { out, err := p.Challenge(); pairResponse(w, out, err) })
 	mux.HandleFunc("POST "+PairPath+"exchange", func(w http.ResponseWriter, r *http.Request) {
 		var req PairRequest
