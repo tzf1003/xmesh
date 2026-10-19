@@ -20,6 +20,8 @@ export interface FakeMeshState {
   failingHosts: string[];
   /** Every argv the service ran, for assertions. */
   calls: string[][];
+  /** Last credential file named by `login`; the panel always passes one. */
+  credentialFile?: string;
   /** Written by `authkey --out`, by path. The panel only ever sees the path. */
   keyFiles: string[];
   devices: FakeDevice[];
@@ -107,7 +109,8 @@ function writePolicy(s: FakeMeshState, label: string, after: string): { snapshot
 }
 
 function needsWrite(s: FakeMeshState): MeshRun | undefined {
-  if (!s.credential || !s.writeCredential) return noCredential();
+  if (!s.credential) return noCredential();
+  if (!s.writeCredential) return fail("meshadmin: insufficient_scope: saved credential is read-only");
   return undefined;
 }
 
@@ -153,6 +156,9 @@ function derpAfter(s: FakeMeshState, regions: string[]): string {
  */
 function fakeLogin(s: FakeMeshState, args: string[], input: string | undefined): MeshRun {
   if (flag(args, "secret-file") !== "-") return fail("fake login expects --secret-file=-");
+  // The panel always passes a credential file; the real CLI writes the key there.
+  const file = flag(args, "credential-file");
+
   const kind = flag(args, "kind");
   const access = flag(args, "access");
   if (kind !== "tailscale" && kind !== "headscale") return fail("--kind 必须是 tailscale 或 headscale");
@@ -163,8 +169,9 @@ function fakeLogin(s: FakeMeshState, args: string[], input: string | undefined):
   if (!s.acceptKeys) return fail("凭据验证失败（用 --no-verify 跳过）: 控制面拒绝了这个密钥");
   s.provider = kind;
   s.credential = true;
-  if (access === "write") s.writeCredential = true;
-  return ok({ profile: "default", access, kind, stored: true });
+  s.writeCredential = access === "write";
+  s.credentialFile = file;
+  return ok({ profile: "default", access, kind, stored: true, file });
 }
 
 /** Interprets one `xmesh mesh ...` command line; `input` is what the command reads from stdin. */
@@ -181,6 +188,10 @@ export function runFakeMesh(s: FakeMeshState, argv: string[], input?: string): M
       return ok({
         provider: s.provider,
         capabilities: { policy_write: s.provider === "tailscale", atomic_policy_write: s.provider === "tailscale", derp_via_policy: s.provider === "tailscale" },
+        credential: (() => {
+          const file = flag(args, "credential-file") ?? s.credentialFile;
+          return { access: s.writeCredential ? "write" : "read", profile: "default", source: file === undefined ? "keychain" : "file", ...(file !== undefined && { file }) };
+        })(),
         devices: s.devices.map((d) => ({
           device: { id: d.id, name: d.name, hostname: d.name, addresses: [`100.64.0.${d.id.slice(1, 2)}`], tags: d.tags.length === 0 ? null : d.tags, online: d.online, authorized: true, os: "linux", last_seen: d.online ? "2026-10-16T08:00:00Z" : "0001-01-01T00:00:00Z" },
           roles: d.roles.length === 0 ? null : d.roles,

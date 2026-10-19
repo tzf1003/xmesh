@@ -9,7 +9,9 @@ import { GatewayCredentials } from "./gateway-token";
 import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
-import { MeshService, execMeshRunner } from "./mesh-service";
+import * as fs from "node:fs";
+import { runBrowserLogin } from "./browser-login";
+import { MeshService, execMeshRunner, meshCredentialPath } from "./mesh-service";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
 import { bundledXmesh, cliCommandText, runXmesh, runXmeshRaw, runXmeshSetup } from "./cli";
@@ -193,21 +195,53 @@ async function start(): Promise<void> {
   const tray = new TrayView(t, runAction, showPanel);
 
   servePanel(rendererRoot());
-  const setupHost = fsSetupHost(roots[0]!, async (args) => {
-    if (TEST_MODE) {
-      calls.push({ op: "setup-cli", arg: [...args] });
-      if (answers.cliFails) throw new Error("simulated cli failure");
-      return `ok ${args[0]}`;
-    }
-    return runXmeshSetup(args);
-  });
-  // Tailnet administration shells out to `xmesh mesh --json`; the credential lives in that CLI's keychain profile.
+  // Tailnet administration shells out to `xmesh mesh --json`. The control-plane
+  // credential is a 0600 file (not the keychain), so the panel works on hosts
+  // without a desktop secret store and never depends on a CLI profile name.
   const fakeMesh = TEST_MODE ? freshFakeMesh() : undefined;
-  const meshService = new MeshService(fakeMesh ? fakeMeshRunner(fakeMesh) : execMeshRunner(), () => {
-    const c = controller.snapshot.connection;
-    const file = c.kind === "connected" ? c.status.paths?.config_file : undefined;
-    return typeof file === "string" && file !== "" ? file : undefined;
-  });
+  const meshCredential = meshCredentialPath(roots[0]!);
+  const meshService = new MeshService(
+    fakeMesh ? fakeMeshRunner(fakeMesh) : execMeshRunner(),
+    () => {
+      const c = controller.snapshot.connection;
+      const file = c.kind === "connected" ? c.status.paths?.config_file : undefined;
+      return typeof file === "string" && file !== "" ? file : undefined;
+    },
+    () => meshCredential,
+  );
+  // The first run can mint its own preauthorised key with the credential saved
+  // on the Tailnet page, so a new node never needs a hand-copied key file.
+  const setupHost = fsSetupHost(
+    roots[0]!,
+    async (args) => {
+      if (TEST_MODE) {
+        calls.push({ op: "setup-cli", arg: [...args] });
+        if (answers.cliFails) throw new Error("simulated cli failure");
+        return `ok ${args[0]}`;
+      }
+      return runXmeshSetup(args);
+    },
+    async (file, tags, controlUrl, user) => {
+      if (TEST_MODE) {
+        calls.push({ op: "setup-authkey", arg: { file, tags } });
+        return;
+      }
+      let cred: { kind?: string; url?: string };
+      try { cred = JSON.parse(fs.readFileSync(meshCredential, "utf8")) as typeof cred; }
+      catch { throw new Error("请先在 Tailnet 管理页保存管理凭据"); }
+      const official = "https://controlplane.tailscale.com";
+      const expected = cred.kind === "tailscale" ? official : cred.url;
+      if (!expected || new URL(expected).origin !== new URL(controlUrl || official).origin) {
+        throw new Error("已保存的管理凭据属于另一个控制面，请切换凭据或控制面地址");
+      }
+      const r = await meshService.request({ op: "onboard", tags, ttl: "1h", ephemeral: false, file, overwrite: false, ...(user && { user }) });
+      if (!r.ok) throw new Error(r.error.message);
+    },
+    async (config, state, controlUrl) => {
+      if (TEST_MODE) { calls.push({ op: "setup-browser-login", arg: { config, state, controlUrl } }); return; }
+      await runBrowserLogin(config, state, controlUrl, (url) => platform.openExternal(url));
+    },
+  );
   registerIpc({
     controller,
     actions,

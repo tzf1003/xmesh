@@ -1,13 +1,14 @@
-// Tailnet administration for the panel. Each request becomes a fixed argv for
-// `xmesh mesh ... --json`; there is no shell, every value was validated by
-// parseMeshRequest and is attached with `--flag=value` so a value can never be
-// read as a flag. The control-plane credential stays in the CLI's keychain
-// profile. The one secret this process handles is the one a `login` request
-// carries: it is written to the CLI's stdin, never to argv, and is not kept
-// anywhere after that. The only other secret the CLI produces (a pre-auth key)
-// goes to a 0600 file the user chose, and only the path comes back.
+// Tailnet administration turns validated requests into fixed argv for
+// `xmesh mesh ... --json`. Values use --flag=value and run without a shell.
+// The CLI stores and reads the control-plane credential in a private JSON file.
+// Login secrets go through stdin; pasted DERP tokens use a temporary private
+// file removed after the call. Auth keys are written to the user's chosen file,
+// and their paths are returned to the panel.
 
 import { execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   type DerpRegionInput,
   type MeshOp,
@@ -68,8 +69,10 @@ function regionArg(r: DerpRegionInput): string {
  * argv after `xmesh`. `nodeConfig` is the connected node's own config file, so
  * the CLI can match devices to xmesh roles and read `agent.authz`.
  */
-export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
+export function buildMeshArgs(req: MeshRequest, nodeConfig?: string, credentialFile?: string): string[] {
   const node = nodeConfig === undefined ? [] : [`--node-config=${nodeConfig}`];
+  // Every subcommand takes the shared flags; the file replaces the keychain profile.
+  const cred = credentialFile === undefined ? [] : [`--credential-file=${credentialFile}`];
   const apply = (on: boolean): string[] => (on ? ["--apply", "--yes"] : []);
   const expect = (v: string | undefined): string[] => (v === undefined ? [] : [`--expect-version=${v}`]);
   switch (req.op) {
@@ -82,19 +85,21 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
         `--kind=${req.kind}`,
         `--access=${req.access}`,
         "--secret-file=-",
+        ...cred,
         ...(req.url !== undefined ? [`--url=${req.url}`] : []),
         ...(req.tailnet !== undefined ? [`--tailnet=${req.tailnet}`] : []),
         ...(req.clientId !== undefined ? [`--client-id=${req.clientId}`] : []),
       ];
     case "status":
-      return ["mesh", "status", "--json", ...node];
+      return ["mesh", "status", "--json", ...cred, ...node];
     case "tags":
-      return ["mesh", "tags", "--json", `--device=${req.device}`, `--set=${req.tags.join(",")}`, ...(req.apply ? ["--apply"] : [])];
+      return ["mesh", "tags", "--json", ...cred, `--device=${req.device}`, `--set=${req.tags.join(",")}`, ...(req.apply ? ["--apply"] : [])];
     case "onboard":
       return [
         "mesh",
         "authkey",
         "--json",
+        ...cred,
         `--tags=${req.tags.join(",")}`,
         `--ttl=${req.ttl}`,
         `--out=${req.file}`,
@@ -103,14 +108,15 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
         ...(req.overwrite ? ["--overwrite"] : []),
       ];
     case "policy.show":
-      return ["mesh", "policy", "--json", "--show"];
+      return ["mesh", "policy", "--json", ...cred, "--show"];
     case "policy.snapshots":
-      return ["mesh", "policy", "--json", "--snapshots"];
+      return ["mesh", "policy", "--json", ...cred, "--snapshots"];
     case "policy.template":
       return [
         "mesh",
         "policy",
         "--json",
+        ...cred,
         `--template=${req.template}`,
         `--owner=${req.owner}`,
         ...(req.port !== undefined ? [`--port=${req.port}`] : []),
@@ -118,15 +124,16 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
         ...apply(req.apply),
       ];
     case "policy.rollback":
-      return ["mesh", "policy", "--json", `--rollback=${req.snapshot}`, ...expect(req.expectVersion), ...apply(req.apply)];
+      return ["mesh", "policy", "--json", ...cred, `--rollback=${req.snapshot}`, ...expect(req.expectVersion), ...apply(req.apply)];
     case "matrix":
-      return ["mesh", "matrix", "--json", ...(req.port !== undefined ? [`--port=${req.port}`] : []), ...(req.mismatchOnly ? ["--mismatch-only"] : []), ...node];
+      return ["mesh", "matrix", "--json", ...cred, ...(req.port !== undefined ? [`--port=${req.port}`] : []), ...(req.mismatchOnly ? ["--mismatch-only"] : []), ...node];
     case "derp.plan":
       return [
         "mesh",
         "derp",
         req.apply ? "apply" : "plan",
         "--json",
+        ...cred,
         ...req.regions.map(regionArg),
         ...(req.omitDefault ? ["--omit-default"] : []),
         ...(req.skipStun ? ["--skip-stun"] : []),
@@ -139,18 +146,21 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
         "derp",
         "probe",
         "--json",
+        ...cred,
         ...req.regions.map(regionArg),
         ...(req.skipStun ? ["--skip-stun"] : []),
         ...(req.compareOfficial ? ["--compare-official"] : []),
       ];
     case "derp.headscale":
-      return ["mesh", "derp", "headscale", "--json", ...req.regions.map(regionArg), ...(req.omitDefault ? ["--omit-default"] : [])];
+      return ["mesh", "derp", "headscale", "--json", ...cred, ...req.regions.map(regionArg), ...(req.omitDefault ? ["--omit-default"] : [])];
     case "derp.sync":
+      if ("token" in req.target) throw new Error("A pasted token must be written to a private file before building argv");
       return [
         "mesh",
         "derp",
         "sync",
         "--json",
+        ...cred,
         ...("allowlist" in req.target
           ? [`--allowlist=${req.target.allowlist}`]
           : [`--admission-url=${req.target.url}`, `--admission-token-file=${req.target.tokenFile}`]),
@@ -161,6 +171,14 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string): string[] {
 
 /** Ops whose non-zero exit still carries a useful JSON document (a failed probe, a rolled-back write). */
 const JSON_ON_FAILURE: readonly MeshOp[] = ["derp.plan", "derp.probe"];
+
+/** The credential file the panel manages. The CLI validates, writes and reads this per-user file. */
+export const MESH_CREDENTIAL_FILE = "mesh-credential.json";
+
+/** A credential file lands beside the app's other per-user state. */
+export function meshCredentialPath(stateRoot: string): string {
+  return path.join(stateRoot, "mesh", MESH_CREDENTIAL_FILE);
+}
 
 function firstLines(s: string, max = 600): string {
   return s
@@ -178,6 +196,10 @@ export function meshError(run: MeshRun): ActionError {
   if (run.missing) return { code: "unavailable", reason: "binary_missing", message: text };
   if (text.includes("没有保存的凭据")) return { code: "no_credential", message: text };
   if (text.includes("预览时的策略版本")) return { code: "conflict", reason: "stale_version", message: text };
+  // A read-only Tailscale OAuth credential is refused by the control plane with
+  // a 403 that names the scope. That is a different problem from "not logged in".
+  if (text.includes("insufficient_scope") || text.includes("HTTP 403")) return { code: "insufficient_scope", message: text };
+  if (text.includes("HTTP 401") || text.includes("invalid_client")) return { code: "invalid_credential", message: text };
   if (text.includes("system keychain")) return { code: "keychain_unavailable", message: text };
   if (run.code === 124) return { code: "unavailable", reason: "timeout", message: text };
   return { code: "mesh_failed", message: text };
@@ -199,18 +221,34 @@ export class MeshService {
   constructor(
     private readonly run: MeshRunner,
     private readonly nodeConfig: () => string | undefined = () => undefined,
+    /** 0600 JSON file the CLI reads instead of the keychain. */
+    private readonly credentialFile: () => string | undefined = () => undefined,
   ) {}
 
   /** `raw` is whatever the renderer sent. */
   async request(raw: unknown): Promise<DataResult<MeshResults[MeshOp]>> {
     const parsed = parseMeshRequest(raw);
     if (!parsed.ok) return { ok: false, error: { code: "invalid_args", message: `invalid ${parsed.field}`, field: parsed.field } };
-    const req = parsed.value;
+    // A pasted admission token becomes a 0600 file for the duration of the
+    // call; the token itself never reaches argv or the environment.
+    let dir: string | undefined;
+    let req = parsed.value;
     let result: MeshRun;
     try {
-      result = await this.run(buildMeshArgs(req, this.nodeConfig()), req.op === "login" ? req.secret : undefined);
-    } catch (e) {
-      return { ok: false, error: { code: "unavailable", message: e instanceof Error ? e.message : String(e) } };
+      if (req.op === "derp.sync" && "token" in req.target) {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-admission-"));
+        if (process.platform !== "win32") fs.chmodSync(dir, 0o700);
+        const file = path.join(dir, "token");
+        fs.writeFileSync(file, req.target.token, { flag: "wx", mode: 0o600 });
+        req = { ...req, target: { url: req.target.url, tokenFile: file } };
+      }
+      result = await this.run(buildMeshArgs(req, this.nodeConfig(), this.credentialFile()), req.op === "login" ? req.secret : undefined);
+    } catch {
+      return { ok: false, error: { code: "unavailable", message: "无法完成控制面操作，请检查凭据文件和内核程序后重试" } };
+    } finally {
+      if (dir !== undefined) {
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* The OS may delay deletion while closing handles. */ }
+      }
     }
     const json = parseJson(result.stdout);
     if (result.code !== 0) {

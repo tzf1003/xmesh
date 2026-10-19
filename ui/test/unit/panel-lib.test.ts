@@ -153,7 +153,19 @@ test("wizard form check mirrors the main-process validation and previews the exa
   assert.ok(good.ok);
   assert.equal(good.params.nodeName, "dev-1");
   assert.deepEqual(checkForm({ ...INITIAL_FORM, nodeName: "n", agent: false, gateway: false }), { ok: false, problem: "roles" });
-  assert.deepEqual(checkForm({ ...INITIAL_FORM, nodeName: "n", workspace: "/w", mode: "tailnet" }), { ok: false, problem: "authkey_file" });
+  // A fresh tailnet form mints its own preauthorised key, so no key field is required.
+  const auto = checkForm({ ...INITIAL_FORM, nodeName: "n", workspace: "/w", mode: "tailnet", authkeySource: "auto" });
+  assert.ok(auto.ok);
+  assert.equal(auto.params.autoAuthkey, true);
+  assert.equal(auto.params.authkey, undefined);
+  assert.equal(auto.params.authkeyFile, undefined);
+  // The file source still needs an absolute path, and a pasted key is checked.
+  assert.deepEqual(checkForm({ ...INITIAL_FORM, nodeName: "n", workspace: "/w", mode: "tailnet", authkeySource: "file" }), { ok: false, problem: "authkey_file" });
+  assert.deepEqual(checkForm({ ...INITIAL_FORM, nodeName: "n", workspace: "/w", mode: "tailnet", authkeySource: "paste", authkey: "short" }), { ok: false, problem: "authkey" });
+  const pasted = checkForm({ ...INITIAL_FORM, nodeName: "n", workspace: "/w", mode: "tailnet", authkeySource: "paste", authkey: "tskey-auth-example" });
+  assert.ok(pasted.ok);
+  assert.equal(pasted.params.authkey, "tskey-auth-example");
+  assert.equal(pasted.params.authkeyFile, undefined);
 });
 
 test("the renderer bundle contains no dynamic code, raw HTML sinks or network APIs", () => {

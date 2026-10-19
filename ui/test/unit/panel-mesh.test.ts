@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { test } from "node:test";
 import { fakeMeshRunner, freshFakeMesh } from "../../src/main/mesh-fake";
 import { MeshService, buildMeshArgs, meshError } from "../../src/main/mesh-service";
@@ -194,7 +196,8 @@ test("login commands: fixed text, copied by key", () => {
 function service(mutate?: (s: ReturnType<typeof freshFakeMesh>) => void): { svc: MeshService; fake: ReturnType<typeof freshFakeMesh> } {
   const fake = freshFakeMesh();
   mutate?.(fake);
-  return { svc: new MeshService(fakeMeshRunner(fake), () => "/n/xmesh.yaml"), fake };
+  // The panel always names a 0600 credential file; tests use a fixed path.
+  return { svc: new MeshService(fakeMeshRunner(fake), () => "/n/xmesh.yaml", () => "/state/mesh/mesh-credential.json"), fake };
 }
 
 test("service: invalid requests never reach the CLI", async () => {
@@ -214,7 +217,7 @@ test("service: status joins devices with roles and the node config", async () =>
   assert.equal(s.devices.length, 3);
   assert.deepEqual(s.devices[0]!.roles, ["agent", "gateway"]);
   assert.equal(s.devices[2]!.issues[0]!.severity, "warn");
-  assert.deepEqual(fake.calls[0], ["mesh", "status", "--json", "--node-config=/n/xmesh.yaml"]);
+  assert.deepEqual(fake.calls[0], ["mesh", "status", "--json", "--credential-file=/state/mesh/mesh-credential.json", "--node-config=/n/xmesh.yaml"]);
 });
 
 test("service: without a saved credential every call says so", async () => {
@@ -226,7 +229,7 @@ test("service: without a saved credential every call says so", async () => {
   assert.ok((await ro.request({ op: "status" })).ok);
   const w = await ro.request({ op: "tags", device: "n100", tags: ["tag:device"], apply: true });
   assert.ok(!w.ok);
-  if (!w.ok) assert.equal(w.error.code, "no_credential");
+  if (!w.ok) assert.equal(w.error.code, "insufficient_scope");
 });
 
 test("service: a tag change previews first and refuses tags the policy does not own", async () => {
@@ -464,6 +467,7 @@ test("service: a saved login brings the credential back through the fake CLI", a
   assert.ok(!(await svc.request({ op: "status" })).ok);
   const r = await svc.request({ op: "login", kind: "headscale", access: "write", url: "https://headscale.example.com", secret: key });
   assert.deepEqual(r, { ok: true, data: { kind: "headscale", access: "write", stored: true } });
+  assert.equal(fake.credentialFile, "/state/mesh/mesh-credential.json");
   assert.equal(fake.provider, "headscale");
   assert.ok((await svc.request({ op: "status" })).ok);
   assert.ok(!JSON.stringify(fake.calls).includes(key));
@@ -485,4 +489,70 @@ test("form helpers", () => {
   assert.deepEqual(regionsFromForms([{ ...good, derpPort: "99999" }]), { ok: false, problem: "invalid", row: 0 });
   assert.deepEqual(regionsFromForms([{ ...good, derpPort: "8x" }]), { ok: false, problem: "invalid", row: 0 });
   assert.deepEqual(regionsFromForms([{ ...good, name: "a,b" }]), { ok: false, problem: "invalid", row: 0 });
+});
+
+test("the credential is a 0600 file, passed to every command", () => {
+  const file = "/state/mesh/mesh-credential.json";
+  for (const req of [
+    { op: "status" },
+    { op: "login", kind: "tailscale", access: "write", secret: "tskey-api-x" },
+    { op: "tags", device: "n1", tags: [], apply: false },
+    { op: "policy.show" },
+    { op: "derp.sync", target: { allowlist: "/a.json" }, allDevices: false },
+  ] as const) {
+    const argv = buildMeshArgs(req as MeshRequest, undefined, file);
+    assert.ok(argv.includes(`--credential-file=${file}`), req.op);
+  }
+  // The secret itself is still only on stdin.
+  const login = buildMeshArgs({ op: "login", kind: "tailscale", access: "write", secret: "tskey-api-x" }, undefined, file);
+  assert.ok(!login.join(" ").includes("tskey-api-x"));
+});
+
+test("a read-only credential is reported as a permission problem, not a broken call", () => {
+  const err = meshError({ code: 1, stdout: "", stderr: 'meshadmin: set tags: credential rejected (HTTP 403); it needs scope "devices:core"' });
+  assert.equal(err.code, "insufficient_scope");
+  const missing = meshError({ code: 1, stdout: "", stderr: '没有保存的凭据（profile "default"）' });
+  assert.equal(missing.code, "no_credential");
+});
+
+test("status says which credential answered", async () => {
+  const { svc } = service();
+  const r = await svc.request({ op: "status" });
+  assert.ok(r.ok);
+  if (r.ok) {
+    const s = r.data as ReturnType<typeof normalizeStatus>;
+    assert.equal(s.credential?.access, "write");
+    assert.equal(s.credential?.source, "file");
+    assert.equal(s.credential?.file, "/state/mesh/mesh-credential.json");
+  }
+  const ro = service((f) => (f.writeCredential = false));
+  const roStatus = await ro.svc.request({ op: "status" });
+  assert.ok(roStatus.ok);
+  if (roStatus.ok) assert.equal((roStatus.data as ReturnType<typeof normalizeStatus>).credential?.access, "read");
+});
+
+test("a pasted admission token becomes a 0600 file for the call and is deleted after", async () => {
+  const seen: string[][] = [];
+  const svc = new MeshService(
+    async (args) => {
+      seen.push(args);
+      const file = args.find((a) => a.startsWith("--admission-token-file="))!.slice("--admission-token-file=".length);
+      if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      assert.equal(fs.readFileSync(file, "utf8"), "admin-TOKEN-value");
+      return { code: 0, stdout: JSON.stringify({ added: 1, removed: 0, total: 1 }), stderr: "" };
+    },
+    () => undefined,
+    () => "/state/mesh/mesh-credential.json",
+  );
+  const r = await svc.request({ op: "derp.sync", target: { url: "https://derp.example.com:8480", token: "admin-TOKEN-value" }, allDevices: false });
+  assert.ok(r.ok);
+  assert.ok(!seen[0]!.join(" ").includes("admin-TOKEN-value"), "the token is never in argv");
+  const file = seen[0]!.find((a) => a.startsWith("--admission-token-file="))!.slice("--admission-token-file=".length);
+  assert.equal(fs.existsSync(path.dirname(file)), false, "the temp directory is removed after the call");
+});
+
+test("a token and a token file cannot both be sent", () => {
+  assert.equal(field({ op: "derp.sync", target: { url: "https://d.example", token: "t", tokenFile: "/t" }, allDevices: false }), "token");
+  assert.equal(field({ op: "derp.sync", target: { url: "https://d.example", token: "bad token" }, allDevices: false }), "token");
+  assert.ok(parseMeshRequest({ op: "derp.sync", target: { url: "https://d.example", token: "good-token" }, allDevices: false }).ok);
 });

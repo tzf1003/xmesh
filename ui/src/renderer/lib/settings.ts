@@ -28,6 +28,7 @@ export interface SettingsForm {
   mode: Mode;
   controlUrl: string;
   authkeyFile: string;
+  browserLogin: boolean;
   roles: Role[];
   listen: ListenMode;
   issuer: string;
@@ -85,6 +86,7 @@ export function formFromConfig(parsed: unknown): SettingsForm {
     mode: mesh.mode === "tailnet" ? "tailnet" : "lan",
     controlUrl: text(mesh.control_url) || DEFAULT_CONTROL_URL,
     authkeyFile: text(mesh.authkey_file),
+    browserLogin: mesh.auth_method === "browser",
     roles: ROLES.filter((r) => roles.includes(r)),
     listen: LISTEN_MODES.find((m) => m === ingress.listen) ?? "tunnel",
     issuer: text(oauth.issuer),
@@ -115,7 +117,7 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
   if (f.roles.length === 0) return "roles";
   if (f.mode === "tailnet") {
     if (!isHttpsUrl(f.controlUrl.trim())) return "control_url";
-    if (!isAbsolutePath(f.authkeyFile.trim())) return "authkey_file";
+    if (!f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey_file";
   }
   if (!f.roles.includes("ingress")) return undefined;
   // The kernel refuses ingress outside tailnet mode, since OAuth and Funnel need the control plane.
@@ -142,7 +144,13 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   doc.setIn(["mesh", "mode"], f.mode);
   if (f.mode === "tailnet") {
     doc.setIn(["mesh", "control_url"], f.controlUrl.trim());
-    doc.setIn(["mesh", "authkey_file"], f.authkeyFile.trim());
+    if (f.browserLogin) {
+      doc.setIn(["mesh", "auth_method"], "browser");
+      doc.deleteIn(["mesh", "authkey_file"]);
+    } else {
+      doc.deleteIn(["mesh", "auth_method"]);
+      doc.setIn(["mesh", "authkey_file"], f.authkeyFile.trim());
+    }
   }
   if (f.roles.includes("gateway") && doc.getIn(["gateway", "listen"]) === undefined) {
     doc.setIn(["gateway", "listen"], GATEWAY_LISTEN);

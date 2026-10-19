@@ -45,7 +45,14 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
     ctx.go("setup");
     setBusy(true);
     setErr(undefined);
-    const r = await getApi().runSetup(check.params);
+    const request = getApi().runSetup(check.params);
+    if (form.authkeySource === "paste") set("authkey", "");
+    let r;
+    try { r = await request; }
+    catch { setBusy(false); setErr({ code: "unavailable", message: t("wizard.failed", { path: preview?.configPath ?? "" }) }); setStep(3); return; }
+    if (r.ok && form.authkeySource === "paste" && preview?.authkeyPath) {
+      setForm((f) => ({ ...f, authkey: "", authkeySource: "file", authkeyFile: preview.authkeyPath! }));
+    }
     setBusy(false);
     setStep(3);
     if (r.ok) setReport(r.data);
@@ -134,14 +141,75 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
               <Field label={t("wizard.controlUrl")} hint={t("wizard.controlUrlHint")}>
                 <input type="text" value={form.controlUrl} onInput={(e) => set("controlUrl", (e.currentTarget as HTMLInputElement).value)} aria-invalid={problem === "control_url"} data-testid="wizard-control-url" />
               </Field>
-              <Field label={t("wizard.authkey")} hint={t("wizard.authkeyHint")}>
-                <div class="row">
-                  <input type="text" value={form.authkeyFile} onInput={(e) => set("authkeyFile", (e.currentTarget as HTMLInputElement).value)} aria-invalid={form.authkeyFile !== "" && problem === "authkey_file"} data-testid="wizard-authkey" />
-                  <button type="button" class="btn" onClick={() => void pick("authkeyFile", "authkeyFile")}>
-                    {t("wizard.choose")}
-                  </button>
-                </div>
-              </Field>
+              <fieldset data-testid="wizard-authkey-source">
+                <legend>{t("wizard.authkeySource")}</legend>
+                <label class="check">
+                  <input type="radio" name="authkeySource" checked={form.authkeySource === "browser"} onChange={() => set("authkeySource", "browser")} data-testid="wizard-authkey-browser" />
+                  <span><strong>{t("wizard.browserLogin")}</strong><br /><span class="hint">{t("wizard.browserLoginHint")}</span></span>
+                </label>
+                <label class="check">
+                  <input type="radio" name="authkeySource" checked={form.authkeySource === "auto"} onChange={() => set("authkeySource", "auto")} data-testid="wizard-authkey-auto" />
+                  <span>
+                    <strong>{t("wizard.authkeyAuto")}</strong>
+                    <br />
+                    <span class="hint">{t("wizard.authkeyAutoHint")}</span>
+                  </span>
+                </label>
+                <label class="check">
+                  <input type="radio" name="authkeySource" checked={form.authkeySource === "paste"} onChange={() => set("authkeySource", "paste")} data-testid="wizard-authkey-paste" />
+                  <span>
+                    <strong>{t("wizard.authkeyPaste")}</strong>
+                    <br />
+                    <span class="hint">{t("wizard.authkeyHint")}</span>
+                  </span>
+                </label>
+                <label class="check">
+                  <input type="radio" name="authkeySource" checked={form.authkeySource === "file"} onChange={() => set("authkeySource", "file")} data-testid="wizard-authkey-file" />
+                  <span>
+                    <strong>{t("wizard.authkeyFile")}</strong>
+                    <br />
+                    <span class="hint">{t("wizard.authkeyFileHint")}</span>
+                  </span>
+                </label>
+              </fieldset>
+              {form.authkeySource === "auto" && (
+                <Field label={t("wizard.authkeyUser")} hint={t("wizard.authkeyUserHint")}>
+                  <input type="text" value={form.authkeyUser} onInput={(e) => set("authkeyUser", (e.currentTarget as HTMLInputElement).value)} data-testid="wizard-authkey-user" />
+                  <button type="button" class="btn" onClick={() => ctx.go("mesh")}>{t("nav.mesh")}</button>
+                </Field>
+              )}
+              {form.authkeySource === "paste" && (
+                <Field label={t("wizard.authkey")} hint={t("wizard.authkeyHint")}>
+                  <input
+                    type="password"
+                    value={form.authkey}
+                    onInput={(e) => set("authkey", (e.currentTarget as HTMLInputElement).value)}
+                    aria-invalid={form.authkey !== "" && problem === "authkey"}
+                    autocomplete="off"
+                    spellcheck={false}
+                    placeholder={t("wizard.authkeyPlaceholder")}
+                    data-testid="wizard-authkey"
+                  />
+                </Field>
+              )}
+              {form.authkeySource === "file" && (
+                <Field label={t("wizard.authkeyFile")} hint={t("wizard.authkeyFileHint")}>
+                  <div class="row">
+                    <input
+                      type="text"
+                      value={form.authkeyFile}
+                      onInput={(e) => set("authkeyFile", (e.currentTarget as HTMLInputElement).value)}
+                      aria-invalid={form.authkeyFile !== "" && problem === "authkey_file"}
+                      autocomplete="off"
+                      spellcheck={false}
+                      data-testid="wizard-authkey-file-path"
+                    />
+                    <button type="button" class="btn" onClick={() => void pick("authkeyFile", "authkeyFile")} data-testid="wizard-authkey-pick">
+                      {t("wizard.choose")}
+                    </button>
+                  </div>
+                </Field>
+              )}
             </>
           )}
           {!form.agent && form.mode === "lan" && <p>{t("wizard.nothingToAsk")}</p>}
@@ -159,12 +227,14 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
       {step === 2 && preview && (
         <section class="card" data-testid="wizard-review">
           <p>{t("wizard.reviewIntro")}</p>
+          {busy && <Banner testid="wizard-busy">{t(form.authkeySource === "browser" ? "wizard.browserWaiting" : "wizard.installing")}</Banner>}
           <pre class="preview mono" data-testid="wizard-preview">
             {preview.config}
           </pre>
           <Banner>
             <p>{t("wizard.reviewNote")}</p>
             <p>{t("wizard.denyFile", { path: preview.denyPath })}</p>
+            {preview.authkeyPath !== undefined && <p data-testid="wizard-authkey-path">{t("wizard.authkeyWritesTo", { path: preview.authkeyPath })}</p>}
           </Banner>
           <div class="row end" style={{ marginTop: "10px" }}>
             <button type="button" class="btn" onClick={() => setStep(1)}>

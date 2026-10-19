@@ -284,7 +284,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                       data-testid="settings-control-url"
                     />
                   </Field>
-                  <Field label={t("wizard.authkey")} hint={t("wizard.authkeyHint")}>
+                  {form.browserLogin ? <Banner>{t("settings.browserLogin")}</Banner> : <Field label={t("settings.authkey")} hint={t("settings.authkeyHint")}>
                     <div class="row">
                       <input
                         type="text"
@@ -297,7 +297,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                         {t("wizard.choose")}
                       </button>
                     </div>
-                  </Field>
+                  </Field>}
                 </>
               )}
             </section>

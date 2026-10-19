@@ -47,7 +47,9 @@
 
 ### 凭据
 
-每个 profile 存两份凭据：`read` 与 `write`。读操作用 `read`，没有时才退到 `write`；写操作只用 `write`，从不退到 `read`。
+桌面凭据文件保存一份当前控制面的凭据，包含 `access`。读写凭据覆盖查看与修改，选择只读时 CLI 拒绝写操作；OAuth 请求使用保存的 access 对应 scope。旧版未包含 `access` 的文件保持兼容，由控制面决定权限。
+
+CLI 的旧有系统钥匙串 profile 保留 `read`、`write` 两份凭据；读操作优先 `read`、回退 `write`，写操作使用 `write`。
 
 | 控制面 | 类型 | 存储内容 | scope |
 | --- | --- | --- | --- |
@@ -55,7 +57,12 @@
 | Tailscale | `token` | API access token | 由签发时决定 |
 | Headscale | `apikey` | API key | 无 scope，等同完整权限 |
 
-存放位置是系统钥匙串（服务名 `xmesh-meshadmin`，账户 `<profile>/<read|write>`；Windows 凭据管理器、macOS 钥匙串、Linux Secret Service）。没有钥匙串的主机用 `--credential-file`，文件在 Unix 上不得对 group 或 other 可读。密钥只从标准输入、`--secret-file` 或终端无回显输入读取，不接受命令行参数。`Credential` 的 `String()` 与 `GoString()` 不输出密钥。
+存放位置有两种，二选一：
+
+- **`0600` 凭据文件**（桌面面板默认）：`--credential-file <路径>`，内容是 `Credential` 的 JSON。`mesh login` 与 `mesh logout` 都认这个参数（`--panel` 自动选择桌面凭据文件），写入是原子替换，在 Unix 上不得对 group 或 other 可读（`0600`；Windows 不检查 mode）。没有桌面会话的 Linux 也照常工作。
+- **系统钥匙串**：服务名 `xmesh-meshadmin`，账户 `<profile>/<read|write>`（Windows 凭据管理器、macOS 钥匙串、Linux Secret Service）。不给 `--credential-file` 时才用。
+
+两种方式下密钥都只从标准输入、`--secret-file` 或终端无回显输入读取，不接受命令行参数；`mesh status --json` 只回报 `access`、`profile`、`source` 与文件路径，不回报密钥。`Credential` 的 `String()` 与 `GoString()` 不输出密钥。
 
 ### 策略写入协议
 

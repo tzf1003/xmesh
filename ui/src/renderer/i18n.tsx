@@ -39,6 +39,8 @@ const ERROR_KEYS: Record<string, Key> = {
   invalid_args: "err.invalid_args",
   forbidden: "err.forbidden",
   keychain_unavailable: "err.keychain_unavailable",
+  insufficient_scope: "err.insufficient_scope",
+  invalid_credential: "err.invalid_credential",
   payload_too_large: "err.payload_too_large",
   token_unavailable: "err.token_unavailable",
 };

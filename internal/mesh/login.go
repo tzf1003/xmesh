@@ -1,0 +1,92 @@
+package mesh
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"slices"
+	"time"
+
+	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/privdir"
+	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tsnet"
+)
+
+// LoginProgress contains just the browser challenge and connection state.
+// Node keys and backend diagnostic logs never travel through this channel.
+type LoginProgress struct {
+	State string `json:"state"`
+	URL   string `json:"url,omitempty"`
+}
+
+// LoginTailnet authorises the same persistent tsnet identity that serve uses.
+// It closes the temporary network before the service opens that state directory.
+func LoginTailnet(ctx context.Context, c *config.Config, stateDir string, progress func(LoginProgress) error) error {
+	if c.Mesh.Mode != "tailnet" || c.Mesh.AuthMethod != "browser" || c.Mesh.Ephemeral {
+		return fmt.Errorf("浏览器登录需要 tailnet 的 auth_method: browser 持久节点")
+	}
+	if err := privdir.Ensure(stateDir); err != nil {
+		return err
+	}
+	server := &tsnet.Server{
+		Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name,
+		ControlURL: c.Mesh.ControlURL, AdvertiseTags: []string{"tag:device"},
+		UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {},
+	}
+	lc, err := server.LocalClient()
+	if err != nil {
+		_ = server.Close()
+		return fmt.Errorf("无法启动浏览器授权: %w", err)
+	}
+	defer server.Close()
+	return waitTailnetLogin(ctx, lc.Status, progress)
+}
+
+func waitTailnetLogin(ctx context.Context, status func(context.Context) (*ipnstate.Status, error), progress func(LoginProgress) error) error {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	last := LoginProgress{}
+	for {
+		st, err := status(ctx)
+		if err != nil {
+			return fmt.Errorf("读取入网授权状态失败: %w", err)
+		}
+		next := LoginProgress{State: "waiting"}
+		if st.AuthURL != "" {
+			next = LoginProgress{State: "needs_login", URL: st.AuthURL}
+		}
+		if st.BackendState == "NeedsMachineAuth" {
+			next = LoginProgress{State: "needs_approval"}
+		}
+		if st.BackendState == "Running" && st.Self != nil && len(st.TailscaleIPs) > 0 {
+			if err := requireBrowserRole(st); err != nil {
+				return err
+			}
+			next = LoginProgress{State: "ready"}
+		}
+		if next != last {
+			if err := progress(next); err != nil {
+				return err
+			}
+			last = next
+		}
+		if next.State == "ready" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("入网授权已取消或超时，请重试；若设备等待审批，请在控制面批准: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// requireBrowserRole checks the control plane's granted tags for both initial
+// authorization and service startup using an existing identity.
+func requireBrowserRole(st *ipnstate.Status) error {
+	if st == nil || st.Self == nil || st.Self.Tags == nil || !slices.Contains(st.Self.Tags.AsSlice(), "tag:device") {
+		return fmt.Errorf("设备已登录，但尚未获得 tag:device。请在控制面允许当前用户使用该标签后重试")
+	}
+	return nil
+}

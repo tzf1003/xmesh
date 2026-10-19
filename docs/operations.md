@@ -50,7 +50,17 @@ agent:
       backends: ['*']
 ```
 
-注册 key 文件设为 `0600`，状态目录由程序设为 `0700`。当前启动流程每次读取 key 文件，已注册后仍需保留其可读路径。控制面须授予节点 `tag:device`；Gateway 仅发现在线、未过期、带该 tag 的设备。网络策略须允许调用节点访问目标 TCP 7433；Agent 再按 `agent.authz` 检查 WhoIs 的可信 tag。生产环境应按设备用途收窄工具和后端授权。
+注册 key 文件设为 `0600`，状态目录由程序设为 `0700`。当前启动流程每次读取 key 文件，已注册后仍需保留其可读路径。
+
+首次运行向导有四种入网授权方式：
+
+- **浏览器登录**（默认）：自动打开 Tailscale 授权页，完成后保存节点身份并安装服务；下次启动复用身份。设备审批和标签授权要求继续生效。命令行为 `xmesh login --config <配置> --state-dir <节点状态目录> --json`。配置使用 `mesh.auth_method: browser`，省略 `authkey_file`；必须使用持久节点。
+
+- **用管理凭据自动创建**：先用「Tailnet 管理」页保存一份读写凭据，向导会调用 `xmesh mesh authkey` 生成预授权（`preauthorized`）、带 `tag:device` 的一次性 key，写进 `<状态根>/<节点>/authkey`（`0600`）。该方式签发的 Tailscale key 设置预授权；Headscale 多用户场景还需在向导填写用户名。
+- **粘贴 key**：直接粘贴 Tailscale 或 Headscale 生成的 key，向导会把它写进同一个 `0600` 文件，配置文件只引用路径。
+- **使用 key 文件**：填写已有的绝对路径。
+
+控制面须授予节点 `tag:device`；Gateway 仅发现在线、未过期、带该 tag 的设备。网络策略须允许调用节点访问目标 TCP 7433；Agent 再按 `agent.authz` 检查 WhoIs 的可信 tag。生产环境应按设备用途收窄工具和后端授权。
 
 ```bash
 bin/xmesh serve --config /secure/xmesh.yaml --state-dir /secure/xmesh-state
@@ -469,7 +479,7 @@ printf '%s' "$KEY" | xmesh mesh login --profile lab --kind headscale --url https
 xmesh mesh status --profile home --node-config xmesh.yaml
 ```
 
-没有钥匙串的主机（无桌面的 Linux 服务器）用 `--credential-file`，文件权限必须是 `0600`。
+桌面面板默认把凭据写进 `<状态根>/mesh/mesh-credential.json`（`0600`），并把路径以 `--credential-file` 交给 `xmesh mesh`；它不使用系统钥匙串，所以无桌面会话的 Linux 也一样可用。手动在终端登录时也可以照这个方式写同一个文件；不给 `--credential-file` 才走系统钥匙串。文件权限必须是 `0600`。
 
 读与写：
 

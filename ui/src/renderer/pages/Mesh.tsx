@@ -42,6 +42,12 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   const [tab, setTab] = useState<TabId>(ctx.focus?.meshTab ?? "devices");
   useEffect(() => { if (ctx.focus?.meshTab) setTab(ctx.focus.meshTab); }, [ctx.focus?.meshTab]);
   const { resource, reload } = useResource(() => getApi().mesh({ op: "status" }), [ctx.snapshot.selectedInstance]);
+  // After saving a credential, ask for status once more: the answer says whether
+  // the key works and which access level it carries.
+  const verify = async (): Promise<ActionError | undefined> => {
+    const r = await getApi().mesh({ op: "status" });
+    return r.ok ? undefined : r.error;
+  };
 
   return (
     <div class="page" data-testid="page-mesh">
@@ -50,7 +56,12 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
           {t("common.refresh")}
         </button>
       </PageHead>
-      <MeshLogin ctx={ctx} open={resource.state === "error" && resource.error.code === "no_credential"} onSaved={reload} />
+      <MeshLogin
+        ctx={ctx}
+        open={resource.state === "error" && (resource.error.code === "no_credential" || resource.error.code === "insufficient_scope")}
+        onSaved={reload}
+        verify={verify}
+      />
       {resource.state === "error" && resource.stale === undefined ? (
         <MeshError error={resource.error} toast={ctx.toast} />
       ) : (
@@ -60,8 +71,18 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
               {stale && resource.state === "error" && <MeshError error={resource.error} toast={ctx.toast} />}
               <p data-testid="mesh-provider">
                 {t("mesh.provider")}: <Badge kind="info">{status.provider}</Badge>{" "}
-                {!status.capabilities.policyWrite && <Badge kind="warn">{t("mesh.policyFileMode")}</Badge>}
+                {!status.capabilities.policyWrite && <Badge kind="warn">{t("mesh.policyFileMode")}</Badge>}{" "}
+                {status.credential?.access === "read" && (
+                  <span data-testid="mesh-readonly-credential">
+                    <Badge kind="warn">{t("mesh.readOnlyCredential")}</Badge>
+                  </span>
+                )}
               </p>
+              {status.credential?.source === "file" && status.credential.file !== undefined && (
+                <p class="hint" data-testid="mesh-credential-file">
+                  {t("mesh.credentialFile", { path: status.credential.file })}
+                </p>
+              )}
               <div class="tabs" role="tablist" aria-label={t("nav.mesh")}>
                 {TABS.map((x) => (
                   <button

@@ -48,6 +48,7 @@ const lan: SettingsForm = {
   mode: "lan",
   controlUrl: DEFAULT_CONTROL_URL,
   authkeyFile: "",
+  browserLogin: false,
   roles: ["agent", "gateway"],
   listen: "tunnel",
   issuer: "",
@@ -89,6 +90,7 @@ test("the form reads what the first run set, the ingress and the working directo
     mode: "tailnet",
     controlUrl: "https://c.example",
     authkeyFile: "/k",
+    browserLogin: false,
     roles: ["agent", "ingress"],
     listen: "public:443",
     issuer: "https://x.example.com",
@@ -272,4 +274,26 @@ test("deny entries that are blank or carry control characters are refused before
   assert.equal(checkDenyList(["bad\nline"]), "control");
   assert.equal(checkDenyList(["x".repeat(1025)]), "control");
   assert.equal(checkDenyList(DEFAULT_DENY), undefined);
+});
+
+
+test("settings switch between browser identity and key files with a valid config", () => {
+  const keyConfig = applySettingsForm(LAN_CONFIG, tailnetIngress)!;
+  const browserForm: SettingsForm = { ...tailnetIngress, browserLogin: true, authkeyFile: "" };
+  const browserConfig = applySettingsForm(keyConfig, browserForm)!;
+  const parsed = parse(browserConfig);
+  assert.equal(parsed.mesh.auth_method, "browser");
+  assert.equal(parsed.mesh.authkey_file, undefined);
+  assert.ok(validateConfig(parsed), JSON.stringify(validateConfig.errors));
+  assert.deepEqual(formFromConfig(parsed), browserForm);
+
+  const edited = applySettingsForm(browserConfig, { ...browserForm, defaultCwd: "/code" })!;
+  assert.equal(parse(edited).mesh.auth_method, "browser");
+  assert.ok(validateConfig(parse(edited)), JSON.stringify(validateConfig.errors));
+
+  const restored = applySettingsForm(edited, tailnetIngress)!;
+  assert.equal(parse(restored).mesh.auth_method, undefined);
+  assert.equal(parse(restored).mesh.authkey_file, tailnetIngress.authkeyFile);
+  assert.ok(validateConfig(parse(restored)), JSON.stringify(validateConfig.errors));
+  assert.deepEqual(formFromConfig(parse(restored)), tailnetIngress);
 });

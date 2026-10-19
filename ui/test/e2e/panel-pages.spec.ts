@@ -354,6 +354,69 @@ test("panel IPC refuses malformed data operations", async () => {
   expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v1/pats") || r.path.startsWith("/v1/audit"))).toBe(false);
 });
 
+test("wizard: a pasted tailnet key lands in a 0600 file and never in the config", async () => {
+  h = await launch({ publish: false, kernel: { capabilities: ALL } });
+  const page = await h.openPanel();
+  await expect(page.getByTestId("page-setup")).toBeVisible();
+  await page.getByTestId("wizard-name").fill("tn-1");
+  await page.getByTestId("wizard-tailnet").check();
+  await page.getByTestId("wizard-next").click();
+  await page.getByTestId("wizard-workspace").fill("/home/me/work");
+  // Choose direct key input.
+  await expect(page.getByTestId("wizard-authkey-browser")).toBeChecked();
+  await page.getByTestId("wizard-authkey-paste").check();
+  const key = "tskey-auth-E2E-PASTED-KEY";
+  await page.getByTestId("wizard-authkey").fill(key);
+  await page.getByTestId("wizard-next").click();
+
+  await expect(page.getByTestId("wizard-preview")).not.toContainText(key);
+  const keyFile = path.join(h.root, "tn-1", "authkey");
+  await expect(page.getByTestId("wizard-authkey-path")).toContainText(keyFile);
+  await page.getByTestId("wizard-run").click();
+  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
+
+  expect(fs.readFileSync(keyFile, "utf8")).toBe(`${key}\n`);
+  if (process.platform !== "win32") expect(fs.statSync(keyFile).mode & 0o777).toBe(0o600);
+  const config = fs.readFileSync(path.join(h.root, "tn-1", "xmesh.yaml"), "utf8");
+  expect(config).not.toContain(key);
+  expect(config).toContain(`authkey_file: ${JSON.stringify(keyFile)}`);
+  expect(await page.content()).not.toContain(key);
+});
+
+test("wizard: automatic admission asks the CLI for a tagged key", async () => {
+  h = await launch({ publish: false, kernel: { capabilities: ALL } });
+  const page = await h.openPanel();
+  await page.getByTestId("wizard-name").fill("tn-2");
+  await page.getByTestId("wizard-tailnet").check();
+  await page.getByTestId("wizard-next").click();
+  await page.getByTestId("wizard-workspace").fill("/home/me/work");
+  await page.getByTestId("wizard-authkey-auto").check();
+  await page.getByTestId("wizard-next").click();
+  await page.getByTestId("wizard-run").click();
+  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
+  const made = (await h.calls()).find((c) => c.op === "setup-authkey");
+  expect(made?.arg).toEqual({ file: path.join(h.root, "tn-2", "authkey"), tags: ["tag:device"] });
+});
+
+test("wizard: the default browser login completes before installation", async () => {
+  h = await launch({ publish: false, kernel: { capabilities: ALL } });
+  const page = await h.openPanel();
+  await page.getByTestId("wizard-name").fill("browser-node");
+  await page.getByTestId("wizard-tailnet").check();
+  await page.getByTestId("wizard-next").click();
+  await page.getByTestId("wizard-workspace").fill("/home/me/work");
+  await expect(page.getByTestId("wizard-authkey-browser")).toBeChecked();
+  await expect(page.getByTestId("wizard-authkey")).toHaveCount(0);
+  await page.getByTestId("wizard-next").click();
+  await expect(page.getByTestId("wizard-preview")).toContainText("auth_method: browser");
+  await page.getByTestId("wizard-run").click();
+  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
+  const calls = (await h.calls()).filter((c) => c.op.startsWith("setup-"));
+  expect(calls.map((c) => c.op)).toEqual(["setup-browser-login", "setup-cli", "setup-cli"]);
+  const install = calls[1]!.arg as string[];
+  expect(install.slice(-2)).toEqual(["--state-dir", path.join(h.root, "browser-node")]);
+});
+
 test("leftover kernel state: cleanup removes the manifest and keeps the node configuration", async () => {
   h = await launch({ publish: false });
   const child = spawnSync(process.execPath, ["-e", ""]);

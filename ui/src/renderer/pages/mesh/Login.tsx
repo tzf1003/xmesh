@@ -10,14 +10,26 @@ import { MeshError } from "./common";
 
 /**
  * Saves a control-plane credential with `xmesh mesh login`. The CLI verifies
- * the key and stores it in the keychain. The secret travels on the request to
- * the main process, which writes it to the CLI's stdin; it is cleared from this
- * page as soon as the request is sent, whatever the answer.
+ * the key and writes it to a 0600 file the panel names. The secret travels on
+ * the request to the main process, which writes it to the CLI's stdin; it is
+ * cleared from this page as soon as the request is sent, whatever the answer.
+ * A write credential also covers reads, so it is the default.
  */
-export function MeshLogin({ ctx, open, onSaved }: { ctx: PageContext; open: boolean; onSaved(): void }): JSX.Element {
+export function MeshLogin({
+  ctx,
+  open,
+  onSaved,
+  verify,
+}: {
+  ctx: PageContext;
+  open: boolean;
+  onSaved(): void;
+  /** Runs after a save; resolves to the failure to show, if the credential does not work. */
+  verify?: () => Promise<ActionError | undefined>;
+}): JSX.Element {
   const t = useT();
   const [kind, setKind] = useState<MeshControlPlane>("tailscale");
-  const [access, setAccess] = useState<MeshAccess>("read");
+  const [access, setAccess] = useState<MeshAccess>("write");
   const [url, setUrl] = useState("");
   const [tailnet, setTailnet] = useState("");
   const [clientId, setClientId] = useState("");
@@ -38,10 +50,25 @@ export function MeshLogin({ ctx, open, onSaved }: { ctx: PageContext; open: bool
     if (!parsed.ok) return;
     setBusy(true);
     setErr(undefined);
-    const r = await getApi().mesh(parsed.value);
+    const request = parsed.value;
     setSecret("");
+    let r;
+    try {
+      r = await getApi().mesh(request);
+    } catch {
+      setBusy(false);
+      return setErr({ code: "unavailable", message: t("mesh.login.failed") });
+    }
+    if (!r.ok) {
+      setBusy(false);
+      return setErr(r.error);
+    }
+    // Say whether it actually works, not just that it was stored.
+    let bad: ActionError | undefined;
+    try { bad = verify === undefined ? undefined : await verify(); }
+    catch { bad = { code: "unavailable", message: t("mesh.login.failed") }; }
     setBusy(false);
-    if (!r.ok) return setErr(r.error);
+    if (bad !== undefined) return setErr(bad);
     ctx.toast(t("mesh.login.saved"));
     onSaved();
   };

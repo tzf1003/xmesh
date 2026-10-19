@@ -85,6 +85,7 @@
         },
         "control_url": { "type": "string", "format": "uri" },
         "authkey_file": { "type": "string", "minLength": 1 },
+        "auth_method": { "enum": ["authkey", "browser"], "default": "authkey", "description": "browser 使用已在本机完成浏览器授权的持久 tsnet 身份。" },
         "ephemeral": { "type": "boolean", "default": false, "description": "短生命周期 tailnet 节点；节点凭据只存内存，退出时尝试注销。" },
         "lan": {
           "type": "object",
@@ -101,7 +102,12 @@
             "properties": { "mode": { "const": "tailnet" } },
             "required": ["mode"]
           },
-          "then": { "required": ["control_url", "authkey_file"] }
+          "then": {
+            "required": ["control_url"],
+            "if": { "properties": { "auth_method": { "const": "browser" } }, "required": ["auth_method"] },
+            "then": { "not": { "anyOf": [ { "required": ["authkey_file"] }, { "properties": { "ephemeral": { "const": true } }, "required": ["ephemeral"] } ] } },
+            "else": { "required": ["authkey_file"] }
+          }
         },
         {
           "if": {
