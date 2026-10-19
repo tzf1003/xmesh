@@ -46,6 +46,7 @@ const PROBLEM: Record<SettingsProblem, Key> = {
   cert_files: "settings.problem.cert_files",
   default_cwd: "settings.problem.default_cwd",
   allow_dirs: "settings.problem.allow_dirs",
+  max_file_size: "settings.problem.max_file_size",
 };
 
 /** A saved dry run: the kernel's diff for `content`, which is what Save writes. */
@@ -394,6 +395,21 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                   )}
                 </section>
               )}
+            </section>
+
+            <section class="card" id="settings-transfers" data-testid="settings-transfers">
+              <h2>{t("settings.transfersTitle")}</h2>
+              <Field label={t("settings.maxFileSize")} hint={t("settings.maxFileSizeHint")}>
+                <label class="row">
+                  <input type="checkbox" checked={form.maxFileSize === "unlimited"}
+                    onChange={(e) => update({ maxFileSize: e.currentTarget.checked ? "unlimited" : "1GiB" })}
+                    data-testid="settings-file-unlimited" />
+                  {t("settings.fileUnlimited")}
+                </label>
+                {form.maxFileSize !== "unlimited" && <input type="text" value={form.maxFileSize}
+                  onInput={(e) => update({ maxFileSize: e.currentTarget.value })}
+                  aria-invalid={problem === "max_file_size"} data-testid="settings-max-file-size" />}
+              </Field>
             </section>
 
             <section class="card" id="settings-workdirs" data-testid="settings-workdirs">

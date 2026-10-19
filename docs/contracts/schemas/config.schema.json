@@ -335,6 +335,18 @@
             ]
           }
         },
+        "fs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_file_size": {
+              "type": "string",
+              "pattern": "^(unlimited|[1-9][0-9]*([KMGT]iB|B)?)$",
+              "default": "1GiB",
+              "description": "单个上传/下载文件的大小上限；unlimited 表示无限制。热更新生效。"
+            }
+          }
+        },
         "disabled_tools": {
           "type": "array",
           "uniqueItems": true,

@@ -34,24 +34,50 @@ func Test_FileTransferThroughGateway(t *testing.T) {
 	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
 	t.Cleanup(server.Close)
 	s := connect(t, server.URL+"/mcp")
-	// Exercise the 10 MiB boundary through the actual HTTP MCP and proxy layers.
-	body := bytes.Repeat([]byte{0, 0xff, 0x80, '\r', '\n'}, (10<<20)/5)
-	body = append(body, make([]byte, (10<<20)-len(body))...)
+	// Exercise multiple chunks through HTTP MCP and the proxy layers.
+	body := bytes.Repeat([]byte{0, 0xff, 0x80, '\r', '\n'}, (3<<20)/5)
 	sum := fmt.Sprintf("%x", sha256.Sum256(body))
-	args := map[string]any{"path": "artifact.bin", "data": base64.StdEncoding.EncodeToString(body), "sha256": sum}
-	up := transferCall(t, s, "local/fs.upload", args)
-	if up.IsError || object(t, up)["sha256"] != sum {
-		t.Fatal("upload failed")
+	id := ""
+	for offset := 0; offset < len(body); {
+		end := min(len(body), offset+(1<<20))
+		args := map[string]any{"path": "artifact.bin", "data": base64.StdEncoding.EncodeToString(body[offset:end]), "sha256": sum,
+			"transfer_id": id, "byte_offset": offset, "final": end == len(body)}
+		up := transferCall(t, s, "local/fs.upload", args)
+		if up.IsError {
+			t.Fatal("upload failed", object(t, up))
+		}
+		if end < len(body) {
+			id = object(t, up)["transfer_id"].(string)
+		} else if object(t, up)["sha256"] != sum {
+			t.Fatal("upload checksum")
+		}
+		offset = end
 	}
-	down := transferCall(t, s, "local/fs.download", map[string]any{"path": "artifact.bin"})
-	if down.IsError {
-		t.Fatal("download failed", object(t, down))
+	var decoded []byte
+	downloadArgs := map[string]any{"path": "artifact.bin"}
+	for {
+		down := transferCall(t, s, "local/fs.download", downloadArgs)
+		if down.IsError {
+			t.Fatal("download failed", object(t, down))
+		}
+		out := object(t, down)
+		chunk, err := base64.StdEncoding.DecodeString(out["data"].(string))
+		if err != nil || out["sha256"] != fmt.Sprintf("%x", sha256.Sum256(chunk)) {
+			t.Fatal("chunk integrity", err)
+		}
+		decoded = append(decoded, chunk...)
+		if out["eof"] == true {
+			if out["file_sha256"] != sum {
+				t.Fatal("file integrity")
+			}
+			break
+		}
+		downloadArgs["transfer_id"], downloadArgs["byte_offset"] = out["transfer_id"], out["next_offset"]
 	}
-	out := object(t, down)
-	decoded, err := base64.StdEncoding.DecodeString(out["data"].(string))
-	if err != nil || !bytes.Equal(body, decoded) || out["sha256"] != sum || out["bytes"] != float64(len(body)) {
-		t.Fatal("download integrity failed", err)
+	if !bytes.Equal(body, decoded) {
+		t.Fatal("download bytes")
 	}
+	args := map[string]any{"path": "artifact.bin", "data": "", "sha256": fmt.Sprintf("%x", sha256.Sum256(nil))}
 	refused := transferCall(t, s, "local/fs.upload", args)
 	if !refused.IsError || object(t, refused)["error"] != "conflict" {
 		t.Fatal("existing file accepted")

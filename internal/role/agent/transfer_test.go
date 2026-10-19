@@ -33,12 +33,12 @@ func Test_FileTransferErrorsAndPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Truncate(10<<20 + 1); err != nil {
+	if err := f.Truncate(1<<30 + 1); err != nil {
 		t.Fatal(err)
 	}
 	f.Close()
 	requireEnvelope(t, schema, "large download", "too_large", tool(t, client, "fs.download", map[string]any{"path": "huge"}))
-	args["path"], args["data"] = "oversize", base64.StdEncoding.EncodeToString(make([]byte, 10<<20+1))
+	args["path"], args["data"] = "oversize", base64.StdEncoding.EncodeToString(make([]byte, 1<<20+1))
 	requireEnvelope(t, schema, "large upload", "too_large", tool(t, client, "fs.upload", args))
 	// Explicit per-tool grants are enforced at the target Agent as well.
 	_, scopedURL, _ := conformanceAgent(t, func(agent map[string]any, root string) {

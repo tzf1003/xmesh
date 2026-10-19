@@ -40,8 +40,8 @@
 
 | 工具 | 对应 | 参数要点 |
 | --- | --- | --- |
-| `fs.download` | — | `path`、`cwd?`。下载原始字节，返回 Base64、SHA-256 和字节数；最大 10 MiB |
-| `fs.upload` | — | `path`、`data`（Base64）、`sha256`、`cwd?`、`force?`。校验后原子写入；目标存在默认冲突，`force: true` 才覆盖；最大 10 MiB |
+| `fs.download` | — | `path`、`cwd?`、`transfer_id?`、`byte_offset?`、`chunk_size?`。分块下载原始字节，返回块哈希及末块整文件哈希 |
+| `fs.upload` | — | `path`、`data`（Base64）、`sha256`、`cwd?`、`force?`、`transfer_id?`、`byte_offset?`、`final?`。整文件校验后原子发布；默认拒绝冲突，`force: true` 才覆盖 |
 | `fs.read` | Read | `path`、`offset?`、`limit?`。`cat -n` 风格带行号。图片返回 base64 + mime。二进制或超过 10 MiB 拒绝，并提示用 `exec` |
 | `fs.write` | Write | `path`、`content`、`expected_sha256?`。整文件覆盖。临时文件 + rename 原子写。父目录不存在则报错 |
 | `fs.edit` | Edit | `path`、`old_string`、`new_string`、`replace_all?`。`old_string` 必须唯一匹配，否则返回匹配行号且不写入 |

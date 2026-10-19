@@ -17,6 +17,9 @@ import tempfile
 import time
 
 
+from file_transfer import upload as upload_file, download as download_file
+
+
 WINDOWS = sys.platform == "win32"
 
 
@@ -199,6 +202,11 @@ def main():
                 client.call("local/fs.upload", {"path": upload["path"], "data": base64.b64encode(changed).decode(),
                     "sha256": hashlib.sha256(changed).hexdigest(), "force": True})
                 assert (workspace / upload["path"]).read_bytes() == changed
+                source, restored = root / "source.bin", root / "restored.bin"
+                source.write_bytes(bytes(range(256)) * 8193)
+                upload_file(client, "local/fs.upload", source, "chunked.bin", False)
+                download_file(client, "local/fs.download", "chunked.bin", restored, False)
+                assert hashlib.sha256(source.read_bytes()).digest() == hashlib.sha256(restored.read_bytes()).digest()
                 script = 'printf SMOKE_EXEC_MARKER'
                 if options.isolation == "L2":
                     home_check = 'test "$HOME" = "$PWD"' if sys.platform == "darwin" else 'test "$HOME" = /tmp'

@@ -19,13 +19,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
 type Service struct {
-	Resolver *cwd.Resolver
-	mu       sync.Mutex
+	Resolver       *cwd.Resolver
+	Transfers      *Transfers
+	Caller         string
+	TransferConfig config.FileTransfer
+	mu             sync.Mutex
 }
 type Args struct {
 	Path           string `json:"path"`
@@ -36,6 +40,10 @@ type Args struct {
 	Data           string `json:"data"`
 	SHA256         string `json:"sha256"`
 	Force          bool   `json:"force"`
+	TransferID     string `json:"transfer_id"`
+	ByteOffset     int64  `json:"byte_offset"`
+	ChunkSize      int    `json:"chunk_size"`
+	Final          bool   `json:"final"`
 	Old            string `json:"old_string"`
 	New            string `json:"new_string"`
 	Expected       string `json:"expected_sha256"`
@@ -62,7 +70,7 @@ type Object = map[string]any
 func Hash(b []byte) string     { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func Stamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (Object, error) {
-	a := Args{Offset: 1, Limit: 2000, Depth: 1, HeadLimit: 200}
+	a := Args{Offset: 1, Limit: 2000, Depth: 1, HeadLimit: 200, Final: true, ChunkSize: transferChunkLimit}
 	if name == "fs.glob" {
 		a.Limit = 1000
 	}
@@ -103,11 +111,11 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 	path := p.Path
 	switch name {
 	case "fs.download":
-		return download(ctx, path)
+		return s.transfer(ctx, path, a, false)
 	case "fs.upload":
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return upload(ctx, path, a)
+		return s.transfer(ctx, path, a, true)
 	case "fs.read":
 		if a.Offset < 1 || a.Limit < 1 || a.Limit > 5000 {
 			return nil, toolerr.Args("offset/limit")
@@ -395,13 +403,6 @@ func conflict(path string, b []byte) *toolerr.Error {
 	return toolerr.New("conflict", "目标已存在或内容发生变化", "path", path, "current_sha256", Hash(b), "mtime", mtime)
 }
 func atomicWrite(path string, b []byte, expected string) error {
-	return atomicStore(context.Background(), path, b, expected, false)
-}
-
-func atomicStore(ctx context.Context, path string, b []byte, expected string, createOnly bool) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	f, e := os.CreateTemp(filepath.Dir(path), ".xmesh-write-*")
 	if e != nil {
 		return toolerr.Internal("fs.write", e)
@@ -433,18 +434,6 @@ func atomicStore(ctx context.Context, path string, b []byte, expected string, cr
 		if Hash(current) != expected {
 			return conflict(path, current)
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if createOnly {
-		if e = atomicCreate(tmp, path); e != nil {
-			if _, statErr := os.Lstat(path); os.IsExist(e) || statErr == nil {
-				return uploadConflict(path)
-			}
-			return toolerr.Internal("fs.create", e)
-		}
-		return nil
 	}
 	if e = atomicReplace(tmp, path); e != nil {
 		return toolerr.Internal("fs.rename", e)

@@ -40,9 +40,9 @@ go test -race ./...
 
 ## 文件互传
 
-通过 MCP 调用 `<设备名>/fs.download` 下载文件原始字节，返回 `encoding: "base64"`、`data`、`sha256`、`bytes`。调用 `<设备名>/fs.upload` 上传到目标路径，参数为 `path`、Base64 编码的 `data` 和原始字节的 `sha256`。本机 Gateway 的设备前缀为 `local/`。
+通过 MCP 调用 `<设备名>/fs.download` 下载原始字节，或用 `<设备名>/fs.upload` 上传到指定路径。本机 Gateway 的前缀为 `local/`。文件分块传输并验证 SHA-256，上传完成前保留原目标；默认拒绝同名冲突，`force: true` 才允许原子覆盖。
 
-上传目标已存在时返回 `conflict`，显式传入 `force: true` 才覆盖。上传先校验 SHA-256，再通过同目录临时文件原子落盘；校验失败保留原文件。单个文件最大 10 MiB，两种工具均接受 `cwd`，路径受节点的 allow/deny 策略约束，父目录须已存在。完整参数和示例见 [文件互传契约](docs/contracts/fs.md#ctr-fs-08)。
+单文件默认上限 **1 GiB**，可在「设置 → 文件互传」修改大小或选择「无限制」，保存后立即生效。配置项为 `agent.fs.max_file_size`，例如 `2GiB` 或 `unlimited`。分块上限固定 1 MiB，支持大文件且内存有界。路径受 allow/deny 策略约束，父目录须已存在。参数见[文件互传契约](docs/contracts/fs.md#ctr-fs-08)，客户端示例见 [`scripts/file_transfer.py`](scripts/file_transfer.py)。
 
 ## 命令
 

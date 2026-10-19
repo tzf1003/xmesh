@@ -23,6 +23,44 @@ func uploadArgs(path string, b []byte, force bool) Object {
 	return Object{"path": path, "data": base64.StdEncoding.EncodeToString(b), "sha256": Hash(b), "force": force}
 }
 
+func uploadAll(t *testing.T, s *Service, path string, b []byte, force bool) Object {
+	t.Helper()
+	id := ""
+	for offset := 0; ; {
+		end := min(len(b), offset+transferChunkLimit)
+		a := uploadArgs(path, b[offset:end], force)
+		a["sha256"] = Hash(b)
+		a["byte_offset"], a["transfer_id"], a["final"] = offset, id, end == len(b)
+		out := call(t, s, "fs.upload", a)
+		if end == len(b) {
+			return out
+		}
+		id = out["transfer_id"].(string)
+		offset = end
+	}
+}
+
+func downloadAll(t *testing.T, s *Service, path string) Object {
+	t.Helper()
+	var data []byte
+	args := Object{"path": path}
+	for {
+		out := call(t, s, "fs.download", args)
+		chunk, err := base64.StdEncoding.DecodeString(out["data"].(string))
+		if err != nil || out["sha256"] != Hash(chunk) {
+			t.Fatal("invalid download chunk", err)
+		}
+		data = append(data, chunk...)
+		if out["eof"] == true {
+			if out["file_sha256"] != Hash(data) {
+				t.Fatal("whole-file checksum mismatch")
+			}
+			return Object{"resolved_path": out["resolved_path"], "data": base64.StdEncoding.EncodeToString(data), "encoding": "base64", "sha256": out["file_sha256"], "bytes": len(data)}
+		}
+		args["transfer_id"], args["byte_offset"] = out["transfer_id"], out["next_offset"]
+	}
+}
+
 // conformance: CTR-FS-08 INV-06
 func Test_TransferRoundtrip(t *testing.T) {
 	s, root := fixture(t)
@@ -30,17 +68,17 @@ func Test_TransferRoundtrip(t *testing.T) {
 		"empty": {}, "binary": {0, 0xff, 0x80, 1, 2},
 		"bom-crlf": []byte("\xef\xbb\xbfhello\r\nworld\r\n"),
 		"utf16":    {0xff, 0xfe, 'h', 0, 'i', 0},
-		"boundary": bytes.Repeat([]byte{0, 1, 0xff, 0x80}, transferLimit/4),
+		"boundary": bytes.Repeat([]byte{0, 1, 0xff, 0x80}, (2*transferChunkLimit+4)/4),
 	} {
 		t.Run(name, func(t *testing.T) {
-			up := call(t, s, "fs.upload", uploadArgs(name, b, false))
-			down := call(t, s, "fs.download", Object{"path": name})
+			up := uploadAll(t, s, name, b, false)
+			down := downloadAll(t, s, name)
 			got, err := base64.StdEncoding.DecodeString(down["data"].(string))
 			if err != nil || !bytes.Equal(b, got) || !bytes.Equal(b, readBytes(t, filepath.Join(root, name))) {
 				t.Fatal("file bytes changed", err)
 			}
 			for _, out := range []Object{up, down} {
-				if out["sha256"] != Hash(b) || out["bytes"] != len(b) || out["resolved_path"] != filepath.Join(root, name) {
+				if out["sha256"] != Hash(b) || fmt.Sprint(out["bytes"]) != fmt.Sprint(len(b)) || out["resolved_path"] != filepath.Join(root, name) {
 					t.Fatal("transfer metadata", out["sha256"], out["bytes"], out["resolved_path"])
 				}
 			}
@@ -126,14 +164,14 @@ func Test_TransferPathsLimitsAndCancellation(t *testing.T) {
 	code(t, s, "fs.download", Object{"path": "absent"}, "invalid_cwd")
 	// Both a decoded overflow within the maximum encoded length and a longer
 	// encoded body must be refused before creating a target.
-	for _, size := range []int{transferLimit + 1, transferLimit + 4} {
+	for _, size := range []int{transferChunkLimit + 1, transferChunkLimit + 4} {
 		code(t, s, "fs.upload", uploadArgs("oversize", make([]byte, size), false), "too_large")
 	}
 	f, err := os.Create(filepath.Join(root, "huge"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Truncate(transferLimit + 1); err != nil {
+	if err := f.Truncate((1 << 30) + 1); err != nil {
 		t.Fatal(err)
 	}
 	f.Close()
@@ -201,7 +239,7 @@ func Test_UploadConcurrentCreate(t *testing.T) {
 	start := make(chan struct{})
 	for i := range writers {
 		go func() {
-			service := &Service{Resolver: s.Resolver}
+			service := &Service{Resolver: s.Resolver, Transfers: s.Transfers}
 			b := []byte(fmt.Sprintf("writer %d", i))
 			raw, _ := json.Marshal(uploadArgs("winner", b, false))
 			<-start
@@ -270,7 +308,8 @@ func Test_UploadAtomicReaders(t *testing.T) {
 				return
 			default:
 			}
-			out, err := download(context.Background(), filepath.Join(root, "target"))
+			raw, _ := json.Marshal(Object{"path": "target"})
+			out, err := s.Call(context.Background(), "fs.download", raw)
 			if err != nil {
 				errCh <- err
 				return
