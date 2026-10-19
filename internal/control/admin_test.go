@@ -242,6 +242,10 @@ func Test_ControlPatsReportAbsoluteTokenPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	workingDir, err = filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tokenFile := filepath.Join(workingDir, "operator.token")
 	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("a", 40)+"\n"), 0600); err != nil {
 		t.Fatal(err)
