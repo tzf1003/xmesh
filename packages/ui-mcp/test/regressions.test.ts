@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { Controller } from "../src/controller.js";
+import { navigationEndpoint } from "../src/navigation.js";
 import { Driver } from "../src/driver.js";
 import { Locks } from "../src/locks.js";
 import { ownProcess, terminateProcesses } from "../src/processes.js";
@@ -136,6 +137,35 @@ test("explicit screenshot deadlines reach both Web capture paths and hidden Elec
       /timed out/,
     );
   } finally {
+    cleanup(c);
+  }
+});
+
+test("Chromium endpoint readiness waits for missing and partially written startup data", async () => {
+  const c = config();
+  const file = path.join(c.state_dir, "DevToolsActivePort");
+  const partial = setTimeout(() => fs.writeFileSync(file, "12345\r\n"), 30);
+  const complete = setTimeout(
+    () => fs.writeFileSync(file, "12345\r\n/devtools/browser/fixture-123\r\n"),
+    60,
+  );
+  try {
+    assert.deepEqual(await navigationEndpoint(c.state_dir, () => true, 2000), {
+      port: "12345",
+      endpoint: "/devtools/browser/fixture-123",
+    });
+    fs.writeFileSync(file, "invalid");
+    await assert.rejects(
+      navigationEndpoint(c.state_dir, () => true, 50),
+      /did not become ready/,
+    );
+    await assert.rejects(
+      navigationEndpoint(c.state_dir, () => false, 2000),
+      /did not become ready/,
+    );
+  } finally {
+    clearTimeout(partial);
+    clearTimeout(complete);
     cleanup(c);
   }
 });

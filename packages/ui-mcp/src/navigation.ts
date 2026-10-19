@@ -20,15 +20,12 @@ export async function navigationGuard(
       "preflight_failed",
       "Chromium profile is unavailable for navigation supervision",
     );
-  const [port, endpoint] = fs
-    .readFileSync(path.join(profile, "DevToolsActivePort"), "utf8")
-    .trim()
-    .split("\n");
-  if (!/^\d+$/.test(port ?? "") || !endpoint?.startsWith("/devtools/browser/"))
-    throw new UIError(
-      "preflight_failed",
-      "Chromium navigation endpoint is invalid",
-    );
+  const { port, endpoint } = await navigationEndpoint(
+    profile,
+    () =>
+      server.process().exitCode === null &&
+      server.process().signalCode === null,
+  );
   const socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`);
   let closing = false,
     sequence = 0;
@@ -180,4 +177,41 @@ export async function navigationGuard(
     closing = true;
     socket.close();
   };
+}
+
+// Chromium can acknowledge its pipe transport before writing DevToolsActivePort.
+// Treat missing/partial startup data as pending, with a bounded readiness wait.
+export async function navigationEndpoint(
+  profile: string,
+  alive: () => boolean,
+  timeout = 10000,
+): Promise<{ port: string; endpoint: string }> {
+  const deadline = Date.now() + timeout;
+  while (alive()) {
+    try {
+      const [port, endpoint] = fs
+        .readFileSync(path.join(profile, "DevToolsActivePort"), "utf8")
+        .trim()
+        .split(/\r?\n/);
+      if (
+        /^\d+$/.test(port ?? "") &&
+        Number(port) > 0 &&
+        Number(port) <= 65535 &&
+        /^\/devtools\/browser\/[a-zA-Z0-9-]+$/.test(endpoint ?? "")
+      )
+        return { port: port!, endpoint: endpoint! };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        throw new UIError(
+          "preflight_failed",
+          "Chromium navigation endpoint is unreadable",
+        );
+    }
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new UIError(
+    "preflight_failed",
+    "Chromium navigation endpoint did not become ready",
+  );
 }
