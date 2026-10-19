@@ -144,7 +144,13 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   doc.setIn(["mesh", "mode"], f.mode);
   if (f.mode === "tailnet") {
     doc.setIn(["mesh", "control_url"], f.controlUrl.trim());
-    if (!f.browserLogin) doc.setIn(["mesh", "authkey_file"], f.authkeyFile.trim());
+    if (f.browserLogin) {
+      doc.setIn(["mesh", "auth_method"], "browser");
+      doc.deleteIn(["mesh", "authkey_file"]);
+    } else {
+      doc.deleteIn(["mesh", "auth_method"]);
+      doc.setIn(["mesh", "authkey_file"], f.authkeyFile.trim());
+    }
   }
   if (f.roles.includes("gateway") && doc.getIn(["gateway", "listen"]) === undefined) {
     doc.setIn(["gateway", "listen"], GATEWAY_LISTEN);
