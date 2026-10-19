@@ -2,8 +2,24 @@ package oauth
 
 import (
 	"encoding/json"
+	"net/http"
+	"slices"
 	"testing"
 )
+
+func TestComputerScopesAppearInDiscovery(t *testing.T) {
+	_, h := oauthFixture(t)
+	get := func(path string) (int, http.Header, string) { return request(t, h, "GET", path, "", "") }
+	for _, path := range []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"} {
+		doc := getJSON(t, path, get)
+		raw, _ := doc["scopes_supported"].([]any)
+		for _, scope := range []string{"computer:observe:*", "computer:control:*", "computer:clipboard-read:*", "computer:clipboard-write:*"} {
+			if !slices.Contains(raw, any(scope)) {
+				t.Fatalf("%s does not advertise %s: %v", path, scope, raw)
+			}
+		}
+	}
+}
 
 func TestComputerScopesAndMixedModeOpen(t *testing.T) {
 	observe := []string{"computer:observe:mac"}

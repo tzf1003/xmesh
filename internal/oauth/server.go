@@ -98,7 +98,7 @@ func New(o Options) (*Server, error) {
 	if e != nil {
 		return nil, e
 	}
-	s := &Server{issuer: o.Issuer, issuerHost: hostKey(u.Host), proxied: o.Proxied, dynamicScopes: dynamic, passwordHash: sha256.Sum256([]byte(o.Password)), clients: map[string]Client{}, codes: map[string]grant{}, access: map[string]Token{}, refresh: map[string]Token{}, csrf: map[string]time.Time{}, windows: map[string][]time.Time{}, login: map[string]loginLimit{}, now: time.Now, maxScopes: []string{"devices:read", "exec:*", "pty:*", "fs:read:*", "fs:write:*", "sys:*", "backend:*:*"}}
+	s := &Server{issuer: o.Issuer, issuerHost: hostKey(u.Host), proxied: o.Proxied, dynamicScopes: dynamic, passwordHash: sha256.Sum256([]byte(o.Password)), clients: map[string]Client{}, codes: map[string]grant{}, access: map[string]Token{}, refresh: map[string]Token{}, csrf: map[string]time.Time{}, windows: map[string][]time.Time{}, login: map[string]loginLimit{}, now: time.Now, maxScopes: []string{"devices:read", "exec:*", "pty:*", "fs:read:*", "fs:write:*", "sys:*", "backend:*:*", "computer:observe:*", "computer:control:*", "computer:clipboard-read:*", "computer:clipboard-write:*"}}
 	if o.StateDir != "" {
 		if e = os.MkdirAll(o.StateDir, 0700); e != nil {
 			return nil, e

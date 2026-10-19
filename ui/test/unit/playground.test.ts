@@ -58,6 +58,62 @@ test("history recursively redacts secrets and schema checks work under a strict 
   assert.equal(argumentError(tool, '{"count":2}'), undefined);
 });
 
+async function credentialPool() {
+  const tokens = Array.from({ length: 13 }, (_, i) => String.fromCharCode(97 + i).repeat(40));
+  const gateway = new FakePlayground(() => tokens);
+  await gateway.start();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-preview-pool-"));
+  const pats = tokens.map((token, i) => {
+    const name = i === 0 ? "default" : `credential-${i}`;
+    const file = path.join(dir, name + ".token");
+    fs.writeFileSync(file, token, { mode: 0o600 });
+    return { name, token_file: file };
+  });
+  const status = statusFixture(); status.roles = ["agent", "gateway"]; status.gateway = { listen: "127.0.0.1:1", url: gateway.url, auth: "pat", addresses: [], access: ["localhost"], hosts: [] };
+  const controller = { snapshot: { ...EMPTY_SNAPSHOT, selectedInstance: "node", connection: { kind: "connected", status, peers: [] } }, requireCapable: () => ({ call: async () => ({ pats }) }) } as unknown as Pick<ShellController, "snapshot" | "requireCapable">;
+  const service = new PlaygroundService(controller);
+  return { gateway, service, async close() { await service.close(); await gateway.stop(); fs.rmSync(dir, { recursive: true, force: true }); } };
+}
+
+test("credential pool evicts idle sessions while a default call stays active", async () => {
+  const pool = await credentialPool();
+  const { service, gateway } = pool;
+  try {
+    const slow = service.request({ op: "call", instance: "node", id: "pinned", name: "local/demo.slow", arguments: {}, timeoutMs: 10000 });
+    for (let n = 0; gateway.calls.length < 1 && n < 200; n++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(gateway.calls.length, 1);
+    const pinned = [...gateway.sessions.keys()][0]!;
+    for (let i = 1; i <= 12; i++) {
+      const result = await service.request({ op: "call", instance: "node", id: `preview-${i}`, name: "local/sys.info", arguments: {}, timeoutMs: 5000, pat: `credential-${i}` });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.ok(gateway.sessions.size <= 8);
+      assert.ok(gateway.sessions.has(pinned), "active default session was evicted");
+    }
+    assert.equal(gateway.sessions.size, 8);
+    await service.request({ op: "cancel", instance: "node", id: "pinned" });
+    assert.equal((await slow).ok, false);
+  } finally { await pool.close(); }
+});
+
+test("credential pool preserves eight active sessions and reuses capacity after completion", async () => {
+  const pool = await credentialPool();
+  const { service, gateway } = pool;
+  const calls = Array.from({ length: 8 }, (_, i) => service.request({ op: "call", instance: "node", id: `pinned-${i}`, name: "local/demo.slow", arguments: {}, timeoutMs: 10000, pat: `credential-${i + 1}` }));
+  try {
+    for (let n = 0; gateway.calls.length < 8 && n < 300; n++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(gateway.calls.length, 8);
+    const sessions = [...gateway.sessions.keys()].sort();
+    const full = await service.request({ op: "list", instance: "node", device: "gateway" });
+    assert.equal(full.ok, false);
+    if (!full.ok) assert.match(full.error.message, /Too many Gateway credentials/);
+    assert.deepEqual([...gateway.sessions.keys()].sort(), sessions);
+    for (let i = 0; i < 8; i++) await service.request({ op: "cancel", instance: "node", id: `pinned-${i}` });
+    assert.ok((await Promise.all(calls)).every((result) => !result.ok));
+    assert.equal((await service.request({ op: "list", instance: "node", device: "gateway" })).ok, true);
+    assert.equal(gateway.sessions.size, 8);
+  } finally { await pool.close(); await Promise.all(calls); }
+});
+
 test("production MCP path reuses PAT, stamps origin, handles errors, cancellation, changes and token rotation", async () => {
   let token = "a".repeat(40);
   const gateway = new FakePlayground(() => token);
