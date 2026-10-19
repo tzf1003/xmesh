@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -61,9 +62,9 @@ test("macOS hands /bin/sh the script and four plain arguments", async () => {
   if (process.platform !== "win32") assert.equal(fs.statSync(s.args[0]!).mode & 0o100, 0o100);
 });
 
-test("Windows hands cmd a script that holds no path, and passes every path through the environment", async () => {
+test("Windows starts a hidden PowerShell helper and passes every path through the environment", async () => {
   const dir = tmpDir();
-  const seen: { cmd: string; args: string[]; opts: { env?: Record<string, string>; windowsVerbatimArguments?: boolean } }[] = [];
+  const seen: { cmd: string; args: string[]; opts: { env?: Record<string, string>; windowsHide?: boolean; windowsVerbatimArguments?: boolean } }[] = [];
   const a = windowsApplier((cmd, args, opts) => {
     seen.push({ cmd, args, opts: opts as never });
     return child();
@@ -72,28 +73,109 @@ test("Windows hands cmd a script that holds no path, and passes every path throu
   const h = { ...handOver(dir), installer: "C:\\Users\\a b\\xmesh-ui-0.1.0-win-x64.exe", execPath: "C:\\Users\\a b\\xmesh\\xmesh.exe" };
   await a.start(h);
   const s = seen[0]!;
-  assert.equal(s.cmd, "cmd.exe");
-  assert.deepEqual(s.args.slice(0, 3), ["/d", "/s", "/c"]);
-  assert.equal(s.args[3], `"${path.join(dir, "apply-update.cmd")}"`);
-  assert.equal(s.opts.windowsVerbatimArguments, true);
+  assert.equal(s.cmd, "powershell.exe");
+  assert.deepEqual(s.args, ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", path.join(dir, "apply-update.ps1")]);
+  assert.equal(s.opts.windowsHide, true);
+  assert.equal(s.opts.windowsVerbatimArguments, undefined);
   assert.equal(s.opts.env!.XMESH_UPD_PID, "4242");
   assert.equal(s.opts.env!.XMESH_UPD_INSTALLER, h.installer);
   assert.equal(s.opts.env!.XMESH_UPD_APP, h.execPath);
   assert.equal(s.opts.env!.XMESH_UPD_RESULT, h.resultFile);
-  assert.equal(fs.readFileSync(path.join(dir, "apply-update.cmd"), "utf8"), WINDOWS_SCRIPT);
+  assert.equal(fs.readFileSync(path.join(dir, "apply-update.ps1"), "utf8"), WINDOWS_SCRIPT);
 });
 
-test("the Windows script is ASCII, CRLF, waits for the app, runs the installer silently and starts the app only on success", () => {
-  assert.ok(/^[\x20-\x7e\r\n]*$/.test(WINDOWS_SCRIPT), "cmd reads it in the console code page");
-  assert.ok(WINDOWS_SCRIPT.includes("\r\n") && !/[^\r]\n/.test(WINDOWS_SCRIPT));
-  const lines = WINDOWS_SCRIPT.split("\r\n");
-  const at = (needle: string): number => lines.findIndex((l) => l.includes(needle));
-  assert.ok(at("tasklist") >= 0 && at("tasklist") < at("/S"));
-  // --updated keeps the kernels' logon tasks (build/installer.nsh skips `xmesh uninstall` for an upgrade).
-  assert.ok(at('"%XMESH_UPD_INSTALLER%" /S --updated') > at(":gone"));
-  const ok = lines.slice(at('if not "%code%"=="0" goto failed'));
-  assert.ok(ok[1]!.startsWith('start "" "%XMESH_UPD_APP%"'), "the app starts right after a successful install");
-  for (const forbidden of [/[A-Za-z]:\\/, /timeout/i, /del /i, /rmdir/i]) assert.ok(!forbidden.test(WINDOWS_SCRIPT), String(forbidden));
+// Execute the same helper on Windows PowerShell in CI and on PowerShell Core where available.
+const powershell = process.platform === "win32" ? "powershell.exe" : "pwsh";
+const ps = spawnSync(powershell, ["-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion"], { timeout: 10_000 });
+const needsPowerShell = ps.status === 0 ? {} : { skip: "PowerShell is unavailable" };
+
+function windowsRig(script = WINDOWS_SCRIPT) {
+  const dir = fs.realpathSync(tmpDir());
+  const odd = path.join(dir, "update 'space' 测试");
+  fs.mkdirSync(odd);
+  const file = path.join(odd, "apply-update.ps1");
+  const log = path.join(odd, "calls.jsonl");
+  const result = path.join(odd, "result.txt");
+  const stub = path.join(odd, "stub.cjs");
+  fs.writeFileSync(file, script);
+  // Node stands in for both executables: the installer receives /S and --updated; the app receives neither.
+  fs.writeFileSync(stub, `
+const fs = require('node:fs');
+const installer = process.argv.includes('--updated');
+fs.appendFileSync(process.env.XMESH_TEST_LOG, JSON.stringify({ installer, args: process.argv.slice(1) }) + '\\n');
+process.exit(installer ? Number(process.env.XMESH_TEST_INSTALL_EXIT || 0) : 0);
+`);
+  const env = {
+    ...process.env,
+    NODE_OPTIONS: `--require ${JSON.stringify(stub)}`,
+    XMESH_TEST_LOG: log,
+    XMESH_UPD_INSTALLER: process.execPath,
+    XMESH_UPD_APP: process.execPath,
+    XMESH_UPD_RESULT: result,
+  };
+  const args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file];
+  const calls = (): { installer: boolean; args: string[] }[] => fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n").map((s) => JSON.parse(s)) : [];
+  return { file, log, result, env, args, calls };
+}
+
+async function waitForApp(r: ReturnType<typeof windowsRig>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!r.calls().some((c) => !c.installer)) {
+    assert.ok(Date.now() < deadline, "the app starts after the installer");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+test("Windows helper waits on the process with a 60-second deadline", () => {
+  assert.ok(/^[\x20-\x7e\r\n]*$/.test(WINDOWS_SCRIPT));
+  assert.match(WINDOWS_SCRIPT, /WaitForExit\(60000\)/);
+});
+
+test("Windows helper installs after the old process exits, preserving paths and upgrade arguments", needsPowerShell, async () => {
+  const r = windowsRig();
+  const oldApp = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+  const exited = once(oldApp, "exit");
+  const helper = spawn(powershell, r.args, { env: { ...r.env, XMESH_UPD_PID: String(oldApp.pid) }, timeout: 15_000 });
+  const finished = once(helper, "exit");
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    assert.deepEqual(r.calls(), [], "installation waits for the running app");
+    oldApp.stdin!.end();
+    await exited;
+    assert.equal((await finished)[0], 0);
+    await waitForApp(r);
+    // Node treats /S as its script filename and resolves it to a drive-rooted path on Windows.
+    const silentArg = process.platform === "win32" ? path.resolve("/S") : "/S";
+    assert.deepEqual(r.calls(), [{ installer: true, args: [silentArg, "--updated"] }, { installer: false, args: [] }]);
+    assert.equal(fs.existsSync(r.result), false);
+  } finally {
+    oldApp.kill();
+    helper.kill();
+  }
+});
+
+test("Windows helper times out a surviving process and records a failure", needsPowerShell, async () => {
+  const r = windowsRig(WINDOWS_SCRIPT.replace("WaitForExit(60000)", "WaitForExit(100)"));
+  const oldApp = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+  const helper = spawn(powershell, r.args, { env: { ...r.env, XMESH_UPD_PID: String(oldApp.pid) }, timeout: 15_000 });
+  try {
+    assert.equal((await once(helper, "exit"))[0], 1);
+    assert.equal(fs.readFileSync(r.result, "utf8"), "the app did not exit");
+    assert.deepEqual(r.calls(), []);
+  } finally {
+    oldApp.kill();
+    helper.kill();
+  }
+});
+
+test("Windows helper handles an already exited app and restarts after installer failure", needsPowerShell, async () => {
+  const r = windowsRig();
+  const gone = spawnSync(process.execPath, ["-e", ""]).pid!;
+  const out = spawnSync(powershell, r.args, { env: { ...r.env, XMESH_UPD_PID: String(gone), XMESH_TEST_INSTALL_EXIT: "2" }, timeout: 15_000, encoding: "utf8" });
+  assert.equal(out.status, 1, out.stderr);
+  await waitForApp(r);
+  assert.deepEqual(r.calls().map((c) => c.installer), [true, false]);
+  assert.equal(fs.readFileSync(r.result, "utf8"), "installer exit code 2");
 });
 
 // --- the macOS script itself, run against stub tools ---
