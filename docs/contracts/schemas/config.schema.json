@@ -490,7 +490,9 @@
               "cwd": { "type": "string" },
               "policy": { "enum": ["shared", "exclusive", "per-caller"] },
               "idle_timeout": { "$ref": "#/$defs/duration" },
-              "favorite": { "type": "boolean" }
+              "favorite": { "type": "boolean" },
+              "shutdown_timeout": { "$ref": "#/$defs/duration" },
+              "process_cleanup": { "enum": ["tree"] }
             },
             "allOf": [
               {

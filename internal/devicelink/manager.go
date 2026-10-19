@@ -429,19 +429,26 @@ func (m *Manager) runPeer(p *peerLink) {
 				delete(p.opens, l.openID)
 			}
 		}
+		if wanted && !p.disconnected.IsZero() && time.Since(p.disconnected) >= m.opts.RecoveryWindow {
+			for _, l := range p.sessions {
+				closeLogical(l, ErrResumeExpired)
+			}
+			for _, l := range p.pending {
+				closeLogical(l, ErrResumeExpired)
+			}
+			if p.active != nil && !p.active.committed {
+				p.active.cancel()
+				_ = p.active.conn.CloseNow()
+			}
+			m.activity(Activity{DeviceID: p.id, State: "offline", Epoch: p.epoch})
+			p.mu.Unlock()
+			continue
+		}
 		if p.active == nil && wanted {
 			if p.disconnected.IsZero() {
 				p.disconnected = time.Now()
 			}
-			if time.Since(p.disconnected) >= m.opts.RecoveryWindow {
-				for _, l := range p.sessions {
-					closeLogical(l, ErrResumeExpired)
-				}
-				for _, l := range p.pending {
-					closeLogical(l, ErrResumeExpired)
-				}
-				m.activity(Activity{DeviceID: p.id, State: "offline", Epoch: p.epoch})
-			} else if !p.attempting {
+			if !p.attempting {
 				p.attempting = true
 				p.workers.Go(func() { m.connect(p); p.mu.Lock(); p.attempting = false; p.mu.Unlock() })
 			}

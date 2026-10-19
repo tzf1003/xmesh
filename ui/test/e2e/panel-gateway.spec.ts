@@ -1,11 +1,11 @@
-// The local gateway on the overview against the fake kernel: the addresses and copy commands (the token
+// The local gateway on the runtime page against the fake kernel: the addresses and copy commands (the token
 // is read in main and never reaches the page), the upgrade notice, the reach editor and token rotation.
 
 import { type Page, expect, test } from "@playwright/test";
 import * as fs from "node:fs";
 import type { Capability, GatewayInfo } from "../../src/shared/control";
 import { FAKE_LAN_IP, FAKE_TAILNET_IP, FAKE_TAILNET_NAME } from "../../testserver/panel-routes";
-import { type Harness, launch } from "./helpers";
+import { type Harness, launch, navigate } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit", "gateway"];
 /** The PAT the copied commands carry: "default", the one rotation targets. */
@@ -30,7 +30,7 @@ async function open(opts: Parameters<typeof launch>[0] = {}): Promise<Page> {
   h = await launch({ ...opts, kernel: { capabilities: ALL, ...opts.kernel } });
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
-  await page.getByTestId("overview-advanced").locator("summary").click();
+  await navigate(page, "runtime");
   // The rotate button shows once the PAT list has loaded, so the card's data is in.
   await expect(page.getByTestId("gateway-rotate")).toBeVisible();
   return page;
@@ -51,7 +51,7 @@ async function rotate(page: Page): Promise<void> {
   await expect(page.getByTestId("confirm")).toHaveCount(0);
 }
 
-test("overview lists every reachable address with its kind and three copy buttons", async () => {
+test("runtime page lists every reachable address with its kind and three copy buttons", async () => {
   const page = await open();
   const rows = page.getByTestId("gateway-address");
   await expect(rows).toHaveCount(4);
@@ -111,7 +111,7 @@ test("the upgrade notice stays dismissed across reloads and comes back when the 
   await expect(notice).toHaveCount(0);
 
   await page.reload();
-  await page.getByTestId("overview-advanced").locator("summary").click();
+  await navigate(page, "runtime");
   await expect(page.getByTestId("gateway-rotate")).toBeVisible();
   await expect(page.getByTestId("token-notice")).toHaveCount(0);
 

@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { PANEL_API_METHODS } from "../../src/shared/ipc";
-import { type Harness, UI_ROOT, expectIcon, launch } from "./helpers";
+import { type Harness, UI_ROOT, expectIcon, launch, navigate } from "./helpers";
 
 let h: Harness;
 test.afterEach(async () => {
@@ -168,7 +168,7 @@ test("panel calls reach the kernel through the main process, with validated argu
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("node")).toHaveText("win-dev-01");
 
-  await page.getByTestId("overview-advanced").locator("summary").click();
+  await navigate(page, "runtime");
   await page.getByRole("button", { name: "暂停接收新调用" }).click();
   await expect.poll(() => h.kernel.requests.some((r) => r.path === "/v2/drain")).toBe(true);
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");

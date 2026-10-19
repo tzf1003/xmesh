@@ -8,7 +8,6 @@ import { cwdPolicy, diffRows, needsRestart, weakening } from "../lib/config";
 import {
   LISTEN_MODES,
   MODES,
-  ROLES,
   TLS_MODES,
   applyDenyFile,
   applySettingsForm,
@@ -20,7 +19,6 @@ import {
   toggleRole,
   type ListenMode,
   type Mode,
-  type Role,
   type SettingsForm,
   type SettingsProblem,
   type TLSMode,
@@ -31,7 +29,6 @@ import type { ActionError, DenyFileResponse } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
 import type { Key } from "../messages";
 
-const ROLE_HINT: Record<Role, Key> = { agent: "wizard.agentHint", gateway: "wizard.gatewayHint", ingress: "settings.ingressHint" };
 const MODE_LABEL: Record<Mode, Key> = { lan: "mode.lan", tailnet: "mode.tailnet", coexist: "mode.coexist", offline: "mode.offline" };
 const LISTEN_LABEL: Record<ListenMode, Key> = { tunnel: "settings.listen.tunnel", "public:443": "settings.listen.public443", funnel: "settings.listen.funnel" };
 const TLS_LABEL: Record<TLSMode, Key> = { autocert: "settings.tls.autocert", file: "settings.tls.file" };
@@ -244,14 +241,14 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
 
       {form && loaded?.valid && (
         <form
-          class="roles-form"
+          class="roles-form section-stack"
           onSubmit={(e) => {
             e.preventDefault();
             if (content !== undefined && changed && writable) void prepare();
           }}
         >
           {!writable && <Banner kind="warn" testid="settings-readonly">{t("config.readOnly")}</Banner>}
-          <fieldset disabled={!writable} class="settings-fields">
+          <fieldset disabled={!writable} class="settings-fields section-stack">
             <section class="card" id="settings-node" data-testid="settings-node">
               <h2>{t("settings.nodeTitle")}</h2>
               <Field label={t("settings.nodeName")} hint={t("wizard.nodeNameHint")}>
@@ -305,22 +302,10 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
 
             <section class="card" id="settings-roles" data-testid="settings-roles">
               <h2>{t("settings.rolesTitle")}</h2>
-              <fieldset>
-                <legend>{t("wizard.roles")}</legend>
-                {ROLES.map((role) => (
-                  <label class="check" key={role}>
-                    <input
-                      type="checkbox"
-                      checked={form.roles.includes(role)}
-                      onChange={(e) => update({ roles: toggleRole(form.roles, role, (e.currentTarget as HTMLInputElement).checked) })}
-                      data-testid={`settings-role-${role}`}
-                    />
-                    <span>
-                      <strong>{role}</strong> <span class="hint">{t(ROLE_HINT[role])}</span>
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
+              <p class="hint">{t("roles.topbarHint")}</p>
+              <div class="row" data-testid="settings-role-summary">
+                {form.roles.map((role) => <Badge key={role} kind="info">{role}</Badge>)}
+              </div>
               {ingressOn && (
                 <section class="roles-ingress" data-testid="settings-ingress">
                   <h3>{t("settings.ingressTitle")}</h3>

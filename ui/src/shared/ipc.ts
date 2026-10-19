@@ -770,6 +770,11 @@ const AUDIT_EVENTS = [
   "progress_unrouted",
   "audit_dropped",
   "control_call",
+  "device_link_online",
+  "device_link_reconnecting",
+  "device_link_offline",
+  "device_link_revoked",
+  "device_link_identity_conflict",
 ] as const;
 
 export function parseAuditQuery(v: unknown): AuditQuery | undefined {

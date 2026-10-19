@@ -230,7 +230,15 @@ func (a *actor) connect(ctx context.Context) (*mcpmux.Bridge, error) {
 		cmd := exec.Command(launch, argv...)
 		cmd.Dir = resolved.Path
 		cmd.Env = env
-		transport = &mcp.CommandTransport{Command: cmd, TerminateDuration: 250 * time.Millisecond}
+		shutdown := 250 * time.Millisecond
+		if a.cfg.ShutdownTimeout != "" {
+			shutdown = config.Duration(a.cfg.ShutdownTimeout)
+		}
+		if a.cfg.ProcessCleanup == "tree" {
+			transport = &treeTransport{command: cmd, shutdown: shutdown}
+		} else {
+			transport = &mcp.CommandTransport{Command: cmd, TerminateDuration: shutdown}
+		}
 	} else {
 		transport = &mcp.StreamableClientTransport{Endpoint: a.cfg.URL, MaxRetries: -1}
 	}

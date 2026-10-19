@@ -134,6 +134,11 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
     if (!f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey_file";
   }
   if (!f.roles.includes("ingress")) return undefined;
+  return checkIngressSettings(f);
+}
+
+/** Fields needed to enable ingress, shared by the form and the global role switch. */
+export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
   if (f.listen === "funnel" && f.mode !== "tailnet" && f.mode !== "coexist") return "tailnet";
   const issuer = f.issuer.trim();
   if (!ISSUER.test(issuer) || !isHttpsUrl(issuer)) return "issuer";
@@ -145,7 +150,7 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
 
 /**
  * The config text with the form applied. Only the keys the form owns change: `node.name` and `node.roles`,
- * `mesh.mode` and for tailnet its control URL and key file, the gateway listen address when the gateway role
+ * the v2 network path switches and Tailnet credentials, the gateway listen address when the gateway role
  * is new, the ingress keys, and `agent.default_cwd`, `agent.cwd_policy.allow` and `agent.fs.max_file_size`. The deny list lives in its
  * own file and is not touched here. Undefined when the text is not YAML at all.
  */

@@ -205,13 +205,15 @@ type PTY struct {
 	ClosedRetainMax int    `json:"closed_retain_max"`
 }
 type Backend struct {
-	Transport   string   `json:"transport"`
-	Command     []string `json:"command"`
-	URL         string   `json:"url"`
-	CWD         string   `json:"cwd"`
-	Policy      string   `json:"policy"`
-	IdleTimeout string   `json:"idle_timeout"`
-	Favorite    bool     `json:"favorite"`
+	Transport       string   `json:"transport"`
+	Command         []string `json:"command"`
+	URL             string   `json:"url"`
+	CWD             string   `json:"cwd"`
+	Policy          string   `json:"policy"`
+	IdleTimeout     string   `json:"idle_timeout"`
+	Favorite        bool     `json:"favorite"`
+	ShutdownTimeout string   `json:"shutdown_timeout,omitempty"`
+	ProcessCleanup  string   `json:"process_cleanup,omitempty"`
 }
 type Grant struct {
 	Backends []string `json:"backends"`
@@ -458,6 +460,18 @@ func (c *Config) Validate() error {
 		}
 	}
 	for name, b := range c.Agent.Backends {
+		if b.ProcessCleanup != "" && b.ProcessCleanup != "tree" {
+			return fail("/agent/backends/" + name + "/process_cleanup")
+		}
+		if b.Transport != "stdio" && (b.ProcessCleanup != "" || b.ShutdownTimeout != "") {
+			return fail("/agent/backends/" + name + ": process lifecycle options require stdio")
+		}
+		if b.ShutdownTimeout != "" {
+			d, e := time.ParseDuration(b.ShutdownTimeout)
+			if e != nil || d <= 0 || d > 30*time.Second {
+				return fail("/agent/backends/" + name + "/shutdown_timeout")
+			}
+		}
 		if b.Transport == "http" {
 			u, e := url.Parse(b.URL)
 			if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
