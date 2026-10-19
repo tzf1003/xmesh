@@ -197,7 +197,10 @@ func setupHost() onboarding.Host {
 		Snapshot: snapshotSetupService,
 		Restore:  restoreSetupService,
 		Stop: func(ctx context.Context, p *onboarding.Plan) error {
-			return runCLI(ctx, "stop", "--config", p.ConfigPath)
+			if err := runCLI(ctx, "stop", "--config", p.ConfigPath); err != nil {
+				return err
+			}
+			return waitSetupServiceStopped(ctx, p)
 		},
 		Configure: func(ctx context.Context, p *onboarding.Plan) error {
 			if e := runCLI(ctx, "uninstall", "--config", p.ConfigPath); e != nil {

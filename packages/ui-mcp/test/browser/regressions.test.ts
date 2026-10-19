@@ -303,8 +303,14 @@ test("navigation policy allows subresources and denies off-origin documents", as
     frameRedirects = 0,
     posts = 0,
     finalPosts = 0;
+  const outsideRequests: string[] = [];
   const outside = http.createServer((req, res) => {
-    hits++;
+    const destination = req.headers["sec-fetch-dest"];
+    outsideRequests.push(`${req.method} ${req.url} ${destination ?? "unknown"}`);
+    // Subresources (including a popup's favicon) remain permitted. Count only
+    // document navigations when checking the origin restriction.
+    // Unclassified requests also count, so missing metadata fails closed.
+    if (destination !== "empty" && destination !== "image") hits++;
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.end("outside");
   });
@@ -380,18 +386,18 @@ test("navigation policy allows subresources and denies off-origin documents", as
       document.body.append(frame);
     }, outsideUrl);
     await new Promise((r) => setTimeout(r, 100));
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const redirect = await driver.context.newPage();
     await assert.rejects(
       redirect.goto(`${url}/redirect`),
       /ERR_BLOCKED_BY_CLIENT/,
     );
     await redirect.close();
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const chain = await driver.context.newPage();
     await assert.rejects(chain.goto(`${url}/chain`), /ERR_BLOCKED_BY_CLIENT/);
     await chain.close();
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const good = await driver.context.newPage();
     await good.goto(`${url}/good`);
     assert.equal(good.url(), `${url}/`);
@@ -404,7 +410,7 @@ test("navigation policy allows subresources and denies off-origin documents", as
     );
     const popup = await popupEvent;
     await popup.waitForLoadState().catch(() => {});
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     await popup.close();
     const allowedPopupEvent = driver.page.waitForEvent("popup");
     await driver.page.evaluate(
@@ -426,7 +432,7 @@ test("navigation policy allows subresources and denies off-origin documents", as
     );
     await until(() => frameRedirects === 1);
     await new Promise((r) => setTimeout(r, 100));
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     await good.evaluate((address) => {
       const form = document.createElement("form");
       form.method = "POST";
