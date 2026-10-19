@@ -52,6 +52,26 @@ for (const mode of ["mock", "real"] as const)
       try {
         const opened = await controller.open("xmesh"),
           session = opened.session_id as string;
+        if (mode === "real") {
+          const heartbeat = controller.submit({
+            protocol_version: 1,
+            session_id: session,
+            request_id: "real-heartbeat",
+            code: `export default async ({ page, step, expect }) => {
+              await step("connected", () => expect(page.locator('[data-testid="state"][data-state="ok"], [data-testid="state"][data-state="degraded"]')).toBeVisible());
+              await step("control-through-idle", async () => {
+                const until = Date.now() + 2500;
+                do {
+                  const reply = await page.evaluate(() => window.xmesh.getConfig());
+                  expect(reply.ok, JSON.stringify(reply.error)).toBe(true);
+                  await new Promise(resolve => setTimeout(resolve, 25));
+                } while (Date.now() < until);
+              });
+            };`,
+          }, true);
+          const stable = await finished(controller, heartbeat.run_id, 15000);
+          assert.equal(stable.status, "passed", JSON.stringify(stable.error));
+        }
         const request = controller.submit({
           protocol_version: 1,
           session_id: session,
