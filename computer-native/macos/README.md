@@ -118,6 +118,29 @@ stapling after actual DMG replacement. Add `--require-ready` to wait for local
 screen/Accessibility authorization before upgrade and assert it remains usable
 afterward. This mode requires the desktop user to grant the initial permissions.
 
+Formal Electron lifecycle acceptance uses two existing release artifacts:
+
+```sh
+rtk env XMESH_TEST_ALLOW_COMPUTER_UPGRADE=1 node ui/scripts/accept-computer-electron-upgrade-macos.mjs \
+  --old-app /absolute/path/old/xmesh.app --new-dmg /absolute/path/new.dmg \
+  --report /absolute/path/upgrade-result.json
+```
+
+Build `ui/dist` first. The harness requires an absent Computer Host installation
+and state directory. It copies the old signed app into a private user Applications
+directory, installs an owned loopback business node and Host, then uses the
+production updater module to stop them and replace the app through the actual
+DMG. The new packaged Electron entrypoint reads the pending update and restores
+both services. Version/PID/desktop-epoch changes, business MCP calls before and
+after replacement, installed signatures/stapling and owned-resource cleanup are
+asserted. A launch wrapper supplies background `open` and the private user-data
+and discovery paths; the update trigger is module-level rather than a menu click.
+The test records permission states and does not request system authorization.
+Run it under independent pointer/foreground/AX monitoring for desktop acceptance.
+Data follows TMPDIR; the small installed service state uses the product's default
+path and is removed afterward. Mountpoints use `/tmp` because DiskImages can
+reject mounting inside a sparsebundle build volume.
+
 Local Electron distribution uses `node ui/scripts/package-macos-local.mjs <version>`.
 The script reads signing/profile references from the existing xmesh release
 configuration in Application Support, builds the native helper in a shared Cargo
