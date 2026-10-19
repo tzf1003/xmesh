@@ -8,6 +8,7 @@ import { type Harness, launch, navigate } from "./helpers";
 import { FakeKernel } from "../../testserver/server";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
+const cli = process.platform === "win32" ? "& 'xmesh'" : "xmesh";
 
 let h: Harness;
 test.afterEach(async () => {
@@ -67,13 +68,13 @@ test("no credential: the page shows the login commands, copies them, and recover
   const page = await h.openPanel();
   await navigate(page, "mesh");
   await expect(page.getByTestId("mesh-no-credential")).toBeVisible();
-  await expect(page.getByTestId("mesh-no-credential")).toContainText("xmesh mesh login");
+  await expect(page.getByTestId("mesh-no-credential")).toContainText(`${cli} mesh login`);
   await page.getByTestId("mesh-copy-write").click();
-  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual(["xmesh mesh login --kind tailscale --access write --panel"]);
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual([`${cli} mesh login --kind tailscale --access write --panel`]);
   await page.getByTestId("mesh-copy-read-headscale").click();
   await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual([
-    "xmesh mesh login --kind tailscale --access write --panel",
-    "xmesh mesh login --kind headscale --url https://headscale.example.com --access read --panel",
+    `${cli} mesh login --kind tailscale --access write --panel`,
+    `${cli} mesh login --kind headscale --url https://headscale.example.com --access read --panel`,
   ]);
   await expect(page.getByTestId("toast").first()).toContainText("已复制");
 
