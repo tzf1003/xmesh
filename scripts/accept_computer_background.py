@@ -247,9 +247,11 @@ def main():
                 native_pid = status["native_pid"]
             else:
                 native_pid = helper.pid
-            def monitor():
+            monitor_lock=threading.Lock()
+            def check_monitor():
                 nonlocal baseline
-                while not stopped.wait(.015):
+                with monitor_lock:
+                    if interference:return
                     try:
                         current = pointer_and_focus()
                         if current != baseline:
@@ -257,7 +259,7 @@ def main():
                             # just-exited test processes. Recheck liveness before
                             # classifying an order-list change as a focus event.
                             try:os.kill(current[2],0)
-                            except ProcessLookupError:continue
+                            except ProcessLookupError:return
                             recent=[(kind,pid,marker) for stamp,kind,pid,marker in mouse_trace.events if time.monotonic()-stamp<.2]
                             motion=(5,6,7,27)
                             own=sum(kind in motion and (pid==native_pid or marker==0x584D5348) for kind,pid,marker in recent)
@@ -268,12 +270,21 @@ def main():
                             control_focus_changed=current[4:]!=baseline[4:]
                             if current[2]!=fixture.pid and own==0 and (not pointer_changed or hardware_motion) and (not foreground_changed or hardware_focus) and (not control_focus_changed or hardware_focus):
                                 baseline=current
-                                continue
+                                return
                             interference.append({"pointer_changed":pointer_changed,"foreground_changed":foreground_changed,"control_focus_changed":control_focus_changed,"foreground_focus_available":current[5],"foreground_before_pid":baseline[2],"foreground_after_pid":current[2],"foreground_before_app":baseline[3],"foreground_after_app":current[3],"fixture_pid":fixture.pid,"fixture_activated":current[2]==fixture.pid,"executor_activated":current[2]==native_pid,"hardware_motion_events":hardware_motion,"executor_motion_events":own,"hardware_focus_events":hardware_focus})
                             helper.kill()
                             return
                     except Exception:
                         interference.append("interference monitor unavailable"); helper.kill(); return
+            def verify_monitor():
+                # A foreground sample can arrive between watcher ticks. Apply
+                # the same provenance rule at assertion time under one lock.
+                check_monitor()
+                assert not interference,{"interference":interference}
+            def monitor():
+                while not stopped.wait(.015):
+                    check_monitor()
+                    if interference:return
             # AppKit can finish initial placement after its first state write.
             # Re-observation before input is safe; input actions are never retried.
             for attempt in range(5):
@@ -328,7 +339,7 @@ def main():
             result = json.loads(state_file.read_text())
             observed = {"clicks": result["clicks"], "value": result["value"], "drag": result["drag_complete"], "scrolled": result["scroll_y"] != state["scroll_y"]}
             assert len(results)==len(steps),observed
-            assert not interference and pointer_and_focus() == baseline, "pointer/focus changed"
+            verify_monitor()
             if mcp:
                 assert tool("renew", {**identity, "ttl_seconds": 30})["structuredContent"]["lease_token"] == identity["lease_token"]
             if options.cancel_drag:
@@ -356,7 +367,7 @@ def main():
                 while json.loads(state_file.read_text())["drag_events"][-1]!="up":
                     assert time.monotonic()<deadline,"cancelled drag did not release its button"
                     time.sleep(.015)
-                assert not interference and pointer_and_focus()==baseline
+                verify_monitor()
                 print(json.dumps({"background_step":"cancel-drag","result":"PASS","state":cancelled[execute_id]["state"],"button_released":True}),flush=True)
             call("release", {"desktop_epoch": info["desktop_epoch"], "lease_token": "1"})
             if options.reject_other_window_key:
@@ -371,7 +382,7 @@ def main():
                     assert refused["state"]=="failed" and refused["executed"]==0 and refused["error"]=="background_action_unsupported",refused
                     time.sleep(.1)
                     assert json.loads(state_file.read_text())["value"]==before,"key reached another window"
-                    assert not interference and pointer_and_focus()==baseline
+                    verify_monitor()
                     print(json.dumps({"background_step":"other-window-key","result":"PASS","state":refused["state"],"executed":0}),flush=True)
                 finally:tool("close",other_identity)
             print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded,"pause_on_user_input":options.pause_on_user_input, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []),*( ["reject-other-window-key"] if options.reject_other_window_key else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation", "foreground-AX-control-and-window-identity"]}, ensure_ascii=False))
