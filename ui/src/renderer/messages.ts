@@ -1,3 +1,4 @@
+import { workspaceZh, workspaceEn } from "./workspace-messages";
 import { playgroundZh, playgroundEn } from "./playground-messages";
 // String tables for the panel. Chinese is the default; English is complete so
 // switching `XMESH_UI_LANG=en` shows no Chinese. test/unit/panel-messages.test.ts
@@ -7,6 +8,7 @@ import { topologyEn, topologyZh } from "./topology-messages";
 
 export const zh = {
   ...playgroundZh,
+  ...workspaceZh,
   ...topologyZh,
   "nav.label": "主导航",
   "nav.overview": "概览",
@@ -963,6 +965,7 @@ export type Key = keyof typeof zh;
 
 export const en: Record<Key, string> = {
   ...playgroundEn,
+  ...workspaceEn,
   ...topologyEn,
   "nav.label": "Main navigation",
   "nav.overview": "Overview",

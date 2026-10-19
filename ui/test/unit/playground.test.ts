@@ -38,6 +38,9 @@ test("production MCP path reuses PAT, stamps origin, handles errors, cancellatio
   const controller = { snapshot, requireCapable: () => ({ call: async () => ({ pats: [{ name: "default", token_file: file }] }) }) } as unknown as Pick<ShellController, "snapshot" | "requireCapable">;
   const service = new PlaygroundService(controller);
   try {
+    const early = service.request({ op: "call", instance: "node", id: "early", name: "local/demo.echo", arguments: { message: "cancel-before-connect" }, timeoutMs: 5000 });
+    const cancelEarly = await service.request({ op: "cancel", instance: "node", id: "early" }); assert.ok(cancelEarly.ok); assert.equal(cancelEarly.data.cancelled, true);
+    assert.equal((await early).ok, false); assert.equal(gateway.calls.some((x) => x.args.message === "cancel-before-connect"), false);
     const list = await service.request({ op: "list", instance: "node", device: "local" }); assert.ok(list.ok); assert.equal(list.data.tools.length, 5);
     const info = await service.request({ op: "call", instance: "node", id: "info", name: "local/sys.info", arguments: {}, timeoutMs: 5000 }); assert.ok(info.ok); assert.equal(info.data.result.structuredContent?.hostname, "fixture-device");
     assert.ok(gateway.calls.every((x) => x.origin === "panel")); assert.equal(JSON.stringify(info).includes(token), false);

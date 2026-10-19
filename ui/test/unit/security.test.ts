@@ -28,7 +28,7 @@ test("CSP: nothing remote, no inline code, no eval, no network from the page, no
   const csp = parseCsp(PANEL_CSP);
   assert.deepEqual(csp.get("default-src"), ["'none'"]);
   assert.deepEqual(csp.get("script-src"), ["'self'"]);
-  assert.deepEqual(csp.get("style-src"), ["'self'"]);
+  assert.deepEqual(csp.get("style-src"), ["'self'", "'nonce-__XMESH_STYLE_NONCE__'"]);
   assert.deepEqual(csp.get("connect-src"), ["'none'"]);
   assert.deepEqual(csp.get("object-src"), ["'none'"]);
   assert.deepEqual(csp.get("base-uri"), ["'none'"]);
@@ -36,7 +36,7 @@ test("CSP: nothing remote, no inline code, no eval, no network from the page, no
   assert.deepEqual(csp.get("frame-ancestors"), ["'none'"]);
   assert.doesNotMatch(PANEL_CSP, /unsafe-inline|unsafe-eval|https?:|\*/);
   for (const [directive, sources] of csp) {
-    for (const s of sources) assert.ok(["'none'", "'self'", "data:"].includes(s), `${directive} allows ${s}`);
+    for (const s of sources) assert.ok(["'none'", "'self'", "data:", "'nonce-__XMESH_STYLE_NONCE__'"].includes(s), `${directive} allows ${s}`);
   }
   assert.equal(panelHeaders("text/html")["Content-Security-Policy"], PANEL_CSP);
   assert.equal(panelHeaders("text/html")["X-Content-Type-Options"], "nosniff");

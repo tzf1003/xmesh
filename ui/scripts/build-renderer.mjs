@@ -1,6 +1,6 @@
 // Bundles the panel (src/renderer) into dist/renderer: app.js, styles.css, index.html.
 // One IIFE, no code splitting, no eval, no external requests: the page is served
-// from app://panel under a CSP that allows only same-origin scripts and styles.
+// from app://panel under the panel CSP; xterm styles are bundled beside it.
 
 import { build } from "esbuild";
 import * as fs from "node:fs";
@@ -31,3 +31,5 @@ await build({
 });
 
 for (const f of ["index.html", "styles.css"]) fs.copyFileSync(path.join(src, f), path.join(out, f));
+
+fs.copyFileSync(path.join(root, "node_modules/@xterm/xterm/css/xterm.css"), path.join(out, "xterm.css"));
