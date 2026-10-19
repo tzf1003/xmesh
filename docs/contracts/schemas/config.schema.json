@@ -335,11 +335,23 @@
             ]
           }
         },
+        "fs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_file_size": {
+              "type": "string",
+              "pattern": "^(unlimited|[1-9][0-9]*([KMGT]iB|B)?)$",
+              "default": "1GiB",
+              "description": "单个上传/下载文件的大小上限；unlimited 表示无限制。热更新生效。"
+            }
+          }
+        },
         "disabled_tools": {
           "type": "array",
           "uniqueItems": true,
           "description": "被关闭的内置工具名。缺省或空数组表示全部开启；调用被关闭的工具返回 policy_denied。",
-          "items": {"enum": ["backend.acquire", "backend.release", "backend.renew", "exec.output", "exec.run", "fs.delete", "fs.edit", "fs.glob", "fs.grep", "fs.list", "fs.mkdir", "fs.move", "fs.read", "fs.sha256", "fs.stat", "fs.write", "pty.close", "pty.list", "pty.open", "pty.read", "pty.resize", "pty.signal", "pty.transfer", "pty.write", "sys.info"]}
+          "items": {"enum": ["backend.acquire", "backend.release", "backend.renew", "exec.output", "exec.run", "fs.delete", "fs.download", "fs.edit", "fs.glob", "fs.grep", "fs.list", "fs.mkdir", "fs.move", "fs.read", "fs.sha256", "fs.stat", "fs.upload", "fs.write", "pty.close", "pty.list", "pty.open", "pty.read", "pty.resize", "pty.signal", "pty.transfer", "pty.write", "sys.info"]}
         },
         "authz": {
           "type": "object",

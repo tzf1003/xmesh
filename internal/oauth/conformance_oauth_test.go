@@ -240,6 +240,8 @@ func Test_CTROAUTH02_ToolToScopeTable(t *testing.T) {
 		{"pty.open", "", "pty:win"},
 		{"pty.write", "", "pty:win"},
 		{"fs.read", "", "fs:read:win"},
+		{"fs.download", "", "fs:read:win"},
+		{"fs.upload", "", "fs:write:win"},
 		{"fs.glob", "", "fs:read:win"},
 		{"fs.grep", "", "fs:read:win"},
 		{"fs.list", "", "fs:read:win"},

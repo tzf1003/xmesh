@@ -58,6 +58,7 @@ const lan: SettingsForm = {
   keyFile: "",
   defaultCwd: "/home/me/work",
   allowDirs: ["/home/me/work"],
+  maxFileSize: "1GiB",
 };
 const tailnetIngress: SettingsForm = {
   ...lan,
@@ -100,6 +101,7 @@ test("the form reads what the first run set, the ingress and the working directo
     keyFile: "/k",
     defaultCwd: "/w",
     allowDirs: ["/w", "/x"],
+    maxFileSize: "1GiB",
   });
 });
 
@@ -296,4 +298,18 @@ test("settings switch between browser identity and key files with a valid config
   assert.equal(parse(restored).mesh.authkey_file, tailnetIngress.authkeyFile);
   assert.ok(validateConfig(parse(restored)), JSON.stringify(validateConfig.errors));
   assert.deepEqual(formFromConfig(parse(restored)), tailnetIngress);
+});
+
+
+test("file transfer limits default to 1GiB and persist custom sizes or unlimited", () => {
+  for (const maxFileSize of ["512MiB", "2GiB", "unlimited", "9223372036854775807B"]) {
+    const f = { ...lan, maxFileSize };
+    assert.equal(checkSettingsForm(f), undefined);
+    const next = applySettingsForm(LAN_CONFIG, f)!;
+    assert.equal(formFromConfig(parse(next)).maxFileSize, maxFileSize);
+    assert.ok(validateConfig(parse(next)), JSON.stringify(validateConfig.errors));
+  }
+  for (const maxFileSize of ["0", "-1", "2GB", "1.5GiB", "9223372036854775808B", "99TiB garbage"]) {
+    assert.equal(checkSettingsForm({ ...lan, maxFileSize }), "max_file_size");
+  }
 });

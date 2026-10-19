@@ -38,6 +38,12 @@ go test -race ./...
 
 客户端使用有会话的 Streamable HTTP MCP。`--local` 是显式开发模式；当前实现进度和外部验收状态见 [实现记录](docs/implementation-status.md)。
 
+## 文件互传
+
+通过 MCP 调用 `<设备名>/fs.download` 下载原始字节，或用 `<设备名>/fs.upload` 上传到指定路径。本机 Gateway 的前缀为 `local/`。文件分块传输并验证 SHA-256，上传完成前保留原目标；默认拒绝同名冲突，`force: true` 才允许原子覆盖。
+
+单文件默认上限 **1 GiB**，可在「设置 → 文件互传」修改大小或选择「无限制」，保存后立即生效。配置项为 `agent.fs.max_file_size`，例如 `2GiB` 或 `unlimited`。分块上限固定 1 MiB，支持大文件且内存有界。路径受 allow/deny 策略约束，父目录须已存在。参数见[文件互传契约](docs/contracts/fs.md#ctr-fs-08)，客户端示例见 [`scripts/file_transfer.py`](scripts/file_transfer.py)。
+
 ## 命令
 
 同一个 `xmesh` 二进制提供以下子命令，参数运行 `xmesh help` 查看：
