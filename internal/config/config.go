@@ -421,6 +421,9 @@ func (c *Config) Validate() error {
 		}
 	}
 	for name, b := range c.Agent.Backends {
+		if name == "computer" {
+			return fail("/agent/backends/computer: 保留名称")
+		}
 		if b.ProcessCleanup != "" && b.ProcessCleanup != "tree" {
 			return fail("/agent/backends/" + name + "/process_cleanup")
 		}

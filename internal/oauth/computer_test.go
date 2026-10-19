@@ -53,3 +53,21 @@ func TestComputerScopesAndMixedModeOpen(t *testing.T) {
 		t.Fatal("clipboard scope exposed screen")
 	}
 }
+
+func TestComputerScopesDoNotAuthorizeBackendTools(t *testing.T) {
+	for _, tool := range []string{"computer.erase", "computer.clipboard", "computer.act_extra"} {
+		for _, scopes := range [][]string{{"computer:observe:*"}, {"computer:control:*"}} {
+			if Allows(scopes, "mac", tool, "") || Allows(scopes, "mac", tool, "computer") {
+				t.Fatalf("desktop scope authorized backend tool %s", tool)
+			}
+		}
+		if !Allows([]string{"backend:mac:computer"}, "mac", tool, "computer") {
+			t.Fatal("explicit backend scope was not evaluated", tool)
+		}
+	}
+	for _, tool := range []string{"computer.info", "computer.open", "computer.observe", "computer.act", "computer.action_status", "computer.renew", "computer.close", "computer.sessions"} {
+		if Allows([]string{"computer:control:mac"}, "mac", tool, "computer") {
+			t.Fatal("backend metadata bypassed its scope", tool)
+		}
+	}
+}

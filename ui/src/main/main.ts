@@ -29,7 +29,7 @@ import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
-import { computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
+import { ComputerEmergencyTargets, computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
 import { registerComputerShortcut } from "./computer-shortcut";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
@@ -202,6 +202,8 @@ async function start(): Promise<void> {
     ? recordingPlatform(showPanel, calls, answers)
     : electronPlatform(showPanel, notifyError);
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
+  const computerTargets = new ComputerEmergencyTargets();
+  controller.on("change", snapshot => computerTargets.observe(snapshot));
 
   const runAction = (a: Action): void => {
     void actions.dispatch(a);
@@ -298,8 +300,10 @@ async function start(): Promise<void> {
     update: new UpdateActions(updater),
   });
   if (!TEST_MODE) controller.setComputerShortcutAvailable(registerComputerShortcut(globalShortcut, () => {
+    const selected = controller.snapshot;
     void panelService.computer({ op: "pause", paused: true });
-    void emergencyStopComputerHost().catch((error: unknown) => notifyError(error instanceof Error ? error.message : String(error)));
+    void Promise.resolve().then(() => emergencyStopComputerHost(undefined, computerTargets.endpoint(selected)))
+      .catch((error: unknown) => notifyError(error instanceof Error ? error.message : String(error)));
   }));
   updater.on("change", (state) => controller.setUpdate(state));
 

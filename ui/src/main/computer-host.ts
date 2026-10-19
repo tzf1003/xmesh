@@ -2,19 +2,38 @@ import { execFile } from "node:child_process";
 import { xmeshBinary } from "./cli";
 import { kernelGone } from "./discovery";
 import { sameVersion } from "../shared/version";
+import type { Snapshot } from "../shared/state";
 import type { StopResult } from "./update/updater";
 
 export interface ComputerHostStatus { running: boolean; pid: number; version: string; native_pid?: number }
 export type ComputerHostCommand = "status" | "start" | "stop";
 
 /** Emergency stop reaches the user Host independently of kernel health. */
-export function emergencyStopComputerHost(binary: string = xmeshBinary()): Promise<void> {
+export function emergencyStopComputerHost(binary: string = xmeshBinary(), endpoint?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(binary, ["computer", "emergency-stop"], { timeout: 6000, windowsHide: true, maxBuffer: 64 * 1024 }, (error) => {
+    execFile(binary, ["computer", "emergency-stop", ...(endpoint ? ["--endpoint", endpoint] : [])], { timeout: 6000, windowsHide: true, maxBuffer: 64 * 1024 }, (error) => {
       if (error) reject(new Error("本机桌面共享紧急停止失败"));
       else resolve();
     });
   });
+}
+
+/** Retain each selected node's effective endpoint through kernel outages. */
+export class ComputerEmergencyTargets {
+  private readonly endpoints = new Map<string, string>();
+  observe(snapshot: Snapshot): void {
+    if (snapshot.connection.kind !== "connected" || !snapshot.selectedInstance) return;
+    const endpoint = snapshot.connection.status.paths.computer_endpoint;
+    if (endpoint) this.endpoints.set(snapshot.selectedInstance, endpoint);
+    else this.endpoints.delete(snapshot.selectedInstance);
+  }
+  endpoint(snapshot: Snapshot): string | undefined {
+    this.observe(snapshot);
+    if (!snapshot.selectedInstance) return undefined;
+    const endpoint = this.endpoints.get(snapshot.selectedInstance);
+    if (!endpoint) throw new Error("所选内核尚未提供桌面服务端点，请使用本机 Computer CLI 紧急停止");
+    return endpoint;
+  }
 }
 
 /** Lifecycle commands use a fixed program and argument list, never renderer data. */

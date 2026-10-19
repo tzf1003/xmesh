@@ -1312,6 +1312,10 @@ export interface Paths {
   config_file: string;
   state_dir: string;
   /**
+   * 当前生效的本机 Computer Host 端点，供紧急停止独立于内核调用。
+   */
+  computer_endpoint?: string;
+  /**
    * 日志不落文件（例如由服务管理器收集）时是 null。
    */
   log_dir: string | null;

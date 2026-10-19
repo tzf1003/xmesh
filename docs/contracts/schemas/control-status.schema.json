@@ -95,6 +95,7 @@
       "properties": {
         "config_file": { "type": "string", "minLength": 1 },
         "state_dir": { "type": "string", "minLength": 1 },
+        "computer_endpoint": { "type": "string", "minLength": 1, "description": "当前生效的本机 Computer Host 端点，供紧急停止独立于内核调用。" },
         "log_dir": { "type": ["string", "null"], "description": "日志不落文件（例如由服务管理器收集）时是 null。" },
         "audit_dir": { "type": ["string", "null"], "description": "审计未启用时是 null。" }
       }

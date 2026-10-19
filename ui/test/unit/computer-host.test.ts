@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { computerHostServices, type ComputerHostStatus } from "../../src/main/computer-host";
+import { ComputerEmergencyTargets, computerHostServices, type ComputerHostStatus } from "../../src/main/computer-host";
 
 test("updating a desktop host waits for process exit and verifies the restored version", async () => {
   let current: ComputerHostStatus = { running: true, pid: 10, version: "v0.1.0" };
@@ -48,4 +48,15 @@ test("replacement also waits for the native child after the host exits", async (
     run: async (command) => command === "status" ? { running: true, pid: 10, native_pid: 11, version: "0.1.0" } : undefined,
   });
   await assert.rejects(service.stop(), /旧桌面服务仍在运行/);
+});
+
+test("emergency stop retains the selected custom endpoint through kernel loss", () => {
+  const targets = new ComputerEmergencyTargets();
+  const snapshot = {
+    selectedInstance: "custom",
+    connection: { kind: "connected", status: { paths: { computer_endpoint: "/tmp/custom-computer.sock" } } },
+  } as any;
+  assert.equal(targets.endpoint(snapshot), "/tmp/custom-computer.sock");
+  snapshot.connection = { kind: "offline" };
+  assert.equal(targets.endpoint(snapshot), "/tmp/custom-computer.sock");
 });
