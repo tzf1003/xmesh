@@ -72,7 +72,7 @@ func remoteDrain(ctx context.Context, node drainSender, req v2.DrainRequest) ([]
 			defer func() { <-limit }()
 			attempt, stop := context.WithTimeout(ctx, time.Duration(timeoutMS)*time.Millisecond)
 			defer stop()
-			if err := node.SendDrain(attempt, peer, agent.DrainRequest{Scope: req.Scope, Device: req.Device, Drain: string(req.Mode)}); err != nil {
+			if err := node.SendDrain(attempt, peer, agent.DrainRequest{Scope: req.Scope, Device: peer.ID, Drain: string(req.Mode)}); err != nil {
 				result[index].Error = err.Error()
 			}
 		})
@@ -81,10 +81,14 @@ func remoteDrain(ctx context.Context, node drainSender, req v2.DrainRequest) ([]
 	return result, nil
 }
 
-func deviceDrainControl(auth agent.Authenticate, name, id string, local *agent.Agent, registry *gatewayRegistry, management sync.Locker) http.Handler {
-	var drain func(bool)
-	if local != nil {
-		drain = local.Drain
+func deviceDrainControl(auth agent.Authenticate, name, id string, local *agent.Agent, registry *gatewayRegistry, management sync.Locker, drainCI func(bool)) http.Handler {
+	drain := func(kill bool) {
+		if local != nil {
+			local.Drain(kill)
+		}
+		if drainCI != nil {
+			drainCI(kill)
+		}
 	}
 	return agent.DrainControl(auth, func() (string, string) { return name, id }, drain, registry.drain, management)
 }

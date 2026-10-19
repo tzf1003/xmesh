@@ -71,3 +71,32 @@ func TestDeviceMigrationPreservesLocalTailnetGrant(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceMigrationPreservesAliasedTailnetGrant(t *testing.T) {
+	raw := []byte(`
+node: {name: old-node, roles: [agent]}
+mesh: {mode: tailnet, control_url: https://controlplane.tailscale.com, auth_method: browser}
+<<: &defaults
+  agent:
+    authz: &shared-authz
+      tag:device: {tools: [sys.info], backends: []}
+agent:
+  cwd_policy: {allow: []}
+  authz: *shared-authz
+`)
+	before, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	converted, err := MigrateDeviceConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := Parse(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after.Agent.Authz["tag:peer"], before.Agent.Authz["tag:device"]) {
+		t.Fatal("aliased authorization lost", string(converted))
+	}
+}

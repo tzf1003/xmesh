@@ -7,7 +7,7 @@ import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { DisplayStore } from "./display-store";
 import { GatewayCredentials } from "./gateway-token";
-import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
+import { discoverConfigured, discoverInstances, stateRoots, type Instance } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import * as fs from "node:fs";
@@ -32,6 +32,7 @@ import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
 import { computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
 import { registerComputerShortcut } from "./computer-shortcut";
+import { KernelConfigs } from "./update/kernel-configs";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -130,12 +131,12 @@ async function start(): Promise<void> {
         ? macApplier(process.execPath)
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
+  const kernelConfigs = new KernelConfigs(path.join(app.getPath("userData"), "kernel-configs.json"), runXmeshSetup);
   const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw,
-    ...(!TEST_MODE && kernelBundled && {prepare: async (node: string): Promise<void> => {
-      if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node)) throw new Error("Invalid node name");
-      const dir = roots.map((root) => path.join(root, node)).find((dir) => fs.existsSync(path.join(dir, "xmesh.yaml")));
-      if (dir) await runXmeshSetup(["migrate", "--config", path.join(dir, "xmesh.yaml"), "--state-dir", dir]);
-    }}),
+    ...(!TEST_MODE && kernelBundled && {
+      beforeStop: (node: string, instance: Instance) => kernelConfigs.capture(node, instance),
+      prepare: (node: string) => kernelConfigs.prepare(node),
+    }),
     ...(kernelBundled && { version: app.getVersion() }) });
   const updateComputer = computerHostServices({ run: (command) => runComputerHost(command), version: app.getVersion() });
   const updater = new Updater({

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/tzf1003/xmesh/internal/ci"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/identity"
@@ -20,6 +21,38 @@ import (
 
 type deadlineDrainSender struct {
 	budget chan time.Duration
+}
+
+type aliasDrainSender struct{ received agent.DrainRequest }
+
+func (s *aliasDrainSender) Peers(context.Context) ([]mesh.Peer, error) {
+	return []mesh.Peer{{ID: "dev-persistent", Name: "workstation-1234", Online: true, Tags: []string{"tag:device"}}}, nil
+}
+func (s *aliasDrainSender) SendDrain(_ context.Context, _ mesh.Peer, req agent.DrainRequest) error {
+	s.received = req
+	return nil
+}
+func TestRemoteDrainResolvesAliasToPersistentID(t *testing.T) {
+	sender := new(aliasDrainSender)
+	_, err := remoteDrain(t.Context(), sender, v2.DrainRequest{Scope: "device", Device: "workstation-1234", Mode: "keep"})
+	if err != nil || sender.received.Device != "dev-persistent" {
+		t.Fatal(sender.received, err)
+	}
+}
+
+func TestRemoteDrainUpdatesCIRunnersOnlyAfterAdminAuthorization(t *testing.T) {
+	mgr := ci.New(ci.Options{StateDir: t.TempDir(), Config: func() config.CI { return config.CI{} }})
+	defer mgr.Shutdown(time.Second)
+	for _, tag := range []string{"tag:peer", "tag:admin"} {
+		handler := deviceDrainControl(func(*http.Request) (identity.Principal, error) {
+			return identity.Principal{Node: "caller", Tags: []string{tag}}, nil
+		}, "target", "dev-target", nil, newGatewayRegistry(), new(sync.Mutex), func(bool) { mgr.SetDraining(true) })
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest("POST", "/control/drain", strings.NewReader(`{"scope":"device","device":"dev-target","drain":"keep"}`)))
+		if mgr.Overview().Draining != (tag == "tag:admin") {
+			t.Fatal("CI drain authorization boundary", tag, response.Code, mgr.Overview())
+		}
+	}
 }
 
 func (s deadlineDrainSender) Peers(context.Context) ([]mesh.Peer, error) {
@@ -73,7 +106,7 @@ func TestRoleOnlyNodeRemoteDrainUsesAdminBoundary(t *testing.T) {
 		registry := newGatewayRegistry()
 		handler := deviceDrainControl(func(*http.Request) (identity.Principal, error) {
 			return identity.Principal{Node: "admin", Tags: []string{item.tag}}, nil
-		}, "role-only", "node-id", nil, registry, new(sync.Mutex))
+		}, "role-only", "node-id", nil, registry, new(sync.Mutex), nil)
 		body := `{"scope":"` + item.scope + `","device":"` + item.device + `","drain":"keep"}`
 		request := httptest.NewRequest("POST", "http://device/control/drain", strings.NewReader(body))
 		response := httptest.NewRecorder()
@@ -108,7 +141,7 @@ func TestRoleOnlyRemoteDrainIsVisibleAndResumable(t *testing.T) {
 	client := control.NewClient(endpoint)
 	handler := deviceDrainControl(func(*http.Request) (identity.Principal, error) {
 		return identity.Principal{Node: "admin", Tags: []string{"tag:admin"}}, nil
-	}, cfg.Node.Name, "node-id", nil, registry, management)
+	}, cfg.Node.Name, "node-id", nil, registry, management, nil)
 	for _, scope := range []string{"device", "mesh"} {
 		request := httptest.NewRequest("POST", "http://device/control/drain", strings.NewReader(`{"scope":"`+scope+`","device":"node-id","drain":"keep"}`))
 		response := httptest.NewRecorder()

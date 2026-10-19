@@ -237,7 +237,7 @@ func TestRemoteDrainUsesDeviceTrustAndPersistentTargetID(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer := mesh.Peer{ID: b.identity.ID, Name: "local-alias"}
-	req := agent.DrainRequest{Scope: "device", Device: peer.ID, Drain: "keep"}
+	req := agent.DrainRequest{Scope: "device", Device: peer.Name, Drain: "keep"}
 	if err := a.SendDrain(t.Context(), peer, req); err == nil || ag.Draining() {
 		t.Fatal("network reachability granted administration", err)
 	}
