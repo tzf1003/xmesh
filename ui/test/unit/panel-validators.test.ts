@@ -1,3 +1,4 @@
+import { PAIR_TAG_CHOICES } from "../../src/renderer/lib/pair";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -127,6 +128,8 @@ test("pair import requires the typed fingerprint and a well-formed document", ()
   assert.deepEqual(parsePairImport(ok), ok);
   assert.ok(parsePairImport({ ...ok, fingerprint: FP.match(/../g)!.join(":") }));
   assert.deepEqual(parsePairImport({ ...ok, tags: ["tag:device"] })?.tags, ["tag:device"]);
+  assert.ok(PAIR_TAG_CHOICES.includes("tag:admin"));
+  for (const tag of PAIR_TAG_CHOICES) assert.deepEqual(parsePairImport({ ...ok, tags: [tag] })?.tags, [tag]);
   // files written by `xmesh pair --export` of earlier kernels carry "tags": null
   assert.deepEqual(parsePairImport({ pair: { ...pair, tags: null }, fingerprint: FP })?.pair.tags, []);
   const { tags: _omitted, ...withoutTags } = pair;
@@ -135,7 +138,7 @@ test("pair import requires the typed fingerprint and a well-formed document", ()
     { pair },
     { ...ok, fingerprint: "abcd" },
     { ...ok, tags: [] },
-    { ...ok, tags: ["tag:admin"] },
+    { ...ok, tags: ["tag:unknown"] },
     { ...ok, tags: ["tag:peer", "tag:peer"] },
     { ...ok, extra: 1 },
     { pair: { ...pair, public_key: "nope" }, fingerprint: FP },

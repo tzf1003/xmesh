@@ -24,6 +24,17 @@ func (a *Agent) Control(auth Authenticate, onDrain func(string)) http.Handler {
 
 // ControlSerialized shares the runtime management lock with local drain/resume.
 func (a *Agent) ControlSerialized(auth Authenticate, onDrain func(string), management sync.Locker) http.Handler {
+	return DrainControl(auth, func() (string, string) {
+		id := ""
+		if info := a.networkInfo.Load(); info != nil {
+			id = info.Node
+		}
+		return a.store.Get().Node.Name, id
+	}, a.Drain, onDrain, management)
+}
+
+// DrainControl enforces device-admin authorization for nodes with any role set.
+func DrainControl(auth Authenticate, target func() (string, string), drain func(bool), onDrain func(string), management sync.Locker) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/control/drain" || r.Method != "POST" {
 			http.NotFound(w, r)
@@ -54,11 +65,7 @@ func (a *Agent) ControlSerialized(auth Authenticate, onDrain func(string), manag
 			_ = json.NewEncoder(w).Encode(toolerr.Args("drain").Object())
 			return
 		}
-		name := a.store.Get().Node.Name
-		deviceID := ""
-		if info := a.networkInfo.Load(); info != nil {
-			deviceID = info.Node
-		}
+		name, deviceID := target()
 		if request.Scope == "device" && request.Device != name && (deviceID == "" || request.Device != deviceID) {
 			http.Error(w, "目标设备不存在", 404)
 			return
@@ -67,7 +74,9 @@ func (a *Agent) ControlSerialized(auth Authenticate, onDrain func(string), manag
 			management.Lock()
 			defer management.Unlock()
 		}
-		a.Drain(request.Drain == "kill")
+		if drain != nil {
+			drain(request.Drain == "kill")
+		}
 		if onDrain != nil {
 			if request.Scope == "mesh" {
 				onDrain("")

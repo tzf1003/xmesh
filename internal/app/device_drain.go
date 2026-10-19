@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -78,4 +79,12 @@ func remoteDrain(ctx context.Context, node drainSender, req v2.DrainRequest) ([]
 	}
 	workers.Wait()
 	return result, nil
+}
+
+func deviceDrainControl(auth agent.Authenticate, name, id string, local *agent.Agent, registry *gatewayRegistry, management sync.Locker) http.Handler {
+	var drain func(bool)
+	if local != nil {
+		drain = local.Drain
+	}
+	return agent.DrainControl(auth, func() (string, string) { return name, id }, drain, registry.drain, management)
 }

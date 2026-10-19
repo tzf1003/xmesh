@@ -110,6 +110,10 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   await expect(page.getByTestId("pair-mismatch")).toBeVisible();
   await expect(page.getByTestId("pair-import")).toBeDisabled();
 
+
+  const admin = page.getByRole("checkbox", { name: "tag:admin", exact: true });
+  await expect(admin).not.toBeChecked();
+  await admin.check();
   await page.getByTestId("pair-typed").fill(FP.toUpperCase());
   await expect(page.getByTestId("pair-import")).toBeEnabled();
   await page.getByTestId("pair-import").click();
@@ -118,6 +122,7 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   // The shared trust store applies the import immediately.
   await expect(page.getByTestId("apply-restart-needed")).toHaveCount(0);
   expect(h.kernel.panel.imported.map((i) => i.name)).toEqual(["peer-2"]);
+  expect(h.kernel.panel.imported[0]?.tags).toContain("tag:admin");
 });
 
 test("devices: pairing is available on a tailnet node", async () => {

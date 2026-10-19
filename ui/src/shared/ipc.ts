@@ -492,7 +492,7 @@ const ETAG = /^sha256-[0-9a-f]{64}$/;
 const FINGERPRINT = /^([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}$/;
 const CLIENT_ID = /^[\x21-\x7e]{1,256}$/;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
-const PAIR_TAGS = ["tag:peer", "tag:device", "tag:ingress"] as const;
+const PAIR_TAGS = ["tag:peer", "tag:device", "tag:ingress", "tag:admin"] as const;
 
 /** PUT /v2/config accepts at most 1 MiB; this counts bytes, not UTF-16 units. */
 export const CONFIG_MAX_BYTES = 1024 * 1024;

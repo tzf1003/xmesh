@@ -141,8 +141,8 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	listeners := []net.Listener{}
 	registry := newGatewayRegistry()
 	management := new(sync.Mutex)
-	if devices != nil && a != nil {
-		devices.SetAdmin(a.ControlSerialized(devices.Authenticate, registry.drain, management))
+	if devices != nil {
+		devices.SetAdmin(deviceDrainControl(devices.Authenticate, c.Node.Name, self.Node, a, registry, management))
 	}
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
@@ -297,6 +297,9 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if devices != nil {
 			devices.Reconfigure(next.Mesh)
 		}
+		if a != nil {
+			setAgentNetwork(a, next, o.Local, self)
+		}
 		for _, g := range registry.all() {
 			g.Reconfigure(next.Gateway.Quota, next.Gateway.ExposeBackends == "favorite")
 		}
@@ -342,8 +345,9 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)
 	defer stopCI()
 	defer startControl(controlDeps{management: management, ci: ciMgr, ciAccounts: ciAccounts, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
-		drain:  func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },
-		resume: func() { registry.resume(c.Node.Name, ""); ciMgr.SetDraining(false) }})()
+		isDraining: func() bool { return registry.draining(c.Node.Name) },
+		drain:      func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },
+		resume:     func() { registry.resume(c.Node.Name, ""); ciMgr.SetDraining(false) }})()
 	select {
 	case <-ctx.Done():
 		return nil
@@ -366,4 +370,12 @@ func localAgentPrincipal(self identity.Principal, p gateway.Principal) identity.
 		self.Tags = []string{"tag:ingress"}
 	}
 	return self
+}
+
+func setAgentNetwork(a *agent.Agent, cfg *config.Config, local bool, self identity.Principal) {
+	mode := cfg.Mesh.NetworkMode()
+	if local {
+		mode = "local"
+	}
+	a.SetNetwork(mode, self)
 }

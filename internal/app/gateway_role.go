@@ -67,6 +67,12 @@ func (r *gatewayRegistry) drain(name string) {
 	}
 }
 
+func (r *gatewayRegistry) draining(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pending[name] || r.pending[""]
+}
+
 // resume undoes drain for the names.
 func (r *gatewayRegistry) resume(names ...string) {
 	r.mu.Lock()

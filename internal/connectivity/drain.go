@@ -3,6 +3,8 @@ package connectivity
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/device"
@@ -26,22 +28,20 @@ func (n *Node) SendDrain(ctx context.Context, peer mesh.Peer, req agent.DrainReq
 		if !path.Reachable {
 			continue
 		}
-		budget := 5 * time.Second
-		if path.Kind == device.LAN {
-			budget = 2 * time.Second
-		}
-		attempt, stop := context.WithTimeout(ctx, budget)
+
 		client, err := n.httpClient(path.Kind, peer.ID, false)
 		if err == nil {
+			// Dial/TLS setup remains bounded by the transport. The response uses
+			// the administrator's per-device deadline, including long drain work.
+			configureDrainTransport(client.Transport.(*http.Transport), path.Kind)
 			target := peer
 			target.Address = path.Address
 			if req.Scope == "device" {
 				req.Device = peer.ID
 			}
-			err = agent.SendDrain(attempt, client, target, req)
+			err = agent.SendDrain(ctx, client, target, req)
 			client.CloseIdleConnections()
 		}
-		stop()
 		if err == nil {
 			return nil
 		}
@@ -51,4 +51,21 @@ func (n *Node) SendDrain(ctx context.Context, peer mesh.Peer, req agent.DrainReq
 		return errors.New("设备没有已验证的可用路径")
 	}
 	return errors.Join(failures...)
+}
+
+func configureDrainTransport(transport *http.Transport, kind device.PathKind) {
+	transport.ResponseHeaderTimeout = 0
+	budget := 5 * time.Second
+	if kind == device.LAN {
+		budget = 2 * time.Second
+	}
+	dial := transport.DialContext
+	if dial == nil {
+		dial = (&net.Dialer{}).DialContext
+	}
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		attempt, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
+		return dial(attempt, network, address)
+	}
 }

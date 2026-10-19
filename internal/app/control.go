@@ -44,6 +44,7 @@ type controlDeps struct {
 	pairing    control.PairingAdmin // nil unless the node runs the LAN network
 	drain      func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume     func()
+	isDraining func() bool
 	management *sync.Mutex
 	// peerInfo is the gateways' sys.info readings by device; ok is false while the node runs no gateway.
 	peerInfo func() (readings map[string]gateway.DeviceInfo, ok bool)
@@ -189,11 +190,15 @@ func (h *controlHost) warnings(cfg *config.Config, st v2.StatusResponse) []v2.Wa
 	if h.firewall.Blocked() {
 		add(v2.WarnFirewallBlocked, v2.SeverityWarning, "Windows 防火墙阻止了本程序的入站连接，其他设备可能连不上本节点：请在 Windows 安全中心的防火墙设置里删除对 xmesh 的阻止规则")
 	}
-	if cfg.Mesh.Mode == "tailnet" {
+	tailnet, authMethod := cfg.Mesh.Mode == "tailnet", cfg.Mesh.AuthMethod
+	if cfg.SchemaVersion == 2 {
+		tailnet, authMethod = cfg.Mesh.TailnetEnabled(), cfg.Mesh.Tailnet.AuthMethod
+	}
+	if tailnet {
 		if h.d.network == nil {
 			add(v2.WarnTailnetNotReady, v2.SeverityWarning, "尚未加入 tailnet")
 		}
-		if cfg.Mesh.AuthMethod != "browser" && !st.AuthkeyReadable {
+		if authMethod != "browser" && !st.AuthkeyReadable {
 			add(v2.WarnAuthkeyUnreadable, v2.SeverityWarning, "无法读取 authkey_file")
 		}
 	}
@@ -239,7 +244,7 @@ func (h *controlHost) Draining() bool {
 	if h.d.agent != nil {
 		return h.d.agent.Draining()
 	}
-	return h.flagged.Load()
+	return h.flagged.Load() || (h.d.isDraining != nil && h.d.isDraining())
 }
 
 func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {

@@ -82,7 +82,8 @@
             "enum": [
               "tag:peer",
               "tag:device",
-              "tag:ingress"
+              "tag:ingress",
+              "tag:admin"
             ]
           },
           "default": [
