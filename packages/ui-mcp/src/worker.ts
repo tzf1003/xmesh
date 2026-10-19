@@ -161,6 +161,17 @@ process.on("message", async (raw: unknown) => {
         } catch {
           emit({ kind: "evidence_incomplete", reason: "screenshot_failed" });
         }
+        const applicationExited =
+          !driver ||
+          (driver.browser && !driver.browser.isConnected()) ||
+          (driver.electronApp &&
+            (driver.electronApp.process().exitCode !== null ||
+              driver.electronApp.process().signalCode !== null));
+        if (applicationExited)
+          throw new UIError(
+            "application_exited",
+            "test application exited during run",
+          );
         throw e;
       } finally {
         if (tracing) {

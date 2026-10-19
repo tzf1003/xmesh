@@ -73,8 +73,52 @@ test("unexpected worker exits preserve completed steps and flag uncertain writes
       ),
     );
     assert.equal(persisted.outcome_unknown, true);
-    // A script can die after completing its last instrumented phase.
     await controller.closeSession(opened.session_id as string);
+    // Browser death can deliver a failed step before the worker reports the
+    // application_exited reply; that completed journal entry is still uncertain.
+    const closedApp = await controller.open("web");
+    const closingRun = controller.submit({
+      protocol_version: 1,
+      session_id: closedApp.session_id as string,
+      request_id: "application-close",
+      steps: [
+        {
+          id: "write",
+          action: "click",
+          target: { role: "button", name: "Search" },
+        },
+        {
+          id: "waiting",
+          action: "fill",
+          target: { label: "absent-field" },
+          value: "pending",
+        },
+      ],
+    });
+    await until(
+      () =>
+        (controller.result(closingRun.run_id) as any).steps[1].status ===
+        "started",
+    );
+    const closingSession = (controller as any).sessions.get(
+      closedApp.session_id,
+    );
+    const browserProcess = closingSession.processes.find(
+      (owned: any) => owned.pid !== closingSession.child.pid,
+    );
+    assert.ok(browserProcess);
+    process.kill(browserProcess.pid, "SIGKILL");
+    const appResult = await finished(controller, closingRun.run_id);
+    assert.equal(
+      appResult.status,
+      "interrupted",
+      JSON.stringify(appResult.error),
+    );
+    assert.equal(appResult.steps[1]!.status, "failed");
+    assert.equal(appResult.outcome_unknown, true);
+    assert.equal(appResult.evidence_incomplete, true);
+    await controller.closeSession(closedApp.session_id as string);
+    // A script can die after completing its last instrumented phase.
     const scripted = await controller.open("web");
     const script = controller.submit(
       {

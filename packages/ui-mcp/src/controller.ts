@@ -752,6 +752,7 @@ export class Controller {
       run.result.status = run.stopState ?? run.result.status;
       if (run.stopState || run.result.status === "interrupted") {
         run.result.outcome_unknown =
+          run.result.status === "interrupted" ||
           run.result.steps.some((s) => s.status === "started") ||
           run.result.mode === "script";
         run.result.evidence_incomplete = true;
