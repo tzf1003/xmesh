@@ -108,7 +108,7 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
                   </button>
                 ))}
               </div>
-              <div role="tabpanel" data-testid={`mesh-panel-${tab}`}>
+              <div class="section-stack" role="tabpanel" data-testid={`mesh-panel-${tab}`}>
                 {tab === "devices" && <MeshDevices ctx={ctx} status={status} reloadStatus={reload} />}
                 {tab === "onboard" && <MeshOnboard ctx={ctx} status={status} reloadStatus={reload} />}
                 {tab === "matrix" && <MeshMatrix ctx={ctx} status={status} reloadStatus={reload} />}
@@ -130,7 +130,7 @@ function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; s
   const t = useT();
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { if (tab === "derp" && draft.document && draft.document.text !== draft.text) void draft.edit({}); }, [tab]);
-  return <div hidden={tab !== "policy" && tab !== "derp"}>
+  return <div class="section-stack" hidden={tab !== "policy" && tab !== "derp"}>
     <section class="card" data-testid="mesh-policy-workspace">
       <p>{t("mesh.draft.intro")}</p>
       <div class="row">

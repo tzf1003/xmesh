@@ -282,7 +282,7 @@ function SecretDialog({ secret, onClose }: { secret: PatSecret; onClose: () => v
 /** Shown once the config is read: the MCP servers, the built-in tool switches and the tag grants. They share one read and one write path. */
 function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
-  const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance]);
+  const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance, ctx.configRevision]);
   const writable = ctx.can("config.write");
   useEffect(() => { if (ctx.focus?.section === "mcp" && resource.state === "ready") document.getElementById("mcp-servers")?.scrollIntoView({ block: "start" }); }, [ctx.focus, resource.state]);
 

@@ -67,7 +67,6 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
     if (!status.gateway) return;
     void getApi().copyGateway({ kind: "codexConfig", url: status.gateway.url }).then((r) => ctx.toast(r.ok ? t("overview.copied") : errorText(t, r.error), !r.ok));
   };
-  const connect = (): void => document.getElementById("overview-advanced")?.setAttribute("open", "");
   const onboard = (): void => status.network.mode === "tailnet" ? ctx.go("mesh", { meshTab: "onboard" }) : ctx.go("devices");
   return <div class="network-workspace" data-testid="topology-workspace">
     <div class="network-main">
@@ -144,7 +143,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
           <dl class="inspector-kv"><dt>{t("col.connection")}</dt><dd>{connectionText(picked, t)}</dd><dt>{t("col.addrs")}</dt><dd class="mono">{picked.addrs.join("\n") || "—"}</dd><dt>{t("topology.kernel")}</dt><dd class="mono">{picked.version ?? "—"}</dd><dt>{t("col.lastSeen")}</dt><dd>{picked.self || picked.online ? t("devices.online") : lastSeen(picked, t)}</dd></dl>
           {picked.info?.error && <p class="inspector-warning">{t("devices.infoFailed")}: {picked.info.error}</p>}
           {picked.self ? <>
-            {status.gateway && <div class="inspector-section"><h3>Gateway</h3><code class="inspector-url">{status.gateway.url}</code><p class="hint">{t("topology.addresses", { n: status.gateway.addresses.length })}</p><button type="button" class="btn" onClick={copy}><Icon name="copy"/>{t("overview.copyCodex")}</button><button type="button" class="text-button" onClick={() => { connect(); document.getElementById("gateway-panel")?.scrollIntoView({ block: "start", behavior: "smooth" }); }}>{t("topology.manageGateway")}<Icon name="chevron"/></button></div>}
+            {status.gateway && <div class="inspector-section"><h3>Gateway</h3><code class="inspector-url">{status.gateway.url}</code><p class="hint">{t("topology.addresses", { n: status.gateway.addresses.length })}</p><button type="button" class="btn" onClick={copy}><Icon name="copy"/>{t("overview.copyCodex")}</button><button type="button" class="text-button" onClick={() => ctx.go("runtime")}>{t("topology.manageGateway")}<Icon name="chevron"/></button></div>}
             <div class="inspector-section"><h3>{t("overview.quota")}</h3><Meter used={status.limits.pty_in_use} max={status.limits.pty_max_sessions} label={t("overview.pty")}/><Meter used={status.limits.exec_shared_in_use} max={status.limits.exec_shared} label={t("overview.execShared")}/><Meter used={status.limits.exec_exclusive_in_use} max={status.limits.exec_exclusive} label={t("overview.execExclusive")}/></div>
           </> : <button type="button" class="btn" onClick={() => ctx.go("mesh")}>{t("topology.manageDevice")}<Icon name="chevron"/></button>}
         </>}
