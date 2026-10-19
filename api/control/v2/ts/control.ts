@@ -915,7 +915,7 @@ export interface ConfigReloadResponse {
 }
 export interface ApplyError {
   /**
-   * 没能生效的部分，目前是 gateway。
+   * 没能生效的部分：gateway、ingress、mesh.lan 或 mesh.tailnet。
    */
   section: string;
   /**

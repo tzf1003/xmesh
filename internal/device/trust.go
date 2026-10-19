@@ -335,7 +335,7 @@ func (s *TrustStore) VerifyCertificate(cert *x509.Certificate, expected string) 
 }
 
 func (s *TrustStore) TLS(i *Identity, expected string, server bool) *tls.Config {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{i.Certificate}}
+	cfg := i.tlsConfig()
 	if server {
 		cfg.ClientAuth = tls.RequireAnyClientCert
 	} else {

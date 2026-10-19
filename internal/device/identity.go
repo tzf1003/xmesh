@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/filelock"
@@ -30,6 +31,7 @@ type Identity struct {
 	ID          string
 	Certificate tls.Certificate
 	privateKey  ed25519.PrivateKey
+	current     atomic.Pointer[tls.Certificate]
 }
 
 type identityFile struct {
@@ -91,6 +93,10 @@ func identityForKey(key ed25519.PrivateKey, now time.Time) (*Identity, error) {
 // LoadIdentity creates or loads identity-v2/identity.json under stateDir. The single atomic
 // record keeps a concurrent first start or an interrupted write from separating the key and cert.
 func LoadIdentity(ctx context.Context, stateDir string) (*Identity, error) {
+	return loadIdentityAt(ctx, stateDir, time.Now())
+}
+
+func loadIdentityAt(ctx context.Context, stateDir string, now time.Time) (*Identity, error) {
 	dir := filepath.Join(stateDir, "identity-v2")
 	if err := privdir.Ensure(dir); err != nil {
 		return nil, err
@@ -140,8 +146,8 @@ func LoadIdentity(ctx context.Context, stateDir string) (*Identity, error) {
 		return nil, fmt.Errorf("设备证书与私钥不一致")
 	}
 	identity := &Identity{ID: id, privateKey: key, Certificate: tls.Certificate{Certificate: [][]byte{leaf.Raw}, PrivateKey: key, Leaf: leaf}}
-	if time.Until(leaf.NotAfter) < 30*24*time.Hour || time.Now().Before(leaf.NotBefore) {
-		identity, err = identityForKey(key, time.Now())
+	if leaf.NotAfter.Sub(now) < 30*24*time.Hour || now.Before(leaf.NotBefore) {
+		identity, err = identityForKey(key, now)
 		if err != nil {
 			return nil, err
 		}
@@ -152,12 +158,51 @@ func LoadIdentity(ctx context.Context, stateDir string) (*Identity, error) {
 	return identity, nil
 }
 
+// TLSCertificate returns an immutable snapshot for a single handshake.
+func (i *Identity) TLSCertificate() *tls.Certificate {
+	if current := i.current.Load(); current != nil {
+		return current
+	}
+	return &i.Certificate
+}
+
+// Refresh renews the persisted certificate before expiry, retaining the same public key.
+func (i *Identity) Refresh(ctx context.Context, stateDir string) error {
+	now, certificate := time.Now(), i.TLSCertificate()
+	if !now.Before(certificate.Leaf.NotBefore) && certificate.Leaf.NotAfter.Sub(now) >= 30*24*time.Hour {
+		return nil
+	}
+	updated, err := LoadIdentity(ctx, stateDir)
+	if err != nil {
+		return err
+	}
+	if updated.ID != i.ID {
+		return fmt.Errorf("设备身份文件的公钥发生变化")
+	}
+	i.current.Store(updated.TLSCertificate())
+	return nil
+}
+
+func (i *Identity) tlsConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{*i.TLSCertificate()},
+		GetCertificate:       func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return i.TLSCertificate(), nil },
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return i.TLSCertificate(), nil },
+	}
+	cfg.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		current := cfg.Clone()
+		current.GetConfigForClient = nil
+		current.Certificates = []tls.Certificate{*i.TLSCertificate()}
+		return current, nil
+	}
+	return cfg
+}
+
 func saveIdentity(path string, id *Identity) error {
 	key, err := x509.MarshalPKCS8PrivateKey(id.privateKey)
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(identityFile{Version, key, id.Certificate.Certificate[0]})
+	raw, err := json.Marshal(identityFile{Version, key, id.TLSCertificate().Certificate[0]})
 	if err != nil {
 		return err
 	}

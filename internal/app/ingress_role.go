@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/identity"
+	"github.com/tzf1003/xmesh/internal/mcpmux"
+	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 	"golang.org/x/crypto/acme/autocert"
@@ -164,7 +167,11 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 	if e != nil {
 		return nil, e
 	}
-	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, Ingress: true, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Discover: deps.discover, Changed: deps.changed, Dial: deps.dial, Audit: deps.log, PTYBudget: ptyBudget})
+	ingressDial := func(ctx context.Context, peer mesh.Peer, principal gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+		principal.Ingress = true
+		return deps.dial(ctx, peer, principal, opts)
+	}
+	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, Ingress: true, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Discover: deps.discover, Changed: deps.changed, Dial: ingressDial, Audit: deps.log, PTYBudget: ptyBudget})
 	deps.registry.add(g)
 	// Read the generation after registering, so a change landing between the two is either seen here
 	// or delivered to the subscription.

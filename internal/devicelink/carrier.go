@@ -73,6 +73,7 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 					break
 				}
 				l.attachedEpoch = c.epoch
+				l.detachedAt = time.Time{}
 				err = p.queueLocked(frame{Type: "opened", OpenID: l.openID, SessionID: l.session.id, Token: l.token, Ack: l.session.Received()})
 				break
 			}
@@ -137,6 +138,7 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 				break
 			}
 			l.attachedEpoch = c.epoch
+			l.detachedAt = time.Time{}
 			err = p.queueLocked(frame{Type: "resumed", SessionID: value.SessionID, Ack: l.session.Received()})
 		case "resumed":
 			l := p.sessions[value.SessionID]

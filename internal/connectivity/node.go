@@ -144,6 +144,18 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	}
 	if supervise {
 		n.workers.Go(n.supervise)
+		n.workers.Go(func() {
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-n.ctx.Done():
+					return
+				case <-ticker.C:
+					_ = n.identity.Refresh(n.ctx, n.stateDir)
+				}
+			}
+		})
 	}
 	n.mu.Lock()
 	n.stopParent = context.AfterFunc(parent, func() { _ = n.Close() })
@@ -521,17 +533,7 @@ func (n *Node) Addresses(ctx context.Context) ([]netip.Addr, string, error) {
 var ErrNoAddress = errors.New("设备网络地址尚未就绪")
 
 func (n *Node) Funnel() (net.Listener, error) {
-	n.mu.Lock()
-	p := n.providers[device.Tailnet]
-	var server *tsnet.Server
-	if p != nil {
-		server = p.ts
-	}
-	n.mu.Unlock()
-	if server == nil {
-		return nil, ErrNoAddress
-	}
-	return server.ListenFunnel("tcp", ":443")
+	return n.listenTailnetPort(443, true)
 }
 
 // supervise applies one configuration snapshot at a time; providers run independently.
