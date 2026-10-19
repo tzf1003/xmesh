@@ -2,7 +2,7 @@ import type { JSX } from "preact";
 import { useState } from "preact/hooks";
 import type { PageContext } from "../../app";
 import { getApi } from "../../api";
-import { Field } from "../../components";
+import { Confirm, Field } from "../../components";
 import { useT } from "../../i18n";
 import type { ActionError } from "../../../shared/ipc";
 import { type MeshAccess, type MeshControlPlane, parseMeshRequest } from "../../../shared/mesh";
@@ -20,12 +20,14 @@ export function MeshLogin({
   open,
   onSaved,
   verify,
+  draftDirty = false,
 }: {
   ctx: PageContext;
   open: boolean;
   onSaved(): void;
   /** Runs after a save; resolves to the failure to show, if the credential does not work. */
   verify?: () => Promise<ActionError | undefined>;
+  draftDirty?: boolean;
 }): JSX.Element {
   const t = useT();
   const [kind, setKind] = useState<MeshControlPlane>("tailscale");
@@ -36,6 +38,7 @@ export function MeshLogin({
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError | undefined>();
+  const [asking, setAsking] = useState(false);
   const headscale = kind === "headscale";
   // The same validation the main process applies; an invalid form is never sent.
   const parsed = parseMeshRequest({
@@ -63,6 +66,9 @@ export function MeshLogin({
       setBusy(false);
       return setErr(r.error);
     }
+    // The CLI has already verified and replaced the credential file. Retire
+    // the old draft even if the additional status read fails transiently.
+    onSaved();
     // Say whether it actually works, not just that it was stored.
     let bad: ActionError | undefined;
     try { bad = verify === undefined ? undefined : await verify(); }
@@ -70,7 +76,6 @@ export function MeshLogin({
     setBusy(false);
     if (bad !== undefined) return setErr(bad);
     ctx.toast(t("mesh.login.saved"));
-    onSaved();
   };
 
   return (
@@ -81,7 +86,8 @@ export function MeshLogin({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void save();
+          if (draftDirty) setAsking(true);
+          else void save();
         }}
       >
         <p class="hint">{t("mesh.login.intro")}</p>
@@ -156,6 +162,7 @@ export function MeshLogin({
           </button>
         </div>
       </form>
+      {asking && <Confirm title={t("mesh.login.title")} body={<p>{t("mesh.draft.credentialChange")}</p>} confirmLabel={t("mesh.login.submit")} onCancel={() => setAsking(false)} onConfirm={() => { setAsking(false); void save(); }} />}
     </details>
   );
 }

@@ -1,44 +1,43 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { getApi } from "../../api";
 import { Badge, Banner, Confirm, Field } from "../../components";
 import { useT } from "../../i18n";
 import { EMPTY_REGION, regionsFromForms, type RegionForm } from "../../lib/mesh";
 import type { ActionError, PickKind } from "../../../shared/ipc";
-import { MESH_REGIONS_MAX, type MeshDerpProbe, type MeshDerpResult, type MeshHeadscaleDerp, type MeshProbe, type MeshSync } from "../../../shared/mesh";
-import type { MeshTabProps } from "../Mesh";
-import { MeshError, PlanView } from "./common";
+import { MESH_REGIONS_MAX, type MeshDerpProbe, type MeshHeadscaleDerp, type MeshProbe, type MeshSync } from "../../../shared/mesh";
+import type { MeshPolicyProps } from "../Mesh";
+import { MeshError } from "./common";
 
 /**
- * Self-hosted DERP relays. Tailscale takes them through the policy (preview,
- * write, probe, automatic rollback when a probe fails); Headscale reads them
- * from its own server config, so the page produces the file and the snippet
- * to put there instead.
+ * DERP changes edit the shared policy document. Headscale takes its relay map
+ * from server configuration, for which this page renders the file and snippet.
  */
-export function MeshDerp({ ctx, status }: MeshTabProps): JSX.Element {
+export function MeshDerp({ ctx, status, draft }: MeshPolicyProps): JSX.Element {
   const t = useT();
   const viaPolicy = status.capabilities.derpViaPolicy;
   const [forms, setForms] = useState<RegionForm[]>([{ ...EMPTY_REGION }]);
-  const [omitDefault, setOmitDefault] = useState(false);
+  const [omitDefault, setOmitDefault] = useState(draft.document?.omitDefault ?? false);
+  const [regionEdit, setRegionEdit] = useState<{ id: number; text: string }>();
+  const [removeID, setRemoveID] = useState<number>();
+  useEffect(() => setOmitDefault(draft.document?.omitDefault ?? false), [draft.document]);
   const [skipStun, setSkipStun] = useState(false);
   const [compare, setCompare] = useState(false);
-  const [busy, setBusy] = useState<"plan" | "apply" | "probe" | "headscale" | undefined>();
+  const [busy, setBusy] = useState<"plan" | "probe" | "headscale" | undefined>();
   const [err, setErr] = useState<ActionError | undefined>();
-  const [plan, setPlan] = useState<MeshDerpResult | undefined>();
+
   const [probe, setProbe] = useState<MeshDerpProbe | undefined>();
   const [hs, setHs] = useState<MeshHeadscaleDerp | undefined>();
-  const [asking, setAsking] = useState(false);
+
   const parsed = regionsFromForms(forms);
 
   const edit = (i: number, patch: Partial<RegionForm>): void => {
     setForms((l) => l.map((f, n) => (n === i ? { ...f, ...patch } : f)));
-    setPlan(undefined);
     setHs(undefined);
   };
 
   const clear = (): void => {
     setErr(undefined);
-    setPlan(undefined);
     setProbe(undefined);
     setHs(undefined);
   };
@@ -65,26 +64,9 @@ export function MeshDerp({ ctx, status }: MeshTabProps): JSX.Element {
       return;
     }
     setBusy("plan");
-    const r = await getApi().mesh({ op: "derp.plan", regions: parsed.regions, omitDefault, apply: false, skipStun });
+    const saved = await draft.edit({ regions: parsed.regions });
     setBusy(undefined);
-    if (r.ok) setPlan(r.data);
-    else setErr(r.error);
-  };
-
-  const doApply = async (): Promise<void> => {
-    if (!parsed.ok || !plan) return;
-    setBusy("apply");
-    setErr(undefined);
-    const r = await getApi().mesh({ op: "derp.plan", regions: parsed.regions, omitDefault, apply: true, skipStun, expectVersion: plan.plan.baseVersion });
-    setBusy(undefined);
-    setAsking(false);
-    if (!r.ok) {
-      setErr(r.error.code === "conflict" ? { ...r.error, message: t("mesh.policy.stale") } : r.error);
-      if (r.error.code === "conflict") setPlan(undefined);
-      return;
-    }
-    setPlan(r.data);
-    ctx.toast(r.data.rolledBack ? t("mesh.derp.rolledBack") : t("mesh.derp.applied"), r.data.rolledBack);
+    if (saved) { setForms([{ ...EMPTY_REGION }]); ctx.toast(t("mesh.draft.updated")); }
   };
 
   const bad = !parsed.ok ? parsed : undefined;
@@ -92,7 +74,26 @@ export function MeshDerp({ ctx, status }: MeshTabProps): JSX.Element {
     <div data-testid="mesh-derp">
       <section class="card">
         <h2>{t("mesh.derp.title")}</h2>
-        <p class="hint">{t("mesh.derp.intro")}</p>
+        <p class="hint">{t(viaPolicy ? "mesh.draft.derpHint" : "mesh.derp.intro")}</p>
+        {viaPolicy && <section data-testid="mesh-derp-current">
+          <h3>{t("mesh.draft.relays")}</h3>
+          {draft.document?.regions.length === 0 && <p>{t("mesh.draft.noRelays")}</p>}
+          {draft.document?.regions.map((r) => <div class="card" key={r.id} data-testid={`mesh-cloud-region-${r.id}`}>
+            <strong>{r.id} · {r.name} ({r.code})</strong><p class="mono">{r.hosts.join(", ")}</p>
+            <div class="row">
+              <button type="button" class="btn" disabled={draft.busy} onClick={() => setRegionEdit({ id: r.id, text: r.text })} data-testid={`mesh-cloud-region-${r.id}-edit`}>{t("mesh.draft.editRegion")}</button>
+              <button type="button" class="btn danger" disabled={draft.busy} onClick={() => setRemoveID(r.id)} data-testid={`mesh-cloud-region-${r.id}-remove`}>{t("mesh.derp.removeRegion")}</button>
+            </div>
+          </div>)}
+          {regionEdit && <div class="card" data-testid="mesh-cloud-region-editor">
+            <p class="hint">{t("mesh.draft.regionHint")}</p>
+            <textarea class="editor" value={regionEdit.text} disabled={draft.busy} onInput={(e) => setRegionEdit({ ...regionEdit, text: (e.currentTarget as HTMLTextAreaElement).value })} data-testid="mesh-cloud-region-text" />
+            <div class="row">
+              <button type="button" class="btn primary" disabled={draft.busy} onClick={() => void draft.edit({ region: regionEdit }).then((ok) => { if (ok) setRegionEdit(undefined); })} data-testid="mesh-cloud-region-save">{t("mesh.draft.update")}</button>
+              <button type="button" class="btn" disabled={draft.busy} onClick={() => setRegionEdit(undefined)}>{t("common.cancel")}</button>
+            </div>
+          </div>}
+        </section>}
         {!viaPolicy && <Banner kind="warn" testid="mesh-derp-file-mode">{t("mesh.derp.fileMode")}</Banner>}
         {forms.map((f, i) => (
           <fieldset key={i} data-testid={`mesh-region-${i}`}>
@@ -141,7 +142,7 @@ export function MeshDerp({ ctx, status }: MeshTabProps): JSX.Element {
           </Banner>
         )}
         <label class="check">
-          <input type="checkbox" checked={omitDefault} onChange={(e) => (setOmitDefault((e.currentTarget as HTMLInputElement).checked), setPlan(undefined), setHs(undefined))} data-testid="mesh-derp-omit" />
+          <input type="checkbox" checked={omitDefault} disabled={draft.busy} onChange={(e) => { const checked = (e.currentTarget as HTMLInputElement).checked; if (viaPolicy) void draft.edit({ omitDefault: checked }); else setOmitDefault(checked); setHs(undefined); }} data-testid="mesh-derp-omit" />
           <span>
             <strong>{t("mesh.derp.omitDefault")}</strong>
             <br />
@@ -157,11 +158,11 @@ export function MeshDerp({ ctx, status }: MeshTabProps): JSX.Element {
           <span>{t("mesh.derp.compare")}</span>
         </label>
         <div class="row">
-          <button type="button" class="btn" disabled={!parsed.ok || busy !== undefined} onClick={() => void doProbe()} data-testid="mesh-derp-probe">
+          <button type="button" class="btn" disabled={!parsed.ok || busy !== undefined || draft.busy || (viaPolicy && draft.error !== undefined)} onClick={() => void doProbe()} data-testid="mesh-derp-probe">
             {t("mesh.derp.probe")}
           </button>
-          <button type="button" class="btn primary" disabled={!parsed.ok || busy !== undefined} onClick={() => void doPreview()} data-testid="mesh-derp-preview">
-            {viaPolicy ? t("mesh.preview") : t("mesh.derp.generate")}
+          <button type="button" class="btn primary" disabled={!parsed.ok || busy !== undefined || draft.busy || (viaPolicy && draft.error !== undefined)} onClick={() => void doPreview()} data-testid="mesh-derp-preview">
+            {viaPolicy ? t("mesh.draft.addRelays") : t("mesh.derp.generate")}
           </button>
         </div>
       </section>
@@ -169,26 +170,8 @@ export function MeshDerp({ ctx, status }: MeshTabProps): JSX.Element {
       {err && <MeshError error={err} toast={ctx.toast} />}
       {probe && <ProbeView probe={probe} />}
       {hs && <HeadscaleView hs={hs} />}
-      {plan && (
-        <section class="card" data-testid="mesh-derp-plan">
-          <h2>{t("mesh.derp.plan")}</h2>
-          <PlanView plan={plan.plan} />
-          {plan.probes.length > 0 && <Probes probes={plan.probes} />}
-          {plan.rolledBack && <Banner kind="danger" testid="mesh-derp-rolledback">{t("mesh.derp.rolledBackBody")}</Banner>}
-          {plan.applied && !plan.rolledBack && <Banner kind="ok" testid="mesh-derp-applied">{t("mesh.derp.appliedBody")}</Banner>}
-          {!plan.applied && (
-            <div class="row end">
-              <button type="button" class="btn danger" disabled={!plan.plan.changed || !plan.plan.writable || busy !== undefined} onClick={() => setAsking(true)} data-testid="mesh-derp-apply">
-                {t("mesh.plan.apply")}
-              </button>
-            </div>
-          )}
-        </section>
-      )}
+      {removeID !== undefined && <Confirm title={t("mesh.derp.removeRegion")} body={<p>{t("mesh.draft.removeHint")}</p>} confirmLabel={t("mesh.draft.update")} danger busy={draft.busy} onCancel={() => setRemoveID(undefined)} onConfirm={() => void draft.edit({ removeID }).then((ok) => { if (ok) setRemoveID(undefined); })} />}
       <Admission ctx={ctx} />
-      {asking && (
-        <Confirm title={t("mesh.derp.confirm.title")} body={<p>{t("mesh.derp.confirm.body")}</p>} confirmLabel={t("mesh.plan.apply")} danger busy={busy === "apply"} onConfirm={() => void doApply()} onCancel={() => setAsking(false)} />
-      )}
     </div>
   );
 }
@@ -268,8 +251,9 @@ function HeadscaleView({ hs }: { hs: MeshHeadscaleDerp }): JSX.Element {
 type SyncMode = "allowlist" | "remote";
 
 /** Keeps the relay's admission list in step with the devices the control plane has authorised. */
-function Admission({ ctx }: { ctx: MeshTabProps["ctx"] }): JSX.Element {
+function Admission({ ctx }: { ctx: MeshPolicyProps["ctx"] }): JSX.Element {
   const t = useT();
+  const [asking, setAsking] = useState(false);
   const [mode, setMode] = useState<SyncMode>("allowlist");
   const [allowlist, setAllowlist] = useState("");
   const [url, setUrl] = useState("");
@@ -278,7 +262,7 @@ function Admission({ ctx }: { ctx: MeshTabProps["ctx"] }): JSX.Element {
   const [tokenFile, setTokenFile] = useState("");
   const [allDevices, setAllDevices] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
+
   const [err, setErr] = useState<ActionError | undefined>();
   const [done, setDone] = useState<MeshSync | undefined>();
 

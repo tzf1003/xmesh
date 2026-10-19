@@ -37,6 +37,7 @@ const meshUsage = `用法: xmesh mesh <子命令> [参数]
   onboard  新设备接入：创建 key 写入 --authkey-file（0600），可选 --config xmesh.yaml --install
   policy   策略：--show | --snapshots | --rollback ID | --template personal|team|restricted --owner 属主
            [--apply] [--expect-version 版本]
+           document 从标准输入解析或修改完整草稿；publish --expect-version 版本 [--apply --yes] 提交完整草稿
   matrix   网络层与工具层合并的权限矩阵  --node-config xmesh.yaml ...  [--port 7433]
   derp     第三方 DERP：plan|apply|probe|headscale|admit-serve|sync
            --region "code=lab,name=Lab,host=derp.example.com,ipv4=1.2.3.4,ipv6=...,id=900"
@@ -152,7 +153,7 @@ func meshRun(args []string, out io.Writer, in io.Reader) error {
 	case "onboard":
 		return meshOnboard(rest, out)
 	case "policy":
-		return meshPolicy(rest, out)
+		return meshPolicy(rest, out, in)
 	case "matrix":
 		return meshMatrix(rest, out)
 	case "derp":
@@ -637,7 +638,10 @@ func meshOnboard(args []string, out io.Writer) error {
 	return nil
 }
 
-func meshPolicy(args []string, out io.Writer) error {
+func meshPolicy(args []string, out io.Writer, in io.Reader) error {
+	if len(args) > 0 && (args[0] == "document" || args[0] == "publish") {
+		return meshPolicyDocument(args[0], args[1:], out, in)
+	}
 	var c meshCommon
 	fs := flag.NewFlagSet("mesh policy", flag.ContinueOnError)
 	c.register(fs)
