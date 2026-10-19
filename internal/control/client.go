@@ -22,7 +22,9 @@ var ErrVersionMismatch = errors.New("控制 API 主版本不兼容")
 // every connection goes to the endpoint's socket or pipe.
 type Client struct {
 	HTTP *http.Client
-	node string
+	// RequestTimeout bounds an individual call; zero uses only the caller's context.
+	RequestTimeout time.Duration
+	node           string
 }
 
 func NewClient(e Endpoint) *Client {
@@ -31,7 +33,7 @@ func NewClient(e Endpoint) *Client {
 		// A reused connection would outlive a restarted kernel.
 		DisableKeepAlives: true,
 	}
-	return &Client{HTTP: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, node: e.Node}
+	return &Client{HTTP: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, node: e.Node, RequestTimeout: 30 * time.Second}
 }
 
 // unreachable names the node in a transport failure and drops net/http's "Get http://xmesh-control/..."
@@ -73,8 +75,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, headers 
 		}
 		reader = bytes.NewReader(raw)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	if c.RequestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.RequestTimeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, method, "http://xmesh-control"+path, reader)
 	if err != nil {
 		return nil, err

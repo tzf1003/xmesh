@@ -315,3 +315,21 @@ test("file transfer limits default to 1GiB and persist custom sizes or unlimited
     assert.equal(checkSettingsForm({ ...lan, maxFileSize }), "max_file_size");
   }
 });
+
+test("saving legacy settings retains Tailnet ephemeral identity across network modes", () => {
+  for (const ephemeral of [true, false]) {
+    for (const mode of ["tailnet", "lan", "coexist"] as const) {
+      const legacy = LAN_CONFIG.replace("mode: lan", `mode: tailnet\n  control_url: https://control.example\n  authkey_file: /authkey\n  ephemeral: ${ephemeral}`);
+      const form = formFromConfig(parse(legacy));
+      const saved = applySettingsForm(legacy, { ...form, mode, defaultCwd: "/other" });
+      assert.ok(saved);
+      const cfg = parse(saved);
+      assert.equal(cfg.mesh.tailnet.ephemeral, ephemeral);
+      assert.equal(cfg.mesh.ephemeral, undefined);
+      assert.equal(cfg.agent.default_cwd, "/other");
+    }
+  }
+  const current = applySettingsForm(LAN_CONFIG, lan)!;
+  const explicit = current.replace("tailnet:", "ephemeral: true\n  tailnet:\n    ephemeral: false");
+  assert.equal(parse(applySettingsForm(explicit, lan)!).mesh.tailnet.ephemeral, false);
+});

@@ -45,6 +45,9 @@ func drain(args []string) error {
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
+	if *timeout <= 0 {
+		return fmt.Errorf("--timeout 必须大于零")
+	}
 	request, e := drainRequest(*scope, *device, *mode)
 	if e != nil {
 		return e
@@ -70,7 +73,11 @@ func drain(args []string) error {
 		if err != nil {
 			return fmt.Errorf("请先启动管理节点以使用已配对的设备连接: %w", err)
 		}
-		response, err := control.NewClient(endpoint).Do(ctx, "POST", "/v2/drain", v2.DrainRequest{Mode: v2.DrainMode(request.Drain), Scope: request.Scope, Device: request.Device}, nil)
+		timeoutMS := int64((*timeout-1)/time.Millisecond) + 1
+		client := control.NewClient(endpoint)
+		// The command context covers all fanout waves, each with its own device timeout.
+		client.RequestTimeout = 0
+		response, err := client.Do(ctx, "POST", "/v2/drain", v2.DrainRequest{Mode: v2.DrainMode(request.Drain), Scope: request.Scope, Device: request.Device, TimeoutMS: timeoutMS}, nil)
 		if err != nil {
 			return err
 		}

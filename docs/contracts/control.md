@@ -180,6 +180,8 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ### POST /v2/drain、POST /v2/resume
 
+远程排空的 `DrainRequest.timeout_ms` 指定每台设备的请求超时（毫秒），省略或零使用 15000。CLI 的 `--timeout` 会传入此字段；调用方的 context 限制整个 fanout 的总时长，本机排空不使用该字段。
+
 请求 `DrainRequest`（`mode` 缺省 `keep`），响应 `DrainResponse`。语义与 [CTR-GW-05](gateway.md#ctr-gw-05) 的 drain 相同，作用于本进程的 Agent 与同进程的 Gateway：
 
 - 进入 drain 后拒绝新的 `exec.run`、`pty.open`、`backend.acquire` 与后端工具，错误码 `policy_denied`，规则 `mesh.draining`。

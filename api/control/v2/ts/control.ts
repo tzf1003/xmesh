@@ -1003,6 +1003,10 @@ export interface DrainRequest {
   mode?: "keep" | "kill";
   scope?: "local" | "device" | "mesh";
   device?: string;
+  /**
+   * Remote drain per-device timeout in milliseconds. Omitted or zero uses 15000; the caller context bounds the whole fanout.
+   */
+  timeout_ms?: number;
 }
 export interface DrainResponse {
   drain: DrainState;

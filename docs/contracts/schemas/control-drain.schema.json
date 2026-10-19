@@ -93,6 +93,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854,
+          "default": 15000,
+          "description": "Remote drain per-device timeout in milliseconds. Omitted or zero uses 15000; the caller context bounds the whole fanout."
         }
       }
     },

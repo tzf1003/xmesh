@@ -18,6 +18,22 @@ func (h *controlHost) RemoteDrain(ctx context.Context, req v2.DrainRequest) ([]v
 	if !ok {
 		return nil, fmt.Errorf("请启用设备网络后执行远程排空")
 	}
+	return remoteDrain(ctx, node, req)
+}
+
+type drainSender interface {
+	Peers(context.Context) ([]mesh.Peer, error)
+	SendDrain(context.Context, mesh.Peer, agent.DrainRequest) error
+}
+
+func remoteDrain(ctx context.Context, node drainSender, req v2.DrainRequest) ([]v2.DrainOutcome, error) {
+	timeoutMS := req.TimeoutMS
+	if timeoutMS == 0 {
+		timeoutMS = v2.DefaultDrainTimeoutMS
+	}
+	if timeoutMS < 0 || timeoutMS > v2.MaxDrainTimeoutMS {
+		return nil, fmt.Errorf("设备排空超时无效")
+	}
 	peers, err := node.Peers(ctx)
 	if err != nil {
 		return nil, err
@@ -53,7 +69,7 @@ func (h *controlHost) RemoteDrain(ctx context.Context, req v2.DrainRequest) ([]v
 				return
 			}
 			defer func() { <-limit }()
-			attempt, stop := context.WithTimeout(ctx, 15*time.Second)
+			attempt, stop := context.WithTimeout(ctx, time.Duration(timeoutMS)*time.Millisecond)
 			defer stop()
 			if err := node.SendDrain(attempt, peer, agent.DrainRequest{Scope: req.Scope, Device: req.Device, Drain: string(req.Mode)}); err != nil {
 				result[index].Error = err.Error()
