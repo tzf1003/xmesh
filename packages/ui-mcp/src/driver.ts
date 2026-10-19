@@ -73,6 +73,9 @@ export class Driver {
       this.electronApp = await _electron.launch({
         executablePath: e.executable,
         args: [
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-background-timer-throttling",
           `--user-data-dir=${path.join(dir, "profile")}`,
           ...(e.args ?? []),
         ],
@@ -381,8 +384,9 @@ export class Driver {
       this.page.locator('input[type="password"]'),
       ...(this.init.environment.mask ?? []).map((s) => this.page.locator(s)),
     ];
-    if (target) await target.screenshot({ path: file, mask, timeout: 3000 });
-    else await this.page.screenshot({ path: file, mask, timeout: 3000 });
+    const timeout = this.init.config.limits.step_timeout_ms;
+    if (target) await target.screenshot({ path: file, mask, timeout });
+    else await this.page.screenshot({ path: file, mask, timeout });
     return { file, name, mime: "image/png" };
   }
   async close(): Promise<void> {
