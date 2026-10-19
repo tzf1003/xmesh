@@ -45,41 +45,53 @@ export interface Spawned {
 export type SpawnFn = (command: string, args: string[], options: SpawnOptions) => Spawned;
 
 /**
- * Windows: `cmd` runs this file. Waits up to a minute for the app's process to end, runs the NSIS installer
- * silently (it reuses the folder of the existing install), then starts the app. `--updated` is what tells the
- * installer, and the old uninstaller it runs, that this is an upgrade: build/installer.nsh then keeps the logon
- * tasks of the kernels, which the update restarts afterwards. cmd runs a batch file's
- * program to its end even for a GUI installer, so `%errorlevel%` is the installer's exit code. ASCII only:
- * cmd reads the file in the console code page.
+ * Windows: a hidden PowerShell process waits on the app's process handle for at most a minute, runs the
+ * NSIS installer, then starts the app. --updated keeps the kernels' logon tasks during the upgrade.
+ * Paths come through the environment; the script is ASCII for Windows PowerShell's default encoding.
  */
-export const WINDOWS_SCRIPT = [
-  "@echo off",
-  "setlocal",
-  "set /a tries=0",
-  ":wait",
-  'tasklist /NH /FO CSV /FI "PID eq %XMESH_UPD_PID%" 2>nul | find """%XMESH_UPD_PID%""" >nul',
-  "if errorlevel 1 goto gone",
-  "set /a tries+=1",
-  "if %tries% geq 60 goto stuck",
-  "ping -n 2 127.0.0.1 >nul",
-  "goto wait",
-  ":gone",
-  "rem The helper processes of the app let go of its files a moment after the main process ends.",
-  "ping -n 3 127.0.0.1 >nul",
-  '"%XMESH_UPD_INSTALLER%" /S --updated',
-  "set code=%errorlevel%",
-  'if not "%code%"=="0" goto failed',
-  'start "" "%XMESH_UPD_APP%"',
-  "exit /b 0",
-  ":failed",
-  '>"%XMESH_UPD_RESULT%" echo installer exit code %code%',
-  'if exist "%XMESH_UPD_APP%" start "" "%XMESH_UPD_APP%"',
-  "exit /b 1",
-  ":stuck",
-  '>"%XMESH_UPD_RESULT%" echo the app did not exit',
-  "exit /b 1",
-  "",
-].join("\r\n");
+export const WINDOWS_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+function Fail-Update([string]$Reason, [switch]$Restart) {
+  [IO.File]::WriteAllText($env:XMESH_UPD_RESULT, $Reason)
+  if ($Restart -and [IO.File]::Exists($env:XMESH_UPD_APP)) {
+    Start-Process -FilePath $env:XMESH_UPD_APP
+  }
+  exit 1
+}
+try {
+  $oldApp = $null
+  try {
+    $oldApp = [Diagnostics.Process]::GetProcessById([int]$env:XMESH_UPD_PID)
+  } catch [ArgumentException] {
+    # The app already exited before the helper opened its process handle.
+  }
+  if ($null -ne $oldApp) {
+    try {
+      if (-not $oldApp.WaitForExit(60000)) { Fail-Update 'the app did not exit' }
+    } finally {
+      $oldApp.Dispose()
+    }
+  }
+} catch {
+  Fail-Update ('could not wait for the app: ' + $_.Exception.Message)
+}
+# Allow Electron's helper processes to release the installed files.
+Start-Sleep -Seconds 2
+try {
+  $installer = Start-Process -FilePath $env:XMESH_UPD_INSTALLER -ArgumentList '/S', '--updated' -PassThru
+  $installer.WaitForExit()
+  $code = $installer.ExitCode
+  $installer.Dispose()
+  if ($code -ne 0) { Fail-Update ('installer exit code ' + $code) -Restart }
+} catch {
+  Fail-Update ('could not run the installer: ' + $_.Exception.Message) -Restart
+}
+try {
+  Start-Process -FilePath $env:XMESH_UPD_APP
+} catch {
+  Fail-Update ('could not start the app: ' + $_.Exception.Message)
+}
+`;
 
 /**
  * macOS: `/bin/sh script <pid> <dmg> <app bundle> <result file>`. Mounts the disk image read-only, swaps the
@@ -143,11 +155,10 @@ export function windowsApplier(spawn: SpawnFn = nodeSpawn): Applier {
   return {
     blocked: () => "",
     async start(h) {
-      const script = path.join(h.dir, "apply-update.cmd");
+      const script = path.join(h.dir, "apply-update.ps1");
       fs.writeFileSync(script, WINDOWS_SCRIPT);
-      await launch(spawn, "cmd.exe", ["/d", "/s", "/c", `"${script}"`], {
+      await launch(spawn, "powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script], {
         windowsHide: true,
-        windowsVerbatimArguments: true,
         env: {
           ...process.env,
           XMESH_UPD_PID: String(h.pid),

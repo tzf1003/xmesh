@@ -18,6 +18,28 @@ XmeSh（X mesh，也是 X me sh：我的 sh）让 Codex Cloud、Claude Cloud 等
 
 阅读规范用语、编号和裁定方式见文档库首页。
 
+## 安装与连接
+
+Windows 和 macOS 用户从[安装首页](https://tzf1003.github.io/xmesh/)选择系统、芯片和版本，下载当前用户安装包，打开 xmesh 设置向导。首页提供版本固定的 Agent 提示词、三步连接说明与排查入口。也可直接查看[发布列表](https://github.com/tzf1003/xmesh/releases)与 [Agent 安装文档](docs/agent/README.md)。
+
+向导会收集用途（本机、多设备、云端）、工作目录、开发或只读权限以及 Codex / Claude Code 客户端。确认计划后执行，遇到中断可按 job ID 恢复；从客户端发起真实请求后完成连接验证。
+
+每个新版本提供 `manifest.json`（平台、架构、SHA-256、大小、签名状态）、`install.sh`、`install.ps1` 和平台离线 ZIP。下载并检查脚本后运行：
+
+```bash
+bash install.sh --channel stable --json
+# 固定版本：bash install.sh --version v1.2.3 --json
+```
+
+```powershell
+.\install.ps1 -Channel stable -Json
+# 固定版本：.\install.ps1 -Version v1.2.3 -Json
+```
+
+稳定版要求 Windows Authenticode 和 macOS 签名、公证、装订验证。beta/rc 属于 testing；安装明确未签名的测试包须加 `--allow-unsigned` / `-AllowUnsigned`，系统信任检查仍生效。安装器支持重试、`--download-only` / `-DownloadOnly`、离线目录和 JSON 输出，并返回应用内长期可用的 CLI 路径。完整参数、升级与恢复见[安装说明](docs/agent/install.md)。版本示例需替换为实际已发布版本。
+
+Agent 可沿 [llms.txt](llms.txt) 阅读版本对应的文档，使用 `setup inspect`、`plan`、`apply`、`status`、`resume`、`verify` 与 `doctor`。Linux 继续使用发布归档与[运行手册](docs/operations.md)。
+
 ## 本机开发
 
 需要 Go 1.27。先在 `xmesh.local.yaml` 中设置允许访问的目录，然后运行：
@@ -37,6 +59,12 @@ go test -race ./...
 | Gateway | `http://127.0.0.1:8080/mcp` | 同一批工具，名字带 `local/` 前缀（`local/exec.run`），并聚合已入网的其他设备（`<设备名>/exec.run`）以及 `devices.list` 等 |
 
 客户端使用有会话的 Streamable HTTP MCP。`--local` 是显式开发模式；当前实现进度和外部验收状态见 [实现记录](docs/implementation-status.md)。
+
+## 文件互传
+
+通过 MCP 调用 `<设备名>/fs.download` 下载原始字节，或用 `<设备名>/fs.upload` 上传到指定路径。本机 Gateway 的前缀为 `local/`。文件分块传输并验证 SHA-256，上传完成前保留原目标；默认拒绝同名冲突，`force: true` 才允许原子覆盖。
+
+单文件默认上限 **1 GiB**，可在「设置 → 文件互传」修改大小或选择「无限制」，保存后立即生效。配置项为 `agent.fs.max_file_size`，例如 `2GiB` 或 `unlimited`。分块上限固定 1 MiB，支持大文件且内存有界。路径受 allow/deny 策略约束，父目录须已存在。参数见[文件互传契约](docs/contracts/fs.md#ctr-fs-08)，客户端示例见 [`scripts/file_transfer.py`](scripts/file_transfer.py)。
 
 ## 命令
 

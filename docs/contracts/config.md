@@ -14,10 +14,11 @@
 | `ingress.pty_budget_file` | 可选绝对路径；默认使用状态目录中的 `ingress-pty.json`。同一主机的入口可指定同一文件进行跨进程准入，且 `max_pty_per_client` 必须一致 |
 | `ingress.pty_budget_authority` | 可选设备名（与 `node.name` 同样的字符集）；多台主机上的入口须配置同一设备，由该 Agent 托管跨主机准入租约，详见 [CTR-GW-06](gateway.md#ctr-gw-06)。留空只在本机协调 |
 | `roles` 含 `agent` | `agent.cwd_policy.allow` 必须存在，可以为空；空表示除 `deny` 外的全部目录都可访问 |
+| `agent.fs.max_file_size` | 单个上传/下载文件的上限，默认 `1GiB`；支持正整数尺寸（例如 `512MiB`、`2GiB`）及 `unlimited`。面板「设置 → 文件互传」可修改，保存后热更新生效，见 [CTR-FS-08](fs.md#ctr-fs-08) |
 | `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件在每次工具调用时重读，改动在下一次调用生效，不需要重启。空列表要写成 `[]`，没有内容的文件按写了一半处理。启动时文件缺失或无法解析，agent 不能启动，不会视为空列表；运行中文件不再能加载（缺失、不可读、不是字符串列表），继续使用上一份成功的列表，`policy_reload_failed` 计数加一，状态里出现同名警告，文件恢复后清除。向导默认创建该文件并写入凭证目录 |
 | `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
 | `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
-| `mesh.mode = lan` | `mesh.lan.mdns` 为 true，且不读取 auth key。可选 `mesh.lan.interface` 指定监听、mDNS 通告和浏览用的网卡名，mDNS 组播只经这块网卡收发（Windows 上显式固定组播出口，不受 Clash/Tailscale 等低 metric 隧道网卡影响）；缺省选第一块带私有 IPv4 的启用网卡，并跳过名字像虚拟机、容器、WSL、Hyper-V、VPN 隧道的网卡（只有它们时才退回使用）。指定的网卡不存在或没有私有 IPv4 时拒绝启动 |
+| `mesh.mode = lan` | `mesh.lan.mdns` 必须显式设置；true 启用公告与发现，false 关闭公告与发现，且不读取 auth key。本机首次配置使用 false，并以 `--local-only` 仅开放需认证的回环 Gateway。可选 `mesh.lan.interface` 指定监听、mDNS 通告和浏览用的网卡名，mDNS 组播只经这块网卡收发（Windows 上显式固定组播出口，不受 Clash/Tailscale 等低 metric 隧道网卡影响）；缺省选第一块带私有 IPv4 的启用网卡，并跳过名字像虚拟机、容器、WSL、Hyper-V、VPN 隧道的网卡（只有它们时才退回使用）。指定的网卡不存在或没有私有 IPv4 时拒绝启动 |
 | `ingress.listen = funnel` | `control_url` 必须是官方 Tailscale 控制面：`https://controlplane.tailscale.com` 或 `https://login.tailscale.com`（端口只能是 443，不含用户信息）。其他主机，包括 Headscale 和形似官方域名的后缀，一律拒绝启动。issuer 必须是 `ts.net` 源。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
 | `ingress.listen = public:443` | 必须有 `domain` 和 `tls`，且 `ingress.oauth.issuer` 的主机等于 `domain`。`tls: file` 时还必须有 `cert_file` 与 `key_file`。`tls: autocert` 只在这种监听下使用 |
 | `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供 |

@@ -16,7 +16,7 @@
 | OAuth 与入口 | 元数据、动态注册、PKCE S256、单主体口令、CSRF、scope、令牌轮转、客户端注册及回调 URI 持久化、Funnel/隧道/HTTPS 入口装配 |
 | 治理与运行 | 元数据审计、热加载失败记录、重启提示、调用预算、Agent 主体与入口跨设备 PTY 预算、keep/kill drain、CLI 与服务失败退出、Windows 用户登录任务与可选 SCM 安装 |
 
-25 个 Agent 内置工具已接入；Gateway 另提供设备列表、搜索和会话默认值。操作方法见[运行手册](operations.md)。
+27 个 Agent 内置工具已接入；Gateway 另提供设备列表、搜索和会话默认值。操作方法见[运行手册](operations.md)。
 
 ## 已执行验证
 

@@ -26,7 +26,9 @@ import (
 )
 
 type Options struct {
-	Local                                        bool
+	Local bool
+	// InternalAgent keeps a local-only node's Agent behind the authenticated Gateway.
+	InternalAgent                                bool
 	Listen, StateDir, PasswordFile, TunnelListen string
 	Ingress                                      bool
 	// ControlAllowSIDs adds Windows principals to the control pipe's access list.
@@ -176,7 +178,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}()
 		fmt.Fprintln(os.Stderr, label+": "+listener.Addr().String()+"/mcp")
 	}
-	if a != nil {
+	if a != nil && !o.InternalAgent {
 		var listener net.Listener
 		auth := agent.Authenticate(agent.Local)
 		if o.Local {

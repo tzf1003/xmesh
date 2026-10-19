@@ -1,0 +1,15 @@
+# xmesh
+
+> Connect selected development workspaces to local clients, other devices and cloud agents over MCP.
+
+## Installation and setup
+
+- [Agent guide](docs/agent/README.md): version-pinned setup workflow and readiness states.
+- [Installation](docs/agent/install.md): native bootstrap, verified downloads and offline bundles.
+- [Setup](docs/agent/setup.md): inspect, plan, apply, status, resume, verify and doctor.
+- [Clients](docs/agent/clients.md): Codex, Claude Code, cloud connectors and reload/verification.
+- [Examples](docs/agent/examples.md): local, multiple-computer and cloud setup requests and success criteria.
+- [Troubleshooting](docs/agent/troubleshooting.md): result codes and concrete repair actions.
+- [Recovery](docs/agent/recovery.md): stable failure phases and recovery actions.
+- [Operations](docs/operations.md): runtime, pairing and network operations.
+- [Acceptance](docs/validation/real-environment-runbook.md): real-device validation.
