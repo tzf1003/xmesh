@@ -156,6 +156,23 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 	return out, nil
 }
 
+// restore binds each endpoint independently so a failed endpoint cannot discard a healthy one.
+func (r *gatewayRole) restore(listen string) ([]net.Listener, error) {
+	var bound []net.Listener
+	listener, err := net.Listen("tcp", listen)
+	if err == nil {
+		bound = append(bound, listener)
+	}
+	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && r.deps.mode == "tailnet" && !gatewayLoopbackOnly(listen) {
+		tailnet, tailnetErr := tn.ListenPort(gatewayPort(listen))
+		if tailnetErr == nil {
+			bound = append(bound, tailnet)
+		}
+		err = errors.Join(err, tailnetErr)
+	}
+	return bound, err
+}
+
 // serve starts the accept loops for listeners. The caller holds r.mu.
 func (r *gatewayRole) serve(listeners []net.Listener) {
 	for _, l := range listeners {
@@ -205,24 +222,14 @@ func (r *gatewayRole) rebind(listen string) error {
 	if listen == r.listen && len(r.bound) > 0 && !r.failed {
 		return nil
 	}
-	if r.failed {
-		r.retire()
-		next, err := r.bind(listen)
-		if err != nil {
-			return err
-		}
-		r.listen, r.failed = listen, false
-		r.serve(next)
-		return nil
-	}
 	next, err := r.bind(listen)
 	if err != nil && addressInUse(err) && gatewayPort(listen) == gatewayPort(r.listen) {
 		previous := r.listen
 		r.retire()
 		if next, err = r.bind(listen); err != nil {
-			if back, e := r.bind(previous); e == nil {
-				r.serve(back)
-			}
+			back, restoreErr := r.restore(previous)
+			r.failed = restoreErr != nil
+			r.serve(back)
 			return err
 		}
 	} else if err != nil {
@@ -230,7 +237,7 @@ func (r *gatewayRole) rebind(listen string) error {
 	} else {
 		r.retire()
 	}
-	r.listen = listen
+	r.listen, r.failed = listen, false
 	r.serve(next)
 	return nil
 }

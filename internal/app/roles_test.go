@@ -3,15 +3,18 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/mesh"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -348,5 +351,78 @@ func Test_GatewayRoleRebindsAfterListenerFailure(t *testing.T) {
 	}
 	if !answers(addr) || role.bindAddress() != addr {
 		t.Fatal("same-address retry did not restore gateway")
+	}
+}
+
+type partialGatewayNetwork struct {
+	mesh.Network
+	address     string
+	unavailable atomic.Bool
+}
+
+func (n *partialGatewayNetwork) ListenPort(int) (net.Listener, error) {
+	if n.unavailable.Load() {
+		return nil, errors.New("tailnet listener unavailable")
+	}
+	return net.Listen("tcp", n.address)
+}
+
+func Test_GatewayRolePreservesPartialAvailabilityOnFailedRetry(t *testing.T) {
+	for _, failedEndpoint := range []string{"os", "tailnet"} {
+		t.Run(failedEndpoint, func(t *testing.T) {
+			osAddress, tailnetAddress := address(t), address(t)
+			_, port, _ := net.SplitHostPort(osAddress)
+			listen := "0.0.0.0:" + port
+			cfg := parseConfig(t, []string{"gateway"}, listen)
+			network := &partialGatewayNetwork{address: tailnetAddress}
+			deps := gatewayDepsFor(t, cfg)
+			deps.mode, deps.network = "tailnet", network
+			role, err := startGatewayRole(deps, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(role.stop)
+			idx, surviving := 0, tailnetAddress
+			if failedEndpoint == "tailnet" {
+				idx, surviving = 1, osAddress
+				network.unavailable.Store(true)
+			}
+			role.mu.Lock()
+			failed := role.bound[idx]
+			role.mu.Unlock()
+			_ = failed.Close()
+			eventually(t, "one surviving listener", func() bool {
+				role.mu.Lock()
+				defer role.mu.Unlock()
+				return role.failed && len(role.bound) == 1
+			})
+			var blocker net.Listener
+			if failedEndpoint == "os" {
+				blocker, err = net.Listen("tcp", listen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = blocker.Close() })
+			}
+			taken := address(t)
+			other, err := net.Listen("tcp", taken)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer other.Close()
+			if err = role.rebind(taken); err == nil || !answers(surviving) {
+				t.Fatal("failed move discarded the surviving listener", err)
+			}
+			if err = role.rebind(listen); err == nil || !answers(surviving) {
+				t.Fatal("failed same-address retry discarded the surviving listener", err)
+			}
+			if blocker != nil {
+				_ = blocker.Close()
+			}
+			network.unavailable.Store(false)
+			if err = role.rebind(listen); err != nil || !answers(osAddress) || !answers(tailnetAddress) {
+				t.Fatal("retry did not restore both listeners", err)
+			}
+		})
 	}
 }
