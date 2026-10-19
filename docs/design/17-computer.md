@@ -61,4 +61,8 @@ Windows、macOS、Linux 上的 Agent 经现有 Streamable HTTP MCP、Gateway / I
 - 契约正反例和文档相对链接校验通过；符合性检查 145/145 通过。
 - 原生适配已接 macOS / Windows 的 ScreenCaptureKit / Windows Graphics Capture 与输入库，并加入 Linux X11 适配源码；Windows / Linux 原生构建交由新工作流验证。Wayland 的共用授权会话、屏幕与输入坐标映射仍在实现。
 
+第二轮：本机 Control API 1.9 增加 desktop 状态、暂停和撤销，CLI 增加 `xmesh control computer`。面板加入桌面控制页、能力开关、权限初始化指引、会话撤销、接管与恢复；主进程注册紧急暂停快捷键。UI 460 项单元测试及两项 Electron 交互测试通过，截图人工检查通过；交互测试覆盖真实窗口中的撤销、接管、恢复和旧内核提示，使用假内核，尚不代表三端真人接管验收。新控制路由在真实本机套接字上的测试通过。
+
+第一轮原生 CI 的 macOS 作业通过；Linux 报告两处类型错误，Windows 报告 scap 的 published Windows 接口不匹配。后续提交修正 Linux 类型并将 Windows 采集改为直接调用 windows-capture。新增当前权限和桌面状态复查，授权撤销、系统锁定和桌面代次改变时回收控制权。
+
 原生第三方接口通过锁定版本的 scap 与 enigo 调用。Linux X11 采集使用 x11rb。本机 Cargo target 通过 `--target-dir` 指向共享缓存；Cargo registry 与 Go 缓存按用户全局复用。

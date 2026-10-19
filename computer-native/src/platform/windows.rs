@@ -123,3 +123,65 @@ pub fn locked() -> bool {
         String::from_utf16_lossy(&name[..len]) != "Default"
     }
 }
+
+pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
+    use std::sync::{Arc, Mutex};
+    use windows_capture::{
+        capture::{Context, GraphicsCaptureApiHandler},
+        frame::Frame,
+        graphics_capture_api::InternalCaptureControl,
+        monitor::Monitor,
+        settings::{
+            ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+            MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+        },
+    };
+    type Pixels = Option<(i32, i32, Vec<u8>)>;
+    struct SingleFrame {
+        result: Arc<Mutex<Pixels>>,
+    }
+    impl GraphicsCaptureApiHandler for SingleFrame {
+        type Flags = Arc<Mutex<Pixels>>;
+        type Error = Box<dyn std::error::Error + Send + Sync>;
+        fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+            Ok(Self { result: ctx.flags })
+        }
+        fn on_frame_arrived(
+            &mut self,
+            frame: &mut Frame,
+            control: InternalCaptureControl,
+        ) -> Result<(), Self::Error> {
+            let width = frame.width() as i32;
+            let height = frame.height() as i32;
+            if width < 1 || height < 1 || width > 16384 || height > 16384 {
+                control.stop();
+                return Ok(());
+            }
+            let mut buffer = frame.buffer()?;
+            let data = buffer.as_nopadding_buffer()?.to_vec();
+            *self.result.lock().map_err(|_| "capture result poisoned")? =
+                Some((width, height, data));
+            control.stop();
+            Ok(())
+        }
+    }
+    let target = Monitor::enumerate()
+        .map_err(|_| "display_unavailable")?
+        .into_iter()
+        .find(|m| (m.as_raw_hmonitor() as usize as u32).to_string() == display.id)
+        .ok_or("display_not_found")?;
+    let result = Arc::new(Mutex::new(None));
+    let settings = Settings::new(
+        target,
+        CursorCaptureSettings::Default,
+        DrawBorderSettings::Default,
+        SecondaryWindowSettings::Default,
+        MinimumUpdateIntervalSettings::Default,
+        DirtyRegionSettings::Default,
+        ColorFormat::Bgra8,
+        Arc::clone(&result),
+    );
+    SingleFrame::start(settings).map_err(|_| "capture_failed")?;
+    let mut guard = result.lock().map_err(|_| "capture_failed")?;
+    guard.take().ok_or("capture_empty")
+}

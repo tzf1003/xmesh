@@ -236,7 +236,7 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     )
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn capture_raw(display: &platform::Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     let target = scap::get_all_targets()
         .into_iter()
@@ -261,7 +261,7 @@ fn capture_raw(display: &platform::Display) -> Result<(i32, i32, Vec<u8>), &'sta
         _ => Err("capture_format"),
     }
 }
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn capture_raw(display: &platform::Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     platform::capture(display)
 }
@@ -413,7 +413,7 @@ fn action(
                     enigo
                         .button(button, Direction::Press)
                         .map_err(|_| "input_failed")?;
-                    let result = (|| {
+                    let result: Result<(), &'static str> = (|| {
                         for i in 1..=20 {
                             pause(runtime, token, start, a.duration_ms.max(200) / 20)?;
                             enigo
@@ -599,7 +599,7 @@ fn main() {
         }
     };
     let authorize = std::env::args().any(|a| a == "--authorize");
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     if authorize && !scap::has_permission() {
         let _ = scap::request_permission();
     }

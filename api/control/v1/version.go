@@ -2,7 +2,7 @@ package v1
 
 // APIVersion is the control API version this package implements: major.minor. A minor bump only
 // adds fields, routes, enum values and capabilities. A major bump changes the path prefix.
-const APIVersion = "1.8"
+const APIVersion = "1.9"
 
 const (
 	// HeaderVersion carries APIVersion on every response and in control.json.
@@ -47,6 +47,7 @@ const (
 	CapIngress     Capability = "ingress"
 	CapAudit       Capability = "audit"
 	CapCI          Capability = "ci"
+	CapComputer    Capability = "computer"
 )
 
 // Severity of a Warning.

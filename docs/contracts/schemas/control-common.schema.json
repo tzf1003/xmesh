@@ -50,7 +50,8 @@
         "gateway",
         "ingress",
         "audit",
-        "ci"
+        "ci",
+        "computer"
       ],
       "description": "内核在 control.json 与 status.control.capabilities 里公布自己已实现的能力。路由表里每条路由属于一个能力。UI 只对已公布的能力启用对应入口。"
     },

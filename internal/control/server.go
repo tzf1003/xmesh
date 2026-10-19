@@ -20,13 +20,15 @@ import (
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backendenv"
+	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
 type Options struct {
-	Host    Host
-	Store   *config.Store
-	Version string
+	Computer *computer.Manager
+	Host     Host
+	Store    *config.Store
+	Version  string
 	// StateDir receives control.json; AuditDir is read by GET /v1/audit.
 	StateDir, AuditDir string
 	Listen             ListenOptions
@@ -175,6 +177,9 @@ func capabilities(o Options) []v1.Capability {
 	if o.CI != nil && o.Store.Path() != "" {
 		caps = append(caps, v1.CapCI)
 	}
+	if o.Computer != nil {
+		caps = append(caps, v1.CapComputer)
+	}
 	return caps
 }
 
@@ -293,17 +298,20 @@ func (rt route) match(method, path string) bool {
 // capability the kernel does not declare answers not_implemented without reaching its handler.
 func (s *Server) table() map[string]handler {
 	return map[string]handler{
-		"control.status.get":    s.status,
-		"control.events.stream": func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
-		"control.peers.list":    s.listPeers,
-		"control.sessions.list": s.sessions,
-		"control.drain.start":   s.startDrain,
-		"control.drain.resume":  s.resume,
-		"control.config.get":    s.getConfig,
-		"control.config.put":    s.putConfig,
-		"control.config.reload": s.reloadConfig,
-		"control.config.patch":  s.patchConfig,
-		"control.audit.list":    s.auditList,
+		"control.computer.get":    s.getComputer,
+		"control.computer.pause":  s.pauseComputer,
+		"control.computer.revoke": s.revokeComputer,
+		"control.status.get":      s.status,
+		"control.events.stream":   func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
+		"control.peers.list":      s.listPeers,
+		"control.sessions.list":   s.sessions,
+		"control.drain.start":     s.startDrain,
+		"control.drain.resume":    s.resume,
+		"control.config.get":      s.getConfig,
+		"control.config.put":      s.putConfig,
+		"control.config.reload":   s.reloadConfig,
+		"control.config.patch":    s.patchConfig,
+		"control.audit.list":      s.auditList,
 
 		"control.pair.export":            s.pairExport,
 		"control.pair.import":            s.pairImport,

@@ -56,6 +56,7 @@ func startControl(d controlDeps) (stop func()) {
 	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Pairing: d.pairing}
 	options.BackendEnv = d.backendEnv
 	if d.agent != nil {
+		options.Computer = d.agent.Computer
 		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
 	}
 	if d.ci != nil {

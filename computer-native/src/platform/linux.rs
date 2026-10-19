@@ -91,7 +91,7 @@ pub fn locked() -> bool {
     if let Ok((conn, n)) = x11rb::connect(None) {
         if let Ok(cookie) = conn.screensaver_query_info(conn.setup().roots[n].root) {
             if let Ok(reply) = cookie.reply() {
-                return reply.state != State::OFF;
+                return reply.state != u8::from(State::OFF);
             }
         }
     }

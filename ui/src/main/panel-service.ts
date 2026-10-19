@@ -9,6 +9,7 @@ import * as path from "node:path";
 
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
+import type { ComputerRequest, ComputerResult } from "../shared/computer";
 import type {
   AuditQuery,
   AuditResponse,
@@ -347,6 +348,16 @@ export class PanelService {
       case "import.inspect":
         return run((c) => c.call("POST", "/v1/ci/import/inspect", { body: { dir: r.dir } }));
     }
+  }
+
+  computer(request: ComputerRequest): Promise<DataResult<ComputerResult>> {
+    return this.data("computer", (client) => {
+      switch (request.op) {
+        case "get": return client.call("GET", "/v1/computer");
+        case "pause": return client.call("POST", "/v1/computer/pause", { body: { paused: request.paused } });
+        case "revoke": return client.call("POST", "/v1/computer/revoke", { body: { session_id: request.session_id } });
+      }
+    });
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {

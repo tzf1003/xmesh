@@ -1,5 +1,6 @@
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
 import { parseCiRequest } from "../shared/ci";
+import { parseComputerRequest } from "../shared/computer";
 import {
   CALLS_EVENT,
   CHANNELS,
@@ -213,6 +214,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
     return v === undefined ? bad("audit query") : service.queryAudit(v);
   });
   handle(CHANNELS.getRecentCalls, (): CallEventData[] => service.recentCalls());
+  handle(CHANNELS.computer, (request: unknown) => {
+    const parsed = parseComputerRequest(request);
+    return parsed === undefined ? bad("computer request") : service.computer(parsed);
+  });
   handle(CHANNELS.previewSetup, (params: unknown) => previewSetup(params));
   handle(CHANNELS.runSetup, (params: unknown) => setup(params));
   handle(CHANNELS.pickPath, (kind: unknown) => {

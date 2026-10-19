@@ -106,6 +106,11 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 		a.computerProvider = computer.NewClient(c.Agent.Computer.Endpoint)
 	}
 	a.Computer = computer.New(a.computerProvider, c.Agent.Computer)
+	a.Computer.SetAuthorization(func(owner string) bool {
+		caller, ok := a.Callers.Get(owner)
+		cfg := a.store.Get()
+		return ok && cfg.Agent.Computer.Enabled && !slices.Contains(cfg.Agent.DisabledTools, "computer.act") && Allowed(cfg, caller, "computer.act", "")
+	})
 	var backendOptions []backend.Option
 	if a.backendEnv != nil {
 		backendOptions = append(backendOptions, backend.WithEnv(a.backendEnv.Snapshot()))

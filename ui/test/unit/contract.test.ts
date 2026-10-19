@@ -87,13 +87,13 @@ test("the copied TypeScript types are the contract's generated file", () => {
 });
 
 test("the UI speaks the contract's API version", () => {
-  assert.equal(CONTROL_API_VERSION, "1.8");
+  assert.equal(CONTROL_API_VERSION, "1.9");
 });
 
 test("status, peers, sessions and control.json from the fake validate against the schemas", async () => {
   const status = await call(k.endpoint, "GET", "/v1/status");
   assert.equal(status.status, 200);
-  assert.equal(status.headers["x-xmesh-control-version"], "1.8");
+  assert.equal(status.headers["x-xmesh-control-version"], "1.9");
   validate("control-status", "StatusResponse", status.body);
   validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v1/peers")).body);
   validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v1/sessions")).body);

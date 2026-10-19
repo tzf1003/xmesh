@@ -440,3 +440,4 @@ progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
 @media (prefers-reduced-motion: no-preference) {
   .graph-node, .edge-dim, .activity-row { transition: border-color .15s, box-shadow .15s, opacity .2s; }
 }
+.computer-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }

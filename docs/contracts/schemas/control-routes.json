@@ -1,5 +1,5 @@
 {
-  "api_version": "1.8",
+  "api_version": "1.9",
   "routes": [
     {
       "id": "control.status.get",
@@ -620,6 +620,56 @@
       "if_match": "none",
       "errors": [
         "invalid_args"
+      ]
+    },
+    {
+      "id": "control.computer.get",
+      "method": "GET",
+      "path": "/v1/computer",
+      "capability": "computer",
+      "since": "1.9",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-computer:1#/$defs/ComputerState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unavailable"
+      ]
+    },
+    {
+      "id": "control.computer.pause",
+      "method": "POST",
+      "path": "/v1/computer/pause",
+      "capability": "computer",
+      "since": "1.9",
+      "query": null,
+      "body": "urn:xmesh:schema:control-computer:1#/$defs/ComputerPauseRequest",
+      "response": "urn:xmesh:schema:control-computer:1#/$defs/ComputerState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "unavailable"
+      ]
+    },
+    {
+      "id": "control.computer.revoke",
+      "method": "POST",
+      "path": "/v1/computer/revoke",
+      "capability": "computer",
+      "since": "1.9",
+      "query": null,
+      "body": "urn:xmesh:schema:control-computer:1#/$defs/ComputerRevokeRequest",
+      "response": "urn:xmesh:schema:control-computer:1#/$defs/ComputerState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "unavailable"
       ]
     }
   ]

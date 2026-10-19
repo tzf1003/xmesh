@@ -55,6 +55,7 @@ type Manager struct {
 	stop       chan struct{}
 	done       chan struct{}
 	workers    sync.WaitGroup
+	authorize  func(string) bool
 	now        func() time.Time
 }
 
@@ -78,7 +79,13 @@ func (m *Manager) sweep() {
 		case <-t.C:
 			m.mu.Lock()
 			m.expireLocked()
+			active := len(m.sessions) > 0 && m.settings.Enabled
 			m.mu.Unlock()
+			if active {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				_, _ = m.Info(ctx)
+				cancel()
+			}
 		}
 	}
 }
@@ -112,11 +119,21 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 	}
 	info, err := m.provider.Info(ctx)
 	if err != nil {
+		m.mu.Lock()
+		m.revokeLocked("")
+		m.mu.Unlock()
 		return Info{}, err
 	}
 	if info.ProtocolVersion != ProtocolVersion {
 		return Info{}, toolerr.New("desktop_unavailable", "桌面执行器协议不兼容", "reason", "protocol_mismatch")
 	}
+	m.mu.Lock()
+	for id, s := range m.sessions {
+		if !info.Available || s.Epoch != info.Epoch {
+			m.removeLocked(id)
+		}
+	}
+	m.mu.Unlock()
 	return info, nil
 }
 
@@ -213,6 +230,10 @@ func (m *Manager) sessionLocked(caller string, r SessionRequest, control bool) (
 		return nil, toolerr.New("conflict", "桌面会话代次已变化", "reason", "desktop_epoch")
 	}
 	if control {
+		if m.authorize != nil && !m.authorize(caller) {
+			m.removeLocked(s.ID)
+			return nil, toolerr.New("policy_denied", "桌面控制授权已撤销", "rule", "computer.authorization_revoked")
+		}
 		if m.paused {
 			return nil, toolerr.New("policy_denied", "桌面控制已暂停", "rule", "computer.paused")
 		}

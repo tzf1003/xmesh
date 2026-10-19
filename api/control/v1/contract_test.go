@@ -20,6 +20,9 @@ const schemaDir = "../../../docs/contracts/schemas"
 // typeFor maps a schema definition name to a fresh Go value of the matching type. A fixture whose
 // definition is missing here fails the test, so a new definition cannot ship without a Go type.
 var typeFor = map[string]func() any{
+	"ComputerState":           func() any { return new(v1.ComputerState) },
+	"ComputerPauseRequest":    func() any { return new(v1.ComputerPauseRequest) },
+	"ComputerRevokeRequest":   func() any { return new(v1.ComputerRevokeRequest) },
 	"ControlEndpointFile":     func() any { return new(v1.ControlEndpointFile) },
 	"StatusResponse":          func() any { return new(v1.StatusResponse) },
 	"DrainRequest":            func() any { return new(v1.DrainRequest) },
@@ -239,7 +242,7 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 			t.Errorf("route %s is a stream and has a response type", r.ID)
 		}
 	}
-	for _, c := range []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI} {
+	for _, c := range []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI, v1.CapComputer} {
 		if !capabilities[c] {
 			t.Errorf("capability %s has no route", c)
 		}
@@ -291,7 +294,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 		}
 	}
 	check("Capability", enumOf(t, "control-common.schema.json", "$defs", "Capability", "enum"),
-		sorted(v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI))
+		sorted(v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI, v1.CapComputer))
 	check("Severity", enumOf(t, "control-common.schema.json", "$defs", "Severity", "enum"),
 		sorted(v1.SeverityInfo, v1.SeverityWarning, v1.SeverityError))
 	check("WarningCode", enumOf(t, "control-common.schema.json", "$defs", "WarningCode", "enum"),
@@ -317,8 +320,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v1.APIVersion != "1.8" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 1.8", v1.APIVersion)
+	if v1.APIVersion != "1.9" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 1.9", v1.APIVersion)
 	}
 }
 

@@ -12,6 +12,7 @@ export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; grou
   { id: "overview", label: "topology.title", icon: "topology", group: "network" },
   { id: "devices", label: "nav.devices", icon: "device", group: "network" },
   { id: "sessions", label: "nav.sessions", icon: "terminal", group: "network" },
+  { id: "computer", label: "nav.computer", icon: "device", group: "network" },
   { id: "authz", label: "nav.authz", icon: "shield", group: "access" },
   { id: "ingress", label: "nav.ingress", icon: "globe", group: "access" },
   { id: "audit", label: "nav.audit", icon: "activity", group: "runtime" },

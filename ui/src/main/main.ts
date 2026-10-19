@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { Notification, app, net, powerMonitor, shell } from "electron";
+import { Notification, app, globalShortcut, net, powerMonitor, shell } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
@@ -242,15 +242,19 @@ async function start(): Promise<void> {
       await runBrowserLogin(config, state, controlUrl, (url) => platform.openExternal(url));
     },
   );
+  const panelService = new PanelService(controller);
   registerIpc({
     controller,
     actions,
-    service: new PanelService(controller),
+    service: panelService,
     previewSetup: (params) => previewSetup(params, setupHost),
     setup: (params) => runSetup(params, setupHost),
     mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
     update: new UpdateActions(updater),
+  });
+  if (!TEST_MODE) globalShortcut.register("CommandOrControl+Alt+Shift+Escape", () => {
+    void panelService.computer({ op: "pause", paused: true });
   });
   updater.on("change", (state) => controller.setUpdate(state));
 
@@ -265,7 +269,7 @@ async function start(): Promise<void> {
   app.on("before-quit", () => {
     void controller.stop();
   });
-  app.on("will-quit", () => tray.destroy());
+  app.on("will-quit", () => { globalShortcut.unregisterAll(); tray.destroy(); });
 
   // After sleep or a lock the event stream is stale; do not wait for the idle timeout to notice.
   powerMonitor.on("resume", () => controller.nudge());
