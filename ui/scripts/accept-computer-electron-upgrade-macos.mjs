@@ -88,9 +88,17 @@ async function appProcesses() {
   return stdout.split("\n").map(line => /^\s*(\d+)\s+(.*)$/.exec(line)).filter(m => m && m[2] === executable).map(m => Number(m[1]));
 }
 async function launch() {
+  // finishPending() removes stale installer files on startup. Its removal of
+  // this owned marker proves cleanup finished before a new installer is staged.
+  const updates = path.join(userData, "updates");
+  fs.mkdirSync(updates, { recursive: true });
+  const startupMarker = path.join(updates, "acceptance-startup-marker");
+  fs.writeFileSync(startupMarker, "startup");
   await exec("/usr/bin/open", ["-g", "-n", "--env", "XMESH_UI_STATE_ROOT=" + states,
     "--env", "XMESH_UPDATE_FEED=http://127.0.0.1:1", app, "--args", "--user-data-dir=" + userData]);
   await waitFor(async () => (await appProcesses()).length === 1, "formal Electron startup");
+  await waitFor(() => !fs.existsSync(startupMarker), "formal Electron startup update cleanup");
+  events.push("old-electron-startup-cleanup-observed");
   const [pid] = await appProcesses(); ownedPids.add(pid); return pid;
 }
 async function nodeStatus() {
@@ -120,7 +128,7 @@ async function businessCall(gateway) {
   } finally { await client.close(); }
 }
 async function stopApp(pid) { if (pid && !gone(pid)) process.kill(pid, "SIGTERM"); if (pid) await waitFor(() => gone(pid), "owned Electron exit"); }
-let outcome;
+let outcome, failure;
 try {
   assert.equal(fs.existsSync(nodePlist), false); assert.ok(await serviceAbsent(nodeLabel));
   await exec("ditto", [oldInput, app], { timeout: 120000 });
@@ -212,30 +220,38 @@ try {
     host_pid_changed: true, native_pid_changed: true, business_node_pid_changed: true, app_pid_changed: true,
     before_desktop_state: beforeInfo.state, after_desktop_state: afterInfo.state,
     desktop_epoch_changed: true, installer_sha256: sha };
+} catch (error) {
+  failure = error;
 } finally {
-  cleaning = true;
-  for (const pid of await appProcesses()) { ownedPids.add(pid); await stopApp(pid); }
-  if (installer && installer.exitCode === null && installer.signalCode === null) { installer.kill("SIGTERM"); await waitFor(() => installer.exitCode !== null || installer.signalCode !== null, "owned installer exit"); }
-  if (nodeInstalled && fs.existsSync(nodePlist)) {
-    assert.equal((await plist(nodePlist)).ProgramArguments[0], binary, "service ownership changed");
-    for (const item of discoverInstances(states)) ownedPids.add(item.manifest.pid);
-    await exec(binary, ["stop", "--name", nodeLabel, "--json"]);
-    await exec(binary, ["uninstall", "--name", nodeLabel, "--json"]);
-    assert.equal(fs.existsSync(nodePlist), false); assert.ok(await serviceAbsent(nodeLabel));
+  try {
+    cleaning = true;
+    for (const pid of await appProcesses()) { ownedPids.add(pid); await stopApp(pid); }
+    if (installer && installer.exitCode === null && installer.signalCode === null) { installer.kill("SIGTERM"); await waitFor(() => installer.exitCode !== null || installer.signalCode !== null, "owned installer exit"); }
+    if (nodeInstalled && fs.existsSync(nodePlist)) {
+      assert.equal((await plist(nodePlist)).ProgramArguments[0], binary, "service ownership changed");
+      for (const item of discoverInstances(states)) ownedPids.add(item.manifest.pid);
+      if (!(await serviceAbsent(nodeLabel))) await exec(binary, ["stop", "--name", nodeLabel, "--json"]);
+      await exec(binary, ["uninstall", "--name", nodeLabel, "--json"]);
+      assert.equal(fs.existsSync(nodePlist), false); assert.ok(await serviceAbsent(nodeLabel));
+    }
+    if (hostInstalled && fs.existsSync(hostPlist)) {
+      assert.equal((await plist(hostPlist)).ProgramArguments[0], binary, "Host ownership changed");
+      const status = await runComputerHost("status", binary);
+      for (const pid of [status.pid, status.native_pid]) if (pid) ownedPids.add(pid);
+      if (await serviceAbsent(hostLabel)) fs.unlinkSync(hostPlist);
+      else await exec(binary, ["computer", "uninstall", "--json"]);
+      assert.equal(fs.existsSync(hostPlist), false); assert.ok(await serviceAbsent(hostLabel));
+      fs.rmSync(hostState, { recursive: true, force: true });
+    }
+    await waitFor(() => [...ownedPids].every(gone), "owned application and service process cleanup");
+    if (mounts) for (const mount of fs.readdirSync(mounts)) { await exec("hdiutil", ["detach", path.join(mounts, mount), "-force"]); }
+    if (mounts) fs.rmSync(mounts, { recursive: true, force: true });
+    fs.rmSync(installed, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true });
+  } catch (cleanupError) {
+    throw failure ? new AggregateError([failure, cleanupError], "upgrade acceptance and cleanup failed") : cleanupError;
   }
-  if (hostInstalled && fs.existsSync(hostPlist)) {
-    assert.equal((await plist(hostPlist)).ProgramArguments[0], binary, "Host ownership changed");
-    const status = await runComputerHost("status", binary);
-    for (const pid of [status.pid, status.native_pid]) if (pid) ownedPids.add(pid);
-    await exec(binary, ["computer", "uninstall", "--json"]);
-    assert.equal(fs.existsSync(hostPlist), false); assert.ok(await serviceAbsent(hostLabel));
-    fs.rmSync(hostState, { recursive: true, force: true });
-  }
-  await waitFor(() => [...ownedPids].every(gone), "owned application and service process cleanup");
-  if (mounts) for (const mount of fs.readdirSync(mounts)) { await exec("hdiutil", ["detach", path.join(mounts, mount), "-force"]); }
-  if (mounts) fs.rmSync(mounts, { recursive: true, force: true });
-  fs.rmSync(installed, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true });
 }
+if (failure) throw failure;
 if (interrupted) throw interrupted;
 const result = { ...outcome, cleanup: "PASS" };
 if (report) fs.writeFileSync(report, JSON.stringify(result, null, 2) + "\n");
