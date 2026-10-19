@@ -269,13 +269,17 @@ func (r *roleRuntime) Settle(ctx context.Context, retry bool) []v1.ApplyError {
 	if retry {
 		r.mu.Lock()
 		again := len(r.problems) > 0 && r.pending == nil && r.latest != nil
-		cfg := r.latest
 		if again {
 			r.ingressFailed = nil
+			r.pending = r.latest
+			r.submitted++
 		}
 		r.mu.Unlock()
 		if again {
-			r.submit(cfg)
+			select {
+			case r.wake <- struct{}{}:
+			default:
+			}
 		}
 	}
 	for {

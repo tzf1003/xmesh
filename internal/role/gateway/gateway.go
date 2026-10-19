@@ -198,6 +198,9 @@ func (g *Gateway) Update(peers []mesh.Peer) {
 		}
 		seen[p.Name] = true
 		old, exists := g.devices[p.Name]
+		if exists && (old.peer.ID != p.ID || old.peer.Address != p.Address) {
+			delete(g.info, p.Name)
+		}
 		if !exists || !old.online || !reflect.DeepEqual(old.peer, p) {
 			changed = true
 		}

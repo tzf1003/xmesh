@@ -59,9 +59,9 @@ func (r *gatewayRegistry) all() []*gateway.Gateway {
 // drain marks name as draining on every gateway, including the ones added later.
 func (r *gatewayRegistry) drain(name string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.pending[name] = true
 	current := append([]*gateway.Gateway{}, r.list...)
-	r.mu.Unlock()
 	for _, g := range current {
 		g.Drain(name)
 	}
@@ -70,11 +70,11 @@ func (r *gatewayRegistry) drain(name string) {
 // resume undoes drain for the names.
 func (r *gatewayRegistry) resume(names ...string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, name := range names {
 		delete(r.pending, name)
 	}
 	current := append([]*gateway.Gateway{}, r.list...)
-	r.mu.Unlock()
 	for _, g := range current {
 		for _, name := range names {
 			g.Resume(name)
