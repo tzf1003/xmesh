@@ -78,6 +78,8 @@ def record(file, repo, version, os, arch, kind, trust):
             "sha256": hashlib.sha256(data).hexdigest(), "url": f"https://github.com/{repo}/releases/download/{version}/{file.name}", "trust": trust}
 
 def bundles(dist, manifest, root):
+    from build_install_site import render_agent_documents
+    documents = render_agent_documents(root / "docs/agent", manifest["version"])
     for asset in manifest["assets"]:
         if asset["kind"] != "desktop":
             continue
@@ -85,10 +87,12 @@ def bundles(dist, manifest, root):
         with zipfile.ZipFile(target, "w", zipfile.ZIP_STORED) as bundle:
             bundle.write(dist / asset["name"], asset["name"])
             bundle.writestr("manifest.json", json.dumps(manifest, indent=2) + "\n")
-            for file in [root / "llms.txt", root / "docs/operations.md", root / "docs/validation/real-environment-runbook.md", *sorted((root / "docs/agent").glob("*.md")), *sorted((root / "scripts").glob("*.py")), *sorted((root / "scripts").glob("*.ps1")), root / "scripts/install.sh"]:
+            for file in [root / "llms.txt", root / "docs/operations.md", root / "docs/validation/real-environment-runbook.md", *sorted((root / "scripts").glob("*.py")), *sorted((root / "scripts").glob("*.ps1")), root / "scripts/install.sh"]:
                 bundle.write(file, str(file.relative_to(root)))
             for name in ("install.sh", "install.ps1"):
                 bundle.write(root / "scripts" / name, name)
+            for name, content in documents.items():
+                bundle.writestr("docs/agent/" + name, content.encode("utf-8"))
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
