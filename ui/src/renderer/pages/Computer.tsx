@@ -9,6 +9,7 @@ import { useResource } from "../hooks";
 import { useT, type T } from "../i18n";
 import { formatTime } from "../lib/format";
 import { applySaved } from "../lib/reload";
+import { DesktopPreview } from "./DesktopPreview";
 
 function status(state: ComputerState, t: T): string {
   if (!state.enabled) return t("computer.disabled");
@@ -75,6 +76,7 @@ function ComputerPage({ ctx }: { ctx: PageContext }): JSX.Element {
         <label><input type="checkbox" checked={state.pause_on_user_input === true} disabled={busy || !ctx.can("config.write") || (!state.info.user_input_monitor && !state.pause_on_user_input)} onChange={(e) => void pauseOnInput(e.currentTarget.checked)} data-testid="computer-pause-on-input" /> {t("computer.pauseOnInput")}</label>
         {!state.info.user_input_monitor && <p class="hint">{t("computer.inputMonitorUnavailable")}</p>}
       </section>
+      <DesktopPreview ctx={ctx}/>
       <section class="card stack">
         <h2>{t("computer.permissions")}</h2>
         <p>{t("computer.permissionsHint")}</p>

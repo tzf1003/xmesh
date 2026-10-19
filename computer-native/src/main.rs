@@ -200,10 +200,7 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     let (width, height, mut pixels) = rx
         .recv_timeout(Duration::from_secs(3))
         .map_err(|_| "capture_timeout")??;
-    if width < 1
-        || height < 1
-        || width > 16384
-        || height > 16384
+    if !platform::valid_capture_size(width as usize, height as usize)
         || pixels.len() != (width as usize) * (height as usize) * 4
     {
         return Err("capture_format");
@@ -729,5 +726,12 @@ mod tests {
         ds[0].x = 0;
         ds[0].scale = 2.0;
         assert_ne!(a, platform::layout(&ds));
+    }
+    #[test]
+    fn native_capture_pixel_budget_accepts_8k_and_rejects_excessive_allocations() {
+        assert!(platform::valid_capture_size(7680, 4320));
+        assert!(!platform::valid_capture_size(16384, 16384));
+        assert!(!platform::valid_capture_size(0, 100));
+        assert!(!platform::valid_capture_size(usize::MAX, 2));
     }
 }

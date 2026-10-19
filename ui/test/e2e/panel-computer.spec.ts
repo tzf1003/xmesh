@@ -31,3 +31,42 @@ test("older kernels explain desktop capability availability", async () => {
   try { const page = await h.openPanel(); await navigate(page, "computer"); await expect(page.getByTestId("page-computer")).toHaveCount(0); await expect(page.locator("main")).toContainText("桌面控制"); }
   finally { await h.close(); }
 });
+
+test("desktop preview renders MCP images with observation leases and clears on exit", async () => {
+  const h = await launch({ kernel: { playground: true, capabilities: ["status", "events", "peers", "sessions", "computer", "pats", "config.read", "config.write"] } });
+  try {
+    const desktop = h.kernel.playground!.enableDesktop();
+    const page = await h.openPanel();
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+    await navigate(page, "computer");
+    desktop.image = (await page.screenshot({ scale: "css" })).toString("base64");
+    const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    desktop.width = viewport.width; desktop.height = viewport.height;
+    await page.getByTestId("computer-preview-refresh").click();
+    const image = page.getByTestId("computer-preview-image");
+    await expect(image).toBeVisible();
+    await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+    await expect.poll(() => desktop.sessions.size).toBe(0);
+    expect(desktop.modes).toEqual(["observe"]);
+    await page.screenshot({ path: "/tmp/xmesh-computer-preview-desktop.png", fullPage: true });
+    await page.setViewportSize({ width: 900, height: 700 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: "/tmp/xmesh-computer-preview-narrow.png", fullPage: true });
+    await page.getByTestId("computer-preview-auto").check();
+    await expect.poll(() => desktop.captures).toBeGreaterThan(1);
+    await page.getByTestId("computer-preview-clear").click();
+    await expect(image).toHaveCount(0);
+    await expect(page.getByTestId("computer-preview-auto")).not.toBeChecked();
+    const captures = desktop.captures;
+    await page.waitForTimeout(2200);
+    expect(desktop.captures).toBe(captures);
+    await page.getByTestId("computer-preview-refresh").click();
+    await expect(image).toBeVisible();
+    await navigate(page, "overview");
+    await navigate(page, "computer");
+    await expect(image).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } finally { await h.close(); }
+});

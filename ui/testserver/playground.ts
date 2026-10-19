@@ -1,4 +1,5 @@
 import { FakeWorkspace } from "./workspace";
+import { FakeComputer } from "./computer";
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -10,6 +11,8 @@ import type { ToolDescriptor } from "../src/shared/playground";
 export class FakePlayground {
   url = "";
   workspace?: FakeWorkspace;
+  desktop?: FakeComputer;
+  enableDesktop(): FakeComputer { this.desktop = new FakeComputer(); this.tools.push(...this.desktop.tools()); return this.desktop; }
   enableWorkspace(): FakeWorkspace { this.workspace = new FakeWorkspace(); this.tools.push(...this.workspace.tools()); return this.workspace; }
   readonly calls: { name: string; args: Record<string, unknown>; origin?: string }[] = [];
   readonly sessions = new Map<string, { transport: StreamableHTTPServerTransport; server: Server }>();
@@ -44,6 +47,7 @@ export class FakePlayground {
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       const name = request.params.name, args = request.params.arguments ?? {};
       this.calls.push({ name, args, origin });
+      if (this.desktop && name.startsWith("local/computer.")) return this.desktop.call(name.slice("local/computer.".length), args);
       let body: Record<string, unknown>;
       let isError = false;
       if (name === "tools.search") {

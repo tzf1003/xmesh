@@ -411,7 +411,7 @@ fn pipewire_frame(
             };
             let width = data.format.size().width as usize;
             let height = data.format.size().height as usize;
-            if width == 0 || height == 0 || width > 16384 || height > 16384 {
+            if !crate::platform::valid_capture_size(width, height) {
                 return;
             }
             let datas = buffer.datas_mut();

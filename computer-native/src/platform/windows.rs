@@ -306,7 +306,7 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
         ) -> Result<(), Self::Error> {
             let width = frame.width() as i32;
             let height = frame.height() as i32;
-            if width < 1 || height < 1 || width > 16384 || height > 16384 {
+            if !super::valid_capture_size(width as usize, height as usize) {
                 control.stop();
                 return Ok(());
             }

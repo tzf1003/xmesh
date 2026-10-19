@@ -183,7 +183,7 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     let (conn, n) = x11rb::connect(None).map_err(|_| "x11_unavailable")?;
     let setup = conn.setup();
     let screen = &setup.roots[n];
-    if display.width < 1 || display.height < 1 || display.width > 16384 || display.height > 16384 {
+    if !super::valid_capture_size(display.width as usize, display.height as usize) {
         return Err("invalid_display");
     }
     let reply = conn

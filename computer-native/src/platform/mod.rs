@@ -6,6 +6,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 pub const INPUT_MARKER: u64 = 0x584d5348;
 pub(crate) static INPUT_SERIAL: AtomicU64 = AtomicU64::new(0);
 pub(crate) static INPUT_MONITOR_READY: AtomicBool = AtomicBool::new(false);
+pub const MAX_CAPTURE_PIXELS: usize = 32 * 1024 * 1024;
+pub fn valid_capture_size(width: usize, height: usize) -> bool {
+    width > 0
+        && height > 0
+        && width <= 16384
+        && height <= 16384
+        && width
+            .checked_mul(height)
+            .is_some_and(|pixels| pixels <= MAX_CAPTURE_PIXELS)
+}
 pub fn user_input_serial() -> u64 {
     INPUT_SERIAL.load(Ordering::Acquire)
 }

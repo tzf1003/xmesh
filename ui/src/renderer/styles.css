@@ -491,3 +491,8 @@ progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
 @media (max-height: 800px) { .terminal-screen { height: 340px; } }
 
 .transfer-job .bar.full > span { background: var(--accent); }
+
+.computer-preview-controls { flex-wrap: wrap; align-items: end; }
+.computer-preview-frame { margin: 0; overflow: hidden; }
+.computer-preview-frame img { display: block; width: 100%; height: auto; max-height: 60vh; object-fit: contain; background: var(--surface); border-radius: 8px; }
+.computer-preview-frame figcaption { margin-top: 8px; }

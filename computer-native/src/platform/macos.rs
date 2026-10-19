@@ -224,8 +224,13 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
             .ok_or("display_not_found")?;
         let filter = sc::ContentFilter::with_display_excluding_windows(target, &ns::Array::new());
         let mut config = sc::StreamCfg::new();
-        config.set_width((f64::from(display.width) * display.scale).round() as usize);
-        config.set_height((f64::from(display.height) * display.scale).round() as usize);
+        let width = (f64::from(display.width) * display.scale).round() as usize;
+        let height = (f64::from(display.height) * display.scale).round() as usize;
+        if !super::valid_capture_size(width, height) {
+            return Err("capture_size");
+        }
+        config.set_width(width);
+        config.set_height(height);
         config.set_pixel_format(cv::PixelFormat::_32_BGRA);
         config.set_shows_cursor(true);
         let mut sample = sc::ScreenshotManager::capture_sample_buf(&filter, &config)
@@ -234,10 +239,7 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
         let pixels = sample.image_buf_mut().ok_or("capture_empty")?;
         let width = pixels.width();
         let height = pixels.height();
-        if width < 1
-            || height < 1
-            || width > 16384
-            || height > 16384
+        if !super::valid_capture_size(width, height)
             || pixels.pixel_format() != cv::PixelFormat::_32_BGRA
         {
             return Err("capture_format");
