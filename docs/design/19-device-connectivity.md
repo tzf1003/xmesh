@@ -127,7 +127,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 
 ## 运行期生命周期与应用结果
 
-Funnel 入口和 Tailnet Gateway 监听器使用持续的接收队列，等待路径就绪，并在提供者重建后重新绑定。网络配置重载等待当前路径配置就绪；无法启动的 LAN/Tailnet 路径分别通过 `apply_errors` 的 `mesh.lan`、`mesh.tailnet` 返回，仍在初始化的路径也会在等待截止后返回待应用状态。
+Funnel 入口和 Tailnet Gateway 监听器使用持续的接收队列，等待路径就绪，并在提供者重建后重新绑定。Funnel 后台启用失败会进入节点警告和配置应用结果，并在监听成功后清除。网络配置重载等待当前路径配置就绪；无法启动的 LAN/Tailnet 路径分别通过 `apply_errors` 的 `mesh.lan`、`mesh.tailnet` 返回，仍在初始化的路径也会在等待截止后返回待应用状态。
 
 入口对同进程 Agent 的调用使用 `tag:ingress` 授权，沿用 OAuth 调用方身份。设备证书在运行期间每小时检查，到期前 30 天使用同一公钥续期；已创建的服务端和客户端 TLS 配置在每次握手时读取当前证书。
 

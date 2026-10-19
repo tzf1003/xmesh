@@ -20,6 +20,8 @@ type portListener struct {
 	cancel   context.CancelFunc
 	port     int
 	funnel   bool
+	ready    bool // guarded by the owning Node's mu
+	err      string
 	incoming chan net.Conn
 	done     chan struct{}
 	once     sync.Once
@@ -51,7 +53,15 @@ func (n *Node) listenTailnetPort(port int, funnel bool) (net.Listener, error) {
 	}
 	ctx, cancel := context.WithCancel(n.ctx)
 	l := &portListener{ctx: ctx, cancel: cancel, port: port, funnel: funnel, incoming: make(chan net.Conn), done: make(chan struct{})}
-	n.workers.Go(func() { defer close(l.done); n.runGatewayListener(l) })
+	if n.listeners == nil {
+		n.listeners = map[*portListener]bool{}
+	}
+	n.listeners[l] = true
+	n.workers.Go(func() {
+		defer close(l.done)
+		defer func() { n.mu.Lock(); delete(n.listeners, l); n.mu.Unlock() }()
+		n.runGatewayListener(l)
+	})
 	return l, nil
 }
 
@@ -65,15 +75,20 @@ func (n *Node) runGatewayListener(l *portListener) {
 		}
 		n.mu.Unlock()
 		var listener net.Listener
+		var listenError error
 		if server != nil {
 			if l.funnel {
-				listener, _ = server.ListenFunnel("tcp", fmt.Sprintf(":%d", l.port))
+				listener, listenError = server.ListenFunnel("tcp", fmt.Sprintf(":%d", l.port))
 			} else {
-				listener, _ = server.Listen("tcp", fmt.Sprintf(":%d", l.port))
+				listener, listenError = server.Listen("tcp", fmt.Sprintf(":%d", l.port))
 			}
 		}
 		n.mu.Lock()
-		current := n.providers[device.Tailnet] == p
+		current := p != nil && n.providers[device.Tailnet] == p && p.ts == server && n.cfg.TailnetEnabled()
+		l.ready, l.err = current && listener != nil, ""
+		if current && listenError != nil {
+			l.err = listenError.Error()
+		}
 		n.mu.Unlock()
 		if !current && listener != nil {
 			_ = listener.Close()
@@ -102,6 +117,9 @@ func (n *Node) runGatewayListener(l *portListener) {
 			}
 			_ = listener.Close()
 			<-done
+			n.mu.Lock()
+			l.ready = false
+			n.mu.Unlock()
 		}
 		select {
 		case <-l.ctx.Done():

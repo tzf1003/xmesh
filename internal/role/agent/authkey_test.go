@@ -18,6 +18,11 @@ func TestAuthkeyReadabilityUsesV2TailnetConfiguration(t *testing.T) {
 	if !authkeyReadable(cfg) {
 		t.Fatal("v2 key reported unreadable")
 	}
+	cfg.Mesh.Tailnet.AuthMethod = "browser"
+	if authkeyReadable(cfg) {
+		t.Fatal("browser login used a stale key file")
+	}
+	cfg.Mesh.Tailnet.AuthMethod = ""
 	cfg.Mesh.Tailnet.Enabled = false
 	if authkeyReadable(cfg) {
 		t.Fatal("disabled path reported readable")
