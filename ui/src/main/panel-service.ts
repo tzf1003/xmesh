@@ -186,9 +186,14 @@ export class PanelService {
       if (etagOf(current) !== req.etag) {
         return { ok: false, error: { code: "precondition_failed", message: "禁止目录文件已被修改，请重新读取后再保存", current_etag: etagOf(current) } };
       }
-      const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, req.text, { mode: 0o600 });
-      fs.renameSync(tmp, file);
+      const dir = fs.mkdtempSync(path.join(path.dirname(file), ".xmesh-deny-"));
+      try {
+        const tmp = path.join(dir, "deny.yaml");
+        fs.writeFileSync(tmp, req.text, { mode: 0o600, flag: "wx" });
+        fs.renameSync(tmp, file);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
       return { ok: true, data: { etag: etagOf(req.text) } };
     } catch (e) {
       return { ok: false, error: { code: "io", message: e instanceof Error ? e.message : String(e) } };

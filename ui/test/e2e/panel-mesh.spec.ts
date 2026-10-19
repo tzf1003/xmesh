@@ -8,6 +8,7 @@ import { type Harness, launch, navigate } from "./helpers";
 import { FakeKernel } from "../../testserver/server";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
+const cli = process.platform === "win32" ? "& 'xmesh'" : "xmesh";
 
 let h: Harness;
 test.afterEach(async () => {
@@ -67,13 +68,13 @@ test("no credential: the page shows the login commands, copies them, and recover
   const page = await h.openPanel();
   await navigate(page, "mesh");
   await expect(page.getByTestId("mesh-no-credential")).toBeVisible();
-  await expect(page.getByTestId("mesh-no-credential")).toContainText("xmesh mesh login");
+  await expect(page.getByTestId("mesh-no-credential")).toContainText(`${cli} mesh login`);
   await page.getByTestId("mesh-copy-write").click();
-  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual(["xmesh mesh login --kind tailscale --access write --panel"]);
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual([`${cli} mesh login --kind tailscale --access write --panel`]);
   await page.getByTestId("mesh-copy-read-headscale").click();
   await expect.poll(async () => (await h.calls()).filter((c) => c.op === "clipboard").map((c) => c.arg)).toEqual([
-    "xmesh mesh login --kind tailscale --access write --panel",
-    "xmesh mesh login --kind headscale --url https://headscale.example.com --access read --panel",
+    `${cli} mesh login --kind tailscale --access write --panel`,
+    `${cli} mesh login --kind headscale --url https://headscale.example.com --access read --panel`,
   ]);
   await expect(page.getByTestId("toast").first()).toContainText("已复制");
 
@@ -410,4 +411,23 @@ test("derp admission: a pasted token goes to a 0600 file, not argv or the page",
   expect(sync.join(" ")).not.toContain(token);
   expect(fileArg).not.toBe("--admission-token-file=/etc/derp/token");
   expect(await page.content()).not.toContain(token);
+});
+
+test("verified mesh status belongs to the selected node",async()=>{
+ const page=await open();
+ await patch({credential:false});
+ await page.getByTestId("mesh-refresh").click();
+ await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open",true);
+ await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
+ await page.getByTestId("mesh-login-secret").fill("tskey-api-e2e-node-scope");
+ await page.getByTestId("mesh-login-submit").click();
+ await expect(page.getByTestId("mesh-provider")).toContainText("tailscale");
+ const second=await FakeKernel.start({pingMs:300,status:{hostname:"other-node"}});
+ try {
+  await patch({provider:"headscale"});
+  second.writeManifest(h.root,"node-b");
+  await expect.poll(async()=>JSON.stringify((await h.tray()).menu)).toContain("instance.node-b");
+  await h.clickMenu("instance.node-b");
+  await expect(page.getByTestId("mesh-provider")).toContainText("headscale");
+ }finally {await second.stop();}
 });

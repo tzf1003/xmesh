@@ -476,7 +476,8 @@ func decode(r *http.Request, v any, required bool) *v2.Error {
 		}
 		return argError(field, "请求体不符合接口定义")
 	}
-	if dec.More() {
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
 		return argError("body", "请求体只能包含一个 JSON 值")
 	}
 	return nil

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/xml"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -81,5 +84,149 @@ func Test_UserTaskRegistration(t *testing.T) {
 	}
 	if _, err := os.Stat(temporary); !os.IsNotExist(err) {
 		t.Fatal("failed registration retained XML", err)
+	}
+}
+
+func Test_RelocateTaskDocument(t *testing.T) {
+	const document = `<?xml version="1.0" encoding="UTF-16"?><Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Principals><Principal id="CurrentUser"><UserId>S-1-5-21-1000</UserId><LogonType>InteractiveToken</LogonType></Principal></Principals><Settings><Hidden>true</Hidden><UnknownSetting>preserved</UnknownSetting></Settings><Actions Context="CurrentUser"><Exec><Command>C:\O&apos;Brien &amp; Apps\resources\bin\xmesh.exe</Command><Arguments>serve --config &quot;D:\节点\xmesh.yaml&quot; --state-dir &quot;D:\state dir&quot;</Arguments><WorkingDirectory>C:\O&apos;Brien &amp; Apps\workspace</WorkingDirectory></Exec></Actions></Task>`
+	got, err := relocateTaskDocument(document, `C:\O'Brien & Apps`, `D:\new & 中文`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := parseUserTask(document)
+	after, err := parseUserTask(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Actions.Exec.Command != `D:\new & 中文\resources\bin\xmesh.exe` || after.Actions.Exec.WorkingDirectory != `D:\new & 中文\workspace` {
+		t.Fatal("installation paths", after.Actions.Exec)
+	}
+	if after.Actions.Exec.Arguments != before.Actions.Exec.Arguments || !reflect.DeepEqual(after.Principal, before.Principal) || !strings.Contains(got, "<UnknownSetting>preserved</UnknownSetting>") {
+		t.Fatal("task registration was changed", got)
+	}
+	outside := strings.Replace(document, `C:\O&apos;Brien &amp; Apps\workspace`, `D:\user workspace`, 1)
+	got, err = relocateTaskDocument(outside, `C:\O'Brien & Apps`, `D:\new`)
+	after, _ = parseUserTask(got)
+	if err != nil || after.Actions.Exec.WorkingDirectory != `D:\user workspace` {
+		t.Fatal("external working directory", after.Actions.Exec.WorkingDirectory, err)
+	}
+}
+
+func Test_InstallerUserTaskOperations(t *testing.T) {
+	const sid = "S-1-5-21-1000"
+	mine, elsewhere, other := userTaskName("xmesh-node", sid), userTaskName("xmesh-other-copy", sid), userTaskName("xmesh-node", "S-1-5-21-2000")
+	var listing bytes.Buffer
+	writer := csv.NewWriter(&listing)
+	_ = writer.WriteAll([][]string{{mine, "ready"}, {elsewhere, "ready"}, {other, "ready"}})
+	base := `<Task><Principals><Principal><UserId>` + sid + `</UserId></Principal></Principals><Actions><Exec><Command>C:\old\resources\bin\xmesh.exe</Command><Arguments>serve --state-dir D:\state</Arguments><WorkingDirectory>D:\workspace</WorkingDirectory></Exec></Actions></Task>`
+	for _, destination := range []string{"", `D:\new & Apps`} {
+		t.Run(destination, func(t *testing.T) {
+			var mutations []string
+			command := func(args ...string) ([]byte, error) {
+				switch args[0] {
+				case "/Query":
+					if args[1] == "/FO" {
+						return listing.Bytes(), nil
+					}
+					if args[2] == other {
+						t.Fatal("queried other account")
+					}
+					if args[2] == elsewhere {
+						return []byte(strings.Replace(base, `C:\old\`, `C:\other\`, 1)), nil
+					}
+					return []byte(base), nil
+				case "/Create":
+					raw, err := os.ReadFile(args[4])
+					if err != nil {
+						t.Fatal(err)
+					}
+					task, err := parseUserTask(taskDocumentText(raw))
+					if err != nil || task.Actions.Exec.Command != destination+`\resources\bin\xmesh.exe` || task.Actions.Exec.Arguments != `serve --state-dir D:\state` || task.Actions.Exec.WorkingDirectory != `D:\workspace` || task.Principal.UserID != sid {
+						t.Fatal("migration document", task, err)
+					}
+				}
+				if args[2] != mine {
+					t.Fatal("modified another installation", args)
+				}
+				mutations = append(mutations, args[0])
+				return nil, nil
+			}
+			count, err := updateUserTasksUnder(`C:\old`, destination, sid, command)
+			want := []string{"/End", "/Delete"}
+			if destination != "" {
+				want = []string{"/Create"}
+			}
+			if err != nil || count != 1 || !reflect.DeepEqual(mutations, want) {
+				t.Fatal(count, mutations, err)
+			}
+		})
+	}
+	for _, failure := range []string{"list", "inspect", "delete", "register"} {
+		t.Run(failure, func(t *testing.T) {
+			expected := errors.New("scheduler access failed")
+			destination := ""
+			if failure == "register" {
+				destination = `D:\new`
+			}
+			_, err := updateUserTasksUnder(`C:\old`, destination, sid, func(args ...string) ([]byte, error) {
+				if args[0] == "/Query" && args[1] == "/FO" {
+					if failure == "list" {
+						return nil, expected
+					}
+					return listing.Bytes(), nil
+				}
+				if args[0] == "/Query" {
+					if failure == "inspect" {
+						return nil, expected
+					}
+					return []byte(base), nil
+				}
+				if args[0] == "/Delete" && failure == "delete" || args[0] == "/Create" && failure == "register" {
+					return nil, expected
+				}
+				return nil, nil
+			})
+			if !errors.Is(err, expected) {
+				t.Fatal("scheduler failure must reach installer", err)
+			}
+		})
+	}
+}
+
+func Test_TaskDocumentEncodingForMigration(t *testing.T) {
+	for _, declaration := range []string{"", `<?xml version="1.0" encoding="UTF-8"?>`, `<?xml version="1.0" encoding="UTF-16"?>`} {
+		document := declaration + `<Task><Actions><Exec><Command>C:\中文\xmesh.exe</Command></Exec></Actions></Task>`
+		err := withTaskDocument(document, func(path string) error {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			text := taskDocumentText(raw)
+			if !strings.HasPrefix(text, `<?xml version="1.0" encoding="UTF-16"?>`) {
+				t.Fatal("scheduler document encoding", text)
+			}
+			program, err := taskProgram(text)
+			if err != nil || program != `C:\中文\xmesh.exe` {
+				t.Fatal(program, err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type taskListingExit int
+
+func (e taskListingExit) Error() string { return "listing exit" }
+func (e taskListingExit) ExitCode() int { return int(e) }
+func Test_EmptyTaskListingAllowsCleanup(t *testing.T) {
+	count, err := updateUserTasksUnder(`C:\old`, "", "SID", func(...string) ([]byte, error) { return nil, taskListingExit(1) })
+	if err != nil || count != 0 {
+		t.Fatal(count, err)
+	}
+	if _, err := updateUserTasksUnder(`C:\old`, "", "SID", func(...string) ([]byte, error) { return nil, taskListingExit(2) }); err == nil {
+		t.Fatal("listing failure swallowed")
 	}
 }

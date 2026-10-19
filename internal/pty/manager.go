@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
@@ -406,10 +407,41 @@ func (s *Session) read(ctx context.Context, cursor uint64, maxBytes int, wait ti
 			data := ""
 			next := offset
 			if offset < s.cursor {
-				data = strings.ToValidUTF8(string(s.ring[offset-start:end-start]), "�")
-				next = end
+				raw := s.ring[offset-start : end-start]
+				complete := 0
+				for complete < len(raw) {
+					if !utf8.FullRune(raw[complete:]) {
+						if end < s.cursor && complete == 0 {
+							end = min(s.cursor, offset+utf8.UTFMax)
+							raw = s.ring[offset-start : end-start]
+							if utf8.FullRune(raw) {
+								continue
+							}
+						}
+						if end == s.cursor && s.eof {
+							complete = len(raw)
+						}
+						break
+					}
+					_, size := utf8.DecodeRune(raw[complete:])
+					complete += size
+				}
+				data = strings.ToValidUTF8(string(raw[:complete]), "�")
+				next = offset + uint64(complete)
 			}
 			eof := s.eof && next >= s.cursor
+			if data == "" && next == offset && !s.eof && wait > 0 {
+				changed := s.changed
+				s.mu.Unlock()
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-timer.C:
+					return Object{"data": "", "next_cursor": offset, "eof": false, "truncated": truncated}, nil
+				case <-changed:
+					continue
+				}
+			}
 			s.mu.Unlock()
 			if data != "" {
 				s.touch()

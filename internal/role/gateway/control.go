@@ -176,6 +176,7 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 			}
 		}
 		v.mu.Lock()
+		previousDevice := v.defaultDeviceLocked()
 		for key, raw := range args {
 			if string(raw) == "null" {
 				delete(v.defaults, key)
@@ -183,7 +184,11 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 				v.defaults[key] = raw
 			}
 		}
+		deviceChanged := previousDevice != v.defaultDeviceLocked()
 		v.mu.Unlock()
+		if deviceChanged {
+			v.refresh()
+		}
 		return agent.Result(map[string]any{"ok": true}, nil)
 	}
 	return agent.Result(nil, toolerr.New("not_found", "工具不存在", "name", name))

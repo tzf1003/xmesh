@@ -185,3 +185,45 @@ func Test_ControlConfigDiffJudgesRolesBySet(t *testing.T) {
 		}
 	}
 }
+
+func Test_ControlReloadReportsTheAdoptedSnapshot(t *testing.T) {
+	f := newFixture(t, quietPoll)
+	current := []byte(strings.Replace(testConfig, "allow_dangerous: false", "allow_dangerous: true", 1))
+	if err := os.WriteFile(f.path, current, 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.store.Refresh()
+	f.server.configMu.Lock()
+	got, err := f.server.adoptFileLocked(context.Background(), v2.ActorControl, true)
+	f.server.configMu.Unlock()
+	if err != nil || !got.Valid || got.ETag != got.EffectiveETag || got.ETag != etagOf(current) {
+		t.Fatalf("snapshot mismatch: %+v %v", got, err)
+	}
+}
+
+func Test_ControlReloadRecoveryDoesNotPublishAStaleReadFailure(t *testing.T) {
+	f := newFixture(t, quietPoll)
+	events := f.stream("")
+	if err := os.Remove(f.path); err != nil {
+		t.Fatal(err)
+	}
+	f.server.configMu.Lock()
+	_, err := f.server.adoptFileLocked(context.Background(), v2.ActorControl, true)
+	f.server.configMu.Unlock()
+	if err == nil {
+		t.Fatal("missing file accepted")
+	}
+	raw := []byte(strings.Replace(testConfig, "allow_dangerous: false", "allow_dangerous: true", 1))
+	if err := os.WriteFile(f.path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := f.reload()
+	if !out.Valid || out.LoadError != nil {
+		t.Fatalf("%+v", out)
+	}
+	var data v2.ConfigEventData
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
+	if data.Change != "reloaded" {
+		t.Fatalf("recovered read reported as failure: %+v", data)
+	}
+}

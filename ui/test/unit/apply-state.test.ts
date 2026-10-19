@@ -78,3 +78,26 @@ test("a gateway update answer becomes the same outcome as a config save", () => 
   assert.deepEqual(outcomeOf({ restart_required: false, apply_errors: [{ message: "a" }, { message: "b" }] }), { restart: false, paths: [], applyErrors: ["a", "b"] });
   assert.deepEqual(outcomeOf({ restart_required: true }), { restart: true, paths: [], applyErrors: [] });
 });
+
+test("new status warnings supersede the prior successful save",()=>{
+ const baseline=statusWith();
+ const failed=statusWith({warnings:[warningOf("policy_reload_failed","error","external edit failed")]});
+ assert.deepEqual(applyView(clean,failed,baseline).problems,["external edit failed"]);
+ assert.equal(applyView(clean,failed,baseline).applied,false);
+ const recovered=statusWith();
+ recovered.control={...recovered.control,boot_id:"next-boot"};
+ assert.deepEqual(applyView({...clean,applyErrors:["old failure"]},recovered,baseline).problems,[]);
+ assert.equal(applyView({...clean,applyErrors:["old failure"]},recovered,baseline).applied,true);
+});
+
+test("failed saves remain visible through status refreshes in the same boot", () => {
+  const baseline = statusWith();
+  const refreshed = statusWith();
+  const invalid = applyView({ ...clean, loadError: "invalid configuration" }, refreshed, baseline);
+  assert.equal(invalid.loadError, "invalid configuration");
+  assert.equal(invalid.applied, false);
+  const rejected = applyView({ ...clean, applyErrors: ["listener unavailable"] }, refreshed, baseline);
+  assert.deepEqual(rejected.problems, ["listener unavailable"]);
+  assert.equal(rejected.applied, false);
+  assert.equal(applyView(clean, refreshed, refreshed).applied, true);
+});

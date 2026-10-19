@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -91,14 +93,129 @@ func taskDocumentText(raw []byte) string {
 
 // taskProgram is the executable a task document runs.
 func taskProgram(document string) (string, error) {
+	task, err := parseUserTask(document)
+	return task.Actions.Exec.Command, err
+}
+
+func parseUserTask(document string) (userTask, error) {
 	var task userTask
 	decoder := xml.NewDecoder(strings.NewReader(document))
 	// The declaration may say UTF-16; the text is already decoded, so take it as it is.
 	decoder.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) { return in, nil }
 	if err := decoder.Decode(&task); err != nil {
+		return task, err
+	}
+	return task, nil
+}
+
+// relocateTaskDocument updates the executable and installation-relative working directory while
+// preserving the scheduler's complete task document, including arguments, identity and settings.
+func relocateTaskDocument(document, oldDir, newDir string) (string, error) {
+	task, err := parseUserTask(document)
+	if err != nil {
 		return "", err
 	}
-	return task.Actions.Exec.Command, nil
+	oldDir, newDir = strings.TrimRight(oldDir, `\/`), strings.TrimRight(newDir, `\/`)
+	if !programUnder(task.Actions.Exec.Command, oldDir) {
+		return "", fmt.Errorf("任务程序不在原安装目录中")
+	}
+	decoder := xml.NewDecoder(strings.NewReader(document))
+	decoder.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) { return in, nil }
+	var out strings.Builder
+	var value strings.Builder
+	var path []string
+	last, content := int64(0), int64(0)
+	for {
+		start := decoder.InputOffset()
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			path = append(path, t.Name.Local)
+			if len(path) == 4 && strings.Join(path[:3], "/") == "Task/Actions/Exec" {
+				content = decoder.InputOffset()
+				value.Reset()
+			}
+		case xml.CharData:
+			if len(path) == 4 && strings.Join(path[:3], "/") == "Task/Actions/Exec" {
+				value.Write(t)
+			}
+		case xml.EndElement:
+			if len(path) == 4 && strings.Join(path[:3], "/") == "Task/Actions/Exec" {
+				original := value.String()
+				if (t.Name.Local == "Command" || t.Name.Local == "WorkingDirectory") && (programUnder(original, oldDir) || t.Name.Local == "WorkingDirectory" && strings.EqualFold(original, oldDir)) {
+					out.WriteString(document[last:content])
+					if err := xml.EscapeText(&out, []byte(newDir+original[len(oldDir):])); err != nil {
+						return "", err
+					}
+					last = start
+				}
+			}
+			path = path[:len(path)-1]
+		}
+	}
+	out.WriteString(document[last:])
+	return out.String(), nil
+}
+
+// updateUserTasksUnder limits installer operations to this user's tasks in one installation.
+// Listing, inspection and registration failures propagate so the installer can preserve files.
+func updateUserTasksUnder(dir, destination, sid string, command func(...string) ([]byte, error)) (int, error) {
+	listed, err := command("/Query", "/FO", "CSV", "/NH")
+	if err != nil {
+		var exit interface{ ExitCode() int }
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return 0, nil
+		}
+		return 0, err
+	}
+	reader := csv.NewReader(bytes.NewReader(listed))
+	reader.FieldsPerRecord, reader.LazyQuotes = -1, true
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return 0, err
+	}
+	updated := 0
+	for _, row := range rows {
+		if len(row) == 0 || !isUserTaskOf(row[0], sid) {
+			continue
+		}
+		document, err := command("/Query", "/TN", row[0], "/XML")
+		if err != nil {
+			return updated, err
+		}
+		text := taskDocumentText(document)
+		program, err := taskProgram(text)
+		if err != nil {
+			return updated, err
+		}
+		if !programUnder(program, dir) {
+			continue
+		}
+		if destination != "" {
+			text, err = relocateTaskDocument(text, dir, destination)
+			if err != nil {
+				return updated, err
+			}
+			err = withTaskDocument(text, func(path string) error {
+				_, err := command("/Create", "/TN", row[0], "/XML", path, "/F")
+				return err
+			})
+		} else {
+			_, _ = command("/End", "/TN", row[0])
+			_, err = command("/Delete", "/TN", row[0], "/F")
+		}
+		if err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, nil
 }
 
 // createUserTask registers a current-user logon task. Registration is exclusive:
@@ -119,28 +236,37 @@ func createUserTask(c *service.Config, sid, arguments string, register func(stri
 	if err != nil {
 		return "", err
 	}
-	dir, err := os.MkdirTemp("", "xmesh-user-task-")
+	name := userTaskName(c.Name, sid)
+	err = withTaskDocument(string(doc), func(path string) error { return register(name, path) })
 	if err != nil {
 		return "", err
+	}
+	return name, nil
+}
+
+func withTaskDocument(document string, use func(string) error) error {
+	dir, err := os.MkdirTemp("", "xmesh-user-task-")
+	if err != nil {
+		return err
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "task.xml")
 	// schtasks reads task documents as UTF-16. Keep its declaration, BOM and
 	// actual code units consistent, including non-ASCII paths and arguments.
-	units := utf16.Encode([]rune("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" + string(doc)))
+	if strings.HasPrefix(strings.TrimSpace(document), "<?xml ") {
+		if end := strings.Index(document, "?>"); end >= 0 {
+			document = document[end+2:]
+		}
+	}
+	document = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" + document
+	units := utf16.Encode([]rune(document))
 	encoded := make([]byte, 2+2*len(units))
 	encoded[0], encoded[1] = 0xff, 0xfe
 	for i, unit := range units {
 		binary.LittleEndian.PutUint16(encoded[2+2*i:], unit)
 	}
 	if err := os.WriteFile(path, encoded, 0600); err != nil {
-		return "", err
+		return err
 	}
-	// Task names are machine-wide; include a stable current-user suffix so
-	// separate Windows accounts can install the same node name independently.
-	name := userTaskName(c.Name, sid)
-	if err := register(name, path); err != nil {
-		return "", err
-	}
-	return name, nil
+	return use(path)
 }

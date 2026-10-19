@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,7 @@ func Test_DecodeOutputPageBoundaryInsideUTF8(t *testing.T) {
 	whole := []byte(strings.Repeat("中文", 5))
 	for cut := 1; cut < len(whole); cut++ {
 		decodeOutput(whole[:cut], false)
-		decodeOutput(whole[cut:], true)
+		decodeOutputPage(bytes.NewReader(whole), whole[cut:], int64(cut))
 	}
 }
 
@@ -47,5 +48,15 @@ func Test_DecodeOutputLegacyStreamStartingWithHighBytes(t *testing.T) {
 	oemDecode = func(b []byte) (string, bool) { called = true; return "converted", true }
 	if got := decodeOutput([]byte{0xb0, 0xa1, 'x'}, false); got != "converted" || !called {
 		t.Fatalf("%q %v", got, called)
+	}
+}
+
+func Test_DecodeOutputLegacyPageWithContinuationLikeBytes(t *testing.T) {
+	old := oemDecode
+	t.Cleanup(func() { oemDecode = old })
+	oemDecode = func(b []byte) (string, bool) { return "converted:" + string(b), true }
+	raw := []byte{0xb0, 0xa1, 'x', 0xb0, 0xa1, 'y'}
+	if got := decodeOutputPage(bytes.NewReader(raw), raw[3:], 3); got != "converted:"+string(raw[3:]) {
+		t.Fatalf("%q", got)
 	}
 }

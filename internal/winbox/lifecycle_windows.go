@@ -340,7 +340,11 @@ func (e *workspaceExecution) closeContext(ctx context.Context, exitCode uint32) 
 			e.fence.unsealRoot()
 		}
 		if err := e.workspace.closeContext(stages); err != nil {
-			return errors.Join(observationErr, err)
+			if e.workspace.tree != nil || !errors.Is(err, errWorkspaceSecurityChanged) {
+				return errors.Join(observationErr, err)
+			}
+			e.observed = errors.Join(e.observed, err)
+			observationErr = errors.Join(observationErr, err)
 		}
 		e.workspace = nil
 	}

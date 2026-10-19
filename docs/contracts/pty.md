@@ -59,6 +59,8 @@ idle 的定义：`lastIO` 距今超过 `idle_timeout`。`open`、`write`、`read
 | `eof` | 会话已 `closed` 且没有未读的保留输出 |
 | `truncated` | 请求的 `cursor` 已经落在被环形缓冲覆写的区域 |
 
+读取保留完整的 UTF-8 字符边界。字符尾字节尚未写入时保持 cursor，等待下一次读取；EOF 的不完整字符以替换字符表示。若 `max_bytes` 小于首个完整字符的字节数，仍返回该完整字符（最多 4 字节），保证读取可以前进。
+
 `cursor` 太旧时，`truncated` 为 true，`data` 从缓冲中现存的最小偏移开始，`next_cursor` 指向该数据之后。这是成功结果。
 
 `wait_ms` 耗尽且没有新数据：`data` 为空字符串，`next_cursor` 等于请求的 cursor（若已被覆写，则等于现存最小偏移，且 `truncated` 为 true），`eof` 为 false。

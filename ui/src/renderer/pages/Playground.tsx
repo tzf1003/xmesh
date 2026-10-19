@@ -11,6 +11,10 @@ import { ToolForm } from "./playground/ToolForm";
 import { ResultView } from "./playground/ResultView";
 
 export function Playground({ ctx }: { ctx: PageContext }): JSX.Element {
+  return <InstancePlayground key={ctx.snapshot.selectedInstance} ctx={ctx}/>;
+}
+
+function InstancePlayground({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const instance = ctx.snapshot.selectedInstance;
   const c = ctx.snapshot.connection;

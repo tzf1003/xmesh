@@ -35,6 +35,8 @@ type objectGrant struct {
 	// nothing in this package edits it again, so any other value is an external
 	// writer's.
 	baseline []byte
+	// reclaimBaseline omits package ACEs that cleanup is expected to remove.
+	reclaimBaseline []byte
 }
 
 func (p *Profile) grantObject(path string) (*objectGrant, error) {
@@ -286,8 +288,12 @@ func (p *Profile) applyGrantLocked(prepared *preparedGrant, intent uint64) (_ *o
 	if err != nil {
 		return nil, fmt.Errorf("read back AppContainer grant descriptor: %w", err)
 	}
+	reclaimBaseline, err := fingerprintDescriptor(prepared.aclHandle, true, nil)
+	if err != nil {
+		return nil, fmt.Errorf("read back AppContainer reclamation descriptor: %w", err)
+	}
 	p.grants++
-	grant := &objectGrant{profile: p, handle: prepared.handle, aclHandle: prepared.aclHandle, ace: prepared.ace, id: prepared.actual.id, intent: intent, baseline: baseline}
+	grant := &objectGrant{profile: p, handle: prepared.handle, aclHandle: prepared.aclHandle, ace: prepared.ace, id: prepared.actual.id, intent: intent, baseline: baseline, reclaimBaseline: reclaimBaseline}
 	prepared.handle, prepared.aclHandle = 0, 0
 	return grant, nil
 }

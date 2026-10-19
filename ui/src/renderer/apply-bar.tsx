@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { getApi } from "./api";
 import { Banner, Confirm } from "./components";
 import { errorText, useT } from "./i18n";
@@ -28,7 +28,9 @@ export function ApplyBar({
   const t = useT();
   const [ask, setAsk] = useState(false);
   const [busy, setBusy] = useState(false);
-  const view = applyView(fresh, status);
+  const baseline=useRef({fresh,status});
+  if(baseline.current.fresh!==fresh) baseline.current={fresh,status};
+  const view = applyView(fresh, status,baseline.current.status);
   if (!hasNews(view)) return null;
 
   const restart = async (): Promise<void> => {
@@ -70,7 +72,7 @@ export function ApplyBar({
           </div>
           {view.waiting.length > 0 && (
             <p class="hint" data-testid="apply-waiting">
-              {t("apply.waiting", { names: view.waiting.join("、") })}
+              {t("apply.waiting", { names: view.waiting.map((name)=>({"节点名称":t("settings.nodeName"),"Agent 角色":t("apply.name.agent"),"组网方式":t("apply.name.mesh"),"审计日志":t("apply.name.audit"),"Windows 沙箱":t("apply.name.sandbox")} as Record<string,string>)[name]??name).join(t("apply.name.separator")) })}
             </p>
           )}
         </Banner>

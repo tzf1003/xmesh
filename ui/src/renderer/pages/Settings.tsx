@@ -76,6 +76,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
   // Reads can overlap (a save re-reads what an earlier read is still fetching); only the latest may write the page.
   const loadSeq = useRef(0);
   const denySeq = useRef(0);
+  const consumedFocus = useRef<PageContext["focus"]>();
 
   const load = async (): Promise<void> => {
     const seq = ++loadSeq.current;
@@ -86,7 +87,9 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
     setLoaded(r.data);
     const current = formFromConfig(r.data.parsed);
     // A link to the ingress role opens with it on in the form; nothing is saved until the user does.
-    setForm(ctx.focus?.role === "ingress" ? { ...current, roles: toggleRole(current.roles, "ingress", true) } : current);
+    const focusIngress=ctx.focus?.role === "ingress" && consumedFocus.current!==ctx.focus;
+    consumedFocus.current=ctx.focus;
+    setForm(focusIngress ? { ...current, roles: toggleRole(current.roles, "ingress", true) } : current);
     setReview(undefined);
   };
 

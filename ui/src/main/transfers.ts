@@ -40,7 +40,7 @@ export class TransferService {
       if (job.active)
         void this.playground.request({
           op: "cancel",
-          instance: this.controller.snapshot.selectedInstance,
+          instance: job.request.instance,
           id: job.active,
         });
     }
@@ -203,8 +203,12 @@ export class TransferService {
         do {
           const amount = chunked ? Math.min(CHUNK, before.size - offset) : before.size;
           const data = Buffer.alloc(amount);
-          const read = (await handle.read(data, 0, amount, offset)).bytesRead;
-          if (read !== amount) throw new Error("Source changed during upload");
+          let read=0;
+          while(read<amount) {
+            const n=(await handle.read(data,read,amount-read,offset+read)).bytesRead;
+            if(!n) throw new Error("Source changed during upload");
+            read+=n;
+          }
           const final = offset + read === before.size;
           if (final) {
             const current = await handle.stat();
@@ -273,8 +277,12 @@ export class TransferService {
           if (bytes.toString("base64") !== body.data || body.bytes !== bytes.length || body.sha256 !== hash(bytes))
             throw new Error("Download chunk checksum mismatch");
           if (chunked && body.file_bytes !== stat.size) throw new Error("Source changed during download");
-          const written = await handle.write(bytes);
-          if (written.bytesWritten !== bytes.length) throw new Error("Incomplete local write");
+          let at=0;
+          while(at<bytes.length) {
+            const written=await handle.write(bytes,at,bytes.length-at);
+            if(!written.bytesWritten) throw new Error("Incomplete local write");
+            at+=written.bytesWritten;
+          }
           digest.update(bytes);
           offset += bytes.length;
           job.state.bytes = offset;
@@ -297,26 +305,82 @@ export class TransferService {
         handle = undefined;
         job.abort.signal.throwIfAborted();
         this.check(req.instance);
-        const current = await fs.promises.lstat(file).catch((e: NodeJS.ErrnoException) => {
-          if (e.code === "ENOENT") return undefined;
-          throw e;
-        });
-        if (
-          !!current !== !!previous ||
-          (current &&
-            previous &&
-            (current.ino !== previous.ino ||
-              current.dev !== previous.dev ||
-              current.size !== previous.size ||
-              current.mtimeMs !== previous.mtimeMs))
-        )
-          throw new Error("Local destination changed during download");
-        await fs.promises.rename(temp, file);
+        await publishDownload(temp, file, previous);
       } finally {
         await handle?.close();
         await fs.promises.rm(temp, { force: true });
       }
     }
     job.state.phase = "complete";
+  }
+}
+
+const sameDestination = (a: fs.Stats, b: fs.Stats): boolean =>
+  a.isFile() && b.isFile() && a.ino === b.ino && a.dev === b.dev &&
+  a.size === b.size && a.mtimeMs === b.mtimeMs;
+
+/** Publish into an unoccupied name, including on filesystems without hard links. */
+async function publishExclusive(source:string,destination:string):Promise<void> {
+  try {await fs.promises.link(source,destination);return;}
+  catch(error) {
+    if(!["EPERM","ENOTSUP","EOPNOTSUPP","ENOSYS","EXDEV"].includes((error as NodeJS.ErrnoException).code??"")) throw error;
+  }
+  const output=await fs.promises.open(destination,"wx",0o600);
+  try {
+    const input=await fs.promises.open(source,"r");
+    try {
+      const buffer=Buffer.alloc(CHUNK);
+      for(;;) {
+        const {bytesRead}=await input.read(buffer,0,buffer.length,null);
+        if(!bytesRead) break;
+        let at=0;
+        while(at<bytesRead) {
+          const {bytesWritten}=await output.write(buffer,at,bytesRead-at);
+          if(!bytesWritten) throw new Error("Incomplete local write");
+          at+=bytesWritten;
+        }
+      }
+      await output.sync();
+    } finally {await input.close();}
+  } catch(error) {
+    // The name may have been concurrently replaced, so a partial entry is retained for inspection.
+    throw new Error(`Download publication failed; partial destination retained at ${destination}`,{cause:error});
+  } finally {await output.close();}
+}
+
+/** Publish a private inode; retain the captured destination until publication succeeds. */
+export async function publishDownload(temp: string, file: string, previous?: fs.Stats): Promise<void> {
+  if (!previous) {
+    await publishExclusive(temp,file);
+    return;
+  }
+  const before = await fs.promises.lstat(file);
+  if (!sameDestination(before, previous) || before.ctimeMs !== previous.ctimeMs)
+    throw new Error("Local destination changed during download");
+  const dir = await fs.promises.mkdtemp(path.join(path.dirname(file), ".xmesh-replaced-"));
+  const backup = path.join(dir, "original");
+  let captured = false;
+  try {
+    await fs.promises.rename(file, backup);
+    captured = true;
+    const current = await fs.promises.lstat(backup);
+    if (!sameDestination(current, previous))
+      throw new Error("Local destination changed during download");
+    await publishExclusive(temp,file);
+    await fs.promises.unlink(backup);
+    captured = false;
+  } catch (error) {
+    if (captured) {
+      try {
+        await publishExclusive(backup,file);
+        await fs.promises.unlink(backup);
+        captured = false;
+      } catch {
+        throw new Error(`Local destination changed; captured file retained at ${backup}`, { cause: error });
+      }
+    }
+    throw error;
+  } finally {
+    if (!captured) await fs.promises.rmdir(dir);
   }
 }

@@ -46,7 +46,7 @@ export function BindingCard({ ctx, overview, binding: b, reload }: Props): JSX.E
     else if (step === "repair") {
       if (b.source === "account") void call(() => getApi().ci({ op: "binding.repair", id: b.id }));
       else setDialog("repair");
-    } else if (step === "account") setDialog("token");
+    } else if (step === "account") setDialog(account ? "token" : "repair");
   };
 
   return (
@@ -150,7 +150,7 @@ export function BindingCard({ ctx, overview, binding: b, reload }: Props): JSX.E
           onClose={() => setDialog(undefined)}
           onSaved={() => {
             setDialog(undefined);
-            void restart();
+            void call(() => getApi().ci({ op: "binding.repair", id: b.id }));
           }}
         />
       )}

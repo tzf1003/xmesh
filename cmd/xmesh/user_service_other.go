@@ -11,3 +11,7 @@ import (
 func installUserService(*service.Config) error {
 	return fmt.Errorf("Windows 用户任务仅适用于 Windows")
 }
+
+func relocateUserTasksUnder(string, string) (int, error) {
+	return 0, fmt.Errorf("Windows 用户任务仅适用于 Windows")
+}

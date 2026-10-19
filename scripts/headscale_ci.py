@@ -192,7 +192,7 @@ extendedKeyUsage=serverAuth
             for name, (command, gateway) in list(nodes.items()):
                 process, log = spawn(command, name)
                 nodes[name] = (process, log, gateway)
-            tokens = {name: wait_for_default_token(work / name / "state") for name in nodes}
+            tokens = {name: wait_for_default_token(binary, work / name / "state") for name in nodes}
             clients = {name: wait_for_gateway(process, gateway, log, tokens[name], seconds=90)
                        for name, (process, log, gateway) in nodes.items()}
             results = []

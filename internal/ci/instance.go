@@ -18,13 +18,14 @@ import (
 // instance is one runner: a directory with an installed, registered runner and the process that
 // listens for jobs. Its goroutine (run) is the only thing that starts or stops that process.
 type instance struct {
-	m        *Manager
-	bid      string
-	idx      int
-	dir      string
-	name     string
-	finished chan struct{}
-	wakeC    chan struct{}
+	m           *Manager
+	bid         string
+	idx         int
+	dir         string
+	name        string
+	finished    chan struct{}
+	cleanupDone chan struct{} // protected by Manager.mu; scale-down owns cleanup until closed
+	wakeC       chan struct{}
 
 	mu        sync.Mutex
 	snap      v2.CiInstance
@@ -34,7 +35,7 @@ type instance struct {
 	restart   bool // stop gracefully, then start again with a clean slate
 	rereg     bool // register again before the next start
 	reinstall bool // unpack the newest package over the install before the next start
-	tail      []string
+	tail      []lineKind
 	removed   bool // the last run ended because GitHub no longer knows this runner
 	conflicts int
 }
@@ -125,20 +126,20 @@ func (i *instance) snapshot() v2.CiInstance {
 
 func (i *instance) setState(state v2.CiInstanceState, problem *v2.CiProblem) {
 	i.mu.Lock()
-	wasBusy := i.snap.State == v2.CiBusy
+	wasBusy := i.snap.Job != nil
 	if i.snap.State != state {
 		i.snap.Since = v2.Now()
 	}
 	i.snap.State = state
 	i.snap.Problem = problem
-	if state != v2.CiBusy {
+	if state != v2.CiBusy && state != v2.CiStopping {
 		i.snap.Job = nil
 	}
 	if state != v2.CiStarting && state != v2.CiIdle && state != v2.CiBusy && state != v2.CiStopping {
 		i.snap.PID = 0
 	}
 	i.mu.Unlock()
-	if wasBusy && state != v2.CiBusy {
+	if wasBusy && state != v2.CiBusy && state != v2.CiStopping {
 		i.m.busyChanged(-1)
 	}
 }
@@ -212,6 +213,7 @@ func (i *instance) run() {
 		}
 		started := time.Now()
 		exit := i.runOnce()
+		i.setState(v2.CiStopped, nil)
 		ranFor := time.Since(started)
 		if ranFor >= i.m.o.StableAfter {
 			attempt = 0
@@ -295,7 +297,9 @@ func (i *instance) ensureRegistered() *v2.CiProblem {
 		if !registered {
 			return i.problem(v2.CiProblemRegistrationFailed, "目录里没有 .runner，这个运行器还没有注册。")
 		}
-		return nil
+		if !rereg {
+			return nil
+		}
 	}
 	if registered && !rereg {
 		return nil
@@ -358,7 +362,9 @@ func (i *instance) configure(spec config.CIBinding, token string) *v2.CiProblem 
 	var lines []string
 	p, err := startProcess(i.dir, filepath.Join(i.dir, scriptName("config")), args, env, func(line string) {
 		mu.Lock()
-		lines = append(lines, strings.ReplaceAll(line, token, "***"))
+		if marker := registrationMarker(line); marker != "" {
+			lines = append(lines, marker)
+		}
 		mu.Unlock()
 	})
 	if err != nil {
@@ -390,15 +396,7 @@ func (i *instance) unregister(ctx context.Context, token string) error {
 	if runtime.GOOS != "windows" && os.Geteuid() == 0 {
 		env = append(env, "RUNNER_ALLOW_RUNASROOT=1")
 	}
-	var mu sync.Mutex
-	var last string
-	p, err := startProcess(i.dir, filepath.Join(i.dir, scriptName("config")), []string{"remove"}, env, func(line string) {
-		mu.Lock()
-		if strings.TrimSpace(line) != "" {
-			last = strings.ReplaceAll(line, token, "***")
-		}
-		mu.Unlock()
-	})
+	p, err := startProcess(i.dir, filepath.Join(i.dir, scriptName("config")), []string{"remove"}, env, func(string) {})
 	if err != nil {
 		return err
 	}
@@ -410,25 +408,17 @@ func (i *instance) unregister(ctx context.Context, token string) error {
 		return ctx.Err()
 	}
 	if p.exit != 0 {
-		mu.Lock()
-		defer mu.Unlock()
-		return fmt.Errorf("退出码 %d: %s", p.exit, short(last))
+		return fmt.Errorf("退出码 %d", p.exit)
 	}
 	return nil
 }
 
 func (i *instance) registrationProblem(lines []string) *v2.CiProblem {
 	joined := strings.Join(lines, "\n")
-	last := ""
-	for j := len(lines) - 1; j >= 0; j-- {
-		if strings.TrimSpace(lines[j]) != "" {
-			last = strings.TrimSpace(lines[j])
-			break
-		}
-	}
+
 	switch {
 	case dependencyMissing(joined):
-		return i.problem(v2.CiProblemMissingDependency, "缺少运行器需要的系统库（常见于 Linux 的 ICU），请先安装依赖: "+short(last))
+		return i.problem(v2.CiProblemMissingDependency, "缺少运行器需要的系统库（常见于 Linux 的 ICU），请先安装依赖。")
 	case strings.Contains(joined, "404") || strings.Contains(joined, "NotFound"):
 		return i.problem(v2.CiProblemRegistrationFailed, "GitHub 找不到这个仓库，或注册令牌没有权限。")
 	case strings.Contains(joined, "401") || strings.Contains(joined, "Unauthorized") || strings.Contains(joined, "expired"):
@@ -436,7 +426,22 @@ func (i *instance) registrationProblem(lines []string) *v2.CiProblem {
 	case strings.Contains(joined, "already configured"):
 		return i.problem(v2.CiProblemRegistrationFailed, "这个目录里已经有一个注册过的运行器。")
 	}
-	return i.problem(v2.CiProblemRegistrationFailed, "注册失败: "+short(last))
+	return i.problem(v2.CiProblemRegistrationFailed, "注册失败，请检查运行器配置和 GitHub 连接后重试。")
+}
+
+// Retain only diagnostic categories from registration stdout.
+func registrationMarker(line string) string {
+	switch {
+	case dependencyMissing(line):
+		return "libicu"
+	case strings.Contains(line, "404") || strings.Contains(line, "NotFound"):
+		return "404"
+	case strings.Contains(line, "401") || strings.Contains(line, "Unauthorized") || strings.Contains(line, "expired"):
+		return "401"
+	case strings.Contains(line, "already configured"):
+		return "already configured"
+	}
+	return ""
 }
 
 func dependencyMissing(text string) bool {
@@ -459,13 +464,14 @@ func short(s string) string {
 
 // exitInfo is how one run of the listener ended.
 type exitInfo struct {
-	code      int
-	asked     bool // the process was stopped on purpose
-	conflict  bool
-	removed   bool
-	deprec    bool
-	authFail  bool
-	tailLines []string
+	code              int
+	asked             bool // the process was stopped on purpose
+	conflict          bool
+	removed           bool
+	deprec            bool
+	authFail          bool
+	missingDependency bool
+	tailLines         []string
 }
 
 // runOnce starts the listener and supervises it until it exits.
@@ -542,9 +548,9 @@ func (i *instance) currentState() v2.CiInstanceState {
 func (i *instance) exitOf(code int, asked bool) exitInfo {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	info := exitInfo{code: code, asked: asked, tailLines: append([]string{}, i.tail...)}
+	info := exitInfo{code: code, asked: asked}
 	for _, l := range i.tail {
-		switch parseLine(l).kind {
+		switch l {
 		case lineSessionConflict:
 			info.conflict = true
 		case lineRunnerRemoved:
@@ -553,6 +559,8 @@ func (i *instance) exitOf(code int, asked bool) exitInfo {
 			info.deprec = true
 		case lineAuthFailed:
 			info.authFail = true
+		case lineMissingDependency:
+			info.missingDependency = true
 		}
 	}
 	return info
@@ -562,7 +570,7 @@ func (i *instance) exitOf(code int, asked bool) exitInfo {
 func (i *instance) onLine(line string) {
 	ev := parseLine(line)
 	i.mu.Lock()
-	i.tail = append(i.tail, line)
+	i.tail = append(i.tail, ev.kind)
 	if len(i.tail) > tailLines {
 		i.tail = i.tail[len(i.tail)-tailLines:]
 	}
@@ -609,15 +617,23 @@ func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duratio
 	case e.removed:
 		i.mu.Lock()
 		i.rereg, i.removed = true, true
+		automatic := i.spec.Account != "" && i.m.o.Token != nil
 		i.mu.Unlock()
-		return time.Second, i.problem(v2.CiProblemRunnerRemoved, "GitHub 已经删除了这个运行器，请选择「重新注册」。"), true
+		return time.Second, i.problem(v2.CiProblemRunnerRemoved, "GitHub 已经删除了这个运行器，请选择「重新注册」。"), !automatic
 	case e.authFail:
-		return time.Second, i.problem(v2.CiProblemAuthFailed, "GitHub 拒绝了这个运行器的凭据，请选择「重新注册」。"), true
+		i.mu.Lock()
+		automatic := i.spec.Account != "" && i.m.o.Token != nil
+		if automatic {
+			i.rereg = true
+		}
+		i.mu.Unlock()
+		return time.Second, i.problem(v2.CiProblemAuthFailed, "GitHub 拒绝了这个运行器的凭据，请选择「重新注册」。"), !automatic
 	case e.deprec || e.code == 7:
 		i.mu.Lock()
 		i.reinstall = true
+		automatic := i.spec.Source != "import"
 		i.mu.Unlock()
-		return time.Second, i.problem(v2.CiProblemVersionDeprecated, "运行器版本已被弃用，重启后会换成最新版本。"), true
+		return time.Second, i.problem(v2.CiProblemVersionDeprecated, "运行器版本已被弃用，重启后会换成最新版本。"), !automatic
 	case e.conflict || e.code == 5:
 		i.mu.Lock()
 		i.conflicts++
@@ -627,13 +643,13 @@ func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duratio
 			return time.Second, i.problem(v2.CiProblemSessionConflict, "这个运行器在别处也在运行，请先关掉另一个，再选择「重启」。"), true
 		}
 		return time.Second, i.problem(v2.CiProblemSessionConflict, "GitHub 上还留着这个运行器的旧会话，稍后自动重试。"), false
-	case dependencyMissing(strings.Join(e.tailLines, "\n")):
+	case e.missingDependency || dependencyMissing(strings.Join(e.tailLines, "\n")):
 		return time.Second, i.problem(v2.CiProblemMissingDependency, "缺少运行器需要的系统库，请先安装依赖，再选择「重启」。"), true
 	case e.code == 3 || e.code == 4 || e.code == 6:
 		// The runner is updating itself or refreshed its configuration: start it again at once.
 		return 0, nil, false
 	case e.code == 127 && ranFor < time.Second:
-		return time.Second, i.problem(v2.CiProblemStartFailed, "无法启动运行器: "+short(strings.Join(e.tailLines, " "))), false
+		return time.Second, i.problem(v2.CiProblemStartFailed, "运行器启动失败（退出码 127），请检查运行器程序及其依赖命令是否可用。"), false
 	}
 	msg := fmt.Sprintf("运行器退出（退出码 %d），稍后自动重启。", e.code)
 	return time.Second, i.problem(v2.CiProblemUnclassified, msg), false
