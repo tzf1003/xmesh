@@ -1461,8 +1461,8 @@ export interface PairImportRequest {
    * @minItems 1
    */
   tags?: [
-    "tag:peer" | "tag:device" | "tag:ingress",
-    ...("tag:peer" | "tag:device" | "tag:ingress")[]
+    "tag:peer" | "tag:device" | "tag:ingress" | "tag:admin",
+    ...("tag:peer" | "tag:device" | "tag:ingress" | "tag:admin")[]
   ];
 }
 export interface PairImportResponse {

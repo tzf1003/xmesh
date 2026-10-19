@@ -3,7 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/identity"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,6 +56,73 @@ func TestRemoteDrainHonorsDeviceTimeout(t *testing.T) {
 		cancel()
 		if err := <-done; err != nil || budget > expected || budget < expected-time.Second {
 			t.Fatal(requested, budget, err)
+		}
+	}
+}
+
+func TestRoleOnlyNodeRemoteDrainUsesAdminBoundary(t *testing.T) {
+	for _, item := range []struct {
+		tag, device, scope string
+		status             int
+	}{
+		{"tag:peer", "node-id", "device", 403},
+		{"tag:admin", "other", "device", 404},
+		{"tag:admin", "node-id", "device", 200},
+		{"tag:admin", "", "mesh", 200},
+	} {
+		registry := newGatewayRegistry()
+		handler := deviceDrainControl(func(*http.Request) (identity.Principal, error) {
+			return identity.Principal{Node: "admin", Tags: []string{item.tag}}, nil
+		}, "role-only", "node-id", nil, registry, new(sync.Mutex))
+		body := `{"scope":"` + item.scope + `","device":"` + item.device + `","drain":"keep"}`
+		request := httptest.NewRequest("POST", "http://device/control/drain", strings.NewReader(body))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != item.status {
+			t.Fatal(item, response.Code, response.Body.String())
+		}
+		registry.mu.Lock()
+		pending := len(registry.pending)
+		registry.mu.Unlock()
+		if (pending > 0) != (item.status == 200) {
+			t.Fatal("role drain changed state across a refused request", item, pending)
+		}
+	}
+}
+
+func TestRoleOnlyRemoteDrainIsVisibleAndResumable(t *testing.T) {
+	cfg := parseConfig(t, []string{"gateway"}, address(t))
+	registry := newGatewayRegistry()
+	management := new(sync.Mutex)
+	host := &controlHost{d: controlDeps{store: config.Static(cfg), management: management, isDraining: func() bool { return registry.draining(cfg.Node.Name) }, resume: func() { registry.resume(cfg.Node.Name, "") }}, firewall: newFirewallWatch()}
+	state := t.TempDir()
+	server, err := control.Start(control.Options{Host: host, Store: host.d.store, StateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	endpoint, err := control.ReadEndpoint(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := control.NewClient(endpoint)
+	handler := deviceDrainControl(func(*http.Request) (identity.Principal, error) {
+		return identity.Principal{Node: "admin", Tags: []string{"tag:admin"}}, nil
+	}, cfg.Node.Name, "node-id", nil, registry, management)
+	for _, scope := range []string{"device", "mesh"} {
+		request := httptest.NewRequest("POST", "http://device/control/drain", strings.NewReader(`{"scope":"`+scope+`","device":"node-id","drain":"keep"}`))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != 200 || !host.Draining() {
+			t.Fatal(scope, response.Code, host.Draining())
+		}
+		var status v2.StatusResponse
+		if err := client.Fetch(t.Context(), "/v2/status", &status); err != nil || !status.Drain.Draining {
+			t.Fatal("remote drain not visible", status.Drain, err)
+		}
+		res, err := client.Do(t.Context(), "POST", "/v2/resume", nil, nil)
+		if err != nil || res.Error() != nil || host.Draining() || registry.draining(cfg.Node.Name) {
+			t.Fatal("remote drain not resumed", scope, err)
 		}
 	}
 }

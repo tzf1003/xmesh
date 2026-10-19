@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -459,5 +460,105 @@ func TestUnattachedIncomingSessionExpiresWithHealthyCarrier(t *testing.T) {
 			t.Fatal("healthy carrier retained an abandoned incoming session")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestDelegatedSessionsRequireIngressTrust(t *testing.T) {
+	for _, grant := range []struct {
+		name     string
+		tags     []string
+		accepted bool
+	}{
+		{"ordinary-peer", []string{"tag:peer", "tag:device"}, false},
+		{"mixed-grants", []string{"tag:peer", "tag:device", "tag:admin", "tag:ingress"}, true},
+	} {
+		t.Run(grant.name, func(t *testing.T) {
+			a, b := newTestNode(t, "a"), newTestNode(t, "b")
+			pairTestNodes(t, a, b)
+			if err := b.trust.Grant(t.Context(), a.id.Document("sender"), grant.tags, nil); err != nil {
+				t.Fatal(err)
+			}
+			seen := make(chan identity.Principal, 1)
+			b.manager.opts.Accept = func(_ context.Context, p identity.Principal, _ *Session) error { seen <- p; return nil }
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			transport, err := a.manager.Open(ctx, b.id.ID, "oauth-client")
+			if !grant.accepted {
+				if err == nil {
+					transport.Session.Close()
+					t.Fatal("ordinary peer delegated its broader grant to an OAuth client")
+				}
+				select {
+				case p := <-seen:
+					t.Fatal("unauthorized session reached Agent", p)
+				default:
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer transport.Session.Close()
+			principal := <-seen
+			if principal.Node != a.id.ID || principal.OAuthClient != "oauth-client" || !reflect.DeepEqual(principal.Tags, []string{"tag:ingress"}) {
+				t.Fatal("OAuth session inherited non-ingress grants", principal)
+			}
+		})
+	}
+}
+
+func TestDelegatedPrincipalMatrix(t *testing.T) {
+	for _, item := range []struct {
+		tags  []string
+		oauth string
+		ok    bool
+	}{
+		{[]string{"tag:peer"}, "", true},
+		{[]string{"tag:peer"}, "claimed", false},
+		{[]string{"tag:admin", "tag:device"}, "claimed", false},
+		{[]string{"tag:ingress", "tag:peer", "tag:admin"}, "client-1", true},
+		{[]string{"tag:ingress"}, "", false},
+	} {
+		p, err := delegatedPrincipal("device", item.tags, item.oauth)
+		if (err == nil) != item.ok {
+			t.Fatal(item, p, err)
+		}
+		if item.ok && item.oauth != "" && (p.OAuthClient != item.oauth || !reflect.DeepEqual(p.Tags, []string{"tag:ingress"})) {
+			t.Fatal(item, p)
+		}
+	}
+}
+
+func TestClosedSessionsReleaseSlotsAfterAcknowledgement(t *testing.T) {
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	pa, _ := a.manager.peer(b.id.ID)
+	pb, _ := b.manager.peer(a.id.ID)
+	for range maxLogicalSessions + 1 {
+		transport, err := a.manager.Open(ctx, b.id.ID, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := transport.Session.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			pa.mu.Lock()
+			left := len(pa.sessions)
+			pa.mu.Unlock()
+			pb.mu.Lock()
+			right := len(pb.sessions)
+			pb.mu.Unlock()
+			if left == 0 && right == 0 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("close acknowledgement retained a session slot", left, right)
+			case <-time.After(time.Millisecond):
+			}
+		}
 	}
 }

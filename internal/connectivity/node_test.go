@@ -353,4 +353,101 @@ func TestSettleWaitsForDisabledPathAndReportsFunnelErrors(t *testing.T) {
 	if problems := n.Settle(t.Context()); len(problems) != 0 || len(n.ListenerErrors()) != 0 {
 		t.Fatal("recovered listener remains degraded", problems)
 	}
+	n.mu.Lock()
+	n.cfg.Tailnet.Enabled = true
+	n.providers[device.Tailnet] = &provider{cfg: n.cfg, ready: true}
+	listener.funnel, listener.ready, listener.err = false, false, "Tailnet gateway port occupied"
+	n.mu.Unlock()
+	problems = n.Settle(t.Context())
+	if len(problems) != 1 || problems[0].Section != "gateway" || len(n.ListenerErrors()) != 1 {
+		t.Fatal("gateway listener error hidden", problems)
+	}
+
+}
+
+func TestOAuthDeviceSessionUsesOnlyTargetIngressGrant(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	clientNode, _ := node(t, "ingress-client")
+	target, cfg := node(t, "target")
+	cfg.Agent.Authz = map[string]config.Grant{
+		"tag:peer":    {Tools: []string{"*"}, Backends: []string{"*"}},
+		"tag:ingress": {Tools: []string{"sys.info", "fs.stat"}},
+	}
+	ag, err := agent.New(config.Static(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ag.Close)
+	principals := make(chan identity.Principal, 1)
+	target.SetAgent(func(ctx context.Context, p identity.Principal, transport mcp.Transport) error {
+		principals <- p
+		_, err := ag.ConnectDevice(ctx, p, transport)
+		return err
+	})
+	server := serveNode(t, target)
+	if err := target.pairing.SetPassword("correct horse battery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clientNode.PairWith(ctx, device.LAN, server.URL, "correct horse battery", target.identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.trust.Grant(ctx, clientNode.identity.Document("ingress-client"), []string{"tag:peer", "tag:device", "tag:ingress"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := clientNode.Transport(ctx, mesh.Peer{ID: target.identity.ID}, "oauth-client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "oauth", Version: "2"}, nil)
+	session, err := client.Connect(ctx, transport, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	p := <-principals
+	if p.OAuthClient != "oauth-client" || len(p.Tags) != 1 || p.Tags[0] != "tag:ingress" {
+		t.Fatal(p)
+	}
+	caller := identity.Caller{ID: p.Node + "/" + session.ID(), Tags: p.Tags, OAuthClient: p.OAuthClient}
+	if agent.Allowed(cfg, caller, "exec.run", "") || !agent.Allowed(cfg, caller, "fs.stat", "") {
+		t.Fatal("delegated grant boundary failed", caller)
+	}
+	allowed, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "sys.info", Arguments: map[string]any{}})
+	if err != nil || allowed.IsError {
+		t.Fatal("legitimate ingress tool failed", allowed, err)
+	}
+	denied, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "exec.run", Arguments: map[string]any{"argv": []string{"must-not-run"}}})
+	if err == nil && !denied.IsError {
+		t.Fatal("peer-only tool reached delegated caller", denied)
+	}
+}
+
+func TestDeviceDrainUsesCallerDeadlineForResponse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	a, _ := node(t, "admin")
+	b, _ := node(t, "drain-target")
+	server := serveNode(t, b)
+	if err := b.pairing.SetPassword("correct horse battery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.PairWith(ctx, device.LAN, server.URL, "correct horse battery", b.identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	b.SetAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(2200 * time.Millisecond):
+			w.WriteHeader(200)
+		case <-r.Context().Done():
+		}
+	}))
+	if err := a.SendDrain(ctx, mesh.Peer{ID: b.identity.ID}, agent.DrainRequest{Scope: "device", Device: b.identity.ID, Drain: "keep"}); err != nil {
+		t.Fatal("LAN response cut off before caller deadline", err)
+	}
+	short, stop := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer stop()
+	if err := a.SendDrain(short, mesh.Peer{ID: b.identity.ID}, agent.DrainRequest{Scope: "mesh", Drain: "keep"}); err == nil {
+		t.Fatal("caller deadline ignored")
+	}
 }

@@ -35,6 +35,13 @@ func (l *portListener) Accept() (net.Conn, error) {
 		return conn, nil
 	}
 }
+func (l *portListener) section() string {
+	if l.funnel {
+		return "ingress"
+	}
+	return "gateway"
+}
+
 func (l *portListener) Addr() net.Addr { return &net.TCPAddr{Port: l.port} }
 func (l *portListener) Close() error   { l.once.Do(l.cancel); <-l.done; return nil }
 

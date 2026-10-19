@@ -453,3 +453,24 @@ func Test_ControlPatsReachTheGateway(t *testing.T) {
 		t.Fatal("gateway info missing")
 	}
 }
+
+func TestV2TailnetAuthKeyWarningUsesNestedConfig(t *testing.T) {
+	cfg := &config.Config{SchemaVersion: 2}
+	host := &controlHost{d: controlDeps{store: config.Static(cfg)}, firewall: newFirewallWatch()}
+	cfg.Mesh.Tailnet.Enabled = true
+	contains := func(warnings []v2.Warning, code v2.WarningCode) bool {
+		for _, warning := range warnings {
+			if warning.Code == code {
+				return true
+			}
+		}
+		return false
+	}
+	if !contains(host.warnings(cfg, v2.StatusResponse{}), v2.WarnAuthkeyUnreadable) {
+		t.Fatal("nested key warning omitted")
+	}
+	cfg.Mesh.Tailnet.AuthMethod = "browser"
+	if contains(host.warnings(cfg, v2.StatusResponse{}), v2.WarnAuthkeyUnreadable) {
+		t.Fatal("browser mode emitted key warning")
+	}
+}

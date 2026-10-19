@@ -67,6 +67,11 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 				p.mu.Unlock()
 				return ErrSequence
 			}
+			principal, e := delegatedPrincipal(p.id, trusted.Tags, value.OAuthClient)
+			if e != nil {
+				err = p.queueLocked(frame{Type: "rejected", OpenID: value.OpenID, Error: "unauthorized"})
+				break
+			}
 			if l := p.opens[value.OpenID]; l != nil {
 				if !l.incoming || l.oauth != value.OAuthClient || l.err != nil || l.session.Closed() || l.trustGeneration != trusted.Generation {
 					err = ErrSequence
@@ -79,11 +84,6 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			}
 			if len(p.sessions) >= maxLogicalSessions || m.opts.Accept == nil {
 				err = p.queueLocked(frame{Type: "rejected", OpenID: value.OpenID, Error: "agent_unavailable"})
-				break
-			}
-			principal, e := identity.FromPeer(p.id, trusted.Tags, value.OAuthClient)
-			if e != nil {
-				err = p.queueLocked(frame{Type: "rejected", OpenID: value.OpenID, Error: "unauthorized"})
 				break
 			}
 			id, token := rand.Text(), rand.Text()+rand.Text()
@@ -130,6 +130,10 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			}
 		case "resume":
 			l := p.sessions[value.SessionID]
+			if _, e := delegatedPrincipal(p.id, trusted.Tags, value.OAuthClient); e != nil {
+				err = p.queueLocked(frame{Type: "ended", SessionID: value.SessionID, Error: "resume_rejected"})
+				break
+			}
 			if l == nil || !l.incoming || l.err != nil || l.session.Closed() || !tokenEqual(l.token, value.Token) || l.oauth != value.OAuthClient || l.trustGeneration != trusted.Generation {
 				err = p.queueLocked(frame{Type: "ended", SessionID: value.SessionID, Error: "resume_rejected"})
 				break
@@ -280,4 +284,24 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 			}
 		}
 	}
+}
+
+// delegatedPrincipal authorizes OAuth delegation at the device trust boundary.
+// An ingress session receives only its ingress grant, even when the device also
+// holds broader peer or admin grants. Plain peer sessions keep their contract.
+func delegatedPrincipal(node string, tags []string, oauth string) (identity.Principal, error) {
+	if oauth != "" {
+		allowed := false
+		for _, tag := range tags {
+			if tag == "tag:ingress" {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return identity.Principal{}, device.ErrUntrusted
+		}
+		tags = []string{"tag:ingress"}
+	}
+	return identity.FromPeer(node, tags, oauth)
 }

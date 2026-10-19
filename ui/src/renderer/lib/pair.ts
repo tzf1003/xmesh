@@ -2,7 +2,7 @@ import type { PairDocument } from "../../shared/control";
 import { type ActionError, parsePairImport, parsePairPassword } from "../../shared/ipc";
 import type { Key } from "../messages";
 
-export const PAIR_TAG_CHOICES = ["tag:peer", "tag:device", "tag:ingress"] as const;
+export const PAIR_TAG_CHOICES = ["tag:peer", "tag:device", "tag:ingress", "tag:admin"] as const;
 
 /** Lowercase hex without colons or spaces, for comparing fingerprints the way the kernel does. */
 export function normalizeFingerprint(s: string): string {

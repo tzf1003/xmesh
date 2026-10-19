@@ -39,15 +39,15 @@ func (n *Node) Settle(ctx context.Context) []v2.ApplyError {
 			out = append(out, v2.ApplyError{Section: "mesh." + string(kind), Message: message})
 		}
 		for listener := range n.listeners {
-			if !listener.funnel || listener.ready {
+			if listener.ready || (!listener.funnel && !cfg.TailnetEnabled()) {
 				continue
 			}
 			message := listener.err
 			if message == "" {
-				message = "Funnel 入口正在等待路径就绪"
+				message = "Tailnet 角色监听器正在等待路径就绪"
 				pending = true
 			}
-			out = append(out, v2.ApplyError{Section: "ingress", Message: message})
+			out = append(out, v2.ApplyError{Section: listener.section(), Message: message})
 		}
 		n.mu.Unlock()
 		if !pending || ctx.Err() != nil {
@@ -60,14 +60,14 @@ func (n *Node) Settle(ctx context.Context) []v2.ApplyError {
 	}
 }
 
-// ListenerErrors exposes operational failures of the current Funnel listener.
+// ListenerErrors exposes operational failures of current Tailnet role listeners.
 func (n *Node) ListenerErrors() []v2.ApplyError {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	out := []v2.ApplyError{}
 	for listener := range n.listeners {
-		if listener.funnel && listener.err != "" {
-			out = append(out, v2.ApplyError{Section: "ingress", Message: listener.err})
+		if listener.err != "" && (listener.funnel || n.cfg.TailnetEnabled()) {
+			out = append(out, v2.ApplyError{Section: listener.section(), Message: listener.err})
 		}
 	}
 	return out
