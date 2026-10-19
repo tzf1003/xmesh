@@ -2,6 +2,7 @@ import { ControlClient } from "../client";
 import { type CliCommand, type CliRun } from "../cli";
 import { type Instance, kernelGone } from "../discovery";
 import { sameVersion } from "../../shared/version";
+import { VersionMismatchError } from "../../shared/control";
 import type { StopResult } from "./updater";
 
 interface KernelServices {
@@ -56,7 +57,12 @@ export function kernelServices(env: KernelServices): { stop(node: string): Promi
     async refresh(node: string): Promise<void> {
       const instance = env.discover().find((i) => i.id === node);
       if (!env.version || !instance || (env.gone ?? kernelGone)(instance.manifest.pid)) return;
-      if (sameVersion((await status(instance)).control.kernel_version, env.version)) return;
+      try {
+        if (sameVersion((await status(instance)).control.kernel_version, env.version)) return;
+      } catch (error) {
+        // A previous control protocol can still be stopped through its installed service.
+        if (!(error instanceof VersionMismatchError)) throw error;
+      }
       await services.stop(node);
       await services.start(node);
     },

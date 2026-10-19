@@ -92,6 +92,7 @@ type refreshJob struct {
 	done    chan struct{}
 	cancel  context.CancelFunc
 	running bool
+	dirty   bool // a tool-list notification arrived while this snapshot was being read
 	retryAt time.Time
 }
 
@@ -602,6 +603,9 @@ func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d 
 		var bridge *mcpmux.Bridge
 		bridge, err = v.g.opts.Dial(ctx, job.peer, v.p, mcpmux.Options{Changed: func() {
 			v.mu.Lock()
+			if pending := v.jobs[name]; pending != nil && pending.running {
+				pending.dirty = true
+			}
 			if current := v.down[name]; current != nil {
 				current.updated = time.Time{}
 			}
@@ -639,6 +643,7 @@ func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d 
 	current, exists := devices[name]
 	v.mu.Lock()
 	valid := !v.closed && v.jobs[name] == job && exists && current.online && current.peer.ID == job.peer.ID && current.peer.Address == job.peer.Address
+	again := false
 	if valid {
 		job.running = false
 		if err != nil {
@@ -648,6 +653,11 @@ func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d 
 			v.down[name] = d
 			if err == nil {
 				d.tools, d.info, d.updated, d.failedSince = tools, info, time.Now(), time.Time{}
+				if job.dirty {
+					// A change after Tools() must not become fresh when sys.info finishes later.
+					d.updated = time.Time{}
+					again = true
+				}
 			} else {
 				if d.failedSince.IsZero() {
 					d.failedSince = time.Now()
@@ -663,6 +673,9 @@ func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d 
 		v.publish(generation)
 	}
 	v.refreshMu.Unlock()
+	if again {
+		go v.refresh()
+	}
 	if !valid && created {
 		_ = d.bridge.Close()
 	}

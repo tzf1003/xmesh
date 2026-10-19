@@ -116,3 +116,29 @@ test("refresh replaces a surviving old kernel and verifies its new version", asy
   await k.refresh("mac");
   assert.deepEqual(calls, ["stop", "start"], "an exited kernel is not brought back");
 });
+
+test("refresh replaces a kernel whose previous control protocol is incompatible", async () => {
+  const old = await FakeKernel.start({ controlVersion: "2.0", kernelVersion: "v0.1.0-beta.3" });
+  const next = await FakeKernel.start({ kernelVersion: "v0.1.0-beta.4" });
+  let endpoint = old.endpoint;
+  let gone = false;
+  const calls: string[] = [];
+  try {
+    const k = kernelServices({
+      discover: () => [{ ...instance, manifest: { ...instance.manifest, endpoint } }],
+      version: "0.1.0-beta.4", gone: () => gone, timeoutMs: 1000,
+      run: async (command) => {
+        calls.push(command);
+        gone = command === "stop";
+        if (command === "start") endpoint = next.endpoint;
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    await k.refresh("mac");
+    assert.deepEqual(calls, ["stop", "start"]);
+    assert.ok(next.requests.some((r) => r.path === "/v1/status"));
+  } finally {
+    await old.stop();
+    await next.stop();
+  }
+});
