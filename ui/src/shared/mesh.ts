@@ -37,6 +37,9 @@ export interface PolicyDocumentEdit {
   omitDefault?: boolean;
 }
 
+export const POLICY_TEXT_MAX_BYTES = 256 * 1024;
+const policyTextWithinLimit = (text: string): boolean => new TextEncoder().encode(text).byteLength <= POLICY_TEXT_MAX_BYTES;
+
 export interface MeshPolicyDocument {
   text: string;
   regions: { id: number; code: string; name: string; hosts: string[]; text: string }[];
@@ -215,20 +218,20 @@ export function parseMeshRequest(v: unknown): MeshParse {
       if (!onlyKeys(v, ["op", "edit"]) || !isRecord(v.edit)) return bad("edit");
       const e = v.edit;
       if (!onlyKeys(e, ["text", "template", "owner", "port", "regions", "region", "removeID", "omitDefault"])) return bad("keys");
-      if (typeof e.text !== "string" || e.text.length > 262144 || e.text.trim() === "") return bad("text");
+      if (typeof e.text !== "string" || !policyTextWithinLimit(e.text) || e.text.trim() === "") return bad("text");
       if (e.template !== undefined && !MESH_TEMPLATES.includes(e.template as MeshTemplate)) return bad("template");
       if (e.owner !== undefined && (typeof e.owner !== "string" || !OWNER.test(e.owner))) return bad("owner");
       if (e.template !== undefined && e.owner === undefined) return bad("owner");
       if (e.port !== undefined && port(e.port) === undefined) return bad("port");
       if (e.regions !== undefined && parseRegions(e.regions) === undefined) return bad("regions");
-      if (e.region !== undefined && (!isRecord(e.region) || !onlyKeys(e.region, ["id", "text"]) || !Number.isInteger(e.region.id) || Number(e.region.id) <= 0 || typeof e.region.text !== "string" || e.region.text.length > 262144)) return bad("region");
+      if (e.region !== undefined && (!isRecord(e.region) || !onlyKeys(e.region, ["id", "text"]) || !Number.isInteger(e.region.id) || Number(e.region.id) <= 0 || typeof e.region.text !== "string" || !policyTextWithinLimit(e.region.text))) return bad("region");
       if (e.removeID !== undefined && (!Number.isInteger(e.removeID) || Number(e.removeID) <= 0)) return bad("removeID");
       if (e.omitDefault !== undefined && typeof e.omitDefault !== "boolean") return bad("omitDefault");
       return { ok: true, value: { op: "policy.document", edit: e as unknown as PolicyDocumentEdit } };
     }
     case "policy.publish":
       if (!onlyKeys(v, ["op", "text", "expectVersion", "apply"])) return bad("keys");
-      if (typeof v.text !== "string" || v.text.trim() === "" || v.text.length > 262144) return bad("text");
+      if (typeof v.text !== "string" || v.text.trim() === "" || !policyTextWithinLimit(v.text)) return bad("text");
       if (typeof v.expectVersion !== "string" || !VERSION.test(v.expectVersion)) return bad("expectVersion");
       if (typeof v.apply !== "boolean") return bad("apply");
       return { ok: true, value: { op: "policy.publish", text: v.text, expectVersion: v.expectVersion, apply: v.apply } };

@@ -4,7 +4,13 @@ import type { ActionError } from "../../shared/ipc";
 import type { MeshPolicy, MeshPolicyDocument, PolicyDocumentEdit } from "../../shared/mesh";
 
 /** One owner for the cloud baseline and the draft shared by the policy and DERP tabs. */
-export function usePolicyDraft(identity: string) {
+export interface SavedPolicyDraft {
+  base: MeshPolicy;
+  document: MeshPolicyDocument;
+  text: string;
+}
+
+export function usePolicyDraft(identity: string, saved: Map<string, SavedPolicyDraft>) {
   const [base, setBase] = useState<MeshPolicy>();
   const [document, setDocument] = useState<MeshPolicyDocument>();
   const [text, setText] = useState("");
@@ -36,11 +42,24 @@ export function usePolicyDraft(identity: string) {
   };
 
   useEffect(() => {
-    setBase(undefined); setDocument(undefined);
-    setText(""); textRef.current = "";
-    baseRef.current = undefined; documentRef.current = undefined;
-    void load();
-    return () => { ++sequence.current; };
+    const previous = saved.get(identity);
+    if (previous) {
+      setBase(previous.base); baseRef.current = previous.base;
+      setDocument(previous.document); documentRef.current = previous.document;
+      setText(previous.text); textRef.current = previous.text;
+      setBusy(false); setError(undefined);
+    } else {
+      setBase(undefined); setDocument(undefined);
+      setText(""); textRef.current = "";
+      baseRef.current = undefined; documentRef.current = undefined;
+      void load();
+    }
+    return () => {
+      ++sequence.current;
+      if (baseRef.current && documentRef.current) {
+        saved.set(identity, { base: baseRef.current, document: documentRef.current, text: textRef.current });
+      }
+    };
   }, [identity]);
 
   const edit = async (change: Omit<PolicyDocumentEdit, "text"> & { text?: string }): Promise<boolean> => {

@@ -11,6 +11,8 @@ import (
 	"github.com/tailscale/hujson"
 )
 
+const MaxPolicyDocumentBytes = 256 << 10
+
 // DocumentEdit changes a local policy document. It never accesses a control plane.
 // Explicit region edits may update user-created regions; automatic templates
 // retain the managed-element ownership rules of ApplyFragment.
@@ -77,6 +79,9 @@ func putDocumentMember(o *hujson.Object, name string, v hujson.Value) {
 }
 
 func InspectPolicyDocument(text string) (PolicyDocument, error) {
+	if len(text) > MaxPolicyDocumentBytes {
+		return PolicyDocument{}, fmt.Errorf("%w: policy text exceeds 256 KiB", ErrInvalid)
+	}
 	if strings.TrimSpace(text) == "" {
 		return PolicyDocument{}, fmt.Errorf("%w: policy document is empty", ErrInvalid)
 	}
@@ -155,6 +160,9 @@ func InspectPolicyDocument(text string) (PolicyDocument, error) {
 }
 
 func EditPolicyDocument(edit DocumentEdit) (PolicyDocument, error) {
+	if len(edit.Text) > MaxPolicyDocumentBytes {
+		return PolicyDocument{}, fmt.Errorf("%w: policy text exceeds 256 KiB", ErrInvalid)
+	}
 	if strings.TrimSpace(edit.Text) == "" {
 		return PolicyDocument{}, fmt.Errorf("%w: policy document is empty", ErrInvalid)
 	}
@@ -181,6 +189,9 @@ func EditPolicyDocument(edit DocumentEdit) (PolicyDocument, error) {
 		}
 		if edit.OmitDefault != nil {
 			putDocumentMember(dm, "omitDefaultRegions", hujson.Value{Value: hujson.Bool(*edit.OmitDefault)})
+		}
+		if edit.Region == nil && edit.RemoveID == nil && len(edit.Regions) == 0 {
+			return InspectPolicyDocument(string(v.Pack()))
 		}
 		regions, err := documentObject(dm, "regions")
 		if err != nil {
@@ -218,6 +229,9 @@ func EditPolicyDocument(edit DocumentEdit) (PolicyDocument, error) {
 			}
 			if memberIndex(regions, strconv.Itoa(s.ID)) >= 0 {
 				return PolicyDocument{}, fmt.Errorf("%w: DERP region already exists", ErrInvalid)
+			}
+			if s.ID == 0 {
+				return PolicyDocument{}, fmt.Errorf("%w: no free DERP region ID in 900-999", ErrInvalid)
 			}
 			frag, _, err := DERPFragment([]DERPRegionSpec{s}, DERPOptions{})
 			if err != nil {
@@ -289,6 +303,9 @@ func ChangedDocumentRelays(before, after string) ([]DERPRegionSpec, error) {
 		}
 		if n.STUNOnly || n.STUNPort < 0 {
 			return nil, fmt.Errorf("%w: changed STUN-only or disabled-STUN nodes require a dedicated probe", ErrUnsupported)
+		}
+		if n.HostName == "" && n.CertName == "" {
+			return nil, fmt.Errorf("%w: changed IP-only DERP nodes need CertName for verified TLS probes", ErrUnsupported)
 		}
 		out = append(out, DERPRegionSpec{Hostname: n.HostName, IPv4: n.IPv4, IPv6: n.IPv6, DERPPort: n.DERPPort, STUNPort: n.STUNPort, CertName: n.CertName})
 	}

@@ -153,7 +153,7 @@ func meshRun(args []string, out io.Writer, in io.Reader) error {
 	case "onboard":
 		return meshOnboard(rest, out)
 	case "policy":
-		return meshPolicy(rest, out)
+		return meshPolicy(rest, out, in)
 	case "matrix":
 		return meshMatrix(rest, out)
 	case "derp":
@@ -638,9 +638,9 @@ func meshOnboard(args []string, out io.Writer) error {
 	return nil
 }
 
-func meshPolicy(args []string, out io.Writer) error {
+func meshPolicy(args []string, out io.Writer, in io.Reader) error {
 	if len(args) > 0 && (args[0] == "document" || args[0] == "publish") {
-		return meshPolicyDocument(args[0], args[1:], out)
+		return meshPolicyDocument(args[0], args[1:], out, in)
 	}
 	var c meshCommon
 	fs := flag.NewFlagSet("mesh policy", flag.ContinueOnError)

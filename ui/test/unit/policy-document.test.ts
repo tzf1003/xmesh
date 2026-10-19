@@ -22,6 +22,7 @@ test("policy documents validate each IPC field and keep policy source off argv",
     { op: "policy.document", edit: { text: "{}", template: "personal" } },
     { op: "policy.document", edit: { text: "" } },
     { op: "policy.document", edit: { text: "x".repeat(262145) } },
+    { op: "policy.document", edit: { text: "中".repeat(90000) } },
     { op: "policy.publish", text: "{}", apply: true, expectVersion: "" },
     { op: "policy.publish", text: "{}", apply: "yes", expectVersion: "v1" },
   ]) assert.equal(parseMeshRequest(bad).ok, false);
