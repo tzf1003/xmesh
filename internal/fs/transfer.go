@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -282,6 +283,42 @@ func (s *Service) transfer(ctx context.Context, path string, a Args, upload bool
 		return abort(err)
 	}
 	eof := t.offset == t.initial.Size()
+	if eof {
+		// Metadata can be preserved by an in-place writer. Re-read the same
+		// handle before committing the download so mixed versions fail closed.
+		if _, err := t.file.Seek(0, io.SeekStart); err != nil {
+			return abort(toolerr.Internal("fs.download.seek", err))
+		}
+		verify := sha256.New()
+		buffer := make([]byte, 64<<10)
+		var total int64
+		for {
+			if err := ctx.Err(); err != nil {
+				return abort(err)
+			}
+			n, err := t.file.Read(buffer)
+			if n > 0 {
+				if int64(n) > t.initial.Size()-total {
+					return abort(downloadConflict(path))
+				}
+				total += int64(n)
+				verify.Write(buffer[:n])
+			}
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return abort(toolerr.Internal("fs.download.verify", err))
+			}
+		}
+		st, err := t.file.Stat()
+		if err != nil {
+			return abort(toolerr.Internal("fs.download.stat", err))
+		}
+		if total != t.initial.Size() || st.Size() != t.initial.Size() || !st.ModTime().Equal(t.initial.ModTime()) || !bytes.Equal(verify.Sum(nil), t.digest.Sum(nil)) {
+			return abort(downloadConflict(path))
+		}
+	}
 	out := Object{"resolved_path": path, "encoding": "base64", "data": base64.StdEncoding.EncodeToString(data), "sha256": Hash(data), "bytes": len(data), "file_bytes": t.initial.Size(), "next_offset": t.offset, "eof": eof}
 	if eof {
 		out["file_sha256"] = hex.EncodeToString(t.digest.Sum(nil))

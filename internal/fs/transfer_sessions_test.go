@@ -161,6 +161,27 @@ func Test_DownloadChangedSourceAndOwnership(t *testing.T) {
 	code(t, s, "fs.download", a, "invalid_args")
 }
 
+func Test_DownloadRejectsChangedSourceWithPreservedMetadata(t *testing.T) {
+	s, root := fixture(t)
+	path := filepath.Join(root, "source")
+	writeBytes(t, path, []byte("AAAABBBB"))
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := call(t, s, "fs.download", Object{"path": "source", "chunk_size": 4})
+	if first["data"] != base64.StdEncoding.EncodeToString([]byte("AAAA")) {
+		t.Fatal("first chunk")
+	}
+	writeBytes(t, path, []byte("CCCCDDDD"))
+	if err := os.Chtimes(path, st.ModTime(), st.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	a := Object{"path": "source", "transfer_id": first["transfer_id"], "byte_offset": 4, "chunk_size": 4}
+	code(t, s, "fs.download", a, "conflict")
+	code(t, s, "fs.download", a, "invalid_args")
+}
+
 func Test_LargeFileTransfer(t *testing.T) {
 	if os.Getenv("XMESH_TEST_LARGE_TRANSFER") != "1" {
 		t.Skip("set XMESH_TEST_LARGE_TRANSFER=1 for the 1 GiB roundtrip")
