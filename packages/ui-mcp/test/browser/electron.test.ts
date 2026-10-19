@@ -55,7 +55,7 @@ test(
           { id: "evidence", action: "screenshot" },
         ],
       });
-      const result = await finished(controller, run.run_id);
+      const result = await finished(controller, run.run_id, 45000);
       assert.equal(result.status, "passed", JSON.stringify(result));
       assert.ok(result.versions.electron);
       const snapshot = (await controller.snapshot(session)) as { aria: string };

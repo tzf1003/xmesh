@@ -385,7 +385,110 @@ export class Driver {
       ...(this.init.environment.mask ?? []).map((s) => this.page.locator(s)),
     ];
     const timeout = this.init.config.limits.step_timeout_ms;
-    if (target) await target.screenshot({ path: file, mask, timeout });
+    if (this.electronApp) {
+      await this.assertBackground();
+      if (target) await target.scrollIntoViewIfNeeded({ timeout });
+      const box = target ? await target.boundingBox({ timeout }) : undefined;
+      requireValue(
+        !target || box,
+        "target_unavailable",
+        "screenshot target has no visible bounds",
+      );
+      const rectangles = [];
+      for (const locator of mask)
+        for (const item of await locator.all()) {
+          const bounds = await item.boundingBox({ timeout });
+          if (bounds) rectangles.push(bounds);
+        }
+      const marker = `xmesh-mask-${randomUUID()}`;
+      const window = await this.electronApp.browserWindow(this.page);
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        await this.page.evaluate(
+          async ({ rectangles, marker }) => {
+            const container = document.createElement("div");
+            container.id = marker;
+            for (const rect of rectangles) {
+              const overlay = document.createElement("div");
+              Object.assign(overlay.style, {
+                position: "fixed",
+                left: `${rect.x}px`,
+                top: `${rect.y}px`,
+                width: `${rect.width}px`,
+                height: `${rect.height}px`,
+                backgroundColor: "#FF00FF",
+                zIndex: "2147483647",
+                pointerEvents: "none",
+              });
+              container.appendChild(overlay);
+            }
+            document.documentElement.appendChild(container);
+            if (rectangles.length)
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => resolve()),
+                ),
+              );
+          },
+          { rectangles, marker },
+        );
+        const clip = box
+          ? {
+              x: Math.floor(box.x),
+              y: Math.floor(box.y),
+              width: Math.ceil(box.width),
+              height: Math.ceil(box.height),
+            }
+          : undefined;
+        // capturePage's stayHidden option avoids the compositor wakeup/focus
+        // dependency of a DevTools screenshot on a hidden Electron window.
+        const capture = window.evaluate(
+          async (
+            win: {
+              webContents: {
+                capturePage(
+                  rect: unknown,
+                  opts: { stayHidden: boolean; stayAwake: boolean },
+                ): Promise<{ isEmpty(): boolean; toPNG(): Buffer }>;
+              };
+            },
+            rect,
+          ) => {
+            const image = await win.webContents.capturePage(rect, {
+              stayHidden: true,
+              stayAwake: false,
+            });
+            if (image.isEmpty())
+              throw new Error("Electron returned an empty screenshot");
+            return image.toPNG().toString("base64");
+          },
+          clip,
+        );
+        const data = await Promise.race([
+          capture,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  new UIError("timeout", "background screenshot timed out"),
+                ),
+              timeout,
+            );
+          }),
+        ]);
+        fs.writeFileSync(file, Buffer.from(data, "base64"), { mode: 0o600 });
+      } finally {
+        clearTimeout(timer);
+        await window.dispose();
+        await this.page
+          .evaluate(
+            (marker) => document.getElementById(marker)?.remove(),
+            marker,
+          )
+          .catch(() => {});
+      }
+      await this.assertBackground();
+    } else if (target) await target.screenshot({ path: file, mask, timeout });
     else await this.page.screenshot({ path: file, mask, timeout });
     return { file, name, mime: "image/png" };
   }

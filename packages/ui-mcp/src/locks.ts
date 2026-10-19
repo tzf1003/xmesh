@@ -28,13 +28,26 @@ export function processIdentity(pid: number): string {
               "-NoProfile",
               "-NonInteractive",
               "-Command",
-              `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
+              `[System.Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks`,
             ],
             {
               encoding: "utf8",
               stdio: ["ignore", "pipe", "ignore"],
               timeout: 10000,
               windowsHide: true,
+              env: {
+                ...process.env,
+                windir: process.env.SystemRoot ?? process.env.SYSTEMROOT,
+                ComSpec:
+                  process.env.ComSpec ??
+                  path.join(
+                    process.env.SystemRoot ??
+                      process.env.SYSTEMROOT ??
+                      "C:\\Windows",
+                    "System32",
+                    "cmd.exe",
+                  ),
+              },
             },
           ).trim()
         : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
