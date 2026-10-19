@@ -5,7 +5,8 @@
 #   workflow_dispatch  手动构建全部四个目标，产物挂在运行页上，用来在发布前试装。
 #   workflow_call    release.yml 的 ui 作业调用（见 ui/README.md「并入发布流水线」），传入标签作为 version。
 #
-# 代码签名只由仓库 secrets 驱动，没有 secrets 时照常产出未签名安装包：
+# Stable releases require verified signing and macOS notarization/stapling. Testing may explicitly report unsigned assets.
+# Credentials are supplied by repository secrets:
 #   WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD                 Windows Authenticode 证书（.pfx 的 base64）与口令
 #   MAC_CSC_LINK / MAC_CSC_KEY_PASSWORD                 Developer ID Application 证书（.p12 的 base64）与口令
 #   APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID   公证
@@ -33,6 +34,11 @@ on:
         description: "写入安装包的版本，形如 v0.1.0-beta.1"
         required: true
         type: string
+      require_signing:
+        description: "Require verified platform signatures and macOS notarization/stapling"
+        default: false
+        required: false
+        type: boolean
     secrets:
       WIN_CSC_LINK:
         required: false
@@ -96,6 +102,7 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      REQUIRE_SIGNING: ${{ inputs.require_signing || false }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -133,7 +140,7 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      # 有证书才启用签名；没有就产出未签名安装包。
+      # Stable packaging fails before build when required credentials are absent.
       - name: 启用签名
         id: sign
         run: |
@@ -147,19 +154,92 @@ jobs:
             echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
             signed=true
           fi
+          if [ "$REQUIRE_SIGNING" = true ]; then
+            test "$signed" = true || { echo "Stable releases require code-signing credentials." >&2; exit 1; }
+            if [ "${{ matrix.platform }}" = mac ]; then
+              test -n "$APPLE_ID" && test -n "$APPLE_APP_SPECIFIC_PASSWORD" && test -n "$APPLE_TEAM_ID" || { echo "Stable macOS releases require notarization credentials." >&2; exit 1; }
+            fi
+          fi
           echo "signed=$signed" >> "$GITHUB_OUTPUT"
+
+      - name: 签名 Windows 内置 CLI
+        if: matrix.platform == 'win' && steps.sign.outputs.signed == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cert = Join-Path $env:RUNNER_TEMP 'xmesh-signing.pfx'
+          try {
+            if ($env:WIN_CSC_LINK.StartsWith('https://')) { Invoke-WebRequest -Uri $env:WIN_CSC_LINK -OutFile $cert }
+            elseif ($env:WIN_CSC_LINK -match '^[A-Za-z0-9+/=\r\n]+$') { [IO.File]::WriteAllBytes($cert, [Convert]::FromBase64String($env:WIN_CSC_LINK)) }
+            else { Copy-Item -LiteralPath $env:WIN_CSC_LINK -Destination $cert }
+            $tool = Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$tool) { throw 'Windows SDK signtool is required for release signing.' }
+            & $tool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $cert /p $env:WIN_CSC_KEY_PASSWORD build/kernel/xmesh.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled CLI signing failed.' }
+          } finally { Remove-Item -LiteralPath $cert -Force -ErrorAction SilentlyContinue }
 
       - name: 打包
         env:
           XMESH_KERNEL_BIN: ${{ github.workspace }}/ui/build/kernel/xmesh${{ matrix.platform == 'win' && '.exe' || '' }}
           VERSION: ${{ steps.ver.outputs.version }}
-        run: npx electron-builder --config electron-builder.config.mjs ${{ matrix.flags }} --publish never -c.extraMetadata.version="$VERSION"
+        run: |
+          extra=()
+          if [ "${{ matrix.platform }}" = mac ] && [ "${{ steps.sign.outputs.signed }}" = true ]; then extra=(-c.dmg.sign=true); fi
+          npx electron-builder --config electron-builder.config.mjs ${{ matrix.flags }} --publish never -c.extraMetadata.version="$VERSION" "${extra[@]}"
 
       - name: 校验安装包内容与 fuses
         run: |
           extra=""
           if [ "${{ matrix.native }}" = true ]; then extra="--run-kernel --smoke"; fi
           node scripts/verify-package.mjs --dir "release/${{ matrix.unpacked }}" --kernel $extra
+
+      - name: 验证 Windows 签名
+        if: matrix.platform == 'win'
+        shell: pwsh
+        env:
+          SIGNED: ${{ steps.sign.outputs.signed }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signed = $env:SIGNED -eq 'true'
+          if ($signed) {
+            $files = @((Get-ChildItem 'release/xmesh-ui-*.exe').FullName, 'release/${{ matrix.unpacked }}/xmesh.exe', 'release/${{ matrix.unpacked }}/resources/bin/xmesh.exe')
+            foreach ($file in $files) {
+              $sig = Get-AuthenticodeSignature -LiteralPath $file
+              if ($sig.Status -ne 'Valid') { throw "Authenticode verification failed for $file : $($sig.Status)" }
+            }
+          }
+          @{signed=$signed; notarized=$false; stapled=$false} | ConvertTo-Json | Set-Content -Encoding utf8 'release/signing-windows-${{ matrix.goarch }}.json'
+
+      - name: 验证 macOS 分发签名、公证与装订
+        if: matrix.platform == 'mac'
+        env:
+          SIGNED: ${{ steps.sign.outputs.signed }}
+        run: |
+          signed=false; notarized=false; stapled=false
+          if [ "$SIGNED" = true ]; then
+            app="release/${{ matrix.unpacked }}/xmesh.app"
+            codesign --verify --deep --strict "$app"
+            signed=true
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              xcrun stapler validate "$app"
+              spctl --assess --type execute --verbose=2 "$app"
+              dmg=$(find release -maxdepth 1 -name 'xmesh-ui-*.dmg' -print -quit)
+              codesign --verify --strict "$dmg"
+              xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+              xcrun stapler staple "$dmg"
+              xcrun stapler validate "$dmg"
+              spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+              mount=$(mktemp -d)
+              hdiutil attach "$dmg" -mountpoint "$mount" -readonly -nobrowse -quiet
+              trap 'hdiutil detach "$mount" -quiet; rmdir "$mount"' EXIT
+              codesign --verify --deep --strict "$mount/xmesh.app"
+              xcrun stapler validate "$mount/xmesh.app"
+              spctl --assess --type execute --verbose=2 "$mount/xmesh.app"
+              notarized=true; stapled=true
+            fi
+          fi
+          if [ "$REQUIRE_SIGNING" = true ]; then test "$signed:$notarized:$stapled" = true:true:true; fi
+          printf '{"signed":%s,"notarized":%s,"stapled":%s}\n' "$signed" "$notarized" "$stapled" > "release/signing-darwin-${{ matrix.goarch }}.json"
 
       - name: 摘要
         env:
@@ -174,6 +254,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: xmesh-ui-${{ matrix.platform }}-${{ matrix.arch }}
-          path: ui/release/xmesh-ui-*.${{ matrix.ext }}
+          path: |
+            ui/release/xmesh-ui-*.${{ matrix.ext }}
+            ui/release/signing-${{ matrix.goos }}-${{ matrix.goarch }}.json
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}

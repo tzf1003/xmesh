@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Confirm, Dialog, Empty, ErrorBanner, Field, NotSupported, PageHead, ResourceView } from "../components";
@@ -284,6 +284,7 @@ function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance]);
   const writable = ctx.can("config.write");
+  useEffect(() => { if (ctx.focus?.section === "mcp" && resource.state === "ready") document.getElementById("mcp-servers")?.scrollIntoView({ block: "start" }); }, [ctx.focus, resource.state]);
 
   /** One PATCH per action. Success reloads the config; a stale etag also reloads, so the next try starts from the file on disk. */
   const write = async (cfg: ConfigResponse, edits: ConfigPatchEdit[]): Promise<ActionError | undefined> => {
@@ -397,7 +398,7 @@ function McpCard({ ctx, cfg, editable, apply }: CardProps): JSX.Element {
   };
 
   return (
-    <section class="card" data-testid="mcp-servers">
+    <section class="card" id="mcp-servers" data-testid="mcp-servers">
       <div class="page-head">
         <div class="grow">
           <h2>{t("mcp.title")}</h2>
