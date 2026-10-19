@@ -1,0 +1,48 @@
+# Computer 工具与桌面执行器
+
+状态：实现中。交付与真机验收记录见 [三端方案](../design/17-computer.md)。
+
+## 会话
+
+工具由目标 Agent 注册，只有 `agent.computer.enabled: true` 时才出现在目录中。工具名经过 Gateway 后带设备前缀。调用方只能从网络 / MCP 会话身份推导，参数里的身份字段不授予权限。
+
+| 工具 | 必填参数 | 语义 |
+| --- | --- | --- |
+| `computer.info` | 无 | 协议版本、可用状态、桌面代次、显示器、能力 |
+| `computer.open` | `mode` | observe 或 control；可选 desktop_id、ttl_seconds |
+| `computer.observe` | session_id、desktop_epoch | 当前截图，可选 display_id、max_width、region |
+| `computer.act` | session_id、desktop_epoch、lease_token、action_id、actions | 最多八个有限动作，可选 frame_id、observe_after |
+| `computer.action_status` | session_id、desktop_epoch、action_id | 查询当前会话中已接收的动作 |
+| `computer.renew` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；可选 ttl_seconds |
+| `computer.close` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；释放输入 |
+| `computer.sessions` | 无 | 仅调用方拥有的会话 |
+
+租期默认 120 秒，范围 10–600 秒；观察会话也需要续期。会话上限默认 16，配置范围 1–32。每个会话最多缓存四张图和 128 个动作结果。已过期会话立即拒绝；内核断开 caller、禁用 computer、暂停或 kill drain 时撤销其会话。新的控制会话获得新的 fencing 序号。
+
+## 画面与动作
+
+截图的 `content` 包含文本元数据和原生 MCP 图片块，`structuredContent` 包含同一份元数据，图片字节不会复制到结构化对象中。frame_id 只在所属会话中有效；坐标动作使用 60 秒内的截图。桌面代次或布局改变后，旧画面不能用于输入。
+
+`capture_region` 是相对于显示器左上角的系统桌面坐标，macOS 为逻辑点，Windows / X11 为后端使用的桌面像素。模型提交图片像素坐标；转换公式为 `display_origin + capture_region_origin + image_coordinate × capture_region_size / image_size`，坐标转换在服务端完成。返回图片和显示器本身都已按当前旋转方向排列。
+
+动作类型：move、click、drag、scroll、key、text、wait。点击的 button 为 left / middle / right，clicks 最大 3；拖动最多 2 秒；每批显式等待总预算最多 4 秒，执行和排队使用五秒总预算。按键组合在同一动作中按顺序按下、反向释放。文本使用系统文字输入，正文上限 64 KiB。键盘与文本行为不借用剪贴板授权。
+
+动作 ID 与请求内容绑定。在有效会话内，相同 ID 和相同参数返回既有结果，相同 ID 配不同参数返回 conflict。请求响应丢失后查询 action_status。executed 表示全部输入动作已提交，业务成功仍须观察确认。failed 表示已知失败，executed 数量指出完整执行的前缀；unknown 表示执行结果不能确定，应重新观察。幂等缓存为内存状态，执行器 / 内核重建后桌面代次变化，旧动作不得重放。
+
+## 授权和错误
+
+OAuth / PAT scope 按设备区分 `computer:observe:<device>` 和 `computer:control:<device>`；control 包含观察。open 的 control 模式还在参数级检查 control scope 和 Agent 的 computer.act tag 授权。剪贴板 scope 单独保留，不授予截图或输入权限。
+
+Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop_unavailable 表示执行器 / 图形会话不可用，desktop_locked 表示锁屏，permission_required 表示本机系统权限缺失。conflict 携带 reason 表达 desktop_epoch、layout_changed、stale_frame、action_id_reused。其余 not_owner、session_not_found、lease_required、resource_busy 沿用共享语义。Computer 的版本冲突使用桌面 reason，文件冲突仍使用文件 hash 和 mtime。
+
+审计记录动作 ID、会话 ID、参数键和字节数。输入正文、图片和其可猜测摘要不写入审计。完整桌面控制具有用户级 GUI 权限；文件路径策略不会自动约束 GUI。Ingress 处理工具结果，是截图数据的信任边界。
+
+## 本机执行器通道
+
+`xmesh computer host` 在图形用户会话中运行，使用用户专用 Unix socket 或 Windows 命名管道接入目标内核，并通过匿名继承管道监督 Rust 原生执行器。此 host 不承载 Agent / Gateway / Ingress，也不接入 mesh。Windows SYSTEM 内核通过配置的用户 SID 管道连接图形会话。
+
+Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道服务器进程 token 的 SID 与管道名中目标 SID 一致。每个用户桌面执行器还有排他文件锁。一条 broker 只绑定一个管理内核；内核以独立标识每两秒心跳，超过六秒没有心跳时关闭执行器并释放绑定。重建后原生执行器重新生成 desktop_epoch。
+
+本机 HTTP 请求仅使用受保护的本机传输，路径为 /v1/info、heartbeat、capture、execute、release、disconnect。原生匿名管道为每行一个 JSON 对象：请求包含 id、method、params，响应包含 id 和 result 或 error。协议版本为 1；请求限 1 MiB，响应限 8 MiB。外部 Agent 只看到 MCP。
+
+本机显式执行 `xmesh computer host --authorize` 请求系统权限。普通远程请求遇到未授权状态直接失败。权限初始化和自动启动仍按三端验收清单逐项验证。

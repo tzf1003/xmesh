@@ -1,0 +1,49 @@
+name: Computer native executor
+on:
+  push:
+    branches: [master]
+    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', '.github/workflows/computer.yml']
+  pull_request:
+    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', '.github/workflows/computer.yml']
+permissions:
+  contents: read
+concurrency:
+  group: computer-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: computer-native
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libxkbcommon-dev xvfb
+      - run: cargo fmt --manifest-path computer-native/Cargo.toml --check
+      - run: cargo clippy --manifest-path computer-native/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path computer-native/Cargo.toml --locked
+      - run: cargo build --manifest-path computer-native/Cargo.toml --locked
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Native IPC
+        if: runner.os != 'Windows'
+        env:
+          XMESH_TEST_COMPUTER_HELPER: ${{ github.workspace }}/computer-native/target/debug/xmesh-computer
+        run: go test -race ./internal/desktopbroker -run TestNativeDesktopRoundTrip -v
+      - name: Native IPC Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:XMESH_TEST_COMPUTER_HELPER = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          go test -race ./internal/desktopbroker -run TestNativeDesktopRoundTrip -v

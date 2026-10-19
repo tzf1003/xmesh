@@ -18,6 +18,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
+	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"go.yaml.in/yaml/v3"
 )
@@ -116,6 +117,7 @@ type Ingress struct {
 	} `json:"oauth"`
 }
 type Agent struct {
+	Computer   computer.Settings        `json:"computer"`
 	DefaultCWD string                   `json:"default_cwd"`
 	Workspaces map[string]cwd.Workspace `json:"workspaces"`
 	CWDPolicy  cwd.Policy               `json:"cwd_policy"`
@@ -327,6 +329,13 @@ func listenHostAllowed(host string) bool {
 
 func (c *Config) Validate() error {
 	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
+	cs := c.Agent.Computer.Effective()
+	if cs.MaxSessions < 1 || cs.MaxSessions > 32 || cs.LeaseSeconds < 10 || cs.LeaseSeconds > 600 || cs.MaxImageBytes < 1024 || cs.MaxImageBytes > 4<<20 {
+		return fail("/agent/computer: 会话数、租期或截图大小超出允许范围")
+	}
+	if ep := cs.Endpoint; ep != "" && !absAnyOS(ep) && !strings.HasPrefix(ep, `\\.\pipe\xmesh-`) {
+		return fail("/agent/computer/endpoint: 必须是本机绝对路径或命名管道")
+	}
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
 	}

@@ -10,6 +10,9 @@ import (
 func (a *Agent) Drain(kill bool) {
 	a.draining.Store(true)
 	if kill {
+		for _, s := range a.Computer.Sessions("") {
+			a.Computer.Revoke(s.ID)
+		}
 		a.PTY.CloseAll()
 		a.Leases.ReleaseAll()
 	}

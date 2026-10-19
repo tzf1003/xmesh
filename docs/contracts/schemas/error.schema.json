@@ -25,6 +25,9 @@
         "lease_required",
         "resource_busy",
         "backend_unavailable",
+        "desktop_unavailable",
+        "desktop_locked",
+        "permission_required",
         "unauthenticated",
         "unauthorized",
         "not_found",
@@ -67,7 +70,7 @@
     "owner": { "type": "string" },
     "queue_position": { "type": "integer", "minimum": 1 },
     "mode": { "enum": ["shared", "exclusive"] },
-    "resource": { "type": "string", "pattern": "^backend:[A-Za-z0-9-]{1,63}$" },
+    "resource": { "type": "string", "pattern": "^(backend|computer):[A-Za-z0-9-]{1,63}$" },
     "held_by": { "type": "string" },
     "expires_in_s": { "type": "integer", "minimum": 0 },
     "attempts": { "type": "integer", "minimum": 1 },
@@ -112,7 +115,7 @@
         "properties": { "error": { "const": "conflict" } },
         "required": ["error"]
       },
-      "then": { "required": ["path", "current_sha256", "mtime"] }
+      "then": { "if": { "properties": { "resource": { "pattern": "^computer:" } }, "required": ["resource"] }, "then": { "required": ["reason"] }, "else": { "required": ["path", "current_sha256", "mtime"] } }
     },
     {
       "if": {
@@ -140,7 +143,7 @@
         "properties": { "error": { "const": "too_large" } },
         "required": ["error"]
       },
-      "then": { "required": ["path", "size", "limit"] }
+      "then": { "required": ["size", "limit"], "anyOf": [{ "required": ["path"] }, { "required": ["resource"], "properties": { "resource": { "pattern": "^computer:" } } }] }
     },
     {
       "if": {
@@ -188,7 +191,7 @@
       "then": {
         "required": ["resource", "expires_in_s", "reason"],
         "properties": {
-          "reason": { "enum": ["held", "token_mismatch", "token_stale"] }
+          "reason": { "enum": ["held", "token_mismatch", "token_stale", "capacity", "desktop_bound", "input_queue_full", "capture_busy"] }
         },
         "allOf": [
           {

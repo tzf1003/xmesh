@@ -150,6 +150,24 @@ func (l *Logger) RecordSession(oauthSession, caller, client, device, tool string
 		status = "error"
 	}
 	record := map[string]any{"time": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "event": event, "caller": caller, "device": device, "tool": tool, "args_digest": Digest(args, resolved), "status": status, "error": code, "duration_ms": max(int64(0), duration.Milliseconds()), "output_sha256": hash(b)}
+	if strings.HasPrefix(localTool, "computer.") {
+		// A digest of a short typed secret can be guessed. Desktop audit keeps only sizes,
+		// key names and opaque operation identifiers, including at forwarding layers.
+		digest := record["args_digest"].(map[string]any)
+		delete(digest, "value_sha256")
+		delete(record, "output_sha256")
+		var meta struct {
+			ActionID  string `json:"action_id"`
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(args, &meta)
+		if len(meta.ActionID) <= 128 && meta.ActionID != "" {
+			digest["action_id"] = meta.ActionID
+		}
+		if len(meta.SessionID) <= 128 && meta.SessionID != "" {
+			digest["session_id"] = meta.SessionID
+		}
+	}
 	if client != "" {
 		record["oauth_client"] = client
 	}

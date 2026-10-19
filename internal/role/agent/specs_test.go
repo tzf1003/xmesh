@@ -16,6 +16,10 @@ func Test_ToolSchemasRejectUnknownArgs(t *testing.T) {
 		properties := s.schema["properties"].(map[string]any)
 		required, _ := s.schema["required"].([]string)
 		for _, key := range required {
+			if name == "computer.act" && key == "actions" {
+				args[key] = []map[string]any{{"type": "wait", "duration_ms": 1}}
+				continue
+			}
 			switch properties[key].(map[string]any)["type"] {
 			case "integer":
 				args[key] = 1

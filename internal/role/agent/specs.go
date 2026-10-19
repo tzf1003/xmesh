@@ -93,5 +93,8 @@ func buildSpecs() map[string]spec {
 		}
 		specs[name] = spec{d[0], schema, compiled}
 	}
+	for name, s := range computerSpecs() {
+		specs[name] = s
+	}
 	return specs
 }
