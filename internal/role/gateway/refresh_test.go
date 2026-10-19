@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -63,6 +64,94 @@ func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	case <-stopped:
 	case <-time.After(2 * time.Second):
 		t.Fatal("session close did not cancel pending discovery")
+	}
+}
+
+func Test_ToolChangeDuringRefreshIsRetried(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			reading, release, changed := make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			defer unblock()
+			var reads atomic.Int32
+			blockAt := int32(1)
+			if cached {
+				blockAt = 2
+			}
+			server := mcp.NewServer(&mcp.Implementation{Name: "changing-agent", Version: "1"}, nil)
+			server.AddTool(&mcp.Tool{Name: "sys.info", InputSchema: map[string]any{"type": "object"}}, func(callCtx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				if reads.Add(1) == blockAt {
+					close(reading)
+					select {
+					case <-release:
+					case <-callCtx.Done():
+						return nil, callCtx.Err()
+					}
+				}
+				return &mcp.CallToolResult{StructuredContent: map[string]any{"hostname": "device"}}, nil
+			})
+			g := New(Options{NodeName: "device", LocalPeer: mesh.Peer{ID: "local", Name: "device", Online: true}, Dial: func(dialCtx context.Context, _ mesh.Peer, _ Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+				upstream, downstream := mcp.NewInMemoryTransports()
+				if _, err := server.Connect(ctx, upstream, nil); err != nil {
+					return nil, err
+				}
+				notify := opts.Changed
+				opts.Changed = func() {
+					notify()
+					select {
+					case changed <- struct{}{}:
+					default:
+					}
+				}
+				return mcpmux.Connect(dialCtx, downstream, opts)
+			}})
+			t.Cleanup(g.Close)
+			v := g.newView(Principal{Local: true})
+			t.Cleanup(v.close)
+			v.refresh()
+			if cached {
+				v.waitReady(ctx, "device")
+				v.mu.Lock()
+				v.down["device"].updated = time.Time{}
+				v.mu.Unlock()
+				v.refresh()
+			}
+			select {
+			case <-reading:
+			case <-ctx.Done():
+				t.Fatal("refresh did not read sys.info")
+			}
+			server.AddTool(&mcp.Tool{Name: "ida.echo", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return &mcp.CallToolResult{StructuredContent: map[string]any{"ok": true}}, nil
+			})
+			select {
+			case <-changed:
+			case <-ctx.Done():
+				t.Fatal("tool change was not delivered")
+			}
+			// Finish processing the change while the old tools snapshot is still in flight.
+			v.refresh()
+			unblock()
+			for {
+				v.mu.Lock()
+				found := false
+				for _, name := range v.names {
+					found = found || name == "local/ida.echo"
+				}
+				v.mu.Unlock()
+				if found {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatal("tool change during refresh was lost")
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+		})
 	}
 }
 

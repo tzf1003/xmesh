@@ -45,9 +45,11 @@ export interface UpdaterEnv {
   store: UpdateStore;
   /** Node names of the kernels running now. */
   runningNodes(): string[];
-  /** Stops the service of a node. `absent`: it has none (a kernel started by hand). Throws when it cannot stop. */
+  /** Stops the service and observes the old process exit. `absent`: the node already exited. Throws when it cannot stop. */
   stopNode(node: string): Promise<StopResult>;
   startNode(node: string): Promise<void>;
+  /** Repairs a running kernel missed by an older updater, verifying its version before restarting. */
+  refreshNode?(node: string): Promise<void>;
   quit(): void;
   openPath(p: string): Promise<string>;
   notify(n: UpdateNotice): void;
@@ -313,8 +315,21 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     this.cleanup();
     if (pending === undefined) return;
     const unstarted = await this.restart(pending.nodes);
-    const ok = sameVersion(this.env.version, pending.to);
-    const outcome: UpdateOutcome = ok ? { ok, version: pending.to } : { ok, version: pending.to, message: reason || `still ${this.env.version}` };
+    const appUpdated = sameVersion(this.env.version, pending.to);
+    if (appUpdated && this.env.kernelBundled && this.env.refreshNode) {
+      // Older updaters omitted a still-running kernel when its installed service name differed.
+      // The new app also checks those survivors before declaring the update complete.
+      for (const node of new Set(this.env.runningNodes())) {
+        if (!NODE.test(node) || pending.nodes.includes(node)) continue;
+        try {
+          await this.env.refreshNode(node);
+        } catch {
+          unstarted.push(node);
+        }
+      }
+    }
+    const ok = appUpdated && unstarted.length === 0;
+    const outcome: UpdateOutcome = ok ? { ok, version: pending.to } : { ok, version: pending.to, message: reason || (appUpdated ? `kernel restart failed: ${unstarted.join(", ")}` : `still ${this.env.version}`) };
     if (unstarted.length > 0) outcome.unstarted = unstarted;
     this.set({ outcome });
     this.env.notify({ kind: ok ? "updated" : "failed", version: pending.to });
