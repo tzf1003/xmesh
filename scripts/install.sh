@@ -139,7 +139,11 @@ emit true 'Release package checksum and size verified.'
 if "$DOWNLOAD_ONLY"; then PHASE=complete; emit true 'Package ready for offline transfer.'; exit 0; fi
 PHASE=trust
 MOUNT="$(mktemp -d "$CACHE/mount.XXXXXX")"
-cleanup() { hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true; rmdir "$MOUNT" 2>/dev/null || true; }
+cleanup() {
+  if [ -n "${STAGE:-}" ] && [ -d "$STAGE" ]; then rm -rf "$STAGE"; fi
+  hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true
+  rmdir "$MOUNT" 2>/dev/null || true
+}
 trap cleanup EXIT
 hdiutil attach "$PACKAGE" -mountpoint "$MOUNT" -nobrowse -readonly -quiet >&2
 SOURCE="$MOUNT/xmesh.app"
@@ -154,7 +158,11 @@ mkdir -p "$INSTALL_DIR"
 APP="$INSTALL_DIR/xmesh.app"; CLI="$APP/Contents/Resources/bin/xmesh"
 STAGE="$(mktemp -d "$INSTALL_DIR/.xmesh-install.XXXXXX")"
 ditto "$SOURCE" "$STAGE/xmesh.app"
-[ -x "$STAGE/xmesh.app/Contents/Resources/bin/xmesh" ] || fail 'Bundled CLI missing from application.'
+PHASE=verify
+STAGED_CLI="$STAGE/xmesh.app/Contents/Resources/bin/xmesh"
+[ -x "$STAGED_CLI" ] || fail 'Bundled CLI missing from application.'
+[ "$("$STAGED_CLI" version)" = "xmesh $VERSION" ] || fail 'Staged CLI version differs from release.' 'Obtain the matching application and manifest from the same release; the existing application is preserved.'
+PHASE=install
 BACKUP=""
 if [ -e "$APP" ]; then BACKUP="$INSTALL_DIR/xmesh.previous.$(date +%Y%m%d%H%M%S).app"; mv "$APP" "$BACKUP"; fi
 if ! mv "$STAGE/xmesh.app" "$APP"; then

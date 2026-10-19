@@ -1,0 +1,115 @@
+name: UI test MCP
+on:
+  pull_request:
+    paths:
+      [
+        "packages/ui-mcp/**",
+        "internal/backend/**",
+        "internal/exec/**",
+        "internal/config/**",
+        "internal/role/gateway/ui_mcp_integration_test.go",
+        "ui/src/**",
+        "ui/scripts/**",
+        "ui/package*.json",
+        "ui/electron.vite.config.*",
+        "go.mod",
+        "go.sum",
+        ".github/workflows/ui-mcp.yml",
+      ]
+  push:
+    paths:
+      [
+        "packages/ui-mcp/**",
+        "internal/backend/**",
+        "internal/exec/**",
+        "internal/config/**",
+        "internal/role/gateway/ui_mcp_integration_test.go",
+        "ui/src/**",
+        "ui/scripts/**",
+        "ui/package*.json",
+        "ui/electron.vite.config.*",
+        "go.mod",
+        "go.sum",
+        ".github/workflows/ui-mcp.yml",
+      ]
+  workflow_dispatch:
+concurrency:
+  group: ui-test-mcp-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    timeout-minutes: 30
+    env:
+      XMESH_UI_TEST_OUTPUT: ${{ github.workspace }}/packages/ui-mcp/.evidence
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            packages/ui-mcp/package-lock.json
+            ui/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: npm ci --prefix packages/ui-mcp
+      - run: npm ci --prefix ui
+      - run: npm run check-types --prefix packages/ui-mcp
+      - run: npm test --prefix packages/ui-mcp
+      - run: npm run build --prefix ui
+      - run: node ui/scripts/flip-fuses.mjs --profile test
+      - name: Reuse browser binaries
+        id: browser-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: ui-mcp-browser-${{ runner.os }}-${{ hashFiles('packages/ui-mcp/package-lock.json') }}
+      - run: node packages/ui-mcp/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Save installed browser binaries
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: ui-mcp-browser-${{ runner.os }}-${{ hashFiles('packages/ui-mcp/package-lock.json') }}
+      - name: Kernel and backend lifecycle regression
+        run: go test ./internal/config ./internal/backend ./internal/exec
+      - name: Build test kernel and resolve Electron
+        shell: bash
+        run: |
+          go build -o "$RUNNER_TEMP/ui-mcp-kernel${{ runner.os == 'Windows' && '.exe' || '' }}" ./cmd/xmesh
+          node -e 'const fs=require("fs"),p=require("path"),r=require("module").createRequire(p.resolve("ui/package.json"));fs.appendFileSync(process.env.GITHUB_ENV,"XMESH_UI_TEST_ELECTRON="+r("electron")+"\nXMESH_UI_MCP_CLI="+p.resolve("packages/ui-mcp/dist/src/cli.js")+"\n");if(process.platform!=="linux")fs.appendFileSync(process.env.GITHUB_ENV,"XMESH_UI_TEST_APP="+p.resolve("ui")+"\nXMESH_UI_TEST_KERNEL="+p.join(process.env.RUNNER_TEMP,"ui-mcp-kernel"+(process.platform==="win32"?".exe":""))+"\n");'
+      - name: Web and Electron acceptance on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:browser --prefix packages/ui-mcp
+      - name: Web, Electron and xmesh panel acceptance
+        if: runner.os != 'Linux'
+        run: npm run test:browser --prefix packages/ui-mcp
+      - name: Two-node Gateway integration
+        run: go test ./internal/role/gateway -run '^TestUIMCPTwoNodes$' -count=1 -timeout 180s
+      - name: Package with checksum
+        working-directory: packages/ui-mcp
+        run: node scripts/package.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-mcp-${{ matrix.os }}
+          path: |
+            packages/ui-mcp/*.tgz
+            packages/ui-mcp/*.sha256
+            packages/ui-mcp/.evidence
+          if-no-files-found: ignore
+          retention-days: 7
+          include-hidden-files: true

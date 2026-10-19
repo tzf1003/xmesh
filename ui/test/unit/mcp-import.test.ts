@@ -4,6 +4,12 @@ import { IMPORT_MAX_BYTES, parseMcpImport } from "../../src/renderer/lib/mcp-imp
 
 const one = (text: string) => parseMcpImport(text);
 
+test("UI MCP lifecycle settings survive import and reject incompatible transports",()=>{
+  const value={transport:"stdio",command:["node","ui-mcp"],policy:"per-caller",shutdown_timeout:"10s",process_cleanup:"tree"};
+  const imported=one(JSON.stringify({ui:value}));assert.deepEqual(imported.entries[0]?.value,value);assert.deepEqual(imported.entries[0]?.warnings,[]);
+  for(const change of [{shutdown_timeout:"0s"},{shutdown_timeout:"31s"},{process_cleanup:"all"},{transport:"http",url:"http://localhost:9000/mcp"}])assert.equal(one(JSON.stringify({ui:{...value,...change}})).problems.length,1);
+});
+
 test("the mcpServers wrapper and the flat name map both import", () => {
   const wrapped = one(JSON.stringify({ mcpServers: { fetch: { command: "uvx", args: ["mcp-server-fetch"] } } }));
   const flat = one(JSON.stringify({ fetch: { command: "uvx", args: ["mcp-server-fetch"] } }));
