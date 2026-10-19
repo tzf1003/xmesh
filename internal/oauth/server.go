@@ -541,6 +541,9 @@ func subset(requested, allowed []string) bool {
 			match := a == scope
 			need, parts := strings.Split(scope, ":"), strings.Split(a, ":")
 			if len(need) == len(parts) {
+				if len(parts) == 3 && parts[0] == "computer" && parts[1] == "control" && need[0] == "computer" && need[1] == "observe" {
+					parts[1] = "observe"
+				}
 				match = true
 				for i, p := range parts {
 					if p != "*" && p != need[i] {

@@ -298,6 +298,50 @@ test("response assertions bind to the latest action and selected page", async ()
   }
 });
 
+test("navigation policy waits for target interception before popup transmission", async () => {
+  const c = config();
+  let hits = 0;
+  const outside = http.createServer((_req, res) => { hits++; res.end("outside"); });
+  await new Promise<void>(resolve => outside.listen(0, "127.0.0.1", resolve));
+  const outsideUrl = `http://127.0.0.1:${(outside.address() as any).port}`;
+  const allowed = http.createServer((req, res) => {
+    if (req.url === "/redirect") res.writeHead(302, { Location: outsideUrl });
+    res.end("allowed");
+  });
+  await new Promise<void>(resolve => allowed.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(allowed.address() as any).port}`;
+  const send = WebSocket.prototype.send;
+  const timers = new Set<NodeJS.Timeout>();
+  WebSocket.prototype.send = function(data) {
+    if (typeof data === "string" && JSON.parse(data).method === "Fetch.enable" && JSON.parse(data).sessionId) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (this.readyState === WebSocket.OPEN) send.call(this, data);
+      }, 200);
+      timers.add(timer);
+    } else send.call(this, data);
+  };
+  const driver = new Driver({ config: c, environment: { driver: "web", url,
+    allowed_origins: [url], executable: executable() }, session_dir: c.state_dir }, () => {});
+  try {
+    await driver.open();
+    for (const address of [outsideUrl, url + "/redirect"]) {
+      const popupEvent = driver.page.waitForEvent("popup");
+      await driver.page.evaluate(address => window.open(address), address);
+      const popup = await popupEvent;
+      await popup.waitForLoadState().catch(() => {});
+      assert.equal(hits, 0, "popup document reached a disallowed origin before interception was ready");
+      await popup.close();
+    }
+  } finally {
+    WebSocket.prototype.send = send;
+    for (const timer of timers) clearTimeout(timer);
+    await driver.close();
+    await new Promise<void>(resolve => outside.close(() => resolve()));
+    await new Promise<void>(resolve => allowed.close(() => resolve())); cleanup(c);
+  }
+});
+
 test("navigation policy allows subresources and denies off-origin documents", async () => {
   let hits = 0,
     frameRedirects = 0,

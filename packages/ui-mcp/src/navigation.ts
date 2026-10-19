@@ -167,6 +167,11 @@ export async function navigationGuard(
         { once: true },
       );
     });
+    // A popup's first request can precede renderer-target attachment. Install
+    // the browser-level document gate before Playwright can create any pages.
+    await send("Fetch.enable", {
+      patterns: [{ resourceType: "Document", requestStage: "Request" }],
+    });
     await send("Target.setAutoAttach", attach);
   } catch (error) {
     closing = true;
