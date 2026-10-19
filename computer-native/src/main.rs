@@ -134,10 +134,10 @@ impl Runtime {
         let displays = platform::displays();
         let state = if !platform::interactive() {
             "desktop_unavailable"
-        } else if platform::locked() {
-            "locked"
         } else if !platform::screen_permission() {
             "permission_required"
+        } else if platform::locked() {
+            "locked"
         } else {
             "ready"
         };
@@ -227,12 +227,19 @@ fn capture_error_code(reason: &str) -> &'static str {
     }
 }
 
-fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> {
-    if platform::locked() {
-        return Err("desktop_locked");
+fn capture_access_error(screen: bool, locked: bool) -> Option<&'static str> {
+    if !screen {
+        Some("permission_required")
+    } else if locked {
+        Some("desktop_locked")
+    } else {
+        None
     }
-    if !platform::screen_permission() {
-        return Err("permission_required");
+}
+
+fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> {
+    if let Some(reason) = capture_access_error(platform::screen_permission(), platform::locked()) {
+        return Err(reason);
     }
     let displays = platform::displays();
     let target = if q.target_id.is_empty() {
@@ -353,11 +360,8 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     } else {
         platform::layout(&platform::displays())
     };
-    if platform::locked() {
-        return Err("desktop_locked");
-    }
-    if !platform::screen_permission() {
-        return Err("permission_required");
+    if let Some(reason) = capture_access_error(platform::screen_permission(), platform::locked()) {
+        return Err(reason);
     }
     if current_layout != layout {
         return Err("layout_changed");
@@ -906,7 +910,14 @@ fn serve_stdio(authorize: bool) {
                     match serde_json::from_value(q.params) {
                         Ok(r) => match capture(&rt, r) {
                             Ok(v) => rt.reply(q.id, v),
-                            Err(reason) => rt.error(q.id, capture_error_code(reason), reason),
+                            Err(reason) => {
+                                let reason = capture_access_error(
+                                    platform::screen_permission(),
+                                    platform::locked(),
+                                )
+                                .unwrap_or(reason);
+                                rt.error(q.id, capture_error_code(reason), reason);
+                            }
                         },
                         Err(_) => rt.error(q.id, "invalid_args", "capture"),
                     };
@@ -937,6 +948,19 @@ mod tests {
         ] {
             assert_eq!(capture_error_code(reason), code);
         }
+    }
+    #[test]
+    fn missing_portal_permission_precedes_its_locked_fallback() {
+        assert_eq!(
+            capture_access_error(false, true),
+            Some("permission_required")
+        );
+        assert_eq!(
+            capture_access_error(false, false),
+            Some("permission_required")
+        );
+        assert_eq!(capture_access_error(true, true), Some("desktop_locked"));
+        assert_eq!(capture_access_error(true, false), None);
     }
     #[test]
     fn permission_loss_fences_the_active_lease_across_permission_restoration() {

@@ -89,6 +89,9 @@ export class PlaygroundService {
     }
     const connecting = this.connecting.get(slot);
     if (connecting) { await connecting; return this.client(instance, pat); }
+    if (current && (this.users.get(slot) ?? 0) > 1) {
+      throw new Error("Gateway credential changed while its connection is active; retry after active calls finish");
+    }
     let evicted: typeof current;
     const occupied = new Set([...this.connections.keys(), ...this.connecting.keys()]).size;
     if (!current && occupied >= 8) {
