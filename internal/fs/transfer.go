@@ -166,14 +166,7 @@ func (s *Service) transfer(ctx context.Context, path string, a Args, upload bool
 				t.temp = t.file.Name()
 			}
 		} else {
-			var st os.FileInfo
-			st, err = os.Stat(path)
-			if err == nil && !st.Mode().IsRegular() {
-				return nil, toolerr.Path(path, "not_directory")
-			}
-			if err == nil {
-				t.file, err = openRead(path)
-			}
+			t.file, err = openTransferRead(path)
 			if err == nil {
 				t.initial, err = t.file.Stat()
 			}
