@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Confirm, Dialog, Empty, PageHead, ResourceView } from "../components";
@@ -7,7 +7,7 @@ import { useResource } from "../hooks";
 import { useT } from "../i18n";
 import { formatTime } from "../lib/format";
 import { parseTagText } from "../lib/mesh";
-import { usePolicyDraft, type PolicyDraft } from "../lib/policy-draft";
+import { usePolicyDraft, type PolicyDraft, type SavedPolicyDraft } from "../lib/policy-draft";
 import type { ActionError } from "../../shared/ipc";
 import type { MeshDeviceReport, MeshStatus, MeshTagPlan } from "../../shared/mesh";
 import type { Key } from "../messages";
@@ -47,6 +47,8 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const [tab, setTab] = useState<TabId>(ctx.focus?.meshTab ?? "devices");
   const [credentialRevision, setCredentialRevision] = useState(0);
+  const savedDrafts = useRef(new Map<string, SavedPolicyDraft>());
+  const [draftDirty, setDraftDirty] = useState(false);
   useEffect(() => { if (ctx.focus?.meshTab) setTab(ctx.focus.meshTab); }, [ctx.focus?.meshTab]);
   const { resource, reload } = useResource(() => getApi().mesh({ op: "status" }), [ctx.snapshot.selectedInstance]);
   // After saving a credential, ask for status once more: the answer says whether
@@ -68,6 +70,7 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
         open={resource.state === "error" && (resource.error.code === "no_credential" || resource.error.code === "insufficient_scope")}
         onSaved={() => { setCredentialRevision((v) => v + 1); reload(); }}
         verify={verify}
+        draftDirty={draftDirty}
       />
       {resource.state === "error" && resource.stale === undefined ? (
         <MeshError error={resource.error} toast={ctx.toast} />
@@ -109,7 +112,7 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
                 {tab === "devices" && <MeshDevices ctx={ctx} status={status} reloadStatus={reload} />}
                 {tab === "onboard" && <MeshOnboard ctx={ctx} status={status} reloadStatus={reload} />}
                 {tab === "matrix" && <MeshMatrix ctx={ctx} status={status} reloadStatus={reload} />}
-                <PolicyWorkspace key={credentialRevision} ctx={ctx} status={status} reloadStatus={reload} tab={tab} showPolicy={() => setTab("policy")} />
+                <PolicyWorkspace key={credentialRevision} revision={credentialRevision} savedDrafts={savedDrafts.current} onDirty={setDraftDirty} ctx={ctx} status={status} reloadStatus={reload} tab={tab} showPolicy={() => setTab("policy")} />
               </div>
             </>
           )}
@@ -119,9 +122,11 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   );
 }
 
-function PolicyWorkspace(props: MeshTabProps & { tab: TabId; showPolicy(): void }): JSX.Element {
+function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; savedDrafts: Map<string, SavedPolicyDraft>; onDirty(dirty: boolean): void; showPolicy(): void }): JSX.Element {
   const { ctx, status, tab } = props;
-  const draft = usePolicyDraft(`${ctx.snapshot.selectedInstance ?? ""}:${status.provider}:${status.credential?.file ?? "keychain"}`);
+  // A local node selection does not change the control-plane credential.
+  const draft = usePolicyDraft(`${props.revision}:${status.provider}:${status.credential?.file ?? "keychain"}`, props.savedDrafts);
+  useEffect(() => props.onDirty(draft.dirty), [draft.dirty]);
   const t = useT();
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { if (tab === "derp" && draft.document && draft.document.text !== draft.text) void draft.edit({}); }, [tab]);

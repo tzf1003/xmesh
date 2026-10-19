@@ -7,18 +7,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
 	"time"
 
 	"github.com/tzf1003/xmesh/meshadmin"
 )
 
-const policyDocumentLimit = 1024 * 1024
+// The JSON envelope may contain both a policy and a region, each up to 256 KiB,
+// with six-byte JSON escapes. The decoded document has its own shared byte cap.
+const policyDocumentLimit = 4 * 1024 * 1024
 
 // Document operations keep draft text off argv and perform no cloud writes.
 // Publish uses the existing validation, version, snapshot and confirmation path.
-func meshPolicyDocument(op string, args []string, out io.Writer) error {
+func meshPolicyDocument(op string, args []string, out io.Writer, in io.Reader) error {
 	var c meshCommon
 	fs := flag.NewFlagSet("mesh policy "+op, flag.ContinueOnError)
 	c.register(fs)
@@ -29,12 +30,12 @@ func meshPolicyDocument(op string, args []string, out io.Writer) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	body, err := io.ReadAll(io.LimitReader(os.Stdin, policyDocumentLimit+1))
+	body, err := io.ReadAll(io.LimitReader(in, policyDocumentLimit+1))
 	if err != nil {
 		return err
 	}
 	if len(body) > policyDocumentLimit {
-		return fmt.Errorf("%w: policy document exceeds 1 MiB", meshadmin.ErrInvalid)
+		return fmt.Errorf("%w: policy input envelope exceeds 4 MiB", meshadmin.ErrInvalid)
 	}
 	var edit meshadmin.DocumentEdit
 	dec := json.NewDecoder(bytes.NewReader(body))
@@ -85,6 +86,23 @@ func meshPolicyDocument(op string, args []string, out io.Writer) error {
 	if baseVersion != *expect {
 		return fmt.Errorf("%w: 云端策略已变化，请保留草稿并重新加载比较", meshadmin.ErrConflict)
 	}
+	probes, err := meshadmin.ChangedDocumentRelays(plan.Before, plan.After)
+	if err != nil {
+		return err
+	}
+	caps, err := p.Capabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if len(probes) > 0 && !caps.DERPViaPolicy {
+		return fmt.Errorf("%w: this control plane requires DERP regions in its server configuration", meshadmin.ErrUnsupported)
+	}
+	if len(probes) > 0 && !plan.BaseExists {
+		return fmt.Errorf("%w: create a base policy before adding DERP regions so failed probes can restore it", meshadmin.ErrUnsupported)
+	}
+	if len(probes) > 8 {
+		return fmt.Errorf("%w: at most 8 changed DERP nodes may be published at once", meshadmin.ErrInvalid)
+	}
 	store, err := c.snapshots(*snapDir)
 	if err != nil {
 		return err
@@ -96,16 +114,16 @@ func meshPolicyDocument(op string, args []string, out io.Writer) error {
 	if err := confirm(out, "应用完整策略草稿到云端", *yes); err != nil {
 		return err
 	}
-	probes, err := meshadmin.ChangedDocumentRelays(plan.Before, plan.After)
-	if err != nil {
-		return err
-	}
-	res, err := plan.Apply(ctx, p, store, true)
+	writeCtx, writeCancel := ctx30()
+	defer writeCancel()
+	res, err := plan.Apply(writeCtx, p, store, true)
 	if err != nil {
 		return err
 	}
 	for _, target := range probes {
-		probe := meshadmin.ProbeDERP(ctx, target, meshadmin.ProbeOptions{})
+		// Each node has its own five-second probe budget. Control-plane calls
+		// cannot consume the time reserved for later nodes.
+		probe := meshadmin.ProbeDERP(context.Background(), target, meshadmin.ProbeOptions{})
 		if probe.OK {
 			continue
 		}
@@ -130,7 +148,9 @@ func meshPolicyDocument(op string, args []string, out io.Writer) error {
 		return err
 	}
 	if *apply && plan.Changed {
-		current, err := p.GetPolicy(ctx)
+		readCtx, readCancel := ctx30()
+		defer readCancel()
+		current, err := p.GetPolicy(readCtx)
 		if err != nil {
 			return fmt.Errorf("策略已写入，但云端回读失败；请重新读取确认：%w", err)
 		}

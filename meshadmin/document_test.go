@@ -3,9 +3,53 @@ package meshadmin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestPolicyDocumentExhaustedIDs(t *testing.T) {
+	var regions []string
+	for id := 900; id <= 999; id++ {
+		regions = append(regions, fmt.Sprintf(`"%d":{"RegionID":%d,"RegionCode":"r%d","RegionName":"R","Nodes":[{"Name":"n%d","RegionID":%d,"HostName":"relay.example.com"}]}`, id, id, id, id, id))
+	}
+	text := `{"derpMap":{"regions":{` + strings.Join(regions, ",") + `}}}`
+	_, err := EditPolicyDocument(DocumentEdit{Text: text, Regions: []DERPRegionSpec{{Code: "extra", Name: "Extra", Hostname: "extra.example.com"}}})
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "no free") {
+		t.Fatalf("want exhausted ID error, got %v", err)
+	}
+}
+
+func TestPolicyDocumentOmitDoesNotCreateRegions(t *testing.T) {
+	omit := true
+	doc, err := EditPolicyDocument(DocumentEdit{Text: `{"derpMap":{}}`, OmitDefault: &omit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !doc.OmitDefault || strings.Contains(doc.Text, `"regions"`) {
+		t.Fatal("switch created unrelated region map")
+	}
+}
+
+func TestPolicyDocumentIPChangeRequiresTLSName(t *testing.T) {
+	before := strings.Replace(documentPolicy, `"HostName":"relay.example.com"`, `"IPv4":"192.0.2.1"`, 1)
+	after := strings.Replace(before, `"192.0.2.1"`, `"192.0.2.2"`, 1)
+	if _, err := ChangedDocumentRelays(before, after); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("want explicit TLS limitation before writing, got %v", err)
+	}
+	after = strings.Replace(after, `"IPv4":"192.0.2.2"`, `"IPv4":"192.0.2.2","CertName":"relay.example.com"`, 1)
+	probes, err := ChangedDocumentRelays(before, after)
+	if err != nil || len(probes) != 1 || probes[0].CertName != "relay.example.com" {
+		t.Fatalf("valid IP target lost TLS name: %+v %v", probes, err)
+	}
+}
+
+func TestPolicyDocumentUTF8Size(t *testing.T) {
+	text := `{"comment":"` + strings.Repeat("中", 90000) + `"}`
+	if _, err := InspectPolicyDocument(text); !errors.Is(err, ErrInvalid) {
+		t.Fatal("accepted oversized UTF-8 text")
+	}
+}
 
 const documentPolicy = `{
   // Custom rules, maintained outside xmesh.

@@ -5,6 +5,7 @@ import { type Page, expect, test } from "@playwright/test";
 import type { Capability } from "../../src/shared/control";
 import type { FakeMeshState } from "../../src/main/mesh-fake";
 import { type Harness, launch, navigate } from "./helpers";
+import { FakeKernel } from "../../testserver/server";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
 
@@ -259,6 +260,34 @@ test("policy: a file-mode control plane shows the whole new policy to install by
   await expect(page.getByTestId("mesh-plan-after")).toHaveValue(/alice@/);
   await expect(page.getByTestId("mesh-plan-apply")).toBeDisabled();
   expect(await fake("version")).toBe(1);
+});
+
+test("policy: local node selection preserves the draft and credential replacement asks before discarding", async () => {
+  const page = await open();
+  await page.getByTestId("mesh-tab-policy").click();
+  await expect(page.getByTestId("mesh-policy-text")).toBeVisible();
+  const original = await page.getByTestId("mesh-policy-text").inputValue();
+  const draft = original.replace('"acls": []', '"acls": [], "note": "unsaved-node-switch"');
+  await page.getByTestId("mesh-policy-text").fill(draft);
+  const second = await FakeKernel.start({ pingMs: 300, status: { hostname: "server" } });
+  try {
+    second.writeManifest(h.root, "node-b");
+    await expect.poll(async () => JSON.stringify((await h.tray()).menu)).toContain("instance.node-b");
+    await h.clickMenu("instance.node-b");
+    await expect(page.getByTestId("node")).toHaveText("server");
+    await expect(page.getByTestId("mesh-policy-text")).toHaveValue(draft);
+    await h.clickMenu("instance.node-a");
+    await expect(page.getByTestId("mesh-policy-text")).toHaveValue(draft);
+    await page.getByTestId("mesh-login").locator("summary").click();
+    await page.getByTestId("mesh-login-secret").fill("tskey-api-replacement");
+    await page.getByTestId("mesh-login-submit").click();
+    await expect(page.getByTestId("confirm")).toBeVisible();
+    await page.getByTestId("confirm-cancel").click();
+    expect((await fake("calls")).some((c) => c[1] === "login")).toBe(false);
+    await expect(page.getByTestId("mesh-policy-text")).toHaveValue(draft);
+  } finally {
+    await second.stop();
+  }
 });
 
 test("matrix: both layers are shown and mismatches can be isolated", async () => {

@@ -87,6 +87,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
     return h[f]!();
   }, fn) as Promise<T>;
 
+  let closing: Promise<void> | undefined;
   return {
     app,
     root,
@@ -110,20 +111,35 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       await page.waitForLoadState("domcontentloaded");
       return page;
     },
-    close: async () => {
-      // A hung quit (seen on macOS runners) must not eat the whole test timeout; kill the process instead.
-      const quit = app.close().then(() => true, () => true);
-      const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000));
-      if (!(await Promise.race([quit, timeout]))) app.process().kill("SIGKILL");
-      await Promise.race([kernel.stop(), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-      // Chromium can release its Windows profile database handles just after
-      // Electron exits. Use Node's bounded native retry instead of making a
-      // test fail during cleanup with EBUSY.
-      const removeTree = (directory: string): void => {
-        fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
-      };
-      removeTree(root);
-      removeTree(userData);
+    close: () => {
+      if (closing) return closing;
+      closing = (async () => {
+        // Test teardown must bypass the production unsaved-draft beforeunload
+        // guard, then wait for the native process before deleting its profile.
+        const child = app.process();
+        if (child.exitCode === null && child.signalCode === null) {
+          let timer: ReturnType<typeof setTimeout>;
+          const closed = new Promise<void>((resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("Electron teardown did not exit within 10 seconds")), 10_000);
+            child.once("close", () => { clearTimeout(timer); resolve(); });
+          });
+          // Exiting may close the evaluation connection before it can reply.
+          // The native close event, rather than that reply, proves shutdown.
+          const requested = app.evaluate(({ app }) => app.exit(0)).then(() => undefined, (error: unknown) => error);
+          await closed;
+          await requested;
+        }
+        await Promise.race([kernel.stop(), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+        // Chromium can release its Windows profile database handles just after
+        // Electron exits. Use Node's bounded native retry instead of making a
+        // test fail during cleanup with EBUSY.
+        const removeTree = (directory: string): void => {
+          fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+        };
+        removeTree(root);
+        removeTree(userData);
+      })();
+      return closing;
     },
   };
 }
