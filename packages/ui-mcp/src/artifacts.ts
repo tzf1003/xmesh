@@ -37,12 +37,25 @@ export function redact<T>(value: T, secrets: string[]): T {
   return JSON.parse(text) as T;
 }
 export function bytes(dir: string): number {
-  if (!fs.existsSync(dir)) return 0;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
   let total = 0;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+  for (const entry of entries) {
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) total += bytes(file);
-    else if (entry.isFile()) total += fs.statSync(file).size;
+    else if (entry.isFile()) {
+      try {
+        total += fs.statSync(file).size;
+      } catch (error) {
+        // Guardians atomically rename their temporary state during this walk.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
   }
   return total;
 }

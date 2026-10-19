@@ -424,15 +424,13 @@ func TestOAuthDeviceSessionUsesOnlyTargetIngressGrant(t *testing.T) {
 }
 
 func TestDeviceDrainUsesCallerDeadlineForResponse(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
 	a, _ := node(t, "admin")
 	b, _ := node(t, "drain-target")
 	server := serveNode(t, b)
 	if err := b.pairing.SetPassword("correct horse battery"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.PairWith(ctx, device.LAN, server.URL, "correct horse battery", b.identity.ID); err != nil {
+	if _, err := a.PairWith(t.Context(), device.LAN, server.URL, "correct horse battery", b.identity.ID); err != nil {
 		t.Fatal(err)
 	}
 	b.SetAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +440,10 @@ func TestDeviceDrainUsesCallerDeadlineForResponse(t *testing.T) {
 		case <-r.Context().Done():
 		}
 	}))
+	// Pairing can be slow under race instrumentation; start the response budget
+	// after setup, while still waiting past the LAN connection budget.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	if err := a.SendDrain(ctx, mesh.Peer{ID: b.identity.ID}, agent.DrainRequest{Scope: "device", Device: b.identity.ID, Drain: "keep"}); err != nil {
 		t.Fatal("LAN response cut off before caller deadline", err)
 	}
