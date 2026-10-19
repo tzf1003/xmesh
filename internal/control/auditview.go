@@ -18,7 +18,7 @@ import (
 // Fields CTR-AUD-01 allows. A record carrying anything else is withheld from
 // the view and counted, so a bug elsewhere cannot leak content through here
 // (INV-10).
-var auditFields = map[string]bool{"time": true, "event": true, "caller": true, "oauth_client": true, "oauth_session": true, "device": true, "tool": true, "args_digest": true, "status": true, "error": true, "duration_ms": true, "output_sha256": true, "actor": true}
+var auditFields = map[string]bool{"time": true, "event": true, "caller": true, "oauth_client": true, "oauth_session": true, "device": true, "tool": true, "args_digest": true, "status": true, "error": true, "duration_ms": true, "output_sha256": true, "actor": true, "origin": true}
 var digestFields = map[string]bool{"keys": true, "resolved_path": true, "cmd": true, "args_len": true, "stdin_sha256": true, "session_id": true, "signal": true, "mode": true, "backend": true, "token": true, "value_len": true, "value_sha256": true, "bytes": true}
 
 const (

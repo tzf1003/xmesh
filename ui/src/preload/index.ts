@@ -14,6 +14,7 @@ const invoke = (channel: string, ...args: unknown[]): Promise<never> =>
   ipcRenderer.invoke(channel, ...args) as Promise<never>;
 
 const api: PanelApi = {
+  playground: (request) => invoke("xmesh:playground", request),
   getSnapshot: () => invoke("xmesh:get-snapshot"),
   onSnapshot: (listener) => {
     if (typeof listener !== "function") throw new TypeError("listener must be a function");
