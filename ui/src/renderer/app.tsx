@@ -116,6 +116,8 @@ export function App(): JSX.Element {
   // With no node configured at all, the first thing worth showing is the setup wizard.
   const current: PageId =
     page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 && snapshot.stoppedNodes.length === 0 ? "setup" : "overview");
+  const [meshVisited, setMeshVisited] = useState(false);
+  useEffect(() => { if (current === "mesh") setMeshVisited(true); }, [current]);
 
   const ctx: PageContext = {
     snapshot,
@@ -143,7 +145,8 @@ export function App(): JSX.Element {
               onClear={() => setFresh(undefined)}
               toast={push}
             />
-            <PageSwitch key={snapshot.selectedInstance} page={current} ctx={ctx} />
+            {(meshVisited || current === "mesh") && <div hidden={current !== "mesh"}><Mesh ctx={ctx} /></div>}
+            {current !== "mesh" && <PageSwitch key={snapshot.selectedInstance} page={current} ctx={ctx} />}
           </main>
         </div>
       </div>

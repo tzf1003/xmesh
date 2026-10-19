@@ -138,6 +138,26 @@ xmesh 写入的每个元素前带一行注释 `// xmesh:managed <section>`。策
 
 ### DERP 地域
 
+桌面「策略」与「DERP 中继」共用一份完整策略草稿。初次读取云端策略及版本后，
+从草稿的 `derpMap` 派生已有地域列表，保留节点数组、扩展字段、注释和地域编号。
+已有地域支持多个节点及只配置 IP 的节点。页面切换保留本次应用会话中的草稿；
+关闭应用前提示待应用的修改。重新加载云端策略需要确认丢弃当前草稿。
+
+桌面调用的文档命令：
+
+- `xmesh mesh policy document --json`：标准输入为 `DocumentEdit` JSON，解析或编辑本地完整 HuJSON，不访问控制面。
+  `region: {id,text}` 编辑已有地域的完整对象；`removeID` 删除明确选择的地域；
+  `regions` 追加新地域，为未指定编号的地域分配空闲编号；`omitDefault` 修改官方中继开关；
+  `template` 合并 xmesh 管理的模板段落。返回完整策略和派生地域列表。
+- `xmesh mesh policy publish --json --expect-version VERSION`：标准输入仅为 `{"text":"完整策略"}`，
+  根据草稿来源的版本校验并预览完整差异，`--apply --yes` 才提交同一份完整正文。
+  写前保存快照，写入沿用 Provider 的版本条件，写后回读并比较策略内容。
+  新增或修改连接参数的 DERP 节点执行真实探测；失败恢复前检查写后版本，
+  避免覆盖其他管理员的后续修改。错误传回调用边界并保留桌面草稿。
+
+显式文档编辑允许用户修改自己已有的地域及策略；自动模板和原 `derp plan/apply`
+仍遵循 `xmesh:managed` 所有权规则。Headscale 的中继仍由服务端配置提供。
+
 `xmesh mesh derp plan|apply --region "code=lab,name=Lab,host=derp.example.com,ipv4=...,ipv6=...,id=900"`。
 
 - 官方控制面：写 `derpMap.regions`，region id 限 900 到 999，未指定时取最小的空闲 id（避开策略里已有的所有 id）；每个 region 一个节点，节点名 `<id>a`；写入 IPv4、IPv6 以抵御 DNS 失败；`--omit-default` 写 `omitDefaultRegions: true`。只有一个 region 且去掉官方 region 时给出单点警告。
