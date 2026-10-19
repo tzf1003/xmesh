@@ -150,6 +150,21 @@ func managedPatPath(dir, name, file string) bool {
 	return ok && patFileSuffixPattern.MatchString(suffix)
 }
 
+// Interrupted creation/deletion never blocks a fresh credential or overwrites retained files.
+func writeAvailablePatFile(dir, name, token string) (string, error) {
+	file := filepath.Join(dir, name+".token")
+	err := writeManagedPatFile(file, name, token)
+	if errors.Is(err, os.ErrExist) {
+		suffix, suffixErr := newPatToken()
+		if suffixErr != nil {
+			return "", suffixErr
+		}
+		file = filepath.Join(dir, name+"-"+suffix+".token")
+		err = writeManagedPatFile(file, name, token)
+	}
+	return file, err
+}
+
 // Create the token and its receipt together for both explicit and automatic PATs.
 func writeManagedPatFile(file, name, token string) error {
 	if err := writeNewPatFile(file, []byte(token+"\n")); err != nil {
@@ -297,9 +312,9 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	if err = privdir.Ensure(s.o.StateDir); err == nil {
 		err = privdir.Ensure(s.patDir())
 	}
-	file := filepath.Join(s.patDir(), req.Name+".token")
+	var file string
 	if err == nil {
-		err = writeManagedPatFile(file, req.Name, token)
+		file, err = writeAvailablePatFile(s.patDir(), req.Name, token)
 	}
 	if err != nil {
 		failWith(w, newError(v1.ErrInternal, "无法写入令牌文件"))
@@ -376,8 +391,14 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	// Only a file the channel created is removed; a token file the operator pointed at stays.
 	if managedPatPath(s.patDir(), name, pat.TokenFile) {
 		if owner, err := os.ReadFile(pat.TokenFile + ".owner"); err == nil && string(owner) == name+"\n" {
-			_ = os.Remove(pat.TokenFile)
-			_ = os.Remove(pat.TokenFile + ".owner")
+			if err := os.Remove(pat.TokenFile); err != nil && !os.IsNotExist(err) {
+				failWith(w, newError(v1.ErrInternal, "PAT 已撤销，但令牌文件清理失败"))
+				return
+			}
+			if err := os.Remove(pat.TokenFile + ".owner"); err != nil && !os.IsNotExist(err) {
+				failWith(w, newError(v1.ErrInternal, "PAT 已撤销，但归属凭据清理失败"))
+				return
+			}
 		}
 	}
 	w.WriteHeader(204)

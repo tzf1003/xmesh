@@ -186,17 +186,17 @@ func Test_ControlConfigDiffJudgesRolesBySet(t *testing.T) {
 	}
 }
 
-func Test_ControlReloadAdoptsTheInspectedSnapshot(t *testing.T) {
+func Test_ControlReloadReportsTheAdoptedSnapshot(t *testing.T) {
 	f := newFixture(t, quietPoll)
-	inspected := []byte(strings.Replace(testConfig, "allow_dangerous: false", "allow_dangerous: true", 1))
-	// A concurrent editor replaces the path after the control handler has read it.
-	if err := os.WriteFile(f.path, []byte("node: ["), 0600); err != nil {
+	current := []byte(strings.Replace(testConfig, "allow_dangerous: false", "allow_dangerous: true", 1))
+	if err := os.WriteFile(f.path, current, 0600); err != nil {
 		t.Fatal(err)
 	}
+	f.store.Refresh()
 	f.server.configMu.Lock()
-	got := f.server.adoptFileLocked(context.Background(), inspected, v1.ActorControl, true)
+	got, err := f.server.adoptFileLocked(context.Background(), v1.ActorControl, true)
 	f.server.configMu.Unlock()
-	if !got.Applied || !got.Valid || got.ETag != got.EffectiveETag || got.ETag != etagOf(inspected) {
-		t.Fatalf("reload did not adopt its inspected bytes: %+v", got)
+	if err != nil || !got.Valid || got.ETag != got.EffectiveETag || got.ETag != etagOf(current) {
+		t.Fatalf("snapshot mismatch: %+v %v", got, err)
 	}
 }

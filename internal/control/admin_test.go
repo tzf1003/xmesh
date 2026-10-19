@@ -333,7 +333,15 @@ func Test_ControlPatCreationPreservesUnconfiguredCredential(t *testing.T) {
 	if err := os.WriteFile(file, []byte("operator-owned"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	apiError(t, f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil), v1.ErrInternal)
+	r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil)
+	if r.Status != 201 {
+		t.Fatal(r.Status)
+	}
+	var secret v1.PatSecret
+	decodeAs(t, r, &secret)
+	if secret.Pat.TokenFile == file {
+		t.Fatal("operator file reused")
+	}
 	if body, err := os.ReadFile(file); err != nil || string(body) != "operator-owned" {
 		t.Fatalf("%q %v", body, err)
 	}
@@ -359,5 +367,37 @@ func Test_ControlDefaultPatHasOwnershipReceipt(t *testing.T) {
 		if _, err := os.Stat(name); !os.IsNotExist(err) {
 			t.Fatalf("managed default remained: %s %v", name, err)
 		}
+	}
+}
+
+func Test_ControlPatRecreationRecoversFailedCleanup(t *testing.T) {
+	f := newFixtureConfig(t, gatewayConfig)
+	for _, name := range []string{"ci", "spare"} {
+		if r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: name, Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+			t.Fatal(r.Status)
+		}
+	}
+	file := filepath.Join(f.server.patDir(), "ci.token")
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(file, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(file, "busy"), []byte("retain"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	apiError(t, f.do("DELETE", "/v1/pats/ci", nil, nil), v1.ErrInternal)
+	if _, ok := f.store.Get().Gateway.PATs["ci"]; ok {
+		t.Fatal("failed cleanup did not revoke PAT")
+	}
+	r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil)
+	if r.Status != 201 {
+		t.Fatal("recreation blocked", r.Status)
+	}
+	var secret v1.PatSecret
+	decodeAs(t, r, &secret)
+	if secret.Pat.TokenFile == file {
+		t.Fatal("retained file reused")
 	}
 }

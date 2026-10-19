@@ -171,43 +171,57 @@ func (s *Store) Subscribe(fn func(*Config)) (unsubscribe func()) {
 	}
 }
 
-// RefreshBytes adopts exactly the immutable file snapshot inspected by the caller.
-// Subscribers must not call this method from their notification callback.
-func (s *Store) RefreshBytes(raw []byte) bool {
-	_, adopted := s.reloadBytes(raw, true)
-	return adopted
+// ReloadSnapshot describes one read, adoption and effective state under the notification lock.
+type ReloadSnapshot struct {
+	Raw             []byte
+	Adopted         bool
+	EffectiveDigest string
+	RestartPaths    []string
+	Failures        uint64
+	ReadError       error
+	config          *Config
 }
 
-func (s *Store) reload() (*Config, bool) { return s.reloadBytes(nil, false) }
+func (s *Store) reload() (*Config, bool) {
+	snapshot := s.RefreshSnapshot()
+	return snapshot.config, snapshot.Adopted
+}
 
-func (s *Store) reloadBytes(raw []byte, supplied bool) (*Config, bool) {
+// RefreshSnapshot serializes the disk read with all other generation adoption.
+// Subscribers must not call this method from their notification callback.
+func (s *Store) RefreshSnapshot() ReloadSnapshot {
 	s.notify.Lock()
 	defer s.notify.Unlock()
-	c, adopted := s.load(raw, supplied)
+	var raw []byte
+	var readErr error
+	if s.path != "" {
+		raw, readErr = os.ReadFile(s.path)
+	}
+	c, adopted := s.load(raw, readErr)
+	s.mu.Lock()
+	snapshot := ReloadSnapshot{Raw: raw, Adopted: adopted, RestartPaths: append([]string{}, s.restart...), Failures: s.failures, ReadError: readErr, config: c}
+	if s.path != "" {
+		snapshot.EffectiveDigest = hex.EncodeToString(s.digest[:])
+	}
+	ids := slices.Sorted(maps.Keys(s.subscribers))
+	fns := make([]func(*Config), 0, len(ids))
 	if adopted {
-		s.mu.Lock()
-		ids := slices.Sorted(maps.Keys(s.subscribers))
-		fns := make([]func(*Config), 0, len(ids))
 		for _, id := range ids {
 			fns = append(fns, s.subscribers[id])
 		}
-		s.mu.Unlock()
-		for _, fn := range fns {
-			fn(c)
-		}
 	}
-	return c, adopted
+	s.mu.Unlock()
+	for _, fn := range fns {
+		fn(c)
+	}
+	return snapshot
 }
 
-func (s *Store) load(b []byte, supplied bool) (*Config, bool) {
+func (s *Store) load(b []byte, e error) (*Config, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.path == "" {
 		return s.current, false
-	}
-	var e error
-	if !supplied {
-		b, e = os.ReadFile(s.path)
 	}
 	if e != nil {
 		if !s.readFailed {

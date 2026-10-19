@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,9 +27,25 @@ func Extract(archive, dst string) error {
 	}
 	defer root.Close()
 	if strings.HasSuffix(archive, ".zip") {
-		return extractZip(archive, root)
+		err = extractZip(archive, root)
+	} else {
+		err = extractTarGz(archive, root)
 	}
-	return extractTarGz(archive, root)
+	if err != nil {
+		return err
+	}
+	return fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			if err := validateArchiveLink(root, name); err != nil {
+				_ = root.Remove(name)
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // rooted reports whether name starts at a root on any system. A leading slash is rooted on Windows too, where
@@ -172,4 +189,48 @@ func writeFile(root *os.Root, path string, r io.Reader, mode os.FileMode) error 
 		return err
 	}
 	return out.Close()
+}
+
+// Resolve link components individually so aliases cannot change the meaning of '..'.
+// Missing components remain lexical: forward and dangling links stay valid within the root.
+func validateArchiveLink(root *os.Root, name string) error {
+	pending := strings.Split(filepath.FromSlash(name), string(filepath.Separator))
+	var resolved []string
+	hops := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) == 0 {
+				return fmt.Errorf("压缩包里的链接指向目录之外: %q", name)
+			}
+			resolved = resolved[:len(resolved)-1]
+			continue
+		}
+		current := filepath.Join(append(append([]string{}, resolved...), part)...)
+		st, err := root.Lstat(current)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil && st.Mode()&os.ModeSymlink != 0 {
+			hops++
+			if hops > 40 {
+				return fmt.Errorf("压缩包里的链接循环: %q", name)
+			}
+			link, err := root.Readlink(current)
+			if err != nil {
+				return err
+			}
+			if rooted(link) {
+				return fmt.Errorf("压缩包里的链接是绝对路径: %q", name)
+			}
+			pending = append(strings.Split(filepath.FromSlash(link), string(filepath.Separator)), pending...)
+			continue
+		}
+		resolved = append(resolved, part)
+	}
+	return nil
 }

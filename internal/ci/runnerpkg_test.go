@@ -274,3 +274,60 @@ func Test_ExtractReplacesHardlinkedFile(t *testing.T) {
 		t.Fatalf("install failed: %q %v", got, err)
 	}
 }
+
+func Test_ExtractRejectsTerminalEscapingSymlink(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "links.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range []*tar.Header{
+		{Name: "a", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0755},
+		{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "../outside", Mode: 0755},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gz.Close()
+	f.Close()
+	if err := Extract(archive, t.TempDir()); err == nil {
+		t.Fatal("escaping link accepted at archive end")
+	}
+}
+
+func Test_ExtractKeepsSafeForwardSymlink(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "forward.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range []*tar.Header{
+		{Name: "bin/tool", Typeflag: tar.TypeSymlink, Linkname: "../run.sh", Mode: 0755},
+		{Name: "run.sh", Typeflag: tar.TypeReg, Size: 4, Mode: 0755},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			tw.Write([]byte("safe"))
+		}
+	}
+	tw.Close()
+	gz.Close()
+	f.Close()
+	dst := t.TempDir()
+	if err := Extract(archive, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "bin", "tool")); err != nil || string(got) != "safe" {
+		t.Fatalf("%q %v", got, err)
+	}
+}

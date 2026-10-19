@@ -324,3 +324,34 @@ func Test_IngressRoleAndSectionAreHot(t *testing.T) {
 		t.Fatalf("the ingress was not added back: %v", got)
 	}
 }
+
+func Test_ReloadSnapshotReadsAfterAdoptionLock(t *testing.T) {
+	f := newReloadFixture(t)
+	s, err := NewStore(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	s.Subscribe(func(*Config) { close(entered); <-release })
+	f.write(func(doc map[string]any) { section(section(doc, "agent"), "policy")["allow_dangerous"] = true })
+	first := make(chan bool, 1)
+	go func() { first <- s.Refresh() }()
+	<-entered
+	// The second read waits behind notification of A, and must read B after it acquires the lock.
+	f.write(nil)
+	done := make(chan ReloadSnapshot, 1)
+	go func() { done <- s.RefreshSnapshot() }()
+	s.mu.Lock()
+	for id := range s.subscribers {
+		delete(s.subscribers, id)
+	}
+	s.mu.Unlock()
+	close(release)
+	if !<-first {
+		t.Fatal("A was not adopted")
+	}
+	snapshot := <-done
+	if snapshot.ReadError != nil || !snapshot.Adopted || string(snapshot.Raw) != string(f.base) || snapshot.config.Agent.Policy.AllowDangerous {
+		t.Fatalf("stale snapshot: %+v", snapshot)
+	}
+}
