@@ -148,7 +148,8 @@ try{
     events.push("new-app-notarized-stapled-and-assessed");
   }
   const dmg=path.join(root,"installer.dmg");
-  await exec("hdiutil",["create","-quiet","-format","UDZO","-srcfolder",staging,dmg],{timeout:120000});
+  const image=await exec("hdiutil",["create","-format","UDZO","-srcfolder",staging,dmg],{timeout:120000,maxBuffer:65536});
+  if(image.stdout.trim())console.log(image.stdout.trim());
   if(signingIdentity){await sign(dmg);await exec("codesign",["--verify","--strict",dmg]);}
   if(notaryProfile){
     await notarize(dmg);
