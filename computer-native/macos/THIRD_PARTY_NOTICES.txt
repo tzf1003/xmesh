@@ -3,6 +3,8 @@ Source: https://github.com/iFurySt/open-computer-use
 Revision: 5136415f52b87f419227bae28767cf469a6bc3b5
 Adapted window-scoped geometry selection from ComputerUseService.swift and
 AccessibilitySnapshot.swift in Sources/AccessibilityClick.swift.
+Adapted framework detection from WindowOcclusionKeepAlive.swift in
+Sources/XmeshBridge.swift.
 
 MIT License
 

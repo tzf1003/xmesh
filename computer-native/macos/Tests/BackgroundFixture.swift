@@ -102,7 +102,7 @@ final class BackgroundFixture:NSObject,NSApplicationDelegate{
             "button":point(button),"text":point(text),"drag":point(drag,-100),"drag_to":point(drag,100),"scroll":point(scroll),"pointer_events":pointerEvents,
             "frontmost_pid":NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0,"drag_events":drag.events,
             "key_events":keyEvents,"selection_location":text.selectedRange().location,"selection_length":text.selectedRange().length,
-            "is_active":NSApp.isActive,"is_key":window.isKeyWindow,"text_focused":window.firstResponder===text,"occluded":occluder != nil]
+            "is_active":NSApp.isActive,"is_key":window.isKeyWindow,"text_focused":window.firstResponder===text,"occluded":occluder != nil,"cover_window":occluder?.windowNumber ?? 0]
         if let data=try? JSONSerialization.data(withJSONObject:state,options:.sortedKeys){try? data.write(to:directory.appendingPathComponent("state.json"),options:.atomic)}
     }
 }

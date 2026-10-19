@@ -67,6 +67,19 @@ fn build_macos_background() {
                 "upstream foreground lookup changed"
             );
             let source = source.replace(original, "xmeshFrontmostPID()");
+            let source = if file.file_name().unwrap() == "SkyKeyboardSimulation.swift" {
+                // Native AppKit accepts PID-directed keys while inactive. The
+                // Chromium-only synthetic key-window sequence can suppress
+                // those native keys; retain the common menu/typing dispatcher.
+                let original = "if xmeshFrontmostPID() == target.pid {";
+                assert_eq!(source.matches(original).count(), 1);
+                source.replace(
+                    original,
+                    "if try xmeshUseDirectKeyboard(target.pid, window: target.windowID) || xmeshFrontmostPID() == target.pid {",
+                )
+            } else {
+                source
+            };
             let staged = output.join(file.file_name().unwrap());
             std::fs::write(&staged, source).unwrap();
             compiler.arg(staged);

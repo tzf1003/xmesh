@@ -173,3 +173,7 @@ Electron 复测还暴露应用 AX 对象的 timeout 不会继承给返回的子�
 PR 合成提交的 Go 运行 39240797123 在 Ubuntu 的 Test_Gate2_TwoMCPClients 失败：后端重启后 acquire 已成功而 ida.echo 尚未重新注册。修复将 acquire 成功作为同步发布目录的边界；刷新目录先 upsert 同名保留项，再删除过期项。重启目录回归连续 20 次通过，相关 Agent / backend / computer / broker / gateway 五包共 208 项竞态测试通过。先前 push 工作流通过仍属有效记录，PR 作业的这次失败由本段单独记录。
 
 最后一次 Electron 完整 MCP 扩展轮次在 pause_on_user_input=true 下验证点击、中文、连续追加、辅助功能全选替换、原生组合键、拖动和滚动，七项状态与干扰检查全部通过。AppKit 原生组合键缺口继续保留。
+
+第十八轮：定位并修复 AppKit 原生组合键缺口。普通 AppKit 接受后台 PID 定向键盘事件，统一施加 Chromium 的合成 key-window 流程会使本机 AppKit 丢弃原生按键。现沿用上游框架检测，在保留其菜单快捷键和文字派发器的同时，普通 AppKit 选择直接进程投递，Chromium / Electron 保留原合成流程。原始 vendored 文件与校验和保持不变，仅在构建暂存目录应用该集成条件。
+
+修复后，真实 MCP 链路在 pause_on_user_input=true 下通过 AppKit 与 Electron 的点击、中文、连续追加、辅助功能全选替换、原生 Meta+Backspace、拖拽及滚动。AppKit 目标被同应用第二窗口完全遮挡；随后向第二窗口申请控制并发送原生按键，因应用当前焦点仍属于第一窗口，执行器在投递前返回 failed / background_action_unsupported / executed=0，第一窗口值保持一致。该轮有四个真实用户活动事件且干扰监测通过。此前第十七轮记录的 AppKit 原生键盘缺口由本轮关闭；其他应用、系统版本和完整前台 first-responder 状态仍不由这些夹具推断。

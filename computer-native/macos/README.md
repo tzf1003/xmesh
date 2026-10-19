@@ -25,7 +25,13 @@ not xmesh runtime acceptance evidence.
 The upstream snapshot files are unchanged. `build.rs` stages a synchronous
 foreground query in Cargo's shared output directory. The executor services
 AppKit's main loop while the serial input worker dispatches actions; foreground
-queries execute on that serviced main thread. `UpstreamKeyboard.swift` retains the upstream text/chord methods with
+queries execute on that serviced main thread. A second staging patch selects
+direct process keyboard delivery for native AppKit after checking that its
+focused AX element belongs to the bound window. Chromium/Electron keep the
+upstream synthetic key-window sequence. Both routes retain the same menu
+shortcut and typing dispatcher. Renderer detection adapts the upstream
+WindowOcclusionKeepAlive.swift framework check.
+`UpstreamKeyboard.swift` retains the upstream text/chord methods with
 private keyboard event sources. Integration hooks route cancellation and
 permission checks to the Rust executor and keep diagnostics out of input logs.
 
@@ -54,10 +60,11 @@ movement began returned unknown and delivered the button release. The final
 Electron MCP run completed during 98 hardware user-activity events with the
 interference checks passing. These results cover the tested host and fixtures;
 other applications and cross-version private-API behavior require their own
-acceptance evidence. An extended AppKit test currently exposes a raw
-Command+Backspace delivery gap despite an executed response. AX select-all and
-text replacement pass, and the Electron raw chord passes. AppKit raw-key
-compatibility remains an open acceptance item.
+acceptance evidence. Extended AppKit and Electron MCP runs both passed
+consecutive insertion and an actual Command+Backspace chord with the user-input
+policy enabled. The AppKit run also covered a fully obscured target and refused
+a key sent to another window in the same app while its focused field belonged
+to the original target.
 
 `scripts/test_computer_background.py` checks snapshot hashes, builds and runs
 pure recipe/admission tests. It does not open apps, take screenshots or post
@@ -90,7 +97,9 @@ lease cancellation after a drag has begun and observes its button release.
 Use `--pause-on-user-input` with `--binary` to exercise the kernel intervention
 policy. `--steps click,text,append,key,native_key,drag,scroll` additionally checks
 consecutive insertion and an actual key chord; the AppKit native-key acceptance
-item above is still open.
+coverage above is limited to the tested applications. Use
+`--occluded --reject-other-window-key` with AppKit and `--binary` to verify
+that an unfocused window cannot redirect native keys to the app's focused window.
 Run desktop acceptance sequentially
 because the native executor holds a per-user desktop lock. A locked desktop
 is reported as unavailable for input.

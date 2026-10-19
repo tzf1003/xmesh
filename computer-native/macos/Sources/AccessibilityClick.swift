@@ -32,6 +32,12 @@ private func ownedByWindow(_ element:AXUIElement,pid:pid_t,window:CGWindowID)->B
     return SkyLightSPI.shared.windowID(for:windowElement)==window
 }
 
+func xmeshAccessibilityKeyboardTarget(pid:pid_t,window:CGWindowID)->Bool{
+    let app=AXUIElementCreateApplication(pid)
+    guard let focused=elementAttribute(app,kAXFocusedUIElementAttribute) else{return false}
+    return ownedByWindow(focused,pid:pid,window:window)
+}
+
 // Frame extraction adapts computer-use-mcp Core/AX.swift. Window-scoped
 // containment/priority selection adapts open-computer-use's bestElement and
 // AccessibilitySnapshot traversal at the pinned revision in upstream.json.

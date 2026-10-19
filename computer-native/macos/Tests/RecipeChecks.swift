@@ -8,6 +8,11 @@ import AppKit
     static func main() throws {
         xmeshBackgroundInitialize()
         precondition(NSApplication.shared.activationPolicy() == .prohibited)
+        precondition(!xmeshRequiresSyntheticKeyboardFocus(frameworkNames:[]))
+        precondition(!xmeshRequiresSyntheticKeyboardFocus(frameworkNames:["AppKit.framework","WebKit.framework"]))
+        for framework in ["Electron Framework.framework","Chromium Framework.framework","CEF.framework"]{
+            precondition(xmeshRequiresSyntheticKeyboardFocus(frameworkNames:[framework]))
+        }
         let single=try skyClickEventRecipe(clickCount:1)
         precondition(single.count==5 && single.last?.kind == .up)
         let double=try skyClickEventRecipe(clickCount:2)

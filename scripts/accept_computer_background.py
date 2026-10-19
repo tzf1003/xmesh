@@ -98,12 +98,14 @@ def main():
     parser.add_argument("--occluded",action="store_true",help="Cover the AppKit target with another window of the same fixture")
     parser.add_argument("--cancel-drag",action="store_true",help="Verify native cancellation during an AppKit drag and button release")
     parser.add_argument("--pause-on-user-input",action="store_true",help="Enable the kernel's target-scoped user-intervention policy")
+    parser.add_argument("--reject-other-window-key",action="store_true",help="Verify native keyboard delivery refuses another window in the same app")
     options = parser.parse_args()
     assert os.environ.get("XMESH_TEST_ALLOW_BACKGROUND_INPUT") == "1", "obtain desktop-user approval and set XMESH_TEST_ALLOW_BACKGROUND_INPUT=1"
     assert options.helper.is_absolute() and options.helper.is_file()
     assert not options.occluded or options.fixture=="appkit","occlusion fixture requires AppKit"
     assert not options.cancel_drag or (options.fixture=="appkit" and not options.binary),"native cancellation fixture requires AppKit without --binary"
     assert not options.pause_on_user_input or options.binary,"user-intervention policy requires --binary"
+    assert not options.reject_other_window_key or (options.binary and options.occluded),"other-window rejection requires MCP and the occluded AppKit fixture"
     steps=options.steps.split(',')
     assert steps and all(step in ('click','sky_click','text','append','key','native_key','drag','scroll') for step in steps)
     root = pathlib.Path(__file__).resolve().parents[1]
@@ -350,7 +352,22 @@ def main():
                 assert not interference and pointer_and_focus()==baseline
                 print(json.dumps({"background_step":"cancel-drag","result":"PASS","state":cancelled[execute_id]["state"],"button_released":True}),flush=True)
             call("release", {"desktop_epoch": info["desktop_epoch"], "lease_token": "1"})
-            print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded,"pause_on_user_input":options.pause_on_user_input, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation"]}, ensure_ascii=False))
+            if options.reject_other_window_key:
+                before=json.loads(state_file.read_text())["value"]
+                cover=json.loads(state_file.read_text())["cover_window"]
+                other=next(item for item in tool("info",{})["structuredContent"]["targets"] if json.loads(item["layout_version"])[0]==cover)
+                session=tool("open",{"mode":"control","interaction":"background","target_id":other["id"],"ttl_seconds":30})["structuredContent"]
+                other_identity={key:session[key] for key in ("session_id","desktop_epoch","lease_token")}
+                try:
+                    other_frame=tool("observe",{**other_identity,"max_width":1280})["structuredContent"]
+                    refused=tool("act",{**other_identity,"frame_id":other_frame["frame_id"],"action_id":"wrong-window-key","actions":[{"type":"key","keys":["x"]}]})["structuredContent"]
+                    assert refused["state"]=="failed" and refused["executed"]==0 and refused["error"]=="background_action_unsupported",refused
+                    time.sleep(.1)
+                    assert json.loads(state_file.read_text())["value"]==before,"key reached another window"
+                    assert not interference and pointer_and_focus()==baseline
+                    print(json.dumps({"background_step":"other-window-key","result":"PASS","state":refused["state"],"executed":0}),flush=True)
+                finally:tool("close",other_identity)
+            print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded,"pause_on_user_input":options.pause_on_user_input, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []),*( ["reject-other-window-key"] if options.reject_other_window_key else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation"]}, ensure_ascii=False))
         finally:
             stopped.set()
             mouse_trace.stop()

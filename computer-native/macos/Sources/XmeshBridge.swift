@@ -12,7 +12,7 @@ private var releasingInput = false
 private var sessionTargetPID: pid_t?
 private var sessionTarget: Action?
 private let bridgeLock = NSLock()
-private enum BridgeStop: Error { case userIntervention, targetChanged }
+private enum BridgeStop: Error { case userIntervention, targetChanged, keyboardTargetUnfocused }
 
 func requireUsableComputerUseSession() throws {
     guard sessionCheck?(sessionContext,releasingInput) == true else { throw ComputerUseError.stateUnavailable("session_cancelled") }
@@ -180,6 +180,7 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
         return 0
     } catch BridgeStop.userIntervention {return 3}
       catch BridgeStop.targetChanged {return 4}
+      catch BridgeStop.keyboardTargetUnfocused {return 5}
       catch { return 2 }
 }
 
@@ -210,6 +211,26 @@ func xmeshFrontmostPID() -> pid_t? {
 
 private func frontmostPID() -> pid_t? { xmeshFrontmostPID() }
 
+// Adapted from open-computer-use WindowOcclusionKeepAlive.swift's framework
+// detector at the pinned revision. Native AppKit and Chromium need different
+// keyboard focus recipes; the decision precedes any input mutation.
+func xmeshRequiresSyntheticKeyboardFocus(frameworkNames:[String])->Bool{
+    frameworkNames.contains{let name=$0.lowercased();return name.contains("chrom") || name.contains("electron") || name.contains("cef")}
+}
+
+func xmeshChromiumApp(_ pid:pid_t)->Bool{
+    let frameworks=NSRunningApplication(processIdentifier:pid)?.bundleURL?.appendingPathComponent("Contents/Frameworks")
+    let names=frameworks.flatMap{try? FileManager.default.contentsOfDirectory(atPath:$0.path)} ?? []
+    return xmeshRequiresSyntheticKeyboardFocus(frameworkNames:names)
+}
+
+func xmeshUseDirectKeyboard(_ pid:pid_t,window:CGWindowID)throws->Bool{
+    if xmeshChromiumApp(pid){return false}
+    try requireUsableComputerUseSession()
+    guard xmeshAccessibilityKeyboardTarget(pid:pid,window:window) else{throw BridgeStop.keyboardTargetUnfocused}
+    return true
+}
+
 private func withTargetFocus(_ action:Action,_ operation:() throws -> Void) throws {
     let spi=SkyLightSPI.shared
     let focus=try spi.beginSyntheticTargetFocus(targetPID:action.pid,targetWindowID:action.window)
@@ -230,9 +251,7 @@ private func dispatchPointer(_ action:Action) throws {
     let start=try action.point(action.x,action.y)
     // Adapted from open-computer-use appHasLazyWebAccessibility: detect the
     // renderer by shipped frameworks instead of an application-name list.
-    let frameworks=NSRunningApplication(processIdentifier:action.pid)?.bundleURL?.appendingPathComponent("Contents/Frameworks")
-    let names=frameworks.flatMap{try? FileManager.default.contentsOfDirectory(atPath:$0.path)} ?? []
-    let chromium=names.contains{let name=$0.lowercased();return name.contains("chrom") || name.contains("electron") || name.contains("cef")}
+    let chromium=xmeshChromiumApp(action.pid)
     guard let source=CGEventSource(stateID:chromium ? .hidSystemState : .privateState) else{throw ComputerUseError.message("event_source")}
     source.localEventsSuppressionInterval=0
     func post(_ type:CGEventType,_ point:CGPoint,_ cleanup:Bool=false) throws {
