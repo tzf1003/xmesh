@@ -38,7 +38,7 @@ func EnsureDefaultPAT(store *config.Store, stateDir string) (bool, error) {
 	}
 	file := filepath.Join(patDirOf(stateDir), DefaultPATName+".token")
 	if err == nil {
-		err = writeAtomic(file, []byte(token+"\n"))
+		err = writeManagedPatFile(file, DefaultPATName, token)
 	}
 	if err != nil {
 		return false, err
@@ -53,6 +53,7 @@ func EnsureDefaultPAT(store *config.Store, stateDir string) (bool, error) {
 	}
 	if err != nil {
 		_ = os.Remove(file)
+		_ = os.Remove(file + ".owner")
 		return false, err
 	}
 	store.Get()

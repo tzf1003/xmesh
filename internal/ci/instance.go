@@ -566,11 +566,9 @@ func (i *instance) exitOf(code int, asked bool) exitInfo {
 func (i *instance) onLine(line string) {
 	ev := parseLine(line)
 	i.mu.Lock()
-	if ev.kind != lineOther {
-		i.tail = append(i.tail, ev.kind)
-		if len(i.tail) > tailLines {
-			i.tail = i.tail[len(i.tail)-tailLines:]
-		}
+	i.tail = append(i.tail, ev.kind)
+	if len(i.tail) > tailLines {
+		i.tail = i.tail[len(i.tail)-tailLines:]
 	}
 	delta := 0
 	switch ev.kind {

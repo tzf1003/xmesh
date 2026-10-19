@@ -38,8 +38,8 @@ func Test_RunnerOutputRetainsOnlyClassifications(t *testing.T) {
 	i.onLine("job-secret-value")
 	i.onLine("job-secret-value: A session for this runner already exists")
 	i.onLine("job-secret-value: missing libicu")
-	if len(i.tail) != 2 {
-		t.Fatalf("retained unknown output: %v", i.tail)
+	if len(i.tail) != 3 {
+		t.Fatalf("classification window: %v", i.tail)
 	}
 	info := i.exitOf(1, false)
 	if !info.conflict || !info.missingDependency || len(info.tailLines) != 0 {
@@ -58,5 +58,17 @@ func Test_RegistrationDiagnosticsDropRawOutput(t *testing.T) {
 		if strings.Contains(p.Message, "secret") {
 			t.Fatalf("output disclosed: %s", p.Message)
 		}
+	}
+}
+
+func Test_RunnerFaultClassificationsExpireWithOrdinaryOutput(t *testing.T) {
+	i := &instance{snap: v1.CiInstance{State: v1.CiIdle}}
+	i.onLine("A session for this runner already exists")
+	for range tailLines {
+		i.onLine("ordinary task output containing a private value")
+	}
+	info := i.exitOf(1, false)
+	if info.conflict || len(i.tail) != tailLines || len(info.tailLines) != 0 {
+		t.Fatalf("stale fault: %+v", info)
 	}
 }

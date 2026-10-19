@@ -133,6 +133,18 @@ func (s *Server) patDir() string { return patDirOf(s.o.StateDir) }
 
 func patDirOf(stateDir string) string { return filepath.Join(stateDir, "pats") }
 
+// Create the token and its receipt together for both explicit and automatic PATs.
+func writeManagedPatFile(file, name, token string) error {
+	if err := writeNewPatFile(file, []byte(token+"\n")); err != nil {
+		return err
+	}
+	if err := writeNewPatFile(file+".owner", []byte(name+"\n")); err != nil {
+		_ = os.Remove(file)
+		return err
+	}
+	return nil
+}
+
 // A pre-existing credential or receipt belongs to its current owner.
 func writeNewPatFile(path string, body []byte) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -270,13 +282,7 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	}
 	file := filepath.Join(s.patDir(), req.Name+".token")
 	if err == nil {
-		err = writeNewPatFile(file, []byte(token+"\n"))
-		if err == nil {
-			err = writeNewPatFile(file+".owner", []byte(req.Name+"\n"))
-			if err != nil {
-				_ = os.Remove(file)
-			}
-		}
+		err = writeManagedPatFile(file, req.Name, token)
 	}
 	if err != nil {
 		failWith(w, newError(v1.ErrInternal, "无法写入令牌文件"))

@@ -338,3 +338,26 @@ func Test_ControlPatCreationPreservesUnconfiguredCredential(t *testing.T) {
 		t.Fatalf("%q %v", body, err)
 	}
 }
+
+func Test_ControlDefaultPatHasOwnershipReceipt(t *testing.T) {
+	f := newFixtureConfig(t, gatewayTokenConfig(""))
+	created, err := EnsureDefaultPAT(f.store, f.server.o.StateDir)
+	if err != nil || !created {
+		t.Fatalf("create default: %v %v", created, err)
+	}
+	file := filepath.Join(f.server.patDir(), "default.token")
+	if raw, err := os.ReadFile(file + ".owner"); err != nil || string(raw) != "default\n" {
+		t.Fatalf("receipt %q %v", raw, err)
+	}
+	if r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+		t.Fatalf("create spare: %d", r.Status)
+	}
+	if r := f.do("DELETE", "/v1/pats/default", nil, nil); r.Status != 204 {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	for _, name := range []string{file, file + ".owner"} {
+		if _, err := os.Stat(name); !os.IsNotExist(err) {
+			t.Fatalf("managed default remained: %s %v", name, err)
+		}
+	}
+}
