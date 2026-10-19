@@ -38,7 +38,8 @@ jobs:
       - run: npm run build --prefix ui
       - run: node ui/scripts/flip-fuses.mjs --profile test
       - name: Reuse browser binaries
-        uses: actions/cache@v4
+        id: browser-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cache/ms-playwright
@@ -46,6 +47,15 @@ jobs:
             ~/AppData/Local/ms-playwright
           key: ui-mcp-browser-${{ runner.os }}-${{ hashFiles('packages/ui-mcp/package-lock.json') }}
       - run: node packages/ui-mcp/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Save installed browser binaries
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: ui-mcp-browser-${{ runner.os }}-${{ hashFiles('packages/ui-mcp/package-lock.json') }}
       - name: Kernel and backend lifecycle regression
         run: go test ./internal/config ./internal/backend ./internal/exec
       - name: Build test kernel and resolve Electron
