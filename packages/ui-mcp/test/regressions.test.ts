@@ -169,3 +169,38 @@ test("Chromium endpoint readiness waits for missing and partially written startu
     cleanup(c);
   }
 });
+
+test("Chromium endpoint readiness retries transient file sharing failures within its deadline", async (t) => {
+  const c = config();
+  const file = path.join(c.state_dir, "DevToolsActivePort");
+  fs.writeFileSync(file, "12345\n/devtools/browser/fixture-123\n");
+  const read = fs.readFileSync.bind(fs);
+  const failures = ["EACCES", "EPERM", "EBUSY"];
+  let persistent = false;
+  t.mock.method(fs, "readFileSync", (input: any, options: any) => {
+    if (input === file) {
+      const code = persistent ? "EACCES" : failures.shift();
+      if (code)
+        throw Object.assign(new Error("endpoint publication in progress"), {
+          code,
+        });
+    }
+    return read(input, options);
+  });
+  try {
+    assert.deepEqual(await navigationEndpoint(c.state_dir, () => true, 2000), {
+      port: "12345",
+      endpoint: "/devtools/browser/fixture-123",
+    });
+    assert.equal(failures.length, 0);
+    persistent = true;
+    await assert.rejects(
+      navigationEndpoint(c.state_dir, () => true, 50),
+      (error: any) =>
+        error.code === "preflight_failed" &&
+        error.details.filesystem_error === "EACCES",
+    );
+  } finally {
+    cleanup(c);
+  }
+});

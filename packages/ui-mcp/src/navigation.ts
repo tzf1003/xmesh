@@ -187,6 +187,7 @@ export async function navigationEndpoint(
   timeout = 10000,
 ): Promise<{ port: string; endpoint: string }> {
   const deadline = Date.now() + timeout;
+  let filesystemError: string | undefined;
   while (alive()) {
     try {
       const [port, endpoint] = fs
@@ -201,10 +202,16 @@ export async function navigationEndpoint(
       )
         return { port: port!, endpoint: endpoint! };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      filesystemError = (error as NodeJS.ErrnoException).code;
+      // Windows can deny sharing while Chromium publishes the file. These
+      // startup states are retried within the same readiness deadline.
+      if (
+        !["ENOENT", "EACCES", "EPERM", "EBUSY"].includes(filesystemError ?? "")
+      )
         throw new UIError(
           "preflight_failed",
           "Chromium navigation endpoint is unreadable",
+          { filesystem_error: filesystemError },
         );
     }
     if (Date.now() >= deadline) break;
@@ -213,5 +220,6 @@ export async function navigationEndpoint(
   throw new UIError(
     "preflight_failed",
     "Chromium navigation endpoint did not become ready",
+    { filesystem_error: filesystemError },
   );
 }
