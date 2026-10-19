@@ -8,6 +8,7 @@ import { cleanup, config } from "./helpers.js";
 import { redact, Evidence, gc } from "../src/artifacts.js";
 import { Locks } from "../src/locks.js";
 import { Controller } from "../src/controller.js";
+import type { RunResult } from "../src/types.js";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -137,6 +138,47 @@ test("evidence is owned by opaque ID and redacts known secrets", () => {
       JSON.stringify({ ended_at: "2000-01-01T00:00:00Z" }),
     );
     assert.equal(gc(c).removed, 1);
+  } finally {
+    cleanup(c);
+  }
+});
+
+test("JUnit reports remove terminal controls and escape failure text", () => {
+  const c = config();
+  try {
+    const evidence = new Evidence(c, "i", "r", []);
+    const result = {
+      protocol_version: 1,
+      instance_id: "i",
+      session_id: "s",
+      run_id: "r",
+      environment_id: "e",
+      driver: "web",
+      mode: "steps",
+      fixtures: "mock",
+      coverage: ["ui"],
+      versions: {},
+      status: "failed",
+      started_at: new Date().toISOString(),
+      steps: [],
+      events: [],
+      artifacts: [],
+      evidence_incomplete: false,
+      error: {
+        code: "execution_failed",
+        message: '\u001b[31m<failure>\u0000 & "quoted"\u001b[0m',
+        details: {},
+      },
+    } as RunResult;
+    const junit = evidence
+      .reports(result)
+      .find((artifact) => artifact.mime_type === "application/xml")!;
+    const text = Buffer.from(
+      evidence.read(junit.id).data as string,
+      "base64",
+    ).toString("utf8");
+    assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text));
+    assert.match(text, /&lt;failure&gt; &amp; &quot;quoted&quot;/);
   } finally {
     cleanup(c);
   }

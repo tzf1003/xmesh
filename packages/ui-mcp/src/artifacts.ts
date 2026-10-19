@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
 import type { Config, Artifact, RunResult } from "./types.js";
 import { privateDir, inside } from "./config.js";
 import { requireValue } from "./errors.js";
@@ -150,17 +151,19 @@ export class Evidence {
     ].join("\n");
     fs.writeFileSync(path.join(this.dir, "report.md"), text, { mode: 0o600 });
     const escape = (s: string) =>
-      s.replace(
-        /[<>&"']/g,
-        (c) =>
-          ({
-            "<": "&lt;",
-            ">": "&gt;",
-            "&": "&amp;",
-            '"': "&quot;",
-            "'": "&apos;",
-          })[c]!,
-      );
+      stripVTControlCharacters(s)
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "")
+        .replace(
+          /[<>&"']/g,
+          (c) =>
+            ({
+              "<": "&lt;",
+              ">": "&gt;",
+              "&": "&amp;",
+              '"': "&quot;",
+              "'": "&apos;",
+            })[c]!,
+        );
     const unsuccessful = safe.status !== "passed";
     fs.writeFileSync(
       path.join(this.dir, "junit.xml"),
