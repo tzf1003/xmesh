@@ -15,7 +15,10 @@ test("native exit is observed while a descendant still holds the output pipe", a
     helper = Number(String(data).trim());
     await waitForNativeExit(parent, 5_000);
     assert.equal(parent.exitCode, 0);
-    assert.equal(closed, false, "the inherited pipe must not determine native shutdown");
+    assert.ok(Number.isInteger(helper) && helper > 0);
+    assert.doesNotThrow(() => process.kill(helper!, 0), "the descendant remains alive after native parent exit");
+    // Windows closes its process pipe independently; POSIX retains the inherited handle.
+    if (process.platform !== "win32") assert.equal(closed, false, "the inherited pipe must not determine native shutdown");
     await waitForNativeExit(parent, 1);
   } finally {
     if (helper && Number.isInteger(helper)) {
