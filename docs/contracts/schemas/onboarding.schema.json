@@ -1,0 +1,530 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:onboarding:1",
+  "title": "Onboarding",
+  "$ref": "#/$defs/Input",
+  "$defs": {
+    "NetworkInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "lan",
+            "tailnet"
+          ]
+        },
+        "control_url": {
+          "type": "string"
+        },
+        "auth_method": {
+          "type": "string",
+          "enum": [
+            "browser",
+            "key"
+          ]
+        },
+        "authkey_file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "Input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "local",
+            "multi-device",
+            "cloud"
+          ]
+        },
+        "node_name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,62}$"
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permission": {
+          "type": "string",
+          "enum": [
+            "development",
+            "readonly"
+          ]
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "claude-code"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "autostart": {
+          "type": "boolean"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkInput"
+        }
+      },
+      "required": [
+        "schema_version",
+        "purpose",
+        "node_name",
+        "workspace",
+        "permission",
+        "clients",
+        "network"
+      ]
+    },
+    "Step": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "waiting_user",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "next_action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "message"
+      ]
+    },
+    "ClientInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "installed": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string"
+        },
+        "problem": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "installed",
+        "version"
+      ]
+    },
+    "ClientChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "before_hash": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "conflict": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "before_hash",
+        "exists",
+        "conflict",
+        "summary"
+      ]
+    },
+    "ClientReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "backup_path": {
+          "type": "string"
+        },
+        "after_hash": {
+          "type": "string"
+        },
+        "before_hash": {
+          "type": "string"
+        },
+        "existed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "backup_path",
+        "after_hash",
+        "before_hash",
+        "existed"
+      ]
+    },
+    "Readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "service_ready": {
+          "type": "boolean"
+        },
+        "client_verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "installed",
+        "service_ready",
+        "client_verified"
+      ]
+    },
+    "Plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        },
+        "input": {
+          "$ref": "#/$defs/Input"
+        },
+        "config_path": {
+          "type": "string"
+        },
+        "config": {
+          "type": "string"
+        },
+        "before_hash": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "client_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClientChange"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Step"
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "input",
+        "config_path",
+        "config",
+        "before_hash",
+        "endpoint",
+        "summary",
+        "client_changes",
+        "steps",
+        "created_at"
+      ]
+    },
+    "Job": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "node_name": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "waiting_user",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Step"
+          }
+        },
+        "readiness": {
+          "$ref": "#/$defs/Readiness"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "next_action": {
+          "type": "string"
+        },
+        "auth_url": {
+          "type": "string"
+        },
+        "control_url": {
+          "type": "string"
+        },
+        "ingress_url": {
+          "type": "string"
+        },
+        "verification_tool": {
+          "type": "string"
+        },
+        "verification_path": {
+          "type": "string"
+        },
+        "ingress_password_set": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "plan_id",
+        "node_name",
+        "purpose",
+        "status",
+        "steps",
+        "readiness",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "NodeInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "config_path": {
+          "type": "string"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "problem": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "config_path",
+        "running"
+      ]
+    },
+    "Inspection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "suggested_node_name": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ClientInfo"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NodeInfo"
+          }
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Job"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "platform",
+        "arch",
+        "hostname",
+        "suggested_node_name",
+        "root",
+        "clients",
+        "nodes",
+        "jobs"
+      ]
+    },
+    "Diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "next_action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "message"
+      ]
+    },
+    "Diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Diagnostic"
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "checks"
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "next_action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    }
+  }
+}

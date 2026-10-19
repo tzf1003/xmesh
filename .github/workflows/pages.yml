@@ -1,0 +1,101 @@
+name: Install site
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "scripts/install.*"
+      - "scripts/*install*site*"
+      - "scripts/release_manifest.py"
+      - "scripts/test_install_distribution.py"
+      - "docs/site/**"
+      - "docs/agent/**"
+      - "llms.txt"
+      - ".github/workflows/pages.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/ui-package.yml"
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: install-pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: false
+jobs:
+  test:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s scripts -p 'test_install_distribution.py' -v
+  build:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        id: pages
+      - name: Rebuild versioned documentation from published bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          mkdir -p _site _releases
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft > _releases/releases.json
+          python3 - <<'PYCODE'
+          import json, os, subprocess, sys, zipfile
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from build_install_site import build
+          from release_manifest import channel_for
+          repo = os.environ['GITHUB_REPOSITORY']
+          tags = []
+          for release in json.loads(Path('_releases/releases.json').read_text()):
+              tag = release['tagName']
+              if release['isDraft']: continue
+              try: channel_for(tag)
+              except ValueError: continue
+              target = Path('_releases') / tag
+              target.mkdir()
+              result = subprocess.run(['gh','release','download',tag,'--repo',repo,'--pattern',f'xmesh-docs-{tag}.zip','--dir',str(target)])
+              if result.returncode: continue  # Historical releases may predate install documentation.
+              with zipfile.ZipFile(target / f'xmesh-docs-{tag}.zip') as bundle:
+                  for item in bundle.infolist():
+                      dest = (target / item.filename).resolve()
+                      if not dest.is_relative_to(target.resolve()): raise ValueError('unsafe docs bundle path')
+                  bundle.extractall(target)
+              manifest = json.loads((target / 'manifest.json').read_text())
+              build(target, Path('_site'), tag, repo, os.environ['BASE_URL'], manifest, homepage=False)
+              tags.append(tag)
+          if not tags: raise SystemExit('No versioned install documentation bundles found')
+          def semver(tag):
+              import re
+              parts = re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)(?:-(beta|rc)\.(\d+))?', tag)
+              return (int(parts[1]),int(parts[2]),int(parts[3]), 2 if not parts[4] else 1 if parts[4]=='rc' else 0, int(parts[5] or 0))
+          stable = [tag for tag in tags if channel_for(tag) == 'stable']
+          selected = max(stable or tags, key=semver)
+          source = Path('_releases') / selected
+          build(source, Path('_site'), selected, repo, os.environ['BASE_URL'], json.loads((source/'manifest.json').read_text()))
+          PYCODE
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

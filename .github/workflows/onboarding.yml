@@ -1,0 +1,117 @@
+name: Onboarding
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit and schema (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check schema-generated transport types
+        run: python scripts/gen-onboarding-types.py --check
+      - name: Onboarding state, adapters and schema regression
+        run: go test -race ./internal/onboarding -count=1 -v -timeout=300s
+      - name: Setup CLI regression
+        run: go test -race ./cmd/xmesh -run '^TestSetup' -count=1 -v -timeout=180s
+      # go.yml Test_CONARCH02 compiles all six release targets, including both ARM64 desktop targets.
+
+  native-service:
+    name: Native user service (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build persistent native acceptance executable
+        shell: bash
+        run: |
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
+          mkdir -p "$RUNNER_TEMP/xmesh-onboarding-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          binary="$RUNNER_TEMP/xmesh-onboarding-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/xmesh$ext"
+          go build -trimpath -o "$binary" ./cmd/xmesh
+          echo "XMESH_TEST_ONBOARDING_BINARY=$binary" >> "$GITHUB_ENV"
+      - name: Check native user-session context (Windows)
+        if: runner.os == 'Windows'
+        id: windows-session
+        shell: pwsh
+        run: |
+          $session = (Get-Process -Id $PID).SessionId
+          Write-Output "Runner Windows session: $session"
+          if ($session -eq 0) {
+            'supported=false' >> $env:GITHUB_OUTPUT
+            '::notice::Native onboarding acceptance skipped: Windows current-user scheduled tasks require an interactive logon session; this runner is in session 0.' | Write-Output
+            '### Native onboarding: Windows' >> $env:GITHUB_STEP_SUMMARY
+            'Skipped: runner session 0 cannot exercise the interactive current-user logon task. Unit/schema coverage still runs. Run this workflow on a runner launched in an interactive user session to accept the task runtime.' >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            'supported=true' >> $env:GITHUB_OUTPUT
+          }
+      - name: macOS LaunchAgent install, MCP verification and cleanup
+        if: runner.os == 'macOS'
+        run: go test -race ./cmd/xmesh -run '^TestOnboardingNativeService$' -count=1 -v -timeout=180s
+      - name: Windows current-user task install, MCP verification and cleanup
+        if: runner.os == 'Windows' && steps.windows-session.outputs.supported == 'true'
+        run: go test -race ./cmd/xmesh -run '^TestOnboardingNativeService$' -count=1 -v -timeout=180s
+      - name: Verify macOS service cleanup
+        if: always() && runner.os == 'macOS' && env.XMESH_TEST_ONBOARDING_BINARY != ''
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import os, pathlib, plistlib, subprocess
+          binary = pathlib.Path(os.environ['XMESH_TEST_ONBOARDING_BINARY']).resolve()
+          agents = pathlib.Path.home() / 'Library' / 'LaunchAgents'
+          for path in agents.glob('xmesh-qs-test-*.plist'):
+              registration = plistlib.loads(path.read_bytes())
+              args = registration.get('ProgramArguments', [])
+              if not args or pathlib.Path(args[0]).resolve() != binary:
+                  continue
+              label = registration.get('Label', '')
+              if not label.startswith('xmesh-qs-test-'):
+                  raise SystemExit('Unexpected acceptance service label')
+              subprocess.run([str(binary), 'stop', '--name', label], check=False, timeout=20)
+              subprocess.run([str(binary), 'uninstall', '--name', label], check=True, timeout=20)
+              if path.exists():
+                  raise SystemExit('Acceptance LaunchAgent registration remains')
+          PYCODE
+      - name: Verify Windows service cleanup
+        if: always() && runner.os == 'Windows' && env.XMESH_TEST_ONBOARDING_BINARY != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = [IO.Path]::GetFullPath($env:XMESH_TEST_ONBOARDING_BINARY)
+          $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -like 'xmesh-qs-test-*' })
+          foreach ($task in $tasks) {
+            $owned = @($task.Actions | Where-Object { $_.Execute -and [IO.Path]::GetFullPath($_.Execute).Equals($binary, [StringComparison]::OrdinalIgnoreCase) })
+            if (!$owned.Count) { continue }
+            Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -InputObject $task -Confirm:$false
+            if (Get-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue) { throw 'Acceptance scheduled task registration remains.' }
+          }
