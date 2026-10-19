@@ -180,3 +180,19 @@ test("role saves retain the current transfer draft", async () => {
   await expect(page.getByTestId("role-gateway")).toHaveAttribute("aria-checked", "false");
   await expect(page.getByTestId("transfer-path")).toHaveValue("/work/unsaved.bin");
 });
+
+test("authorization edits use the config version saved by the role switch", async () => {
+  const page = await open();
+  await navigate(page, "authz");
+  await expect(page.getByTestId("tool-fs.read")).toBeChecked();
+  await page.getByTestId("role-gateway").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("role-gateway")).toHaveAttribute("aria-checked", "false");
+  await page.getByTestId("tool-fs.read").click();
+  await expect(page.getByTestId("tool-fs.read")).not.toBeChecked();
+  await expect.poll(() => h.kernel.panel.writes.length).toBe(2);
+  const config = JSON.parse(h.kernel.panel.content);
+  expect(config.node.roles).toEqual(["agent"]);
+  expect(config.agent.disabled_tools).toContain("fs.read");
+  await expect(page.locator(".toast.error")).toHaveCount(0);
+});
