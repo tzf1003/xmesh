@@ -240,3 +240,7 @@ db9de5b 的 macOS UI MCP 导航测试在 popup 重定向的请求计数断言失
 合并核对时复用本地 master 的 7f83e06 导航夹具修复：允许的 fetch / image 子资源与被阻止的文档导航分别计数，未分类请求仍计入拒绝断言。新增显式图片请求，验证它实际到达服务端且不影响后续文档 / popup / iframe 拒绝检查；修复后的 CI 同版 Chromium 连续二十轮通过。升级脚本依据节点 manifest 的 Control API 主版本选择 Computer 路由，正式包升级和业务 MCP 复测通过。db9de5b 的第二次 CI 尝试被后续提交取代而取消，不能作为重跑通过。
 
 第三十二轮：补齐三处边界。Control API 状态现在返回当前生效的 Computer Host 端点，面板紧急停止会记住所选节点的自定义端点，内核连接短暂中断时仍停止正确的 Host。OAuth `computer:*` scope 只匹配注册的内置 Computer 工具，名为 `computer` 的可配置后端被保留；观察 scope 不再授权同名后端的任意副作用。Linux X11 将屏保 `DISABLED` 状态视为可用桌面，保留 `ON` / `CYCLE` 的锁定判断。相关 Go scope/config/gateway 回归、496 项 UI 单元测试、Rust 十一项测试和 clippy 通过。端点在 Control 启动时固定为实际生效值；新增默认 / 自定义端点和状态读取不消费配置重载的回归，修正中间实现导致的 reload 断言失败后，Control 全包竞态回归通过。外接盘长 TMP 路径会触发 Unix socket 长度限制，套接字回归使用短 `/tmp` 路径。Linux 专属屏保分支由新提交 CI 验证。
+
+第三十三轮：动作结果携带缓存截图时，在 action_status、重复 act 和已完成动作等待的返回边界重新检查 computer.observe 授权，撤权后不发布图片并回收会话缓存。续租依据会话模式检查 computer.act 或 computer.observe，撤权后释放控制槽及会话容量。原生 Execute 出错后，管理器同步撤销已被原生清理路径隔离的租约，保留 unknown 动作结果；调用方重新申请会话并观察后才能继续。
+
+新增真实 MCP 回归覆盖标签授权撤销和 disabled_tools 两种重载方式，以及缓存动作图片和两类会话续租；新增子进程夹具验证五秒执行预算耗尽、原生进程仍存活时旧会话失效、新控制者使用新 token 执行成功。Computer / Agent / Host 三包竞态回归通过，缓存图片 / 续租 / Schema 回归连续五轮通过。MCP 发布 Schema 与内部校验均约束显式 background 必带 target_id、foreground 不带 target_id。cd87ab9 的 Linux CI 在 Clippy items_after_test_module 失败，测试模块已移至文件末尾，屏保逻辑保持原样，新提交继续验证 Linux 编译与测试。

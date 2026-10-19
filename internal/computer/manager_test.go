@@ -206,7 +206,11 @@ func TestDispatchFailureIsUnknown(t *testing.T) {
 	if e != nil || v.State != "unknown" {
 		t.Fatal(v, e)
 	}
+	if len(m.Sessions("a/1")) != 0 {
+		t.Fatal("execution error retained its fenced lease")
+	}
 	_, _ = m.Act(context.Background(), "a/1", r)
+	_ = open(t, m, "b/2", "control")
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.calls != 1 {

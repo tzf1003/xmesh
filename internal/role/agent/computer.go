@@ -181,6 +181,12 @@ func computerSpecs() map[string]spec {
 		if d[1] != "" {
 			schema["required"] = strings.Fields(d[1])
 		}
+		if name == "computer.open" {
+			schema["allOf"] = []any{
+				map[string]any{"if": map[string]any{"required": []string{"interaction"}, "properties": map[string]any{"interaction": map[string]any{"const": "background"}}}, "then": map[string]any{"required": []string{"target_id"}}},
+				map[string]any{"if": map[string]any{"required": []string{"interaction"}, "properties": map[string]any{"interaction": map[string]any{"const": "foreground"}}}, "then": map[string]any{"not": map[string]any{"required": []string{"target_id"}}}},
+			}
+		}
 		accepted := map[string]any{}
 		for k, v := range props {
 			accepted[k] = v
@@ -191,6 +197,9 @@ func computerSpecs() map[string]spec {
 		validation := map[string]any{"type": "object", "properties": accepted, "additionalProperties": false}
 		if d[1] != "" {
 			validation["required"] = strings.Fields(d[1])
+		}
+		if constraints, ok := schema["allOf"]; ok {
+			validation["allOf"] = constraints
 		}
 		compiler := jsonschema.NewCompiler()
 		raw, _ := json.Marshal(validation)

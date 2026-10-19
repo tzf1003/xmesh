@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/internal/computer"
 )
 
@@ -33,6 +34,98 @@ func (p *desktopFixture) Execute(_ context.Context, r computer.Execution) (compu
 }
 func (*desktopFixture) Release(context.Context, computer.Execution) error { return nil }
 func (*desktopFixture) Close() error                                      { return nil }
+
+func TestPolicyReloadFencesCachedActionImagesAndRenewalsOverMCP(t *testing.T) {
+	for _, operation := range []string{"action_status", "duplicate", "renew-control", "renew-observe"} {
+		for _, revoke := range []string{"tag", "disabled_tool"} {
+			t.Run(operation+"/"+revoke, func(t *testing.T) {
+				file, store := configuration(t)
+				raw, _ := os.ReadFile(file)
+				var doc map[string]any
+				_ = json.Unmarshal(raw, &doc)
+				cfg := doc["agent"].(map[string]any)
+				cfg["computer"] = map[string]bool{"enabled": true}
+				cfg["authz"] = map[string]any{"tag:peer": map[string]any{"tools": []string{"computer.*"}, "backends": []string{}}}
+				write := func() {
+					data, _ := json.Marshal(doc)
+					if err := os.WriteFile(file, data, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				write()
+				a, err := New(store, WithComputerProvider(&desktopFixture{}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(a.Close)
+				server := httptest.NewServer(a.HTTP(Local))
+				t.Cleanup(server.Close)
+				client := connect(t, server.URL+"/mcp")
+				mode := "control"
+				denied := "computer.observe"
+				if operation == "renew-control" {
+					denied = "computer.act"
+				}
+				if operation == "renew-observe" {
+					mode = "observe"
+				}
+				session := object(t, tool(t, client, "computer.open", map[string]any{"mode": mode}))
+				identity := map[string]any{"session_id": session["session_id"], "desktop_epoch": session["desktop_epoch"], "lease_token": session["lease_token"]}
+				if session["lease_token"] == nil {
+					delete(identity, "lease_token")
+				}
+				action := map[string]any{}
+				for k, v := range identity {
+					action[k] = v
+				}
+				action["action_id"] = "cached"
+				action["actions"] = []map[string]any{{"type": "wait", "duration_ms": 1}}
+				action["observe_after"] = true
+				if operation == "action_status" || operation == "duplicate" {
+					before := tool(t, client, "computer.act", action)
+					if before.IsError || len(before.Content) != 2 {
+						t.Fatal(before)
+					}
+				}
+				if revoke == "tag" {
+					grants := []string{"computer.info", "computer.open", "computer.observe", "computer.act", "computer.action_status", "computer.renew", "computer.close"}
+					kept := []string{}
+					for _, grant := range grants {
+						if grant != denied {
+							kept = append(kept, grant)
+						}
+					}
+					cfg["authz"] = map[string]any{"tag:peer": map[string]any{"tools": kept, "backends": []string{}}}
+				} else {
+					cfg["disabled_tools"] = []string{denied}
+				}
+				write()
+				name := "computer.renew"
+				args := identity
+				if operation == "action_status" {
+					name = "computer.action_status"
+					args["action_id"] = "cached"
+				}
+				if operation == "duplicate" {
+					name = "computer.act"
+					args = action
+				}
+				after := tool(t, client, name, args)
+				if !after.IsError || object(t, after)["error"] != "policy_denied" {
+					t.Fatal(after)
+				}
+				for _, content := range after.Content {
+					if _, ok := content.(*mcp.ImageContent); ok {
+						t.Fatal("revoked cached image escaped")
+					}
+				}
+				if len(a.Computer.Sessions("")) != 0 {
+					t.Fatal("revoked session retained capacity")
+				}
+			})
+		}
+	}
+}
 
 type revocableObservationFixture struct {
 	desktopFixture
@@ -252,6 +345,10 @@ func TestComputerSchemasExposeSupportedActionsAndCoordinateRequirements(t *testi
 	}{
 		{"computer.open", `{"mode":"control","ttl_seconds":30}`, true},
 		{"computer.open", `{"mode":"control","interaction":"background","target_id":"window-one"}`, true},
+		{"computer.open", `{"mode":"control","interaction":"background"}`, false},
+		{"computer.open", `{"mode":"observe","interaction":"background"}`, false},
+		{"computer.open", `{"mode":"control","interaction":"foreground"}`, true},
+		{"computer.open", `{"mode":"control","interaction":"foreground","target_id":"window-one"}`, false},
 		{"computer.open", `{"mode":"control","interaction":"global"}`, false},
 		{"computer.open", `{"mode":"operator"}`, false},
 		{"computer.open", `{"mode":"observe","ttl_seconds":601}`, false},
@@ -268,6 +365,21 @@ func TestComputerSchemasExposeSupportedActionsAndCoordinateRequirements(t *testi
 	} {
 		if err := specs[example.tool].validate(json.RawMessage(example.args)); (err == nil) != example.valid {
 			t.Fatal("computer contract validation", example.tool, example.args, err)
+		}
+		compiler := jsonschema.NewCompiler()
+		raw, _ := json.Marshal(specs[example.tool].schema)
+		var published, arguments any
+		_ = json.Unmarshal(raw, &published)
+		_ = json.Unmarshal([]byte(example.args), &arguments)
+		if err := compiler.AddResource("urn:published-computer-schema", published); err != nil {
+			t.Fatal(err)
+		}
+		advertised, err := compiler.Compile("urn:published-computer-schema")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := advertised.Validate(arguments); (err == nil) != example.valid {
+			t.Fatal("advertised computer schema", example.tool, example.args, err)
 		}
 	}
 	if description := specs["computer.act"].desc; !strings.Contains(description, "image pixel") || !strings.Contains(description, "unknown") {
