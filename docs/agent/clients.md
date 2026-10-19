@@ -6,6 +6,8 @@ Codex uses `CODEX_HOME/config.toml`, defaulting to `~/.codex/config.toml`, and a
 
 After apply, reload or restart the selected client so it reads the new configuration. Existing running agent sessions may retain their original MCP server list. Use the client to perform the `verification_tool`/`verification_path` request returned by the job, then call `setup verify`. The client file being readable proves only saved configuration, while a successful job requires the tool call evidence.
 
+Client tool-approval rules also apply. If a client asks to approve the verification request, confirm that specific read-only call there before running `setup verify`. A headless client that forbids approval prompts may connect successfully and still reject the tool call; use that client's supported explicit approval or user-initiated tool-call interface. Keep the xmesh job pending until the successful request is recorded.
+
 Cloud clients connect to `job.ingress_url`, complete OAuth in the browser using the password set in the wizard, and call the cloud-prefixed verification tool. A local client configuration is never written with a public bearer token. For other clients use their supported Streamable HTTP MCP connection mechanism and retain the same authentication and verification requirements.
 
 Reference documentation: Codex MCP at `https://developers.openai.com/codex/mcp`; Claude Code MCP at `https://code.claude.com/docs/en/mcp`. Client configuration changes should be tested against the installed client version before extending this adapter list.

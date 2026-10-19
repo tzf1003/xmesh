@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { FakeKernel, type FakeKernelOptions } from "../../testserver/server";
+import { stopNativeTestProcess } from "./process-exit";
 
 export const UI_ROOT = path.resolve(__dirname, "..", "..");
 
@@ -107,7 +108,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       await app.evaluate(() =>
         (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
       );
-      const page = await app.waitForEvent("window");
+      const page = app.windows()[0] ?? await app.waitForEvent("window");
       await page.waitForLoadState("domcontentloaded");
       return page;
     },
@@ -118,16 +119,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
         // guard, then wait for the native process before deleting its profile.
         const child = app.process();
         if (child.exitCode === null && child.signalCode === null) {
-          let timer: ReturnType<typeof setTimeout>;
-          const closed = new Promise<void>((resolve, reject) => {
-            timer = setTimeout(() => reject(new Error("Electron teardown did not exit within 10 seconds")), 10_000);
-            child.once("close", () => { clearTimeout(timer); resolve(); });
-          });
-          // Exiting may close the evaluation connection before it can reply.
-          // The native close event, rather than that reply, proves shutdown.
-          const requested = app.evaluate(({ app }) => app.exit(0)).then(() => undefined, (error: unknown) => error);
-          await closed;
-          await requested;
+          await stopNativeTestProcess(child, () => app.evaluate(({ app }) => app.exit(0)));
         }
         await Promise.race([kernel.stop(), new Promise((resolve) => setTimeout(resolve, 5_000))]);
         // Chromium can release its Windows profile database handles just after
