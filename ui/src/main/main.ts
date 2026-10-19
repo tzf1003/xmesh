@@ -1,3 +1,4 @@
+import { createOnboardingService, fakeOnboarding } from "./onboarding";
 import * as path from "node:path";
 import { clipboard, dialog, Notification, app, net, powerMonitor, shell } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
@@ -184,7 +185,7 @@ async function start(): Promise<void> {
     ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, streamIdleMs: 2000 }),
   });
 
-  const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
+  const answers: { confirm: boolean; cliFails: boolean; picked?: string; setupWaiting?: boolean; setupConflict?: boolean } = { confirm: true, cliFails: false };
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
@@ -273,13 +274,14 @@ async function start(): Promise<void> {
     if (key !== playgroundKey) { playgroundKey = key; transfers.reset(); void playground.close(); }
   });
   registerIpc({
+    onboarding: createOnboardingService(roots[0]!, (url) => platform.openExternal(url), TEST_MODE ? fakeOnboarding(roots[0]!, answers, calls) : undefined, (text) => clipboard.writeText(text)),
     playground,
     transfers,
     controller,
     actions,
     service: new PanelService(controller),
-    previewSetup: (params) => previewSetup(params, setupHost),
-    setup: (params) => runSetup(params, setupHost),
+    previewSetup: (params) => TEST_MODE ? previewSetup(params, setupHost) : { ok: false, error: { code: "setup_migrated", message: "请使用开始使用向导生成设置计划。" } },
+    setup: async (params) => TEST_MODE ? runSetup(params, setupHost) : { ok: false, error: { code: "setup_migrated", message: "请使用开始使用向导继续设置任务。" } },
     mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
     update: new UpdateActions(updater),

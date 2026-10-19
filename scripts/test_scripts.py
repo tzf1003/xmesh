@@ -100,7 +100,7 @@ class ReleaseGate(unittest.TestCase):
         runs = [run(self.ALL[0], "completed", "success"), run(self.ALL[1], "in_progress")]
         verdict, reasons = release_gate.judge(runs)
         self.assertEqual(verdict, "wait")
-        self.assertEqual(len(reasons), 2)
+        self.assertEqual(len(reasons), len(self.ALL) - 1)
 
     def test_failure_is_final(self):
         runs = [run(self.ALL[0], "completed", "failure"), run(self.ALL[1], "queued")]

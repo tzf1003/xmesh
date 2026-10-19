@@ -1,60 +1,34 @@
-The acceptance steps for Windows, Linux and macOS machines are in
-[docs/validation/real-environment-runbook.md](https://github.com/tzf1003/xmesh/blob/__TAG__/docs/validation/real-environment-runbook.md);
-each one is independent and can be skipped. Every archive also contains the runbook and the
-`scripts/` it uses, so nothing else needs to be cloned.
+xmesh __TAG__ connects selected workspaces to local MCP clients, other devices and cloud agents.
 
-## Download and verify
+## Install and connect
 
-Pick the archive for your system (`linux`, `darwin` or `windows`; `amd64` or `arm64`), then check it
-against `SHA256SUMS.txt` from this release:
+Use the [versioned install page](https://tzf1003.github.io/xmesh/versions/__TAG__/) to select Windows/macOS and amd64/arm64, download the desktop installer, or copy a version-pinned Agent prompt. Open the installed application, choose purpose/workspace/permissions/clients, review the setup plan and verify a real client request.
 
-```
-sha256sum --ignore-missing -c SHA256SUMS.txt        # Linux
-shasum -a 256 --ignore-missing -c SHA256SUMS.txt    # macOS
+This release includes `manifest.json` with platform, architecture, SHA-256, byte size and verified signing metadata. Download and review `install.sh` (macOS) or `install.ps1` (Windows), then pin this version:
+
+```bash
+bash install.sh --version __TAG__ --json
 ```
 
-Windows (PowerShell): `(Get-FileHash .\xmesh-__TAG__-windows-amd64.zip).Hash` must equal the matching
-line in `SHA256SUMS.txt`. Then run `xmesh version`; it must print `xmesh __TAG__`.
+```powershell
+.\install.ps1 -Version __TAG__ -Json
+```
 
-## Desktop app
+Stable releases require Authenticode verification on Windows and a signed, notarized, stapled macOS application. Beta/rc versions belong to the testing channel. Consult each asset's `trust` entry; explicitly unsigned testing packages require `--allow-unsigned` / `-AllowUnsigned`. System security policies and signature checks remain active.
 
-The tray app ships as an installer. Each installer also contains the `xmesh` binary for its platform, the
-same one as in the archives above.
+For offline installation, extract `xmesh-offline-__TAG__-<os>-<arch>.zip`, then use `--offline <folder>` / `-Offline <folder>`. The ZIP contains the native package, manifest, scripts and Agent documentation. OS trust verification may require network access or locally cached trust data. Verified downloads remain cached for retries. Bootstrap JSON events identify the phase, package, installed CLI path and recovery action.
 
-- Windows: `xmesh-ui-*-win-x64.exe` (64-bit Intel or AMD) or `xmesh-ui-*-win-arm64.exe` (ARM). Run it and
-  follow the installer.
-- macOS: `xmesh-ui-*-mac-arm64.dmg` (Apple silicon) or `xmesh-ui-*-mac-x64.dmg` (Intel). Open it and drag
-  xmesh to Applications.
+The persistent CLI is inside the installed application: macOS `xmesh.app/Contents/Resources/bin/xmesh`, Windows `resources/bin/xmesh.exe`. Agent documentation is included in the offline bundle and published as raw Markdown under the versioned install page. Use `setup inspect`, `plan --input`, `apply --plan`, `status/resume/verify --job`, and `doctor --json`. Preserve plan/job IDs for recovery. A running service and client verification have separate readiness states.
 
-The installers are not code-signed, so the system warns on first launch:
+## Verify and validate
 
-- Windows: SmartScreen shows "Windows protected your PC". Choose "More info", then "Run anyway".
-- macOS: Gatekeeper may say the app is damaged. Run `/usr/bin/xattr -dr com.apple.quarantine /Applications/xmesh.app`
-  in Terminal and open the app again. Alternatively, open System Settings > Privacy & Security and choose
-  "Open Anyway".
-  Run the command before the first launch. If the app was already opened while it was still quarantined, macOS
-  runs it from a read-only copy under AppTranslocation, and the command does nothing to that copy: quit xmesh,
-  run the command, then open it again from Applications.
+Every downloadable file is listed in `SHA256SUMS.txt`. Match the package hash with the corresponding release record. The signed desktop packages contain the platform CLI; stable Windows/macOS distribution uses these native bundles. Linux CLI archives include the scripts and [real-environment runbook](https://github.com/tzf1003/xmesh/blob/__TAG__/docs/validation/real-environment-runbook.md).
 
-The control panel opens from the tray icon. It shows the overview, devices, pairing, configuration, audit,
-sessions, authorization, ingress and mesh pages. Try them, and the tray menu's restart and stop actions.
+The release commit must pass the Go, contract fixture, Headscale interop and Onboarding gates, including native user-service acceptance when the runner has a supported user session, before artifacts are built. Native installer launch and upgrade acceptance must also be run on target devices; passing build checks alone does not establish those outcomes.
 
-On Windows, if the firewall blocks the node from receiving connections, the tray icon turns yellow and
-the overview shows a warning. The warning stays until the block rule for xmesh is removed or changed in
-Windows Defender Firewall. Uninstalling removes the logon task the installer created for your user and
-that install folder; tasks of other users and of other folders are kept.
+## Operational limits
 
-## Known limits of this build
-
-- The binaries are not code-signed or notarized. macOS: run `/usr/bin/xattr -d com.apple.quarantine xmesh` after
-  extracting. Windows: SmartScreen may ask for confirmation.
-- LAN mode: the Agent always listens on TCP 7433 and that port cannot be configured, so two LAN nodes cannot run
-  on the same host.
-- Windows L2 isolation is not available in production yet: a Windows node configured with
-  `agent.policy.isolation: L2` refuses exec and PTY with `sandbox.unavailable`. This is expected, and
-  step F of the runbook checks for exactly that refusal.
-- The desktop app is a first build. Apart from the tray app, everything is driven by the `xmesh` command line.
-- OAuth tokens are kept in memory only, so an ingress restart requires authorizing again.
-
-The release commit passed the Go, contract fixture and Headscale interop workflows, including the
-Windows native jobs, before these binaries were built.
+- Windows L2 isolation is unavailable in production. A Windows node configured with `agent.policy.isolation: L2` refuses exec and PTY with `sandbox.unavailable`; runbook step F checks that boundary.
+- LAN Agent TCP port 7433 is fixed, so two LAN nodes cannot run on the same host.
+- OAuth tokens are held in memory; an ingress restart requires authorization again.
+- Cloud connections require a reachable public endpoint, browser authorization and a successful request from the intended client. Setup reports prerequisites and recovery actions when these remain pending.
