@@ -282,7 +282,7 @@ function SecretDialog({ secret, onClose }: { secret: PatSecret; onClose: () => v
 /** Shown once the config is read: the MCP servers, the built-in tool switches and the tag grants. They share one read and one write path. */
 function ToolAccess({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
-  const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance]);
+  const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance, ctx.configRevision]);
   const writable = ctx.can("config.write");
 
   /** One PATCH per action. Success reloads the config; a stale etag also reloads, so the next try starts from the file on disk. */
@@ -539,6 +539,8 @@ function formFromRow(row: BackendRow, rows: readonly AuthzRow[]): BackendForm {
     grants: exactGrants(rows, row.name),
     newTag: "",
     favorite: row.favorite,
+    shutdownTimeout: row.shutdownTimeout,
+    processCleanup: row.processCleanup,
     env: [],
   };
 }

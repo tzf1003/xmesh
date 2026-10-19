@@ -51,13 +51,15 @@ export interface ZoomControl {
 }
 
 export function createPanelWindow(onClosedByUser: () => void = () => {}, zoom?: ZoomControl): PanelWindow {
-  const webPreferences = panelWebPreferences(path.join(__dirname, "..", "preload", "index.js"), app.isPackaged);
+  const backgroundTest = !app.isPackaged && process.env.XMESH_UI_TEST === "1" && process.env.XMESH_UI_BACKGROUND_TEST === "1";
+  const webPreferences = { ...panelWebPreferences(path.join(__dirname, "..", "preload", "index.js"), app.isPackaged), ...(backgroundTest && { backgroundThrottling: false }) };
   const win = new BrowserWindow({
     width: 1320,
     height: 860,
     minWidth: 640,
     minHeight: 420,
     show: false,
+    ...(backgroundTest && { focusable: false }),
     title: "xmesh",
     autoHideMenuBar: true,
     ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
@@ -93,6 +95,7 @@ export function createPanelWindow(onClosedByUser: () => void = () => {}, zoom?: 
     window: win,
     webPreferences,
     show: () => {
+      if (backgroundTest) return;
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();

@@ -194,6 +194,15 @@ test("a backend form keeps favorite from the stored entry", () => {
   assert.equal(r.value.favorite, true);
 });
 
+test("editing an UI MCP backend preserves its process lifecycle settings", () => {
+  const row=backendRows(parsedWith({backends:{ui:{transport:"stdio",command:["node","ui-mcp"],policy:"per-caller",shutdown_timeout:"10s",process_cleanup:"tree"}}}))[0]!;
+  const form={...formBase,name:row.name,command:row.command.join("\n"),policy:row.policy,shutdownTimeout:row.shutdownTimeout,processCleanup:row.processCleanup};
+  const edited=checkBackendForm(form,["ui"],"ui");assert.ok(edited.ok);
+  assert.equal(edited.value.shutdown_timeout,"10s");assert.equal(edited.value.process_cleanup,"tree");
+  const remote=checkBackendForm({...form,transport:"http",url:"http://localhost:9000/mcp"},["ui"],"ui");assert.ok(remote.ok);
+  assert.ok(!("shutdown_timeout" in remote.value));assert.ok(!("process_cleanup" in remote.value));
+});
+
 test("JSON pointers escape / and ~ and join segments", () => {
   assert.equal(pointer("agent", "authz", "tag:a/b~c"), "/agent/authz/tag:a~1b~0c");
   assert.equal(pointer("agent", "disabled_tools"), "/agent/disabled_tools");

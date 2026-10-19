@@ -11,6 +11,7 @@ export function Configuration({ ctx }: { ctx: PageContext }): JSX.Element {
   const [view, setView] = useState<"form" | "source">(ctx.focus?.configView ?? "form");
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<"form" | "source">();
+  useEffect(() => ctx.setConfigDirty(dirty), [dirty, ctx.setConfigDirty]);
   useEffect(() => {
     if (ctx.focus?.configView && !dirty) setView(ctx.focus.configView);
   }, [ctx.focus?.configView]);

@@ -17,6 +17,10 @@ Agent 把后端的每个工具暴露为 `<backend>.<tool>`。`backend` 是配置
 
 stdio 后端的 `command` 数组直接作为进程 argv，不经 shell。工作目录是 `agent.default_cwd`，除非该后端配置了 `cwd`。环境过滤器与 exec 相同，避免 IDA 插件进程继承到 auth key。
 
+stdio 后端可配置 `shutdown_timeout`（正 duration，最大 30 秒）控制关闭 stdin 后的退出宽限期，缺省沿用 250 毫秒。`process_cleanup: tree` 启用受管进程树：Windows 在创建时绑定 Job，Unix 跟踪进程组及具有匹配启动身份的后代。关闭连接后先允许后端保存结果，再回收所属进程。Unix 使用轮询，只保证原进程组及已观察到且身份匹配的后代；后端必须让子进程留在原进程组，或在父进程退出前由自己的 supervisor 注册、清理脱离进程组的辅助进程。快速调用 `setsid` 并在扫描前重归父进程的后代不在该保证内。需要创建时完整归属约束的环境应使用 Windows Job 或独立容器/虚拟机的生命周期管理。HTTP 后端不接受这两个字段。
+
+UI 测试后端使用 `policy: per-caller`、`shutdown_timeout: 10s` 与 `process_cleanup: tree`。长测试通过后端内部任务 ID 查询，工具提交立即返回，使串行转发期间仍可查询和取消。安装、协议和环境配置见 [UI 测试 MCP](../../packages/ui-mcp/README.md)。
+
 HTTP 后端连接配置的 `url`。该 URL 必须是回环地址或 tailnet 地址。禁止配置公网 URL，以免 Agent 成为开放代理。
 
 ### 崩溃

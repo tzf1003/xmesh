@@ -1,0 +1,15 @@
+version: 1
+state_dir: ../.runs
+environments:
+  web-example:
+    driver: web
+    url: http://127.0.0.1:3456
+    allowed_origins: [http://127.0.0.1:3456]
+    headless: true
+    script_enabled: false
+    fixtures: mock
+    coverage: [ui, fixture-web-backend]
+    locators:
+      username: {label: Username}
+      search: {role: button, name: Search}
+      result: {testId: results}

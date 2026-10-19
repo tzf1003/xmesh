@@ -20,6 +20,7 @@ import { Computer } from "./pages/Computer";
 import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
+import { Runtime } from "./pages/Runtime";
 import { Overview } from "./pages/Overview";
 import { Settings } from "./pages/Settings";
 import { Terminal } from "./pages/Terminal";
@@ -28,10 +29,11 @@ import { Playground } from "./pages/Playground";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 import { Configuration } from "./pages/Configuration";
+import { RoleSwitches } from "./role-switches";
 import { Icon } from "./icons";
 import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
-export type PageId = "computer" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
+export type PageId = "computer" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
@@ -67,6 +69,10 @@ function outstanding(o: SaveOutcome): boolean {
 /** What a page needs from the kernel before it is worth showing. */
 export interface PageContext {
   snapshot: Snapshot;
+  configDirty: boolean;
+  configRevision: number;
+  setConfigDirty(dirty: boolean): void;
+  refreshConfig(): void;
   /** UI-only positions kept per instance across page navigation. */
   topologySlots: Map<string, Map<string, number>>;
   /** `undefined` while the kernel is not connected. */
@@ -89,15 +95,18 @@ export function App(): JSX.Element {
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
   const [page, setPage] = useState<PageId | undefined>(undefined);
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
+  const [configDirty, setConfigDirty] = useState(false);
+  const [configRevision, setConfigRevision] = useState(0);
   const { toasts, push } = useToasts();
   // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
   const [fresh, setFresh] = useState<SaveOutcome | undefined>(undefined);
   const navigate = (next: PageId, nextFocus?: PageFocus): void => {
+    if (next !== current) setConfigDirty(false);
     setFocus(nextFocus);
     setPage(next);
     setFresh(undefined);
   };
-  useEffect(() => setFresh(undefined), [snapshot.selectedInstance]);
+  useEffect(() => { setFresh(undefined); setConfigDirty(false); }, [snapshot.selectedInstance]);
 
   useEffect(() => {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
@@ -125,6 +134,10 @@ export function App(): JSX.Element {
 
   const ctx: PageContext = {
     snapshot,
+    configDirty,
+    configRevision,
+    setConfigDirty,
+    refreshConfig: () => setConfigRevision((v) => v + 1),
     topologySlots: topologySlots.current,
     can: (c) => snapshot.connection.kind === "connected" && hasCapability(snapshot.connection.status.control.capabilities, c),
     toast: push,
@@ -136,7 +149,7 @@ export function App(): JSX.Element {
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        <TopBar snapshot={snapshot} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} />
+        <TopBar ctx={ctx} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} />
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
@@ -150,7 +163,7 @@ export function App(): JSX.Element {
               toast={push}
             />
             {(meshVisited || current === "mesh") && <div hidden={current !== "mesh"}><Mesh ctx={ctx} /></div>}
-            {current !== "mesh" && <PageSwitch key={snapshot.selectedInstance} page={current} ctx={ctx} />}
+            {current !== "mesh" && <PageSwitch key={`${snapshot.selectedInstance}:${current === "config" || current === "settings" ? configRevision : 0}`} page={current} ctx={ctx} />}
           </main>
         </div>
       </div>
@@ -199,8 +212,9 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   );
 }
 
-function TopBar({ snapshot, onDisplay, onSearch }: { snapshot: Snapshot; onDisplay: () => void; onSearch(): void }): JSX.Element {
+function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () => void; onSearch(): void }): JSX.Element {
   const t = useT();
+  const { snapshot } = ctx;
   const icon = deriveIcon(snapshot.connection);
   const c = snapshot.connection;
   return (
@@ -209,6 +223,7 @@ function TopBar({ snapshot, onDisplay, onSearch }: { snapshot: Snapshot; onDispl
       <div class="title">
         <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
       </div>
+      <RoleSwitches key={snapshot.selectedInstance} ctx={ctx} />
       <button type="button" class="search-trigger" onClick={onSearch} aria-label={t("nav.find")} data-testid="open-search"><Icon name="search"/><span>{t("nav.find")}</span><kbd>⌘/Ctrl K</kbd></button>
       <button type="button" class="icon-btn" onClick={onDisplay} title={t("display.open")} aria-label={t("display.open")} data-testid="open-display">
         Aa
@@ -259,6 +274,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
   switch (page) {
     case "overview":
       return <Overview ctx={ctx} />;
+    case "runtime":
+      return <Runtime ctx={ctx} />;
     case "devices":
       return <Devices ctx={ctx} />;
     case "terminal":
@@ -278,7 +295,7 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
     case "computer":
       return <Computer ctx={ctx} />;
     case "settings":
-      return <Settings ctx={ctx} />;
+      return <Settings ctx={ctx} onDirtyChange={ctx.setConfigDirty} />;
     case "config":
       return <Configuration ctx={ctx} />;
     case "audit":

@@ -11,6 +11,7 @@ import { peerKey } from "./lib/topology";
 export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; group: "network" | "access" | "runtime" | "advanced" | "settings" }[] = [
   { id: "overview", label: "topology.title", icon: "topology", group: "network" },
   { id: "devices", label: "nav.devices", icon: "device", group: "network" },
+  { id: "runtime", label: "topology.operations", icon: "sliders", group: "runtime" },
   { id: "terminal", label: "ws.terminal", icon: "terminal", group: "runtime" },
   { id: "transfers", label: "ws.files", icon: "code", group: "runtime" },
   { id: "playground", label: "pg.title", icon: "code", group: "runtime" },

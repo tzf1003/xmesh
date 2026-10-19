@@ -27,7 +27,6 @@ async function open(opts: Parameters<typeof launch>[0] = {}, nav?: string): Prom
     await expect(page.getByTestId(`page-${nav}`)).toBeVisible();
     if (nav === "config") await page.getByTestId("config-source-tab").click();
   }
-  if (!nav || nav === "overview") await page.getByTestId("overview-advanced").locator("summary").click();
   return page;
 }
 
@@ -44,7 +43,7 @@ async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
 test("every page renders under the CSP without violations", async () => {
   const page = await open({ kernel: { status: LAN_STATUS } });
   const violations = await watchCsp(page);
-  for (const id of ["overview", "devices", "sessions", "authz", "ingress", "settings", "config", "audit", "mesh"]) {
+  for (const id of ["overview", "runtime", "devices", "sessions", "authz", "ingress", "settings", "config", "audit", "mesh"]) {
     await navigate(page, id);
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }
@@ -61,9 +60,9 @@ test("the wizard renders under the CSP without violations when no node has a con
   expect(await violations()).toEqual([]);
 });
 
-test("overview: pause from the page, kill needs a confirmation, resume", async () => {
-  const page = await open();
-  await expect(page.getByTestId("page-overview")).toBeVisible();
+test("runtime: pause from the page, kill needs a confirmation, resume", async () => {
+  const page = await open({}, "runtime");
+  await expect(page.getByTestId("page-runtime")).toBeVisible();
 
   await page.getByTestId("drain-kill").click();
   await expect(page.getByTestId("confirm")).toBeVisible();
@@ -74,7 +73,6 @@ test("overview: pause from the page, kill needs a confirmation, resume", async (
   await page.getByTestId("confirm-ok").click();
   await expect.poll(() => h.kernel.requests.find((r) => r.path === "/v1/drain")?.body).toEqual({ mode: "kill" });
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");
-  await expect(page.getByTestId("draining")).toBeVisible();
 
   await page.getByTestId("resume").click();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "ok");
@@ -333,8 +331,9 @@ test("wizard: a failing install is shown and start is not attempted; an existing
 
 test("panel IPC refuses malformed data operations", async () => {
   const page = await open();
-  // The overview's gateway card lists the PATs on mount. The rotate button appears once that read has
+  // The runtime page's gateway card lists the PATs on mount. The rotate button appears once that read has
   // finished, so the snapshot below counts only what the malformed calls sent.
+  await navigate(page, "runtime");
   await expect(page.getByTestId("gateway-rotate")).toBeVisible();
   const before = h.kernel.requests.length;
   const codes = await page.evaluate(async () => {
