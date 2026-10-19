@@ -198,14 +198,19 @@ pub fn locked() -> bool {
         if dictionary.is_null() {
             return true;
         }
-        let key = CFStringCreateWithCString(
-            std::ptr::null(),
-            c"CGSSessionScreenIsLocked".as_ptr(),
-            0x08000100,
-        );
-        let value = CFDictionaryGetValue(dictionary, key);
-        let locked = !value.is_null() && CFBooleanGetValue(value);
-        CFRelease(key);
+        let boolean = |name: &std::ffi::CStr| {
+            let key = CFStringCreateWithCString(std::ptr::null(), name.as_ptr(), 0x08000100);
+            if key.is_null() {
+                return None;
+            }
+            let value = CFDictionaryGetValue(dictionary, key);
+            let result = (!value.is_null()).then(|| CFBooleanGetValue(value));
+            CFRelease(key);
+            result
+        };
+        let locked = boolean(c"CGSSessionScreenIsLocked").unwrap_or(false)
+            || boolean(c"kCGSSessionOnConsoleKey") != Some(true)
+            || boolean(c"kCGSessionLoginDoneKey") != Some(true);
         CFRelease(dictionary);
         locked
     }

@@ -2,6 +2,7 @@ package computer
 
 import (
 	"context"
+	"sync"
 	"testing"
 )
 
@@ -17,6 +18,31 @@ func TestQueuedActionsRecheckCurrentAuthorization(t *testing.T) {
 	if len(m.Sessions("")) != 0 {
 		t.Fatal("revoked caller retained lease")
 	}
+}
+
+func TestConcurrentControlOpenAndPolicyReload(t *testing.T) {
+	m, p := manager(t)
+	p.mu.Lock()
+	p.info.UserInputMonitor = true
+	p.mu.Unlock()
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		for i := range 100 {
+			m.Configure(Settings{Enabled: true, PauseOnUserInput: i%2 == 0})
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for range 100 {
+			s, err := m.Open(context.Background(), "race/session", OpenRequest{Mode: "control"})
+			if err == nil {
+				_ = m.CloseSession("race/session", request(s))
+			}
+		}
+	}()
+	workers.Wait()
 }
 
 func TestPermissionAndEpochChangesRevokeControl(t *testing.T) {

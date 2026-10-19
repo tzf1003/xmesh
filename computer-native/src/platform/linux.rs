@@ -158,6 +158,12 @@ pub fn locked() -> bool {
         );
         if let Ok((path,)) = session {
             let p = conn.with_proxy("org.freedesktop.login1", path, Duration::from_millis(200));
+            if matches!(
+                p.get::<bool>("org.freedesktop.login1.Session", "Active"),
+                Ok(false)
+            ) {
+                return true;
+            }
             if let Ok(locked) = p.get::<bool>("org.freedesktop.login1.Session", "LockedHint") {
                 return locked;
             }

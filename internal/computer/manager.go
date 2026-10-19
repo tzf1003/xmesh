@@ -196,9 +196,6 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	if !slices.Contains(info.Capabilities, "screenshot") || (r.Mode == "control" && !inputCapable(info)) {
 		return Session{}, toolerr.New("permission_required", "需要系统桌面权限", "reason", "desktop_capability_missing")
 	}
-	if r.Mode == "control" && m.settings.PauseOnUserInput && !info.UserInputMonitor {
-		return Session{}, toolerr.New("permission_required", "当前桌面无法监测本机用户输入", "reason", "input_monitor_unavailable")
-	}
 	if r.DesktopID != "" && r.DesktopID != info.DesktopID {
 		return Session{}, toolerr.New("not_found", "桌面不存在", "name", r.DesktopID)
 	}
@@ -206,6 +203,9 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	defer m.mu.Unlock()
 	if err = m.availableLocked(); err != nil {
 		return Session{}, err
+	}
+	if r.Mode == "control" && m.settings.PauseOnUserInput && !info.UserInputMonitor {
+		return Session{}, toolerr.New("permission_required", "当前桌面无法监测本机用户输入", "reason", "input_monitor_unavailable")
 	}
 	m.expireLocked()
 	for id, s := range m.sessions {

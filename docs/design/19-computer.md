@@ -98,3 +98,5 @@ Windows 原生输入改用带 VIRTUALDESK 的 SendInput 物理坐标，支持负
 第九轮准备：新增真实目标验收脚本 accept_computer.py，校验连续截图的 MCP 图片与元数据、有限控制执行、动作去重 / 查询、续租和关闭；脚本不留存画面。Headscale 一次性环境支持 --computer-helper，由 hs-b 连接用户 Host，分别从 hs-a 的对等 Gateway 和 hs-i 的 OAuth 入口调用真实桌面。Linux 原生 CI 接入该链路；结果待最新工作流验证。既有脚本 24 项与验收脚本 13 项回归通过。
 
 本机 macOS 通过真实 Gateway PAT → Agent → Host → 原生执行器链路运行该脚本，连续收到两张 1280×831 截图（626290 / 626341 字节），有限控制、动作去重 / 查询、续租及关闭通过。默认 Gateway PAT 的 scope 未包含桌面权限时调用被拒绝；验收使用显式授予 computer:control scope 的独立 PAT。该记录证明本机完整 MCP 链路，跨 tailnet 与 OAuth 桌面链路仍待 CI。
+
+原生执行器补充活跃用户会话检查：Windows 查询 WTS Active，macOS 同时检查登录完成和当前控制台会话，Linux logind 返回 inactive 时阻断输入。macOS 发布构建经真实 broker 返回 1280×831 截图通过，单次 350ms（含 -race 的 Go 验收链路），本次不是性能分位数证据。控制会话创建与策略热更新并发读取现统一在管理锁内，新增竞态回归连续三次通过。Headscale 桌面作业首轮因配置显式 PAT 后不再生成默认 PAT 而失败；夹具改为分别使用显式对等工具 PAT 与桌面 PAT，待复测。

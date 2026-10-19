@@ -4,6 +4,9 @@ use windows_sys::Win32::{
     Graphics::Gdi::{
         EnumDisplaySettingsW, GetMonitorInfoW, DEVMODEW, ENUM_CURRENT_SETTINGS, MONITORINFOEXW,
     },
+    System::RemoteDesktop::{
+        WTSActive, WTSConnectState, WTSFreeMemory, WTSQuerySessionInformationW,
+    },
     UI::{
         HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
         Input::KeyboardAndMouse::{
@@ -249,7 +252,28 @@ pub fn input_permission() -> bool {
 }
 pub fn interactive() -> bool {
     let mut session = 0;
-    unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) != 0 && session != 0 }
+    unsafe {
+        if ProcessIdToSessionId(GetCurrentProcessId(), &mut session) == 0 || session == 0 {
+            return false;
+        }
+        let mut buffer = std::ptr::null_mut();
+        let mut size = 0;
+        if WTSQuerySessionInformationW(
+            std::ptr::null_mut(),
+            session,
+            WTSConnectState,
+            &mut buffer,
+            &mut size,
+        ) == 0
+        {
+            return false;
+        }
+        let active = !buffer.is_null()
+            && size as usize >= std::mem::size_of::<i32>()
+            && std::ptr::read_unaligned(buffer.cast::<i32>()) == WTSActive;
+        WTSFreeMemory(buffer.cast());
+        active
+    }
 }
 
 pub fn session_id() -> u32 {
@@ -260,6 +284,9 @@ pub fn session_id() -> u32 {
     session
 }
 pub fn locked() -> bool {
+    if !interactive() {
+        return true;
+    }
     unsafe {
         let desk = OpenInputDesktop(0, 0, 1);
         if desk.is_null() {

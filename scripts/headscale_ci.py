@@ -157,6 +157,10 @@ def main():
                 desktop_pat_file = work / "computer-pat"
                 desktop_pat_file.touch(mode=0o600)
                 desktop_pat_file.write_text(desktop_pat)
+                peer_pat = os.urandom(32).hex()
+                peer_pat_file = work / "peer-pat"
+                peer_pat_file.touch(mode=0o600)
+                peer_pat_file.write_text(peer_pat)
                 desktop_state = work / "computer"
                 host, host_log = spawn([binary, "computer", "host", "--state-dir", desktop_state,
                                         "--helper", options.computer_helper.resolve()], "computer-host")
@@ -179,8 +183,9 @@ def main():
                 if name == "hs-b" and desktop_endpoint:
                     cfg["agent"]["computer"] = {"enabled": True, "endpoint": desktop_endpoint}
                 if name == "hs-a" and desktop_endpoint:
-                    cfg["gateway"]["pats"] = {"computer-test": {"token_file": str(desktop_pat_file),
-                                                                "scopes": ["devices:read", "computer:control:hs-b"]}}
+                    cfg["gateway"]["pats"] = {
+                        "peer-test": {"token_file": str(peer_pat_file), "scopes": ["devices:read", "sys:*", "exec:*", "pty:*", "fs:read:*", "fs:write:*"]},
+                        "computer-test": {"token_file": str(desktop_pat_file), "scopes": ["devices:read", "computer:control:hs-b"]}}
                 command = [binary, "serve", "--config", node / "config.json", "--state-dir", node / "state"]
                 if name == "hs-i":
                     cfg["node"]["roles"].append("ingress")
@@ -192,7 +197,7 @@ def main():
                 (node / "config.json").write_text(json.dumps(cfg))
                 process, log = spawn(command, name)
                 nodes[name] = (process, log, f"127.0.0.1:{port}")
-            tokens = {name: wait_for_default_token(work / name / "state") for name in nodes}
+            tokens = {name: peer_pat if name == "hs-a" and desktop_endpoint else wait_for_default_token(work / name / "state") for name in nodes}
             clients = {name: wait_for_gateway(process, gateway, log, tokens[name], seconds=90)
                        for name, (process, log, gateway) in nodes.items()}
             results = []
