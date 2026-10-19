@@ -129,7 +129,7 @@
       "additionalProperties": false,
       "required": ["section", "message"],
       "properties": {
-        "section": { "type": "string", "minLength": 1, "description": "没能生效的部分，目前是 gateway。" },
+        "section": { "type": "string", "minLength": 1, "description": "没能生效的部分：gateway、ingress、mesh.lan 或 mesh.tailnet。" },
         "message": { "type": "string", "minLength": 1, "description": "给人看的原因，例如监听地址被占用，以及运行中的进程现在是什么状态。" }
       }
     }

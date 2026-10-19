@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/device"
+	"tailscale.com/tsnet"
 )
 
 // MultiPath marks a runtime whose independently enabled Tailnet provider can become ready
@@ -18,6 +19,7 @@ type portListener struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	port     int
+	funnel   bool
 	incoming chan net.Conn
 	done     chan struct{}
 	once     sync.Once
@@ -35,6 +37,10 @@ func (l *portListener) Addr() net.Addr { return &net.TCPAddr{Port: l.port} }
 func (l *portListener) Close() error   { l.once.Do(l.cancel); <-l.done; return nil }
 
 func (n *Node) ListenPort(port int) (net.Listener, error) {
+	return n.listenTailnetPort(port, false)
+}
+
+func (n *Node) listenTailnetPort(port int, funnel bool) (net.Listener, error) {
 	if port < 1 || port > 65535 || port == 7433 {
 		return nil, fmt.Errorf("Gateway 端口不可用")
 	}
@@ -44,7 +50,7 @@ func (n *Node) ListenPort(port int) (net.Listener, error) {
 		return nil, net.ErrClosed
 	}
 	ctx, cancel := context.WithCancel(n.ctx)
-	l := &portListener{ctx: ctx, cancel: cancel, port: port, incoming: make(chan net.Conn), done: make(chan struct{})}
+	l := &portListener{ctx: ctx, cancel: cancel, port: port, funnel: funnel, incoming: make(chan net.Conn), done: make(chan struct{})}
 	n.workers.Go(func() { defer close(l.done); n.runGatewayListener(l) })
 	return l, nil
 }
@@ -53,11 +59,26 @@ func (n *Node) runGatewayListener(l *portListener) {
 	for l.ctx.Err() == nil {
 		n.mu.Lock()
 		p := n.providers[device.Tailnet]
-		var listener net.Listener
-		if p != nil && p.ts != nil {
-			listener, _ = p.ts.Listen("tcp", fmt.Sprintf(":%d", l.port))
+		var server *tsnet.Server
+		if p != nil {
+			server = p.ts
 		}
 		n.mu.Unlock()
+		var listener net.Listener
+		if server != nil {
+			if l.funnel {
+				listener, _ = server.ListenFunnel("tcp", fmt.Sprintf(":%d", l.port))
+			} else {
+				listener, _ = server.Listen("tcp", fmt.Sprintf(":%d", l.port))
+			}
+		}
+		n.mu.Lock()
+		current := n.providers[device.Tailnet] == p
+		n.mu.Unlock()
+		if !current && listener != nil {
+			_ = listener.Close()
+			listener = nil
+		}
 		if listener != nil {
 			done := make(chan struct{})
 			go func() {

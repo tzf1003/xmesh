@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"os"
 	"path/filepath"
 	"sync"
@@ -99,5 +100,48 @@ func TestIdentityRejectsWrongKeyType(t *testing.T) {
 	}
 	if _, err := IDFromKey(ed25519.PublicKey{1}); err == nil {
 		t.Fatal("short public key accepted")
+	}
+}
+
+func TestLiveCertificateRenewalUpdatesExistingTLSConfigurations(t *testing.T) {
+	root := t.TempDir()
+	original, err := LoadIdentity(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nearExpiry, err := identityForKey(original.privateKey, time.Now().AddDate(-1, 0, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveIdentity(filepath.Join(root, "identity-v2", "identity.json"), nearExpiry); err != nil {
+		t.Fatal(err)
+	}
+	cfg := nearExpiry.tlsConfig()
+	before := nearExpiry.TLSCertificate()
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			for range 100 {
+				if _, err := cfg.GetClientCertificate(&tls.CertificateRequestInfo{}); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+	if err := nearExpiry.Refresh(t.Context(), root); err != nil {
+		t.Fatal(err)
+	}
+	readers.Wait()
+	server, err := cfg.GetConfigForClient(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := cfg.GetClientCertificate(&tls.CertificateRequestInfo{})
+	if err != nil || nearExpiry.ID != original.ID || !client.Leaf.NotAfter.After(before.Leaf.NotAfter) || !bytes.Equal(server.Certificates[0].Certificate[0], client.Certificate[0]) {
+		t.Fatal("live renewal did not reach both TLS roles", err)
+	}
+	loaded, err := LoadIdentity(t.Context(), root)
+	if err != nil || !bytes.Equal(loaded.Certificate.Certificate[0], client.Certificate[0]) {
+		t.Fatal("renewed certificate was not persisted", err)
 	}
 }

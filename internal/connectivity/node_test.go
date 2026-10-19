@@ -282,3 +282,45 @@ func TestSameNameDevicesKeepSeparateRoutingIdentity(t *testing.T) {
 		t.Fatal("route alias collision", aliases, err)
 	}
 }
+
+func TestFunnelWaitsForProviderAndClosesWhilePending(t *testing.T) {
+	n, cfg := node(t, "funnel-node")
+	cfg.Mesh.Tailnet.Enabled = true
+	n.Reconfigure(cfg.Mesh)
+	listener, err := n.Funnel()
+	if err != nil {
+		t.Fatal("Funnel rejected normal provider startup", err)
+	}
+	accepted := make(chan error, 1)
+	go func() { _, err := listener.Accept(); accepted <- err }()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-accepted:
+		if err == nil {
+			t.Fatal("closed listener accepted a connection")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending Funnel listener did not stop")
+	}
+}
+
+func TestNetworkSettleReportsProviderApplyErrors(t *testing.T) {
+	n, cfg := node(t, "settle-node")
+	n.mu.Lock()
+	n.providers[device.LAN] = &provider{cfg: cfg.Mesh, err: "LAN interface is unavailable"}
+	n.mu.Unlock()
+	defer func() { n.mu.Lock(); delete(n.providers, device.LAN); n.mu.Unlock() }()
+	problems := n.Settle(t.Context())
+	if len(problems) != 1 || problems[0].Section != "mesh.lan" || problems[0].Message != "LAN interface is unavailable" {
+		t.Fatal(problems)
+	}
+	n.mu.Lock()
+	n.providers[device.LAN].ready = true
+	n.providers[device.LAN].err = ""
+	n.mu.Unlock()
+	if problems := n.Settle(t.Context()); len(problems) != 0 {
+		t.Fatal(problems)
+	}
+}

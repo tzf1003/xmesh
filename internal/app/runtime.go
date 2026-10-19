@@ -256,7 +256,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	dialPeer := func(ctx context.Context, peer mesh.Peer, p gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
 		if peer.ID == localPeer.ID {
-			principal := self
+			principal := localAgentPrincipal(self, p)
 			if p.ClientID != "" {
 				principal.OAuthClient = p.ClientID
 			}
@@ -358,4 +358,12 @@ func runnerOrNil(r l2Runner) sandbox.Runner {
 		return nil
 	}
 	return r
+}
+
+// localAgentPrincipal applies the same ingress grant to same-process Agent calls.
+func localAgentPrincipal(self identity.Principal, p gateway.Principal) identity.Principal {
+	if p.Ingress {
+		self.Tags = []string{"tag:ingress"}
+	}
+	return self
 }

@@ -33,6 +33,7 @@ type Principal struct {
 	OAuthSession string
 	Scopes       []string
 	Local        bool
+	Ingress      bool
 }
 type Dial func(context.Context, mesh.Peer, Principal, mcpmux.Options) (*mcpmux.Bridge, error)
 type Discover func(context.Context) ([]mesh.Peer, error)

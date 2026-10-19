@@ -69,6 +69,8 @@ type logical struct {
 	changed              chan struct{}
 	trustGeneration      uint64
 	attachedEpoch        uint64
+	closedAt             time.Time
+	detachedAt           time.Time
 }
 
 type carrier struct {
@@ -424,11 +426,21 @@ func (m *Manager) runPeer(p *peerLink) {
 			}
 		}
 		for sid, l := range p.sessions {
+			if l.incoming && !l.detachedAt.IsZero() && time.Since(l.detachedAt) >= m.opts.RecoveryWindow {
+				closeLogical(l, ErrResumeExpired)
+			}
 			if l.err == nil && !l.session.Closed() {
 				wanted = true
-			} else if p.active == nil {
-				delete(p.sessions, sid)
-				delete(p.opens, l.openID)
+			} else {
+				if l.closedAt.IsZero() {
+					l.closedAt = time.Now()
+				}
+				if time.Since(l.closedAt) < m.opts.RecoveryWindow {
+					wanted = true
+				} else {
+					delete(p.sessions, sid)
+					delete(p.opens, l.openID)
+				}
 			}
 		}
 		if wanted && !p.disconnected.IsZero() && time.Since(p.disconnected) >= m.opts.RecoveryWindow {
@@ -750,6 +762,14 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 		}
 		for _, l := range p.pending {
 			closeLogical(l, ErrRestarted)
+		}
+	}
+	for _, l := range p.sessions {
+		if l.incoming && l.attachedEpoch != c.epoch && l.detachedAt.IsZero() {
+			l.detachedAt = p.disconnected
+			if l.detachedAt.IsZero() {
+				l.detachedAt = time.Now()
+			}
 		}
 	}
 	p.boot = boot

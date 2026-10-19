@@ -124,3 +124,11 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 - Linux arm64 的两个独立 Docker 网络空间：一条设备记录、首次 LAN、LAN 关闭后 Tailnet 接替、LAN 恢复后保持 Tailnet、Tailnet 网络授权撤销后回到 LAN；exec 仅执行一次，PTY 与 per-caller 后端 PID 保持，Gateway 租约心跳和跨路径分块文件哈希正确；远程排空按设备 ID 定位，并检查 xmesh 信任中的管理角色。常规路径恢复约 1.6 秒，禁用直连 UDP、强制经过嵌入 DERP 的相同测试约 0.6 秒。脚本为 `scripts/coexist_ci.py`，属于同一宿主机上的网络隔离验收。
 - Windows amd64 与 Linux arm64 交叉构建成功。跨构建不代表对应平台已经完成实际运行验收。
 - Electron 页面已检查单设备双路径、当前与备用路径、Tailnet 保持、重连状态和撤销信任操作。
+
+## 运行期生命周期与应用结果
+
+Funnel 入口和 Tailnet Gateway 监听器使用持续的接收队列，等待路径就绪，并在提供者重建后重新绑定。网络配置重载等待当前路径配置就绪；无法启动的 LAN/Tailnet 路径分别通过 `apply_errors` 的 `mesh.lan`、`mesh.tailnet` 返回，仍在初始化的路径也会在等待截止后返回待应用状态。
+
+入口对同进程 Agent 的调用使用 `tag:ingress` 授权，沿用 OAuth 调用方身份。设备证书在运行期间每小时检查，到期前 30 天使用同一公钥续期；已创建的服务端和客户端 TLS 配置在每次握手时读取当前证书。
+
+逻辑会话在断网期间关闭后保留其已认证的关闭通知，直到对端确认或恢复窗口到期。关闭通知会触发重连并跨承载连接重放，使对端 MCP 会话和调用方资源随之释放。
