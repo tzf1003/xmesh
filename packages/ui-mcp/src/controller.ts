@@ -173,7 +173,9 @@ export class Controller {
       {
         execArgv: [],
         stdio: ["ignore", "ignore", guardianLog, "ipc"],
-        detached: process.platform !== "win32",
+        // Windows libuv's parent Job kills attached children on abrupt exit.
+        // The guardian must survive that Job; its console stays hidden.
+        detached: true,
         windowsHide: true,
       },
     );

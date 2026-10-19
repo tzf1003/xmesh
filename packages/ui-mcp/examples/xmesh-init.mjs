@@ -40,7 +40,10 @@ export default async ({
     });
     kernel.panel.setContent(
       JSON.stringify({
-        node: { name: "ui-test", roles: ["agent", "gateway"] },
+        node: {
+          name: `ui-test-${path.basename(sessionDir).slice(-8)}`,
+          roles: ["agent", "gateway"],
+        },
         mesh: { mode: "lan", lan: { mdns: true } },
         gateway: { listen: "127.0.0.1:8080" },
         agent: {
@@ -62,7 +65,10 @@ export default async ({
     fs.writeFileSync(
       config,
       JSON.stringify({
-        node: { name: "ui-test", roles: ["agent", "gateway"] },
+        node: {
+          name: `ui-test-${path.basename(sessionDir).slice(-8)}`,
+          roles: ["agent", "gateway"],
+        },
         mesh: { mode: "lan", lan: { mdns: true } },
         gateway: { listen: `127.0.0.1:${port}` },
         agent: {
