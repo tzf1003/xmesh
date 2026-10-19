@@ -196,7 +196,9 @@ async function start(): Promise<void> {
       const text = hint === undefined ? undefined : loginHints[hint];
       if (text !== undefined) notify([{ key: `login.${hint}`, text }]);
     },
-    ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, streamIdleMs: 2000 }),
+    // Mock fixtures ping frequently. Real kernels retain the protocol's
+    // default idle budget for their fifteen-second event heartbeat.
+    ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, ...(!process.env.XMESH_UI_KERNEL_BINARY && { streamIdleMs: 2000 }) }),
     ...(BACKGROUND_TEST && { requestTimeoutMs: 30_000 }),
   });
 
