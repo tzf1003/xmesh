@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { Notification, app, net, powerMonitor, shell } from "electron";
+import { clipboard, dialog, Notification, app, net, powerMonitor, shell } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
@@ -12,6 +12,7 @@ import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import * as fs from "node:fs";
 import { runBrowserLogin } from "./browser-login";
 import { MeshService, execMeshRunner, meshCredentialPath } from "./mesh-service";
+import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
 import { bundledXmesh, cliCommandText, runXmeshRaw, runXmeshSetup } from "./cli";
@@ -242,7 +243,23 @@ async function start(): Promise<void> {
       await runBrowserLogin(config, state, controlUrl, (url) => platform.openExternal(url));
     },
   );
+  const playground = new PlaygroundService(controller, {
+    copy: (text) => clipboard.writeText(text),
+    save: async (text) => {
+      const result = await dialog.showSaveDialog({ defaultPath: "xmesh-tool-result.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (result.canceled || !result.filePath) return false;
+      await fs.promises.writeFile(result.filePath, text, { mode: 0o600 });
+      return true;
+    },
+  });
+  let playgroundKey = "";
+  controller.on("change", (s: import("../shared/state").Snapshot) => {
+    const c = s.connection;
+    const key = JSON.stringify([s.selectedInstance, c.kind, c.kind === "connected" ? c.status.control.boot_id : "", c.kind === "connected" ? c.status.gateway : null]);
+    if (key !== playgroundKey) { playgroundKey = key; void playground.close(); }
+  });
   registerIpc({
+    playground,
     controller,
     actions,
     service: new PanelService(controller),
@@ -263,6 +280,7 @@ async function start(): Promise<void> {
   });
 
   app.on("before-quit", () => {
+    void playground.close();
     void controller.stop();
   });
   app.on("will-quit", () => tray.destroy());

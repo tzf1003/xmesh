@@ -1,4 +1,6 @@
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
+import { parsePlayground } from "../shared/playground";
+import type { PlaygroundService } from "./playground";
 import { parseCiRequest } from "../shared/ci";
 import {
   CALLS_EVENT,
@@ -54,6 +56,7 @@ export function isTrustedSender(
 }
 
 export interface IpcDeps {
+  playground: PlaygroundService;
   controller: ShellController;
   actions: Actions;
   service: PanelService;
@@ -67,7 +70,7 @@ export interface IpcDeps {
   update: UpdateActions;
 }
 
-export function registerIpc({ controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
+export function registerIpc({ playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -80,6 +83,10 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
     });
   };
 
+  handle(CHANNELS.playground, (request: unknown) => {
+    const req = parsePlayground(request);
+    return req ? playground.request(req) : bad("playground request");
+  });
   handle(CHANNELS.getSnapshot, (): Snapshot => controller.snapshot);
   handle(CHANNELS.drain, (mode: unknown) => {
     if (mode === undefined) return actions.drain();

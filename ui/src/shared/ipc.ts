@@ -32,6 +32,7 @@ import type { UpdatePrefs } from "./update";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { CiRequest, CiResultFor } from "./ci";
 import type { MeshRequest, MeshResultFor } from "./mesh";
+import type { PlaygroundApi } from "./playground";
 import type { Snapshot } from "./state";
 
 /** `ipcMain.handle` channels. The preload script hard-codes the same strings; a unit test checks they agree. */
@@ -87,6 +88,7 @@ export const CHANNELS = {
   pickPath: "xmesh:pick-path",
   mesh: "xmesh:mesh",
   ci: "xmesh:ci",
+  playground: "xmesh:playground",
 } as const;
 
 /** Main -> renderer push channel. */
@@ -262,6 +264,7 @@ export interface SetupPreview {
 
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
+  playground: PlaygroundApi;
   getSnapshot(): Promise<Snapshot>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   /** `keep` (default) refuses new calls; `kill` also ends every PTY and lease. */
@@ -339,6 +342,7 @@ export interface PanelApi {
 }
 
 export const PANEL_API_METHODS = [
+  "playground",
   "getSnapshot",
   "onSnapshot",
   "drain",

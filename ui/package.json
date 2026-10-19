@@ -8,7 +8,7 @@
   "main": "dist/src/main/main.js",
   "type": "commonjs",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/build-renderer.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-renderer.mjs && node scripts/build-mcp.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-reporter=spec \"dist/test/unit/**/*.test.js\"",
     "test:e2e": "npm run build && node scripts/flip-fuses.mjs --profile test && playwright test",
@@ -34,7 +34,8 @@
     "esbuild": "0.28.2",
     "preact": "10.29.8",
     "typescript": "7.0.2",
-    "yaml": "2.8.4"
+    "yaml": "2.8.4",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "engines": {
     "node": ">=22.18"
