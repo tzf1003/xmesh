@@ -1,0 +1,65 @@
+import { ControlClient } from "../client";
+import { type CliCommand, type CliRun } from "../cli";
+import { type Instance, kernelGone } from "../discovery";
+import { sameVersion } from "../../shared/version";
+import type { StopResult } from "./updater";
+
+interface KernelServices {
+  discover(): Instance[];
+  run(command: CliCommand, node: string): Promise<CliRun>;
+  /** When set, starting a kernel must also prove it runs this bundled version. */
+  version?: string;
+  gone?: (pid: number) => boolean;
+  status?: (instance: Instance) => Promise<{ control: { kernel_version: string } }>;
+  timeoutMs?: number;
+  pollMs?: number;
+}
+
+/** Update service commands are complete only after observing the process and its control version. */
+export function kernelServices(env: KernelServices): { stop(node: string): Promise<StopResult>; start(node: string): Promise<void>; refresh(node: string): Promise<void> } {
+  const timeout = env.timeoutMs ?? 30_000;
+  const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, env.pollMs ?? 100));
+  const status = (instance: Instance): Promise<{ control: { kernel_version: string } }> =>
+    env.status?.(instance) ?? new ControlClient({ endpoint: instance.manifest.endpoint, requestTimeoutMs: Math.min(timeout, 2000) }).getStatus();
+  const services = {
+    async stop(node: string): Promise<StopResult> {
+      const instance = env.discover().find((i) => i.id === node);
+      if (!instance || (env.gone ?? kernelGone)(instance.manifest.pid)) return "absent";
+      const result = await env.run("stop", node);
+      if (result.code !== 0) throw new Error(`无法停止内核 ${node}: ${result.stderr || result.stdout}`);
+      const deadline = Date.now() + timeout;
+      do {
+        if ((env.gone ?? kernelGone)(instance.manifest.pid)) return "stopped";
+        await pause();
+      } while (Date.now() < deadline);
+      throw new Error(`内核 ${node} 的旧进程仍在运行，更新尚未开始`);
+    },
+    async start(node: string): Promise<void> {
+      const result = await env.run("start", node);
+      if (result.code !== 0) throw new Error(`无法启动内核 ${node}: ${result.stderr || result.stdout}`);
+      const deadline = Date.now() + timeout;
+      let version = "";
+      do {
+        const instance = env.discover().find((i) => i.id === node);
+        if (instance) {
+          try {
+            version = (await status(instance)).control.kernel_version;
+            if (!env.version || sameVersion(version, env.version)) return;
+          } catch {
+            // The service can publish its manifest before the control channel starts answering.
+          }
+        }
+        await pause();
+      } while (Date.now() < deadline);
+      throw new Error(`内核 ${node} 启动验收失败${version ? `：运行版本 ${version}，预期 ${env.version}` : "：控制通道未就绪"}`);
+    },
+    async refresh(node: string): Promise<void> {
+      const instance = env.discover().find((i) => i.id === node);
+      if (!env.version || !instance || (env.gone ?? kernelGone)(instance.manifest.pid)) return;
+      if (sameVersion((await status(instance)).control.kernel_version, env.version)) return;
+      await services.stop(node);
+      await services.start(node);
+    },
+  };
+  return services;
+}
