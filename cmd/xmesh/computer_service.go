@@ -78,11 +78,15 @@ func computerService(action string, args []string) error {
 	f := flag.NewFlagSet("computer "+action, flag.ContinueOnError)
 	state := f.String("state-dir", computer.DefaultStateDir(), "用户桌面服务状态目录")
 	helper := f.String("helper", "", "原生桌面执行器绝对路径")
+	endpoint := f.String("endpoint", "", "setup：已配置的本机桌面服务端点")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
 	if f.NArg() != 0 {
 		return fmt.Errorf("computer: unexpected arguments")
+	}
+	if *endpoint != "" && action != "setup" {
+		return fmt.Errorf("--endpoint 仅用于 computer setup，服务生命周期命令请使用 --state-dir")
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -128,17 +132,27 @@ func computerService(action string, args []string) error {
 		}
 	}
 	if action == "setup" {
+		if *endpoint != "" && *endpoint != computer.EndpointForState(statePath) {
+			// A custom socket does not identify an install directory or service.
+			// Authorize that existing Host; never install a different default Host.
+			client := computer.NewClient(*endpoint)
+			defer client.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return client.Authorize(ctx)
+		}
+		serviceArgs := []string{"--state-dir", statePath, "--helper", path}
 		// Start first so an existing per-user installation is retained. Only install
 		// after the platform reports absence; other failures remain visible.
-		if err := computerService("start", args); err != nil {
+		if err := computerService("start", serviceArgs); err != nil {
 			var missing *toolerr.Error
 			if !serviceMissing(err) && !(errors.As(err, &missing) && missing.Code == "not_found" && missing.Fields["reason"] == "not_installed") {
 				return err
 			}
-			if err := computerService("install", args); err != nil {
+			if err := computerService("install", serviceArgs); err != nil {
 				return err
 			}
-			if err := computerService("start", args); err != nil {
+			if err := computerService("start", serviceArgs); err != nil {
 				return err
 			}
 		}

@@ -244,3 +244,5 @@ db9de5b 的 macOS UI MCP 导航测试在 popup 重定向的请求计数断言失
 第三十三轮：动作结果携带缓存截图时，在 action_status、重复 act 和已完成动作等待的返回边界重新检查 computer.observe 授权，撤权后不发布图片并回收会话缓存。续租依据会话模式检查 computer.act 或 computer.observe，撤权后释放控制槽及会话容量。原生 Execute 出错后，管理器同步撤销已被原生清理路径隔离的租约，保留 unknown 动作结果；调用方重新申请会话并观察后才能继续。
 
 新增真实 MCP 回归覆盖标签授权撤销和 disabled_tools 两种重载方式，以及缓存动作图片和两类会话续租；新增子进程夹具验证五秒执行预算耗尽、原生进程仍存活时旧会话失效、新控制者使用新 token 执行成功。Computer / Agent / Host 三包竞态回归通过，缓存图片 / 续租 / Schema 回归连续五轮通过。MCP 发布 Schema 与内部校验均约束显式 background 必带 target_id、foreground 不带 target_id。cd87ab9 的 Linux CI 在 Clippy items_after_test_module 失败，测试模块已移至文件末尾，屏保逻辑保持原样，新提交继续验证 Linux 编译与测试。
+
+第三十四轮：面板的恢复和初始化入口与紧急停止统一使用所选内核的有效 Host 端点。新增 setup --endpoint，对自定义端点只授权已有 Host，缺失时返回错误；默认端点继续执行既有安装 / 启动流程。CLI 回归以受保护本机 IPC 确认自定义授权到达指定端点，并在成功及端点缺失两种情况下保持其他服务状态目录不存在；不适用的生命周期子命令显式拒绝 endpoint 参数。497 项 UI 单元测试和 CLI 全包竞态检查通过，相关 CLI 用例连续三轮通过。真实内核发布自定义端点后退出，面板的实际停止 / 恢复函数经 CLI 先暂停再恢复同一 Host，第二个临时 Host 保持运行；该轮未发出桌面输入或新的系统授权请求。

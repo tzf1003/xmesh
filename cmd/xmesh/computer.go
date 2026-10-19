@@ -22,7 +22,7 @@ func computerCommand(args []string) error {
 		}
 	}
 	if len(args) == 0 || args[0] == "help" {
-		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup|install|start|stop|restart|uninstall [--json]\n      xmesh computer status|info|authorize|emergency-stop|resume [--endpoint 本机套接字或管道]")
+		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup [--endpoint 本机套接字或管道] [--json]\n      xmesh computer install|start|stop|restart|uninstall [--json]\n      xmesh computer status|info|authorize|emergency-stop|resume [--endpoint 本机套接字或管道]")
 		return nil
 	}
 	f := flag.NewFlagSet("computer "+args[0], flag.ContinueOnError)

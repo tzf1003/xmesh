@@ -53,9 +53,9 @@ export function runComputerHost(command: ComputerHostCommand, binary: string = x
   });
 }
 
-export function resumeComputerHost(binary: string = xmeshBinary()): Promise<void> {
+export function resumeComputerHost(binary: string = xmeshBinary(), endpoint?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(binary, ["computer", "resume"], { timeout: 6000, windowsHide: true, maxBuffer: 64 * 1024 }, (error) => {
+    execFile(binary, ["computer", "resume", ...(endpoint ? ["--endpoint", endpoint] : [])], { timeout: 6000, windowsHide: true, maxBuffer: 64 * 1024 }, (error) => {
       if (error) reject(new Error("本机桌面共享恢复失败"));
       else resolve();
     });
@@ -107,9 +107,9 @@ export function computerHostServices(env: HostServicesEnv): { stop(): Promise<St
 }
 
 /** The renderer can request setup but cannot choose the program, arguments or OS endpoint. */
-export function setupComputerHost(binary: string = xmeshBinary()): Promise<void> {
+export function setupComputerHost(binary: string = xmeshBinary(), endpoint?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(binary, ["computer", "setup", "--json"], { timeout: 30000, windowsHide: true, maxBuffer: 64 * 1024 }, (error, stdout) => {
+    execFile(binary, ["computer", "setup", "--json", ...(endpoint ? ["--endpoint", endpoint] : [])], { timeout: 30000, windowsHide: true, maxBuffer: 64 * 1024 }, (error, stdout) => {
       let result: { ok?: boolean; error?: { message?: string } };
       try { result = JSON.parse(stdout) as typeof result; }
       catch { reject(new Error("桌面服务初始化未返回有效结果")); return; }

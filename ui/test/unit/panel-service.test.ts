@@ -64,6 +64,19 @@ async function setup(capabilities: Capability[] = ALL, status: Partial<StatusRes
 
 const last = (k: FakeKernel, method: string, p: string) => k.requests.filter((r) => r.method === method && r.path.startsWith(p)).at(-1);
 
+test("desktop setup and resume use the selected kernel's effective Host endpoint", async () => {
+  const fixture = statusFixture();
+  const endpoint = "/tmp/selected-computer.sock";
+  const { c } = await setup([...ALL, "computer"], { paths: { ...fixture.paths, computer_endpoint: endpoint } });
+  const calls: { operation: string; endpoint?: string }[] = [];
+  const service = new PanelService(c,
+    async endpoint => { calls.push({ operation: "setup", endpoint }); },
+    async endpoint => { calls.push({ operation: "resume", endpoint }); });
+  assert.equal((await service.computer({ op: "setup" })).ok, true);
+  assert.equal((await service.computer({ op: "pause", paused: false })).ok, true);
+  assert.deepEqual(calls, [{ operation: "setup", endpoint }, { operation: "resume", endpoint }]);
+});
+
 test("resuming desktop control clears Agent pause even when the user Host is unavailable", async () => {
   const { k, c } = await setup([...ALL, "computer"]);
   const order: string[] = [];

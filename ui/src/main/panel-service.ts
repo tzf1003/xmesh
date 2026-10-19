@@ -96,7 +96,9 @@ function toError(e: unknown): ActionError {
 }
 
 export class PanelService {
-  constructor(private readonly controller: CapabilityClient, private readonly setupDesktop: () => Promise<void> = setupComputerHost, private readonly resumeDesktop: () => Promise<void> = resumeComputerHost) {}
+  constructor(private readonly controller: CapabilityClient,
+    private readonly setupDesktop: (endpoint?: string) => Promise<void> = endpoint => setupComputerHost(undefined, endpoint),
+    private readonly resumeDesktop: (endpoint?: string) => Promise<void> = endpoint => resumeComputerHost(undefined, endpoint)) {}
 
   private async data<T>(capability: Parameters<CapabilityClient["requireCapable"]>[0], run: (c: ControlClient) => Promise<unknown>): Promise<DataResult<T>> {
     try {
@@ -359,13 +361,15 @@ export class PanelService {
 
   computer(request: ComputerRequest): Promise<DataResult<ComputerResult>> {
     return this.data("computer", async (client) => {
+      const connection = this.controller.snapshot.connection;
+      const endpoint = connection.kind === "connected" ? connection.status.paths.computer_endpoint : undefined;
       switch (request.op) {
         case "get": return client.call("GET", "/v2/computer");
-        case "setup": await this.setupDesktop(); return client.call("GET", "/v2/computer");
+        case "setup": await this.setupDesktop(endpoint); return client.call("GET", "/v2/computer");
         case "pause": {
           // Agent pause is independent of Host availability. A suspended Host
           // continues enforcing its own local guard if its resume fails.
-          if (!request.paused) await this.resumeDesktop().catch(() => undefined);
+          if (!request.paused) await this.resumeDesktop(endpoint).catch(() => undefined);
           return client.call("POST", "/v2/computer/pause", { body: { paused: request.paused } });
         }
         case "revoke": return client.call("POST", "/v2/computer/revoke", { body: { session_id: request.session_id } });
