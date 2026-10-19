@@ -157,7 +157,7 @@ try {
     try { manifest = JSON.parse(readFileSync(path.join(state, "control.json"), "utf8")); return true; } catch { return false; }
   }, { timeout: 15000 }).toBe(true);
   const control = new ControlClient({ endpoint: manifest.endpoint });
-  await expect.poll(async () => (await control.call("GET", "/v1/computer")).info.available, { timeout: 15000 }).toBe(true);
+  await expect.poll(async () => (await control.call("GET", "/v2/computer")).info.available, { timeout: 15000 }).toBe(true);
   const input = await verifyInput(gateway);
   const args = [`--user-data-dir=${path.join(root, "ui")}`, ui];
   app = await electron.launch({ args, env: { ...process.env, XMESH_UI_TEST: "1", XMESH_UI_STATE_ROOT: path.join(root, "nodes"), XMESH_UI_LANG: "zh", XMESH_BIN: binary } });
@@ -186,14 +186,14 @@ try {
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img) => img.complete && img.naturalWidth > 0), { timeout: 15000 }).toBe(true);
     dimensions.push(await image.evaluate((img) => ({ width: img.naturalWidth, height: img.naturalHeight })));
-    await expect.poll(async () => (await control.call("GET", "/v1/computer")).sessions.length).toBe(0);
+    await expect.poll(async () => (await control.call("GET", "/v2/computer")).sessions.length).toBe(0);
   }
   await page.getByTestId("computer-preview-clear").click();
   await expect(image).toHaveCount(0);
   await page.getByTestId("computer-takeover").click();
-  await expect.poll(async () => (await control.call("GET", "/v1/computer")).paused).toBe(true);
+  await expect.poll(async () => (await control.call("GET", "/v2/computer")).paused).toBe(true);
   await page.getByTestId("computer-pause").click();
-  await expect.poll(async () => (await control.call("GET", "/v1/computer")).paused).toBe(false);
+  await expect.poll(async () => (await control.call("GET", "/v2/computer")).paused).toBe(false);
   await page.setViewportSize({ width: 900, height: 700 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   // The captured desktop stays in memory. This optional UI evidence is taken

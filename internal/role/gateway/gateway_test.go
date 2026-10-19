@@ -371,3 +371,18 @@ func Test_DiscoveryWakesOnChangeSignal(t *testing.T) {
 		t.Fatal("a change signal did not poll ahead of the 10 s ticker")
 	}
 }
+
+func TestDiscoveryIdentifiesSelfByID(t *testing.T) {
+	g, _ := fixture(t, false)
+	self := g.opts.LocalPeer
+	self.Name = "self-advertisement"
+	remote := mesh.Peer{ID: "remote-key", Name: "test-node-remote", DisplayName: g.opts.LocalPeer.Name, Online: true, Address: g.opts.LocalPeer.Address}
+	g.Update([]mesh.Peer{self, remote})
+	devices, _ := g.snapshot()
+	if len(devices) != 2 || devices[g.opts.LocalPeer.Name].peer.ID != g.opts.LocalPeer.ID || devices[remote.Name].peer.ID != remote.ID {
+		t.Fatal("identity-based discovery", devices)
+	}
+	if _, exists := devices[self.Name]; exists {
+		t.Fatal("self advertisement inserted as remote")
+	}
+}

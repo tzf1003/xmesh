@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 func (s *Server) getComputer(w http.ResponseWriter, r *http.Request, _ *call) {
@@ -16,7 +16,7 @@ func (s *Server) getComputer(w http.ResponseWriter, r *http.Request, _ *call) {
 }
 
 func (s *Server) pauseComputer(w http.ResponseWriter, r *http.Request, _ *call) {
-	var req v1.ComputerPauseRequest
+	var req v2.ComputerPauseRequest
 	if err := decode(r, &req, true); err != nil {
 		failWith(w, err)
 		return
@@ -26,7 +26,7 @@ func (s *Server) pauseComputer(w http.ResponseWriter, r *http.Request, _ *call) 
 }
 
 func (s *Server) revokeComputer(w http.ResponseWriter, r *http.Request, _ *call) {
-	var req v1.ComputerRevokeRequest
+	var req v2.ComputerRevokeRequest
 	if err := decode(r, &req, true); err != nil {
 		failWith(w, err)
 		return

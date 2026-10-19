@@ -256,7 +256,7 @@ func Test_MeshAuthKeyAndOnboardWriteSecretFile(t *testing.T) {
 	if _, err := runMesh(t, "", "authkey", "--out", keyFile); err == nil {
 		t.Fatal("existing key file overwritten")
 	}
-	if out, err := runMesh(t, "", "onboard", "--authkey-file", filepath.Join(dir, "k2"), "--config", "xmesh.yaml"); err != nil || !strings.Contains(out, "xmesh install --config xmesh.yaml") || !strings.Contains(out, "mesh.authkey_file") {
+	if out, err := runMesh(t, "", "onboard", "--authkey-file", filepath.Join(dir, "k2"), "--config", "xmesh.yaml"); err != nil || !strings.Contains(out, "xmesh install --config xmesh.yaml") || !strings.Contains(out, "mesh.tailnet.authkey_file") {
 		t.Fatalf("onboard: %v\n%s", err, out)
 	}
 	if _, err := runMesh(t, "", "authkey", "--tags", "device", "--out", filepath.Join(dir, "k3")); err == nil {
@@ -471,5 +471,20 @@ func TestMeshPanelCredentialLocation(t *testing.T) {
 	}
 	if c.credFile != filepath.Join(root, "mesh", "mesh-credential.json") {
 		t.Fatalf("panel credential path: %s", c.credFile)
+	}
+}
+
+func TestMeshOnboardRefusesLegacyInstallBeforeCreatingKey(t *testing.T) {
+	_, dir := setupMesh(t)
+	cfg := filepath.Join(dir, "legacy.yaml")
+	if err := os.WriteFile(cfg, []byte(cliConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(dir, "unused-key")
+	if _, err := runMesh(t, "", "onboard", "--authkey-file", key, "--config", cfg, "--install"); err == nil {
+		t.Fatal("legacy config installed")
+	}
+	if _, err := os.Stat(key); !os.IsNotExist(err) {
+		t.Fatal("key created before config preflight", err)
 	}
 }

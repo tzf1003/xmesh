@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"net"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 func dial(ctx context.Context, e Endpoint) (net.Conn, error) {
-	if e.Transport != v1.TransportUnix {
+	if e.Transport != v2.TransportUnix {
 		return nil, fmt.Errorf("此平台不支持传输 %s", e.Transport)
 	}
 	var d net.Dialer

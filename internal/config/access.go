@@ -60,7 +60,7 @@ func (a Access) AllowsSource(addr netip.Addr) bool {
 	if inAny(loopbackPrefixes, addr) {
 		return true
 	}
-	if a.lan && inAny(lanPrefixes, addr) {
+	if a.lan && inAny(lanPrefixes, addr) && !inAny(tailnetPrefixes, addr) {
 		return true
 	}
 	if a.tailnet && inAny(tailnetPrefixes, addr) {
@@ -70,7 +70,10 @@ func (a Access) AllowsSource(addr netip.Addr) bool {
 }
 
 // IsLANAddr reports whether addr is a private LAN address, the ones the lan entry covers.
-func IsLANAddr(addr netip.Addr) bool { return inAny(lanPrefixes, addr.Unmap()) }
+func IsLANAddr(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	return inAny(lanPrefixes, addr) && !inAny(tailnetPrefixes, addr)
+}
 
 // IsTailnetAddr reports whether addr is a Tailscale address.
 func IsTailnetAddr(addr netip.Addr) bool { return inAny(tailnetPrefixes, addr.Unmap()) }

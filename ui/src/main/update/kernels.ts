@@ -8,6 +8,10 @@ import type { StopResult } from "./updater";
 interface KernelServices {
   discover(): Instance[];
   run(command: CliCommand, node: string): Promise<CliRun>;
+	/** Persist the running service's configuration before its control channel exits. */
+	beforeStop?(node: string, instance: Instance): Promise<void>;
+	/** Converts stopped-node configuration with the newly installed kernel before starting it. */
+	prepare?(node:string):Promise<void>;
   /** When set, starting a kernel must also prove it runs this bundled version. */
   version?: string;
   gone?: (pid: number) => boolean;
@@ -26,6 +30,7 @@ export function kernelServices(env: KernelServices): { stop(node: string): Promi
     async stop(node: string): Promise<StopResult> {
       const instance = env.discover().find((i) => i.id === node);
       if (!instance || (env.gone ?? kernelGone)(instance.manifest.pid)) return "absent";
+      await env.beforeStop?.(node, instance);
       const result = await env.run("stop", node);
       if (result.code !== 0) throw new Error(`无法停止内核 ${node}: ${result.stderr || result.stdout}`);
       const deadline = Date.now() + timeout;
@@ -36,6 +41,7 @@ export function kernelServices(env: KernelServices): { stop(node: string): Promi
       throw new Error(`内核 ${node} 的旧进程仍在运行，更新尚未开始`);
     },
     async start(node: string): Promise<void> {
+		await env.prepare?.(node);
       const result = await env.run("start", node);
       if (result.code !== 0) throw new Error(`无法启动内核 ${node}: ${result.stderr || result.stdout}`);
       const deadline = Date.now() + timeout;

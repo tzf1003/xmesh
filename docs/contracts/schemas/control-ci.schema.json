@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-ci:1",
+  "$id": "urn:xmesh:schema:control-ci:2",
   "title": "ControlCi",
   "description": "CTR-CTL-15。GitHub Actions 运行器托管：内核在本机监督官方运行器进程，一台机器可以绑定多个仓库。GitHub 凭据与注册令牌只写不读：响应只给掩码，不进配置、事件、审计和日志。",
   "$defs": {
@@ -96,7 +96,7 @@
           "description": "工作流里 job 的名字。"
         },
         "started_at": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp"
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
         }
       }
     },
@@ -118,7 +118,7 @@
           "$ref": "#/$defs/CiResultKind"
         },
         "finished_at": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp"
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
         }
       }
     },
@@ -158,7 +158,7 @@
           "description": "内核启动以来这个实例被重启的次数。"
         },
         "since": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp",
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp",
           "description": "进入当前状态的时间。"
         },
         "job": {
@@ -648,7 +648,7 @@
           "description": "没有账号的绑定重新注册时用的一次性注册令牌。有账号时省略，内核自己签发。只出现在这个请求里。"
         }
       },
-      "description": "POST /v1/ci/bindings/{id}/repair 的请求体，可以是空对象。"
+      "description": "POST /v2/ci/bindings/{id}/repair 的请求体，可以是空对象。"
     }
   }
 }

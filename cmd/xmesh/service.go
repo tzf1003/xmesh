@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/kardianos/service"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
-	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/device"
+	"github.com/tzf1003/xmesh/internal/filelock"
 	"github.com/tzf1003/xmesh/internal/privdir"
 	"os"
 	"path/filepath"
@@ -183,50 +187,125 @@ func pair(args []string) error {
 	flags := flag.NewFlagSet("pair", flag.ContinueOnError)
 	path := flags.String("config", "xmesh.yaml", "配置路径")
 	state := flags.String("state-dir", "", "状态目录")
-	export := flags.String("export", "", "导出本节点公开配对文件")
-	importFile := flags.String("import", "", "导入对端公开配对文件")
-	fingerprint := flags.String("fingerprint", "", "独立核对的对端 SHA-256 指纹")
-	tags := flags.String("tags", "tag:peer,tag:device", "授予对端的 LAN 角色")
-	if e := flags.Parse(args); e != nil {
-		return e
+	export := flags.String("export", "", "导出设备公开配对文档")
+	importFile := flags.String("import", "", "导入对端设备公开配对文档")
+	fingerprint := flags.String("fingerprint", "", "独立核对的设备公钥 SHA-256 指纹")
+	tags := flags.String("tags", "tag:peer,tag:device", "授予对端的设备角色")
+	if err := flags.Parse(args); err != nil {
+		return err
 	}
-	cfg, e := config.Load(*path)
-	if e != nil {
-		return e
+	if flags.NArg() != 0 || (*export == "") == (*importFile == "") {
+		return fmt.Errorf("请选择 --export 或 --import")
 	}
-	if cfg.Mesh.Mode != "lan" {
-		return fmt.Errorf("pair 仅用于 lan 模式")
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+	if cfg.SchemaVersion != 2 {
+		return fmt.Errorf("请先运行 xmesh migrate 将配置升级到版本 2，再重新配对")
 	}
 	dir := *state
 	if dir == "" {
-		dir, e = app.StateDir(cfg.Node.Name)
-		if e != nil {
-			return e
+		dir, err = app.StateDir(cfg.Node.Name)
+		if err != nil {
+			return err
 		}
 	}
-	if e = privdir.Ensure(dir); e != nil {
-		return e
+	if err := privdir.Ensure(dir); err != nil {
+		return err
 	}
-	dir = filepath.Join(dir, "lan")
-	if (*export == "") == (*importFile == "") {
-		return fmt.Errorf("请选择 --export 或 --import")
+	var request v2.PairImportRequest
+	if *importFile != "" {
+		raw, err := os.ReadFile(*importFile)
+		if err != nil {
+			return err
+		}
+		var wrapped v2.PairExportResponse
+		if json.Unmarshal(raw, &wrapped) == nil && wrapped.Pair.Version == 2 {
+			request.Pair = wrapped.Pair
+		} else if err := json.Unmarshal(raw, &request.Pair); err != nil {
+			return err
+		}
+		request.Fingerprint = cleanFingerprint(*fingerprint)
+		request.Tags = strings.Split(*tags, ",")
+		doc := device.Document{Version: request.Pair.Version, DeviceID: request.Pair.DeviceID, Name: request.Pair.Name, PublicKey: request.Pair.PublicKey}
+		if err := doc.Validate(); err != nil {
+			return fmt.Errorf("需要新版设备配对文档: %w", err)
+		}
+		if request.Fingerprint == "" || "dev-"+request.Fingerprint != doc.DeviceID || request.Fingerprint != request.Pair.Fingerprint {
+			return fmt.Errorf("设备公钥指纹与独立确认的指纹不一致")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var exported v2.PairDocument
+	handled := false
+	if endpoint, err := control.ReadEndpoint(dir); err == nil {
+		client := control.NewClient(endpoint)
+		route := "/v2/pair/export"
+		var body any
+		if *importFile != "" {
+			route = "/v2/pair/import"
+			body = request
+		}
+		response, err := client.Do(ctx, "POST", route, body, nil)
+		if errors.Is(err, control.ErrVersionMismatch) {
+			return err
+		}
+		if err == nil {
+			if err := response.Error(); err != nil {
+				return err
+			}
+			handled = true
+			if *export != "" {
+				var reply v2.PairExportResponse
+				if err := json.Unmarshal(response.Body, &reply); err != nil {
+					return err
+				}
+				exported = reply.Pair
+			}
+		}
+	}
+	if !handled {
+		lockCtx, stop := context.WithTimeout(ctx, 250*time.Millisecond)
+		lock, err := filelock.Acquire(lockCtx, filepath.Join(dir, "device-runtime.lock"))
+		stop()
+		if err != nil {
+			return fmt.Errorf("节点正在运行，请通过 xmesh control pair 操作: %w", err)
+		}
+		defer lock.Close()
+		id, err := device.LoadIdentity(ctx, dir)
+		if err != nil {
+			return err
+		}
+		if *export != "" {
+			doc := id.Document(cfg.Node.Name)
+			exported = v2.PairDocument{Version: 2, DeviceID: doc.DeviceID, PublicKey: doc.PublicKey, Name: doc.Name, Fingerprint: strings.TrimPrefix(doc.DeviceID, "dev-"), Tags: []string{}}
+		} else {
+			store, err := device.OpenTrust(dir)
+			if err != nil {
+				return err
+			}
+			if request.Pair.DeviceID == id.ID {
+				return fmt.Errorf("无法与本机自身配对")
+			}
+			if err := store.Grant(ctx, device.Document{Version: 2, DeviceID: request.Pair.DeviceID, Name: request.Pair.Name, PublicKey: request.Pair.PublicKey}, request.Tags, nil); err != nil {
+				return err
+			}
+		}
 	}
 	if *export != "" {
-		fp, e := mesh.ExportPair(dir, cfg.Node.Name, *export)
-		if e != nil {
-			return e
+		raw, err := json.MarshalIndent(exported, "", "  ")
+		if err != nil {
+			return err
 		}
-		fmt.Println("节点证书指纹:", fp)
+		if err := os.WriteFile(*export, append(raw, '\n'), 0600); err != nil {
+			return err
+		}
+		fmt.Println("设备公钥指纹:", exported.Fingerprint)
 		return nil
 	}
-	granted := strings.Split(*tags, ",")
-	if e = mesh.ImportPair(dir, *importFile, *fingerprint, granted); e != nil {
-		return e
-	}
-	fmt.Println("已保存对端配对证书；重启节点后生效")
-	if note := missingDeviceTagNote(granted); note != "" {
-		fmt.Println(note)
-	}
+	fmt.Println("设备信任已保存")
 	return nil
 }
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-ingress:1",
+  "$id": "urn:xmesh:schema:control-ingress:2",
   "title": "ControlIngress",
   "description": "CTR-CTL-10。入口的 OAuth 客户端与登录口令。roles 不含 ingress 时这些路由返回 role_disabled。",
   "$defs": {
@@ -12,7 +12,7 @@
         "client_id": { "type": "string", "minLength": 1 },
         "client_name": { "type": "string" },
         "redirect_uris": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "scopes": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Scope" } },
+        "scopes": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Scope" } },
         "token_endpoint_auth_method": { "type": "string", "minLength": 1 }
       }
     },
@@ -38,7 +38,7 @@
       "additionalProperties": false,
       "required": ["rotated_at"],
       "properties": {
-        "rotated_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+        "rotated_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
       }
     }
   }

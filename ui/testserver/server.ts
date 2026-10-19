@@ -45,16 +45,16 @@ export interface RecordedRequest {
 
 const RING = 1024;
 
-/** Panel route prefixes and the capability that gates each (PUT and PATCH /v1/config need config.write instead). */
+/** Panel route prefixes and the capability that gates each (PUT and PATCH /v2/config need config.write instead). */
 const PANEL_ROUTE_CAPS: [string, Capability][] = [
-  ["/v1/computer", "computer"],
-  ["/v1/config", "config.read"],
-  ["/v1/backends", "config.write"],
-  ["/v1/pats", "pats"],
-  ["/v1/ingress", "ingress"],
-  ["/v1/pair", "pair"],
-  ["/v1/ci", "ci"],
-  ["/v1/audit", "audit"],
+  ["/v2/computer", "computer"],
+  ["/v2/config", "config.read"],
+  ["/v2/backends", "config.write"],
+  ["/v2/pats", "pats"],
+  ["/v2/ingress", "ingress"],
+  ["/v2/pair", "pair"],
+  ["/v2/ci", "ci"],
+  ["/v2/audit", "audit"],
 ];
 
 export function randomEndpoint(): string {
@@ -67,7 +67,7 @@ export function randomEndpoint(): string {
 const iso = (): string => new Date().toISOString();
 
 /**
- * A fake xmesh kernel for Control API v1: status, peers, sessions, drain,
+ * A fake xmesh kernel for Control API v2: status, peers, sessions, drain,
  * resume and the event stream, over a Unix socket or named pipe like the real
  * one. Data starts from the contract fixtures; tests script it (`setStatus`,
  * `setPeers`, `emit`, `dropStreams`, `setControlVersion`, `restartBoot`) to
@@ -331,39 +331,46 @@ export class FakeKernel {
       this.failures.delete(url);
       return this.send(res, failure.status, failure.body);
     }
-    if (method === "GET" && url === "/v1/status") {
+    if (method === "GET" && url === "/v2/status") {
       if (this.requires(res, "status")) this.send(res, 200, this.status);
       return;
     }
-    if (method === "GET" && url === "/v1/peers") {
+    const revoke = /^\/v2\/pair\/trust\/(dev-[0-9a-f]{64})$/.exec(url);
+    if (method === "DELETE" && revoke) {
+      if (!this.requires(res, "pair")) return;
+      if (!this.peers.some((p) => p.device_id === revoke[1] && !p.self)) return this.send(res, 404, { error: "not_found", message: "Device is not paired" });
+      this.setPeers(this.peers.filter((p) => p.device_id !== revoke[1]));
+      res.writeHead(204, { [CONTROL_VERSION_HEADER]: this.controlVersion }); res.end(); return;
+    }
+    if (method === "GET" && url === "/v2/peers") {
       if (this.requires(res, "peers")) this.send(res, 200, { peers: this.peers });
       return;
     }
-    if (method === "GET" && url === "/v1/sessions") {
+    if (method === "GET" && url === "/v2/sessions") {
       if (this.requires(res, "sessions")) this.send(res, 200, this.panel.sessions);
       return;
     }
-    if (method === "GET" && url === "/v1/events") {
+    if (method === "GET" && url === "/v2/events") {
       if (this.requires(res, "events")) this.openStream(res, lastEventId);
       return;
     }
-    if (method === "POST" && url === "/v1/drain") {
+    if (method === "POST" && url === "/v2/drain") {
       if (this.requires(res, "drain")) this.drain(res, body);
       return;
     }
-    if (method === "POST" && url === "/v1/resume") {
+    if (method === "POST" && url === "/v2/resume") {
       if (this.requires(res, "drain")) this.resume(res);
       return;
     }
-    if (method === "PUT" && url === "/v1/gateway") {
+    if (method === "PUT" && url === "/v2/gateway") {
       if (this.requires(res, "gateway")) this.putGateway(res, body);
       return;
     }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
-    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v1/config" ? "config.write" : cap[1])) {
+    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v2/config" ? "config.write" : cap[1])) {
       const r = this.panel.handle(method, url, body, ifMatch);
       if (r) {
-        if (method !== "GET" && r.status < 300 && (url.startsWith("/v1/config") || url.startsWith("/v1/backends"))) this.publishBackends();
+        if (method !== "GET" && r.status < 300 && (url.startsWith("/v2/config") || url.startsWith("/v2/backends"))) this.publishBackends();
         if (r.status === 204) {
           res.writeHead(204, { [CONTROL_VERSION_HEADER]: this.controlVersion });
           res.end();

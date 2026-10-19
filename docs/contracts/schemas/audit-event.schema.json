@@ -21,7 +21,12 @@
         "policy_reload_failed",
         "progress_unrouted",
         "audit_dropped",
-        "control_call"
+        "control_call",
+        "device_link_online",
+        "device_link_reconnecting",
+        "device_link_offline",
+        "device_link_revoked",
+        "device_link_identity_conflict"
       ]
     },
     "actor": {

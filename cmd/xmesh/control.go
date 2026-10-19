@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -137,14 +137,14 @@ func controlCommand(args []string) error {
 		}
 		switch *action {
 		case "get":
-			return show(c.Do(ctx, "GET", "/v1/computer", nil, nil))
+			return show(c.Do(ctx, "GET", "/v2/computer", nil, nil))
 		case "pause", "resume":
-			return show(c.Do(ctx, "POST", "/v1/computer/pause", v1.ComputerPauseRequest{Paused: *action == "pause"}, nil))
+			return show(c.Do(ctx, "POST", "/v2/computer/pause", v2.ComputerPauseRequest{Paused: *action == "pause"}, nil))
 		case "revoke":
 			if *id == "" {
 				return fmt.Errorf("revoke 需要 --session-id")
 			}
-			return show(c.Do(ctx, "POST", "/v1/computer/revoke", v1.ComputerRevokeRequest{SessionID: *id}, nil))
+			return show(c.Do(ctx, "POST", "/v2/computer/revoke", v2.ComputerRevokeRequest{SessionID: *id}, nil))
 		default:
 			return fmt.Errorf("未知桌面操作: %s", *action)
 		}
@@ -159,7 +159,7 @@ func controlCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "GET", "/v1/"+verb, nil, nil))
+		return show(c.Do(ctx, "GET", "/v2/"+verb, nil, nil))
 	case "resume":
 		if err := flags.Parse(rest); err != nil {
 			return err
@@ -168,7 +168,7 @@ func controlCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "POST", "/v1/resume", nil, nil))
+		return show(c.Do(ctx, "POST", "/v2/resume", nil, nil))
 	case "drain":
 		mode := flags.String("mode", "keep", "keep 或 kill")
 		if err := flags.Parse(rest); err != nil {
@@ -178,7 +178,7 @@ func controlCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "POST", "/v1/drain", map[string]string{"mode": *mode}, nil))
+		return show(c.Do(ctx, "POST", "/v2/drain", map[string]string{"mode": *mode}, nil))
 	case "audit":
 		return controlAudit(ctx, flags, target, rest)
 	case "events":
@@ -213,7 +213,7 @@ func controlAudit(ctx context.Context, flags *flag.FlagSet, target targetFlags, 
 			values = append(values, name+"="+queryEscape(*v))
 		}
 	}
-	path := "/v1/audit"
+	path := "/v2/audit"
 	if len(values) > 0 {
 		path += "?" + strings.Join(values, "&")
 	}
@@ -258,7 +258,7 @@ func controlEvents(ctx context.Context, flags *flag.FlagSet, target targetFlags,
 	if *last != "" {
 		headers["Last-Event-ID"] = *last
 	}
-	res, err := c.Stream(ctx, "/v1/events", headers)
+	res, err := c.Stream(ctx, "/v2/events", headers)
 	if err != nil {
 		return err
 	}
@@ -309,8 +309,8 @@ func (d *deleteFlags) Set(path string) error {
 }
 
 func controlConfig(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
-	if len(args) == 0 || (args[0] != "get" && args[0] != "set") {
-		return fmt.Errorf("用法: xmesh control config get|set")
+	if len(args) == 0 || (args[0] != "get" && args[0] != "set" && args[0] != "reload") {
+		return fmt.Errorf("用法: xmesh control config get|set|reload")
 	}
 	verb := args[0]
 	var edits editFlags
@@ -327,16 +327,19 @@ func controlConfig(ctx context.Context, flags *flag.FlagSet, target targetFlags,
 		return err
 	}
 	if verb == "get" {
-		return show(c.Do(ctx, "GET", "/v1/config", nil, nil))
+		return show(c.Do(ctx, "GET", "/v2/config", nil, nil))
 	}
-	current, err := c.Do(ctx, "GET", "/v1/config", nil, nil)
+	if verb == "reload" {
+		return show(c.Do(ctx, "POST", "/v2/config/reload", nil, nil))
+	}
+	current, err := c.Do(ctx, "GET", "/v2/config", nil, nil)
 	if err != nil {
 		return err
 	}
 	if err = current.Error(); err != nil {
 		return err
 	}
-	var file v1.ConfigResponse
+	var file v2.ConfigResponse
 	if err = json.Unmarshal(current.Body, &file); err != nil {
 		return err
 	}
@@ -356,7 +359,7 @@ func controlConfig(ctx context.Context, flags *flag.FlagSet, target targetFlags,
 	default:
 		return fmt.Errorf("--yaml-file 与 --set/--delete 二选一")
 	}
-	return show(c.Do(ctx, "PUT", "/v1/config", v1.ConfigPutRequest{Content: string(next), DryRun: *dry}, map[string]string{"If-Match": `"` + file.ETag + `"`}))
+	return show(c.Do(ctx, "PUT", "/v2/config", v2.ConfigPutRequest{Content: string(next), DryRun: *dry}, map[string]string{"If-Match": `"` + file.ETag + `"`}))
 }
 
 func text2(v any) string { return fmt.Sprint(v) }
@@ -369,7 +372,7 @@ func controlStatus(node, stateDir string, machine bool) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	r, err := control.NewClient(e).Do(ctx, "GET", "/v1/status", nil, nil)
+	r, err := control.NewClient(e).Do(ctx, "GET", "/v2/status", nil, nil)
 	if err != nil {
 		return err
 	}

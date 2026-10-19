@@ -112,8 +112,8 @@ async function smoke() {
   const deadline = Date.now() + 60_000;
   let status = false;
   while (Date.now() < deadline && !exited) {
-    status = kernelServer.requests.some((r) => r.method === "GET" && r.path === "/v1/status");
-    if (status && kernelServer.requests.some((r) => r.path.startsWith("/v1/events"))) break;
+    status = kernelServer.requests.some((r) => r.method === "GET" && r.path === "/v2/status");
+    if (status && kernelServer.requests.some((r) => r.path.startsWith("/v2/events"))) break;
     await new Promise((r) => setTimeout(r, 250));
   }
   const seen = kernelServer.requests.map((r) => `${r.method} ${r.path}`);
@@ -134,6 +134,6 @@ async function smoke() {
   } catch {}
 
   if (exited) fail(`packaged app exited early (${JSON.stringify(exited)}):\n${output}`);
-  if (!status) fail(`packaged app never asked the fake kernel for /v1/status; saw [${seen.join(", ")}]\n${output}`);
+  if (!status) fail(`packaged app never asked the fake kernel for /v2/status; saw [${seen.join(", ")}]\n${output}`);
   ok(`packaged app started and talked to the fake kernel: ${[...new Set(seen)].join(", ")}`);
 }

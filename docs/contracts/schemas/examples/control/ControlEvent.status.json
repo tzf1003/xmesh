@@ -5,7 +5,7 @@
   "type": "status",
   "data": {
     "control": {
-      "api_version": "1.0",
+      "api_version": "2.0",
       "kernel_version": "0.4.0",
       "boot_id": "9f3c21aa",
       "capabilities": [
@@ -84,13 +84,33 @@
       "listen": ":8080",
       "url": "http://127.0.0.1:8080/mcp",
       "auth": "pat",
-      "access": ["localhost", "lan", "tailnet"],
+      "access": [
+        "localhost",
+        "lan",
+        "tailnet"
+      ],
       "hosts": [],
       "addresses": [
-        { "kind": "localhost", "host": "127.0.0.1", "url": "http://127.0.0.1:8080/mcp" },
-        { "kind": "lan", "host": "192.168.1.20", "url": "http://192.168.1.20:8080/mcp" },
-        { "kind": "tailnet_ip", "host": "100.100.1.20", "url": "http://100.100.1.20:8080/mcp" },
-        { "kind": "tailnet_name", "host": "node.example.ts.net", "url": "http://node.example.ts.net:8080/mcp" }
+        {
+          "kind": "localhost",
+          "host": "127.0.0.1",
+          "url": "http://127.0.0.1:8080/mcp"
+        },
+        {
+          "kind": "lan",
+          "host": "192.168.1.20",
+          "url": "http://192.168.1.20:8080/mcp"
+        },
+        {
+          "kind": "tailnet_ip",
+          "host": "100.100.1.20",
+          "url": "http://100.100.1.20:8080/mcp"
+        },
+        {
+          "kind": "tailnet_name",
+          "host": "node.example.ts.net",
+          "url": "http://node.example.ts.net:8080/mcp"
+        }
       ]
     },
     "peers": {

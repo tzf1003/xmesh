@@ -59,7 +59,7 @@ export function parseSetup(v: unknown): { ok: true; value: SetupParams } | { ok:
   const allowed = ["nodeName", "mode", "roles", "workspace", "controlUrl", "authkeyFile", "authkey", "autoAuthkey", "browserLogin", "authkeyUser"];
   if (!Object.keys(r).every((k) => allowed.includes(k))) return bad("node_name");
   if (typeof r.nodeName !== "string" || !NODE_NAME.test(r.nodeName)) return bad("node_name");
-  if (r.mode !== "lan" && r.mode !== "tailnet") return bad("mode");
+  if (r.mode !== "lan" && r.mode !== "tailnet" && r.mode !== "coexist") return bad("mode");
   if (!Array.isArray(r.roles) || r.roles.length === 0) return bad("roles");
   const roles: ("agent" | "gateway")[] = [];
   for (const role of r.roles) {
@@ -69,7 +69,7 @@ export function parseSetup(v: unknown): { ok: true; value: SetupParams } | { ok:
   // The config schema requires `agent.cwd_policy.allow` even on a gateway-only node, so the workspace is always needed.
   if (typeof r.workspace !== "string" || !isAbsolutePath(r.workspace)) return bad("workspace");
   const value: SetupParams = { nodeName: r.nodeName, mode: r.mode, roles, workspace: r.workspace };
-  if (r.mode === "tailnet") {
+  if (r.mode === "tailnet" || r.mode === "coexist") {
     const url = r.controlUrl === undefined ? DEFAULT_CONTROL_URL : r.controlUrl;
     if (typeof url !== "string" || !isHttpsUrl(url)) return bad("control_url");
     // Exactly one source: create one with the saved credential, paste one, or
@@ -145,25 +145,27 @@ export function generateDenyFile(): string {
 export function generateConfig(p: SetupParams, denyFile: string): string {
   const lines: string[] = [
     "# 由 xmesh 首次运行向导生成。之后可以在面板的「设置」页修改。",
+    "schema_version: 2",
     "node:",
     `  name: ${q(p.nodeName)}`,
     `  roles: [${p.roles.join(", ")}]`,
     "mesh:",
-    `  mode: ${p.mode}`,
+    "  lan:",
+    `    enabled: ${p.mode !== "tailnet"}`,
+    "    mdns: true",
+    "  tailnet:",
+    `    enabled: ${p.mode !== "lan"}`,
   ];
-  if (p.mode === "tailnet") {
-    lines.push(`  control_url: ${q(p.controlUrl ?? DEFAULT_CONTROL_URL)}`);
-    if (p.browserLogin === true) lines.push("  auth_method: browser");
-    else lines.push(`  authkey_file: ${q(p.authkeyFile ?? "")}`);
-  } else {
-    lines.push("  lan:", "    mdns: true");
+  if (p.mode !== "lan") {
+    lines.push(`    control_url: ${q(p.controlUrl ?? DEFAULT_CONTROL_URL)}`);
+    if (p.browserLogin === true) lines.push("    auth_method: browser");
+    else lines.push(`    authkey_file: ${q(p.authkeyFile ?? "")}`);
   }
   if (p.roles.includes("gateway")) {
     // Every interface, with access limited per request by gateway.access (localhost, LAN and tailnet by default).
     lines.push("gateway:", '  listen: ":8080"');
   }
-  // Always present: the schema requires it even when the agent role is off. LAN peers are trusted as
-  // `tag:peer` (pairing); tailnet devices authenticate with the `tag:device` tag the control plane grants.
+  // Paired device roles are independent of the enabled network paths.
   lines.push(
     "agent:",
     `  default_cwd: ${q(p.workspace)}`,
@@ -171,7 +173,7 @@ export function generateConfig(p: SetupParams, denyFile: string): string {
     `    allow: [${q(p.workspace)}]`,
     `    deny_file: ${q(denyFile)}`,
     "  authz:",
-    `    "${p.mode === "tailnet" ? "tag:device" : "tag:peer"}":`,
+    '    \"tag:peer\":',
     '      tools: ["*"]',
     '      backends: ["*"]',
   );

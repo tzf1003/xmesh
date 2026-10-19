@@ -35,15 +35,15 @@ import { fixture } from "./fixtures";
 //
 //   - config content containing "BROKEN" fails validation (422 config_invalid);
 //   - content containing "allow_dangerous: true" produces a diff entry with weakens_security;
-//   - PUT /v1/config without If-Match answers 428, with a stale one 412 + current_etag;
-//   - PATCH /v1/config applies JSON Pointer edits to the parsed document (arrays are
+//   - PUT /v2/config without If-Match answers 428, with a stale one 412 + current_etag;
+//   - PATCH /v2/config applies JSON Pointer edits to the parsed document (arrays are
 //     replaced whole, missing maps are created, a scalar on the path is 409), all or
 //     nothing, then writes the document back as JSON text (JSON is valid YAML). Comments
 //     are not kept by the fake; the real kernel keeps them.
 //   - PATs keep their token in a file under `tokenDir`, like the kernel's 0600 files: create,
 //     rotate and delete rewrite or remove it, and nothing else ever returns the token body;
-//   - PUT /v1/gateway validates the reach settings; the addresses follow from listen and access;
-//   - PATCH and DELETE /v1/backends/{name}/env keep environment variables write-only, like the kernel's
+//   - PUT /v2/gateway validates the reach settings; the addresses follow from listen and access;
+//   - PATCH and DELETE /v2/backends/{name}/env keep environment variables write-only, like the kernel's
 //     private file: nothing the fake serves ever carries a value, only `envValues` (a test hook) reads one.
 //     Loader and shell hijack names (LD_*, XMESH_* ...) answer 400 invalid_args with reason env_denied.
 
@@ -97,7 +97,7 @@ export class PanelData {
   /** Valid settings the kernel could not put into effect, as the reload reports them (control API 1.5). */
   applyErrors: { section: string; message: string }[] = [];
   private effectiveEtag: string;
-  /** The parsed document `GET /v1/config` returns. PATCH edits it; a PUT adopts it only when the text is JSON. */
+  /** The parsed document `GET /v2/config` returns. PATCH edits it; a PUT adopts it only when the text is JSON. */
   private model: Record<string, unknown>;
   pats: PatInfo[];
   gateway: GatewayReach;
@@ -167,33 +167,33 @@ export class PanelData {
   handle(method: string, url: string, body: unknown, ifMatch: string | undefined): RouteResult | undefined {
     const u = new URL(url, "http://x");
     const p = u.pathname;
-    if (p === "/v1/computer" && method === "GET") return ok(this.computer);
-    if (p === "/v1/computer/pause" && method === "POST") {
+    if (p === "/v2/computer" && method === "GET") return ok(this.computer);
+    if (p === "/v2/computer/pause" && method === "POST") {
       const req = body as { paused?: unknown };
       if (typeof req?.paused !== "boolean") return err(400, "invalid_args", "paused required", { field: "paused" });
       this.computer.paused = req.paused;
       if (req.paused) this.computer.sessions = [];
       return ok(this.computer);
     }
-    if (p === "/v1/computer/revoke" && method === "POST") {
+    if (p === "/v2/computer/revoke" && method === "POST") {
       const req = body as { session_id?: unknown };
       if (typeof req?.session_id !== "string") return err(400, "invalid_args", "session_id required", { field: "session_id" });
       this.computer.sessions = this.computer.sessions.filter((s) => s.session_id !== req.session_id);
       return ok(this.computer);
     }
-    if (method === "GET" && p === "/v1/sessions") return ok(this.sessions);
-    if (method === "GET" && p === "/v1/config") return this.getConfig();
-    if (method === "PUT" && p === "/v1/config") return this.putConfig(body, ifMatch);
-    if (method === "PATCH" && p === "/v1/config") return this.patchConfig(body, ifMatch);
-    if (method === "POST" && p === "/v1/config/reload") return ok(this.reload());
-    if (p === "/v1/pats" || p.startsWith("/v1/pats/")) return this.pats_(method, p, body);
-    if (method === "PUT" && p === "/v1/gateway") return this.putGateway(body);
-    const env = /^\/v1\/backends\/([^/]+)\/env$/.exec(p);
+    if (method === "GET" && p === "/v2/sessions") return ok(this.sessions);
+    if (method === "GET" && p === "/v2/config") return this.getConfig();
+    if (method === "PUT" && p === "/v2/config") return this.putConfig(body, ifMatch);
+    if (method === "PATCH" && p === "/v2/config") return this.patchConfig(body, ifMatch);
+    if (method === "POST" && p === "/v2/config/reload") return ok(this.reload());
+    if (p === "/v2/pats" || p.startsWith("/v2/pats/")) return this.pats_(method, p, body);
+    if (method === "PUT" && p === "/v2/gateway") return this.putGateway(body);
+    const env = /^\/v2\/backends\/([^/]+)\/env$/.exec(p);
     if (env && (method === "PATCH" || method === "DELETE")) return this.backendEnvRoute(method, decodeURIComponent(env[1]!), body);
-    if (p.startsWith("/v1/ingress/")) return this.ingress(method, p, body);
-    if (p.startsWith("/v1/pair/")) return this.pair(method, p, body);
-    if (p === "/v1/ci" || p.startsWith("/v1/ci/")) return this.ci.handle(method, p, u.searchParams, body);
-    if (method === "GET" && p === "/v1/audit") return this.auditQuery(u.searchParams);
+    if (p.startsWith("/v2/ingress/")) return this.ingress(method, p, body);
+    if (p.startsWith("/v2/pair/")) return this.pair(method, p, body);
+    if (p === "/v2/ci" || p.startsWith("/v2/ci/")) return this.ci.handle(method, p, u.searchParams, body);
+    if (method === "GET" && p === "/v2/audit") return this.auditQuery(u.searchParams);
     return undefined;
   }
 
@@ -397,11 +397,11 @@ export class PanelData {
   }
 
   private pats_(method: string, p: string, body: unknown): RouteResult {
-    if (method === "GET" && p === "/v1/pats") {
+    if (method === "GET" && p === "/v2/pats") {
       const list: PatList = { pats: this.pats, enforced: this.pats.length > 0 };
       return ok(list);
     }
-    if (method === "POST" && p === "/v1/pats") {
+    if (method === "POST" && p === "/v2/pats") {
       const b = body as { name?: string; scopes?: string[] } | null;
       if (!b?.name || !Array.isArray(b.scopes)) return err(400, "invalid_args", "name 和 scopes 必填");
       if (this.pats.some((x) => x.name === b.name)) return err(409, "conflict", "名字已存在");
@@ -410,7 +410,7 @@ export class PanelData {
       const secret: PatSecret = { pat: info, token: this.tokenOf(b.name)! };
       return ok(secret, 201);
     }
-    const m = /^\/v1\/pats\/([^/]+)(\/rotate)?$/.exec(p);
+    const m = /^\/v2\/pats\/([^/]+)(\/rotate)?$/.exec(p);
     if (m) {
       const name = decodeURIComponent(m[1]!);
       const i = this.pats.findIndex((x) => x.name === name);
@@ -447,7 +447,7 @@ export class PanelData {
     return { listen, url: addresses[0]!.url, auth: "pat", access: [...access], hosts: [...hosts], addresses };
   }
 
-  /** PUT /v1/gateway: whole-replacement validation, then the new reach. Hot fields apply at once; the caller sets restart for listen. */
+  /** PUT /v2/gateway: whole-replacement validation, then the new reach. Hot fields apply at once; the caller sets restart for listen. */
   putGateway(body: unknown): RouteResult {
     if (typeof body !== "object" || body === null || Array.isArray(body)) return err(400, "invalid_args", "请求体必须是对象");
     const b = body as Record<string, unknown>;
@@ -479,15 +479,15 @@ export class PanelData {
 
   private ingress(method: string, p: string, body: unknown): RouteResult {
     if (!this.hasIngress) return err(409, "role_disabled", "本机没有启用 ingress 角色");
-    if (method === "GET" && p === "/v1/ingress/clients") return ok({ issuer: this.issuer, clients: this.clients });
-    const m = /^\/v1\/ingress\/clients\/([^/]+)$/.exec(p);
+    if (method === "GET" && p === "/v2/ingress/clients") return ok({ issuer: this.issuer, clients: this.clients });
+    const m = /^\/v2\/ingress\/clients\/([^/]+)$/.exec(p);
     if (method === "DELETE" && m) {
       const id = decodeURIComponent(m[1]!);
       if (!this.clients.some((c) => c.client_id === id)) return err(404, "not_found", "没有这个客户端");
       this.clients = this.clients.filter((c) => c.client_id !== id);
       return { status: 204 };
     }
-    if (method === "PUT" && p === "/v1/ingress/password") {
+    if (method === "PUT" && p === "/v2/ingress/password") {
       const pw = (body as { password?: unknown } | null)?.password;
       if (typeof pw !== "string" || pw.length < 12 || pw.length > 256) return err(400, "invalid_args", "口令长度需为 12 到 256", { field: "password" });
       this.passwordRotations++;
@@ -497,19 +497,18 @@ export class PanelData {
   }
 
   private pair(method: string, p: string, body: unknown): RouteResult {
-    if (this.mode !== "lan") return err(409, "unsupported_mode", "只有 lan 模式支持配对");
-    if (p === "/v1/pair/password") return this.pairPasswordRoute(method, body);
-    if (method === "GET" && p === "/v1/pair/discovered") return ok({ devices: this.discovered });
-    if (method === "POST" && p === "/v1/pair/connect") return this.connectPair(body);
-    if (method === "POST" && p === "/v1/pair/export") return ok({ pair: this.localPair });
-    if (method === "POST" && p === "/v1/pair/import") {
+    if (p === "/v2/pair/password") return this.pairPasswordRoute(method, body);
+    if (method === "GET" && p === "/v2/pair/discovered") return ok({ devices: this.discovered });
+    if (method === "POST" && p === "/v2/pair/connect") return this.connectPair(body);
+    if (method === "POST" && p === "/v2/pair/export") return ok({ pair: this.localPair });
+    if (method === "POST" && p === "/v2/pair/import") {
       const b = body as { pair?: PairDocument; fingerprint?: string; tags?: string[] } | null;
       if (!b?.pair || typeof b.fingerprint !== "string") return err(400, "invalid_args", "缺少 pair 或 fingerprint");
       const norm = (s: string): string => s.replaceAll(":", "").toLowerCase();
       if (norm(b.fingerprint) !== norm(b.pair.fingerprint)) return err(422, "fingerprint_mismatch", "指纹与证书不符");
       const tags = b.tags ?? ["tag:peer", "tag:device"];
       this.imported.push({ name: b.pair.name, tags });
-      return ok({ name: b.pair.name, fingerprint: b.pair.fingerprint, tags, restart_required: true });
+      return ok({ name: b.pair.name, fingerprint: b.pair.fingerprint, tags, restart_required: false });
     }
     return err(404, "not_found", "没有这个接口");
   }
@@ -548,7 +547,8 @@ export class PanelData {
     const name = device?.name ?? "peer-typed";
     this.discovered = this.discovered.filter((d) => d.name !== name);
     this.imported.push({ name, tags: ["tag:peer", "tag:device"] });
-    return ok({ name, fingerprint: device?.fingerprint ?? "3f2a9c4e1b7d8a60f5e2c9b1d4a7e8f03c6b5a29d1e4f7a8b0c3d6e9f2a5b8c1", address, tags: ["tag:peer", "tag:device"] });
+    const fingerprint = device?.fingerprint ?? "9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68";
+    return ok({ name, device_id: `dev-${fingerprint}`, path: b.path ?? "lan", fingerprint, address, tags: ["tag:peer", "tag:device"] });
   }
 
   private auditQuery(q: URLSearchParams): RouteResult {

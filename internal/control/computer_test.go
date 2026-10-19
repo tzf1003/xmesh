@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/computer"
 )
 
@@ -19,8 +19,8 @@ func TestComputerEndpointStatusUsesStartupAuthority(t *testing.T) {
 				text = strings.Replace(text, "agent:\n", "agent:\n  computer:\n    endpoint: "+endpoint+"\n", 1)
 			}
 			f := newFixtureConfig(t, text, quietPoll)
-			var status v1.StatusResponse
-			if err := json.Unmarshal(f.ok("GET", "/v1/status", nil, "StatusResponse").Body, &status); err != nil {
+			var status v2.StatusResponse
+			if err := json.Unmarshal(f.ok("GET", "/v2/status", nil, "StatusResponse").Body, &status); err != nil {
 				t.Fatal(err)
 			}
 			want := endpoint
@@ -68,11 +68,11 @@ func TestComputerLocalPauseRevokeAndSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := f.ok("GET", "/v1/computer", nil, "ComputerState")
+	r := f.ok("GET", "/v2/computer", nil, "ComputerState")
 	if strings.Contains(string(r.Body), "lease_token") {
 		t.Fatal("local UI received lease token")
 	}
-	f.ok("POST", "/v1/computer/revoke", v1.ComputerRevokeRequest{SessionID: s.ID}, "ComputerState")
+	f.ok("POST", "/v2/computer/revoke", v2.ComputerRevokeRequest{SessionID: s.ID}, "ComputerState")
 	if len(manager.Sessions("")) != 0 {
 		t.Fatal("revoke retained control")
 	}
@@ -80,12 +80,12 @@ func TestComputerLocalPauseRevokeAndSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.ok("POST", "/v1/computer/pause", v1.ComputerPauseRequest{Paused: true}, "ComputerState")
+	f.ok("POST", "/v2/computer/pause", v2.ComputerPauseRequest{Paused: true}, "ComputerState")
 	if len(manager.Sessions("")) != 0 {
 		t.Fatal("takeover retained control")
 	}
 	if _, err = manager.Open(context.Background(), "agent/session", computer.OpenRequest{Mode: "control"}); err == nil {
 		t.Fatal("paused control opened")
 	}
-	f.ok("POST", "/v1/computer/pause", v1.ComputerPauseRequest{Paused: false}, "ComputerState")
+	f.ok("POST", "/v2/computer/pause", v2.ComputerPauseRequest{Paused: false}, "ComputerState")
 }

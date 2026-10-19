@@ -159,4 +159,4 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 
 **令牌的生命周期。** 首次启动或升级时若没有任何 PAT，内核创建 `default`。已有令牌从不因启动、升级、更新或重装而改动。轮转只能由用户经 [CTR-CTL-09](../contracts/control.md#ctr-ctl-09) 的轮转路由发起。删除最后一个 PAT 被拒绝。
 
-验收：`internal/config/access_test.go` 覆盖来源与 Host 判定；`internal/role/gateway/gateway_access_test.go` 覆盖三层拒绝；`internal/control/gateway_token_test.go` 覆盖升级不轮换与 `PUT /v1/gateway`；`internal/app/gateway_info_test.go` 覆盖地址列表。
+验收：`internal/config/access_test.go` 覆盖来源与 Host 判定；`internal/role/gateway/gateway_access_test.go` 覆盖三层拒绝；`internal/control/gateway_token_test.go` 覆盖升级不轮换与 `PUT /v2/gateway`；`internal/app/gateway_info_test.go` 覆盖地址列表。

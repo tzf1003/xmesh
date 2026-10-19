@@ -2,7 +2,7 @@
 
 XmeSh（X mesh，也是 X me sh：我的 sh）让 Codex Cloud、Claude Cloud 等云端 Agent 通过标准 Remote MCP，调度真实开发设备（Windows / macOS / Linux）上的终端、文件和本机已有的 MCP 工具。
 
-每台机器运行同一个 `xmesh` 进程，同时承担 Agent 与 Gateway 角色。设备只在 tailnet 内可达；需要对云端暴露时，由带 `--ingress` 的节点提供带 OAuth 2.1 的公网 MCP 端点。
+每台机器运行同一个 `xmesh` 进程，同时承担 Agent 与 Gateway 角色。设备通过统一公钥配对，可在局域网与 Tailnet 上独立连接；需要对云端暴露时，由带 `--ingress` 的节点提供带 OAuth 2.1 的公网 MCP 端点。
 
 ## 文档
 
@@ -52,8 +52,10 @@ go test -race ./...
 | --- | --- |
 | `xmesh serve --config xmesh.yaml` | 按配置启动已启用的角色（`agent`、`gateway`、`ingress`）。`--local` 为本机开发模式，`--ingress` 临时加上入口角色 |
 | `xmesh install --config xmesh.yaml` | 安装为用户级常驻服务：macOS LaunchAgent、Linux systemd 用户服务、Windows 当前用户的登录计划任务。Windows 加 `--system` 改为注册管理员 SCM 服务 |
-| `xmesh pair --config xmesh.yaml --export 文件`<br>`xmesh pair ... --import 文件 --fingerprint 指纹` | `lan` 模式下导出本节点证书、导入并核对对端证书 |
+| `xmesh pair --config xmesh.yaml --export 文件`<br>`xmesh pair ... --import 文件 --fingerprint 指纹` | 导出设备公钥、导入并独立核对对端公钥指纹，即时建立设备信任 |
 | `xmesh status` | 读取运行中节点的 `sys.info`（不读配置文件）。`--endpoint` 指向 Gateway 时要加 `--tool local/sys.info`；`--json` 输出原始 JSON |
 | `xmesh version` | 打印版本号 |
+
+新版配置使用 `schema_version: 2`，通过 `mesh.lan.enabled` 与 `mesh.tailnet.enabled` 开启共存。首次连接和断线恢复优先 LAN，健康连接保持当前路径。一台设备在界面中显示一次。旧节点停止后运行 `xmesh migrate --config xmesh.yaml` 备份并转换配置，再按新版重新配对。
 
 构建、配对、入网和运行的完整步骤见 [运行手册](docs/operations.md)；测试版（pre-release）的发布方式见运行手册的“测试版发布”。

@@ -39,10 +39,10 @@ test("scopes are split on commas and whitespace, deduplicated and validated", ()
 });
 
 test("pair text parsing accepts the bare document and the export response, nothing else", () => {
-  const doc = { name: "p1", fingerprint: FP, certificate_pem: PEM, tags: ["tag:peer"] };
+  const doc = { name: "p1", version: 2 as const, device_id: `dev-${FP}`, fingerprint: FP, public_key: "MCowBQYDK2VwAyEAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", tags: ["tag:peer"] };
   assert.ok(parsePairText(JSON.stringify(doc)).ok);
   assert.ok(parsePairText(JSON.stringify({ pair: doc })).ok);
-  for (const t of ["", "not json", "[]", "null", JSON.stringify({ ...doc, certificate_pem: "x" }), JSON.stringify({ ...doc, admin: 1 })]) {
+  for (const t of ["", "not json", "[]", "null", JSON.stringify({ ...doc, public_key: "x" }), JSON.stringify({ ...doc, admin: 1 })]) {
     assert.equal(parsePairText(t).ok, false, t);
   }
 });

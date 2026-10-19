@@ -10,7 +10,7 @@ import (
 
 func Test_ControlClientUnreachableIsReadable(t *testing.T) {
 	c := &Client{node: "mac-a"}
-	raw := &url.Error{Op: "Get", URL: "http://xmesh-control/v1/status", Err: syscall.ECONNREFUSED}
+	raw := &url.Error{Op: "Get", URL: "http://xmesh-control/v2/status", Err: syscall.ECONNREFUSED}
 	err := c.unreachable(raw)
 	text := err.Error()
 	if !strings.Contains(text, "mac-a") || strings.Contains(text, "xmesh-control") || strings.Contains(text, "Get ") {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-pats:1",
+  "$id": "urn:xmesh:schema:control-pats:2",
   "title": "ControlPats",
   "description": "CTR-CTL-09。本机 Gateway PAT。令牌正文只出现在 PatSecret，且只在创建或轮转的那一次响应里；内核同时把它写入 0600 文件。",
   "$defs": {
@@ -9,17 +9,17 @@
       "additionalProperties": false,
       "required": ["name", "scopes", "token_file", "modified_at"],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "name": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName" },
         "scopes": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Scope" }
+          "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Scope" }
         },
         "token_file": { "type": "string", "minLength": 1 },
         "modified_at": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
             { "type": "null" }
           ],
           "description": "令牌文件的修改时间。文件缺失为 null。"
@@ -40,12 +40,12 @@
       "additionalProperties": false,
       "required": ["name", "scopes"],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
+        "name": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName" },
         "scopes": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Scope" }
+          "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Scope" }
         }
       }
     },

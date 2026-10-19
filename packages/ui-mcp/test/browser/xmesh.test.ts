@@ -3,9 +3,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { Controller } from "../../src/controller.js";
 import { parse } from "yaml";
 import { cleanup, config, finished } from "../helpers.js";
+
+// Explicit runtime paths skip Playwright's automatic development-app loader.
+// Use the loader from our pinned Playwright version so readiness is released
+// only after both debugger connections are attached.
+const require = createRequire(import.meta.url);
+const electronLoader = path.join(path.dirname(require.resolve("playwright-core/package.json")), "lib/server/electron/loader.js");
 
 for (const mode of ["mock", "real"] as const)
   test(
@@ -24,7 +31,7 @@ for (const mode of ["mock", "real"] as const)
         background_capable: true,
         script_enabled: true,
         executable: process.env.XMESH_UI_TEST_ELECTRON,
-        args: [...(process.platform === "linux" ? ["--no-sandbox"] : []), app],
+        args: [...(process.platform === "linux" ? ["--no-sandbox"] : []), "-r", electronLoader, app],
         env: {
           XMESH_UI_TEST: "1",
           XMESH_UI_LANG: "en",
@@ -57,6 +64,7 @@ for (const mode of ["mock", "real"] as const)
             protocol_version: 1,
             session_id: session,
             request_id: "real-heartbeat",
+            timeout_ms: 45000,
             code: `export default async ({ page, step, expect }) => {
               await step("connected", () => expect(page.locator('[data-testid="state"][data-state="ok"], [data-testid="state"][data-state="degraded"]')).toBeVisible());
               await step("control-through-idle", async () => {
@@ -67,10 +75,19 @@ for (const mode of ["mock", "real"] as const)
                   await new Promise(resolve => setTimeout(resolve, 25));
                 } while (Date.now() < until);
               });
+              await step("control-after-idle", async () => {
+                await new Promise(resolve => setTimeout(resolve, 2500));
+                const checked = await page.evaluate(async () => {
+                  const config = await window.xmesh.getConfig();
+                  if (!config.ok) return config;
+                  return window.xmesh.putConfig({ content: config.data.content, etag: config.data.etag, dryRun: true });
+                });
+                expect(checked.ok, JSON.stringify(checked.error)).toBe(true);
+              });
             };`,
           }, true);
-          const stable = await finished(controller, heartbeat.run_id, 15000);
-          assert.equal(stable.status, "passed", JSON.stringify(stable.error));
+          const stable = await finished(controller, heartbeat.run_id, 60000);
+          assert.equal(stable.status, "passed", JSON.stringify(stable));
         }
         const request = controller.submit({
           protocol_version: 1,

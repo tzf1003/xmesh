@@ -1,7 +1,6 @@
 name: Headscale 互联与 OAuth 协议
-# 单个 runner 上起一次性 Headscale，两个 xmesh 节点经 tsnet 入网并互调，再由第三个节点跑
-# Test_TailnetPeerConnectivity，最后让 scripts/oauth_client.py 走完 ingress 的 OAuth 协议路径。
-# 只覆盖直连路径：同机节点之间直连，虽然 Headscale 内置了回环 DERP/STUN（让 netcheck 成功，避免 magicsock 反复重绑）。DERP 兜底仍按 docs/validation/2026-10-15-headscale.md 多机验收。
+# 临时 HTTPS Headscale 上运行两个已完成公钥配对的新版设备节点，验证双向文件、exec、PTY。
+# 第三个 Ingress 节点验证完整 OAuth 流程；两个独立 Docker 网络空间验证双路径及 DERP 恢复。
 on:
   push:
   pull_request:
@@ -33,5 +32,9 @@ jobs:
           chmod +x "$RUNNER_TEMP/headscale"
       - name: 构建 xmesh
         run: go build -o "$RUNNER_TEMP/xmesh" ./cmd/xmesh
-      - name: 两节点互调、tailnet 探针、ingress OAuth 协议
+      - name: 新版设备双向互调与 ingress OAuth 协议
         run: python3 scripts/headscale_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh" --ingress
+      - name: 独立网络空间的 LAN 与 Tailnet 共存
+        run: python3 scripts/coexist_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh"
+      - name: DERP 路径及资源恢复
+        run: python3 scripts/coexist_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh" --force-derp

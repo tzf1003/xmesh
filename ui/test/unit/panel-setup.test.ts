@@ -66,12 +66,12 @@ test("a gateway-only node still gets the agent section the config schema require
   assert.match(text, /allow: \["\/home\/me\/work"\]/);
 });
 
-test("trusted callers: LAN peers by pairing tag, tailnet devices by the tag the control plane grants", () => {
+test("trusted device roles are the same on every network path", () => {
   assert.match(generateConfig(must(lan), deny), /^ {4}"tag:peer":/m);
   assert.doesNotMatch(generateConfig(must(lan), deny), /tag:device/);
   const tn = generateConfig(must({ ...lan, mode: "tailnet", authkeyFile: "/k" }), deny);
-  assert.match(tn, /^ {4}"tag:device":/m);
-  assert.doesNotMatch(tn, /tag:peer/);
+  assert.match(tn, /^ {4}"tag:peer":/m);
+  assert.doesNotMatch(tn, /tag:device/);
 });
 
 test("generated config carries the values and the safe defaults", () => {
@@ -83,7 +83,8 @@ test("generated config carries the values and the safe defaults", () => {
   const tn = generateConfig(must(tailnet), deny);
   assert.match(tn, /control_url: "https:\/\/controlplane\.tailscale\.com"/);
   assert.match(tn, /authkey_file: "\/home\/me\/authkey"/);
-  assert.doesNotMatch(tn, /mdns/);
+  assert.equal(parse(tn).mesh.lan.enabled, false);
+  assert.equal(parse(tn).mesh.tailnet.enabled, true);
 });
 
 test("quoting keeps hostile paths inside their scalar", () => {
@@ -244,7 +245,7 @@ test("a pasted auth key is validated, written to a 0600 file, and never reaches 
   const keyFile = path.join("/state", "dev-1", AUTHKEY_FILE_NAME);
   assert.equal(written[keyFile], `${key}\n`);
   assert.doesNotMatch(written[path.join("/state", "dev-1", "xmesh.yaml")]!, new RegExp(key));
-  assert.equal(parse(written[path.join("/state", "dev-1", "xmesh.yaml")]!).mesh.authkey_file, keyFile);
+  assert.equal(parse(written[path.join("/state", "dev-1", "xmesh.yaml")]!).mesh.tailnet.authkey_file, keyFile);
 });
 
 test("auth key sources are exclusive and each is checked", () => {
@@ -273,7 +274,7 @@ test("automatic admission mints a tagged key with the saved credential", async (
   const keyFile = path.join("/state", "dev-1", AUTHKEY_FILE_NAME);
   assert.deepEqual(asked, [{ file: keyFile, tags: ["tag:device"] }]);
   assert.deepEqual(calls, [`install --config ${path.join("/state", "dev-1", "xmesh.yaml")}`, `start --config ${path.join("/state", "dev-1", "xmesh.yaml")}`]);
-  assert.equal(parse(written[path.join("/state", "dev-1", "xmesh.yaml")]!).mesh.authkey_file, keyFile);
+  assert.equal(parse(written[path.join("/state", "dev-1", "xmesh.yaml")]!).mesh.tailnet.authkey_file, keyFile);
 
   // Without the hook the run stops before touching install or start.
   const plain = recordingHost("/state");
@@ -316,8 +317,8 @@ test("browser login completes before installation and failures permit a retry", 
   assert.ok(preview.ok);
   if (!preview.ok) return;
   const config = parse(preview.data.config);
-  assert.equal(config.mesh.auth_method, "browser");
-  assert.equal(config.mesh.authkey_file, undefined);
+  assert.equal(config.mesh.tailnet.auth_method, "browser");
+  assert.equal(config.mesh.tailnet.authkey_file, undefined);
   h.host.loginTailnet = async (file, state, url) => {
     assert.deepEqual(h.calls, []);
     assert.equal(file, preview.data.configPath);

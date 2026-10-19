@@ -159,7 +159,7 @@ test("a window that is not the panel cannot call the control IPC", async () => {
     }
   });
   expect(outcome).toContain("untrusted sender");
-  expect(h.kernel.requests.some((r) => r.path === "/v1/drain")).toBe(false);
+  expect(h.kernel.requests.some((r) => r.path === "/v2/drain")).toBe(false);
 });
 
 test("panel calls reach the kernel through the main process, with validated arguments", async () => {
@@ -170,7 +170,7 @@ test("panel calls reach the kernel through the main process, with validated argu
 
   await navigate(page, "runtime");
   await page.getByRole("button", { name: "暂停接收新调用" }).click();
-  await expect.poll(() => h.kernel.requests.some((r) => r.path === "/v1/drain")).toBe(true);
+  await expect.poll(() => h.kernel.requests.some((r) => r.path === "/v2/drain")).toBe(true);
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");
   await expectIcon(h, "draining");
 

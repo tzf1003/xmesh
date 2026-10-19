@@ -6,7 +6,7 @@ export const PEER_SLOTS: readonly Point[] = [
   { x: 170, y: 205 }, { x: 630, y: 205 }, { x: 665, y: 400 }, { x: 560, y: 505 },
   { x: 350, y: 515 }, { x: 155, y: 460 }, { x: 120, y: 330 }, { x: 470, y: 425 },
 ];
-export const peerKey = (p: Peer): string => p.node_id || p.name;
+export const peerKey = (p: Peer): string => p.device_id || p.node_id || p.name;
 
 /** Stable slots survive status/order changes and filtering for the mounted instance. */
 export function assignSlots(peers: readonly Peer[], previous: ReadonlyMap<string, number>): Map<string, number> {

@@ -2,13 +2,14 @@ package control
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
-	"github.com/tzf1003/xmesh/internal/mesh"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/internal/device"
 )
 
 const (
@@ -25,20 +26,20 @@ type fakePairing struct {
 	updated    time.Time
 	locked     time.Time
 	failures   int
-	found      []mesh.DiscoveredPeer
+	found      []v2.PairDiscoveredDevice
 	connectErr error
 	pairedWith string
 }
 
-func (p *fakePairing) PairPasswordState() mesh.PairPasswordState {
+func (p *fakePairing) PairPasswordState() device.PairStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return mesh.PairPasswordState{Set: p.set, UpdatedAt: p.updated, FailedAttempts: p.failures, LockedUntil: p.locked}
+	return device.PairStatus{Set: p.set, UpdatedAt: p.updated, FailedAttempts: p.failures, LockedUntil: p.locked}
 }
 
-func (p *fakePairing) SetPairPassword(password string) (mesh.PairPasswordState, error) {
-	if err := mesh.ValidatePairPassword(password); err != nil {
-		return mesh.PairPasswordState{}, err
+func (p *fakePairing) SetPairPassword(password string) (device.PairStatus, error) {
+	if err := device.ValidatePassword(password); err != nil {
+		return device.PairStatus{}, err
 	}
 	p.mu.Lock()
 	p.set, p.updated = true, time.Now().UTC().Truncate(time.Millisecond)
@@ -53,58 +54,58 @@ func (p *fakePairing) ClearPairPassword() error {
 	return nil
 }
 
-func (p *fakePairing) Discovered(context.Context) ([]mesh.DiscoveredPeer, error) {
+func (p *fakePairing) Discovered(context.Context) ([]v2.PairDiscoveredDevice, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return append([]mesh.DiscoveredPeer(nil), p.found...), nil
+	return append([]v2.PairDiscoveredDevice(nil), p.found...), nil
 }
 
-func (p *fakePairing) PairWith(_ context.Context, address, password, expected string) (mesh.Trusted, error) {
+func (p *fakePairing) PairWith(_ context.Context, _ device.PathKind, address, password, expected string) (device.Trust, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pairedWith = address
 	if p.connectErr != nil {
-		return mesh.Trusted{}, p.connectErr
+		return device.Trust{}, p.connectErr
 	}
 	if password != pairTestPassword {
-		return mesh.Trusted{}, &mesh.PairError{Reason: mesh.PairWrongPassword}
+		return device.Trust{}, device.ErrPairProof
 	}
-	if expected != "" && expected != pairPeerFingerprint {
-		return mesh.Trusted{}, &mesh.PairError{Reason: mesh.PairFingerprintMismatch}
+	if expected != "" && expected != "dev-"+pairPeerFingerprint {
+		return device.Trust{}, device.ErrIdentityMismatch
 	}
-	return mesh.Trusted{Name: "peer-b", Fingerprint: pairPeerFingerprint, CertificatePEM: "-----BEGIN CERTIFICATE-----\n", Tags: []string{"tag:peer", "tag:device"}}, nil
+	return device.Trust{Document: device.Document{Name: "peer-b", DeviceID: "dev-" + pairPeerFingerprint}, Tags: []string{"tag:peer", "tag:device"}}, nil
 }
 
 // conformance: CTR-CTL-08 the connection-password routes exist only in lan mode, and the password
 // never comes back in a response.
-func Test_CTRCTL08_PairPasswordRoutesNeedLANMode(t *testing.T) {
+func Test_CTRCTL08_PairingUnavailableWithoutRuntimeService(t *testing.T) {
 	f := newFixtureConfig(t, tailnetConfig)
-	apiError(t, f.do("GET", "/v1/pair/password", nil, nil), v1.ErrUnsupportedMode)
-	apiError(t, f.do("PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: pairTestPassword}, nil), v1.ErrUnsupportedMode)
-	apiError(t, f.do("DELETE", "/v1/pair/password", nil, nil), v1.ErrUnsupportedMode)
-	apiError(t, f.do("GET", "/v1/pair/discovered", nil, nil), v1.ErrUnsupportedMode)
-	apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Address: "10.0.0.2", Password: pairTestPassword}, nil), v1.ErrUnsupportedMode)
+	apiError(t, f.do("GET", "/v2/pair/password", nil, nil), v2.ErrUnavailable)
+	apiError(t, f.do("PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: pairTestPassword}, nil), v2.ErrUnavailable)
+	apiError(t, f.do("DELETE", "/v2/pair/password", nil, nil), v2.ErrUnavailable)
+	apiError(t, f.do("GET", "/v2/pair/discovered", nil, nil), v2.ErrUnavailable)
+	apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Address: "10.0.0.2", Password: pairTestPassword}, nil), v2.ErrUnavailable)
 }
 
 // conformance: CTR-CTL-08
 func Test_CTRCTL08_PairPasswordLifecycle(t *testing.T) {
 	plain := newFixture(t)
-	apiError(t, plain.do("GET", "/v1/pair/password", nil, nil), v1.ErrUnavailable)
+	apiError(t, plain.do("GET", "/v2/pair/password", nil, nil), v2.ErrUnavailable)
 	plain.server.Close() // the pipe name is global on Windows: one server per node at a time
 
 	admin := &fakePairing{}
 	f := newFixture(t, func(o *Options) { o.Pairing = admin })
 
-	var state v1.PairPasswordState
-	decodeAs(t, f.ok("GET", "/v1/pair/password", nil, "PairPasswordState"), &state)
+	var state v2.PairPasswordState
+	decodeAs(t, f.ok("GET", "/v2/pair/password", nil, "PairPasswordState"), &state)
 	if state.Set || state.UpdatedAt != nil || state.LockedUntil != nil || state.FailedAttempts != 0 {
 		t.Fatalf("a new node has no password: %+v", state)
 	}
 
-	apiError(t, f.do("PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: "short"}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: " " + pairTestPassword}, nil), v1.ErrInvalidArgs)
+	apiError(t, f.do("PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: "short"}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: " " + pairTestPassword}, nil), v2.ErrInvalidArgs)
 
-	put := f.ok("PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: pairTestPassword}, "PairPasswordState")
+	put := f.ok("PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: pairTestPassword}, "PairPasswordState")
 	if strings.Contains(string(put.Body), pairTestPassword) {
 		t.Fatalf("the response echoes the password: %s", put.Body)
 	}
@@ -113,10 +114,10 @@ func Test_CTRCTL08_PairPasswordLifecycle(t *testing.T) {
 		t.Fatalf("after a set the password is set: %+v", state)
 	}
 
-	if r := f.do("DELETE", "/v1/pair/password", nil, nil); r.Status != 204 {
+	if r := f.do("DELETE", "/v2/pair/password", nil, nil); r.Status != 204 {
 		t.Fatalf("delete: %d %s", r.Status, r.Body)
 	}
-	decodeAs(t, f.ok("GET", "/v1/pair/password", nil, "PairPasswordState"), &state)
+	decodeAs(t, f.ok("GET", "/v2/pair/password", nil, "PairPasswordState"), &state)
 	if state.Set {
 		t.Fatalf("after a delete the password is not set: %+v", state)
 	}
@@ -127,8 +128,8 @@ func Test_CTRCTL08_PairPasswordReportsLockout(t *testing.T) {
 	until := time.Now().Add(time.Minute).UTC().Truncate(time.Millisecond)
 	admin := &fakePairing{set: true, updated: time.Now().UTC().Truncate(time.Millisecond), failures: 5, locked: until}
 	f := newFixture(t, func(o *Options) { o.Pairing = admin })
-	var state v1.PairPasswordState
-	decodeAs(t, f.ok("GET", "/v1/pair/password", nil, "PairPasswordState"), &state)
+	var state v2.PairPasswordState
+	decodeAs(t, f.ok("GET", "/v2/pair/password", nil, "PairPasswordState"), &state)
 	if state.FailedAttempts != 5 || state.LockedUntil == nil || !state.LockedUntil.Equal(until) {
 		t.Fatalf("lockout is not reported: %+v", state)
 	}
@@ -136,29 +137,29 @@ func Test_CTRCTL08_PairPasswordReportsLockout(t *testing.T) {
 
 // conformance: CTR-CTL-08
 func Test_CTRCTL08_PairDiscoveryAndConnect(t *testing.T) {
-	admin := &fakePairing{found: []mesh.DiscoveredPeer{{Name: "peer-b", Fingerprint: pairPeerFingerprint, Address: "192.168.31.15:7433", SeenAt: time.Now()}}}
+	admin := &fakePairing{found: []v2.PairDiscoveredDevice{{Name: "peer-b", Fingerprint: pairPeerFingerprint, Address: "192.168.31.15:7433", Path: "lan", DeviceID: "dev-" + pairPeerFingerprint, SeenAt: v2.Now()}}}
 	f := newFixture(t, func(o *Options) { o.Pairing = admin })
 
-	var listed v1.PairDiscoveredResponse
-	decodeAs(t, f.ok("GET", "/v1/pair/discovered", nil, "PairDiscoveredResponse"), &listed)
+	var listed v2.PairDiscoveredResponse
+	decodeAs(t, f.ok("GET", "/v2/pair/discovered", nil, "PairDiscoveredResponse"), &listed)
 	if len(listed.Devices) != 1 || listed.Devices[0].Name != "peer-b" || listed.Devices[0].Address != "192.168.31.15:7433" {
 		t.Fatalf("discovered: %+v", listed)
 	}
 
-	apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Password: pairTestPassword}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Fingerprint: "not-a-fingerprint", Password: pairTestPassword}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Address: "192.168.31.15:7433", Password: "short"}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Fingerprint: pairOtherFingerprint, Password: pairTestPassword}, nil), v1.ErrNotFound)
+	apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Password: pairTestPassword}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Fingerprint: "not-a-fingerprint", Password: pairTestPassword}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Address: "192.168.31.15:7433", Password: "short"}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Fingerprint: pairOtherFingerprint, Password: pairTestPassword}, nil), v2.ErrNotFound)
 	// A named address with a different expected certificate stops before anything is confirmed.
-	apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Address: "192.168.31.15:7433", Fingerprint: pairOtherFingerprint, Password: pairTestPassword}, nil), v1.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Address: "192.168.31.15:7433", Fingerprint: pairOtherFingerprint, Password: pairTestPassword}, nil), v2.ErrInvalidArgs)
 
 	// With only a fingerprint, the address comes from the discovery list.
-	var connected v1.PairConnectResponse
-	decodeAs(t, f.ok("POST", "/v1/pair/connect", v1.PairConnectRequest{Fingerprint: pairPeerFingerprint, Password: pairTestPassword}, "PairConnectResponse"), &connected)
-	if admin.pairedWith != "192.168.31.15:7433" || connected.Name != "peer-b" || connected.Address != "192.168.31.15:7433" || len(connected.Tags) != 2 {
+	var connected v2.PairConnectResponse
+	decodeAs(t, f.ok("POST", "/v2/pair/connect", v2.PairConnectRequest{Fingerprint: pairPeerFingerprint, Password: pairTestPassword}, "PairConnectResponse"), &connected)
+	if admin.pairedWith != "https://192.168.31.15:7433" || connected.Name != "peer-b" || connected.Address != "https://192.168.31.15:7433" || len(connected.Tags) != 2 {
 		t.Fatalf("connect: paired with %q, response %+v", admin.pairedWith, connected)
 	}
-	if strings.Contains(string(f.do("GET", "/v1/pair/discovered", nil, nil).Body), pairTestPassword) {
+	if strings.Contains(string(f.do("GET", "/v2/pair/discovered", nil, nil).Body), pairTestPassword) {
 		t.Fatal("discovery leaks the password")
 	}
 }
@@ -168,30 +169,30 @@ func Test_CTRCTL08_PairConnectErrors(t *testing.T) {
 	cases := []struct {
 		name       string
 		err        error
-		code       v1.ErrorCode
+		code       v2.ErrorCode
 		reason     string
 		retryAfter bool
 	}{
-		{"wrong password", &mesh.PairError{Reason: mesh.PairWrongPassword}, v1.ErrPairRejected, "wrong_password", false},
-		{"no password on the peer", &mesh.PairError{Reason: mesh.PairNoPassword}, v1.ErrPairRejected, "no_password", false},
-		{"old peer", &mesh.PairError{Reason: mesh.PairUnsupportedBy}, v1.ErrPairRejected, "unsupported_peer", false},
-		{"unreachable", &mesh.PairError{Reason: mesh.PairUnreachable}, v1.ErrPairRejected, "unreachable", false},
-		{"bad peer", &mesh.PairError{Reason: mesh.PairBadPeer}, v1.ErrPairRejected, "bad_peer", false},
-		{"rate limited", &mesh.PairError{Reason: mesh.PairRateLimited, RetryAfter: 30 * time.Second}, v1.ErrRateLimited, "", true},
-		{"fingerprint mismatch", &mesh.PairError{Reason: mesh.PairFingerprintMismatch}, v1.ErrInvalidArgs, "fingerprint_mismatch", false},
+		{"wrong password", device.ErrPairProof, v2.ErrPairRejected, "wrong_password", false},
+		{"no password on the peer", device.ErrPairDisabled, v2.ErrPairRejected, "no_password", false},
+		{"old peer", device.ErrPairUnsupported, v2.ErrPairRejected, "unsupported_peer", false},
+		{"unreachable", errors.New("network unreachable"), v2.ErrPairRejected, "unreachable", false},
+		{"bad peer", device.ErrPairProof, v2.ErrPairRejected, "wrong_password", false},
+		{"rate limited", device.ErrPairLimited, v2.ErrRateLimited, "", true},
+		{"fingerprint mismatch", device.ErrIdentityMismatch, v2.ErrInvalidArgs, "fingerprint_mismatch", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			admin := &fakePairing{connectErr: c.err}
 			f := newFixture(t, func(o *Options) { o.Pairing = admin })
-			e := apiError(t, f.do("POST", "/v1/pair/connect", v1.PairConnectRequest{Address: "192.168.31.15", Password: pairTestPassword}, nil), c.code)
+			e := apiError(t, f.do("POST", "/v2/pair/connect", v2.PairConnectRequest{Address: "192.168.31.15", Password: pairTestPassword}, nil), c.code)
 			if e.Reason != c.reason {
 				t.Errorf("reason = %q, want %q", e.Reason, c.reason)
 			}
 			if c.retryAfter != (e.RetryAfterMS != nil && *e.RetryAfterMS == 30000) {
 				t.Errorf("retry_after_ms = %v", e.RetryAfterMS)
 			}
-			if c.code == v1.ErrInvalidArgs && e.Field != "fingerprint" {
+			if c.code == v2.ErrInvalidArgs && e.Field != "fingerprint" {
 				t.Errorf("field = %q, want fingerprint", e.Field)
 			}
 		})
@@ -202,8 +203,8 @@ func Test_CTRCTL08_PairConnectErrors(t *testing.T) {
 func Test_CTRCTL08_PasswordIsWriteOnly(t *testing.T) {
 	admin := &fakePairing{}
 	f := newFixture(t, func(o *Options) { o.Pairing = admin })
-	f.ok("PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: pairTestPassword}, "PairPasswordState")
-	for _, path := range []string{"/v1/pair/password", "/v1/pair/discovered", "/v1/status"} {
+	f.ok("PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: pairTestPassword}, "PairPasswordState")
+	for _, path := range []string{"/v2/pair/password", "/v2/pair/discovered", "/v2/status"} {
 		if body := string(f.do("GET", path, nil, nil).Body); strings.Contains(body, pairTestPassword) {
 			t.Errorf("%s leaks the password: %s", path, body)
 		}

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
 )
 
@@ -24,7 +24,7 @@ func sleeper(t *testing.T) *exec.Cmd {
 }
 
 func endpointOf(pid int, started time.Time) control.Endpoint {
-	return control.Endpoint{ControlEndpointFile: v1.ControlEndpointFile{PID: pid, StartedAt: v1.Time{Time: started}}}
+	return control.Endpoint{ControlEndpointFile: v2.ControlEndpointFile{PID: pid, StartedAt: v2.Time{Time: started}}}
 }
 
 func Test_WaitKernelExitBlocksWhileKernelRuns(t *testing.T) {

@@ -70,17 +70,17 @@ export class CiFake {
 
   handle(method: string, p: string, params: URLSearchParams, body: unknown): RouteResult | undefined {
     const b = (body ?? {}) as Record<string, unknown>;
-    if (method === "GET" && p === "/v1/ci") return ok(this.overview());
-    if (method === "POST" && p === "/v1/ci/accounts") return this.createAccount(b);
-    const acc = /^\/v1\/ci\/accounts\/([^/]+)(\/repos)?$/.exec(p);
+    if (method === "GET" && p === "/v2/ci") return ok(this.overview());
+    if (method === "POST" && p === "/v2/ci/accounts") return this.createAccount(b);
+    const acc = /^\/v2\/ci\/accounts\/([^/]+)(\/repos)?$/.exec(p);
     if (acc) {
       const id = decodeURIComponent(acc[1]!);
       if (method === "DELETE" && !acc[2]) return this.deleteAccount(id);
       if (method === "GET" && acc[2]) return this.repos(id, params);
     }
-    if (method === "POST" && p === "/v1/ci/bindings") return this.createBinding(b);
-    if (method === "POST" && p === "/v1/ci/import/inspect") return this.inspect(b);
-    const bind = /^\/v1\/ci\/bindings\/([^/]+)(\/restart|\/repair)?$/.exec(p);
+    if (method === "POST" && p === "/v2/ci/bindings") return this.createBinding(b);
+    if (method === "POST" && p === "/v2/ci/import/inspect") return this.inspect(b);
+    const bind = /^\/v2\/ci\/bindings\/([^/]+)(\/restart|\/repair)?$/.exec(p);
     if (bind) {
       const id = decodeURIComponent(bind[1]!);
       const binding = this.bindings.find((x) => x.id === id);

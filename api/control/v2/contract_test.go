@@ -1,4 +1,4 @@
-package v1_test
+package v2_test
 
 import (
 	"bytes"
@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
-	"github.com/tzf1003/xmesh/api/control/v1/schemacheck"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/api/control/v2/schemacheck"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
 )
 
@@ -20,55 +20,55 @@ const schemaDir = "../../../docs/contracts/schemas"
 // typeFor maps a schema definition name to a fresh Go value of the matching type. A fixture whose
 // definition is missing here fails the test, so a new definition cannot ship without a Go type.
 var typeFor = map[string]func() any{
-	"ComputerState":           func() any { return new(v1.ComputerState) },
-	"ComputerPauseRequest":    func() any { return new(v1.ComputerPauseRequest) },
-	"ComputerRevokeRequest":   func() any { return new(v1.ComputerRevokeRequest) },
-	"ControlEndpointFile":     func() any { return new(v1.ControlEndpointFile) },
-	"StatusResponse":          func() any { return new(v1.StatusResponse) },
-	"DrainRequest":            func() any { return new(v1.DrainRequest) },
-	"DrainResponse":           func() any { return new(v1.DrainResponse) },
-	"PeersResponse":           func() any { return new(v1.PeersResponse) },
-	"SessionsResponse":        func() any { return new(v1.SessionsResponse) },
-	"ControlEvent":            func() any { return new(v1.Event) },
-	"ConfigResponse":          func() any { return new(v1.ConfigResponse) },
-	"ConfigPutRequest":        func() any { return new(v1.ConfigPutRequest) },
-	"ConfigPutResponse":       func() any { return new(v1.ConfigPutResponse) },
-	"ConfigReloadResponse":    func() any { return new(v1.ConfigReloadResponse) },
-	"ConfigEditRequest":       func() any { return new(v1.ConfigEditRequest) },
-	"PairExportResponse":      func() any { return new(v1.PairExportResponse) },
-	"PairImportRequest":       func() any { return new(v1.PairImportRequest) },
-	"PairImportResponse":      func() any { return new(v1.PairImportResponse) },
-	"PairPasswordRequest":     func() any { return new(v1.PairPasswordRequest) },
-	"PairPasswordState":       func() any { return new(v1.PairPasswordState) },
-	"PairDiscoveredResponse":  func() any { return new(v1.PairDiscoveredResponse) },
-	"PairConnectRequest":      func() any { return new(v1.PairConnectRequest) },
-	"PairConnectResponse":     func() any { return new(v1.PairConnectResponse) },
-	"PatList":                 func() any { return new(v1.PatList) },
-	"PatCreateRequest":        func() any { return new(v1.PatCreateRequest) },
-	"PatSecret":               func() any { return new(v1.PatSecret) },
-	"BackendEnvPatch":         func() any { return new(v1.BackendEnvPatch) },
-	"BackendEnvResponse":      func() any { return new(v1.BackendEnvResponse) },
-	"GatewayUpdateRequest":    func() any { return new(v1.GatewayUpdateRequest) },
-	"GatewayUpdateResponse":   func() any { return new(v1.GatewayUpdateResponse) },
-	"IngressClientsResponse":  func() any { return new(v1.IngressClientsResponse) },
-	"IngressPasswordRequest":  func() any { return new(v1.IngressPasswordRequest) },
-	"IngressPasswordResponse": func() any { return new(v1.IngressPasswordResponse) },
-	"AuditQuery":              func() any { return new(v1.AuditQuery) },
-	"AuditResponse":           func() any { return new(v1.AuditResponse) },
-	"ControlError":            func() any { return new(v1.Error) },
-	"CiAccount":               func() any { return new(v1.CiAccount) },
-	"CiAccountCreate":         func() any { return new(v1.CiAccountCreate) },
-	"CiBinding":               func() any { return new(v1.CiBinding) },
-	"CiBindingCreate":         func() any { return new(v1.CiBindingCreate) },
-	"CiBindingPatch":          func() any { return new(v1.CiBindingPatch) },
-	"CiBindingRepair":         func() any { return new(v1.CiBindingRepair) },
-	"CiDeleteQuery":           func() any { return new(v1.CiDeleteQuery) },
-	"CiImportInspectRequest":  func() any { return new(v1.CiImportInspectRequest) },
-	"CiImportInspectResponse": func() any { return new(v1.CiImportInspectResponse) },
-	"CiOverview":              func() any { return new(v1.CiOverview) },
-	"CiReposQuery":            func() any { return new(v1.CiReposQuery) },
-	"CiReposResponse":         func() any { return new(v1.CiReposResponse) },
-	"CiSummary":               func() any { return new(v1.CiSummary) },
+	"ComputerState":           func() any { return new(v2.ComputerState) },
+	"ComputerPauseRequest":    func() any { return new(v2.ComputerPauseRequest) },
+	"ComputerRevokeRequest":   func() any { return new(v2.ComputerRevokeRequest) },
+	"ControlEndpointFile":     func() any { return new(v2.ControlEndpointFile) },
+	"StatusResponse":          func() any { return new(v2.StatusResponse) },
+	"DrainRequest":            func() any { return new(v2.DrainRequest) },
+	"DrainResponse":           func() any { return new(v2.DrainResponse) },
+	"PeersResponse":           func() any { return new(v2.PeersResponse) },
+	"SessionsResponse":        func() any { return new(v2.SessionsResponse) },
+	"ControlEvent":            func() any { return new(v2.Event) },
+	"ConfigResponse":          func() any { return new(v2.ConfigResponse) },
+	"ConfigPutRequest":        func() any { return new(v2.ConfigPutRequest) },
+	"ConfigPutResponse":       func() any { return new(v2.ConfigPutResponse) },
+	"ConfigReloadResponse":    func() any { return new(v2.ConfigReloadResponse) },
+	"ConfigEditRequest":       func() any { return new(v2.ConfigEditRequest) },
+	"PairExportResponse":      func() any { return new(v2.PairExportResponse) },
+	"PairImportRequest":       func() any { return new(v2.PairImportRequest) },
+	"PairImportResponse":      func() any { return new(v2.PairImportResponse) },
+	"PairPasswordRequest":     func() any { return new(v2.PairPasswordRequest) },
+	"PairPasswordState":       func() any { return new(v2.PairPasswordState) },
+	"PairDiscoveredResponse":  func() any { return new(v2.PairDiscoveredResponse) },
+	"PairConnectRequest":      func() any { return new(v2.PairConnectRequest) },
+	"PairConnectResponse":     func() any { return new(v2.PairConnectResponse) },
+	"PatList":                 func() any { return new(v2.PatList) },
+	"PatCreateRequest":        func() any { return new(v2.PatCreateRequest) },
+	"PatSecret":               func() any { return new(v2.PatSecret) },
+	"BackendEnvPatch":         func() any { return new(v2.BackendEnvPatch) },
+	"BackendEnvResponse":      func() any { return new(v2.BackendEnvResponse) },
+	"GatewayUpdateRequest":    func() any { return new(v2.GatewayUpdateRequest) },
+	"GatewayUpdateResponse":   func() any { return new(v2.GatewayUpdateResponse) },
+	"IngressClientsResponse":  func() any { return new(v2.IngressClientsResponse) },
+	"IngressPasswordRequest":  func() any { return new(v2.IngressPasswordRequest) },
+	"IngressPasswordResponse": func() any { return new(v2.IngressPasswordResponse) },
+	"AuditQuery":              func() any { return new(v2.AuditQuery) },
+	"AuditResponse":           func() any { return new(v2.AuditResponse) },
+	"ControlError":            func() any { return new(v2.Error) },
+	"CiAccount":               func() any { return new(v2.CiAccount) },
+	"CiAccountCreate":         func() any { return new(v2.CiAccountCreate) },
+	"CiBinding":               func() any { return new(v2.CiBinding) },
+	"CiBindingCreate":         func() any { return new(v2.CiBindingCreate) },
+	"CiBindingPatch":          func() any { return new(v2.CiBindingPatch) },
+	"CiBindingRepair":         func() any { return new(v2.CiBindingRepair) },
+	"CiDeleteQuery":           func() any { return new(v2.CiDeleteQuery) },
+	"CiImportInspectRequest":  func() any { return new(v2.CiImportInspectRequest) },
+	"CiImportInspectResponse": func() any { return new(v2.CiImportInspectResponse) },
+	"CiOverview":              func() any { return new(v2.CiOverview) },
+	"CiReposQuery":            func() any { return new(v2.CiReposQuery) },
+	"CiReposResponse":         func() any { return new(v2.CiReposResponse) },
+	"CiSummary":               func() any { return new(v2.CiSummary) },
 }
 
 func fixtures(t *testing.T, sub string) map[string][]byte {
@@ -147,12 +147,12 @@ func Test_CTRCTL02_FixturesRoundTripThroughGoTypes(t *testing.T) {
 //
 // Event payloads decode into their typed structs and survive the SSE framing.
 func Test_CTRCTL04_EventPayloadsAndSSE(t *testing.T) {
-	seen := map[v1.EventType]bool{}
+	seen := map[v2.EventType]bool{}
 	for name, raw := range fixtures(t, "") {
 		if defOf(name) != "ControlEvent" {
 			continue
 		}
-		var ev v1.Event
+		var ev v2.Event
 		if err := json.Unmarshal(raw, &ev); err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +161,7 @@ func Test_CTRCTL04_EventPayloadsAndSSE(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		again, err := v1.NewEvent(ev.ID, ev.Seq, ev.Time, ev.Type, payload)
+		again, err := v2.NewEvent(ev.ID, ev.Seq, ev.Time, ev.Type, payload)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,13 +185,13 @@ func Test_CTRCTL04_EventPayloadsAndSSE(t *testing.T) {
 			t.Fatalf("%s: unexpected SSE frame %q", name, frame)
 		}
 		if ev.ID != "" {
-			boot, seq, err := v1.ParseEventID(ev.ID)
-			if err != nil || v1.FormatEventID(boot, seq) != ev.ID || seq != ev.Seq {
+			boot, seq, err := v2.ParseEventID(ev.ID)
+			if err != nil || v2.FormatEventID(boot, seq) != ev.ID || seq != ev.Seq {
 				t.Fatalf("%s: event id %q does not match seq %d (%v)", name, ev.ID, ev.Seq, err)
 			}
 		}
 	}
-	for _, typ := range []v1.EventType{v1.EventHello, v1.EventReset, v1.EventStatus, v1.EventPeer, v1.EventCall, v1.EventSession, v1.EventWarning, v1.EventConfig, v1.EventLifecycle} {
+	for _, typ := range []v2.EventType{v2.EventHello, v2.EventReset, v2.EventStatus, v2.EventPeer, v2.EventCall, v2.EventSession, v2.EventWarning, v2.EventConfig, v2.EventLifecycle} {
 		if !seen[typ] {
 			t.Errorf("no fixture for event type %s", typ)
 		}
@@ -222,8 +222,8 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := map[string]bool{}
-	capabilities := map[v1.Capability]bool{}
-	for _, r := range v1.Routes() {
+	capabilities := map[v2.Capability]bool{}
+	for _, r := range v2.Routes() {
 		if ids[r.ID] {
 			t.Errorf("duplicate route id %s", r.ID)
 		}
@@ -242,12 +242,12 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 			t.Errorf("route %s is a stream and has a response type", r.ID)
 		}
 	}
-	for _, c := range []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI, v1.CapComputer} {
+	for _, c := range []v2.Capability{v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer} {
 		if !capabilities[c] {
 			t.Errorf("capability %s has no route", c)
 		}
 	}
-	if r, ok := v1.RouteByID("control.config.put"); !ok || r.IfMatch != "required" {
+	if r, ok := v2.RouteByID("control.config.put"); !ok || r.IfMatch != "required" {
 		t.Errorf("control.config.put must require If-Match: %+v", r)
 	}
 }
@@ -294,16 +294,16 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 		}
 	}
 	check("Capability", enumOf(t, "control-common.schema.json", "$defs", "Capability", "enum"),
-		sorted(v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPair, v1.CapPats, v1.CapGateway, v1.CapIngress, v1.CapAudit, v1.CapCI, v1.CapComputer))
+		sorted(v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer))
 	check("Severity", enumOf(t, "control-common.schema.json", "$defs", "Severity", "enum"),
-		sorted(v1.SeverityInfo, v1.SeverityWarning, v1.SeverityError))
+		sorted(v2.SeverityInfo, v2.SeverityWarning, v2.SeverityError))
 	check("WarningCode", enumOf(t, "control-common.schema.json", "$defs", "WarningCode", "enum"),
-		sorted(v1.WarnRestartRequired, v1.WarnPolicyReloadFailed, v1.WarnAllowDangerous, v1.WarnTailnetNotReady, v1.WarnAuthkeyUnreadable, v1.WarnPeerOffline, v1.WarnAuditDropped, v1.WarnQuotaExhausted, v1.WarnSandboxUnavailable, v1.WarnFirewallBlocked, v1.WarnUnclassified))
-	check("DrainMode", enumOf(t, "control-common.schema.json", "$defs", "DrainMode", "enum"), sorted(v1.DrainKeep, v1.DrainKill))
-	check("Actor", enumOf(t, "control-common.schema.json", "$defs", "Actor", "enum"), sorted(v1.ActorFile, v1.ActorControl))
-	check("ErrorCode", enumOf(t, "control-error.schema.json", "$defs", "ControlErrorCode", "enum"), sorted(v1.ErrorCodes()...))
+		sorted(v2.WarnRestartRequired, v2.WarnPolicyReloadFailed, v2.WarnAllowDangerous, v2.WarnTailnetNotReady, v2.WarnAuthkeyUnreadable, v2.WarnPeerOffline, v2.WarnAuditDropped, v2.WarnQuotaExhausted, v2.WarnSandboxUnavailable, v2.WarnFirewallBlocked, v2.WarnUnclassified))
+	check("DrainMode", enumOf(t, "control-common.schema.json", "$defs", "DrainMode", "enum"), sorted(v2.DrainKeep, v2.DrainKill))
+	check("Actor", enumOf(t, "control-common.schema.json", "$defs", "Actor", "enum"), sorted(v2.ActorFile, v2.ActorControl))
+	check("ErrorCode", enumOf(t, "control-error.schema.json", "$defs", "ControlErrorCode", "enum"), sorted(v2.ErrorCodes()...))
 	check("Transport", enumOf(t, "control-endpoint.schema.json", "$defs", "ControlEndpointFile", "properties", "transport", "enum"),
-		sorted(v1.TransportUnix, v1.TransportPipe))
+		sorted(v2.TransportUnix, v2.TransportPipe))
 
 	raw, err := os.ReadFile(filepath.Join(schemaDir, "control-error.schema.json"))
 	if err != nil {
@@ -315,13 +315,13 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range v1.ErrorCodes() {
+	for _, code := range v2.ErrorCodes() {
 		if doc.Status[string(code)] != code.HTTPStatus() {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v1.APIVersion != "1.9" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 1.9", v1.APIVersion)
+	if v2.APIVersion != "2.0" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 2.0", v2.APIVersion)
 	}
 }
 
@@ -344,7 +344,7 @@ func Test_CTRCTL09_SecretsOnlyInPatSecret(t *testing.T) {
 				rt = rt.Elem()
 			}
 			// A lease token is a fencing sequence number, not a credential (CTR-LEASE-01).
-			if rt.Kind() != reflect.Struct || seen[rt] || rt == reflect.TypeOf(v1.BackendLease{}) {
+			if rt.Kind() != reflect.Struct || seen[rt] || rt == reflect.TypeOf(v2.BackendLease{}) {
 				return
 			}
 			seen[rt] = true
@@ -362,7 +362,7 @@ func Test_CTRCTL09_SecretsOnlyInPatSecret(t *testing.T) {
 		walk(reflect.TypeOf(mk()), "")
 	}
 	var err error
-	_, err = json.Marshal(v1.Session{})
+	_, err = json.Marshal(v2.Session{})
 	if err == nil {
 		t.Error("an empty Session must not encode")
 	}

@@ -49,7 +49,7 @@
 | [11 已决事项与风险](design/11-decisions.md) | 五项已决、风险与缓解 |
 | [12 桌面 UI 与本机控制通道](design/12-ui-and-control.md) | Windows / macOS 托盘与面板、UI 与内核解耦、拆分与验收 |
 | [13 tailnet 管理与 DERP 提供商路径](design/13-mesh-admin-and-derp.md) | UI 端管理 tag、权限、第三方 DERP；国内 DERP 提供商的研究与风险 |
-| [14 连接密码配对与内网发现](design/14-password-pairing.md) | `lan` 模式下设置连接密码、SPAKE2 配对、发现未配对设备；CON-NET-09 的修订 |
+| [14 设备连接密码与发现](design/14-password-pairing.md) | LAN / Tailnet 统一 SPAKE2 配对、设备公钥信任与发现 |
 | [15 GitHub Actions 运行器托管](design/15-github-runner.md) | 内核监督官方运行器：面板绑定仓库、多项目、保活、导入已有运行器；CTR-CTL-15 |
 | [19 Computer 三端远程桌面](design/19-computer.md) | Agent 桌面观察与输入、租约、三端执行器和验收进度（实现中） |
 | [术语表](glossary.md) | 角色、身份、资源名词 |

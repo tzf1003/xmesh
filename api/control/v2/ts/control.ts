@@ -136,6 +136,7 @@ export type Actor = "file" | "control";
  * 与 CTR-GW-05 的 drain 载荷同义。keep 拒绝新调用并保留现有资源，kill 另外终止本机全部 PTY 并释放全部租约。
  */
 export type DrainMode = "keep" | "kill";
+export type DeviceId = string;
 export type ControlErrorCode =
   | "invalid_args"
   | "forbidden"
@@ -193,11 +194,11 @@ export type ControlEvent =
   | ConfigEvent
   | LifecycleEvent;
 /**
- * 证书 SHA-256，小写十六进制，无分隔符。
+ * 设备 SPKI 公钥的 SHA-256，与 device_id 的摘要一致。
  */
 export type PairFingerprint = string;
 /**
- * 主机或 主机:端口。省略端口时使用 7433。IPv6 地址放在方括号中。
+ * HTTPS 设备端点；手动输入主机或主机:端口时由内核补全为 https://host:7433。
  */
 export type PairAddress = string;
 /**
@@ -259,7 +260,12 @@ export interface AuditEvent {
     | "policy_reload_failed"
     | "progress_unrouted"
     | "audit_dropped"
-    | "control_call";
+    | "control_call"
+    | "device_link_online"
+    | "device_link_reconnecting"
+    | "device_link_offline"
+    | "device_link_revoked"
+    | "device_link_identity_conflict";
   /**
    * 调用经由哪条通道发生。缺省等于 mcp。control 表示本机控制通道（CTR-CTL-01），此时 caller 形如 control:<系统身份>，tool 是路由编号（如 control.config.put）。
    */
@@ -749,7 +755,7 @@ export interface CiImportInspectResponse {
   ephemeral?: boolean;
 }
 /**
- * POST /v1/ci/bindings/{id}/repair 的请求体，可以是空对象。
+ * POST /v2/ci/bindings/{id}/repair 的请求体，可以是空对象。
  */
 export interface CiBindingRepair {
   /**
@@ -899,7 +905,7 @@ export interface ConfigEdit {
   delete?: boolean;
 }
 /**
- * PATCH /v1/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。
+ * PATCH /v2/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。
  */
 export interface ConfigEditRequest {
   /**
@@ -971,7 +977,7 @@ export interface ConfigReloadResponse {
 }
 export interface ApplyError {
   /**
-   * 没能生效的部分，目前是 gateway。
+   * 没能生效的部分：gateway、ingress、mesh.lan 或 mesh.tailnet。
    */
   section: string;
   /**
@@ -995,6 +1001,12 @@ export interface DrainRequest {
    * 与 CTR-GW-05 的 drain 载荷同义。keep 拒绝新调用并保留现有资源，kill 另外终止本机全部 PTY 并释放全部租约。
    */
   mode?: "keep" | "kill";
+  scope?: "local" | "device" | "mesh";
+  device?: string;
+  /**
+   * Remote drain per-device timeout in milliseconds. Omitted or zero uses 15000; the caller context bounds the whole fanout.
+   */
+  timeout_ms?: number;
 }
 export interface DrainResponse {
   drain: DrainState;
@@ -1006,6 +1018,11 @@ export interface DrainResponse {
    * 这次请求新释放的租约数。keep 与 resume 恒为 0。
    */
   released_leases: number;
+  outcomes?: DrainOutcome[];
+}
+export interface DrainOutcome {
+  device: string;
+  error?: string;
 }
 export interface ControlEndpointFile {
   api_version: ApiVersion;
@@ -1114,6 +1131,12 @@ export interface Peer {
    */
   version: string | null;
   info?: PeerInfo;
+  device_id?: DeviceId;
+  display_name?: string;
+  trust_state?: "self" | "paired" | "identity_conflict";
+  paths?: DevicePath[];
+  active_path?: "lan" | "tailnet";
+  connection_state?: "online" | "reconnecting" | "offline" | "identity_conflict";
 }
 /**
  * 网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。
@@ -1127,6 +1150,12 @@ export interface PeerInfo {
    * 最近一次读取失败的原因；成功之后以及读取完成前为 null。
    */
   error: string | null;
+}
+export interface DevicePath {
+  kind: "lan" | "tailnet";
+  address: string;
+  reachable: boolean;
+  verified_at: Timestamp | null;
 }
 export interface CallEventData {
   /**
@@ -1270,7 +1299,7 @@ export interface ControlInfo {
   capabilities: Capability[];
 }
 export interface NetworkIdentity {
-  mode: "tailnet" | "lan" | "local";
+  mode: "local" | "lan" | "tailnet" | "coexist" | "offline";
   node_id: string;
   tags: Tag[];
 }
@@ -1480,8 +1509,10 @@ export interface IngressPasswordResponse {
 export interface PairDocument {
   name: NodeName;
   fingerprint: PairFingerprint;
-  certificate_pem: string;
   tags: Tag[];
+  version: 2;
+  device_id: DeviceId;
+  public_key: string;
 }
 export interface PairExportResponse {
   pair: PairDocument;
@@ -1489,15 +1520,15 @@ export interface PairExportResponse {
 export interface PairImportRequest {
   pair: PairDocument;
   /**
-   * 用户在另一台设备上独立核对过的指纹。必须由 UI 用户确认后提交，内核比较它与 pair.fingerprint（忽略冒号与大小写），不一致返回 fingerprint_mismatch。
+   * 用户独立核对的设备公钥指纹。与设备 ID、公钥和文档内指纹同时验证。
    */
   fingerprint: string;
   /**
    * @minItems 1
    */
   tags?: [
-    "tag:peer" | "tag:device" | "tag:ingress",
-    ...("tag:peer" | "tag:device" | "tag:ingress")[]
+    "tag:peer" | "tag:device" | "tag:ingress" | "tag:admin",
+    ...("tag:peer" | "tag:device" | "tag:ingress" | "tag:admin")[]
   ];
 }
 export interface PairImportResponse {
@@ -1505,9 +1536,9 @@ export interface PairImportResponse {
   fingerprint: PairFingerprint;
   tags: Tag[];
   /**
-   * 与 xmesh pair 一致，重启节点后信任才生效时为 true。
+   * 共享信任服务即时生效。
    */
-  restart_required: boolean;
+  restart_required: false;
 }
 export interface PairPasswordRequest {
   password: PairPassword;
@@ -1533,11 +1564,10 @@ export interface PairPasswordState {
 export interface PairDiscoveredDevice {
   name: NodeName;
   fingerprint: PairFingerprint;
-  /**
-   * 内网中发现的地址，主机:端口。
-   */
-  address: string;
+  address: PairAddress;
   seen_at: Timestamp;
+  device_id: DeviceId;
+  path: "lan" | "tailnet";
 }
 export interface PairDiscoveredResponse {
   /**
@@ -1551,16 +1581,19 @@ export interface PairDiscoveredResponse {
 export interface PairConnectRequest {
   address?: PairAddress;
   /**
-   * 证书 SHA-256，小写十六进制，无分隔符。
+   * 设备 SPKI 公钥的 SHA-256，与 device_id 的摘要一致。
    */
   fingerprint?: string;
   password: PairPassword;
+  path?: "lan" | "tailnet";
 }
 export interface PairConnectResponse {
   name: NodeName;
   fingerprint: PairFingerprint;
   address: PairAddress;
   tags: Tag[];
+  device_id: DeviceId;
+  path: "lan" | "tailnet";
 }
 export interface PatInfo {
   name: NodeName;
@@ -1637,7 +1670,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "1.9" as const;
+export const CONTROL_API_VERSION = "2.0" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -1658,7 +1691,7 @@ export const CONTROL_CAPABILITIES = [
   "computer"
 ] as const;
 
-/** Event "type" values on GET /v1/events, in schema order. */
+/** Event "type" values on GET /v2/events, in schema order. */
 export const CONTROL_EVENT_TYPES = [
   "hello",
   "reset",
@@ -1712,7 +1745,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.status.get",
     "method": "GET",
-    "path": "/v1/status",
+    "path": "/v2/status",
     "capability": "status",
     "since": "1.0",
     "query": null,
@@ -1726,7 +1759,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.events.stream",
     "method": "GET",
-    "path": "/v1/events",
+    "path": "/v2/events",
     "capability": "events",
     "since": "1.0",
     "query": null,
@@ -1740,7 +1773,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.peers.list",
     "method": "GET",
-    "path": "/v1/peers",
+    "path": "/v2/peers",
     "capability": "peers",
     "since": "1.0",
     "query": null,
@@ -1754,7 +1787,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.sessions.list",
     "method": "GET",
-    "path": "/v1/sessions",
+    "path": "/v2/sessions",
     "capability": "sessions",
     "since": "1.0",
     "query": null,
@@ -1768,7 +1801,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.drain.start",
     "method": "POST",
-    "path": "/v1/drain",
+    "path": "/v2/drain",
     "capability": "drain",
     "since": "1.0",
     "query": null,
@@ -1779,13 +1812,14 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "if_match": "none",
     "errors": [
       "invalid_args",
-      "conflict"
+      "conflict",
+      "unavailable"
     ]
   },
   {
     "id": "control.drain.resume",
     "method": "POST",
-    "path": "/v1/resume",
+    "path": "/v2/resume",
     "capability": "drain",
     "since": "1.0",
     "query": null,
@@ -1799,7 +1833,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.config.get",
     "method": "GET",
-    "path": "/v1/config",
+    "path": "/v2/config",
     "capability": "config.read",
     "since": "1.0",
     "query": null,
@@ -1813,7 +1847,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.config.patch",
     "method": "PATCH",
-    "path": "/v1/config",
+    "path": "/v2/config",
     "capability": "config.write",
     "since": "1.3",
     "query": null,
@@ -1833,7 +1867,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.config.put",
     "method": "PUT",
-    "path": "/v1/config",
+    "path": "/v2/config",
     "capability": "config.write",
     "since": "1.0",
     "query": null,
@@ -1852,7 +1886,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.config.reload",
     "method": "POST",
-    "path": "/v1/config/reload",
+    "path": "/v2/config/reload",
     "capability": "config.write",
     "since": "1.4",
     "query": null,
@@ -1866,7 +1900,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.export",
     "method": "POST",
-    "path": "/v1/pair/export",
+    "path": "/v2/pair/export",
     "capability": "pair",
     "since": "1.0",
     "query": null,
@@ -1882,7 +1916,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.import",
     "method": "POST",
-    "path": "/v1/pair/import",
+    "path": "/v2/pair/import",
     "capability": "pair",
     "since": "1.0",
     "query": null,
@@ -1900,7 +1934,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.password.get",
     "method": "GET",
-    "path": "/v1/pair/password",
+    "path": "/v2/pair/password",
     "capability": "pair",
     "since": "1.5",
     "query": null,
@@ -1916,7 +1950,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.password.put",
     "method": "PUT",
-    "path": "/v1/pair/password",
+    "path": "/v2/pair/password",
     "capability": "pair",
     "since": "1.5",
     "query": null,
@@ -1933,7 +1967,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.password.delete",
     "method": "DELETE",
-    "path": "/v1/pair/password",
+    "path": "/v2/pair/password",
     "capability": "pair",
     "since": "1.5",
     "query": null,
@@ -1949,7 +1983,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.discovered",
     "method": "GET",
-    "path": "/v1/pair/discovered",
+    "path": "/v2/pair/discovered",
     "capability": "pair",
     "since": "1.5",
     "query": null,
@@ -1965,7 +1999,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pair.connect",
     "method": "POST",
-    "path": "/v1/pair/connect",
+    "path": "/v2/pair/connect",
     "capability": "pair",
     "since": "1.5",
     "query": null,
@@ -1985,7 +2019,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pats.list",
     "method": "GET",
-    "path": "/v1/pats",
+    "path": "/v2/pats",
     "capability": "pats",
     "since": "1.0",
     "query": null,
@@ -1999,7 +2033,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pats.create",
     "method": "POST",
-    "path": "/v1/pats",
+    "path": "/v2/pats",
     "capability": "pats",
     "since": "1.0",
     "query": null,
@@ -2016,7 +2050,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pats.rotate",
     "method": "POST",
-    "path": "/v1/pats/{name}/rotate",
+    "path": "/v2/pats/{name}/rotate",
     "capability": "pats",
     "since": "1.0",
     "query": null,
@@ -2032,7 +2066,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.pats.delete",
     "method": "DELETE",
-    "path": "/v1/pats/{name}",
+    "path": "/v2/pats/{name}",
     "capability": "pats",
     "since": "1.0",
     "query": null,
@@ -2048,7 +2082,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.backends.env.patch",
     "method": "PATCH",
-    "path": "/v1/backends/{name}/env",
+    "path": "/v2/backends/{name}/env",
     "capability": "config.write",
     "since": "1.7",
     "query": null,
@@ -2064,7 +2098,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.backends.env.delete",
     "method": "DELETE",
-    "path": "/v1/backends/{name}/env",
+    "path": "/v2/backends/{name}/env",
     "capability": "config.write",
     "since": "1.7",
     "query": null,
@@ -2080,7 +2114,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.gateway.update",
     "method": "PUT",
-    "path": "/v1/gateway",
+    "path": "/v2/gateway",
     "capability": "gateway",
     "since": "1.2",
     "query": null,
@@ -2098,7 +2132,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.get",
     "method": "GET",
-    "path": "/v1/ci",
+    "path": "/v2/ci",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2112,7 +2146,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.accounts.create",
     "method": "POST",
-    "path": "/v1/ci/accounts",
+    "path": "/v2/ci/accounts",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2128,7 +2162,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.accounts.delete",
     "method": "DELETE",
-    "path": "/v1/ci/accounts/{id}",
+    "path": "/v2/ci/accounts/{id}",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2145,7 +2179,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.accounts.repos",
     "method": "GET",
-    "path": "/v1/ci/accounts/{id}/repos",
+    "path": "/v2/ci/accounts/{id}/repos",
     "capability": "ci",
     "since": "1.8",
     "query": "CiReposQuery",
@@ -2162,7 +2196,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.bindings.create",
     "method": "POST",
-    "path": "/v1/ci/bindings",
+    "path": "/v2/ci/bindings",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2180,7 +2214,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.bindings.patch",
     "method": "PATCH",
-    "path": "/v1/ci/bindings/{id}",
+    "path": "/v2/ci/bindings/{id}",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2197,7 +2231,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.bindings.delete",
     "method": "DELETE",
-    "path": "/v1/ci/bindings/{id}",
+    "path": "/v2/ci/bindings/{id}",
     "capability": "ci",
     "since": "1.8",
     "query": "CiDeleteQuery",
@@ -2214,7 +2248,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.bindings.restart",
     "method": "POST",
-    "path": "/v1/ci/bindings/{id}/restart",
+    "path": "/v2/ci/bindings/{id}/restart",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2231,7 +2265,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.bindings.repair",
     "method": "POST",
-    "path": "/v1/ci/bindings/{id}/repair",
+    "path": "/v2/ci/bindings/{id}/repair",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2249,7 +2283,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ci.import.inspect",
     "method": "POST",
-    "path": "/v1/ci/import/inspect",
+    "path": "/v2/ci/import/inspect",
     "capability": "ci",
     "since": "1.8",
     "query": null,
@@ -2266,7 +2300,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ingress.clients.list",
     "method": "GET",
-    "path": "/v1/ingress/clients",
+    "path": "/v2/ingress/clients",
     "capability": "ingress",
     "since": "1.0",
     "query": null,
@@ -2282,7 +2316,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ingress.clients.delete",
     "method": "DELETE",
-    "path": "/v1/ingress/clients/{client_id}",
+    "path": "/v2/ingress/clients/{client_id}",
     "capability": "ingress",
     "since": "1.0",
     "query": null,
@@ -2299,7 +2333,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.ingress.password.put",
     "method": "PUT",
-    "path": "/v1/ingress/password",
+    "path": "/v2/ingress/password",
     "capability": "ingress",
     "since": "1.0",
     "query": null,
@@ -2317,7 +2351,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.audit.list",
     "method": "GET",
-    "path": "/v1/audit",
+    "path": "/v2/audit",
     "capability": "audit",
     "since": "1.0",
     "query": "AuditQuery",
@@ -2331,9 +2365,27 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.pair.trust.delete",
+    "method": "DELETE",
+    "path": "/v2/pair/trust/{device_id}",
+    "capability": "pair",
+    "since": "2.0",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "internal"
+    ]
+  },
+  {
     "id": "control.computer.get",
     "method": "GET",
-    "path": "/v1/computer",
+    "path": "/v2/computer",
     "capability": "computer",
     "since": "1.9",
     "query": null,
@@ -2349,7 +2401,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.computer.pause",
     "method": "POST",
-    "path": "/v1/computer/pause",
+    "path": "/v2/computer/pause",
     "capability": "computer",
     "since": "1.9",
     "query": null,
@@ -2366,7 +2418,7 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
   {
     "id": "control.computer.revoke",
     "method": "POST",
-    "path": "/v1/computer/revoke",
+    "path": "/v2/computer/revoke",
     "capability": "computer",
     "since": "1.9",
     "query": null,
@@ -2422,6 +2474,7 @@ export interface ControlRouteTypes {
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };
   "control.ingress.password.put": { query: undefined; body: IngressPasswordRequest; response: IngressPasswordResponse };
   "control.audit.list": { query: AuditQuery; body: undefined; response: AuditResponse };
+  "control.pair.trust.delete": { query: undefined; body: undefined; response: undefined };
   "control.computer.get": { query: undefined; body: undefined; response: ComputerState };
   "control.computer.pause": { query: undefined; body: ComputerPauseRequest; response: ComputerState };
   "control.computer.revoke": { query: undefined; body: ComputerRevokeRequest; response: ComputerState };

@@ -21,7 +21,7 @@ function patAt(name: string, file: string): PatInfo {
   return { name, scopes: ["devices:read"], token_file: file, modified_at: "2026-10-16T15:30:00.123Z" };
 }
 
-/** A controller stand-in: `requireCapable` hands back a client whose `call` answers GET /v1/pats with `pats`. */
+/** A controller stand-in: `requireCapable` hands back a client whose `call` answers GET /v2/pats with `pats`. */
 function controllerWith(pats: unknown, capable = true): Pick<ShellController, "requireCapable"> {
   const client = { call: async () => pats };
   return {

@@ -93,7 +93,7 @@ test("resuming desktop control clears Agent pause even when the user Host is una
   assert.equal(result.ok, true);
   assert.equal(k.panel.computer.paused, false);
   assert.ok(result.ok && !result.data.info.available);
-  assert.ok(last(k, "POST", "/v1/computer/pause"));
+  assert.ok(last(k, "POST", "/v2/computer/pause"));
 });
 
 test("sessions and config reads return the kernel's documents", async () => {
@@ -129,9 +129,9 @@ test("a reload goes to the kernel's reload route; a kernel without it answers wi
   assert.ok(r.ok);
   assert.equal(r.data.restart_required, false);
   assert.deepEqual(r.data.restart_paths, []);
-  assert.equal(last(k, "POST", "/v1/config/reload")?.path, "/v1/config/reload");
+  assert.equal(last(k, "POST", "/v2/config/reload")?.path, "/v2/config/reload");
 
-  k.failNext("/v1/config/reload", 404, "not_found", "没有这个接口");
+  k.failNext("/v2/config/reload", 404, "not_found", "没有这个接口");
   assert.ok(!(await service.reloadConfig()).ok);
 });
 
@@ -143,7 +143,7 @@ test("config save sends If-Match and dry_run; a stale etag comes back with the c
   const dry = await service.putConfig({ content, etag: cfg.data.etag, dryRun: true });
   assert.ok(dry.ok);
   assert.equal(k.panel.writes.length, 0, "a dry run writes nothing");
-  assert.deepEqual(last(k, "PUT", "/v1/config")?.body, { content, dry_run: true });
+  assert.deepEqual(last(k, "PUT", "/v2/config")?.body, { content, dry_run: true });
 
   const stale = await service.putConfig({ content, etag: `sha256-${"0".repeat(64)}`, dryRun: false });
   assert.ok(!stale.ok);
@@ -170,13 +170,13 @@ test("PAT create, rotate and delete use fixed routes and the secret comes from t
   const made = await service.createPat({ name: "ci", scopes: ["devices:read"] });
   assert.ok(made.ok);
   assert.ok(made.data.token.length > 0);
-  assert.deepEqual(last(k, "POST", "/v1/pats")?.body, { name: "ci", scopes: ["devices:read"] });
+  assert.deepEqual(last(k, "POST", "/v2/pats")?.body, { name: "ci", scopes: ["devices:read"] });
   const rot = await service.rotatePat("claude-code");
   assert.ok(rot.ok);
-  assert.ok(last(k, "POST", "/v1/pats/claude-code/rotate"));
+  assert.ok(last(k, "POST", "/v2/pats/claude-code/rotate"));
   const del = await service.deletePat("claude-code");
   assert.deepEqual(del, { ok: true });
-  assert.ok(last(k, "DELETE", "/v1/pats/claude-code"));
+  assert.ok(last(k, "DELETE", "/v2/pats/claude-code"));
   const list = await service.listPats();
   assert.ok(list.ok);
 });
@@ -187,18 +187,18 @@ test("ingress: revoke a client, rotate the password (write-only)", async () => {
   assert.ok(before.ok);
   const id = before.data.clients[0]!.client_id;
   assert.deepEqual(await service.revokeIngressClient(id), { ok: true });
-  assert.ok(last(k, "DELETE", `/v1/ingress/clients/${id}`));
+  assert.ok(last(k, "DELETE", `/v2/ingress/clients/${id}`));
   const r = await service.rotateIngressPassword("correct horse battery");
   assert.ok(r.ok);
   assert.equal(k.panel.passwordRotations, 1);
-  assert.deepEqual(last(k, "PUT", "/v1/ingress/password")?.body, { password: "correct horse battery" });
+  assert.deepEqual(last(k, "PUT", "/v2/ingress/password")?.body, { password: "correct horse battery" });
 });
 
 test("pair export, and import only with a matching fingerprint", async () => {
   const { k, service } = await setup();
   const exp = await service.exportPair();
   assert.ok(exp.ok);
-  const pair = { name: "peer-2", fingerprint: FP, certificate_pem: PEM, tags: ["tag:peer"] };
+  const pair = { name: "peer-2", version: 2 as const, device_id: `dev-${FP}`, fingerprint: FP, public_key: "MCowBQYDK2VwAyEAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", tags: ["tag:peer"] };
   const bad = await service.importPair({ pair, fingerprint: "cd".repeat(32) });
   assert.ok(!bad.ok);
   assert.equal(bad.error.code, "fingerprint_mismatch");
@@ -217,7 +217,7 @@ test("connection password: set, read back without the value, clear; connect to a
   assert.ok(set.ok);
   assert.equal(set.data.set, true);
   assert.equal(JSON.stringify(set).includes("correct horse"), false, "the password is never echoed back");
-  assert.deepEqual(last(k, "PUT", "/v1/pair/password")?.body, { password: "correct horse battery" });
+  assert.deepEqual(last(k, "PUT", "/v2/pair/password")?.body, { password: "correct horse battery" });
 
   const found = await service.discoverPairs();
   assert.ok(found.ok);
@@ -234,7 +234,7 @@ test("connection password: set, read back without the value, clear; connect to a
   const good = await service.connectPair({ fingerprint: device.fingerprint, password: PEER_PASSWORD });
   assert.ok(good.ok, JSON.stringify(good));
   assert.equal(good.data.name, device.name);
-  assert.ok(last(k, "POST", "/v1/pair/connect"));
+  assert.ok(last(k, "POST", "/v2/pair/connect"));
   const after = await service.discoverPairs();
   assert.ok(after.ok);
   assert.equal(after.data.devices.some((d) => d.name === device.name), false, "a paired device leaves the discovery list");
@@ -243,19 +243,19 @@ test("connection password: set, read back without the value, clear; connect to a
   assert.equal(k.panel.pairPassword.set, false);
 });
 
-test("pairing outside lan mode is reported as unsupported_mode", async () => {
+test("device pairing works independently of the selected network mode", async () => {
   const { k, service } = await setup();
   k.panel.mode = "tailnet";
   const r = await service.exportPair();
-  assert.ok(!r.ok);
-  assert.equal(r.error.code, "unsupported_mode");
+  assert.ok(r.ok);
+  assert.equal(r.data.pair.version, 2);
 });
 
 test("audit filters go in the query string and nothing else does", async () => {
   const { k, service } = await setup();
   const r = await service.queryAudit({ limit: "5", status: "error", tool: "exec.run" });
   assert.ok(r.ok);
-  const req = last(k, "GET", "/v1/audit")!;
+  const req = last(k, "GET", "/v2/audit")!;
   const q = new URL(req.path, "http://x").searchParams;
   assert.equal(q.get("status"), "error");
   assert.equal(q.get("tool"), "exec.run");
@@ -269,7 +269,7 @@ test("a capability the kernel lacks is refused locally without a request", async
     assert.ok(!r.ok);
     assert.equal(r.error.code, "not_implemented");
   }
-  assert.equal(k.requests.slice(before).filter((x) => x.path.startsWith("/v1/config") || x.path.startsWith("/v1/pats") || x.path.startsWith("/v1/audit")).length, 0);
+  assert.equal(k.requests.slice(before).filter((x) => x.path.startsWith("/v2/config") || x.path.startsWith("/v2/pats") || x.path.startsWith("/v2/audit")).length, 0);
 });
 
 test("call events feed the recent-calls ring, newest last", async () => {
@@ -284,7 +284,7 @@ test("call events feed the recent-calls ring, newest last", async () => {
   assert.ok(seen.length >= 1);
 });
 
-test("PATCH /v1/config: edits apply to the document, If-Match is sent, and a stale, invalid or unappliable patch writes nothing", async () => {
+test("PATCH /v2/config: edits apply to the document, If-Match is sent, and a stale, invalid or unappliable patch writes nothing", async () => {
   const { k, service } = await setup();
   const cfg = await service.getConfig();
   assert.ok(cfg.ok);
@@ -301,7 +301,7 @@ test("PATCH /v1/config: edits apply to the document, If-Match is sent, and a sta
   assert.ok(dry.ok);
   assert.equal(dry.data.applied, false);
   assert.equal(k.panel.writes.length, 0, "a dry run writes nothing");
-  const sent = last(k, "PATCH", "/v1/config");
+  const sent = last(k, "PATCH", "/v2/config");
   assert.deepEqual(sent?.body, { edits, dry_run: true });
   assert.equal(sent?.ifMatch, `"${cfg.data.etag}"`);
 
@@ -338,14 +338,14 @@ test("backend env: values go to the kernel's private store and come back as name
   const secret = "sk-test-secret-value";
   const first = await service.patchBackendEnv({ name: "github", set: { GITHUB_TOKEN: secret, DEBUG: "1" }, unset: [] });
   assert.deepEqual(first, { ok: true, data: { name: "github", names: ["DEBUG", "GITHUB_TOKEN"] } });
-  const sent = last(k, "PATCH", "/v1/backends/github/env");
+  const sent = last(k, "PATCH", "/v2/backends/github/env");
   assert.deepEqual(sent?.body, { set: { GITHUB_TOKEN: secret, DEBUG: "1" } }, "an empty unset is left out of the body");
   assert.deepEqual(k.panel.envValues("github"), { GITHUB_TOKEN: secret, DEBUG: "1" });
   assert.ok(!JSON.stringify(first).includes(secret));
 
   const second = await service.patchBackendEnv({ name: "github", set: {}, unset: ["DEBUG"] });
   assert.deepEqual(second, { ok: true, data: { name: "github", names: ["GITHUB_TOKEN"] } });
-  assert.deepEqual(last(k, "PATCH", "/v1/backends/github/env")?.body, { unset: ["DEBUG"] });
+  assert.deepEqual(last(k, "PATCH", "/v2/backends/github/env")?.body, { unset: ["DEBUG"] });
   assert.deepEqual(k.panel.envValues("github"), { GITHUB_TOKEN: secret });
 
   // Neither the status nor the config the panel reads ever carries a value.
@@ -369,7 +369,7 @@ test("backend env: clearing a backend removes every variable and is not an error
   const { k, service } = await setup();
   assert.ok((await service.patchBackendEnv({ name: "git-tools", set: { A: "1" }, unset: [] })).ok);
   assert.deepEqual(await service.clearBackendEnv("git-tools"), { ok: true });
-  assert.equal(last(k, "DELETE", "/v1/backends/git-tools/env")?.path, "/v1/backends/git-tools/env");
+  assert.equal(last(k, "DELETE", "/v2/backends/git-tools/env")?.path, "/v2/backends/git-tools/env");
   assert.deepEqual(k.panel.envValues("git-tools"), {});
   assert.deepEqual(await service.clearBackendEnv("git-tools"), { ok: true });
 });
@@ -407,7 +407,7 @@ test("the status lists the configured backends with their variable names, and a 
   await wait([["remote"]]);
 });
 
-test("PATCH /v1/config delete removes a key and leaves the rest of the document alone", async () => {
+test("PATCH /v2/config delete removes a key and leaves the rest of the document alone", async () => {
   const { k, service } = await setup();
   const cfg = await service.getConfig();
   assert.ok(cfg.ok);
@@ -429,7 +429,7 @@ test("the gateway reach is replaced as a whole: access, hosts and the listen sco
     ok: true,
     data: { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"], restart_required: false, apply_errors: [] },
   });
-  assert.deepEqual(last(k, "PUT", "/v1/gateway")?.body, { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
+  assert.deepEqual(last(k, "PUT", "/v2/gateway")?.body, { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
   assert.ok(k.currentStatus.gateway?.addresses.some((a) => a.url === "http://xmesh.home.example:8080/mcp"), "the status follows the new reach");
 
   const cold = await service.updateGateway({ listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
@@ -455,7 +455,7 @@ test("rotating the gateway token rewrites its file; the page only learns the nam
   const after = fs.readFileSync(file, "utf8").trim();
   assert.notEqual(after, before, "the token file has the new token");
   assert.equal(JSON.stringify(r).includes(after), false, "the new token is not in what the page receives");
-  assert.ok(last(k, "POST", "/v1/pats/default/rotate"));
+  assert.ok(last(k, "POST", "/v2/pats/default/rotate"));
 });
 
 test("without a default PAT, rotation is refused and nothing is rotated", async () => {
@@ -464,7 +464,7 @@ test("without a default PAT, rotation is refused and nothing is rotated", async 
   const r = await service.rotateGatewayPat();
   assert.ok(!r.ok);
   assert.equal(r.error.code, "not_found");
-  assert.equal(last(k, "POST", "/v1/pats/default/rotate"), undefined);
+  assert.equal(last(k, "POST", "/v2/pats/default/rotate"), undefined);
 });
 
 test("the copy path reads the default PAT's token from its file, the same one the kernel stores", async () => {

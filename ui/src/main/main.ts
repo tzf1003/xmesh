@@ -6,7 +6,7 @@ import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { DisplayStore } from "./display-store";
 import { GatewayCredentials } from "./gateway-token";
-import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
+import { discoverConfigured, discoverInstances, stateRoots, type Instance } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import * as fs from "node:fs";
@@ -31,6 +31,7 @@ import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
 import { ComputerEmergencyTargets, computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
 import { registerComputerShortcut } from "./computer-shortcut";
+import { KernelConfigs } from "./update/kernel-configs";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -129,7 +130,13 @@ async function start(): Promise<void> {
         ? macApplier(process.execPath)
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
-  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw, ...(kernelBundled && { version: app.getVersion() }) });
+  const kernelConfigs = new KernelConfigs(path.join(app.getPath("userData"), "kernel-configs.json"), runXmeshSetup);
+  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw,
+    ...(!TEST_MODE && kernelBundled && {
+      beforeStop: (node: string, instance: Instance) => kernelConfigs.capture(node, instance),
+      prepare: (node: string) => kernelConfigs.prepare(node),
+    }),
+    ...(kernelBundled && { version: app.getVersion() }) });
   const updateComputer = computerHostServices({ run: (command) => runComputerHost(command), version: app.getVersion() });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
@@ -196,7 +203,7 @@ async function start(): Promise<void> {
     ...(BACKGROUND_TEST && { requestTimeoutMs: 30_000 }),
   });
 
-  const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
+  const answers: { confirm: boolean; cliFails: boolean; picked?: string; setupWaiting?: boolean; setupConflict?: boolean } = { confirm: true, cliFails: false };
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
@@ -333,6 +340,10 @@ async function start(): Promise<void> {
 
   controller.start();
   void updater.finishPending().finally(() => updater.start());
+
+  if (discoverConfigured(roots).length === 0 && discoverInstances(roots).length === 0) {
+    showPanel();
+  }
 
   if (TEST_MODE) {
     // Reachable only from Playwright's main-process evaluate; never set in a packaged app.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-common:1",
+  "$id": "urn:xmesh:schema:control-common:2",
   "title": "ControlCommon",
   "description": "CTR-CTL-02。本机控制通道各模式共用的基础类型。本文件只含 $defs，没有根类型。",
   "$defs": {
@@ -29,13 +29,23 @@
       "pattern": "^sha256-[0-9a-f]{64}$",
       "description": "配置文件字节的 SHA-256。作为 HTTP ETag 时两侧加双引号，强校验器。"
     },
-    "NodeName": { "$ref": "urn:xmesh:schema:config:1#/$defs/nodeName" },
-    "Scope": { "$ref": "urn:xmesh:schema:config:1#/$defs/scope" },
+    "NodeName": {
+      "$ref": "urn:xmesh:schema:config:1#/$defs/nodeName"
+    },
+    "Scope": {
+      "$ref": "urn:xmesh:schema:config:1#/$defs/scope"
+    },
     "Tag": {
       "type": "string",
       "pattern": "^tag:[A-Za-z0-9][A-Za-z0-9-]{0,62}$"
     },
-    "Role": { "enum": ["agent", "gateway", "ingress"] },
+    "Role": {
+      "enum": [
+        "agent",
+        "gateway",
+        "ingress"
+      ]
+    },
     "Capability": {
       "enum": [
         "status",
@@ -55,7 +65,13 @@
       ],
       "description": "内核在 control.json 与 status.control.capabilities 里公布自己已实现的能力。路由表里每条路由属于一个能力。UI 只对已公布的能力启用对应入口。"
     },
-    "Severity": { "enum": ["info", "warning", "error"] },
+    "Severity": {
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ]
+    },
     "WarningCode": {
       "enum": [
         "restart_required",
@@ -75,10 +91,18 @@
     "Warning": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["code", "severity", "message"],
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
       "properties": {
-        "code": { "$ref": "#/$defs/WarningCode" },
-        "severity": { "$ref": "#/$defs/Severity" },
+        "code": {
+          "$ref": "#/$defs/WarningCode"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
         "message": {
           "type": "string",
           "minLength": 1,
@@ -87,12 +111,22 @@
       }
     },
     "Actor": {
-      "enum": ["file", "control"],
+      "enum": [
+        "file",
+        "control"
+      ],
       "description": "配置变更的来源。file 是直接改了配置文件（含热加载），control 是经控制通道写入。"
     },
     "DrainMode": {
-      "enum": ["keep", "kill"],
+      "enum": [
+        "keep",
+        "kill"
+      ],
       "description": "与 CTR-GW-05 的 drain 载荷同义。keep 拒绝新调用并保留现有资源，kill 另外终止本机全部 PTY 并释放全部租约。"
+    },
+    "DeviceId": {
+      "type": "string",
+      "pattern": "^dev-[0-9a-f]{64}$"
     }
   }
 }

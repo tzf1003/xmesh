@@ -1,4 +1,4 @@
-package v1
+package v2
 
 import (
 	"encoding/json"
@@ -34,16 +34,29 @@ type DrainState struct {
 }
 
 type DrainRequest struct {
-	Mode DrainMode `json:"mode,omitempty"`
+	Mode      DrainMode `json:"mode,omitempty"`
+	Scope     string    `json:"scope,omitempty"`
+	Device    string    `json:"device,omitempty"`
+	TimeoutMS int64     `json:"timeout_ms,omitempty"`
 }
+
+// Drain timeouts are expressed in milliseconds; zero uses the default budget.
+const DefaultDrainTimeoutMS int64 = 15_000
+const MaxDrainTimeoutMS int64 = (1<<63 - 1) / 1_000_000
 
 type DrainResponse struct {
-	Drain          DrainState `json:"drain"`
-	ClosedPTY      int        `json:"closed_pty"`
-	ReleasedLeases int        `json:"released_leases"`
+	Drain          DrainState     `json:"drain"`
+	ClosedPTY      int            `json:"closed_pty"`
+	ReleasedLeases int            `json:"released_leases"`
+	Outcomes       []DrainOutcome `json:"outcomes,omitempty"`
 }
 
-// StatusResponse is GET /v1/status and the data of a status event (control-status.schema.json).
+type DrainOutcome struct {
+	Device string `json:"device"`
+	Error  string `json:"error,omitempty"`
+}
+
+// StatusResponse is GET /v2/status and the data of a status event (control-status.schema.json).
 type StatusResponse struct {
 	Control              ControlInfo     `json:"control"`
 	Lifecycle            string          `json:"lifecycle"`
@@ -167,22 +180,35 @@ type PeerSummary struct {
 	Online int `json:"online"`
 }
 
-// Peer is one device in GET /v1/peers (control-peers.schema.json).
+// Peer is one device in GET /v2/peers (control-peers.schema.json).
 type Peer struct {
-	Name       string   `json:"name"`
-	Self       bool     `json:"self"`
-	NodeID     string   `json:"node_id"`
-	Tags       []string `json:"tags"`
-	Online     bool     `json:"online"`
-	Connection string   `json:"connection"`
-	DERPRegion *string  `json:"derp_region"`
-	Addrs      []string `json:"addrs"`
-	LastSeen   *Time    `json:"last_seen"`
-	OS         *string  `json:"os"`
-	Version    *string  `json:"version"`
+	DeviceID        string       `json:"device_id,omitempty"`
+	DisplayName     string       `json:"display_name,omitempty"`
+	TrustState      string       `json:"trust_state,omitempty"`
+	Paths           []DevicePath `json:"paths,omitempty"`
+	ActivePath      string       `json:"active_path,omitempty"`
+	ConnectionState string       `json:"connection_state,omitempty"`
+	Name            string       `json:"name"`
+	Self            bool         `json:"self"`
+	NodeID          string       `json:"node_id"`
+	Tags            []string     `json:"tags"`
+	Online          bool         `json:"online"`
+	Connection      string       `json:"connection"`
+	DERPRegion      *string      `json:"derp_region"`
+	Addrs           []string     `json:"addrs"`
+	LastSeen        *Time        `json:"last_seen"`
+	OS              *string      `json:"os"`
+	Version         *string      `json:"version"`
 	// Info is what the gateway has read from the device's sys.info. Absent on this node, on offline
 	// devices and on a node without a gateway.
 	Info *PeerInfo `json:"info,omitempty"`
+}
+
+type DevicePath struct {
+	Kind       string `json:"kind"`
+	Address    string `json:"address"`
+	Reachable  bool   `json:"reachable"`
+	VerifiedAt *Time  `json:"verified_at"`
 }
 
 // PeerInfo is the gateway's background reading of one online device (CTR-CTL-05).
@@ -281,7 +307,7 @@ func (s *Session) UnmarshalJSON(b []byte) error {
 	return fmt.Errorf("control: unknown session kind %q", head.Kind)
 }
 
-// ConfigResponse is GET /v1/config (control-config.schema.json).
+// ConfigResponse is GET /v2/config (control-config.schema.json).
 type ConfigResponse struct {
 	ETag            string           `json:"etag"`
 	Content         string           `json:"content"`
@@ -349,13 +375,13 @@ type ConfigEdit struct {
 	Delete bool   `json:"delete,omitempty"`
 }
 
-// ConfigEditRequest is PATCH /v1/config: the edits apply in order, all or none.
+// ConfigEditRequest is PATCH /v2/config: the edits apply in order, all or none.
 type ConfigEditRequest struct {
 	Edits  []ConfigEdit `json:"edits"`
 	DryRun bool         `json:"dry_run,omitempty"`
 }
 
-// BackendEnvPatch is PATCH /v1/backends/{name}/env: Unset is applied first, then Set.
+// BackendEnvPatch is PATCH /v2/backends/{name}/env: Unset is applied first, then Set.
 type BackendEnvPatch struct {
 	Set   map[string]string `json:"set,omitempty"`
 	Unset []string          `json:"unset,omitempty"`
@@ -369,10 +395,12 @@ type BackendEnvResponse struct {
 
 // PairDocument is the public pairing file; it matches mesh.Trusted.
 type PairDocument struct {
-	Name           string   `json:"name"`
-	Fingerprint    string   `json:"fingerprint"`
-	CertificatePEM string   `json:"certificate_pem"`
-	Tags           []string `json:"tags"`
+	Version     int      `json:"version"`
+	DeviceID    string   `json:"device_id"`
+	PublicKey   []byte   `json:"public_key"`
+	Name        string   `json:"name"`
+	Fingerprint string   `json:"fingerprint"`
+	Tags        []string `json:"tags"`
 }
 
 type PairExportResponse struct {
@@ -408,6 +436,8 @@ type PairPasswordState struct {
 
 // PairDiscoveredDevice is an unpaired device seen on the LAN.
 type PairDiscoveredDevice struct {
+	DeviceID    string `json:"device_id"`
+	Path        string `json:"path"`
 	Name        string `json:"name"`
 	Fingerprint string `json:"fingerprint"`
 	Address     string `json:"address"`
@@ -421,12 +451,15 @@ type PairDiscoveredResponse struct {
 // PairConnectRequest pairs with a device on the LAN. Address or Fingerprint must be set. When only
 // Fingerprint is set the address comes from the discovery list.
 type PairConnectRequest struct {
+	Path        string `json:"path,omitempty"`
 	Address     string `json:"address,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Password    string `json:"password"`
 }
 
 type PairConnectResponse struct {
+	DeviceID    string   `json:"device_id"`
+	Path        string   `json:"path"`
 	Name        string   `json:"name"`
 	Fingerprint string   `json:"fingerprint"`
 	Address     string   `json:"address"`
@@ -478,7 +511,7 @@ type IngressPasswordResponse struct {
 	RotatedAt Time `json:"rotated_at"`
 }
 
-// AuditQuery is the query string of GET /v1/audit. Empty fields are left out.
+// AuditQuery is the query string of GET /v2/audit. Empty fields are left out.
 type AuditQuery struct {
 	Since  string `json:"since,omitempty"`
 	Until  string `json:"until,omitempty"`
@@ -505,7 +538,7 @@ func (q AuditQuery) Values() url.Values {
 	return v
 }
 
-// AuditResponse is GET /v1/audit. Every element of Events is a CTR-AUD-01 event passed through
+// AuditResponse is GET /v2/audit. Every element of Events is a CTR-AUD-01 event passed through
 // verbatim, so this package does not restate that schema.
 type AuditResponse struct {
 	Enabled    bool              `json:"enabled"`

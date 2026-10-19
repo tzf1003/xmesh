@@ -78,7 +78,7 @@ export class GatewayCredentials {
   async read(name?: string): Promise<string> {
     let list: unknown;
     try {
-      list = await this.controller.requireCapable("pats").call("GET", "/v1/pats");
+      list = await this.controller.requireCapable("pats").call("GET", "/v2/pats");
     } catch (e) {
       throw new TokenUnavailableError(e instanceof Error ? e.message : String(e));
     }
