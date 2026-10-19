@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 // Fields CTR-AUD-01 allows. A record carrying anything else is withheld from
@@ -33,7 +33,7 @@ type auditQuery struct {
 	cursor                             string
 }
 
-// auditList serves GET /v1/audit (CTR-CTL-11): CTR-AUD-01 events, newest first, passed through
+// auditList serves GET /v2/audit (CTR-CTL-11): CTR-AUD-01 events, newest first, passed through
 // without added fields.
 func (s *Server) auditList(w http.ResponseWriter, r *http.Request, _ *call) {
 	q := auditQuery{limit: defaultAuditLimit}
@@ -58,14 +58,14 @@ func (s *Server) auditList(w http.ResponseWriter, r *http.Request, _ *call) {
 		failWith(w, argError("status", "status 只能是 ok 或 error"))
 		return
 	}
-	out := v1.AuditResponse{Events: []json.RawMessage{}}
+	out := v2.AuditResponse{Events: []json.RawMessage{}}
 	if s.o.AuditDir == "" {
 		writeJSON(w, 200, out)
 		return
 	}
 	out.Enabled = true
 	records, next, _, err := readAudit(s.o.AuditDir, q)
-	var invalid *v1.Error
+	var invalid *v2.Error
 	switch {
 	case errors.As(err, &invalid):
 		failWith(w, invalid)
@@ -73,7 +73,7 @@ func (s *Server) auditList(w http.ResponseWriter, r *http.Request, _ *call) {
 	case os.IsNotExist(err):
 		records, next = nil, ""
 	case err != nil:
-		failWith(w, newError(v1.ErrInternal, "无法读取审计目录"))
+		failWith(w, newError(v2.ErrInternal, "无法读取审计目录"))
 		return
 	}
 	for _, record := range records {

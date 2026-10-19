@@ -60,22 +60,28 @@ func (r *gatewayRegistry) all() []*gateway.Gateway {
 // drain marks name as draining on every gateway, including the ones added later.
 func (r *gatewayRegistry) drain(name string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.pending[name] = true
 	current := append([]*gateway.Gateway{}, r.list...)
-	r.mu.Unlock()
 	for _, g := range current {
 		g.Drain(name)
 	}
 }
 
+func (r *gatewayRegistry) draining(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pending[name] || r.pending[""]
+}
+
 // resume undoes drain for the names.
 func (r *gatewayRegistry) resume(names ...string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, name := range names {
 		delete(r.pending, name)
 	}
 	current := append([]*gateway.Gateway{}, r.list...)
-	r.mu.Unlock()
 	for _, g := range current {
 		for _, name := range names {
 			g.Resume(name)
@@ -145,7 +151,11 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 		return nil, err
 	}
 	out := []net.Listener{listener}
-	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && r.deps.mode == "tailnet" && !gatewayLoopbackOnly(listen) {
+	multiPath := false
+	if network, ok := r.deps.network.(interface{ MultiPath() bool }); ok {
+		multiPath = network.MultiPath()
+	}
+	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && (r.deps.mode == "tailnet" || multiPath) && !gatewayLoopbackOnly(listen) {
 		tailnet, err := tn.ListenPort(gatewayPort(listen))
 		if err != nil {
 			_ = listener.Close()

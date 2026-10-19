@@ -25,6 +25,7 @@ func Test_GatewayAccessSources(t *testing.T) {
 		{"tailnet CGNAT range", []string{"tailnet"}, "100.100.1.2", true},
 		{"tailnet IPv6 prefix", []string{"tailnet"}, "fd7a:115c:a1e0::1", true},
 		{"tailnet denied without tailnet", []string{"lan"}, "100.100.1.2", false},
+		{"tailnet IPv6 denied without tailnet", []string{"lan"}, "fd7a:115c:a1e0::1", false},
 		{"custom CIDR", []string{"203.0.113.0/24"}, "203.0.113.9", true},
 		{"custom CIDR outside", []string{"203.0.113.0/24"}, "203.0.114.9", false},
 		{"custom single address", []string{"198.51.100.7"}, "198.51.100.7", true},

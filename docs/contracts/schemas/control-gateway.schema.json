@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-gateway:1",
+  "$id": "urn:xmesh:schema:control-gateway:2",
   "title": "ControlGateway",
-  "description": "CTR-CTL-13。本机 Gateway 的监听地址与来源设置（PUT /v1/gateway）。来源与域名可以热加载；监听地址要重启才生效（CTR-CFG-01）。",
+  "description": "CTR-CTL-13。本机 Gateway 的监听地址与来源设置（PUT /v2/gateway）。来源与域名可以热加载；监听地址要重启才生效（CTR-CFG-01）。",
   "$defs": {
     "GatewayUpdateRequest": {
       "type": "object",
@@ -17,7 +17,7 @@
         "access": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-status:1#/$defs/GatewayAccess" },
+          "items": { "$ref": "urn:xmesh:schema:control-status:2#/$defs/GatewayAccess" },
           "description": "整份替换 gateway.access。"
         },
         "hosts": {
@@ -38,10 +38,10 @@
       "required": ["listen", "access", "hosts", "restart_required", "apply_errors"],
       "properties": {
         "listen": { "type": "string" },
-        "access": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-status:1#/$defs/GatewayAccess" } },
+        "access": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-status:2#/$defs/GatewayAccess" } },
         "hosts": { "type": "array", "items": { "type": "string" } },
         "restart_required": { "type": "boolean", "description": "自 API 1.5 起恒为 false：listen、access 与 hosts 都在运行中生效。字段保留给旧的客户端。" },
-        "apply_errors": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-config:1#/$defs/ApplyError" }, "description": "写入已完成，但运行中的 Gateway 没能移到新的 listen（例如端口被占用）时给出原因；Gateway 仍在原来的地址上。没有时为空数组。" }
+        "apply_errors": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-config:2#/$defs/ApplyError" }, "description": "写入已完成，但运行中的 Gateway 没能移到新的 listen（例如端口被占用）时给出原因；Gateway 仍在原来的地址上。没有时为空数组。" }
       }
     }
   }

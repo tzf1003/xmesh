@@ -1,4 +1,4 @@
-package v1
+package v2
 
 // GitHub Actions runner hosting (CTR-CTL-15, API 1.8). The kernel supervises the official runner
 // processes; GitHub credentials and registration tokens are written once and never read back.
@@ -134,7 +134,7 @@ type CiSummary struct {
 	Draining bool        `json:"draining,omitempty"`
 }
 
-// CiOverview is GET /v1/ci.
+// CiOverview is GET /v2/ci.
 type CiOverview struct {
 	Accounts              []CiAccount     `json:"accounts"`
 	Bindings              []CiBinding     `json:"bindings"`
@@ -145,13 +145,13 @@ type CiOverview struct {
 	Draining              bool            `json:"draining,omitempty"`
 }
 
-// CiAccountCreate is POST /v1/ci/accounts. Token appears in this request only.
+// CiAccountCreate is POST /v2/ci/accounts. Token appears in this request only.
 type CiAccountCreate struct {
 	Token string `json:"token"`
 	Host  string `json:"host,omitempty"`
 }
 
-// CiReposQuery is the query string of GET /v1/ci/accounts/{id}/repos.
+// CiReposQuery is the query string of GET /v2/ci/accounts/{id}/repos.
 type CiReposQuery struct {
 	Q    string `json:"q,omitempty"`
 	Page string `json:"page,omitempty"`
@@ -168,7 +168,7 @@ type CiReposResponse struct {
 	NextPage *string  `json:"next_page"`
 }
 
-// CiBindingCreate is POST /v1/ci/bindings. Exactly one of the three ways is used: Target with
+// CiBindingCreate is POST /v2/ci/bindings. Exactly one of the three ways is used: Target with
 // Account, Target with RegistrationToken, or ImportDir.
 type CiBindingCreate struct {
 	ID                string   `json:"id,omitempty"`
@@ -181,7 +181,7 @@ type CiBindingCreate struct {
 	ConfirmPublic     bool     `json:"confirm_public,omitempty"`
 }
 
-// CiBindingPatch is PATCH /v1/ci/bindings/{id}; absent fields stay as they are.
+// CiBindingPatch is PATCH /v2/ci/bindings/{id}; absent fields stay as they are.
 type CiBindingPatch struct {
 	Concurrency *int      `json:"concurrency,omitempty"`
 	Labels      *[]string `json:"labels,omitempty"`
@@ -189,12 +189,12 @@ type CiBindingPatch struct {
 	Account     *string   `json:"account,omitempty"`
 }
 
-// CiBindingRepair is POST /v1/ci/bindings/{id}/repair.
+// CiBindingRepair is POST /v2/ci/bindings/{id}/repair.
 type CiBindingRepair struct {
 	RegistrationToken string `json:"registration_token,omitempty"`
 }
 
-// CiDeleteQuery is the query string of DELETE /v1/ci/bindings/{id}.
+// CiDeleteQuery is the query string of DELETE /v2/ci/bindings/{id}.
 type CiDeleteQuery struct {
 	Force string `json:"force,omitempty"`
 }

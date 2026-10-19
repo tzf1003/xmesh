@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
-	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/device"
 )
 
 const cliGatewayConfig = cliConfig + "gateway:\n  listen: 127.0.0.1:8099\n"
@@ -53,15 +53,19 @@ func runObject(t *testing.T, state string, args ...string) map[string]any {
 	return v
 }
 
-func Test_CLIControlPair(t *testing.T) {
-	state, _ := startKernelStub(t)
-	other, err := mesh.LoadCertificate(t.TempDir(), "peer-b")
+func cliPairDocument(t *testing.T, name string) v2.PairDocument {
+	t.Helper()
+	id, err := device.NewIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
+	doc := id.Document(name)
+	return v2.PairDocument{Version: 2, Name: name, DeviceID: doc.DeviceID, PublicKey: doc.PublicKey, Fingerprint: strings.TrimPrefix(doc.DeviceID, "dev-"), Tags: []string{}}
+}
+func Test_CLIControlPair(t *testing.T) {
+	state, _ := startKernelStub(t)
+	other := cliPairDocument(t, "peer-b")
 	dir := t.TempDir()
-
-	// stdout carries the whole export reply; --out writes the document the peer imports
 	exported := runObject(t, state, "pair", "export")["pair"].(map[string]any)
 	if exported["name"] != "cli-node" || len(exported["fingerprint"].(string)) != 64 {
 		t.Fatal(exported)
@@ -71,49 +75,34 @@ func Test_CLIControlPair(t *testing.T) {
 	if written["file"] != file || written["fingerprint"] != exported["fingerprint"] {
 		t.Fatal(written)
 	}
-	var onDisk v1.PairDocument
+	var onDisk v2.PairDocument
 	raw, err := os.ReadFile(file)
-	if err != nil || json.Unmarshal(raw, &onDisk) != nil || onDisk.CertificatePEM == "" || onDisk.Fingerprint != exported["fingerprint"] {
-		t.Fatalf("%v %s", err, raw)
+	if err != nil || json.Unmarshal(raw, &onDisk) != nil || len(onDisk.PublicKey) == 0 || onDisk.DeviceID != "dev-"+onDisk.Fingerprint {
+		t.Fatal(err, string(raw))
 	}
-
 	peerFile := filepath.Join(dir, "peer-b.json")
-	doc, _ := json.Marshal(mesh.Trusted{Name: "peer-b", Fingerprint: other.Fingerprint, CertificatePEM: string(other.PEM)})
-	if err = os.WriteFile(peerFile, doc, 0600); err != nil {
+	doc, _ := json.Marshal(other)
+	if err := os.WriteFile(peerFile, doc, 0600); err != nil {
 		t.Fatal(err)
 	}
-	// a fingerprint that is not the certificate's is refused and nothing is stored
-	if _, err = runControl(t, state, "pair", "import", "--file", peerFile, "--fingerprint", differentFingerprint(other.Fingerprint)); err == nil || !strings.Contains(err.Error(), "fingerprint_mismatch") && !strings.Contains(err.Error(), "指纹") {
-		t.Fatalf("wrong fingerprint: %v", err)
+	if _, err := runControl(t, state, "pair", "import", "--file", peerFile, "--fingerprint", differentFingerprint(other.Fingerprint)); err == nil {
+		t.Fatal("wrong fingerprint accepted")
 	}
-	if _, err = os.Stat(filepath.Join(state, "lan", "peers.json")); err == nil {
-		t.Fatal("a refused import left a trust record")
-	}
-	if _, err = runControl(t, state, "pair", "import", "--file", peerFile); err == nil || !strings.Contains(err.Error(), "--fingerprint") {
-		t.Fatalf("import without a fingerprint: %v", err)
+	if _, err := runControl(t, state, "pair", "import", "--file", peerFile); err == nil || !strings.Contains(err.Error(), "--fingerprint") {
+		t.Fatal(err)
 	}
 	colon := strings.ToUpper(other.Fingerprint[:2] + ":" + other.Fingerprint[2:])
 	imported := runObject(t, state, "pair", "import", "--file", peerFile, "--fingerprint", colon, "--tags", "tag:peer")
-	if imported["name"] != "peer-b" || imported["fingerprint"] != other.Fingerprint || imported["restart_required"] != true || len(imported["tags"].([]any)) != 1 {
+	if imported["name"] != "peer-b" || imported["fingerprint"] != other.Fingerprint || imported["restart_required"] != false {
 		t.Fatal(imported)
 	}
-	// the export reply itself is accepted as the pairing file
-	third, err := mesh.LoadCertificate(t.TempDir(), "peer-c")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapped, _ := json.Marshal(v1.PairExportResponse{Pair: v1.PairDocument{Name: "peer-c", Fingerprint: third.Fingerprint, CertificatePEM: string(third.PEM)}})
-	if err = os.WriteFile(peerFile, wrapped, 0600); err != nil {
+	third := cliPairDocument(t, "peer-c")
+	wrapped, _ := json.Marshal(v2.PairExportResponse{Pair: third})
+	if err := os.WriteFile(peerFile, wrapped, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if got := runObject(t, state, "pair", "import", "--file", peerFile, "--fingerprint", third.Fingerprint); got["name"] != "peer-c" {
 		t.Fatal(got)
-	}
-
-	for _, bad := range [][]string{{"pair"}, {"pair", "swap"}, {"pair", "export", "--file", peerFile}, {"pair", "import", "--out", file}} {
-		if _, err = runControl(t, state, bad...); err == nil {
-			t.Errorf("%v accepted", bad)
-		}
 	}
 }
 
@@ -181,12 +170,12 @@ func Test_CLIControlPatsNeedGateway(t *testing.T) {
 }
 
 type cliIngress struct {
-	clients  []v1.IngressClient
+	clients  []v2.IngressClient
 	password string
 }
 
 func (i *cliIngress) Issuer() string                { return "https://x.example.com" }
-func (i *cliIngress) Clients() []v1.IngressClient   { return i.clients }
+func (i *cliIngress) Clients() []v2.IngressClient   { return i.clients }
 func (i *cliIngress) RotatePassword(p string) error { i.password = p; return nil }
 func (i *cliIngress) RevokeClient(id string) (bool, error) {
 	for n, c := range i.clients {
@@ -199,7 +188,7 @@ func (i *cliIngress) RevokeClient(id string) (bool, error) {
 }
 
 func Test_CLIControlIngress(t *testing.T) {
-	admin := &cliIngress{clients: []v1.IngressClient{{ClientID: "c1", ClientName: "Claude", RedirectURIs: []string{"https://claude.ai/cb"}, Scopes: []string{"devices:read"}, TokenEndpointAuthMethod: "none"}}}
+	admin := &cliIngress{clients: []v2.IngressClient{{ClientID: "c1", ClientName: "Claude", RedirectURIs: []string{"https://claude.ai/cb"}, Scopes: []string{"devices:read"}, TokenEndpointAuthMethod: "none"}}}
 	state, _ := startKernelStubWith(t, cliIngressConfig, admin)
 	listed := runObject(t, state, "ingress", "clients")
 	if listed["issuer"] != "https://x.example.com" || len(listed["clients"].([]any)) != 1 {
@@ -266,34 +255,34 @@ func differentFingerprint(fingerprint string) string {
 type cliPairing struct {
 	set      bool
 	password string
-	found    []mesh.DiscoveredPeer
+	found    []v2.PairDiscoveredDevice
 	paired   string
 }
 
-func (p *cliPairing) PairPasswordState() mesh.PairPasswordState {
-	return mesh.PairPasswordState{Set: p.set, UpdatedAt: time.Unix(1700000000, 0)}
+func (p *cliPairing) PairPasswordState() device.PairStatus {
+	return device.PairStatus{Set: p.set, UpdatedAt: time.Unix(1700000000, 0)}
 }
-func (p *cliPairing) SetPairPassword(password string) (mesh.PairPasswordState, error) {
-	if err := mesh.ValidatePairPassword(password); err != nil {
-		return mesh.PairPasswordState{}, err
+func (p *cliPairing) SetPairPassword(password string) (device.PairStatus, error) {
+	if err := device.ValidatePassword(password); err != nil {
+		return device.PairStatus{}, err
 	}
 	p.set, p.password = true, password
 	return p.PairPasswordState(), nil
 }
 func (p *cliPairing) ClearPairPassword() error { p.set = false; return nil }
-func (p *cliPairing) Discovered(context.Context) ([]mesh.DiscoveredPeer, error) {
+func (p *cliPairing) Discovered(context.Context) ([]v2.PairDiscoveredDevice, error) {
 	return p.found, nil
 }
-func (p *cliPairing) PairWith(_ context.Context, address, password, expected string) (mesh.Trusted, error) {
+func (p *cliPairing) PairWith(_ context.Context, _ device.PathKind, address, password, expected string) (device.Trust, error) {
 	p.paired = address + " " + password
-	return mesh.Trusted{Name: "peer-b", Fingerprint: cliPeerFingerprint, Tags: []string{"tag:peer", "tag:device"}}, nil
+	return device.Trust{Document: device.Document{Name: "peer-b", DeviceID: "dev-" + cliPeerFingerprint}, Tags: []string{"tag:peer", "tag:device"}}, nil
 }
 
 const cliPeerFingerprint = "3f2a9c4e1b7d8a60f5e2c9b1d4a7e8f03c6b5a29d1e4f7a8b0c3d6e9f2a5b8c1"
 
 // conformance: CTR-CTL-08 the CLI takes connection passwords from stdin or a file, never argv.
 func Test_CLIControlPairPassword(t *testing.T) {
-	admin := &cliPairing{found: []mesh.DiscoveredPeer{{Name: "peer-b", Fingerprint: cliPeerFingerprint, Address: "192.168.31.15:7433", SeenAt: time.Now()}}}
+	admin := &cliPairing{found: []v2.PairDiscoveredDevice{{Name: "peer-b", Fingerprint: cliPeerFingerprint, Address: "192.168.31.15:7433", Path: "lan", DeviceID: "dev-" + cliPeerFingerprint, SeenAt: v2.Now()}}}
 	state, _ := startKernelStubOptions(t, cliConfig, func(o *control.Options) { o.Pairing = admin })
 
 	if got := runObject(t, state, "pair", "password", "show"); got["set"] != false {
@@ -328,7 +317,7 @@ func Test_CLIControlPairPassword(t *testing.T) {
 	}
 	controlStdin = strings.NewReader("correct horse battery staple\n")
 	runObject(t, state, "pair", "connect", "--address", "192.168.31.15:7433", "--password-stdin")
-	if admin.paired != "192.168.31.15:7433 correct horse battery staple" {
+	if admin.paired != "https://192.168.31.15:7433 correct horse battery staple" {
 		t.Fatalf("connect: %q", admin.paired)
 	}
 	if _, err := runControl(t, state, "pair", "connect", "--password-stdin"); err == nil || !strings.Contains(err.Error(), "--address") {

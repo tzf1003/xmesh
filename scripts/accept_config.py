@@ -9,6 +9,7 @@ a missing OAuth password file is created with a random value (mode 0600) and nev
 
   lan        step A: LAN node discovered over mDNS, peers authorised through `xmesh pair`
   tailnet    steps D-F: tailnet node (Agent + Gateway) that joins with a registration key file
+  coexist    step H: independently enabled LAN and Tailnet paths with shared device trust
   ingress    steps B, C, E: tailnet node that also serves the OAuth ingress
 """
 
@@ -29,7 +30,7 @@ def build(kind, options):
     """Return the configuration document for one node. `options` is an argparse namespace."""
     work = str(options.work)
     roles = options.roles or (["agent", "gateway", "ingress"] if kind == "ingress" else ["agent", "gateway"])
-    config = {"node": {"name": options.name, "roles": roles},
+    config = {"schema_version": 2, "node": {"name": options.name, "roles": roles},
               "gateway": {"listen": options.gateway_listen},
               "agent": {"default_cwd": work, "cwd_policy": {"allow": [work]}}}
     if options.isolation:
@@ -37,15 +38,15 @@ def build(kind, options):
     if options.pat_file:
         config["gateway"]["pats"] = {"accept": {"token_file": str(options.pat_file), "scopes": ["devices:read", "sys:*", "exec:*", "pty:*"]}}
     if kind == "lan":
-        config["mesh"] = {"mode": "lan", "lan": {"mdns": True}}
+        config["mesh"] = {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}}
         # Peers are paired with --tags tag:peer,tag:device; the receiving side decides what they may call.
         config["agent"]["authz"] = {"tag:peer": dict(GRANT), "tag:device": dict(GRANT)}
         return config
-    config["mesh"] = {"mode": "tailnet", "control_url": options.control_url, "authkey_file": str(options.authkey_file)}
+    config["mesh"] = {"lan": {"enabled": kind == "coexist", "mdns": True}, "tailnet": {"enabled": True, "control_url": options.control_url, "authkey_file": str(options.authkey_file)}}
     if options.ephemeral:
-        config["mesh"]["ephemeral"] = True
+        config["mesh"]["tailnet"]["ephemeral"] = True
     # Devices must accept calls from other devices and, for the ingress, from the tag:ingress node.
-    config["agent"]["authz"] = {"tag:device": dict(GRANT), "tag:ingress": dict(GRANT)}
+    config["agent"]["authz"] = {"tag:peer": dict(GRANT), "tag:device": dict(GRANT), "tag:ingress": dict(GRANT)}
     if kind == "ingress":
         ingress = {"listen": options.listen, "max_pty_per_client": options.max_pty_per_client,
                    "oauth": {"issuer": options.issuer.rstrip("/"),
@@ -69,7 +70,7 @@ def csv(text):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("kind", choices=["lan", "tailnet", "ingress"])
+    p.add_argument("kind", choices=["lan", "tailnet", "coexist", "ingress"])
     p.add_argument("--name", required=True, help="node.name: letters, digits and hyphens")
     p.add_argument("--out", required=True, type=pathlib.Path, help="directory that receives config.json, state/ and work/")
     p.add_argument("--roles", type=csv, help="comma separated; default agent,gateway (plus ingress for `ingress`)")
@@ -82,7 +83,7 @@ def parser():
     tail = p.add_argument_group("tailnet and ingress")
     tail.add_argument("--authkey-file", type=pathlib.Path, help="file holding the registration key (not the key itself)")
     tail.add_argument("--control-url", default=OFFICIAL_CONTROL)
-    tail.add_argument("--ephemeral", action="store_true", help="mesh.ephemeral, for short-lived sandboxes")
+    tail.add_argument("--ephemeral", action="store_true", help="mesh.tailnet.ephemeral, for short-lived sandboxes")
     ing = p.add_argument_group("ingress only")
     ing.add_argument("--issuer", help="ingress.oauth.issuer: the public https origin clients reach")
     ing.add_argument("--listen", default="funnel", choices=["funnel", "tunnel", "public:443"])
@@ -135,7 +136,7 @@ def main(argv=None):
     state.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(build(kind, options), indent=2) + "\n", encoding="utf-8")
     command = "xmesh serve --config %s --state-dir %s" % (config_path, state)
-    note = []
+    note = ["Pair xmesh device public keys or use a connection password before remote calls; Tailnet admission alone does not grant device trust."]
     if options.pat_file:
         pat = options.pat_file.resolve()
         if not pat.exists():

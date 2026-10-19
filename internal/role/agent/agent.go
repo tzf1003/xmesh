@@ -589,18 +589,13 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	if state := a.sandbox.Load(); state != nil {
 		warnings = append(warnings, state.warnings...)
 	}
-	readable := false
-	if c.Mesh.Mode == "tailnet" {
-		if f, e := os.Open(c.Mesh.AuthkeyFile); e == nil {
-			readable = true
-			_ = f.Close()
-		}
-	}
+	keyReadable := authkeyReadable(c)
+
 	network := a.networkInfo.Load()
 	if network == nil {
 		network = &NetworkInfo{Mode: "local", Node: "local", Tags: []string{"tag:peer"}}
 	}
-	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "network": network, "restart_required": restart, "policy_reload_failures": failures, "authkey_readable": readable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "exec_shared_in_use": execShared, "exec_exclusive_in_use": execExclusive, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
+	return map[string]any{"os": runtime.GOOS, "arch": runtime.GOARCH, "hostname": c.Node.Name, "home": r.Home, "roles": c.Node.Roles, "network": network, "restart_required": restart, "policy_reload_failures": failures, "authkey_readable": keyReadable, "warnings": warnings, "path_sep": string(os.PathSeparator), "shells": shells, "workspaces": workspaces, "backends": backends, "limits": map[string]any{"exec_shared": c.Agent.Exec.MaxConcurrent, "exec_exclusive": c.Agent.Exec.ExclusiveSlots, "exec_shared_in_use": execShared, "exec_exclusive_in_use": execExclusive, "pty_max_sessions": c.Agent.PTY.MaxSessions, "pty_max_per_caller": c.Agent.PTY.MaxPerCaller, "pty_in_use": inUse, "pty_active": active, "pty_closed": closed, "pty_closed_retain_max": c.Agent.PTY.ClosedRetainMax}}
 }
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {

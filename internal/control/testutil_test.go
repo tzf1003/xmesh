@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
-	"github.com/tzf1003/xmesh/api/control/v1/schemacheck"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/api/control/v2/schemacheck"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -38,34 +38,34 @@ type fakeHost struct {
 	mu       sync.Mutex
 	draining bool
 	kills    []bool
-	warnings []v1.Warning
-	ptys     []v1.PtySession
-	execs    []v1.ExecRun
-	leases   []v1.BackendLease
-	peers    []v1.Peer
+	warnings []v2.Warning
+	ptys     []v2.PtySession
+	execs    []v2.ExecRun
+	leases   []v2.BackendLease
+	peers    []v2.Peer
 }
 
-func (h *fakeHost) Status() v1.StatusResponse {
+func (h *fakeHost) Status() v2.StatusResponse {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return v1.StatusResponse{
+	return v2.StatusResponse{
 		OS: "linux", Arch: "amd64", Hostname: "ctl-node", Home: "/home/x", Roles: []string{"agent"}, PathSep: "/",
-		Network:  v1.NetworkIdentity{Mode: "lan", NodeID: "ctl-node", Tags: []string{"tag:peer"}},
-		Warnings: append([]v1.Warning{}, h.warnings...), Shells: []string{"bash"}, Workspaces: []v1.Workspace{}, Backends: []v1.Backend{},
-		Limits: v1.Limits{ExecShared: 4, ExecExclusive: 1, PTYMaxSessions: 20, PTYMaxPerCaller: 8, PTYInUse: len(h.ptys), PTYClosedRetainMax: 20},
+		Network:  v2.NetworkIdentity{Mode: "lan", NodeID: "ctl-node", Tags: []string{"tag:peer"}},
+		Warnings: append([]v2.Warning{}, h.warnings...), Shells: []string{"bash"}, Workspaces: []v2.Workspace{}, Backends: []v2.Backend{},
+		Limits: v2.Limits{ExecShared: 4, ExecExclusive: 1, PTYMaxSessions: 20, PTYMaxPerCaller: 8, PTYInUse: len(h.ptys), PTYClosedRetainMax: 20},
 	}
 }
 func (h *fakeHost) Draining() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.draining }
-func (h *fakeHost) Peers(context.Context) ([]v1.Peer, error) {
+func (h *fakeHost) Peers(context.Context) ([]v2.Peer, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	self := v1.Peer{Name: "ctl-node", Self: true, NodeID: "ctl-node", Tags: []string{"tag:peer"}, Online: true, Connection: "local", Addrs: []string{}}
-	return append([]v1.Peer{self}, h.peers...), nil
+	self := v2.Peer{Name: "ctl-node", Self: true, NodeID: "ctl-node", Tags: []string{"tag:peer"}, Online: true, Connection: "local", Addrs: []string{}}
+	return append([]v2.Peer{self}, h.peers...), nil
 }
-func (h *fakeHost) Sessions() v1.SessionsResponse {
+func (h *fakeHost) Sessions() v2.SessionsResponse {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return v1.SessionsResponse{PTY: append([]v1.PtySession{}, h.ptys...), Exec: append([]v1.ExecRun{}, h.execs...), Leases: append([]v1.BackendLease{}, h.leases...)}
+	return v2.SessionsResponse{PTY: append([]v2.PtySession{}, h.ptys...), Exec: append([]v2.ExecRun{}, h.execs...), Leases: append([]v2.BackendLease{}, h.leases...)}
 }
 func (h *fakeHost) Drain(kill bool) (int, int) {
 	h.mu.Lock()
@@ -84,11 +84,11 @@ func (h *fakeHost) Resume() {
 }
 func (h *fakeHost) mutate(f func(*fakeHost)) { h.mu.Lock(); f(h); h.mu.Unlock() }
 
-func peer(name string, online bool) v1.Peer {
-	return v1.Peer{Name: name, NodeID: name + "-id", Tags: []string{"tag:device"}, Online: online, Connection: "direct", Addrs: []string{"100.64.0.2"}}
+func peer(name string, online bool) v2.Peer {
+	return v2.Peer{Name: name, NodeID: name + "-id", Tags: []string{"tag:device"}, Online: online, Connection: "direct", Addrs: []string{"100.64.0.2"}}
 }
-func pty(id string) v1.PtySession {
-	return v1.PtySession{Kind: "pty", ID: id, Owner: "n1/s", PID: 10, State: "active", Cols: 80, Rows: 24, Cwd: "/work", CreatedAt: v1.Now()}
+func pty(id string) v2.PtySession {
+	return v2.PtySession{Kind: "pty", ID: id, Owner: "n1/s", PID: 10, State: "active", Cols: 80, Rows: 24, Cwd: "/work", CreatedAt: v2.Now()}
 }
 
 type fixture struct {
@@ -188,9 +188,9 @@ func valid(t *testing.T, def string, doc []byte) {
 }
 
 // apiError requires an error response with the given code and the HTTP status the contract gives it.
-func apiError(t *testing.T, r *Response, code v1.ErrorCode) *v1.Error {
+func apiError(t *testing.T, r *Response, code v2.ErrorCode) *v2.Error {
 	t.Helper()
-	var e v1.Error
+	var e v2.Error
 	if err := json.Unmarshal(r.Body, &e); err != nil || e.Code != code || r.Status != code.HTTPStatus() {
 		t.Fatalf("want %s (%d), got %d %s", code, code.HTTPStatus(), r.Status, r.Body)
 	}
@@ -206,10 +206,10 @@ func decodeAs(t *testing.T, r *Response, out any) {
 	}
 }
 
-// stream reads parsed events from /v1/events until stop is called. Every event is checked against
+// stream reads parsed events from /v2/events until stop is called. Every event is checked against
 // the ControlEvent schema as it arrives.
 type stream struct {
-	events chan v1.Event
+	events chan v2.Event
 	stop   context.CancelFunc
 }
 
@@ -220,7 +220,7 @@ func (f *fixture) stream(lastID string) *stream {
 	if lastID != "" {
 		headers["Last-Event-ID"] = lastID
 	}
-	res, err := f.client.Stream(ctx, "/v1/events", headers)
+	res, err := f.client.Stream(ctx, "/v2/events", headers)
 	if err != nil {
 		cancel()
 		f.t.Fatal(err)
@@ -229,7 +229,7 @@ func (f *fixture) stream(lastID string) *stream {
 		cancel()
 		f.t.Fatalf("events: HTTP %d", res.StatusCode)
 	}
-	s := &stream{events: make(chan v1.Event, 512), stop: cancel}
+	s := &stream{events: make(chan v2.Event, 512), stop: cancel}
 	go func() {
 		defer res.Body.Close()
 		defer close(s.events)
@@ -248,7 +248,7 @@ func (f *fixture) stream(lastID string) *stream {
 			case line == "" && data != "":
 				// an event counts once its blank line has arrived; a line cut off by the
 				// connection closing is never dispatched
-				var e v1.Event
+				var e v2.Event
 				if err := json.Unmarshal([]byte(data), &e); err != nil {
 					f.t.Errorf("bad event %q: %v", data, err)
 				} else if err = schemacheck.Validate("ControlEvent", []byte(data)); err != nil {
@@ -266,7 +266,7 @@ func (f *fixture) stream(lastID string) *stream {
 }
 
 // next waits for an event matching match.
-func (s *stream) next(t *testing.T, match func(v1.Event) bool) v1.Event {
+func (s *stream) next(t *testing.T, match func(v2.Event) bool) v2.Event {
 	t.Helper()
 	deadline := time.After(20 * time.Second) // a slow Windows runner can need seconds to start sampling
 	for {
@@ -283,12 +283,12 @@ func (s *stream) next(t *testing.T, match func(v1.Event) bool) v1.Event {
 		}
 	}
 }
-func ofType(kind v1.EventType) func(v1.Event) bool {
-	return func(e v1.Event) bool { return e.Type == kind }
+func ofType(kind v2.EventType) func(v2.Event) bool {
+	return func(e v2.Event) bool { return e.Type == kind }
 }
 
 // payload decodes an event's data into out.
-func payload(t *testing.T, e v1.Event, out any) {
+func payload(t *testing.T, e v2.Event, out any) {
 	t.Helper()
 	if err := json.Unmarshal(e.Data, out); err != nil {
 		t.Fatal(err)

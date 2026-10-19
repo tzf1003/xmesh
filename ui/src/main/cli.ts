@@ -95,7 +95,7 @@ export function runXmeshRaw(command: CliCommand, node?: string, bin: string = xm
 }
 
 /** First-run subcommands. Unlike `CliCommand` these take arguments, built here from validated values only. */
-export type SetupCliArgs = readonly ["install", "--config", string] | readonly ["install", "--config", string, "--state-dir", string] | readonly ["start", "--config", string];
+export type SetupCliArgs = readonly ["install", "--config", string] | readonly ["install", "--config", string, "--state-dir", string] | readonly ["start", "--config", string] | readonly ["migrate","--config",string,"--state-dir",string] | readonly ["migrate", "--name", string];
 
 /**
  * Runs `xmesh install|start --config <file>` without a shell and returns a

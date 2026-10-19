@@ -6,7 +6,7 @@ import { Actions } from "./actions";
 import { ShellController } from "./controller";
 import { DisplayStore } from "./display-store";
 import { GatewayCredentials } from "./gateway-token";
-import { discoverConfigured, discoverInstances, stateRoots } from "./discovery";
+import { discoverConfigured, discoverInstances, stateRoots, type Instance } from "./discovery";
 import { registerIpc } from "./ipc";
 import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import * as fs from "node:fs";
@@ -29,6 +29,7 @@ import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
+import { KernelConfigs } from "./update/kernel-configs";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -127,7 +128,13 @@ async function start(): Promise<void> {
         ? macApplier(process.execPath)
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
-  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw, ...(kernelBundled && { version: app.getVersion() }) });
+  const kernelConfigs = new KernelConfigs(path.join(app.getPath("userData"), "kernel-configs.json"), runXmeshSetup);
+  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw,
+    ...(!TEST_MODE && kernelBundled && {
+      beforeStop: (node: string, instance: Instance) => kernelConfigs.capture(node, instance),
+      prepare: (node: string) => kernelConfigs.prepare(node),
+    }),
+    ...(kernelBundled && { version: app.getVersion() }) });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
     packaged: app.isPackaged || TEST_MODE,
@@ -186,7 +193,9 @@ async function start(): Promise<void> {
       const text = hint === undefined ? undefined : loginHints[hint];
       if (text !== undefined) notify([{ key: `login.${hint}`, text }]);
     },
-    ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, streamIdleMs: 2000 }),
+    // Mock fixtures ping frequently. Real kernels retain the protocol's
+    // default idle budget for their fifteen-second event heartbeat.
+    ...(TEST_MODE && { pollMs: 150, reconnectMs: 100, refreshDelayMs: 20, ...(!process.env.XMESH_UI_KERNEL_BINARY && { streamIdleMs: 2000 }) }),
     ...(BACKGROUND_TEST && { requestTimeoutMs: 30_000 }),
   });
 

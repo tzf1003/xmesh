@@ -8,17 +8,17 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 // quietPoll keeps the file watcher out of the way, so the explicit reload is the only thing
 // that adopts the file.
 func quietPoll(o *Options) { o.Poll = time.Hour }
 
-func (f *fixture) reload() v1.ConfigReloadResponse {
+func (f *fixture) reload() v2.ConfigReloadResponse {
 	f.t.Helper()
-	r := f.ok("POST", "/v1/config/reload", nil, "ConfigReloadResponse")
-	var out v1.ConfigReloadResponse
+	r := f.ok("POST", "/v2/config/reload", nil, "ConfigReloadResponse")
+	var out v2.ConfigReloadResponse
 	decodeAs(f.t, r, &out)
 	return out
 }
@@ -42,9 +42,9 @@ func Test_ControlConfigReloadAppliesFileEdit(t *testing.T) {
 	if got.EffectiveETag != got.ETag {
 		t.Fatalf("effective %s != etag %s after an applied edit", got.EffectiveETag, got.ETag)
 	}
-	var data v1.ConfigEventData
-	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
-	if data.Change != "reloaded" || data.Actor != v1.ActorControl || data.ETag == nil || *data.ETag != got.ETag {
+	var data v2.ConfigEventData
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
+	if data.Change != "reloaded" || data.Actor != v2.ActorControl || data.ETag == nil || *data.ETag != got.ETag {
 		t.Fatalf("%+v", data)
 	}
 
@@ -85,9 +85,9 @@ func Test_ControlConfigReloadRejectsInvalidFile(t *testing.T) {
 	if got.Applied || got.Valid || got.LoadError == nil || got.ETag == got.EffectiveETag {
 		t.Fatalf("%+v", got)
 	}
-	var data v1.ConfigEventData
-	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
-	if data.Change != "reload_failed" || data.Actor != v1.ActorControl {
+	var data v2.ConfigEventData
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
+	if data.Change != "reload_failed" || data.Actor != v2.ActorControl {
 		t.Fatalf("%+v", data)
 	}
 	if f.store.Get().Node.Name != "ctl-node" {
@@ -104,7 +104,7 @@ func Test_ControlConfigReloadRepeatedInvalidFileStillFails(t *testing.T) {
 	f := newFixture(t, quietPoll)
 	events := f.stream("")
 	invalid := []byte("node: [")
-	var data v1.ConfigEventData
+	var data v2.ConfigEventData
 	for range 2 {
 		if err := os.WriteFile(f.path, invalid, 0600); err != nil {
 			t.Fatal(err)
@@ -112,7 +112,7 @@ func Test_ControlConfigReloadRepeatedInvalidFileStillFails(t *testing.T) {
 		if got := f.reload(); got.Valid || got.LoadError == nil {
 			t.Fatalf("%+v", got)
 		}
-		payload(t, events.next(t, ofType(v1.EventConfig)), &data)
+		payload(t, events.next(t, ofType(v2.EventConfig)), &data)
 		if data.Change != "reload_failed" {
 			t.Fatalf("%+v", data)
 		}
@@ -122,7 +122,7 @@ func Test_ControlConfigReloadRepeatedInvalidFileStillFails(t *testing.T) {
 		if got := f.reload(); !got.Valid || got.LoadError != nil {
 			t.Fatalf("%+v", got)
 		}
-		payload(t, events.next(t, ofType(v1.EventConfig)), &data)
+		payload(t, events.next(t, ofType(v2.EventConfig)), &data)
 		if data.Change != "reloaded" {
 			t.Fatalf("%+v", data)
 		}
@@ -131,11 +131,11 @@ func Test_ControlConfigReloadRepeatedInvalidFileStillFails(t *testing.T) {
 
 // fakeApplier stands in for the node's role runtime.
 type fakeApplier struct {
-	errs    []v1.ApplyError
+	errs    []v2.ApplyError
 	retries []bool
 }
 
-func (a *fakeApplier) Settle(_ context.Context, retry bool) []v1.ApplyError {
+func (a *fakeApplier) Settle(_ context.Context, retry bool) []v2.ApplyError {
 	a.retries = append(a.retries, retry)
 	return a.errs
 }
@@ -148,7 +148,7 @@ func Test_ControlConfigReloadReportsApplyErrors(t *testing.T) {
 	if got := f.reload(); got.ApplyErrors == nil || len(got.ApplyErrors) != 0 {
 		t.Fatalf("a clean reload must report an empty list: %+v", got)
 	}
-	applier.errs = []v1.ApplyError{{Section: "gateway", Message: "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上"}}
+	applier.errs = []v2.ApplyError{{Section: "gateway", Message: "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上"}}
 	got := f.reload()
 	if len(got.ApplyErrors) != 1 || got.ApplyErrors[0].Section != "gateway" || got.RestartRequired {
 		t.Fatalf("%+v", got)
@@ -194,7 +194,7 @@ func Test_ControlReloadReportsTheAdoptedSnapshot(t *testing.T) {
 	}
 	f.store.Refresh()
 	f.server.configMu.Lock()
-	got, err := f.server.adoptFileLocked(context.Background(), v1.ActorControl, true)
+	got, err := f.server.adoptFileLocked(context.Background(), v2.ActorControl, true)
 	f.server.configMu.Unlock()
 	if err != nil || !got.Valid || got.ETag != got.EffectiveETag || got.ETag != etagOf(current) {
 		t.Fatalf("snapshot mismatch: %+v %v", got, err)
@@ -208,7 +208,7 @@ func Test_ControlReloadRecoveryDoesNotPublishAStaleReadFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.server.configMu.Lock()
-	_, err := f.server.adoptFileLocked(context.Background(), v1.ActorControl, true)
+	_, err := f.server.adoptFileLocked(context.Background(), v2.ActorControl, true)
 	f.server.configMu.Unlock()
 	if err == nil {
 		t.Fatal("missing file accepted")
@@ -221,8 +221,8 @@ func Test_ControlReloadRecoveryDoesNotPublishAStaleReadFailure(t *testing.T) {
 	if !out.Valid || out.LoadError != nil {
 		t.Fatalf("%+v", out)
 	}
-	var data v1.ConfigEventData
-	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
+	var data v2.ConfigEventData
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
 	if data.Change != "reloaded" {
 		t.Fatalf("recovered read reported as failure: %+v", data)
 	}

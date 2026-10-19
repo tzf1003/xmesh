@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/control"
 	"golang.org/x/sys/windows"
@@ -42,7 +42,7 @@ func Test_TaskStateDirectory(t *testing.T) {
 func Test_KernelStartRequiresReachableEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	started := time.Now()
-	endpoint := control.Endpoint{ControlEndpointFile: v1.ControlEndpointFile{PID: os.Getpid(), Transport: v1.TransportPipe, Endpoint: `\\.\pipe\xmesh-test-unavailable`}}
+	endpoint := control.Endpoint{ControlEndpointFile: v2.ControlEndpointFile{PID: os.Getpid(), Transport: v2.TransportPipe, Endpoint: `\\.\pipe\xmesh-test-unavailable`}}
 	endpoint.StartedAt.Time = started
 	if err := control.WriteEndpoint(dir, endpoint.ControlEndpointFile); err != nil {
 		t.Fatal(err)

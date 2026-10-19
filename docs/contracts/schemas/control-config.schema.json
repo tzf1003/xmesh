@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-config:1",
+  "$id": "urn:xmesh:schema:control-config:2",
   "title": "ControlConfig",
-  "description": "CTR-CTL-07。GET/PUT /v1/config。ETag 是磁盘上配置文件字节的 SHA-256。",
+  "description": "CTR-CTL-07。GET/PUT /v2/config。ETag 是磁盘上配置文件字节的 SHA-256。",
   "$defs": {
     "ConfigLoadError": {
       "type": "object",
@@ -19,7 +19,7 @@
       "additionalProperties": false,
       "required": ["etag", "content", "parsed", "valid", "load_error", "effective_etag", "restart_required"],
       "properties": {
-        "etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "磁盘上文件的 ETag，与响应头 ETag 相同。" },
+        "etag": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag", "description": "磁盘上文件的 ETag，与响应头 ETag 相同。" },
         "content": { "type": "string", "description": "文件原文（UTF-8，含注释）。" },
         "parsed": {
           "type": ["object", "null"],
@@ -31,7 +31,7 @@
           "description": "valid 为 false 时给出第一条错误。"
         },
         "effective_etag": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag",
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag",
           "description": "正在生效的那份配置所对应的文件 ETag。与 etag 不同表示磁盘上的新内容尚未生效：热加载失败，或属于需要重启的变更。"
         },
         "restart_required": { "type": "boolean" }
@@ -82,7 +82,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["edits"],
-      "description": "PATCH /v1/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。",
+      "description": "PATCH /v2/config：在当前文件上依次应用修改，全部通过校验才写入（原子）。",
       "properties": {
         "edits": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/ConfigEdit"}},
         "dry_run": {"type": "boolean", "default": false, "description": "只校验并计算 diff，不写文件。"}
@@ -103,7 +103,7 @@
       "required": ["applied", "etag", "diff", "restart_required"],
       "properties": {
         "applied": { "type": "boolean", "description": "dry_run 为 true 或没有任何变化时是 false。" },
-        "etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "写入后的 ETag；未写入时是磁盘上当前的 ETag。" },
+        "etag": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag", "description": "写入后的 ETag；未写入时是磁盘上当前的 ETag。" },
         "diff": { "type": "array", "items": { "$ref": "#/$defs/ConfigChange" } },
         "restart_required": { "type": "boolean", "description": "写入后的配置是否有变更需要重启才生效。" }
       }
@@ -116,8 +116,8 @@
         "applied": { "type": "boolean", "description": "本次调用是否使磁盘上的新内容成为生效的配置。内容未变、或已被文件监视器采纳时为 false。" },
         "valid": { "type": "boolean", "description": "磁盘上的内容能否通过校验。为 false 时 load_error 给出第一条错误，生效的配置保持不变。" },
         "load_error": { "oneOf": [{ "$ref": "#/$defs/ConfigLoadError" }, { "type": "null" }] },
-        "etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "磁盘上当前内容的 ETag。" },
-        "effective_etag": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag", "description": "正在生效的那份配置所对应的文件 ETag。" },
+        "etag": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag", "description": "磁盘上当前内容的 ETag。" },
+        "effective_etag": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag", "description": "正在生效的那份配置所对应的文件 ETag。" },
         "changed_paths": { "type": "array", "items": { "type": "string" }, "description": "本次生效的变更对应的 JSON Pointer。未生效时为空数组。" },
         "restart_required": { "type": "boolean", "description": "磁盘上是否有需要重启才生效的段（RestartPaths）尚未运行。" },
         "restart_paths": { "type": "array", "items": { "type": "string" }, "description": "需要重启的段，例如 /mesh、/audit。" },
@@ -129,7 +129,7 @@
       "additionalProperties": false,
       "required": ["section", "message"],
       "properties": {
-        "section": { "type": "string", "minLength": 1, "description": "没能生效的部分，目前是 gateway。" },
+        "section": { "type": "string", "minLength": 1, "description": "没能生效的部分：gateway、ingress、mesh.lan 或 mesh.tailnet。" },
         "message": { "type": "string", "minLength": 1, "description": "给人看的原因，例如监听地址被占用，以及运行中的进程现在是什么状态。" }
       }
     }

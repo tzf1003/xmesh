@@ -11,7 +11,7 @@ import (
 
 // Edit changes one value of a configuration document. Path is a JSON Pointer such as
 // /agent/policy/allow_dangerous; arrays are replaced as a whole. The control API itself takes
-// whole-file content (PUT /v1/config); clients such as the CLI use Edit to build that content
+// whole-file content (PUT /v2/config); clients such as the CLI use Edit to build that content
 // from the current file while keeping its comments.
 type Edit struct {
 	Path   string `json:"path"`

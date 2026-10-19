@@ -161,8 +161,8 @@ def main():
         outside = root / "host-only"
         outside.write_text("host-only")
         direct, gateway = address(), address()
-        cfg = {"node": {"name": "smoke-node", "roles": ["agent", "gateway"]},
-               "mesh": {"mode": "lan", "lan": {"mdns": True}}, "gateway": {"listen": gateway},
+        cfg = {"schema_version": 2, "node": {"name": "smoke-node", "roles": ["agent", "gateway"]},
+               "mesh": {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}}, "gateway": {"listen": gateway},
                "agent": {"default_cwd": str(workspace), "cwd_policy": {"allow": [str(workspace)]},
                          "policy": {"isolation": options.isolation},
                          "pty": {"default_shell": options.shell},

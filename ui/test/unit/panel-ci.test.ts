@@ -190,16 +190,16 @@ test("each request goes to its own kernel route with the body the contract names
 
   const account = await service.ci({ op: "account.create", token: GOOD });
   assert.ok(account.ok);
-  assert.deepEqual(last(k, "POST", "/v1/ci/accounts")?.body, { token: GOOD });
+  assert.deepEqual(last(k, "POST", "/v2/ci/accounts")?.body, { token: GOOD });
   assert.ok(!JSON.stringify(account.data).includes(GOOD), "only the mask comes back");
 
   const repos = await service.ci({ op: "repos", id: account.data.id, q: "xm", page: "2" });
   assert.ok(repos.ok);
-  assert.equal(last(k, "GET", "/v1/ci/accounts")?.path, `/v1/ci/accounts/${account.data.id}/repos?q=xm&page=2`);
+  assert.equal(last(k, "GET", "/v2/ci/accounts")?.path, `/v2/ci/accounts/${account.data.id}/repos?q=xm&page=2`);
 
   const created = await service.ci({ op: "binding.create", args: { target: "tzf1003/xmesh", account: account.data.id, concurrency: 2, labels: ["gpu"] } });
   assert.ok(created.ok);
-  assert.deepEqual(last(k, "POST", "/v1/ci/bindings")?.body, { target: "tzf1003/xmesh", account: account.data.id, concurrency: 2, labels: ["gpu"] });
+  assert.deepEqual(last(k, "POST", "/v2/ci/bindings")?.body, { target: "tzf1003/xmesh", account: account.data.id, concurrency: 2, labels: ["gpu"] });
   assert.equal(created.data.instances.length, 2);
 
   const publicTry = await service.ci({ op: "binding.create", args: { target: "tzf1003/oss-lib", account: account.data.id } });
@@ -207,24 +207,24 @@ test("each request goes to its own kernel route with the body the contract names
   assert.equal(publicTry.error.reason, "public_repo_requires_confirm");
 
   assert.ok((await service.ci({ op: "binding.patch", id: "xmesh", patch: { paused: true } })).ok);
-  assert.deepEqual(last(k, "PATCH", "/v1/ci/bindings/xmesh")?.body, { paused: true });
+  assert.deepEqual(last(k, "PATCH", "/v2/ci/bindings/xmesh")?.body, { paused: true });
   const restarted = await service.ci({ op: "binding.restart", id: "xmesh" });
   assert.deepEqual(restarted, { ok: true, data: null });
-  assert.equal(last(k, "POST", "/v1/ci/bindings/xmesh/restart")?.path, "/v1/ci/bindings/xmesh/restart");
+  assert.equal(last(k, "POST", "/v2/ci/bindings/xmesh/restart")?.path, "/v2/ci/bindings/xmesh/restart");
 
   assert.ok((await service.ci({ op: "binding.repair", id: "xmesh" })).ok);
-  assert.equal(last(k, "POST", "/v1/ci/bindings/xmesh/repair")?.body, null, "no token, no body");
+  assert.equal(last(k, "POST", "/v2/ci/bindings/xmesh/repair")?.body, null, "no token, no body");
   assert.ok((await service.ci({ op: "binding.repair", id: "xmesh", registration_token: REG })).ok);
-  assert.deepEqual(last(k, "POST", "/v1/ci/bindings/xmesh/repair")?.body, { registration_token: REG });
+  assert.deepEqual(last(k, "POST", "/v2/ci/bindings/xmesh/repair")?.body, { registration_token: REG });
 
   const inspected = await service.ci({ op: "import.inspect", dir: "/runners/clean" });
   assert.ok(inspected.ok);
-  assert.deepEqual(last(k, "POST", "/v1/ci/import/inspect")?.body, { dir: "/runners/clean" });
+  assert.deepEqual(last(k, "POST", "/v2/ci/import/inspect")?.body, { dir: "/runners/clean" });
 
   const removed = await service.ci({ op: "binding.delete", id: "xmesh", force: true });
   assert.ok(removed.ok);
   assert.equal(removed.data.removing, true);
-  assert.equal(last(k, "DELETE", "/v1/ci/bindings/xmesh")?.path, "/v1/ci/bindings/xmesh?force=true");
+  assert.equal(last(k, "DELETE", "/v2/ci/bindings/xmesh")?.path, "/v2/ci/bindings/xmesh?force=true");
   const busyAccount = await service.ci({ op: "account.delete", id: account.data.id });
   assert.ok(!busyAccount.ok && busyAccount.error.reason === "account_in_use", "the binding is still draining");
   assert.ok((await service.ci({ op: "get" })).ok, "the fake drops a removed binding on the next read");
@@ -235,7 +235,7 @@ test("each request goes to its own kernel route with the body the contract names
 
 test("a kernel without the ci route answers with an error the page can show", async () => {
   const { k, service } = await setup();
-  k.failNext("/v1/ci", 501, "not_implemented", "此内核尚未实现 ci");
+  k.failNext("/v2/ci", 501, "not_implemented", "此内核尚未实现 ci");
   const r = await service.ci({ op: "get" });
   assert.ok(!r.ok);
   assert.equal(r.error.code, "not_implemented");
@@ -249,7 +249,7 @@ test("everything the fake kernel answers on the ci routes validates against the 
     ajv.addSchema(JSON.parse(fs.readFileSync(path.join(schemaDir(), f), "utf8")));
   }
   const check = (def: string, value: unknown): void => {
-    const v = ajv.getSchema(`urn:xmesh:schema:control-ci:1#/$defs/${def}`);
+    const v = ajv.getSchema(`urn:xmesh:schema:control-ci:2#/$defs/${def}`);
     assert.ok(v, def);
     assert.ok(v(value), `${def} invalid: ${ajv.errorsText(v.errors)}\n${JSON.stringify(value).slice(0, 300)}`);
   };
@@ -260,24 +260,24 @@ test("everything the fake kernel answers on the ci routes validates against the 
     return r;
   };
 
-  check("CiOverview", call("GET", "/v1/ci").body);
-  const account = call("POST", "/v1/ci/accounts", { token: GOOD });
+  check("CiOverview", call("GET", "/v2/ci").body);
+  const account = call("POST", "/v2/ci/accounts", { token: GOOD });
   check("CiAccount", account.body);
   const id = (account.body as { id: string }).id;
-  check("CiReposResponse", call("GET", `/v1/ci/accounts/${id}/repos`).body);
-  check("CiReposResponse", call("GET", `/v1/ci/accounts/${id}/repos`, undefined, "page=2").body);
-  for (const dir of ["clean", "service", "running", "ephemeral"]) check("CiImportInspectResponse", call("POST", "/v1/ci/import/inspect", { dir: `/runners/${dir}` }).body);
+  check("CiReposResponse", call("GET", `/v2/ci/accounts/${id}/repos`).body);
+  check("CiReposResponse", call("GET", `/v2/ci/accounts/${id}/repos`, undefined, "page=2").body);
+  for (const dir of ["clean", "service", "running", "ephemeral"]) check("CiImportInspectResponse", call("POST", "/v2/ci/import/inspect", { dir: `/runners/${dir}` }).body);
 
-  const created = call("POST", "/v1/ci/bindings", { target: "tzf1003/xmesh", account: id, concurrency: 2, labels: ["gpu"] });
+  const created = call("POST", "/v2/ci/bindings", { target: "tzf1003/xmesh", account: id, concurrency: 2, labels: ["gpu"] });
   assert.equal(created.status, 201);
   check("CiBinding", created.body);
-  const taken = call("POST", "/v1/ci/bindings", { import_dir: "/runners/clean" });
+  const taken = call("POST", "/v2/ci/bindings", { import_dir: "/runners/clean" });
   check("CiBinding", taken.body);
-  check("CiBinding", call("PATCH", "/v1/ci/bindings/xmesh", { paused: true }).body);
-  check("CiBinding", call("POST", "/v1/ci/bindings/xmesh/repair", {}).body);
-  check("CiBinding", call("DELETE", "/v1/ci/bindings/xmesh").body);
-  check("CiOverview", call("GET", "/v1/ci").body);
-  for (const r of [call("POST", "/v1/ci/accounts", { token: "short" }), call("GET", "/v1/ci/accounts/none/repos"), call("POST", "/v1/ci/bindings", {})]) {
+  check("CiBinding", call("PATCH", "/v2/ci/bindings/xmesh", { paused: true }).body);
+  check("CiBinding", call("POST", "/v2/ci/bindings/xmesh/repair", {}).body);
+  check("CiBinding", call("DELETE", "/v2/ci/bindings/xmesh").body);
+  check("CiOverview", call("GET", "/v2/ci").body);
+  for (const r of [call("POST", "/v2/ci/accounts", { token: "short" }), call("GET", "/v2/ci/accounts/none/repos"), call("POST", "/v2/ci/bindings", {})]) {
     const e = r.body as { error: string; message: string };
     assert.ok(r.status >= 400 && typeof e.error === "string" && typeof e.message === "string");
   }

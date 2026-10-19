@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -441,10 +441,10 @@ func (m *Manager) releaseSleep() {
 }
 
 // Bindings is the state of every binding, ordered by id.
-func (m *Manager) Bindings() []v1.CiBinding {
+func (m *Manager) Bindings() []v2.CiBinding {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]v1.CiBinding, 0, len(m.bindings))
+	out := make([]v2.CiBinding, 0, len(m.bindings))
 	for _, b := range m.bindings {
 		out = append(out, m.viewLocked(b))
 	}
@@ -453,12 +453,12 @@ func (m *Manager) Bindings() []v1.CiBinding {
 }
 
 // Binding is the state of one binding.
-func (m *Manager) Binding(id string) (v1.CiBinding, bool) {
+func (m *Manager) Binding(id string) (v2.CiBinding, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b := m.bindings[id]
 	if b == nil {
-		return v1.CiBinding{}, false
+		return v2.CiBinding{}, false
 	}
 	return m.viewLocked(b), true
 }
@@ -470,18 +470,18 @@ func (m *Manager) Gone(id string) bool {
 	return m.bindings[id] == nil
 }
 
-func (m *Manager) viewLocked(b *binding) v1.CiBinding {
+func (m *Manager) viewLocked(b *binding) v2.CiBinding {
 	labels := append([]string{}, b.spec.Labels...)
-	view := v1.CiBinding{
-		ID: b.spec.ID, Scope: "repo", Target: b.spec.Target, Source: v1.CiBindingSource(b.spec.Source),
+	view := v2.CiBinding{
+		ID: b.spec.ID, Scope: "repo", Target: b.spec.Target, Source: v2.CiBindingSource(b.spec.Source),
 		Account: b.spec.Account, Public: b.spec.Public, Concurrency: b.spec.Concurrency, Labels: labels,
-		Paused: b.spec.Paused, Removing: b.removing, Dir: b.dir, Instances: []v1.CiInstance{},
+		Paused: b.spec.Paused, Removing: b.removing, Dir: b.dir, Instances: []v2.CiInstance{},
 	}
 	if view.Concurrency < 1 {
 		view.Concurrency = 1
 	}
 	if view.Source == "" {
-		view.Source = v1.CiSourceAccount
+		view.Source = v2.CiSourceAccount
 	}
 	idx := make([]int, 0, len(b.instances))
 	for i := range b.instances {
@@ -495,34 +495,34 @@ func (m *Manager) viewLocked(b *binding) v1.CiBinding {
 }
 
 // Summary is StatusResponse.ci; nil when nothing is bound.
-func (m *Manager) Summary() *v1.CiSummary {
+func (m *Manager) Summary() *v2.CiSummary {
 	bindings := m.Bindings()
 	if len(bindings) == 0 {
 		return nil
 	}
-	return &v1.CiSummary{Bindings: bindings, Draining: m.isDraining()}
+	return &v2.CiSummary{Bindings: bindings, Draining: m.isDraining()}
 }
 
-// Overview is GET /v1/ci apart from the accounts, which the control layer adds.
-func (m *Manager) Overview() v1.CiOverview {
+// Overview is GET /v2/ci apart from the accounts, which the control layer adds.
+func (m *Manager) Overview() v2.CiOverview {
 	c := m.o.Config()
 	bindings := m.Bindings()
-	runner := v1.CiRunnerPackage{}
+	runner := v2.CiRunnerPackage{}
 	if m.o.Cache != nil {
 		if pkg, ok := m.o.Cache.Cached(); ok {
-			runner = v1.CiRunnerPackage{Version: pkg.Version, Cached: true}
+			runner = v2.CiRunnerPackage{Version: pkg.Version, Cached: true}
 		}
 	}
-	return v1.CiOverview{
-		Accounts: []v1.CiAccount{}, Bindings: bindings, Notices: orEmpty(Notices(len(bindings))), Runner: runner,
+	return v2.CiOverview{
+		Accounts: []v2.CiAccount{}, Bindings: bindings, Notices: orEmpty(Notices(len(bindings))), Runner: runner,
 		PreventSleepWhileBusy: c.PreventSleepWhileBusy, StopTimeoutS: int(c.StopTimeoutDuration() / time.Second),
 		Draining: m.isDraining(),
 	}
 }
 
-func orEmpty(n []v1.CiNotice) []v1.CiNotice {
+func orEmpty(n []v2.CiNotice) []v2.CiNotice {
 	if n == nil {
-		return []v1.CiNotice{}
+		return []v2.CiNotice{}
 	}
 	return n
 }
@@ -551,7 +551,7 @@ func scriptName(base string) string {
 }
 
 // SpecView is the contract view of a binding that has no instances yet (or no longer).
-func (m *Manager) SpecView(spec config.CIBinding, removing bool) v1.CiBinding {
+func (m *Manager) SpecView(spec config.CIBinding, removing bool) v2.CiBinding {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.viewLocked(&binding{spec: spec, dir: m.bindingDir(spec), removing: removing, instances: map[int]*instance{}})

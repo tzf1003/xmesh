@@ -28,6 +28,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import ssl
 
 from smoke_local import MCP, address, stop_runtime, wait_for_default_token, wait_for_gateway
 from smoke_peer import verify_peer
@@ -44,7 +45,7 @@ def sh(*command, **options):
     return done.stdout
 
 
-def headscale_config(work, port):
+def headscale_config(work, port, tls=False):
     # Headscale refuses an empty DERP map, and a map whose only entry cannot be reached makes every
     # node's netcheck fail and rebind its UDP socket every few seconds, which can swallow a fresh
     # WireGuard handshake. The embedded DERP server therefore runs on loopback with its STUN
@@ -59,8 +60,9 @@ def headscale_config(work, port):
                   "dst": ["100.64.0.0/10:*", "fd7a:115c:a1e0::/48:*"]}],
     }))
     (work / "headscale.yaml").write_text("\n".join([
-        f"server_url: http://127.0.0.1:{port}",
+        f"server_url: {'https' if tls else 'http'}://127.0.0.1:{port}",
         f"listen_addr: 127.0.0.1:{port}",
+        *([f"tls_cert_path: {work / 'control.crt'}", f"tls_key_path: {work / 'control.key'}"] if tls else []),
         f"metrics_listen_addr: 127.0.0.1:{port + 1000}",
         f"grpc_listen_addr: 127.0.0.1:{port + 1001}",
         "grpc_allow_insecure: true",
@@ -82,10 +84,10 @@ def headscale_config(work, port):
 
 def xmesh_config(name, key, port, control):
     grant = {"tools": ["*"], "backends": ["*"]}
-    return {"node": {"name": name, "roles": ["agent", "gateway"]},
-            "mesh": {"mode": "tailnet", "control_url": control, "authkey_file": str(key), "ephemeral": True},
+    return {"schema_version": 2, "node": {"name": name, "roles": ["agent", "gateway"]},
+            "mesh": {"lan": {"enabled": False}, "tailnet": {"enabled": True, "control_url": control, "authkey_file": str(key), "ephemeral": True}},
             "gateway": {"listen": f"127.0.0.1:{port}"},
-            "agent": {"authz": {"tag:device": grant, "tag:ingress": grant}}}
+            "agent": {"authz": {"tag:peer": grant, "tag:ingress": grant}}}
 
 
 def main():
@@ -97,30 +99,42 @@ def main():
     parser.add_argument("--ingress", action="store_true", help="also run the OAuth protocol check through an ingress on hs-a")
     options = parser.parse_args()
     headscale, binary = options.headscale.resolve(), options.binary.resolve()
-    control = f"http://127.0.0.1:{CONTROL_PORT}"
+    control = f"https://127.0.0.1:{CONTROL_PORT}"
+    node_env = dict(os.environ)
     processes, logs = [], []
 
     def spawn(command, name):
         log = open(work / f"{name}.log", "w+")
         logs.append(log)
-        process = subprocess.Popen([str(part) for part in command], stdout=log, stderr=log)
+        process = subprocess.Popen([str(part) for part in command], stdout=log, stderr=log, env=node_env)
         processes.append(process)
         return process, log
 
     with tempfile.TemporaryDirectory(prefix="xmesh-headscale-") as temporary:
         work = pathlib.Path(temporary).resolve()
         try:
-            probe_test = work / "mesh.test"
-            if not options.skip_go_test:
-                # Compile first: building the test binary takes a minute on a CI runner and would starve
-                # the running nodes if done after they have started.
-                sh("go", "test", "-c", "-o", probe_test, "./internal/mesh", cwd=ROOT)
-            config = headscale_config(work, CONTROL_PORT)
+            (work / "tls.cnf").write_text("""[req]
+distinguished_name=dn
+x509_extensions=extensions
+prompt=no
+[dn]
+CN=localhost
+[extensions]
+subjectAltName=IP:127.0.0.1,DNS:localhost
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign
+extendedKeyUsage=serverAuth
+""")
+            sh("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+               "-config", work / "tls.cnf", "-keyout", work / "control.key", "-out", work / "control.crt")
+            node_env["SSL_CERT_FILE"] = str(work / "control.crt")
+            tls_context = ssl.create_default_context(cafile=str(work / "control.crt"))
+            config = headscale_config(work, CONTROL_PORT, tls=True)
             hs, hs_log = spawn([headscale, "-c", config, "serve"], "headscale")
             deadline = time.monotonic() + 60
             while True:
                 try:
-                    urllib.request.urlopen(control + "/health", timeout=2).read()
+                    urllib.request.urlopen(control + "/health", timeout=2, context=tls_context).read()
                     break
                 except OSError:
                     assert hs.poll() is None, (hs_log.seek(0), hs_log.read())[1]
@@ -154,13 +168,30 @@ def main():
                 command = [binary, "serve", "--config", node / "config.json", "--state-dir", node / "state"]
                 if name == "hs-i":
                     cfg["node"]["roles"].append("ingress")
-                    cfg["mesh"]["authkey_file"] = str(ingress_key_file)
+                    cfg["mesh"]["tailnet"]["authkey_file"] = str(ingress_key_file)
                     cfg["ingress"] = {"listen": "tunnel", "oauth": {"issuer": issuer, "clients": {
                         "codex": {"scopes": ["devices:read", "exec:*"]}}}}
                     command += ["--ingress", "--tunnel-listen", tunnel, "--oauth-password-file", password_file]
                 (node / "config.json").write_text(json.dumps(cfg))
+                nodes[name] = (command, f"127.0.0.1:{port}")
+            documents = {}
+            for name in nodes:
+                node = work / name
+                pairfile = node / "device-pair.json"
+                sh(binary, "pair", "--config", node / "config.json", "--state-dir", node / "state", "--export", pairfile)
+                documents[name] = (pairfile, json.loads(pairfile.read_text())["fingerprint"])
+            for source in nodes:
+                for target in nodes:
+                    if source == target:
+                        continue
+                    pairfile, fingerprint = documents[target]
+                    node = work / source
+                    tags = "tag:peer,tag:device" + (",tag:ingress" if target == "hs-i" else "")
+                    sh(binary, "pair", "--config", node / "config.json", "--state-dir", node / "state",
+                       "--import", pairfile, "--fingerprint", fingerprint, "--tags", tags)
+            for name, (command, gateway) in list(nodes.items()):
                 process, log = spawn(command, name)
-                nodes[name] = (process, log, f"127.0.0.1:{port}")
+                nodes[name] = (process, log, gateway)
             tokens = {name: wait_for_default_token(binary, work / name / "state") for name in nodes}
             clients = {name: wait_for_gateway(process, gateway, log, tokens[name], seconds=90)
                        for name, (process, log, gateway) in nodes.items()}
@@ -170,36 +201,31 @@ def main():
             for client in clients.values():
                 client.close()
 
+            device_password = work / "device-password"
+            device_password.write_text("device-pairing-" + os.urandom(16).hex())
+            device_password.chmod(0o600)
+            sh(binary, "control", "pair", "password", "set", "--state-dir", work / "hs-a" / "state",
+               "--password-file", device_password)
+            sandbox = sh(sys.executable, HERE / "smoke_sandbox.py", "--binary", binary,
+                         "--control-url", control, "--auth-key-file", key_file,
+                         "--peer", "hs-a:" + options.expected_os,
+                         "--peer-password-file", "hs-a=" + str(device_password),
+                         "--observer-gateway", nodes["hs-a"][2],
+                         "--observer-token-file", work / "hs-a" / "state" / "pats" / "default.token",
+                         env=node_env, timeout=180)
+            sandbox_result = json.loads(sandbox.strip().splitlines()[-1])
+
+            # The application calls above traverse real tsnet paths and the version 2 device link.
+            # Legacy unauthenticated Agent HTTP probes cannot validate this protocol.
             probe = None
-            if not options.skip_go_test:
-                probe_dir = work / "probe"
-                (probe_dir / "workspace").mkdir(parents=True)
-                cfg = xmesh_config("hs-probe", key_file, 0, control)
-                cfg["node"]["roles"] = ["agent"]
-                cfg.pop("gateway")
-                cfg["agent"].update({"default_cwd": str(probe_dir / "workspace"),
-                                     "cwd_policy": {"allow": [str(probe_dir / "workspace")]}})
-                (probe_dir / "config.json").write_text(json.dumps(cfg))
-                env = dict(os.environ, XMESH_TEST_TAILNET_CONFIG=str(probe_dir / "config.json"),
-                           XMESH_TEST_TAILNET_STATE=str(probe_dir / "state"), XMESH_TEST_TAILNET_PEER="hs-b",
-                           XMESH_TEST_TAILNET_VERBOSE="1")
-                for attempt in (1, 2):
-                    probe = subprocess.run([probe_test, "-test.run", "^Test_TailnetPeerConnectivity$",
-                                            "-test.v", "-test.count=1", "-test.timeout=120s"], cwd=ROOT / "internal" / "mesh",
-                                           env=env, capture_output=True, text=True)
-                    sys.stderr.write(f"--- go test attempt {attempt}\n{probe.stdout}{probe.stderr}")
-                    if probe.returncode == 0 and "--- PASS: Test_TailnetPeerConnectivity" in probe.stdout:
-                        break
-                else:
-                    raise AssertionError("tailnet probe failed twice")
             oauth = None
             if options.ingress:
                 oauth = json.loads(sh(sys.executable, HERE / "oauth_client.py", "--base", tunnel, "--issuer", issuer,
                                       "--password-file", password_file, "--preregistered", "codex",
                                       "--device", "hs-a", "--device", "hs-b"))
             print(json.dumps({"result": "PASS", "peer_checks": results, "tailnet_probe": probe is not None,
-                              "oauth": oauth, "path": "direct",
-                              "checks": ["join", "peer-tools-both-ways"] + (["tailnet-connectivity"] if probe else [])
+                              "oauth": oauth, "path": "tailnet", "sandbox": sandbox_result,
+                              "checks": ["join", "public-key-pairing", "device-link", "peer-tools-both-ways", "ephemeral-network-stable-device"] + (["tailnet-connectivity"] if probe else [])
                               + (["oauth-protocol"] if oauth else [])}))
         except BaseException:
             for log in logs:

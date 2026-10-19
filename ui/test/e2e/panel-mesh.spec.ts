@@ -416,6 +416,8 @@ test("verified mesh status belongs to the selected node",async()=>{
  const page=await open();
  await patch({credential:false});
  await page.getByTestId("mesh-refresh").click();
+ await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open",true);
+ await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
  await page.getByTestId("mesh-login-secret").fill("tskey-api-e2e-node-scope");
  await page.getByTestId("mesh-login-submit").click();
  await expect(page.getByTestId("mesh-provider")).toContainText("tailscale");

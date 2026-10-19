@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -8,13 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
-	"github.com/tzf1003/xmesh/internal/mesh"
+	"github.com/tzf1003/xmesh/internal/device"
 	"github.com/tzf1003/xmesh/internal/oauth"
 	"github.com/tzf1003/xmesh/internal/privdir"
 )
@@ -22,14 +24,14 @@ import (
 // IngressAdmin is the running ingress as the control channel sees it.
 type IngressAdmin interface {
 	Issuer() string
-	Clients() []v1.IngressClient
+	Clients() []v2.IngressClient
 	// RevokeClient removes a client and its tokens; false means there was no such client.
 	RevokeClient(id string) (bool, error)
 	// RotatePassword stores the new login password and makes it effective.
 	RotatePassword(password string) error
 }
 
-// pathPart returns the i-th segment of the request path ("/v1/pats/x/rotate": 0 is "v1").
+// pathPart returns the i-th segment of the request path ("/v2/pats/x/rotate": 0 is "v2").
 func pathPart(r *http.Request, i int) string {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if i < len(parts) {
@@ -40,89 +42,100 @@ func pathPart(r *http.Request, i int) string {
 
 // --- pairing (CTR-CTL-08) ---
 
-// lanPairDir is where the LAN certificate and trust store live; the CLI uses the same directory.
-func (s *Server) lanPairDir() string { return filepath.Join(s.o.StateDir, "lan") }
-
-func (s *Server) requireLAN(w http.ResponseWriter) bool {
-	if s.o.Store.Get().Mesh.Mode != "lan" {
-		failWith(w, newError(v1.ErrUnsupportedMode, "配对仅用于 lan 模式"))
-		return false
+// deviceState uses the running shared trust service. Local-only management can also prepare
+// its version 2 identity and trust before any network provider is enabled.
+func (s *Server) deviceState(ctx context.Context) (*device.Identity, *device.TrustStore, error) {
+	if s.o.DeviceIdentity != nil && s.o.DeviceTrust != nil {
+		return s.o.DeviceIdentity, s.o.DeviceTrust, nil
 	}
-	return true
-}
-
-func (s *Server) pairExport(w http.ResponseWriter, _ *http.Request, _ *call) {
-	if !s.requireLAN(w) {
-		return
-	}
-	cert, err := mesh.LoadCertificate(s.lanPairDir(), s.o.Store.Get().Node.Name)
+	id, err := device.LoadIdentity(ctx, s.o.StateDir)
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取本机 LAN 证书"))
-		return
+		return nil, nil, err
 	}
-	writeJSON(w, 200, v1.PairExportResponse{Pair: v1.PairDocument{Name: s.o.Store.Get().Node.Name, Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM), Tags: []string{}}})
+	trust, err := device.OpenTrust(s.o.StateDir)
+	return id, trust, err
 }
 
-var pairTags = map[string]bool{"tag:peer": true, "tag:device": true, "tag:ingress": true}
+func (s *Server) pairExport(w http.ResponseWriter, r *http.Request, _ *call) {
+	id, _, err := s.deviceState(r.Context())
+	if err != nil {
+		failWith(w, newError(v2.ErrInternal, "无法读取设备身份"))
+		return
+	}
+	doc := id.Document(s.o.Store.Get().Node.Name)
+	writeJSON(w, 200, v2.PairExportResponse{Pair: v2.PairDocument{Version: doc.Version, DeviceID: doc.DeviceID, PublicKey: doc.PublicKey, Name: doc.Name, Fingerprint: strings.TrimPrefix(doc.DeviceID, "dev-"), Tags: []string{}}})
+}
+
+var pairTags = map[string]bool{"tag:peer": true, "tag:device": true, "tag:ingress": true, "tag:admin": true}
 
 func normalizeFingerprint(text string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(text), ":", ""))
 }
 
+func (s *Server) deleteDeviceTrust(w http.ResponseWriter, r *http.Request, _ *call) {
+	id := pathPart(r, 3)
+	if !strings.HasPrefix(id, "dev-") || !pairFingerprintPattern.MatchString(strings.TrimPrefix(id, "dev-")) {
+		failWith(w, argError("device_id", "设备 ID 无效"))
+		return
+	}
+	_, trust, err := s.deviceState(r.Context())
+	if err != nil {
+		failWith(w, newError(v2.ErrInternal, "设备信任服务不可用"))
+		return
+	}
+	if _, ok := trust.Find(id); !ok {
+		failWith(w, newError(v2.ErrNotFound, "该设备尚未配对"))
+		return
+	}
+	if err := trust.Revoke(r.Context(), id); err != nil {
+		failWith(w, newError(v2.ErrInternal, "无法撤销设备信任"))
+		return
+	}
+	w.WriteHeader(204)
+}
 func (s *Server) pairImport(w http.ResponseWriter, r *http.Request, _ *call) {
-	var req v1.PairImportRequest
+	var req v2.PairImportRequest
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
 	}
-	if !s.requireLAN(w) {
+	doc := device.Document{Version: req.Pair.Version, DeviceID: req.Pair.DeviceID, Name: req.Pair.Name, PublicKey: req.Pair.PublicKey}
+	confirmed := normalizeFingerprint(req.Fingerprint)
+	if confirmed == "" || confirmed != normalizeFingerprint(req.Pair.Fingerprint) || "dev-"+confirmed != doc.DeviceID {
+		failWith(w, newError(v2.ErrFingerprintMismatch, "设备公钥指纹与独立确认的指纹不一致"))
+		return
+	}
+	if err := doc.Validate(); err != nil {
+		failWith(w, argError("pair", "设备配对文档无效，请使用新版导出文档"))
 		return
 	}
 	tags := []string{}
-	seen := map[string]bool{}
 	for _, tag := range req.Tags {
 		if !pairTags[tag] {
-			failWith(w, argError("tags", "tags 只能是 tag:peer、tag:device、tag:ingress"))
+			failWith(w, argError("tags", "设备角色无效"))
 			return
 		}
-		if !seen[tag] {
-			seen[tag] = true
+		if !slices.Contains(tags, tag) {
 			tags = append(tags, tag)
 		}
 	}
 	if len(tags) == 0 {
 		tags = []string{"tag:peer", "tag:device"}
 	}
-	if req.Pair.Name == "" || req.Pair.CertificatePEM == "" {
-		failWith(w, argError("pair", "缺少对端配对内容"))
-		return
-	}
-	// The fingerprint the user confirmed must match both the document and the certificate in it.
-	confirmed := normalizeFingerprint(req.Fingerprint)
-	computed, err := mesh.CertificateFingerprint(req.Pair.CertificatePEM)
+	id, trust, err := s.deviceState(r.Context())
 	if err != nil {
-		failWith(w, argError("pair.certificate_pem", "证书无效"))
+		failWith(w, newError(v2.ErrInternal, "设备信任服务不可用"))
 		return
 	}
-	if confirmed == "" || confirmed != normalizeFingerprint(req.Pair.Fingerprint) || confirmed != computed {
-		failWith(w, newError(v1.ErrFingerprintMismatch, "指纹与配对文件或证书不一致"))
+	if id.ID == doc.DeviceID {
+		failWith(w, argError("pair", "无法与本机自身配对"))
 		return
 	}
-	if err = privdir.Ensure(s.o.StateDir); err != nil {
-		failWith(w, newError(v1.ErrInternal, "状态目录不可用"))
+	if err := trust.Grant(r.Context(), doc, tags, nil); err != nil {
+		failWith(w, newError(v2.ErrInternal, "无法保存设备信任"))
 		return
 	}
-	peer := mesh.Trusted{Name: req.Pair.Name, Fingerprint: computed, CertificatePEM: req.Pair.CertificatePEM}
-	if err = mesh.ImportTrusted(s.lanPairDir(), peer, confirmed, tags); err != nil {
-		if errors.Is(err, mesh.ErrPairFingerprint) {
-			failWith(w, newError(v1.ErrFingerprintMismatch, "指纹与配对文件或证书不一致"))
-		} else {
-			failWith(w, argError("pair", "对端配对内容无效"))
-		}
-		return
-	}
-	s.pairPending.Store(true)
-	writeJSON(w, 200, v1.PairImportResponse{Name: peer.Name, Fingerprint: computed, Tags: tags, RestartRequired: true})
+	writeJSON(w, 200, v2.PairImportResponse{Name: doc.Name, Fingerprint: strings.TrimPrefix(doc.DeviceID, "dev-"), Tags: tags, RestartRequired: false})
 }
 
 // --- personal access tokens (CTR-CTL-09) ---
@@ -209,15 +222,15 @@ func newPatToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func patInfo(name string, pat config.PAT) v1.PatInfo {
-	info := v1.PatInfo{Name: name, Scopes: append([]string{}, pat.Scopes...), TokenFile: pat.TokenFile}
+func patInfo(name string, pat config.PAT) v2.PatInfo {
+	info := v2.PatInfo{Name: name, Scopes: append([]string{}, pat.Scopes...), TokenFile: pat.TokenFile}
 	if pat.TokenFile != "" {
 		if absolute, err := filepath.Abs(pat.TokenFile); err == nil {
 			info.TokenFile = absolute
 		}
 	}
 	if st, err := os.Stat(pat.TokenFile); err == nil {
-		t := v1.At(st.ModTime())
+		t := v2.At(st.ModTime())
 		info.ModifiedAt = &t
 	}
 	return info
@@ -230,7 +243,7 @@ func (s *Server) listPats(w http.ResponseWriter, _ *http.Request, _ *call) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := v1.PatList{Pats: []v1.PatInfo{}, Enforced: len(pats) > 0}
+	out := v2.PatList{Pats: []v2.PatInfo{}, Enforced: len(pats) > 0}
 	for _, name := range names {
 		out.Pats = append(out.Pats, patInfo(name, pats[name]))
 	}
@@ -256,29 +269,29 @@ func patEntries(raw []byte) map[string]config.PAT {
 	return out
 }
 
-// editConfigLocked applies edits to the file, validates the result like PUT /v1/config and stores
+// editConfigLocked applies edits to the file, validates the result like PUT /v2/config and stores
 // it. The caller holds configMu. A failure is reported to w and returns false.
 func (s *Server) editConfigLocked(w http.ResponseWriter, old []byte, edits []Edit) bool {
 	next, err := ApplyEdits(old, edits)
 	if err != nil {
-		failWith(w, newError(v1.ErrConflict, "配置结构不允许这项修改"))
+		failWith(w, newError(v2.ErrConflict, "配置结构不允许这项修改"))
 		return false
 	}
 	if _, err = config.Parse(next); err != nil {
-		e := newError(v1.ErrConfigInvalid, "配置未通过校验，没有写入")
+		e := newError(v2.ErrConfigInvalid, "配置未通过校验，没有写入")
 		e.Diagnostics = diagnostics(err)
 		failWith(w, e)
 		return false
 	}
 	if _, _, err = s.storeConfigLocked(next, diffConfigs(parsedOf(old), parsedOf(next))); err != nil {
-		failWith(w, newError(v1.ErrInternal, "写入配置文件失败"))
+		failWith(w, newError(v2.ErrInternal, "写入配置文件失败"))
 		return false
 	}
 	return true
 }
 
 func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
-	var req v1.PatCreateRequest
+	var req v2.PatCreateRequest
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -299,23 +312,23 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	if _, exists := patEntries(old)[req.Name]; exists {
-		failWith(w, newError(v1.ErrConflict, "同名 PAT 已存在"))
+		failWith(w, newError(v2.ErrConflict, "同名 PAT 已存在"))
 		return
 	}
 	if gateway, _ := parsedOf(old)["gateway"].(map[string]any); gateway["listen"] == nil {
 		// Without a gateway section the new entry alone would not be a valid configuration.
-		e := newError(v1.ErrConflict, "此节点没有配置 gateway，无法创建 PAT")
+		e := newError(v2.ErrConflict, "此节点没有配置 gateway，无法创建 PAT")
 		e.Reason = "gateway_not_configured"
 		failWith(w, e)
 		return
 	}
 	token, err := newPatToken()
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法生成令牌"))
+		failWith(w, newError(v2.ErrInternal, "无法生成令牌"))
 		return
 	}
 	if err = privdir.Ensure(s.o.StateDir); err == nil {
@@ -326,7 +339,7 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 		file, err = writeAvailablePatFile(s.patDir(), req.Name, token)
 	}
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法写入令牌文件"))
+		failWith(w, newError(v2.ErrInternal, "无法写入令牌文件"))
 		return
 	}
 	// The token file exists before the entry that names it: the Gateway refuses every PAT while
@@ -337,7 +350,7 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 		_ = os.Remove(file + ".owner")
 		return
 	}
-	writeJSON(w, 201, v1.PatSecret{Pat: patInfo(req.Name, config.PAT{TokenFile: file, Scopes: scopes}), Token: token})
+	writeJSON(w, 201, v2.PatSecret{Pat: patInfo(req.Name, config.PAT{TokenFile: file, Scopes: scopes}), Token: token})
 }
 
 func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
@@ -350,12 +363,12 @@ func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	pat, ok := patEntries(old)[name]
 	if !ok || pat.TokenFile == "" {
-		failWith(w, newError(v1.ErrNotFound, "没有这个 PAT"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个 PAT"))
 		return
 	}
 	token, err := newPatToken()
@@ -363,10 +376,10 @@ func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
 		err = writeAtomic(pat.TokenFile, []byte(token+"\n"))
 	}
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法写入令牌文件"))
+		failWith(w, newError(v2.ErrInternal, "无法写入令牌文件"))
 		return
 	}
-	writeJSON(w, 200, v1.PatSecret{Pat: patInfo(name, pat), Token: token})
+	writeJSON(w, 200, v2.PatSecret{Pat: patInfo(name, pat), Token: token})
 }
 
 func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
@@ -379,17 +392,17 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	pat, ok := patEntries(old)[name]
 	if !ok {
-		failWith(w, newError(v1.ErrNotFound, "没有这个 PAT"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个 PAT"))
 		return
 	}
 	if len(patEntries(old)) == 1 {
 		// The gateway always requires a token (CTR-GW-07), so the last one stays until it is rotated.
-		e := newError(v1.ErrConflict, "至少保留一个令牌：本机 Gateway 每个请求都需要令牌")
+		e := newError(v2.ErrConflict, "至少保留一个令牌：本机 Gateway 每个请求都需要令牌")
 		e.Reason = "last_pat"
 		failWith(w, e)
 		return
@@ -401,11 +414,11 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	if managedPatPath(s.patDir(), name, pat.TokenFile) {
 		if owner, err := os.ReadFile(pat.TokenFile + ".owner"); err == nil && string(owner) == name+"\n" {
 			if err := os.Remove(pat.TokenFile); err != nil && !os.IsNotExist(err) {
-				failWith(w, newError(v1.ErrInternal, "PAT 已撤销，但令牌文件清理失败"))
+				failWith(w, newError(v2.ErrInternal, "PAT 已撤销，但令牌文件清理失败"))
 				return
 			}
 			if err := os.Remove(pat.TokenFile + ".owner"); err != nil && !os.IsNotExist(err) {
-				failWith(w, newError(v1.ErrInternal, "PAT 已撤销，但归属凭据清理失败"))
+				failWith(w, newError(v2.ErrInternal, "PAT 已撤销，但归属凭据清理失败"))
 				return
 			}
 		}
@@ -417,7 +430,7 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 
 func (s *Server) ingressAdmin(w http.ResponseWriter) IngressAdmin {
 	if !s.o.Store.Get().HasRole("ingress") {
-		failWith(w, newError(v1.ErrRoleDisabled, "此节点没有 ingress 角色"))
+		failWith(w, newError(v2.ErrRoleDisabled, "此节点没有 ingress 角色"))
 		return nil
 	}
 	admin := s.o.Ingress
@@ -425,7 +438,7 @@ func (s *Server) ingressAdmin(w http.ResponseWriter) IngressAdmin {
 		admin = s.o.IngressNow()
 	}
 	if admin == nil {
-		failWith(w, newError(v1.ErrUnavailable, "入口尚未就绪"))
+		failWith(w, newError(v2.ErrUnavailable, "入口尚未就绪"))
 		return nil
 	}
 	return admin
@@ -436,9 +449,9 @@ func (s *Server) listIngressClients(w http.ResponseWriter, _ *http.Request, _ *c
 	if admin == nil {
 		return
 	}
-	out := v1.IngressClientsResponse{Clients: admin.Clients()}
+	out := v2.IngressClientsResponse{Clients: admin.Clients()}
 	if out.Clients == nil {
-		out.Clients = []v1.IngressClient{}
+		out.Clients = []v2.IngressClient{}
 	}
 	if issuer := admin.Issuer(); issuer != "" {
 		out.Issuer = &issuer
@@ -454,9 +467,9 @@ func (s *Server) deleteIngressClient(w http.ResponseWriter, r *http.Request, _ *
 	found, err := admin.RevokeClient(pathPart(r, 3))
 	switch {
 	case err != nil:
-		failWith(w, newError(v1.ErrInternal, "无法保存客户端列表"))
+		failWith(w, newError(v2.ErrInternal, "无法保存客户端列表"))
 	case !found:
-		failWith(w, newError(v1.ErrNotFound, "没有这个客户端"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个客户端"))
 	default:
 		w.WriteHeader(204)
 	}
@@ -467,7 +480,7 @@ func (s *Server) putIngressPassword(w http.ResponseWriter, r *http.Request, _ *c
 	if admin == nil {
 		return
 	}
-	var req v1.IngressPasswordRequest
+	var req v2.IngressPasswordRequest
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -484,15 +497,15 @@ func (s *Server) putIngressPassword(w http.ResponseWriter, r *http.Request, _ *c
 	if err := admin.RotatePassword(req.Password); err != nil {
 		var source *PasswordSourceError
 		if errors.As(err, &source) {
-			e := newError(v1.ErrConflict, "登录口令不是来自文件，无法通过控制通道轮转")
+			e := newError(v2.ErrConflict, "登录口令不是来自文件，无法通过控制通道轮转")
 			e.Reason = "password_source_not_file"
 			failWith(w, e)
 			return
 		}
-		failWith(w, newError(v1.ErrInternal, "无法保存登录口令"))
+		failWith(w, newError(v2.ErrInternal, "无法保存登录口令"))
 		return
 	}
-	writeJSON(w, 200, v1.IngressPasswordResponse{RotatedAt: v1.Now()})
+	writeJSON(w, 200, v2.IngressPasswordResponse{RotatedAt: v2.Now()})
 }
 
 // PasswordSourceError is returned by IngressAdmin.RotatePassword when the password did not come

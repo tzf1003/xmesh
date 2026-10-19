@@ -90,7 +90,7 @@ flowchart LR
 
 ### 第三方 DERP 设置
 
-- 设备页展示每台设备当前是直连还是走哪个 DERP region、延迟。数据来自内核 `Peer.Relay` 与 `Peer.Direct`，经 Control API 的 `/v1/peers`（见 12 号文档）。
+- 设备页展示每台设备当前是直连还是走哪个 DERP region、延迟。数据来自内核 `Peer.Relay` 与 `Peer.Direct`，经 Control API 的 `/v2/peers`（见 12 号文档）。
 - DERP 地域编辑：官方控制面写入 `derpMap`（自动分配 900 到 999 的 region ID，避开已有，每 region 一个节点，写入 IPv4 与 IPv6 以抵御 DNS 失败）；Headscale 生成 `derp.paths` 的 YAML，并给出 `derp.urls` 设置。
 - 健康探测：对每个 region 检查 TLS 证书与主机名是否匹配、`tcp/443` 与 `udp/3478` 是否可达、延迟，并与官方 region 对比。「只有一个自建 region」时提示单点风险。
 - 一键回滚：写入 `derpMap` 前保存快照，探测失败时恢复。
@@ -110,7 +110,7 @@ flowchart LR
 | 阶段 | 交付 | 依赖 |
 | --- | --- | --- |
 | U7 meshadmin 契约 | `docs/contracts/meshadmin.md`、Provider 接口、xmesh 权限模板规范、钥匙串存取约束、裁定（Provider 差异只在 `meshadmin`） | U0 |
-| U8 只读管理 | Tailscale 与 Headscale 的只读 Provider；设备与 tag 视图、角色检查、权限矩阵、DERP 地域与健康探测、直连或中继展示；`xmesh mesh status` | U7、U1（`/v1/peers`） |
+| U8 只读管理 | Tailscale 与 Headscale 的只读 Provider；设备与 tag 视图、角色检查、权限矩阵、DERP 地域与健康探测、直连或中继展示；`xmesh mesh status` | U7、U1（`/v2/peers`） |
 | U9 写管理 | 改 tag、创建 auth key、接入向导、策略写入（预览、校验、etag、快照、回滚）、`derpMap` 与 `derp.paths` 写入 | U8 |
 | U10 提供商集成 | 目录格式与签名、节点公钥注册、用量展示、降级。只做客户端侧；服务端准入与计量属于提供商业务，另开仓库 | U9 |
 

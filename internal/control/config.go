@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"go.yaml.in/yaml/v3"
 )
@@ -33,13 +33,13 @@ func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
 	path := s.o.Store.Path()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	s.o.Store.Get() // apply a pending reload so effective_etag is current
 	restart, _ := s.o.Store.State()
 	etag := etagOf(raw)
-	out := v1.ConfigResponse{ETag: etag, Content: string(raw), EffectiveETag: "sha256-" + s.o.Store.Digest(), RestartRequired: restart}
+	out := v2.ConfigResponse{ETag: etag, Content: string(raw), EffectiveETag: "sha256-" + s.o.Store.Digest(), RestartRequired: restart}
 	if _, err = config.Parse(raw); err != nil {
 		out.LoadError = loadError(err)
 	} else {
@@ -52,14 +52,14 @@ func (s *Server) getConfig(w http.ResponseWriter, _ *http.Request, _ *call) {
 // applySettleTimeout is how long a reload waits for the roles to follow the new generation.
 const applySettleTimeout = 10 * time.Second
 
-// maxConfigEdits bounds one PATCH /v1/config; a form edit needs a handful, a whole file goes through PUT.
+// maxConfigEdits bounds one PATCH /v2/config; a form edit needs a handful, a whole file goes through PUT.
 const maxConfigEdits = 64
 
 // ifMatch returns the ETag a write names, or reports the missing precondition.
 func ifMatch(w http.ResponseWriter, r *http.Request) (string, bool) {
 	match := r.Header.Get("If-Match")
 	if strings.TrimSpace(match) == "" {
-		failWith(w, newError(v1.ErrPreconditionNeeded, "修改配置必须带 If-Match"))
+		failWith(w, newError(v2.ErrPreconditionNeeded, "修改配置必须带 If-Match"))
 		return "", false
 	}
 	return strings.Trim(strings.TrimSpace(match), `"`), true
@@ -70,11 +70,11 @@ func ifMatch(w http.ResponseWriter, r *http.Request) (string, bool) {
 func (s *Server) readMatchedLocked(w http.ResponseWriter, match string) ([]byte, bool) {
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return nil, false
 	}
 	if current := etagOf(old); match != current {
-		e := newError(v1.ErrPreconditionFailed, "配置文件已被修改，请重新读取后再保存")
+		e := newError(v2.ErrPreconditionFailed, "配置文件已被修改，请重新读取后再保存")
 		e.CurrentETag = current
 		failWith(w, e)
 		return nil, false
@@ -87,7 +87,7 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	var req v1.ConfigPutRequest
+	var req v2.ConfigPutRequest
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -108,7 +108,7 @@ func (s *Server) patchConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	var req v1.ConfigEditRequest
+	var req v2.ConfigEditRequest
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -133,7 +133,7 @@ func (s *Server) patchConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	}
 	next, err := ApplyEdits(old, edits)
 	if err != nil {
-		failWith(w, newError(v1.ErrConflict, "配置结构不允许这项修改"))
+		failWith(w, newError(v2.ErrConflict, "配置结构不允许这项修改"))
 		return
 	}
 	// An edit that changes nothing in the parsed document, such as removing an absent key, writes nothing.
@@ -145,7 +145,7 @@ func (s *Server) patchConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 // stores it. The caller holds configMu and has matched old against If-Match.
 func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool) {
 	if _, err := config.Parse(next); err != nil {
-		e := newError(v1.ErrConfigInvalid, "配置未通过校验，没有写入")
+		e := newError(v2.ErrConfigInvalid, "配置未通过校验，没有写入")
 		e.Diagnostics = diagnostics(err)
 		failWith(w, e)
 		return
@@ -157,22 +157,22 @@ func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool
 	}
 	applied := !dryRun && !bytes.Equal(old, next)
 	if !applied {
-		writeJSON(w, 200, v1.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
+		writeJSON(w, 200, v2.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
 		return
 	}
 	etag, restart, err := s.storeConfigLocked(next, diff)
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "写入配置文件失败"))
+		failWith(w, newError(v2.ErrInternal, "写入配置文件失败"))
 		return
 	}
 	w.Header().Set("ETag", `"`+etag+`"`)
-	writeJSON(w, 200, v1.ConfigPutResponse{Applied: true, ETag: etag, Diff: diff, RestartRequired: restart})
+	writeJSON(w, 200, v2.ConfigPutResponse{Applied: true, ETag: etag, Diff: diff, RestartRequired: restart})
 }
 
 // storeConfigLocked replaces the configuration file with next, which the caller has validated and
 // diffed against the current content, and announces it on the event stream. The caller holds
 // configMu. It returns the new ETag and the store's own restart_required verdict.
-func (s *Server) storeConfigLocked(next []byte, diff []v1.ConfigChange) (etag string, restart bool, err error) {
+func (s *Server) storeConfigLocked(next []byte, diff []v2.ConfigChange) (etag string, restart bool, err error) {
 	if err = writeAtomic(s.o.Store.Path(), next); err != nil {
 		return "", false, err
 	}
@@ -188,7 +188,7 @@ func (s *Server) storeConfigLocked(next []byte, diff []v1.ConfigChange) (etag st
 	for i, c := range diff {
 		paths[i] = c.Pointer
 	}
-	_ = s.bus.Publish(v1.EventConfig, v1.ConfigEventData{Change: "written", Actor: v1.ActorControl, ETag: &etag, RestartRequired: restart, ChangedPaths: paths})
+	_ = s.bus.Publish(v2.EventConfig, v2.ConfigEventData{Change: "written", Actor: v2.ActorControl, ETag: &etag, RestartRequired: restart, ChangedPaths: paths})
 	return etag, restart, nil
 }
 
@@ -200,7 +200,7 @@ func (s *Server) watchConfigFile() {
 	if now == "" || now == s.digest {
 		return
 	}
-	_, _ = s.adoptFileLocked(context.Background(), v1.ActorFile, false)
+	_, _ = s.adoptFileLocked(context.Background(), v2.ActorFile, false)
 }
 
 // reloadConfig re-reads the configuration file now. The UI calls it after it has written
@@ -208,9 +208,9 @@ func (s *Server) watchConfigFile() {
 func (s *Server) reloadConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
-	out, err := s.adoptFileLocked(r.Context(), v1.ActorControl, true)
+	out, err := s.adoptFileLocked(r.Context(), v2.ActorControl, true)
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	writeJSON(w, 200, out)
@@ -222,11 +222,11 @@ func (s *Server) reloadConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 // one and is reported as load_error. Roles that start, stop or move with the new generation are
 // given a short while to do so, and what still failed is reported as apply_errors; retry tries again
 // what failed last time. The caller holds configMu.
-func (s *Server) adoptFileLocked(ctx context.Context, actor v1.Actor, retry bool) (v1.ConfigReloadResponse, error) {
+func (s *Server) adoptFileLocked(ctx context.Context, actor v2.Actor, retry bool) (v2.ConfigReloadResponse, error) {
 	snapshot := s.o.Store.RefreshSnapshot()
 	if snapshot.ReadError != nil {
 		s.failures = snapshot.Failures
-		return v1.ConfigReloadResponse{}, snapshot.ReadError
+		return v2.ConfigReloadResponse{}, snapshot.ReadError
 	}
 	raw := snapshot.Raw
 	changed := sum(raw) != s.digest
@@ -237,7 +237,7 @@ func (s *Server) adoptFileLocked(ctx context.Context, actor v1.Actor, retry bool
 	s.failures = failures
 	pending := snapshot.RestartPaths
 	etag := etagOf(raw)
-	out := v1.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + snapshot.EffectiveDigest, ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending, ApplyErrors: []v1.ApplyError{}}
+	out := v2.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + snapshot.EffectiveDigest, ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending, ApplyErrors: []v2.ApplyError{}}
 	if s.o.Applier != nil {
 		settle, cancel := context.WithTimeout(ctx, applySettleTimeout)
 		if errs := s.o.Applier.Settle(settle, retry); errs != nil {
@@ -255,7 +255,7 @@ func (s *Server) adoptFileLocked(ctx context.Context, actor v1.Actor, retry bool
 	if !changed && !failed {
 		return out, nil
 	}
-	data := v1.ConfigEventData{Change: "reloaded", Actor: actor, ETag: &etag, RestartRequired: out.RestartRequired, ChangedPaths: []string{}}
+	data := v2.ConfigEventData{Change: "reloaded", Actor: actor, ETag: &etag, RestartRequired: out.RestartRequired, ChangedPaths: []string{}}
 	if invalid || failed {
 		data.Change = "reload_failed"
 	} else if parsed := parsedOf(raw); parsed != nil {
@@ -265,7 +265,7 @@ func (s *Server) adoptFileLocked(ctx context.Context, actor v1.Actor, retry bool
 		s.lastParsed = parsed
 		data.ChangedPaths = out.ChangedPaths
 	}
-	_ = s.bus.Publish(v1.EventConfig, data)
+	_ = s.bus.Publish(v2.EventConfig, data)
 	return out, nil
 }
 
@@ -289,14 +289,14 @@ func parsedOf(raw []byte) map[string]any {
 var yamlLine = regexp.MustCompile(`line (\d+)`)
 
 // diagnostics turns a config.Parse error into one entry per failing location.
-func diagnostics(err error) []v1.Diagnostic {
+func diagnostics(err error) []v2.Diagnostic {
 	var ve *jsonschema.ValidationError
 	if errors.As(err, &ve) {
-		out := []v1.Diagnostic{}
+		out := []v2.Diagnostic{}
 		var walk func(u *jsonschema.OutputUnit)
 		walk = func(u *jsonschema.OutputUnit) {
 			if u.Error != nil && len(out) < 20 {
-				out = append(out, v1.Diagnostic{Pointer: u.InstanceLocation, Message: oneLine(u.Error.String())})
+				out = append(out, v2.Diagnostic{Pointer: u.InstanceLocation, Message: oneLine(u.Error.String())})
 			}
 			for i := range u.Errors {
 				walk(&u.Errors[i])
@@ -307,16 +307,16 @@ func diagnostics(err error) []v1.Diagnostic {
 			return out
 		}
 	}
-	d := v1.Diagnostic{Message: oneLine(err.Error())}
+	d := v2.Diagnostic{Message: oneLine(err.Error())}
 	if m := yamlLine.FindStringSubmatch(err.Error()); m != nil {
 		d.Line, _ = strconv.Atoi(m[1])
 	}
-	return []v1.Diagnostic{d}
+	return []v2.Diagnostic{d}
 }
 
-func loadError(err error) *v1.ConfigLoadError {
+func loadError(err error) *v2.ConfigLoadError {
 	d := diagnostics(err)[0]
-	out := &v1.ConfigLoadError{Message: d.Message}
+	out := &v2.ConfigLoadError{Message: d.Message}
 	if d.Pointer != "" {
 		out.Message = d.Pointer + ": " + d.Message
 	}
@@ -370,8 +370,8 @@ func writeAtomic(path string, data []byte) error {
 
 // diffConfigs lists the RFC 6902 style operations that turn before into after, as the
 // contract's ConfigChange rows (CTR-CTL-07). Arrays are compared element by element.
-func diffConfigs(before, after map[string]any) []v1.ConfigChange {
-	var out []v1.ConfigChange
+func diffConfigs(before, after map[string]any) []v2.ConfigChange {
+	var out []v2.ConfigChange
 	if before == nil {
 		before = map[string]any{}
 	}
@@ -381,17 +381,20 @@ func diffConfigs(before, after map[string]any) []v1.ConfigChange {
 	diffValue("", before, after, &out)
 	for i := range out {
 		out[i].RestartRequired = restartNeeded(out[i])
+		if before["schema_version"] == float64(2) && after["schema_version"] == float64(2) && (out[i].Pointer == "/mesh" || strings.HasPrefix(out[i].Pointer, "/mesh/")) {
+			out[i].RestartRequired = false
+		}
 		out[i].WeakensSecurity = weakensSecurity(out[i], before, after)
 	}
 	if out == nil {
-		out = []v1.ConfigChange{}
+		out = []v2.ConfigChange{}
 	}
 	return out
 }
 
 // restartNeeded reports whether the change falls under config.RestartPaths. node.roles is judged by
 // the roles that were added or removed: those in config.HotRoles come and go without a restart.
-func restartNeeded(c v1.ConfigChange) bool {
+func restartNeeded(c v2.ConfigChange) bool {
 	if c.Pointer != "/node/roles" {
 		return config.NeedsRestart(c.Pointer)
 	}
@@ -405,7 +408,7 @@ func escapePointer(key string) string {
 	return strings.NewReplacer("~", "~0", "/", "~1").Replace(key)
 }
 
-func diffValue(ptr string, a, b any, out *[]v1.ConfigChange) {
+func diffValue(ptr string, a, b any, out *[]v2.ConfigChange) {
 	raw := func(v any) json.RawMessage { r, _ := json.Marshal(v); return r }
 	switch x := a.(type) {
 	case map[string]any:
@@ -424,9 +427,9 @@ func diffValue(ptr string, a, b any, out *[]v1.ConfigChange) {
 				case inA && inB:
 					diffValue(ptr+"/"+escapePointer(k), from, to, out)
 				case inA:
-					*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + escapePointer(k), Op: "remove", Before: raw(from)})
+					*out = append(*out, v2.ConfigChange{Pointer: ptr + "/" + escapePointer(k), Op: "remove", Before: raw(from)})
 				default:
-					*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + escapePointer(k), Op: "add", After: raw(to)})
+					*out = append(*out, v2.ConfigChange{Pointer: ptr + "/" + escapePointer(k), Op: "add", After: raw(to)})
 				}
 			}
 			return
@@ -436,7 +439,7 @@ func diffValue(ptr string, a, b any, out *[]v1.ConfigChange) {
 			// The roles are a set: which of them need a restart does not depend on their order, so the
 			// list is one change rather than one per position.
 			if !reflect.DeepEqual(x, y) {
-				*out = append(*out, v1.ConfigChange{Pointer: ptr, Op: "replace", Before: raw(a), After: raw(b)})
+				*out = append(*out, v2.ConfigChange{Pointer: ptr, Op: "replace", Before: raw(a), After: raw(b)})
 			}
 			return
 		}
@@ -446,23 +449,23 @@ func diffValue(ptr string, a, b any, out *[]v1.ConfigChange) {
 				diffValue(ptr+"/"+strconv.Itoa(i), x[i], y[i], out)
 			}
 			for i := n; i < len(y); i++ {
-				*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + strconv.Itoa(i), Op: "add", After: raw(y[i])})
+				*out = append(*out, v2.ConfigChange{Pointer: ptr + "/" + strconv.Itoa(i), Op: "add", After: raw(y[i])})
 			}
 			for i := len(x) - 1; i >= n; i-- {
-				*out = append(*out, v1.ConfigChange{Pointer: ptr + "/" + strconv.Itoa(i), Op: "remove", Before: raw(x[i])})
+				*out = append(*out, v2.ConfigChange{Pointer: ptr + "/" + strconv.Itoa(i), Op: "remove", Before: raw(x[i])})
 			}
 			return
 		}
 	}
 	if !reflect.DeepEqual(a, b) {
-		*out = append(*out, v1.ConfigChange{Pointer: ptr, Op: "replace", Before: raw(a), After: raw(b)})
+		*out = append(*out, v2.ConfigChange{Pointer: ptr, Op: "replace", Before: raw(a), After: raw(b)})
 	}
 }
 
 // weakensSecurity marks changes the UI should confirm (CTR-CTL-07). It is a UI courtesy, not an
 // authorization boundary: the kernel writes the change either way, and any process of the same
 // user could edit the file directly. It errs towards asking.
-func weakensSecurity(c v1.ConfigChange, before, after map[string]any) bool {
+func weakensSecurity(c v2.ConfigChange, before, after map[string]any) bool {
 	changed := c.Op == "add" || c.Op == "replace"
 	switch {
 	case c.Pointer == "/agent/policy/allow_dangerous":

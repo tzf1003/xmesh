@@ -2,23 +2,23 @@
 
 ## CON-NET-01
 
-Agent 角色的 MCP 监听地址必须是 tsnet 监听器，或 `lan` 模式下只绑定已配对对端可连的地址。禁止把 Agent 端口绑定到 `0.0.0.0` 后直接暴露到公网，也禁止对 Agent 端口做端口映射来代替入口。
+设备链路监听器使用 tsnet 或所选 LAN 网卡地址；两者独立启用，均要求 xmesh 设备信任与 mTLS。禁止把 Agent 端口绑定到 `0.0.0.0` 后直接暴露到公网，也禁止对 Agent 端口做端口映射来代替入口。
 
 需要公网 URL 时，只允许 Ingress 角色监听，见 [CON-NET-06](#con-net-06)。
 
 ## CON-NET-02
 
-未加入同一 tailnet、且未完成 `lan` 配对的客户端，不能拨到 Agent。阶段 1 的本机验收监听 `127.0.0.1`，该监听不得成为阶段 3 之后的默认对外地址。
+设备须在可达的 LAN 或 Tailnet 路径上完成 xmesh 配对，才能调用远端 Agent。网络可达不授予应用权限。开发用本机验收监听 `127.0.0.1`，该监听不得成为默认对外地址。
 
 ## CON-NET-03
 
 tailnet 接入使用 `tailscale.com/tsnet`。安装文档和 `install` 子命令不得要求先安装官方 Tailscale 客户端，不得要求 root，不得创建 TUN。
 
-ACL、MagicDNS 和密钥仍由控制面负责。xmesh 不自建第二套节点身份。
+Tailnet 的网络准入、ACL、MagicDNS 和网络密钥由控制面负责。xmesh 设备身份来自独立的持久公钥，配对信任及应用角色适用于 LAN 与 Tailnet，网络节点 ID、WhoIs 或控制面标签不授予 xmesh 信任。
 
 ## CON-NET-04
 
-切换官方 Tailscale 与 Headscale 时，只改变 `mesh.control_url` 和 auth key 的签发方。业务代码里禁止出现「如果是 Headscale 就走另一套 RPC」的分支。Funnel 只在官方控制面可用；Headscale 下把 `ingress.listen: funnel` 视为配置错误并拒绝启动。管理控制面的 `xmesh mesh` 子命令与 `meshadmin` 不在数据通路上，是该规则唯一的例外，见 [CON-MESH-01](meshadmin.md#con-mesh-01)。
+切换官方 Tailscale 与 Headscale 时，只改变 `mesh.tailnet.control_url` 和入网凭据。业务代码使用统一设备链路。Funnel 只在官方控制面可用；Headscale 下把 `ingress.listen: funnel` 视为配置错误并拒绝启动。管理控制面的 `xmesh mesh` 子命令与 `meshadmin` 使用各控制面的管理接口，见 [CON-MESH-01](meshadmin.md#con-mesh-01)。
 
 ## CON-NET-05
 
@@ -28,7 +28,7 @@ tsnet 的打洞失败时，流量必须能够经由 DERP（官方或 `derper`）
 
 ## CON-NET-06
 
-`--ingress` 或 `roles` 含 `ingress` 的节点，在原有 Agent/Gateway 之外增加公网监听和 OAuth 授权服务器。它仍用 tsnet 拨号到目标 Agent，转发时剥前缀、鉴权、审计。禁止把入口实现成反向代理到某个固定 IP 的独立项目。
+`--ingress` 或 `roles` 含 `ingress` 的节点，在 Agent/Gateway 之外增加公网监听和 OAuth 授权服务器。入口使用已配对设备的逻辑链路调用目标 Agent，路径遵循 LAN 优先与健康连接保持规则，转发时剥前缀、鉴权、审计。禁止把入口实现成反向代理到某个固定 IP 的独立项目。
 
 `ingress.listen` 取值：
 
@@ -40,9 +40,9 @@ tsnet 的打洞失败时，流量必须能够经由 DERP（官方或 `derper`）
 
 ## CON-NET-07
 
-入口节点在控制面 ACL 里使用 `tag:ingress`。目标 Agent 对来自该 tag 的连接应用 `agent.authz` 中 `tag:ingress` 的后端与工具允许列表，即使用户已经在入口过了 OAuth。入口被攻破时，没有在 authz 里放开的后端仍然不可达。
+目标 Agent 在 xmesh 设备信任中授予入口 `tag:ingress`，并应用 `agent.authz` 中该角色的后端与工具允许列表，即使用户已经在入口完成 OAuth。入口被攻破时，没有在 authz 里放开的后端仍然不可达。
 
-`tag:gw-*` 与 `tag:cloud` 的 ACL 只能访问 `tag:device` 的 Agent 端口。这是网络层约束，Agent 仍要做 WhoIs 检查。
+控制面 ACL 可进一步限制网络角色能访问的设备端口；Agent 始终按 xmesh 公钥信任验证设备及本地授予的应用角色。撤销 Tailnet 准入只影响网络路径，撤销 xmesh 信任结束该设备全部会话。
 
 ## CON-NET-08
 
@@ -50,11 +50,11 @@ tsnet 的打洞失败时，流量必须能够经由 DERP（官方或 `derper`）
 
 ## CON-NET-09
 
-`mesh.mode: lan` 时，节点发现使用 mDNS / DNS-SD。数据面使用 mTLS。首次配对有两条路径，两条都在互相钉入证书之前由双方核实对方身份：
+LAN 发现使用 mDNS / DNS-SD，Tailnet 从网络状态取得候选地址，再通过 TLS 取得公开身份。业务数据面使用 mTLS。首次配对有两条流程，都在授予公钥信任之前由双方核实对方身份：
 
 - 交换配对文档：`xmesh pair` 或面板的高级选项，用户在另一台设备上亲自核对指纹。
-- 连接密码：一台设备设置口令，另一台输入它。这是 SPAKE2（口令认证密钥交换）加上以双方证书为转录的密钥确认，口令本身不离开设备，也不落盘。错误口令与中间人攻击无法在客户端区分，两者都不会钉入证书，并计入节点的限流。
+- 连接密码：一台设备设置口令，另一台输入它。SPAKE2 确认 transcript 绑定双方版本 2 身份文档，口令本身不离开设备，也不落盘。错误口令与中间人攻击无法在客户端区分，两者都不会授予设备信任，并计入节点限流。
 
-未配对的对端，普通握手（ALPN 未声明 `xmesh-pair/1`）仍在 TLS 层失败。只有声明该 ALPN 的握手能到达配对路由，而且它只访问 `/lan/pair/*`，其余路径返回 404。详见 [docs/design/14-password-pairing.md](../design/14-password-pairing.md)。
+未配对对端的普通握手仍在 TLS 层失败。引导 ALPN `xmesh-pair/2` 只开放 `/mesh/v2/pair/*`，其余路径返回 404。详见 [设备连接密码与发现](../design/14-password-pairing.md)。
 
-`lan` 模式不提供 Funnel，也不实现 OAuth。云端客户端要接入时，仍需一台走公网的入口，入口背后可以是 tailnet。
+Funnel 要求启用 Tailnet。云端 MCP 客户端通过入口的公网 URL 与 OAuth 接入；入口向设备转发仍使用同一份 xmesh 信任及设备链路。

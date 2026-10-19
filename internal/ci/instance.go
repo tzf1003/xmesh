@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -28,7 +28,7 @@ type instance struct {
 	wakeC       chan struct{}
 
 	mu        sync.Mutex
-	snap      v1.CiInstance
+	snap      v2.CiInstance
 	spec      config.CIBinding
 	shutting  bool // the binding or the node is going away
 	force     bool // do not wait for a running job
@@ -58,7 +58,7 @@ func (m *Manager) newInstance(b *binding, idx int) *instance {
 		name = name[:64]
 	}
 	in := &instance{m: m, bid: b.spec.ID, idx: idx, dir: dir, name: name, spec: b.spec, finished: make(chan struct{}), wakeC: make(chan struct{}, 1)}
-	in.snap = v1.CiInstance{Index: idx, Name: name, State: v1.CiStopped, Since: v1.Now()}
+	in.snap = v2.CiInstance{Index: idx, Name: name, State: v2.CiStopped, Since: v2.Now()}
 	return in
 }
 
@@ -105,7 +105,7 @@ func (i *instance) shutdown(force bool) {
 	i.wake()
 }
 
-func (i *instance) snapshot() v1.CiInstance {
+func (i *instance) snapshot() v2.CiInstance {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	s := i.snap
@@ -124,28 +124,28 @@ func (i *instance) snapshot() v1.CiInstance {
 	return s
 }
 
-func (i *instance) setState(state v1.CiInstanceState, problem *v1.CiProblem) {
+func (i *instance) setState(state v2.CiInstanceState, problem *v2.CiProblem) {
 	i.mu.Lock()
 	wasBusy := i.snap.Job != nil
 	if i.snap.State != state {
-		i.snap.Since = v1.Now()
+		i.snap.Since = v2.Now()
 	}
 	i.snap.State = state
 	i.snap.Problem = problem
-	if state != v1.CiBusy && state != v1.CiStopping {
+	if state != v2.CiBusy && state != v2.CiStopping {
 		i.snap.Job = nil
 	}
-	if state != v1.CiStarting && state != v1.CiIdle && state != v1.CiBusy && state != v1.CiStopping {
+	if state != v2.CiStarting && state != v2.CiIdle && state != v2.CiBusy && state != v2.CiStopping {
 		i.snap.PID = 0
 	}
 	i.mu.Unlock()
-	if wasBusy && state != v1.CiBusy && state != v1.CiStopping {
+	if wasBusy && state != v2.CiBusy && state != v2.CiStopping {
 		i.m.busyChanged(-1)
 	}
 }
 
-func (i *instance) problem(code v1.CiProblemCode, message string) *v1.CiProblem {
-	return &v1.CiProblem{Code: code, Message: message}
+func (i *instance) problem(code v2.CiProblemCode, message string) *v2.CiProblem {
+	return &v2.CiProblem{Code: code, Message: message}
 }
 
 // wantRunning is whether a listener should be running right now.
@@ -183,15 +183,15 @@ func (i *instance) run() {
 	attempt := 0
 	for {
 		if i.m.ctx.Err() != nil {
-			i.setState(v1.CiStopped, nil)
+			i.setState(v2.CiStopped, nil)
 			return
 		}
 		if shutting, _, _ := i.flags(); shutting {
-			i.setState(v1.CiStopped, nil)
+			i.setState(v2.CiStopped, nil)
 			return
 		}
 		if !i.wantRunning() {
-			i.setState(v1.CiStopped, nil)
+			i.setState(v2.CiStopped, nil)
 			i.waitWake(0)
 			continue
 		}
@@ -207,13 +207,13 @@ func (i *instance) run() {
 			continue
 		}
 		if p := i.ensureRegistered(); p != nil {
-			i.setState(v1.CiBroken, p)
+			i.setState(v2.CiBroken, p)
 			i.waitWake(0)
 			continue
 		}
 		started := time.Now()
 		exit := i.runOnce()
-		i.setState(v1.CiStopped, nil)
+		i.setState(v2.CiStopped, nil)
 		ranFor := time.Since(started)
 		if ranFor >= i.m.o.StableAfter {
 			attempt = 0
@@ -226,23 +226,23 @@ func (i *instance) run() {
 		wait, p, broken := i.classify(exit, ranFor)
 		switch {
 		case broken:
-			i.setState(v1.CiBroken, p)
+			i.setState(v2.CiBroken, p)
 			i.waitWake(0)
 		case wait == 0:
 			attempt = 0
 		default:
 			attempt++
-			i.setState(v1.CiBackoff, p)
+			i.setState(v2.CiBackoff, p)
 			i.waitWake(i.m.o.Backoff(attempt))
 		}
 	}
 }
 
-func stateOf(transient bool) v1.CiInstanceState {
+func stateOf(transient bool) v2.CiInstanceState {
 	if transient {
-		return v1.CiBackoff
+		return v2.CiBackoff
 	}
-	return v1.CiBroken
+	return v2.CiBroken
 }
 
 func (i *instance) clearRestart() {
@@ -253,7 +253,7 @@ func (i *instance) clearRestart() {
 
 // ensureInstalled unpacks the runner into the instance's directory when it is not there. The
 // returned problem is non-nil on failure; transient says it is worth retrying by itself.
-func (i *instance) ensureInstalled() (p *v1.CiProblem, transient bool) {
+func (i *instance) ensureInstalled() (p *v2.CiProblem, transient bool) {
 	i.mu.Lock()
 	source, reinstall := i.spec.Source, i.reinstall
 	i.mu.Unlock()
@@ -265,20 +265,20 @@ func (i *instance) ensureInstalled() (p *v1.CiProblem, transient bool) {
 		return nil, false
 	}
 	if i.m.o.Cache == nil {
-		return i.problem(v1.CiProblemDownloadFailed, "GitHub 没有提供适用于这个系统和架构的官方运行器。"), false
+		return i.problem(v2.CiProblemDownloadFailed, "GitHub 没有提供适用于这个系统和架构的官方运行器。"), false
 	}
-	i.setState(v1.CiInstalling, nil)
+	i.setState(v2.CiInstalling, nil)
 	i.m.pkgMu.Lock()
 	pkg, err := i.m.o.Cache.Ensure(i.m.ctx, reinstall)
 	i.m.pkgMu.Unlock()
 	if err != nil {
-		return i.problem(v1.CiProblemDownloadFailed, "下载运行器安装包失败，稍后重试: "+short(err.Error())), true
+		return i.problem(v2.CiProblemDownloadFailed, "下载运行器安装包失败，稍后重试: "+short(err.Error())), true
 	}
 	if err = Extract(pkg.Path, i.dir); err != nil {
 		if !reinstall {
 			_ = os.RemoveAll(i.dir)
 		}
-		return i.problem(v1.CiProblemDownloadFailed, "解压运行器安装包失败: "+short(err.Error())), true
+		return i.problem(v2.CiProblemDownloadFailed, "解压运行器安装包失败: "+short(err.Error())), true
 	}
 	i.mu.Lock()
 	i.reinstall = false
@@ -287,7 +287,7 @@ func (i *instance) ensureInstalled() (p *v1.CiProblem, transient bool) {
 }
 
 // ensureRegistered registers the runner with GitHub unless it already is.
-func (i *instance) ensureRegistered() *v1.CiProblem {
+func (i *instance) ensureRegistered() *v2.CiProblem {
 	i.mu.Lock()
 	spec, rereg := i.spec, i.rereg
 	i.mu.Unlock()
@@ -295,7 +295,7 @@ func (i *instance) ensureRegistered() *v1.CiProblem {
 	registered := err == nil
 	if spec.Source == "import" {
 		if !registered {
-			return i.problem(v1.CiProblemRegistrationFailed, "目录里没有 .runner，这个运行器还没有注册。")
+			return i.problem(v2.CiProblemRegistrationFailed, "目录里没有 .runner，这个运行器还没有注册。")
 		}
 		if !rereg {
 			return nil
@@ -306,17 +306,17 @@ func (i *instance) ensureRegistered() *v1.CiProblem {
 	}
 	token, ok := i.m.heldToken(i.bid)
 	if !ok && spec.Account != "" && i.m.o.Token != nil {
-		i.setState(v1.CiRegistering, nil)
+		i.setState(v2.CiRegistering, nil)
 		t, err := i.m.o.Token(i.m.ctx, spec)
 		if err != nil {
-			return i.problem(v1.CiProblemAuthFailed, "无法向 GitHub 取得注册令牌: "+short(err.Error()))
+			return i.problem(v2.CiProblemAuthFailed, "无法向 GitHub 取得注册令牌: "+short(err.Error()))
 		}
 		token, ok = t, true
 	}
 	if !ok {
-		return i.problem(v1.CiProblemRegistrationFailed, "没有可用的注册令牌：请在仓库的 Actions 运行器页复制新的注册令牌后选择「重新注册」。")
+		return i.problem(v2.CiProblemRegistrationFailed, "没有可用的注册令牌：请在仓库的 Actions 运行器页复制新的注册令牌后选择「重新注册」。")
 	}
-	i.setState(v1.CiRegistering, nil)
+	i.setState(v2.CiRegistering, nil)
 	if registered {
 		for _, f := range []string{".runner", ".credentials", ".credentials_rsaparams"} {
 			_ = os.Remove(filepath.Join(i.dir, f))
@@ -352,7 +352,7 @@ func (i *instance) labels(spec config.CIBinding) string {
 
 // configure runs the runner's own registration script. The token goes through the environment so
 // it does not show in the process list.
-func (i *instance) configure(spec config.CIBinding, token string) *v1.CiProblem {
+func (i *instance) configure(spec config.CIBinding, token string) *v2.CiProblem {
 	args := []string{"--unattended", "--url", i.runnerURL(spec), "--name", i.name, "--labels", i.labels(spec), "--work", "_work", "--replace"}
 	env := append(i.m.o.Env(), "ACTIONS_RUNNER_INPUT_TOKEN="+token)
 	if runtime.GOOS != "windows" && os.Geteuid() == 0 {
@@ -368,18 +368,18 @@ func (i *instance) configure(spec config.CIBinding, token string) *v1.CiProblem 
 		mu.Unlock()
 	})
 	if err != nil {
-		return i.problem(v1.CiProblemStartFailed, "无法运行注册脚本: "+short(err.Error()))
+		return i.problem(v2.CiProblemStartFailed, "无法运行注册脚本: "+short(err.Error()))
 	}
 	select {
 	case <-p.done:
 	case <-time.After(registerLimit):
 		p.kill()
 		<-p.done
-		return i.problem(v1.CiProblemRegistrationFailed, "注册超时，请检查网络后重新注册。")
+		return i.problem(v2.CiProblemRegistrationFailed, "注册超时，请检查网络后重新注册。")
 	case <-i.m.ctx.Done():
 		p.kill()
 		<-p.done
-		return i.problem(v1.CiProblemRegistrationFailed, "注册被中断。")
+		return i.problem(v2.CiProblemRegistrationFailed, "注册被中断。")
 	}
 	if p.exit == 0 {
 		return nil
@@ -413,20 +413,20 @@ func (i *instance) unregister(ctx context.Context, token string) error {
 	return nil
 }
 
-func (i *instance) registrationProblem(lines []string) *v1.CiProblem {
+func (i *instance) registrationProblem(lines []string) *v2.CiProblem {
 	joined := strings.Join(lines, "\n")
 
 	switch {
 	case dependencyMissing(joined):
-		return i.problem(v1.CiProblemMissingDependency, "缺少运行器需要的系统库（常见于 Linux 的 ICU），请先安装依赖。")
+		return i.problem(v2.CiProblemMissingDependency, "缺少运行器需要的系统库（常见于 Linux 的 ICU），请先安装依赖。")
 	case strings.Contains(joined, "404") || strings.Contains(joined, "NotFound"):
-		return i.problem(v1.CiProblemRegistrationFailed, "GitHub 找不到这个仓库，或注册令牌没有权限。")
+		return i.problem(v2.CiProblemRegistrationFailed, "GitHub 找不到这个仓库，或注册令牌没有权限。")
 	case strings.Contains(joined, "401") || strings.Contains(joined, "Unauthorized") || strings.Contains(joined, "expired"):
-		return i.problem(v1.CiProblemRegistrationFailed, "注册令牌无效或已过期（一小时有效），请换一个新的。")
+		return i.problem(v2.CiProblemRegistrationFailed, "注册令牌无效或已过期（一小时有效），请换一个新的。")
 	case strings.Contains(joined, "already configured"):
-		return i.problem(v1.CiProblemRegistrationFailed, "这个目录里已经有一个注册过的运行器。")
+		return i.problem(v2.CiProblemRegistrationFailed, "这个目录里已经有一个注册过的运行器。")
 	}
-	return i.problem(v1.CiProblemRegistrationFailed, "注册失败，请检查运行器配置和 GitHub 连接后重试。")
+	return i.problem(v2.CiProblemRegistrationFailed, "注册失败，请检查运行器配置和 GitHub 连接后重试。")
 }
 
 // Retain only diagnostic categories from registration stdout.
@@ -485,7 +485,7 @@ func (i *instance) runOnce() exitInfo {
 	if runtime.GOOS != "windows" && os.Geteuid() == 0 {
 		env = append(env, "RUNNER_ALLOW_RUNASROOT=1")
 	}
-	i.setState(v1.CiStarting, nil)
+	i.setState(v2.CiStarting, nil)
 	p, err := startProcess(i.dir, filepath.Join(i.dir, scriptName("run")), nil, env, i.onLine)
 	if err != nil {
 		return exitInfo{code: 127, tailLines: []string{err.Error()}}
@@ -523,12 +523,12 @@ func (i *instance) runOnce() exitInfo {
 		if wantedSince.IsZero() {
 			wantedSince = time.Now()
 		}
-		busy := i.currentState() == v1.CiBusy
+		busy := i.currentState() == v2.CiBusy
 		overdue := time.Since(wantedSince) > i.m.o.Config().StopTimeoutDuration()
 		if busy && !force && !overdue && i.m.ctx.Err() == nil {
 			continue
 		}
-		i.setState(v1.CiStopping, nil)
+		i.setState(v2.CiStopping, nil)
 		asked = true
 		termAt = time.Now()
 		if force || overdue {
@@ -539,7 +539,7 @@ func (i *instance) runOnce() exitInfo {
 	}
 }
 
-func (i *instance) currentState() v1.CiInstanceState {
+func (i *instance) currentState() v2.CiInstanceState {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.snap.State
@@ -577,20 +577,20 @@ func (i *instance) onLine(line string) {
 	delta := 0
 	switch ev.kind {
 	case lineListening, lineConnected:
-		if i.snap.State == v1.CiStarting {
-			i.snap.State, i.snap.Since = v1.CiIdle, v1.Now()
+		if i.snap.State == v2.CiStarting {
+			i.snap.State, i.snap.Since = v2.CiIdle, v2.Now()
 			i.snap.Problem = nil
 		}
 	case lineJobStarted:
-		if i.snap.State != v1.CiBusy {
+		if i.snap.State != v2.CiBusy {
 			delta = 1
 		}
-		i.snap.State, i.snap.Since = v1.CiBusy, v1.Now()
-		i.snap.Job = &v1.CiJob{Name: ev.job, StartedAt: v1.Now()}
+		i.snap.State, i.snap.Since = v2.CiBusy, v2.Now()
+		i.snap.Job = &v2.CiJob{Name: ev.job, StartedAt: v2.Now()}
 	case lineJobDone:
-		i.snap.LastResult = &v1.CiResult{Name: ev.job, Result: ev.result, FinishedAt: v1.Now()}
-		if i.snap.State == v1.CiBusy {
-			i.snap.State, i.snap.Since, i.snap.Job = v1.CiIdle, v1.Now(), nil
+		i.snap.LastResult = &v2.CiResult{Name: ev.job, Result: ev.result, FinishedAt: v2.Now()}
+		if i.snap.State == v2.CiBusy {
+			i.snap.State, i.snap.Since, i.snap.Job = v2.CiIdle, v2.Now(), nil
 			delta = -1
 		}
 	}
@@ -605,7 +605,7 @@ func (i *instance) onLine(line string) {
 
 // classify turns an exit into what to do next: how long to wait before starting again (zero:
 // at once), the problem to show, and whether the instance needs the user before it can go on.
-func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duration, p *v1.CiProblem, broken bool) {
+func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duration, p *v2.CiProblem, broken bool) {
 	shutting, _, restart := i.flags()
 	if e.asked || shutting || restart {
 		i.mu.Lock()
@@ -619,7 +619,7 @@ func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duratio
 		i.rereg, i.removed = true, true
 		automatic := i.spec.Account != "" && i.m.o.Token != nil
 		i.mu.Unlock()
-		return time.Second, i.problem(v1.CiProblemRunnerRemoved, "GitHub 已经删除了这个运行器，请选择「重新注册」。"), !automatic
+		return time.Second, i.problem(v2.CiProblemRunnerRemoved, "GitHub 已经删除了这个运行器，请选择「重新注册」。"), !automatic
 	case e.authFail:
 		i.mu.Lock()
 		automatic := i.spec.Account != "" && i.m.o.Token != nil
@@ -627,30 +627,30 @@ func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duratio
 			i.rereg = true
 		}
 		i.mu.Unlock()
-		return time.Second, i.problem(v1.CiProblemAuthFailed, "GitHub 拒绝了这个运行器的凭据，请选择「重新注册」。"), !automatic
+		return time.Second, i.problem(v2.CiProblemAuthFailed, "GitHub 拒绝了这个运行器的凭据，请选择「重新注册」。"), !automatic
 	case e.deprec || e.code == 7:
 		i.mu.Lock()
 		i.reinstall = true
 		automatic := i.spec.Source != "import"
 		i.mu.Unlock()
-		return time.Second, i.problem(v1.CiProblemVersionDeprecated, "运行器版本已被弃用，重启后会换成最新版本。"), !automatic
+		return time.Second, i.problem(v2.CiProblemVersionDeprecated, "运行器版本已被弃用，重启后会换成最新版本。"), !automatic
 	case e.conflict || e.code == 5:
 		i.mu.Lock()
 		i.conflicts++
 		n := i.conflicts
 		i.mu.Unlock()
 		if n >= 3 {
-			return time.Second, i.problem(v1.CiProblemSessionConflict, "这个运行器在别处也在运行，请先关掉另一个，再选择「重启」。"), true
+			return time.Second, i.problem(v2.CiProblemSessionConflict, "这个运行器在别处也在运行，请先关掉另一个，再选择「重启」。"), true
 		}
-		return time.Second, i.problem(v1.CiProblemSessionConflict, "GitHub 上还留着这个运行器的旧会话，稍后自动重试。"), false
+		return time.Second, i.problem(v2.CiProblemSessionConflict, "GitHub 上还留着这个运行器的旧会话，稍后自动重试。"), false
 	case e.missingDependency || dependencyMissing(strings.Join(e.tailLines, "\n")):
-		return time.Second, i.problem(v1.CiProblemMissingDependency, "缺少运行器需要的系统库，请先安装依赖，再选择「重启」。"), true
+		return time.Second, i.problem(v2.CiProblemMissingDependency, "缺少运行器需要的系统库，请先安装依赖，再选择「重启」。"), true
 	case e.code == 3 || e.code == 4 || e.code == 6:
 		// The runner is updating itself or refreshed its configuration: start it again at once.
 		return 0, nil, false
 	case e.code == 127 && ranFor < time.Second:
-		return time.Second, i.problem(v1.CiProblemStartFailed, "无法启动运行器: "+short(strings.Join(e.tailLines, " "))), false
+		return time.Second, i.problem(v2.CiProblemStartFailed, "无法启动运行器: "+short(strings.Join(e.tailLines, " "))), false
 	}
 	msg := fmt.Sprintf("运行器退出（退出码 %d），稍后自动重启。", e.code)
-	return time.Second, i.problem(v1.CiProblemUnclassified, msg), false
+	return time.Second, i.problem(v2.CiProblemUnclassified, msg), false
 }

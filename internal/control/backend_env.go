@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"sort"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/policy"
 )
@@ -13,11 +13,11 @@ import (
 // --- backend environment variables (CTR-CTL-14) ---
 //
 // The values are written to the private backendenv file and are never read back: not by these
-// routes, not by GET /v1/status, not by the audit record (it keeps only the body's key names).
+// routes, not by GET /v2/status, not by the audit record (it keeps only the body's key names).
 
 func (s *Server) backendEnvStore(w http.ResponseWriter) *backendenv.Store {
 	if s.o.BackendEnv == nil {
-		failWith(w, newError(v1.ErrUnavailable, "此节点没有后端环境变量存储"))
+		failWith(w, newError(v2.ErrUnavailable, "此节点没有后端环境变量存储"))
 		return nil
 	}
 	return s.o.BackendEnv
@@ -41,7 +41,7 @@ func (s *Server) patchBackendEnv(w http.ResponseWriter, r *http.Request, _ *call
 		failWith(w, argError("name", "后端名只能含字母、数字和连字符，且以字母或数字开头"))
 		return
 	}
-	var req v1.BackendEnvPatch
+	var req v2.BackendEnvPatch
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -91,11 +91,11 @@ func (s *Server) patchBackendEnv(w http.ResponseWriter, r *http.Request, _ *call
 		failWith(w, argError("set", "每个后端最多 64 个环境变量"))
 		return
 	case err != nil:
-		failWith(w, newError(v1.ErrInternal, "无法写入环境变量文件"))
+		failWith(w, newError(v2.ErrInternal, "无法写入环境变量文件"))
 		return
 	}
 	s.applyBackendEnv()
-	writeJSON(w, 200, v1.BackendEnvResponse{Name: name, Names: names})
+	writeJSON(w, 200, v2.BackendEnvResponse{Name: name, Names: names})
 }
 
 func (s *Server) deleteBackendEnv(w http.ResponseWriter, r *http.Request, _ *call) {
@@ -109,7 +109,7 @@ func (s *Server) deleteBackendEnv(w http.ResponseWriter, r *http.Request, _ *cal
 		return
 	}
 	if err := store.Clear(name); err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法写入环境变量文件"))
+		failWith(w, newError(v2.ErrInternal, "无法写入环境变量文件"))
 		return
 	}
 	s.applyBackendEnv()

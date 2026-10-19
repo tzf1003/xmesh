@@ -1,9 +1,11 @@
 {
   "pair": {
     "name": "mac-dev-01",
-    "fingerprint": "3f2a9c4e1b7d8a60f5e2c9b1d4a7e8f03c6b5a29d1e4f7a8b0c3d6e9f2a5b8c1",
-    "certificate_pem": "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUXMESH\n-----END CERTIFICATE-----\n",
-    "tags": []
+    "fingerprint": "9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
+    "tags": [],
+    "version": 2,
+    "device_id": "dev-9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
+    "public_key": "MCowBQYDK2VwAyEAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
   },
   "fingerprint": "3F:2A:9C:4E:1B:7D:8A:60:F5:E2:C9:B1:D4:A7:E8:F0:3C:6B:5A:29:D1:E4:F7:A8:B0:C3:D6:E9:F2:A5:B8:C1",
   "tags": [

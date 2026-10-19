@@ -23,10 +23,11 @@ const (
 
 // infoRecord is the latest reading of one device.
 type infoRecord struct {
-	refreshedAt time.Time
-	err         string
-	attempted   time.Time
-	attempting  bool
+	refreshedAt     time.Time
+	err             string
+	attempted       time.Time
+	attempting      bool
+	peerID, address string
 }
 
 // DeviceInfo is the outcome of the latest sys.info read of one device. A device without an entry
@@ -64,9 +65,13 @@ func (g *Gateway) pollInfo(now time.Time) {
 		if name == g.opts.LocalPeer.Name || !d.online || !d.peer.Online {
 			continue
 		}
+		current, exists := g.devices[name]
+		if !exists || current.peer.ID != d.peer.ID || current.peer.Address != d.peer.Address || !current.online {
+			continue
+		}
 		r := g.info[name]
-		if r == nil {
-			r = &infoRecord{}
+		if r == nil || r.peerID != d.peer.ID || r.address != d.peer.Address {
+			r = &infoRecord{peerID: d.peer.ID, address: d.peer.Address}
 			g.info[name] = r
 		}
 		if r.attempting || now.Sub(r.attempted) < infoEvery {
@@ -74,11 +79,11 @@ func (g *Gateway) pollInfo(now time.Time) {
 		}
 		r.attempting = true
 		g.infoWorkers.Add(1)
-		go g.readInfo(name, d.peer)
+		go g.readInfo(name, d.peer, r)
 	}
 }
 
-func (g *Gateway) readInfo(name string, peer mesh.Peer) {
+func (g *Gateway) readInfo(name string, peer mesh.Peer, record *infoRecord) {
 	defer g.infoWorkers.Done()
 	ctx, cancel := context.WithTimeout(g.ctx, infoTimeout)
 	defer cancel()
@@ -86,10 +91,13 @@ func (g *Gateway) readInfo(name string, peer mesh.Peer) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	r := g.info[name]
-	if r == nil {
-		// The device left while it was being read; pollInfo drops the entry on its next pass.
-		r = &infoRecord{}
-		g.info[name] = r
+	current, exists := g.devices[name]
+	if r != record {
+		return
+	}
+	if !exists || !current.online || current.peer.ID != peer.ID || current.peer.Address != peer.Address {
+		delete(g.info, name)
+		return
 	}
 	r.attempting = false
 	r.attempted = time.Now()

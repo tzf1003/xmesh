@@ -1,4 +1,4 @@
-// Control API v1 as the shell consumes it (docs/contracts/control.md, CTR-CTL-*).
+// Control API v2 as the shell consumes it (docs/contracts/control.md, CTR-CTL-*).
 //
 // The wire types are generated from the contract schemas and live in
 // ./generated/control.ts (copied by `npm run sync-types`, checked in CI).

@@ -167,7 +167,7 @@ func waitKernelStart(dir string, old control.Endpoint, started time.Time, limit 
 	for {
 		if e, err := control.ReadEndpoint(dir); err == nil && e.StartedAt.After(old.StartedAt.Time) && !e.StartedAt.Before(started.Add(-2*time.Second)) {
 			ctx, cancel := context.WithDeadline(context.Background(), deadline)
-			r, err := control.NewClient(e).Do(ctx, "GET", "/v1/status", nil, nil)
+			r, err := control.NewClient(e).Do(ctx, "GET", "/v2/status", nil, nil)
 			cancel()
 			if err == nil && r.Error() == nil {
 				return nil

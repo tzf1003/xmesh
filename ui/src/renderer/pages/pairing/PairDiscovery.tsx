@@ -46,13 +46,14 @@ export function PairDiscovery({ ctx }: { ctx: PageContext }): JSX.Element {
       {devices && devices.length > 0 && (
         <ul class="pair-found" data-testid="pair-discovered">
           {devices.map((d) => (
-            <li key={d.fingerprint} data-testid={`pair-device-${d.name}`}>
+            <li key={`${d.device_id}:${d.path}:${d.address}`} data-testid={`pair-device-${d.name}`}>
               <p>{t("pair.discovered", { name: d.name, address: d.address })}</p>
               <p class="hint mono">{groupFingerprint(d.fingerprint)}</p>
-              {open === d.fingerprint ? (
+              {open === `${d.device_id}:${d.path}:${d.address}` ? (
                 <PairConnectForm
                   ctx={ctx}
                   address={d.address}
+                  path={d.path}
                   fingerprint={d.fingerprint}
                   testid={`pair-connect-${d.name}`}
                   onDone={() => {
@@ -61,7 +62,7 @@ export function PairDiscovery({ ctx }: { ctx: PageContext }): JSX.Element {
                   }}
                 />
               ) : (
-                <button type="button" class="btn primary" onClick={() => setOpen(d.fingerprint)} data-testid={`pair-open-${d.name}`}>
+                <button type="button" class="btn primary" onClick={() => setOpen(`${d.device_id}:${d.path}:${d.address}`)} data-testid={`pair-open-${d.name}`}>
                   {t("pair.connect")}
                 </button>
               )}

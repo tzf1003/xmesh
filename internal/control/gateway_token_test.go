@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -89,13 +89,13 @@ func Test_GatewayTokenOnlyForGatewayNodes(t *testing.T) {
 	}
 }
 
-// PUT /v1/gateway changes access and host names at once; a changed listen address is moved to by the
+// PUT /v2/gateway changes access and host names at once; a changed listen address is moved to by the
 // running gateway, so it needs no restart.
 func Test_GatewayUpdateReachSettings(t *testing.T) {
 	f := newFixtureConfig(t, gatewayTokenConfig(""))
-	var out v1.GatewayUpdateResponse
-	body := v1.GatewayUpdateRequest{Listen: ":8080", Access: []string{"localhost", "203.0.113.0/24"}, Hosts: []string{"xmesh.home.example"}}
-	decodeAs(t, f.ok("PUT", "/v1/gateway", body, "GatewayUpdateResponse"), &out)
+	var out v2.GatewayUpdateResponse
+	body := v2.GatewayUpdateRequest{Listen: ":8080", Access: []string{"localhost", "203.0.113.0/24"}, Hosts: []string{"xmesh.home.example"}}
+	decodeAs(t, f.ok("PUT", "/v2/gateway", body, "GatewayUpdateResponse"), &out)
 	if out.RestartRequired || out.Listen != ":8080" || len(out.Access) != 2 || out.Hosts[0] != "xmesh.home.example" {
 		t.Fatalf("%+v", out)
 	}
@@ -103,7 +103,7 @@ func Test_GatewayUpdateReachSettings(t *testing.T) {
 		t.Fatalf("store has %+v", got)
 	}
 	body.Listen = "127.0.0.1:8080"
-	decodeAs(t, f.ok("PUT", "/v1/gateway", body, "GatewayUpdateResponse"), &out)
+	decodeAs(t, f.ok("PUT", "/v2/gateway", body, "GatewayUpdateResponse"), &out)
 	if out.RestartRequired || out.Listen != "127.0.0.1:8080" {
 		t.Fatalf("a listen change asked for a restart: %+v", out)
 	}
@@ -112,12 +112,12 @@ func Test_GatewayUpdateReachSettings(t *testing.T) {
 	}
 	// Malformed access entries, an address used as a host name, and a specific bind address are refused.
 	raw, _ := os.ReadFile(f.path)
-	for _, bad := range []v1.GatewayUpdateRequest{
+	for _, bad := range []v2.GatewayUpdateRequest{
 		{Listen: ":8080", Access: []string{"everyone"}, Hosts: []string{}},
 		{Listen: ":8080", Access: []string{}, Hosts: []string{"192.168.1.5"}},
 		{Listen: "192.0.2.5:8080", Access: []string{}, Hosts: []string{}},
 	} {
-		if r := f.do("PUT", "/v1/gateway", bad, nil); r.Status != 422 {
+		if r := f.do("PUT", "/v2/gateway", bad, nil); r.Status != 422 {
 			t.Fatalf("%+v accepted: %d %s", bad, r.Status, r.Body)
 		}
 	}
@@ -129,7 +129,7 @@ func Test_GatewayUpdateReachSettings(t *testing.T) {
 // A node without the gateway role has no gateway to reach.
 func Test_GatewayUpdateNeedsGatewayRole(t *testing.T) {
 	f := newFixture(t)
-	apiError(t, f.do("PUT", "/v1/gateway", v1.GatewayUpdateRequest{Listen: ":8080", Access: []string{}, Hosts: []string{}}, nil), v1.ErrRoleDisabled)
+	apiError(t, f.do("PUT", "/v2/gateway", v2.GatewayUpdateRequest{Listen: ":8080", Access: []string{}, Hosts: []string{}}, nil), v2.ErrRoleDisabled)
 }
 
 func Test_GatewayDefaultPatRecoversInterruptedCreation(t *testing.T) {
@@ -173,10 +173,10 @@ func Test_GatewayDefaultPatRecoversInterruptedCreation(t *testing.T) {
 				t.Fatalf("new receipt %q %v", body, err)
 			}
 			// The recovered managed file follows the normal deletion path.
-			if r := f.do("POST", "/v1/pats", v1.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+			if r := f.do("POST", "/v2/pats", v2.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
 				t.Fatal(r.Status)
 			}
-			if r := f.do("DELETE", "/v1/pats/default", nil, nil); r.Status != 204 {
+			if r := f.do("DELETE", "/v2/pats/default", nil, nil); r.Status != 204 {
 				t.Fatal(r.Status)
 			}
 			if _, err := os.Stat(pat.TokenFile); !os.IsNotExist(err) {
