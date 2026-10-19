@@ -10,6 +10,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 const processes: OwnedProcess[] = [];
 const root = process.argv[2]!;
 const parent = Number(process.argv[3]);
+const parentBirth = process.argv[4]!;
 let closing = false;
 let parentWaiter: ChildProcess | undefined;
 process.on("message", (message: any) => {
@@ -70,6 +71,10 @@ async function close(): Promise<void> {
   }
 }
 const watch = setInterval(() => {
+  if (!process.connected) {
+    void close();
+    return;
+  }
   try {
     process.kill(parent, 0);
   } catch (error) {
@@ -77,10 +82,24 @@ const watch = setInterval(() => {
   }
 }, 250);
 process.once("disconnect", () => void close());
+function ready(): void {
+  if (closing) return;
+  atomicJSON(path.join(root, "guardian.json"), {
+    state: "ready",
+    pid: process.pid,
+    parent,
+    parentBirth,
+    waiter_pid: parentWaiter?.pid,
+    time: new Date().toISOString(),
+  });
+  if (process.connected) process.send?.({ type: "ready" });
+  else void close();
+}
 if (
   process.platform === "win32" &&
   Number.isSafeInteger(parent) &&
-  parent > 0
+  parent > 0 &&
+  /^\d+$/.test(parentBirth)
 ) {
   // Windows can retain inherited pipe handles after a parent dies. Wait on the
   // OS process handle as well as IPC EOF so cleanup does not depend on the pipe.
@@ -90,10 +109,10 @@ if (
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      `try { $xmeshParent = [System.Diagnostics.Process]::GetProcessById(${parent}); $xmeshParent.WaitForExit(); exit 0 } catch { if ($_.Exception -is [System.ArgumentException] -or $_.Exception.InnerException -is [System.ArgumentException]) { exit 0 }; exit 2 }`,
+      `try { $xmeshParent = [System.Diagnostics.Process]::GetProcessById(${parent}); if ($xmeshParent.StartTime.ToUniversalTime().Ticks.ToString() -ne '${parentBirth}') { exit 0 }; [Console]::Out.WriteLine('ready'); [Console]::Out.Flush(); $xmeshParent.WaitForExit(); exit 0 } catch { if ($_.Exception -is [System.ArgumentException] -or $_.Exception.InnerException -is [System.ArgumentException]) { exit 0 }; [Console]::Error.WriteLine($_.Exception.Message); exit 2 }`,
     ],
     {
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "inherit"],
       windowsHide: true,
       env: {
         ...process.env,
@@ -108,16 +127,19 @@ if (
       },
     },
   );
+  parentWaiter.stdout?.once("data", (data) => {
+    if (data.toString().includes("ready")) ready();
+  });
   parentWaiter.once("exit", (code) => {
     if (code === 0) void close();
+    else if (!closing) {
+      atomicJSON(path.join(root, "guardian.json"), {
+        state: "monitor_failed",
+        code,
+        time: new Date().toISOString(),
+      });
+      void close();
+    }
   });
-  parentWaiter.once("error", () => {});
-}
-atomicJSON(path.join(root, "guardian.json"), {
-  state: "ready",
-  pid: process.pid,
-  parent,
-  time: new Date().toISOString(),
-});
-if (process.connected) process.send?.({ type: "ready" });
-else void close();
+  parentWaiter.once("error", () => void close());
+} else ready();

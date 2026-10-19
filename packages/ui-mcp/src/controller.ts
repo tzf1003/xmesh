@@ -168,6 +168,7 @@ export class Controller {
       [
         path.join(config.state_dir, "instances", this.instance_id),
         String(process.pid),
+        processIdentity(process.pid),
       ],
       {
         execArgv: [],
