@@ -59,4 +59,11 @@ test("emergency stop retains the selected custom endpoint through kernel loss", 
   assert.equal(targets.endpoint(snapshot), "/tmp/custom-computer.sock");
   snapshot.connection = { kind: "offline" };
   assert.equal(targets.endpoint(snapshot), "/tmp/custom-computer.sock");
+  snapshot.selectedInstance = "other";
+  assert.throws(() => targets.endpoint(snapshot), /尚未提供/);
+  snapshot.connection = { kind: "connected", status: { paths: { computer_endpoint: "/tmp/other.sock" } } };
+  assert.equal(targets.endpoint(snapshot), "/tmp/other.sock");
+  snapshot.selectedInstance = "custom";
+  snapshot.connection = { kind: "offline" };
+  assert.equal(targets.endpoint(snapshot), "/tmp/custom-computer.sock");
 });

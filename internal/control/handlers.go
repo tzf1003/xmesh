@@ -10,7 +10,6 @@ import (
 	"time"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
-	"github.com/tzf1003/xmesh/internal/computer"
 )
 
 // snapshot completes the host's status with what only the server knows (CTR-CTL-03).
@@ -21,10 +20,7 @@ func (s *Server) snapshot() v1.StatusResponse {
 	st.StartedAt, st.PID = s.started, os.Getpid()
 	st.Drain = s.currentDrain()
 	st.Paths = v1.Paths{ConfigFile: s.o.Store.Path(), StateDir: s.o.StateDir}
-	st.Paths.ComputerEndpoint = s.o.Store.Get().Agent.Computer.Endpoint
-	if st.Paths.ComputerEndpoint == "" {
-		st.Paths.ComputerEndpoint = computer.EndpointForState(st.Paths.StateDir)
-	}
+	st.Paths.ComputerEndpoint = s.computerEndpoint
 	if s.o.AuditDir != "" {
 		st.Paths.AuditDir = ptr(s.o.AuditDir)
 	}
