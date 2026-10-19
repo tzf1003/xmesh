@@ -3,7 +3,8 @@
 // into a packaged app). It follows the CLI's argument handling and JSON shapes
 // closely enough that the real service code runs unchanged on top of it.
 
-import type { MeshRun, MeshRunner } from "./mesh-service";
+import * as path from "node:path";
+import { execMeshRunner, type MeshRun, type MeshRunner } from "./mesh-service";
 
 export interface FakeMeshState {
   provider: "tailscale" | "headscale";
@@ -89,7 +90,7 @@ function planDoc(s: FakeMeshState, label: string, after: string): Record<string,
     base_exists: true,
     before: s.policyText,
     after,
-    diff: changed ? `--- policy (before)\n+++ policy (after)\n-${s.policyText.split("\n")[1] ?? ""}\n+${after.split("\n")[1] ?? ""}\n` : "",
+    diff: changed ? `--- policy (before)\n+++ policy (after)\n${s.policyText.split("\n").map((line) => `-${line}`).join("\n")}\n${after.split("\n").map((line) => `+${line}`).join("\n")}\n` : "",
     changed,
     warnings: changed ? null : undefined,
     writable: s.provider === "tailscale",
@@ -230,6 +231,25 @@ export function runFakeMesh(s: FakeMeshState, argv: string[], input?: string): M
       if (has(args, "snapshots")) {
         return ok({ snapshots: s.snapshots.map((x) => ({ id: x.id, provider: s.provider, time: "2026-10-16T08:30:00Z", label: x.label, version: x.version })) });
       }
+      if (args[0] === "publish") {
+        const conflict = stale(args, s);
+        if (conflict) return conflict;
+        let after: string;
+        try {
+          const value = JSON.parse(input ?? "");
+          if (typeof value.text !== "string") return fail("policy text is required");
+          after = value.text;
+        } catch { return fail("invalid policy document input"); }
+        const doc: Record<string, unknown> = { plan: planDoc(s, "policy document", after), applied: false };
+        if (has(args, "apply")) {
+          const w = needsWrite(s);
+          if (w) return w;
+          if (s.provider !== "tailscale") return fail("该控制面不允许远程写策略");
+          doc.applied = true;
+          doc.result = writePolicy(s, "policy document", after);
+        }
+        return ok(doc);
+      }
       const w = needsWrite(s);
       if (w) return w;
       let label: string;
@@ -319,6 +339,13 @@ function runFakeDerp(s: FakeMeshState, argv: string[]): MeshRun {
 export function fakeMeshRunner(state: FakeMeshState): MeshRunner {
   return async (argv, input) => {
     if (state.delayMs > 0) await new Promise((r) => setTimeout(r, state.delayMs));
+    // HuJSON editing is a local operation. E2E uses the real CLI so comments,
+    // templates and region preservation exercise the production parser.
+    if (argv[0] === "mesh" && argv[1] === "policy" && argv[2] === "document") {
+      state.calls.push([...argv]);
+      const binary = path.resolve(__dirname, "../../../build/policy-test", process.platform === "win32" ? "xmesh.exe" : "xmesh");
+      return execMeshRunner(() => binary)(argv, input);
+    }
     return runFakeMesh(state, argv, input);
   };
 }

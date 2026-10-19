@@ -466,6 +466,31 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 
 ## tailnet 管理（xmesh mesh）
 
+桌面「策略」和「DERP 中继」先读取云端策略，共用一份本地会话草稿。
+DERP 页显示云端已有地域；新增、编辑、删除及官方中继开关更新这份草稿。
+模板也先合并到草稿中。到「策略」查看最终完整正文，点击「预览完整策略差异」，
+校验通过并确认后「应用到云端」。应用前保存快照、检查版本，应用后回读。
+版本冲突保留草稿；先复制草稿再重新加载云端策略，比较并合并需要的修改。
+快照先恢复到草稿，再统一预览和应用。草稿在本次应用会话内保留，尚未持久化到磁盘。
+
+真实边界验收（复用现有依赖与 Go 缓存）：
+
+```bash
+go test ./meshadmin -run '^TestPolicyDocument' -count=1
+go build -o /tmp/xmesh-policy-check ./cmd/xmesh
+# 使用已校验的 Headscale v0.29.5 二进制；测试只写入临时 SQLite 控制面。
+XMESH_TEST_HEADSCALE_BIN=/path/to/headscale XMESH_TEST_XMESH_BIN=/tmp/xmesh-policy-check \
+  go test -tags policy_live ./meshadmin -run '^TestPolicyDocumentLivePublish$' -count=1
+# UI 构建后，用具有两个已有地域的 Tailscale 凭据执行真实只读验收。
+# 脚本将凭据复制为只读的临时凭据，结果写入 XMESH_ACCEPT_OUT，结束后移除临时凭据。
+cd ui
+npm run build
+XMESH_ACCEPT_BIN=/tmp/xmesh-policy-check XMESH_ACCEPT_CREDENTIAL_FILE=/path/to/mesh-credential.json \
+  XMESH_ACCEPT_OUT=/tmp/xmesh-policy-evidence node scripts/accept-policy-draft.mjs
+```
+
+上述真实验收独立于旧版假内核/控制面 E2E 夹具；Windows/Linux 的实际桌面运行仍需各平台验证。
+
 `xmesh mesh` 管理控制面（官方 Tailscale 或 Headscale）：设备与 tag、接入新设备、权限模板、第三方 DERP。管理凭据只存系统钥匙串或 `0600` 文件，不放进 `xmesh.yaml`，也不进内核进程，见 [CON-MESH-02](constraints/meshadmin.md#con-mesh-02)。命令都支持 `--json`，桌面 UI 通过它们调用。契约见 [meshadmin](contracts/meshadmin.md)。
 
 登录（密钥从标准输入读，不放命令行）：
