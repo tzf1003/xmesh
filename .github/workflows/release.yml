@@ -34,8 +34,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
-  build:
+  computer:
     needs: verify
+    uses: ./.github/workflows/computer-release.yml
+    with:
+      version: ${{ github.ref_name }}
+  build:
+    needs: [verify, computer]
     strategy:
       fail-fast: true
       matrix:
@@ -53,6 +58,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: computer-native-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: native
       - name: 构建
         env:
           GOOS: ${{ matrix.goos }}
@@ -68,6 +77,9 @@ jobs:
             test "$("dist/$name/xmesh" version)" = "xmesh ${GITHUB_REF_NAME}"
           fi
           cp README.md "dist/$name/" 2>/dev/null || true
+          cp -R native/. "dist/$name/"
+          if [ "$GOOS" = darwin ]; then chmod +x "dist/$name/xmesh-computer.app/Contents/MacOS/xmesh-computer"; fi
+          if [ "$GOOS" = linux ]; then chmod +x "dist/$name/xmesh-computer"; fi
           # 操作者只下载归档：验收脚本和手册随二进制一起带走。
           mkdir -p "dist/$name/scripts" "dist/$name/docs/validation"
           cp scripts/*.py scripts/*.ps1 "dist/$name/scripts/"
@@ -97,6 +109,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: xmesh-*
           merge-multiple: true
       - name: 校验和
         run: cd dist && sha256sum * > SHA256SUMS.txt

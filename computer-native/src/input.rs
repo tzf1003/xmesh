@@ -1,7 +1,7 @@
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 
 pub enum Input {
-    Native(Enigo),
+    Native(Box<Enigo>),
     #[cfg(target_os = "linux")]
     Portal(crate::platform::PortalInput),
 }
@@ -28,7 +28,7 @@ impl Input {
             release_keys_when_dropped: true,
             ..Default::default()
         };
-        Enigo::new(&settings).ok().map(Self::Native)
+        Enigo::new(&settings).ok().map(Box::new).map(Self::Native)
     }
 
     pub fn move_mouse(
@@ -53,6 +53,11 @@ impl Input {
         }
     }
     pub fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), &'static str> {
+        #[cfg(target_os = "macos")]
+        {
+            crate::platform::scroll(length, axis)
+        }
+        #[cfg(not(target_os = "macos"))]
         match self {
             Self::Native(input) => input.scroll(length, axis).map_err(|_| "input_failed"),
             #[cfg(target_os = "linux")]

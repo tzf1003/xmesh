@@ -65,4 +65,10 @@ Windows、macOS、Linux 上的 Agent 经现有 Streamable HTTP MCP、Gateway / I
 
 第一轮原生 CI 的 macOS 作业通过；Linux 报告两处类型错误，Windows 报告 scap 的 published Windows 接口不匹配。后续提交修正 Linux 类型并将 Windows 采集改为直接调用 windows-capture。新增当前权限和桌面状态复查，授权撤销、系统锁定和桌面代次改变时回收控制权。
 
-原生第三方接口通过锁定版本的 scap 与 enigo 调用。Linux X11 采集使用 x11rb。本机 Cargo target 通过 `--target-dir` 指向共享缓存；Cargo registry 与 Go 缓存按用户全局复用。
+原生第三方接口通过锁定版本的 cidre、windows-capture 与 enigo 调用。Linux X11 采集使用 x11rb。本机 Cargo target 通过 `--target-dir` 指向共享缓存；Cargo registry 与 Go 缓存按用户全局复用。
+
+第三轮：全仓库 1248 项 Go 竞态测试通过。Windows 原生构建、clippy 和 IPC 在 GitHub runner 上通过；Linux Wayland 源码完成编译，随后修正 clippy 的枚举大小和类型复杂度检查。Wayland 共用 RemoteDesktop / ScreenCast 授权和 PipeWire stream，支持 Portal 输入、持久恢复令牌、本机显式授权与关闭信号；GNOME / KDE 真机行为仍待验收。
+
+macOS 采集改用 SCScreenshotManager 的单帧接口，发布构建单次截图为 203ms，尚需多次采样确认 p95。独立 Electron 测试窗口经真实 broker 和原生执行器验证点击、中文文本、组合键、拖动及滚动，连续三次通过；测试也修正了滚动定位和方向。测试窗口使用独立用户数据目录，不保存桌面图片或输入到工作区。
+
+新增本机 `computer setup|install|start|stop|restart|uninstall|authorize`、图形会话自启配置、面板初始化按钮，以及原生执行器在 UI 和六平台归档中的打包路径。macOS 执行器采用 `app.xmesh.computer` 应用标识。该轮安装包和跨平台输入 CI 仍待完成，正式签名和公证依赖发布凭据。

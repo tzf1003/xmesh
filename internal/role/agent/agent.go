@@ -37,10 +37,11 @@ import (
 type Principal = identity.Principal
 type Authenticate func(*http.Request) (Principal, error)
 type Agent struct {
-	Computer         *computer.Manager
-	computerProvider computer.Provider
-	store            *config.Store
-	PTY              *pty.Manager
+	Computer          *computer.Manager
+	computerProvider  computer.Provider
+	computerUnprotect func()
+	store             *config.Store
+	PTY               *pty.Manager
 	// BudgetAuthority hosts the cross-host PTY admission lease for ingress nodes.
 	BudgetAuthority *pty.BudgetAuthority
 	Exec            *runexec.Manager
@@ -106,6 +107,13 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 		a.computerProvider = computer.NewClient(c.Agent.Computer.Endpoint)
 	}
 	a.Computer = computer.New(a.computerProvider, c.Agent.Computer)
+	if runtime.GOOS != "windows" {
+		endpoint := c.Agent.Computer.Endpoint
+		if endpoint == "" {
+			endpoint = computer.DefaultEndpoint()
+		}
+		a.computerUnprotect = policy.ProtectPath(endpoint)
+	}
 	a.Computer.SetAuthorization(func(owner string) bool {
 		caller, ok := a.Callers.Get(owner)
 		cfg := a.store.Get()
@@ -595,6 +603,9 @@ func (a *Agent) Close() {
 		}
 		a.PTY.Shutdown()
 		_ = a.Computer.Close()
+		if a.computerUnprotect != nil {
+			a.computerUnprotect()
+		}
 		a.Exec.Close()
 		a.Backends.Close()
 		a.Leases.Close()

@@ -19,7 +19,7 @@ interface BuilderConfig {
 
 /** The config reads signing and kernel settings from the environment at import time, so each variant gets its own module URL. */
 async function loadConfig(env: Record<string, string | undefined>): Promise<{ default: BuilderConfig; builderFuses: (p: Record<number, boolean>) => Record<string, boolean> }> {
-  const keys = ["XMESH_KERNEL_BIN", "CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
+  const keys = ["XMESH_KERNEL_BIN", "XMESH_COMPUTER_BIN", "CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
   const saved = keys.map((k) => [k, process.env[k]] as const);
   for (const k of keys) delete process.env[k];
   Object.assign(process.env, Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)));
@@ -85,6 +85,12 @@ test("package config: kernel is bundled per platform when XMESH_KERNEL_BIN is se
   assert.deepEqual(cfg.mac.extraResources, [{ from: "/k/xmesh", to: "bin/xmesh" }]);
   const none = await loadConfig({});
   assert.deepEqual(none.default.win.extraResources, []);
+});
+
+test("package config: native executor is bundled with its platform identity", async () => {
+  const { default: cfg } = await loadConfig({ XMESH_COMPUTER_BIN: "/native/helper" });
+  assert.deepEqual(cfg.win.extraResources, [{ from: "/native/helper", to: "bin/xmesh-computer.exe" }]);
+  assert.deepEqual(cfg.mac.extraResources, [{ from: "/native/helper", to: "bin/xmesh-computer.app" }]);
 });
 
 test("package config: macOS signing and notarization are enabled only by secrets, never by default", async () => {

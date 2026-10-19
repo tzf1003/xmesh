@@ -17,12 +17,12 @@ import (
 func computerCommand(args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
-		case "install", "start", "stop", "restart", "uninstall":
+		case "install", "start", "stop", "restart", "uninstall", "setup":
 			return withJSON("computer."+args[0], args[1:], func(rest []string) error { return computerService(args[0], rest) })
 		}
 	}
 	if len(args) == 0 || args[0] == "help" {
-		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径]\n      xmesh computer info [--endpoint 本机套接字或管道]")
+		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup|install|start|stop|restart|uninstall [--json]\n      xmesh computer info|authorize [--endpoint 本机套接字或管道]")
 		return nil
 	}
 	f := flag.NewFlagSet("computer "+args[0], flag.ContinueOnError)

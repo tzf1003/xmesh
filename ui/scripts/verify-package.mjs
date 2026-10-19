@@ -77,6 +77,18 @@ if (flag("run-kernel")) {
   ok(`bundled kernel runs: ${out}`);
 }
 
+if (flag("computer")) {
+  const native = platform === "darwin"
+    ? path.join(resources, "bin", "xmesh-computer.app", "Contents", "MacOS", "xmesh-computer")
+    : path.join(resources, "bin", platform === "win32" ? "xmesh-computer.exe" : "xmesh-computer");
+  if (!fs.existsSync(native)) fail("native desktop executor is missing");
+  if (flag("run-kernel")) {
+    const output = execFileSync(native, ["--version"], { encoding: "utf8", timeout: 30000 }).trim();
+    if (!/^xmesh-computer \S+ protocol=1$/.test(output)) fail("native executor version handshake is invalid");
+  }
+  ok("native desktop executor bundled");
+}
+
 if (flag("smoke")) await smoke();
 
 async function smoke() {

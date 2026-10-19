@@ -65,6 +65,7 @@ function ComputerPage({ ctx }: { ctx: PageContext }): JSX.Element {
       <section class="card stack">
         <h2>{t("computer.permissions")}</h2>
         <p>{t("computer.permissionsHint")}</p>
+        <div><button class="btn primary" type="button" disabled={busy} onClick={() => void run({ op: "setup" })} data-testid="computer-setup-button">{t("computer.setupButton")}</button></div>
         <label>{t("computer.setup")}<pre class="mono" data-testid="computer-setup">xmesh computer host --authorize</pre></label>
         <p class="hint">{t("computer.scopeHint")}</p>
         <code class="mono">computer:observe:{ctx.snapshot.connection.kind === "connected" ? ctx.snapshot.connection.status.hostname : "device"}</code>

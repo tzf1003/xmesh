@@ -129,7 +129,7 @@ impl Runtime {
         } else {
             "ready"
         };
-        let input = self.input_ready.load(Ordering::Acquire);
+        let input = self.input_ready.load(Ordering::Acquire) && platform::input_permission();
         json!({"protocol_version":1,"available":state=="ready","state":state,
             "reason":if state=="permission_required"{"screen_permission"}else if state=="ready"&&!input{"input_permission_required"}else{state},
             "desktop_id":"desktop","desktop_epoch":self.epoch,"layout_version":platform::layout(&displays),
@@ -139,6 +139,7 @@ impl Runtime {
         token > self.revoked.load(Ordering::Acquire)
             && start.elapsed() < Duration::from_secs(5)
             && !platform::locked()
+            && platform::input_permission()
     }
 }
 
@@ -175,11 +176,16 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     {
         return Err("invalid_region");
     }
+    static RAW_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+    if RAW_CAPTURE_ACTIVE.swap(true, Ordering::AcqRel) {
+        return Err("capture_busy");
+    }
     let (tx, rx) = mpsc::sync_channel(1);
     let capture_display = display.clone();
     thread::spawn(move || {
         let result = std::panic::catch_unwind(|| capture_raw(&capture_display))
             .unwrap_or(Err("capture_unavailable"));
+        RAW_CAPTURE_ACTIVE.store(false, Ordering::Release);
         let _ = tx.send(result);
     });
     let (width, height, mut pixels) = rx
@@ -239,32 +245,6 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     )
 }
 
-#[cfg(target_os = "macos")]
-fn capture_raw(display: &platform::Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
-    let target = scap::get_all_targets()
-        .into_iter()
-        .find(|target| matches!(target,scap::Target::Display(d) if d.id.to_string()==display.id))
-        .ok_or("display_not_found")?;
-    let mut capturer = scap::capturer::Capturer::build(scap::capturer::Options {
-        fps: 5,
-        target: Some(target),
-        show_cursor: true,
-        show_highlight: true,
-        output_type: scap::frame::FrameType::BGRAFrame,
-        ..Default::default()
-    })
-    .map_err(|_| "capture_unavailable")?;
-    capturer.start_capture();
-    let frame = capturer.get_next_frame();
-    capturer.stop_capture();
-    match frame {
-        Ok(scap::frame::Frame::Video(scap::frame::VideoFrame::BGRA(f))) => {
-            Ok((f.width, f.height, f.data))
-        }
-        _ => Err("capture_format"),
-    }
-}
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn capture_raw(display: &platform::Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     platform::capture(display)
 }
@@ -388,6 +368,11 @@ fn action(
             enigo
                 .move_mouse(x, y, Coordinate::Abs)
                 .map_err(|_| "input_failed")?;
+            // Let the compositor route the pointer to the target before a button,
+            // wheel or keyboard event uses its focus. This is cancellable.
+            if a.kind != "move" {
+                pause(runtime, token, start, 20)?;
+            }
             match a.kind.as_str() {
                 "click" => {
                     for _ in 0..a.clicks.max(1) {
@@ -466,6 +451,7 @@ fn action(
                 }
             }
             result?;
+            pause(runtime, token, start, 50)?;
         }
         "text" => {
             if a.text.is_empty() || a.text.len() > 65536 || a.text.contains('\0') {
@@ -579,7 +565,10 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
 
 fn main() {
     if std::env::args().any(|a| a == "--version") {
-        println!("xmesh-computer {} protocol=1", env!("CARGO_PKG_VERSION"));
+        println!(
+            "xmesh-computer {} protocol=1",
+            option_env!("XMESH_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+        );
         return;
     }
     if !std::env::args().any(|a| a == "--stdio") {
@@ -595,8 +584,8 @@ fn main() {
     };
     let authorize = std::env::args().any(|a| a == "--authorize");
     #[cfg(target_os = "macos")]
-    if authorize && !scap::has_permission() {
-        let _ = scap::request_permission();
+    if authorize && !platform::screen_permission() {
+        platform::request_screen_permission();
     }
     let runtime = Arc::new(Runtime {
         epoch: format!(

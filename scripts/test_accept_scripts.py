@@ -182,7 +182,11 @@ class FakeIngress(http.server.BaseHTTPRequestHandler):
 class PtyBudget(unittest.TestCase):
     def serve(self, limit):
         FakeIngress.opened, FakeIngress.limit = [], limit
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeIngress)
+        class FixtureServer(http.server.ThreadingHTTPServer):
+            # This test starts ten sessions at once; admission is tested in the
+            # fake MCP handler rather than by the operating system's listen backlog.
+            request_queue_size = 32
+        server = FixtureServer(("127.0.0.1", 0), FakeIngress)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
         self.addCleanup(server.server_close)

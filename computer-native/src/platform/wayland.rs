@@ -30,6 +30,8 @@ struct Stream {
     display: Display,
 }
 
+type Pixels = (i32, i32, Vec<u8>);
+
 struct Shared {
     active: AtomicBool,
     streams: Vec<Stream>,
@@ -316,7 +318,7 @@ fn pipewire_frame(
     let stream=pw::stream::Stream::new(&core,"xmesh-computer",properties!{*pw::keys::MEDIA_TYPE=>"Video",*pw::keys::MEDIA_CATEGORY=>"Capture",*pw::keys::MEDIA_ROLE=>"Screen"}).map_err(|_|"pipewire_stream")?;
     struct Data {
         format: spa::param::video::VideoInfoRaw,
-        frame: Rc<RefCell<Option<(i32, i32, Vec<u8>)>>>,
+        frame: Rc<RefCell<Option<Pixels>>>,
     }
     let frame = Rc::new(RefCell::new(None));
     let failed = Rc::new(RefCell::new(false));

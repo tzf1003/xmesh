@@ -10,6 +10,8 @@ test("desktop sessions can be revoked and human takeover pauses Agent control", 
     page.on("pageerror", (e) => errors.push(e.message));
     await navigate(page, "computer");
     await expect(page.getByTestId("computer-state")).toHaveText("桌面已就绪");
+    await page.getByTestId("computer-setup-button").click();
+    await expect.poll(async () => (await h.calls()).some((c) => c.op === "computer-setup")).toBe(true);
     await expect(page.getByTestId("computer-sessions")).toContainText("cloud/session");
     await page.getByTestId("computer-revoke-cs-12345678").click();
     await expect(page.getByTestId("page-computer")).toContainText("当前没有桌面会话");

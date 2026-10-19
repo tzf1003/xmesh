@@ -517,3 +517,14 @@ xmesh mesh derp sync --profile home --admission-url http://127.0.0.1:8480 --admi
 `--verify-client-url-fail-open=false` 不能省：上游默认在准入服务不可达时放行。准入只在连接建立时判断，已有连接要重连才受影响。
 
 验证状态：Headscale 一侧用真实 v0.29.5 做过集成测试（`policy.mode=database`，含生成的 DERP 文件被其加载）；Tailscale 一侧只对照官方客户端的请求形状做了夹具测试，没有联调真实 tailnet；第三方 DERP 的探测与准入在本机回环验证过，没有跨公网验证。计量、计费、多租户目录没有实现。
+# Computer 桌面接入
+
+在目标设备的图形用户会话中打开面板“桌面控制”，开启桌面能力，再点击“安装桌面服务并授权”。系统会请求屏幕录制与输入控制权限。桌面 host 独立于面板运行，用户注销后按平台会话规则退出。
+
+CLI 对应步骤：`xmesh computer setup` 安装并启动当前用户的桌面服务并请求系统授权；`xmesh computer info` 查询执行器状态；`xmesh computer stop|start|restart|uninstall` 管理用户服务。需要前台诊断时运行 `xmesh computer host --authorize`。这些命令要求发行包中同时存在 `xmesh` 与原生桌面执行器；macOS 原生执行器位于同目录的 `xmesh-computer.app`。
+
+在节点配置中设置 `agent.computer.enabled: true`，并按用途向节点 tag 授予 `computer.info`、`computer.open`、`computer.observe`、`computer.sessions`、`computer.renew`、`computer.close`；控制还需要 `computer.act` 和 `computer.action_status`。Gateway PAT / Ingress OAuth 使用 `computer:observe:<设备名>` 或 `computer:control:<设备名>`。
+
+Windows SYSTEM 内核需要显式配置 `agent.computer.endpoint` 指向登录用户 SID 的 `\\.\pipe\xmesh-<SID>-computer` 管道，桌面 host 由该用户的登录任务启动。Linux 服务绑定 `graphical-session.target`；Wayland 还需要 RemoteDesktop 与 ScreenCast Portal、PipeWire，以及支持对应接口的桌面后端。Linux 二进制运行时依赖 libdbus、libxkbcommon 和 libpipewire。
+
+本机接管可在面板暂停 Agent，或执行 `xmesh control computer --action pause --node <节点名>`；`--action resume` 恢复，Agent 随后重新获取控制会话。紧急快捷键在面板应用运行期间有效。各平台实测进度见 [Computer 方案](design/17-computer.md)，工具参数见 [契约](contracts/computer.md)。

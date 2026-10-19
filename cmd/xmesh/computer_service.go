@@ -1,16 +1,20 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/kardianos/service"
 	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/privdir"
+	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
 const computerServiceName = "xmesh-computer-host"
@@ -93,6 +97,38 @@ func computerService(action string, args []string) error {
 		return err
 	}
 	c := computerServiceConfig(exe, path, statePath)
+	if action == "setup" {
+		// Start first so an existing per-user installation is retained. Only install
+		// after the platform reports absence; other failures remain visible.
+		if err := computerService("start", args); err != nil {
+			var missing *toolerr.Error
+			if !serviceMissing(err) && !(errors.As(err, &missing) && missing.Code == "not_found" && missing.Fields["reason"] == "not_installed") {
+				return err
+			}
+			if err := computerService("install", args); err != nil {
+				return err
+			}
+			if err := computerService("start", args); err != nil {
+				return err
+			}
+		}
+		client := computer.NewClient("")
+		defer client.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var err error
+		for ctx.Err() == nil {
+			err = client.Authorize(ctx)
+			if err == nil {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		return err
+	}
 	if action == "install" {
 		if strings.Contains(filepath.ToSlash(exe), "/go-build") {
 			return fmt.Errorf("请先将 xmesh 构建到持久路径后再安装桌面服务")
@@ -120,11 +156,18 @@ func computerService(action string, args []string) error {
 		return nil
 	}
 	if runtime.GOOS == "windows" {
-		return userTaskAction(action, c)
+		err := userTaskAction(action, c)
+		if serviceMissing(err) {
+			return notInstalled(computerServiceName)
+		}
+		return err
 	}
 	s, err := service.New(&program{}, c)
 	if err != nil {
 		return err
+	}
+	if _, err := s.Status(); serviceMissing(err) {
+		return notInstalled(computerServiceName)
 	}
 	switch action {
 	case "start":

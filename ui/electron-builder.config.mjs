@@ -15,6 +15,7 @@ import { FuseV1Options } from "@electron/fuses";
 import { profiles } from "./scripts/fuses.config.mjs";
 
 const kernel = process.env.XMESH_KERNEL_BIN;
+const computer = process.env.XMESH_COMPUTER_BIN;
 if (!kernel && /electron-builder/.test(process.argv[1] ?? "")) {
   console.warn("XMESH_KERNEL_BIN is not set: the package will not bundle the xmesh kernel and falls back to PATH");
 }
@@ -35,6 +36,7 @@ export function builderFuses(profile) {
 }
 
 const bundledKernel = (to) => (kernel ? [{ from: kernel, to }] : []);
+const bundledComputer = (to) => computer ? [{ from: computer, to }] : [];
 
 export default {
   appId: "app.xmesh.ui",
@@ -57,7 +59,7 @@ export default {
 
   win: {
     target: [{ target: "nsis" }],
-    extraResources: bundledKernel("bin/xmesh.exe"),
+    extraResources: [...bundledKernel("bin/xmesh.exe"), ...bundledComputer("bin/xmesh-computer.exe")],
   },
   nsis: {
     // build/installer.nsh replaces the image-name kill of running xmesh.exe with a check limited to this install's folder.
@@ -79,7 +81,7 @@ export default {
     // identity: null keeps electron-builder from picking a keychain identity or failing on a runner without one.
     ...(macSigning ? {} : { identity: null }),
     notarize: macNotarize,
-    extraResources: bundledKernel("bin/xmesh"),
+    extraResources: [...bundledKernel("bin/xmesh"), ...bundledComputer("bin/xmesh-computer.app")],
   },
   dmg: { sign: false },
 };

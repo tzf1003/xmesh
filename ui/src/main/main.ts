@@ -242,7 +242,7 @@ async function start(): Promise<void> {
       await runBrowserLogin(config, state, controlUrl, (url) => platform.openExternal(url));
     },
   );
-  const panelService = new PanelService(controller);
+  const panelService = new PanelService(controller, TEST_MODE ? async () => { calls.push({ op: "computer-setup" }); } : undefined);
   registerIpc({
     controller,
     actions,
