@@ -182,11 +182,29 @@ pub fn locked() -> bool {
     if let Ok((conn, n)) = x11rb::connect(None) {
         if let Ok(cookie) = conn.screensaver_query_info(conn.setup().roots[n].root) {
             if let Ok(reply) = cookie.reply() {
-                return reply.state != u8::from(State::OFF);
+                return screensaver_locked(reply.state);
             }
         }
     }
     true
+}
+
+fn screensaver_locked(state: u8) -> bool {
+    state != u8::from(State::OFF) && state != u8::from(State::DISABLED)
+}
+
+#[cfg(test)]
+mod screensaver_tests {
+    use super::*;
+
+    #[test]
+    fn disabled_screensaver_keeps_the_x11_desktop_usable() {
+        assert!(!screensaver_locked(u8::from(State::OFF)));
+        assert!(!screensaver_locked(u8::from(State::DISABLED)));
+        assert!(screensaver_locked(u8::from(State::ON)));
+        assert!(screensaver_locked(u8::from(State::CYCLE)));
+        assert!(screensaver_locked(u8::MAX));
+    }
 }
 
 pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {

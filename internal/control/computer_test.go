@@ -2,12 +2,46 @@ package control
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/computer"
 )
+
+func TestComputerEndpointStatusUsesStartupAuthority(t *testing.T) {
+	for _, endpoint := range []string{"", "/tmp/custom-computer.sock"} {
+		t.Run(endpoint, func(t *testing.T) {
+			text := testConfig
+			if endpoint != "" {
+				text = strings.Replace(text, "agent:\n", "agent:\n  computer:\n    endpoint: "+endpoint+"\n", 1)
+			}
+			f := newFixtureConfig(t, text, quietPoll)
+			var status v2.StatusResponse
+			if err := json.Unmarshal(f.ok("GET", "/v2/status", nil, "StatusResponse").Body, &status); err != nil {
+				t.Fatal(err)
+			}
+			want := endpoint
+			if want == "" {
+				want = computer.DefaultEndpoint()
+			}
+			if status.Paths.ComputerEndpoint != want {
+				t.Fatal(status.Paths.ComputerEndpoint, want)
+			}
+			changed := strings.Replace(text, "name: ctl-node", "name: renamed-node", 1)
+			if err := os.WriteFile(f.path, []byte(changed), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// Status must not adopt configuration as a side effect of reporting the endpoint.
+			f.server.snapshot()
+			if !f.reload().Applied {
+				t.Fatal("status consumed the pending reload")
+			}
+		})
+	}
+}
 
 type controlDesktop struct{}
 

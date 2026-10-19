@@ -19,6 +19,7 @@ func (s *Server) snapshot() v2.StatusResponse {
 	st.StartedAt, st.PID = s.started, os.Getpid()
 	st.Drain = s.currentDrain()
 	st.Paths = v2.Paths{ConfigFile: s.o.Store.Path(), StateDir: s.o.StateDir}
+	st.Paths.ComputerEndpoint = s.computerEndpoint
 	if s.o.AuditDir != "" {
 		st.Paths.AuditDir = ptr(s.o.AuditDir)
 	}

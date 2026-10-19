@@ -114,8 +114,9 @@ type Server struct {
 	drainMu sync.Mutex
 	drain   v2.DrainState
 
-	peerMu sync.Mutex
-	peers  []v2.Peer
+	peerMu           sync.Mutex
+	peers            []v2.Peer
+	computerEndpoint string
 }
 
 // Start opens the channel, writes control.json and begins serving. A node
@@ -130,6 +131,10 @@ func Start(o Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{o: o, bound: bound, bus: NewBus(), started: v2.Now(), stop: make(chan struct{})}
+	s.computerEndpoint = o.Store.Get().Agent.Computer.Endpoint
+	if s.computerEndpoint == "" {
+		s.computerEndpoint = computer.DefaultEndpoint()
+	}
 	s.lifecycle.Store("starting")
 	s.caps = capabilities(o)
 	s.routes = compileRoutes(v2.Routes())

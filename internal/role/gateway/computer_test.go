@@ -17,7 +17,12 @@ import (
 func TestDesktopImagesAndParameterScopesThroughIngress(t *testing.T) {
 	s := newScripted()
 	var opened atomic.Int32
+	var backendCalls atomic.Int32
 	pixel := []byte{137, 80, 78, 71, 13, 10, 26, 10}
+	s.tool("computer.erase", map[string]any{"type": "object"}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		backendCalls.Add(1)
+		return agent.Result(map[string]any{"erased": true}, nil), nil
+	})
 	s.tool("computer.open", map[string]any{"type": "object"}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		opened.Add(1)
 		return agent.Result(map[string]any{"session_id": "cs"}, nil), nil
@@ -41,6 +46,13 @@ func TestDesktopImagesAndParameterScopesThroughIngress(t *testing.T) {
 	t.Cleanup(ts.Close)
 	c := connect(t, ts.URL+"/mcp")
 	waitFor(t, "computer discovery", 3e9, func() bool { return hasTool(t, c, "desktop/computer.open") })
+	if hasTool(t, c, "desktop/computer.erase") {
+		t.Fatal("observation scope exposed backend tool")
+	}
+	denied := call(t, c, "desktop/computer.erase", map[string]any{})
+	if !denied.IsError || backendCalls.Load() != 0 {
+		t.Fatal("observation token dispatched a backend side effect", denied, backendCalls.Load())
+	}
 	r := call(t, c, "desktop/computer.open", map[string]any{"mode": "control"})
 	if !r.IsError || object(t, r)["error"] != "unauthorized" || opened.Load() != 0 {
 		t.Fatal(r, opened.Load())

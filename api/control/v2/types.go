@@ -128,10 +128,11 @@ type Limits struct {
 }
 
 type Paths struct {
-	ConfigFile string  `json:"config_file"`
-	StateDir   string  `json:"state_dir"`
-	LogDir     *string `json:"log_dir"`
-	AuditDir   *string `json:"audit_dir"`
+	ConfigFile       string  `json:"config_file"`
+	StateDir         string  `json:"state_dir"`
+	LogDir           *string `json:"log_dir"`
+	AuditDir         *string `json:"audit_dir"`
+	ComputerEndpoint string  `json:"computer_endpoint,omitempty"`
 }
 
 // GatewayInfo is the gateway block of StatusResponse (CTR-CTL-03, CTR-GW-07).
