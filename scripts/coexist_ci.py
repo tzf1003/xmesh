@@ -408,6 +408,12 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         )
         assert remote(a)["active_path"] == "tailnet", remote(a)
         print("Tailnet retained after LAN recovery", flush=True)
+        # A revoked Tailnet path may take the full recovery budget to time out.
+        # Keep the lease valid for that interval after the short-TTL heartbeat check.
+        extended = call("backend.acquire", {"name": "exclusive", "ttl": "60s"})
+        assert (
+            extended["token"] == lease["token"] and extended["owner"] == lease["owner"]
+        ), extended
         members = hscli("nodes", "list")
         target = next(
             (
