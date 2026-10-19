@@ -153,7 +153,10 @@ export class Controller {
     );
     this.guardian = fork(
       fileURLToPath(new URL("./guardian.js", import.meta.url)),
-      [path.join(config.state_dir, "instances", this.instance_id)],
+      [
+        path.join(config.state_dir, "instances", this.instance_id),
+        String(process.pid),
+      ],
       {
         execArgv: [],
         stdio: ["ignore", "ignore", "ignore", "ipc"],
@@ -619,11 +622,6 @@ export class Controller {
       event,
       Object.values(run.session.account?.secrets ?? {}),
     );
-    if (run.result.events.length >= 1000) {
-      run.result.evidence_incomplete = true;
-      return;
-    }
-    run.result.events.push(safe);
     if (safe.kind === "step") {
       let step = run.result.steps.find((s) => s.id === safe.id);
       if (!step) {
@@ -633,6 +631,16 @@ export class Controller {
       step.status = safe.status as typeof step.status;
       step.duration_ms = safe.duration_ms as number | undefined;
     }
+    if (run.result.events.length >= 1000) {
+      run.result.evidence_incomplete = true;
+      if (safe.kind === "step")
+        try {
+          run.evidence.event(safe);
+          run.evidence.save(run.result);
+        } catch {}
+      return;
+    }
+    run.result.events.push(safe);
     if (safe.kind === "evidence_incomplete")
       run.result.evidence_incomplete = true;
     try {
@@ -828,6 +836,30 @@ export class Controller {
       ),
       { closed_at: new Date().toISOString() },
     );
-    if (this.guardian.connected) this.guardian.disconnect();
+    if (this.guardian.exitCode === null && this.guardian.signalCode === null) {
+      const exited = new Promise<void>((resolve) =>
+        this.guardian.once("exit", () => resolve()),
+      );
+      if (this.guardian.connected) this.guardian.disconnect();
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          exited,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              this.guardian.kill();
+              reject(
+                new UIError(
+                  "cleanup_pending",
+                  "guardian shutdown was not confirmed",
+                ),
+              );
+            }, 10000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
   }
 }

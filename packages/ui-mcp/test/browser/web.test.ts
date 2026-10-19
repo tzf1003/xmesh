@@ -132,14 +132,17 @@ test("Web batches, prevalidation, deduplication, evidence and session isolation"
         protocol_version: 1,
         session_id: id,
         request_id: "script",
-        code: 'export default async ({page,step,expect})=>{await step("title",async()=>{await expect(page.getByLabel("Username")).toHaveValue("alice")})}',
+        code: 'export default async ({page,step,expect})=>{await page.evaluate(()=>{for(let i=0;i<1200;i++)console.log("log burst")});await step("title",async()=>{await expect(page.getByLabel("Username")).toHaveValue("alice")})}',
       } as ScriptRequest,
       true,
     );
+    const scriptResult = await finished(controller, scripted.run_id, 30000);
+    assert.equal(scriptResult.status, "passed");
     assert.equal(
-      (await finished(controller, scripted.run_id)).status,
+      scriptResult.steps.find((step) => step.id === "title")?.status,
       "passed",
     );
+    assert.equal(scriptResult.evidence_incomplete, true);
   } finally {
     await controller.close();
     await web.close();

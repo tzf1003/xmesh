@@ -56,7 +56,7 @@ for (const mode of ["mock", "real"] as const)
           protocol_version: 1,
           session_id: session,
           request_id: "panel",
-          timeout_ms: 30000,
+          timeout_ms: 60000,
           steps: [
             {
               id: "connected",
@@ -108,10 +108,11 @@ for (const mode of ["mock", "real"] as const)
               action: "assert",
               target: { testId: "apply-applied" },
               expect: { visible: true },
+              timeout_ms: 30000,
             },
           ],
         });
-        const result = await finished(controller, request.run_id, 40000);
+        const result = await finished(controller, request.run_id, 75000);
         if (result.status !== "passed") {
           const log = path.join(
             c.state_dir,

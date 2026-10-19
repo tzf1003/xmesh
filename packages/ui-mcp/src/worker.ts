@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect } from "@playwright/test";
 import { Driver } from "./driver.js";
-import { failure } from "./errors.js";
+import { failure, UIError } from "./errors.js";
 import type { WorkerInit, Step } from "./types.js";
 
 let driver: Driver | undefined;
@@ -17,7 +17,24 @@ const emit = (event: Record<string, unknown>) => {
     send({ type: "process", ...event });
     return;
   }
-  if (!activeRun || eventCount++ >= 1000) return;
+  if (!activeRun) return;
+  if (
+    event.kind !== "step" &&
+    event.kind !== "evidence_incomplete" &&
+    eventCount++ >= 800
+  ) {
+    if (eventCount === 801)
+      send({
+        type: "event",
+        run_id: activeRun,
+        event: {
+          kind: "evidence_incomplete",
+          reason: "log_limit",
+          time: new Date().toISOString(),
+        },
+      });
+    return;
+  }
   send({
     type: "event",
     run_id: activeRun,
@@ -77,7 +94,13 @@ process.on("message", async (raw: unknown) => {
           });
           tracing = true;
         }
+        let phaseCount = 0;
         const step = async (id: string, action: () => Promise<unknown>) => {
+          if (++phaseCount > driver!.init.config.limits.max_steps)
+            throw new UIError(
+              "step_limit",
+              "script phase count exceeds configured step limit",
+            );
           const started = Date.now();
           emit({ kind: "step", id, status: "started" });
           try {

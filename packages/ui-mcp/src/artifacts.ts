@@ -8,7 +8,24 @@ import { requireValue } from "./errors.js";
 export function atomicJSON(file: string, value: unknown): void {
   const tmp = `${file}.${randomUUID()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      break;
+    } catch (error) {
+      if (
+        process.platform !== "win32" ||
+        !["EPERM", "EACCES", "EBUSY"].includes(
+          (error as NodeJS.ErrnoException).code ?? "",
+        ) ||
+        attempt >= 20
+      ) {
+        fs.rmSync(tmp, { force: true });
+        throw error;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
 }
 export function redact<T>(value: T, secrets: string[]): T {
   let text = JSON.stringify(value);
