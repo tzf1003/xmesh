@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ type Options struct {
 	StateDir   string
 	HelperPath string
 	Authorize  bool
+	Version    string
 	Factory    func() (computer.Provider, error)
 }
 
@@ -163,6 +165,16 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	method := strings.TrimPrefix(r.URL.Path, "/v1/")
+	if method == "status" {
+		state := computer.HostStatus{Running: true, PID: os.Getpid(), Version: b.options.Version}
+		b.mu.Lock()
+		if process, ok := b.provider.(interface{ PID() int }); ok {
+			state.NativePID = process.PID()
+		}
+		b.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(state)
+		return
+	}
 	if method == "authorize" {
 		b.mu.Lock()
 		if b.closed {

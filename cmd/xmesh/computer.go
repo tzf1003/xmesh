@@ -22,7 +22,7 @@ func computerCommand(args []string) error {
 		}
 	}
 	if len(args) == 0 || args[0] == "help" {
-		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup|install|start|stop|restart|uninstall [--json]\n      xmesh computer info|authorize [--endpoint 本机套接字或管道]")
+		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup|install|start|stop|restart|uninstall [--json]\n      xmesh computer status|info|authorize [--endpoint 本机套接字或管道]")
 		return nil
 	}
 	f := flag.NewFlagSet("computer "+args[0], flag.ContinueOnError)
@@ -36,6 +36,9 @@ func computerCommand(args []string) error {
 	if f.NArg() != 0 {
 		return fmt.Errorf("computer: unexpected arguments")
 	}
+	if *endpoint == "" {
+		*endpoint = computer.EndpointForState(*state)
+	}
 	switch args[0] {
 	case "host":
 		path := *helper
@@ -46,7 +49,7 @@ func computerCommand(args []string) error {
 			}
 			path = nativeHelperPath(exe)
 		}
-		b, err := desktopbroker.Start(desktopbroker.Options{StateDir: *state, HelperPath: path, Authorize: *authorize})
+		b, err := desktopbroker.Start(desktopbroker.Options{StateDir: *state, HelperPath: path, Authorize: *authorize, Version: buildVersion})
 		if err != nil {
 			return err
 		}
@@ -58,6 +61,16 @@ func computerCommand(args []string) error {
 		defer cancel()
 		<-ctx.Done()
 		return nil
+	case "status":
+		c := computer.NewClient(*endpoint)
+		defer c.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		v, err := c.HostStatus(ctx)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(v)
 	case "info":
 		c := computer.NewClient(*endpoint)
 		defer c.Close()

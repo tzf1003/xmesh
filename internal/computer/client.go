@@ -5,13 +5,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/toolerr"
@@ -48,6 +51,15 @@ func DefaultStateDir() string {
 }
 
 func (c *Client) call(ctx context.Context, method string, in, out any) error {
+	err := c.request(ctx, method, in, out)
+	var network *url.Error
+	if errors.As(err, &network) {
+		return toolerr.New("desktop_unavailable", "用户桌面执行器未连接", "reason", "executor_disconnected")
+	}
+	return err
+}
+
+func (c *Client) request(ctx context.Context, method string, in, out any) error {
 	raw, err := json.Marshal(in)
 	if err != nil {
 		return err
@@ -60,7 +72,7 @@ func (c *Client) call(ctx context.Context, method string, in, out any) error {
 	req.Header.Set("X-Xmesh-Computer-Owner", c.owner)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return toolerr.New("desktop_unavailable", "用户桌面执行器未连接", "reason", "executor_disconnected")
+		return err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
@@ -85,6 +97,24 @@ func (c *Client) call(ctx context.Context, method string, in, out any) error {
 		return fmt.Errorf("desktop response: %w", err)
 	}
 	return nil
+}
+
+// HostStatus is a local lifecycle probe. It does not bind the desktop, start a
+// native process or acquire the kernel's heartbeat ownership.
+type HostStatus struct {
+	Running   bool   `json:"running"`
+	PID       int    `json:"pid"`
+	Version   string `json:"version"`
+	NativePID int    `json:"native_pid"`
+}
+
+func (c *Client) HostStatus(ctx context.Context) (HostStatus, error) {
+	var status HostStatus
+	err := c.request(ctx, "status", nil, &status)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+		return HostStatus{}, nil
+	}
+	return status, err
 }
 
 func (c *Client) Info(ctx context.Context) (Info, error) {

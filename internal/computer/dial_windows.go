@@ -16,6 +16,7 @@ func DefaultEndpoint() string {
 	}
 	return `\\.\pipe\xmesh-` + u.User.Sid.String() + `-computer`
 }
+func EndpointForState(string) string { return DefaultEndpoint() }
 func dialDesktop(ctx context.Context, endpoint string) (net.Conn, error) {
 	if !strings.HasPrefix(endpoint, `\\.\pipe\xmesh-`) || !strings.HasSuffix(endpoint, "-computer") {
 		return nil, fmt.Errorf("desktop endpoint must be a local computer pipe")

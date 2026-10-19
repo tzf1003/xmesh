@@ -97,6 +97,36 @@ func computerService(action string, args []string) error {
 		return err
 	}
 	c := computerServiceConfig(exe, path, statePath)
+	if action == "restart" {
+		client := computer.NewClient(computer.EndpointForState(statePath))
+		defer client.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		current, err := client.HostStatus(ctx)
+		if err != nil {
+			return err
+		}
+		if !current.Running {
+			return computerService("start", args)
+		}
+		if err := computerService("stop", args); err != nil {
+			return err
+		}
+		for {
+			status, err := client.HostStatus(ctx)
+			if err != nil {
+				return err
+			}
+			if !status.Running {
+				return computerService("start", args)
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("旧桌面服务尚未退出: %w", ctx.Err())
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
 	if action == "setup" {
 		// Start first so an existing per-user installation is retained. Only install
 		// after the platform reports absence; other failures remain visible.
@@ -112,7 +142,7 @@ func computerService(action string, args []string) error {
 				return err
 			}
 		}
-		client := computer.NewClient("")
+		client := computer.NewClient(computer.EndpointForState(statePath))
 		defer client.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -156,6 +186,21 @@ func computerService(action string, args []string) error {
 		return nil
 	}
 	if runtime.GOOS == "windows" {
+		if action == "uninstall" {
+			client := computer.NewClient(computer.EndpointForState(statePath))
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			status, err := client.HostStatus(ctx)
+			cancel()
+			_ = client.Close()
+			if err != nil {
+				return err
+			}
+			if status.Running {
+				if err := userTaskAction("stop", c); err != nil {
+					return err
+				}
+			}
+		}
 		err := userTaskAction(action, c)
 		if serviceMissing(err) {
 			return notInstalled(computerServiceName)

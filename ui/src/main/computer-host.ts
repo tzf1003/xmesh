@@ -1,5 +1,72 @@
 import { execFile } from "node:child_process";
 import { xmeshBinary } from "./cli";
+import { kernelGone } from "./discovery";
+import { sameVersion } from "../shared/version";
+import type { StopResult } from "./update/updater";
+
+export interface ComputerHostStatus { running: boolean; pid: number; version: string; native_pid?: number }
+export type ComputerHostCommand = "status" | "start" | "stop";
+
+/** Lifecycle commands use a fixed program and argument list, never renderer data. */
+export function runComputerHost(command: ComputerHostCommand, binary: string = xmeshBinary()): Promise<ComputerHostStatus | void> {
+  return new Promise((resolve, reject) => {
+    execFile(binary, ["computer", command, ...(command === "status" ? [] : ["--json"])], { timeout: 30000, windowsHide: true, maxBuffer: 64 * 1024 }, (error, stdout, stderr) => {
+      try {
+        const result = JSON.parse(stdout) as Partial<ComputerHostStatus> & { ok?: boolean; error?: { message?: string } };
+        if (error) throw new Error(result.error?.message || stderr.trim() || "桌面服务操作失败");
+        if (command === "status") {
+          if (typeof result.running !== "boolean" || !Number.isSafeInteger(result.pid) || typeof result.version !== "string" || (result.running && result.pid! <= 0) || (result.native_pid !== undefined && (!Number.isSafeInteger(result.native_pid) || result.native_pid < 0))) throw new Error("桌面服务状态无效");
+          resolve(result as ComputerHostStatus);
+        } else if (result.ok === true) resolve();
+        else throw new Error(result.error?.message ?? "桌面服务操作失败");
+      } catch (e) { reject(e); }
+    });
+  });
+}
+
+interface HostServicesEnv {
+  run(command: ComputerHostCommand): Promise<ComputerHostStatus | void>;
+  version: string;
+  gone?: (pid: number) => boolean;
+  timeoutMs?: number;
+  pollMs?: number;
+}
+
+export function computerHostServices(env: HostServicesEnv): { stop(): Promise<StopResult>; start(): Promise<void> } {
+  const timeout = env.timeoutMs ?? 30000;
+  const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, env.pollMs ?? 100));
+  const status = async (): Promise<ComputerHostStatus> => {
+    const value = await env.run("status");
+    if (!value) throw new Error("桌面服务状态无效");
+    return value;
+  };
+  return {
+    async stop() {
+      const current = await status();
+      if (!current.running) return "absent";
+      await env.run("stop");
+      const deadline = Date.now() + timeout;
+      do {
+        const gone = env.gone ?? kernelGone;
+        if (gone(current.pid) && (!current.native_pid || gone(current.native_pid)) && !(await status()).running) return "stopped";
+        await pause();
+      } while (Date.now() < deadline);
+      throw new Error("旧桌面服务仍在运行，更新尚未开始");
+    },
+    async start() {
+      await env.run("start");
+      const deadline = Date.now() + timeout;
+      do {
+        try {
+          const current = await status();
+          if (current.running && sameVersion(current.version, env.version)) return;
+        } catch { /* The service may still be opening its protected endpoint. */ }
+        await pause();
+      } while (Date.now() < deadline);
+      throw new Error("桌面服务启动验收失败：运行版本或本机通道未就绪");
+    },
+  };
+}
 
 /** The renderer can request setup but cannot choose the program, arguments or OS endpoint. */
 export function setupComputerHost(binary: string = xmeshBinary()): Promise<void> {

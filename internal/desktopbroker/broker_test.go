@@ -92,3 +92,29 @@ func TestNativeCrashChangesEpochAndPreservesKernelBinding(t *testing.T) {
 		t.Fatal("unexpected native process restarts", starts.Load())
 	}
 }
+
+func TestHostLifecycleProbeDoesNotAcquireDesktop(t *testing.T) {
+	var starts atomic.Int32
+	b, err := Start(Options{StateDir: t.TempDir(), Version: "test-version", Factory: func() (computer.Provider, error) {
+		starts.Add(1)
+		return &desktop{epoch: "current"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	probe := computer.NewClient(b.Endpoint)
+	status, err := probe.HostStatus(context.Background())
+	if err != nil || !status.Running || status.PID <= 0 || status.Version != "test-version" {
+		t.Fatal(status, err)
+	}
+	_ = probe.Close()
+	if starts.Load() != 0 {
+		t.Fatal("status started a native executor")
+	}
+	owner := computer.NewClient(b.Endpoint)
+	defer owner.Close()
+	if _, err := owner.Info(context.Background()); err != nil {
+		t.Fatal("probe retained desktop authority", err)
+	}
+}

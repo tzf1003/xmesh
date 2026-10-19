@@ -10,7 +10,8 @@ import (
 	"path/filepath"
 )
 
-func DefaultEndpoint() string { return filepath.Join(DefaultStateDir(), "control.sock") }
+func DefaultEndpoint() string              { return EndpointForState(DefaultStateDir()) }
+func EndpointForState(state string) string { return filepath.Join(state, "control.sock") }
 func dialDesktop(ctx context.Context, endpoint string) (net.Conn, error) {
 	if !filepath.IsAbs(endpoint) {
 		return nil, fmt.Errorf("desktop endpoint must be absolute")

@@ -411,6 +411,51 @@ test("without an update in flight, starting only cleans up", async () => {
   assert.deepEqual(r.events, []);
 });
 
+test("an update stops the desktop host and restores it before starting kernels", async () => {
+  const order: string[] = [];
+  const r = rig({
+    stopComputer: async () => { order.push("computer-stop"); return "stopped"; },
+    stopNode: async (node) => { order.push(`stop ${node}`); return "stopped"; },
+  });
+  await r.updater.check(true);
+  assert.deepEqual(await r.updater.install(), { ok: true });
+  assert.deepEqual(order, ["computer-stop", "stop node-a", "stop node-b"]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(r.data, "pending.json"), "utf8")).computer, true);
+  order.length = 0;
+  const after = rig({ version: "0.1.0-beta.3", dataDir: r.data,
+    startComputer: async () => { order.push("computer-start"); },
+    startNode: async (node) => { order.push(`start ${node}`); },
+  });
+  await after.updater.finishPending();
+  assert.deepEqual(order, ["computer-start", "start node-a", "start node-b"]);
+  assert.equal(after.updater.state.outcome?.ok, true);
+});
+
+test("a failed installer handover restores the stopped desktop host", async () => {
+  let starts = 0;
+  const r = rig({ stopComputer: async () => "stopped", startComputer: async () => { starts++; } });
+  r.applier.fail = new Error("installer unavailable");
+  await r.updater.check(true);
+  assert.equal((await r.updater.install()).ok, false);
+  assert.equal(starts, 1);
+});
+
+test("desktop stop failures block replacement and restore failures fail update acceptance", async () => {
+  const blocked = rig({ stopComputer: async () => { throw new Error("desktop survives"); } });
+  await blocked.updater.check(true);
+  const result = await blocked.updater.install();
+  assert.equal(!result.ok && result.error.code, "stop_failed");
+  assert.deepEqual(blocked.events, []);
+  assert.equal(blocked.handovers.length, 0);
+  const r = rig({ stopComputer: async () => "stopped" });
+  await r.updater.check(true);
+  await r.updater.install();
+  const after = rig({ version: "0.1.0-beta.3", dataDir: r.data, startComputer: async () => { throw new Error("desktop unavailable"); } });
+  await after.updater.finishPending();
+  assert.equal(after.updater.state.outcome?.ok, false);
+  assert.deepEqual(after.updater.state.outcome?.unstarted, ["computer-host"]);
+});
+
 test("the store keeps preferences and the announced tag, and reads a damaged file as the defaults", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-update-store-"));
   const file = path.join(dir, "update.json");

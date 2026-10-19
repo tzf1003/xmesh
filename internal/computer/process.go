@@ -209,6 +209,8 @@ func (p *Process) Exited() bool {
 	}
 }
 
+func (p *Process) PID() int { return p.cmd.Process.Pid }
+
 func (p *Process) Close() error {
 	p.closeOnce.Do(func() {
 		_ = p.input.Close()

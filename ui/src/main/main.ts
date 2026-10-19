@@ -29,6 +29,7 @@ import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
+import { computerHostServices, runComputerHost } from "./computer-host";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -123,6 +124,7 @@ async function start(): Promise<void> {
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
   const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw, ...(kernelBundled && { version: app.getVersion() }) });
+  const updateComputer = computerHostServices({ run: (command) => runComputerHost(command), version: app.getVersion() });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
     packaged: app.isPackaged || TEST_MODE,
@@ -158,6 +160,7 @@ async function start(): Promise<void> {
       await updateKernels.start(node);
     },
     refreshNode: (node) => updateKernels.refresh(node),
+    ...(!TEST_MODE && kernelBundled && { stopComputer: () => updateComputer.stop(), startComputer: () => updateComputer.start() }),
     quit: () => (TEST_MODE ? void calls.push({ op: "quit" }) : app.quit()),
     openPath: (p) => shell.openPath(p),
     notify: updateNotice,
