@@ -2,7 +2,9 @@ name: Computer native executor
 on:
   push:
     branches: [master, 'codex/**']
-    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', 'scripts/test_computer_background.py', 'ui/src/main/computer-host.ts', 'ui/src/main/update/**', 'ui/scripts/accept-computer-upgrade-macos.mjs', '.github/workflows/computer.yml']
+    # The release gate requires native evidence at the exact tag commit,
+    # including commits whose changes are outside the native executor.
+    tags: ['v*.*.*']
   pull_request:
     paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', 'scripts/test_computer_background.py', 'ui/src/main/computer-host.ts', 'ui/src/main/update/**', 'ui/scripts/accept-computer-upgrade-macos.mjs', '.github/workflows/computer.yml']
 permissions:

@@ -63,7 +63,7 @@ async fn run_portal(
     path: PathBuf,
     mut restore: Option<String>,
     ready: mpsc::SyncSender<Result<Arc<Shared>, &'static str>>,
-) {
+) -> bool {
     let result = async {
         let remote = RemoteDesktop::new().await.map_err(|_| "portal_unavailable")?;
         let screencast = Screencast::new().await.map_err(|_| "portal_unavailable")?;
@@ -132,7 +132,7 @@ async fn run_portal(
             Ok(closed)=>closed,
             Err(_)=>{let _=session.close().await;return Err("portal_session_closed");}
         };
-        if ready.send(Ok(Arc::clone(&shared))).is_err() { let _=session.close().await; return Ok(()); }
+        if ready.send(Ok(Arc::clone(&shared))).is_err() { let _=session.close().await; return Ok(false); }
         let mut keys = HashSet::new();
         let mut buttons = HashSet::new();
         loop {
@@ -193,10 +193,18 @@ async fn run_portal(
         }
         drop(eis);
         let _=session.close().await;
-        Ok(())
+        // Recreate the entire executor through the local supervisor. A new
+        // process supplies a new desktop epoch, fencing every old lease/frame.
+        // Only an established session takes this path; failed restoration waits
+        // for explicit local authorization instead of restarting repeatedly.
+        Ok(true)
     }.await;
-    if let Err(error) = result {
-        let _ = ready.send(Err(error));
+    match result {
+        Ok(restart) => restart,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            false
+        }
     }
 }
 
@@ -352,7 +360,12 @@ impl PortalInput {
                 let _ = tx.send(Err("portal_runtime"));
                 return;
             };
-            runtime.block_on(run_portal(authorize, path, restore, tx));
+            if runtime.block_on(run_portal(authorize, path, restore, tx)) {
+                // Held input and the Portal session have finished cleanup.
+                // The broker replaces this child on its next request while
+                // preserving the kernel's exclusive desktop binding.
+                std::process::exit(4);
+            }
         });
         let shared = rx
             .recv_timeout(if authorize {
