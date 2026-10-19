@@ -126,6 +126,9 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 					if tool.InputSchema != nil {
 						row["inputSchema"] = tool.InputSchema
 					}
+					if tool.Annotations != nil {
+						row["annotations"] = tool.Annotations
+					}
 					rows = append(rows, row)
 					if len(rows) > 100 {
 						rows = rows[:100]

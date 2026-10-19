@@ -1,0 +1,136 @@
+import { Client, StreamableHTTPClientTransport, McpError, ToolListChangedNotificationSchema } from "./mcp-sdk";
+import type { ShellController } from "./controller";
+import { GatewayCredentials } from "./gateway-token";
+import type { DataResult } from "../shared/ipc";
+import type { CallOutcome, PlaygroundRequest, PlaygroundResult, ToolDescriptor, ToolResult } from "../shared/playground";
+
+type Controller = Pick<ShellController, "snapshot" | "requireCapable">;
+
+/** Only a loopback URL reported by the selected kernel may receive its credential. */
+export function localGatewayUrl(raw: string): URL {
+  const u = new URL(raw);
+  if (u.protocol !== "http:" || !["127.0.0.1", "[::1]", "localhost"].includes(u.hostname) || u.pathname !== "/mcp" || u.username || u.password || u.search || u.hash) throw new Error("Local Gateway address is unavailable");
+  return u;
+}
+
+export class PlaygroundService {
+  private connection?: { key: string; client: Client; transport: StreamableHTTPClientTransport };
+  private connecting?: Promise<Client>;
+  private epoch = 0;
+  private revision = 0;
+  private readonly running = new Map<string, AbortController>();
+  private readonly progress: Record<string, { progress: number; total?: number; message?: string }> = Object.create(null) as Record<string, { progress: number; total?: number; message?: string }>;
+  constructor(private readonly controller: Controller, private readonly desktop?: { copy(text: string): void; save(text: string): Promise<boolean> }) {}
+
+  async close(): Promise<void> {
+    this.epoch++;
+    for (const c of this.running.values()) c.abort();
+    this.running.clear();
+    for (const k of Object.keys(this.progress)) delete this.progress[k];
+    const old = this.connection;
+    this.connection = undefined;
+    if (old) {
+      await old.transport.terminateSession().catch(() => undefined);
+      await old.client.close().catch(() => undefined);
+    }
+  }
+
+  private check(instance: string): void {
+    const s = this.controller.snapshot;
+    if (s.selectedInstance !== instance || s.connection.kind !== "connected") throw new Error("Selected node is no longer connected");
+    if (!s.connection.status.roles.includes("gateway")) throw new Error("Enable the Gateway role to use the playground");
+  }
+
+  private async client(instance: string): Promise<Client> {
+    this.check(instance);
+    if (this.connecting) { await this.connecting; this.check(instance); }
+    const c = this.controller.snapshot.connection;
+    if (c.kind !== "connected") throw new Error("Gateway is unavailable");
+    const raw = c.status.gateway?.addresses?.find((a) => a.kind === "localhost")?.url ?? c.status.gateway?.url;
+    if (!raw) throw new Error("Local Gateway address is unavailable");
+    const url = localGatewayUrl(raw);
+    const epoch = this.epoch;
+    const token = await new GatewayCredentials(this.controller).read();
+    this.check(instance);
+    if (epoch !== this.epoch) throw new Error("Gateway connection changed");
+    const key = JSON.stringify([instance, c.status.control.boot_id, url.href, token]);
+    if (this.connection?.key === key) return this.connection.client;
+    if (this.connecting) { await this.connecting; return this.client(instance); }
+    this.connecting = (async () => {
+      await this.close();
+      const generation = this.epoch;
+      const client = new Client({ name: "xmesh-panel", version: "1.0.0" }, { capabilities: {} });
+      const transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}`, "X-Xmesh-Origin": "panel" }, redirect: "error" } });
+      client.setNotificationHandler(ToolListChangedNotificationSchema, () => { this.revision++; });
+      try {
+        await client.connect(transport, { timeout: 10_000 });
+        this.check(instance);
+        if (generation !== this.epoch) throw new Error("Gateway connection changed");
+      } catch (e) { await client.close().catch(() => undefined); throw e; }
+      client.onclose = () => { if (this.connection?.client === client) this.connection = undefined; };
+      this.connection = { key, client, transport };
+      this.revision++;
+      return client;
+    })();
+    try { return await this.connecting; } finally { this.connecting = undefined; }
+  }
+
+  async call(instance: string, id: string, name: string, args: Record<string, unknown>, timeoutMs: number): Promise<CallOutcome> {
+    const client = await this.client(instance);
+    if (this.running.has(id) || this.running.size >= 8) throw new Error("Too many calls or duplicate call id");
+    const abort = new AbortController();
+    this.running.set(id, abort);
+    const started = Date.now();
+    try {
+      const result = await client.callTool({ name, arguments: args }, undefined, {
+        signal: abort.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs,
+        onprogress: (p) => { this.progress[id] = { progress: p.progress, total: p.total, message: p.message }; },
+      });
+      return { result: result as ToolResult, durationMs: Date.now() - started };
+    } finally { this.running.delete(id); delete this.progress[id]; }
+  }
+
+  async request<R extends PlaygroundRequest>(req: R): Promise<DataResult<PlaygroundResult<R>>> {
+    try {
+      this.check(req.instance);
+      let data: unknown;
+      switch (req.op) {
+        case "copy": if (!this.desktop) throw new Error("Clipboard unavailable"); this.desktop.copy(req.text); data = { done: true }; break;
+        case "save": if (!this.desktop) throw new Error("Save dialog unavailable"); data = { done: await this.desktop.save(req.text) }; break;
+        case "cancel": {
+          const pending = this.running.get(req.id);
+          pending?.abort();
+          data = { cancelled: pending !== undefined };
+          break;
+        }
+        case "status": data = { revision: this.revision, progress: { ...this.progress } }; break;
+        case "call": data = await this.call(req.instance, req.id, req.name, req.arguments, req.timeoutMs); break;
+        case "list": {
+          const client = await this.client(req.instance);
+          if (req.device === "gateway") {
+            const tools: ToolDescriptor[] = [];
+            let cursor: string | undefined;
+            do {
+              const page = await client.listTools({ cursor });
+              tools.push(...page.tools.filter((t) => !t.name.includes("/")) as ToolDescriptor[]);
+              cursor = page.nextCursor;
+            } while (cursor);
+            data = { tools, truncated: false, revision: this.revision };
+          } else {
+            const out = await client.callTool({ name: "tools.search", arguments: { device: req.device, pattern: req.pattern ?? "*" } }) as ToolResult;
+            const raw: Record<string, unknown> = out.structuredContent ?? JSON.parse(out.content.filter((c) => c.type === "text").map((c) => c.text).join("")) as Record<string, unknown>;
+            if (out.isError) throw new Error(JSON.stringify(raw));
+            data = { tools: raw.tools ?? [], truncated: raw.truncated === true, revision: this.revision };
+          }
+          break;
+        }
+      }
+      return { ok: true, data: data as PlaygroundResult<R> };
+    } catch (e) {
+      let code = "unavailable";
+      if (e instanceof McpError) code = e.code === -32001 ? "timeout" : "protocol_error";
+      if (e instanceof Error && /abort|cancel/i.test(e.message)) code = "cancelled";
+      return { ok: false, error: { code, message: e instanceof Error ? e.message : String(e) } };
+    }
+  }
+}
