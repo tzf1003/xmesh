@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -167,6 +168,10 @@ func relocateTaskDocument(document, oldDir, newDir string) (string, error) {
 func updateUserTasksUnder(dir, destination, sid string, command func(...string) ([]byte, error)) (int, error) {
 	listed, err := command("/Query", "/FO", "CSV", "/NH")
 	if err != nil {
+		var exit interface{ ExitCode() int }
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return 0, nil
+		}
 		return 0, err
 	}
 	reader := csv.NewReader(bytes.NewReader(listed))

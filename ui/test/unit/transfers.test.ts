@@ -246,3 +246,20 @@ test("upload and download continue after short file reads and writes",async()=>{
   assert.deepEqual(fs.readFileSync(output),bytes);
  }finally {stub.mock.restore();service.reset();await playground.close();await kernel.stop();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test("downloads publish exclusively on filesystems without hard links",async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"xmesh-no-links-"));
+ const source=path.join(dir,"source"),out=path.join(dir,"out");
+ fs.writeFileSync(source,"verified",{mode:0o600});
+ const stub=mock.method(fs.promises,"link",async()=>{throw Object.assign(new Error("unsupported"),{code:"ENOTSUP"});});
+ try {
+  await publishDownload(source,out);
+  assert.equal(fs.readFileSync(out,"utf8"),"verified");
+  fs.writeFileSync(out,"old");
+  await publishDownload(source,out,fs.statSync(out));
+  assert.equal(fs.readFileSync(out,"utf8"),"verified");
+  fs.writeFileSync(out,"concurrent");
+  await assert.rejects(publishDownload(source,out),{code:"EEXIST"});
+  assert.equal(fs.readFileSync(out,"utf8"),"concurrent");
+ }finally {stub.mock.restore();fs.rmSync(dir,{recursive:true,force:true});}
+});

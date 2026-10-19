@@ -411,3 +411,20 @@ test("derp admission: a pasted token goes to a 0600 file, not argv or the page",
   expect(fileArg).not.toBe("--admission-token-file=/etc/derp/token");
   expect(await page.content()).not.toContain(token);
 });
+
+test("verified mesh status belongs to the selected node",async()=>{
+ const page=await open();
+ await patch({credential:false});
+ await page.getByTestId("mesh-refresh").click();
+ await page.getByTestId("mesh-login-secret").fill("tskey-api-e2e-node-scope");
+ await page.getByTestId("mesh-login-submit").click();
+ await expect(page.getByTestId("mesh-provider")).toContainText("tailscale");
+ const second=await FakeKernel.start({pingMs:300,status:{hostname:"other-node"}});
+ try {
+  await patch({provider:"headscale"});
+  second.writeManifest(h.root,"node-b");
+  await expect.poll(async()=>JSON.stringify((await h.tray()).menu)).toContain("instance.node-b");
+  await h.clickMenu("instance.node-b");
+  await expect(page.getByTestId("mesh-provider")).toContainText("headscale");
+ }finally {await second.stop();}
+});

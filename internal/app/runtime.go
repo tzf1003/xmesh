@@ -288,7 +288,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		return readings(registry.all()), true
 	}
 	var pairing control.PairingAdmin
-	if lan, ok := network.(*mesh.LAN); ok && a != nil {
+	if lan, ok := network.(*mesh.LAN); ok {
 		pairing = lan
 	}
 	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)

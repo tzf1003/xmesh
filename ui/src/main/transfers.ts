@@ -319,10 +319,39 @@ const sameDestination = (a: fs.Stats, b: fs.Stats): boolean =>
   a.isFile() && b.isFile() && a.ino === b.ino && a.dev === b.dev &&
   a.size === b.size && a.mtimeMs === b.mtimeMs;
 
+/** Publish into an unoccupied name, including on filesystems without hard links. */
+async function publishExclusive(source:string,destination:string):Promise<void> {
+  try {await fs.promises.link(source,destination);return;}
+  catch(error) {
+    if(!["EPERM","ENOTSUP","EOPNOTSUPP","ENOSYS","EXDEV"].includes((error as NodeJS.ErrnoException).code??"")) throw error;
+  }
+  const output=await fs.promises.open(destination,"wx",0o600);
+  try {
+    const input=await fs.promises.open(source,"r");
+    try {
+      const buffer=Buffer.alloc(CHUNK);
+      for(;;) {
+        const {bytesRead}=await input.read(buffer,0,buffer.length,null);
+        if(!bytesRead) break;
+        let at=0;
+        while(at<bytesRead) {
+          const {bytesWritten}=await output.write(buffer,at,bytesRead-at);
+          if(!bytesWritten) throw new Error("Incomplete local write");
+          at+=bytesWritten;
+        }
+      }
+      await output.sync();
+    } finally {await input.close();}
+  } catch(error) {
+    // The name may have been concurrently replaced, so a partial entry is retained for inspection.
+    throw new Error(`Download publication failed; partial destination retained at ${destination}`,{cause:error});
+  } finally {await output.close();}
+}
+
 /** Publish a private inode; retain the captured destination until publication succeeds. */
 export async function publishDownload(temp: string, file: string, previous?: fs.Stats): Promise<void> {
   if (!previous) {
-    await fs.promises.link(temp, file);
+    await publishExclusive(temp,file);
     return;
   }
   const before = await fs.promises.lstat(file);
@@ -332,24 +361,18 @@ export async function publishDownload(temp: string, file: string, previous?: fs.
   const backup = path.join(dir, "original");
   let captured = false;
   try {
-    // Check exclusive-link support before moving the existing destination.
-    const probe = path.join(dir,"probe");
-    await fs.promises.link(temp,probe);
-    await fs.promises.unlink(probe);
     await fs.promises.rename(file, backup);
     captured = true;
     const current = await fs.promises.lstat(backup);
     if (!sameDestination(current, previous))
       throw new Error("Local destination changed during download");
-    // Exclusive publication preserves a file created after the capture.
-    await fs.promises.link(temp, file);
+    await publishExclusive(temp,file);
     await fs.promises.unlink(backup);
     captured = false;
   } catch (error) {
     if (captured) {
       try {
-        // Restore only into an empty name; retain both files if another writer won.
-        await fs.promises.link(backup, file);
+        await publishExclusive(backup,file);
         await fs.promises.unlink(backup);
         captured = false;
       } catch {

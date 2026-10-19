@@ -216,3 +216,17 @@ func Test_TaskDocumentEncodingForMigration(t *testing.T) {
 		}
 	}
 }
+
+type taskListingExit int
+
+func (e taskListingExit) Error() string { return "listing exit" }
+func (e taskListingExit) ExitCode() int { return int(e) }
+func Test_EmptyTaskListingAllowsCleanup(t *testing.T) {
+	count, err := updateUserTasksUnder(`C:\old`, "", "SID", func(...string) ([]byte, error) { return nil, taskListingExit(1) })
+	if err != nil || count != 0 {
+		t.Fatal(count, err)
+	}
+	if _, err := updateUserTasksUnder(`C:\old`, "", "SID", func(...string) ([]byte, error) { return nil, taskListingExit(2) }); err == nil {
+		t.Fatal("listing failure swallowed")
+	}
+}

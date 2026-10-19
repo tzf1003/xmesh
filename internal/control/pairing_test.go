@@ -209,3 +209,9 @@ func Test_CTRCTL08_PasswordIsWriteOnly(t *testing.T) {
 		}
 	}
 }
+
+func Test_GatewayPairingKeepsOutgoingOperations(t *testing.T) {
+	f := newFixtureConfig(t, strings.Replace(gatewayConfig, "roles: [agent]", "roles: [gateway]", 1), func(o *Options) { o.Pairing = &fakePairing{} })
+	apiError(t, f.do("PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: pairTestPassword}, nil), v1.ErrRoleDisabled)
+	f.ok("GET", "/v1/pair/discovered", nil, "PairDiscoveredResponse")
+}

@@ -35,6 +35,20 @@ func (s *Server) pairingAdmin(w http.ResponseWriter) PairingAdmin {
 	return s.o.Pairing
 }
 
+// Only nodes serving an Agent listener accept incoming password pairing.
+// Outgoing discovery and connection remain available to LAN gateways.
+func (s *Server) pairingListenerAdmin(w http.ResponseWriter) PairingAdmin {
+	admin := s.pairingAdmin(w)
+	if admin == nil {
+		return nil
+	}
+	if !s.o.Store.Get().HasRole("agent") {
+		failWith(w, newError(v1.ErrRoleDisabled, "连接密码需要 Agent 角色"))
+		return nil
+	}
+	return admin
+}
+
 // pairPasswordView turns the mesh state into the contract shape. Unset times are null, not zero.
 func pairPasswordView(st mesh.PairPasswordState) v1.PairPasswordState {
 	out := v1.PairPasswordState{Set: st.Set, FailedAttempts: st.FailedAttempts}
@@ -50,7 +64,7 @@ func pairPasswordView(st mesh.PairPasswordState) v1.PairPasswordState {
 }
 
 func (s *Server) getPairPassword(w http.ResponseWriter, _ *http.Request, _ *call) {
-	admin := s.pairingAdmin(w)
+	admin := s.pairingListenerAdmin(w)
 	if admin == nil {
 		return
 	}
@@ -58,7 +72,7 @@ func (s *Server) getPairPassword(w http.ResponseWriter, _ *http.Request, _ *call
 }
 
 func (s *Server) putPairPassword(w http.ResponseWriter, r *http.Request, _ *call) {
-	admin := s.pairingAdmin(w)
+	admin := s.pairingListenerAdmin(w)
 	if admin == nil {
 		return
 	}
@@ -79,7 +93,7 @@ func (s *Server) putPairPassword(w http.ResponseWriter, r *http.Request, _ *call
 }
 
 func (s *Server) deletePairPassword(w http.ResponseWriter, _ *http.Request, _ *call) {
-	admin := s.pairingAdmin(w)
+	admin := s.pairingListenerAdmin(w)
 	if admin == nil {
 		return
 	}
