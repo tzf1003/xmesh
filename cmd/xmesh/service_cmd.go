@@ -64,6 +64,13 @@ func serviceCommand(action string, args []string) error {
 		}
 		serviceID = serviceName(cfg.Node.Name)
 	}
+	if !*system {
+		var err error
+		serviceID, err = resolveUserServiceName(serviceID)
+		if err != nil {
+			return err
+		}
+	}
 	c := &service.Config{Name: serviceID, DisplayName: "XmeSh", Option: service.KeyValue{"UserService": true, "RunAtLoad": true, "KeepAlive": true}}
 	if runtime.GOOS == "windows" && !*system {
 		if e := userTaskAction(action, c); e != nil {

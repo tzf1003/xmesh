@@ -14,7 +14,7 @@ import { runBrowserLogin } from "./browser-login";
 import { MeshService, execMeshRunner, meshCredentialPath } from "./mesh-service";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { bundledXmesh, cliCommandText, runXmesh, runXmeshRaw, runXmeshSetup } from "./cli";
+import { bundledXmesh, cliCommandText, runXmeshRaw, runXmeshSetup } from "./cli";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -26,6 +26,7 @@ import { macApplier, windowsApplier, type Applier } from "./update/apply";
 import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
+import { kernelServices } from "./update/kernels";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -118,12 +119,14 @@ async function start(): Promise<void> {
       : process.platform === "darwin"
         ? macApplier(process.execPath)
         : undefined;
+  const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
+  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw, ...(kernelBundled && { version: app.getVersion() }) });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
     packaged: app.isPackaged || TEST_MODE,
     platform: updatePlatform,
     arch,
-    kernelBundled: bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN,
+    kernelBundled,
     execPath: process.execPath,
     pid: process.pid,
     dataDir: path.join(app.getPath("userData"), "updates"),
@@ -137,25 +140,22 @@ async function start(): Promise<void> {
           }),
     applier,
     store: new UpdateStore(path.join(app.getPath("userData"), "update.json")),
-    runningNodes: () => controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id),
+    runningNodes: () => TEST_MODE ? controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id) : discoverInstances(roots).map((i) => i.id),
     stopNode: async (node) => {
       if (TEST_MODE) {
         calls.push({ op: "update-stop", arg: node });
         return "stopped";
       }
-      const r = await runXmeshRaw("stop", node);
-      if (r.code === 0) return "stopped";
-      // A kernel started by hand has no service to stop; whether it blocks the installer is for the installer to say.
-      if (/not_installed|未安装/.test(`${r.stdout}\n${r.stderr}`)) return "absent";
-      throw new Error(t("update.stopFailed", { name: node }));
+      return updateKernels.stop(node);
     },
     startNode: async (node) => {
       if (TEST_MODE) {
         calls.push({ op: "update-start", arg: node });
         return;
       }
-      await runXmesh("start", node);
+      await updateKernels.start(node);
     },
+    refreshNode: (node) => updateKernels.refresh(node),
     quit: () => (TEST_MODE ? void calls.push({ op: "quit" }) : app.quit()),
     openPath: (p) => shell.openPath(p),
     notify: updateNotice,
