@@ -205,7 +205,7 @@ test("install without a found release or while already busy is refused", async (
   assert.equal((await first).ok, true);
 });
 
-test("a nodes without a service is skipped, and is not restarted afterwards", async () => {
+test("a node that already exited is skipped during installation", async () => {
   const r = rig();
   r.nodes.stopResult["node-b"] = "absent";
   await r.updater.check(true);
@@ -340,7 +340,32 @@ test("a kernel that will not start after the update is reported, the others stil
   });
   await after.updater.finishPending();
   assert.deepEqual(after.events, ["start node-b"]);
-  assert.deepEqual(after.updater.state.outcome, { ok: true, version: "0.1.0-beta.3", unstarted: ["node-a"] });
+  assert.deepEqual(after.updater.state.outcome, { ok: false, version: "0.1.0-beta.3", message: "kernel restart failed: node-a", unstarted: ["node-a"] });
+  assert.deepEqual(after.notices, [{ kind: "failed", version: "0.1.0-beta.3" }]);
+});
+
+test("the new app repairs a surviving kernel omitted by an older updater", async () => {
+  const r = rig();
+  r.nodes.stopResult["node-a"] = "absent";
+  r.nodes.stopResult["node-b"] = "absent";
+  await r.updater.check(true);
+  await r.updater.install();
+  const refreshed: string[] = [];
+  const after = rig({ version: "0.1.0-beta.3", dataDir: r.data, refreshNode: async (node) => { refreshed.push(node); } });
+  await after.updater.finishPending();
+  assert.deepEqual(refreshed, ["node-a", "node-b"]);
+  assert.deepEqual(after.updater.state.outcome, { ok: true, version: "0.1.0-beta.3" });
+});
+
+test("failure to replace a surviving old kernel makes the update incomplete", async () => {
+  const r = rig();
+  r.nodes.stopResult["node-b"] = "absent";
+  await r.updater.check(true);
+  await r.updater.install();
+  const after = rig({ version: "0.1.0-beta.3", dataDir: r.data, refreshNode: async () => { throw new Error("old kernel remains"); } });
+  await after.updater.finishPending();
+  assert.deepEqual(after.updater.state.outcome, { ok: false, version: "0.1.0-beta.3", message: "kernel restart failed: node-b", unstarted: ["node-b"] });
+  assert.deepEqual(after.notices, [{ kind: "failed", version: "0.1.0-beta.3" }]);
 });
 
 test("a leftover that cannot be removed does not keep the kernels down", async () => {
