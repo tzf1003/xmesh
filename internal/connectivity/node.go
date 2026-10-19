@@ -72,6 +72,7 @@ type Node struct {
 	accept         func(context.Context, identity.Principal, mcp.Transport) error
 	admin          http.Handler
 	providers      map[device.PathKind]*provider
+	listeners      map[*portListener]bool
 	candidates     map[string]Candidate
 	workers        sync.WaitGroup
 	closed         bool

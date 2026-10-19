@@ -316,3 +316,41 @@ func TestNetworkSettleReportsProviderApplyErrors(t *testing.T) {
 		t.Fatal(problems)
 	}
 }
+
+func TestSettleWaitsForDisabledPathAndReportsFunnelErrors(t *testing.T) {
+	n, cfg := node(t, "settle-disabled")
+	before := cfg.Mesh
+	disabled := false
+	before.LAN.Enabled = &disabled
+	before.Tailnet.Enabled = true
+	n.mu.Lock()
+	n.cfg = before
+	n.providers[device.Tailnet] = &provider{cfg: before, ready: true}
+	n.mu.Unlock()
+	defer func() { n.mu.Lock(); delete(n.providers, device.Tailnet); n.listeners = nil; n.mu.Unlock() }()
+	next := before
+	next.Tailnet.Enabled = false
+	n.Reconfigure(next)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	problems := n.Settle(ctx)
+	if len(problems) != 1 || problems[0].Section != "mesh.tailnet" {
+		t.Fatal("path disable reported before the provider stopped", problems)
+	}
+	n.mu.Lock()
+	n.providers[device.Tailnet] = &provider{cfg: next}
+	listener := &portListener{funnel: true, err: "Funnel permission denied"}
+	n.listeners = map[*portListener]bool{listener: true}
+	n.mu.Unlock()
+	problems = n.Settle(t.Context())
+	if len(problems) != 1 || problems[0].Section != "ingress" || len(n.ListenerErrors()) != 1 {
+		t.Fatal("Funnel failure hidden", problems)
+	}
+	n.mu.Lock()
+	listener.ready = true
+	listener.err = ""
+	n.mu.Unlock()
+	if problems := n.Settle(t.Context()); len(problems) != 0 || len(n.ListenerErrors()) != 0 {
+		t.Fatal("recovered listener remains degraded", problems)
+	}
+}

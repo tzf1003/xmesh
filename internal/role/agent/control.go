@@ -144,7 +144,7 @@ func (a *Agent) backendLeases() []lease.Lease {
 
 func authkeyReadable(cfg *config.Config) bool {
 	if cfg.SchemaVersion == 2 {
-		return cfg.Mesh.TailnetEnabled() && readable(cfg.Mesh.Tailnet.AuthkeyFile)
+		return cfg.Mesh.TailnetEnabled() && cfg.Mesh.Tailnet.AuthMethod != "browser" && readable(cfg.Mesh.Tailnet.AuthkeyFile)
 	}
-	return cfg.Mesh.Mode == "tailnet" && readable(cfg.Mesh.AuthkeyFile)
+	return cfg.Mesh.Mode == "tailnet" && cfg.Mesh.AuthMethod != "browser" && readable(cfg.Mesh.AuthkeyFile)
 }

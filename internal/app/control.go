@@ -128,6 +128,9 @@ func (h *controlHost) Status() v2.StatusResponse {
 				st.Warnings = append(st.Warnings, v2.Warning{Code: v2.WarnUnclassified, Severity: v2.SeverityWarning, Message: message})
 			}
 		}
+		for _, issue := range node.ListenerErrors() {
+			st.Warnings = append(st.Warnings, v2.Warning{Code: v2.WarnUnclassified, Severity: v2.SeverityWarning, Message: issue.Message})
+		}
 	}
 	st.PolicyReloadFailures += int(h.d.roles.failureCount())
 	st.AuthkeyReadable = authkeyReadable(cfg)
