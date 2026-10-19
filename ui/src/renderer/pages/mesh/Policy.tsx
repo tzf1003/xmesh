@@ -56,7 +56,7 @@ export function MeshPolicy({ ctx, status, reloadStatus, draft }: MeshPolicyProps
     await draft.edit({ text: r.data.plan.after });
     setBusy(false);
   };
-  return <div data-testid="mesh-policy">
+  return <div class="section-stack" data-testid="mesh-policy">
     <section class="card">
       <h2>{t("mesh.draft.title")}</h2>
       <p class="hint">{t("mesh.policy.version", { version: draft.base?.exists ? draft.base.version : "—" })}</p>
