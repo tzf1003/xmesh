@@ -1,17 +1,18 @@
 name: 发布
-# 推送标签时，为 Windows、Linux、macOS 构建二进制与桌面 UI 安装包，并发布为正式版（Latest）。
-# 所有标签都是正式发布，包括 beta；发布说明取自 .github/release-notes/release.md（英文，__TAG__ 替换为标签），
-# 再附上 GitHub 按提交自动生成的更新列表。
+# Semantic release tags select stable or testing. Stable Windows/macOS distribution uses signed desktop bundles.
+# Existing Go/contract/native validation gates run before building release assets.
 on:
   push:
     tags: ['v*.*.*']
 permissions:
   contents: write
 jobs:
-  # 红提交不得发布：同一提交上的 Go 实现与契约夹具两个工作流都必须已经成功（含 Windows 原生作业），
+  # 同一提交上的 Go、契约、Headscale 和 Onboarding 工作流均须成功（含原生平台作业），
   # 另外在这里重跑 vet、竞态测试和符合性矩阵检查。标签推送得太早时，最多等 30 分钟让它们跑完。
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.channel.outputs.channel }}
     permissions:
       contents: read
       actions: read
@@ -23,6 +24,11 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@v4
+      - name: 发布通道
+        id: channel
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then echo 'channel=testing' >> "$GITHUB_OUTPUT"; else echo 'channel=stable' >> "$GITHUB_OUTPUT"; fi
+      - run: python3 -m unittest discover -s scripts -p 'test_install_distribution.py'
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -68,6 +74,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
+          if [ "${{ needs.verify.outputs.channel }}" = stable ] && [ "$GOOS" != linux ]; then
+            echo "Stable native distribution is supplied by the signed desktop bundle."
+            exit 0
+          fi
           name="xmesh-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}"
           mkdir -p "dist/$name"
           ext=""; [ "$GOOS" = windows ] && ext=".exe"
@@ -82,17 +92,20 @@ jobs:
           if [ "$GOOS" = linux ]; then chmod +x "dist/$name/xmesh-computer"; fi
           # 操作者只下载归档：验收脚本和手册随二进制一起带走。
           mkdir -p "dist/$name/scripts" "dist/$name/docs/validation"
-          cp scripts/*.py scripts/*.ps1 "dist/$name/scripts/"
+          cp scripts/*.py scripts/*.ps1 scripts/*.sh "dist/$name/scripts/"
+          cp -R docs/agent "dist/$name/docs/"
+          cp llms.txt "dist/$name/"
           cp docs/validation/real-environment-runbook.md "dist/$name/docs/validation/"
           cd dist
           if [ "$GOOS" = windows ]; then zip -qr "$name.zip" "$name"; else tar -czf "$name.tar.gz" "$name"; fi
           rm -rf "$name"
       - uses: actions/upload-artifact@v4
+        if: needs.verify.outputs.channel == 'testing' || matrix.goos == 'linux'
         with:
           name: xmesh-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
   # 桌面 UI 安装包（Windows NSIS、macOS dmg，各内置同平台内核）由 ui-package.yml 构建，同样排在 verify 之后。
-  # 没有签名 secrets 时安装包未签名，beta 说明里写明了系统警告的处理办法。
+  # Stable requires platform signature verification; testing publishes explicit trust metadata.
   ui:
     needs: verify
     permissions:
@@ -100,9 +113,10 @@ jobs:
     uses: ./.github/workflows/ui-package.yml
     with:
       version: ${{ github.ref_name }}
+      require_signing: ${{ needs.verify.outputs.channel == 'stable' }}
     secrets: inherit
   release:
-    needs: [build, ui]
+    needs: [verify, build, ui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,6 +125,19 @@ jobs:
           path: dist
           pattern: xmesh-*
           merge-multiple: true
+      - name: 安装清单与离线包
+        run: |
+          python3 scripts/release_manifest.py --dist dist --version "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --offline-bundles
+          cp scripts/install.sh scripts/install.ps1 dist/
+          python3 - <<'PYCODE'
+          import os, zipfile
+          from pathlib import Path
+          tag = os.environ['GITHUB_REF_NAME']
+          files = [Path('llms.txt'), Path('dist/manifest.json'), Path('scripts/install.sh'), Path('scripts/install.ps1'), *Path('docs/agent').glob('*.md'), *Path('docs/site').glob('*')]
+          with zipfile.ZipFile(f'dist/xmesh-docs-{tag}.zip', 'w', zipfile.ZIP_DEFLATED) as bundle:
+              for file in files:
+                  bundle.write(file, 'manifest.json' if file.name == 'manifest.json' else str(file))
+          PYCODE
       - name: 校验和
         run: cd dist && sha256sum * > SHA256SUMS.txt
       - name: 发布
@@ -118,5 +145,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/release.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --latest --generate-notes \
+          flags=(--latest)
+          if [ "${{ needs.verify.outputs.channel }}" = testing ]; then flags=(--prerelease --latest=false); fi
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}" --generate-notes \
             --title "$GITHUB_REF_NAME" --notes-file notes.md
+  install-site:
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

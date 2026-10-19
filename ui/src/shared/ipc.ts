@@ -1,3 +1,4 @@
+import type { OnboardingRequest, OnboardingResultFor } from "./onboarding";
 // The renderer receives fixed operations with validated arguments. Tool calls go
 // through the selected local Gateway and its policies; local transfer paths are
 // issued by native dialogs and represented by opaque tickets.
@@ -84,6 +85,7 @@ export const CHANNELS = {
   connectPair: "xmesh:connect-pair",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
+  onboarding: "xmesh:onboarding",
   previewSetup: "xmesh:preview-setup",
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
@@ -141,6 +143,7 @@ export type PickKind = (typeof PICK_KINDS)[number];
 export interface ActionError {
   code: string;
   message: string;
+  next_action?: string;
   reason?: string;
   field?: string;
   current_etag?: string;
@@ -335,6 +338,7 @@ export interface PanelApi {
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
+  onboarding<R extends OnboardingRequest>(request: R): Promise<DataResult<OnboardingResultFor<R>>>;
   previewSetup(params: SetupParams): Promise<DataResult<SetupPreview>>;
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
   /** Opens the system file chooser; `path` is null when the user cancels. */
@@ -397,6 +401,7 @@ export const PANEL_API_METHODS = [
   "queryAudit",
   "getRecentCalls",
   "onCalls",
+  "onboarding",
   "previewSetup",
   "runSetup",
   "pickPath",

@@ -118,7 +118,7 @@
             "required": ["lan"],
             "properties": {
               "ephemeral": { "const": false },
-              "lan": { "required": ["mdns"], "properties": { "mdns": { "const": true } } }
+              "lan": { "required": ["mdns"] }
             }
           }
         }

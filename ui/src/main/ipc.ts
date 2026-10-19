@@ -1,3 +1,4 @@
+import { parseOnboarding, type OnboardingRequest } from "../shared/onboarding";
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
 import { parseTransfer } from "../shared/transfers";
 import type { TransferService } from "./transfers";
@@ -59,6 +60,7 @@ export function isTrustedSender(
 }
 
 export interface IpcDeps {
+  onboarding?: (request: OnboardingRequest) => Promise<DataResult<unknown>>;
   playground: PlaygroundService;
   transfers: TransferService;
   controller: ShellController;
@@ -74,7 +76,7 @@ export interface IpcDeps {
   update: UpdateActions;
 }
 
-export function registerIpc({ transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
+export function registerIpc({ onboarding, transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -231,6 +233,10 @@ export function registerIpc({ transfers, playground, controller, actions, servic
   handle(CHANNELS.computer, (request: unknown) => {
     const parsed = parseComputerRequest(request);
     return parsed === undefined ? bad("computer request") : service.computer(parsed);
+  });
+  handle(CHANNELS.onboarding, (request: unknown) => {
+    const parsed = parseOnboarding(request);
+    return parsed && onboarding ? onboarding(parsed) : bad("setup request");
   });
   handle(CHANNELS.previewSetup, (params: unknown) => previewSetup(params));
   handle(CHANNELS.runSetup, (params: unknown) => setup(params));

@@ -32,6 +32,16 @@ type Config struct {
 	Audit   Audit   `json:"audit"`
 	CI      CI      `json:"ci"`
 }
+
+// DefaultControlURL is the default coordination service used by setup clients.
+const DefaultControlURL = "https://controlplane.tailscale.com"
+
+// SupportsFunnel reports whether a coordination URL supports the Funnel path.
+func SupportsFunnel(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && officialControlURL(u)
+}
+
 type Node struct {
 	Name  string   `json:"name"`
 	Roles []string `json:"roles"`
