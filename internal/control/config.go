@@ -17,6 +17,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/filelock"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -160,8 +161,12 @@ func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool
 		writeJSON(w, 200, v1.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
 		return
 	}
-	etag, restart, err := s.storeConfigLocked(next, diff)
+	etag, restart, err := s.storeConfigLocked(old, next, diff)
 	if err != nil {
+		if errors.Is(err, errConfigChanged) {
+			failWith(w, newError(v1.ErrConflict, "配置已变化，请重新读取后重试"))
+			return
+		}
 		failWith(w, newError(v1.ErrInternal, "写入配置文件失败"))
 		return
 	}
@@ -172,7 +177,23 @@ func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool
 // storeConfigLocked replaces the configuration file with next, which the caller has validated and
 // diffed against the current content, and announces it on the event stream. The caller holds
 // configMu. It returns the new ETag and the store's own restart_required verdict.
-func (s *Server) storeConfigLocked(next []byte, diff []v1.ConfigChange) (etag string, restart bool, err error) {
+var errConfigChanged = errors.New("configuration changed before update")
+
+func (s *Server) storeConfigLocked(old, next []byte, diff []v1.ConfigChange) (etag string, restart bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := filelock.Acquire(ctx, s.o.Store.Path()+".xmesh.lock")
+	if err != nil {
+		return "", false, err
+	}
+	defer lock.Close()
+	current, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		return "", false, err
+	}
+	if !bytes.Equal(current, old) {
+		return "", false, errConfigChanged
+	}
 	if err = writeAtomic(s.o.Store.Path(), next); err != nil {
 		return "", false, err
 	}

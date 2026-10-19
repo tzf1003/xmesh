@@ -31,11 +31,11 @@ test("selected hostname owns task state and unrelated newest task is excluded", 
   assert.equal(deriveFeatureStates(s, [unrelated]).clients, "unconfigured");
   assert.equal(deriveFeatureStates(s, [makeJob()]).clients, "configuring");
 });
-test("MCP running backends and verified selected clients determine readiness", () => {
+test("only an actual selected client verification determines client readiness", () => {
   const s = makeSnapshot(); if (s.connection.kind !== "connected") return;
   s.connection.status.backends = [{ name: "server", policy: "shared", state: "running", favorite: false }];
-  assert.equal(deriveFeatureStates(s, []).clients, "ready");
-  s.connection.status.backends[0]!.state = "crashed"; assert.equal(deriveFeatureStates(s, []).clients, "attention");
+  assert.equal(deriveFeatureStates(s, []).clients, "unconfigured");
+  s.connection.status.backends[0]!.state = "crashed"; assert.equal(deriveFeatureStates(s, []).clients, "unconfigured");
   s.connection.status.backends = [];
   const job = makeJob(); job.status = "succeeded"; job.readiness.client_verified = true;
   assert.equal(deriveFeatureStates(s, [job]).clients, "ready");

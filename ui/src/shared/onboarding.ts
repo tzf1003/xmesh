@@ -11,7 +11,7 @@ export type OnboardingRequest =
   | { op: "plan"; input: OnboardingInput }
   | { op: "set_password"; job: string; password: string }
   | { op: "apply"; plan: string }
-  | { op: "status" | "resume" | "verify"; job: string; open_auth?: boolean; copy_prompt?: boolean };
+  | { op: "status" | "resume" | "verify" | "cancel"; job: string; open_auth?: boolean; copy_prompt?: boolean };
 export type OnboardingResultFor<R extends OnboardingRequest> = R extends { op: "inspect" } ? OnboardingInspect : R extends { op: "plan" } ? OnboardingPlan : R extends { op: "doctor" } ? Record<string, unknown> : OnboardingJob;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, allowed: string[]): boolean => Object.keys(v).every((key) => allowed.includes(key));
@@ -38,11 +38,22 @@ export function parseOnboarding(v: unknown): OnboardingRequest | undefined {
   if (v.op === "plan" && keys(v, ["op", "input"])) { const input = parseOnboardingInput(v.input); return input ? { op: "plan", input } : undefined; }
   if (v.op === "set_password" && keys(v, ["op", "job", "password"]) && typeof v.job === "string" && ID.test(v.job) && validIngressPassword(v.password)) return v as unknown as OnboardingRequest;
   if (v.op === "apply" && keys(v, ["op", "plan"]) && typeof v.plan === "string" && ID.test(v.plan)) return { op: "apply", plan: v.plan };
-  if (["status", "resume", "verify"].includes(String(v.op)) && keys(v, ["op", "job", "open_auth", "copy_prompt"]) && typeof v.job === "string" && ID.test(v.job) && (v.open_auth === undefined || v.op === "resume" && typeof v.open_auth === "boolean") && (v.copy_prompt === undefined || v.op === "status" && typeof v.copy_prompt === "boolean")) return v as unknown as OnboardingRequest;
+  if (["status", "resume", "verify", "cancel"].includes(String(v.op)) && keys(v, ["op", "job", "open_auth", "copy_prompt"]) && typeof v.job === "string" && ID.test(v.job) && (v.open_auth === undefined || v.op === "resume" && typeof v.open_auth === "boolean") && (v.copy_prompt === undefined || v.op === "status" && typeof v.copy_prompt === "boolean")) return v as unknown as OnboardingRequest;
 }
 /** Redact credential-shaped values before they reach the panel or clipboard. */
 export function redactOnboarding(text: string): string {
   return text.replace(/(?:tskey|hskey)-[A-Za-z0-9_-]+/g, "[redacted]").replace(/(Bearer\s+)[^\s"']+/gi, "$1[redacted]").replace(/((?:token|password|secret|authkey)["']?\s*[:=]\s*["']?)[^\s,"']+/gi, "$1[redacted]");
+}
+
+/** Structured responses preserve paths and identifiers; only secret fields are removed. */
+export function redactOnboardingResponse<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(redactOnboardingResponse) as T;
+  if (!record(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /^(?:password|token|secret|authkey|auth_key|access_token|refresh_token|client_secret)$/i.test(key) ? "[redacted]" : redactOnboardingResponse(item)])) as T;
+}
+
+export function setupNeedsAttention(job: OnboardingJob): boolean {
+  return job.status !== "cancelled" && (job.status !== "succeeded" || !job.readiness.client_verified);
 }
 
 export function verificationPrompt(job: OnboardingJob): string | undefined {

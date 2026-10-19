@@ -1,14 +1,53 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/filelock"
 )
+
+func TestStoreConfigRechecksSharedLock(t *testing.T) {
+	f := newFixture(t)
+	old := []byte(f.file())
+	lock, err := filelock.Acquire(t.Context(), f.path+".xmesh.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := f.server.storeConfigLocked(old, append(append([]byte{}, old...), []byte("\n# replacement\n")...), nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("write bypassed shared lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	later := append(append([]byte{}, old...), []byte("\n# later edit\n")...)
+	if err = os.WriteFile(f.path, later, 0600); err != nil {
+		t.Fatal(err)
+	}
+	lock.Close()
+	select {
+	case err := <-done:
+		if err != errConfigChanged {
+			t.Fatal("expected stale configuration", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal(context.DeadlineExceeded)
+	}
+	if f.file() != string(later) {
+		t.Fatal("newer config overwritten")
+	}
+}
 
 func (f *fixture) config() v1.ConfigResponse {
 	f.t.Helper()

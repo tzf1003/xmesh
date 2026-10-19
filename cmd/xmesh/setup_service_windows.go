@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,22 +16,48 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func waitSetupServiceStopped(ctx context.Context, p *onboarding.Plan) error {
+func prepareSetupServiceStop(ctx context.Context, p *onboarding.Plan) (func() error, error) {
 	ep, err := control.ReadEndpoint(filepath.Dir(p.ConfigPath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			// A stopped task can be replaced without a control endpoint. A
+			// running task without its process identity needs explicit repair.
+			if err := verifyStoppedSetupTask(ctx, p); err != nil {
+				return nil, err
+			}
+			return func() error { return nil }, nil
 		}
+		return nil, err
+	}
+	return func() error {
+		limit := kernelExitLimit
+		if deadline, ok := ctx.Deadline(); ok {
+			limit = min(limit, time.Until(deadline))
+		}
+		if limit <= 0 {
+			return context.DeadlineExceeded
+		}
+		return waitKernelExit(ep, limit)
+	}, nil
+}
+
+func verifyStoppedSetupTask(ctx context.Context, p *onboarding.Plan) error {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
 		return err
 	}
-	limit := kernelExitLimit
-	if deadline, ok := ctx.Deadline(); ok {
-		limit = min(limit, time.Until(deadline))
+	name := userTaskName(serviceName(p.Input.NodeName), user.User.Sid.String())
+	dir, err := windows.GetSystemDirectory()
+	if err != nil {
+		return err
 	}
-	if limit <= 0 {
-		return context.DeadlineExceeded
+	// Task Scheduler's COM State is numeric and independent of system language.
+	script := `$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\').GetTask('` + strings.ReplaceAll(name, "'", "''") + `'); if ($t.State -eq 4) { exit 2 }`
+	cmd := exec.CommandContext(ctx, filepath.Join(dir, "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
+	if err := cmd.Run(); err != nil {
+		return errors.New("无法确认旧服务进程已停止，请检查任务管理器和本机服务状态")
 	}
-	return waitKernelExit(ep, limit)
+	return nil
 }
 
 func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.ServiceSnapshot, error) {
@@ -85,10 +112,14 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 	if e != nil {
 		return e
 	}
+	wait, e := prepareSetupServiceStop(ctx, p)
+	if e != nil {
+		return e
+	}
 	_, _ = taskCommand(dir, "/End", "/TN", snap.Path)
 	// Task Scheduler acknowledges /End before the old kernel releases ports.
 	// Wait for that exact process before restoring and starting its replacement.
-	if e = waitSetupServiceStopped(ctx, p); e != nil {
+	if e = wait(); e != nil {
 		return e
 	}
 	tmp, e := os.CreateTemp("", "xmesh-service-restore-*.xml")

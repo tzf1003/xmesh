@@ -12,7 +12,9 @@ import (
 	"github.com/tzf1003/xmesh/internal/onboarding"
 )
 
-func waitSetupServiceStopped(context.Context, *onboarding.Plan) error { return nil }
+func prepareSetupServiceStop(context.Context, *onboarding.Plan) (func() error, error) {
+	return func() error { return nil }, nil
+}
 
 func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.ServiceSnapshot, error) {
 	var snap onboarding.ServiceSnapshot
@@ -33,6 +35,11 @@ func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.S
 		return snap, &onboarding.Error{Code: "service_conflict", Message: "同名服务使用另一个配置，请选择新的设备名", Field: "node_name"}
 	}
 	snap.Running = exec.CommandContext(ctx, "systemctl", "--user", "is-active", "--quiet", serviceName(p.Input.NodeName)).Run() == nil
+	enabled, err := exec.CommandContext(ctx, "systemctl", "--user", "is-enabled", serviceName(p.Input.NodeName)).Output()
+	snap.Enabled = strings.TrimSpace(string(enabled))
+	if err != nil && snap.Enabled == "" {
+		return snap, err
+	}
 	return snap, nil
 }
 func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboarding.ServiceSnapshot) error {
@@ -45,9 +52,34 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 	if e := exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").Run(); e != nil {
 		return e
 	}
+	if snap.Enabled != "" {
+		// Clear enablement created by the attempted replacement before restoring
+		// an originally runtime-only or disabled registration.
+		if e := exec.CommandContext(ctx, "systemctl", "--user", "disable", serviceName(p.Input.NodeName)).Run(); e != nil {
+			return e
+		}
+	}
+	if args := systemdRestoreEnablement(snap.Enabled, serviceName(p.Input.NodeName)); args != nil {
+		if e := exec.CommandContext(ctx, "systemctl", args...).Run(); e != nil {
+			return e
+		}
+	}
 	action := "stop"
 	if snap.Running {
 		action = "restart"
 	}
 	return exec.CommandContext(ctx, "systemctl", "--user", action, serviceName(p.Input.NodeName)).Run()
+}
+
+func systemdRestoreEnablement(state, name string) []string {
+	switch state {
+	case "enabled":
+		return []string{"--user", "enable", name}
+	case "enabled-runtime":
+		return []string{"--user", "enable", "--runtime", name}
+	case "disabled", "static", "indirect":
+		return []string{"--user", "disable", name}
+	default:
+		return nil
+	}
 }

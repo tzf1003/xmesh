@@ -31,7 +31,7 @@ func LoginTailnet(ctx context.Context, c *config.Config, stateDir string, progre
 	}
 	server := &tsnet.Server{
 		Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name,
-		ControlURL: c.Mesh.ControlURL, AdvertiseTags: []string{"tag:device"},
+		ControlURL: c.Mesh.ControlURL, AdvertiseTags: runtimeTailnetTags(c),
 		UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {},
 	}
 	lc, err := server.LocalClient()

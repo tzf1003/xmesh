@@ -12,7 +12,9 @@ import (
 	"github.com/tzf1003/xmesh/internal/onboarding"
 )
 
-func waitSetupServiceStopped(context.Context, *onboarding.Plan) error { return nil }
+func prepareSetupServiceStop(context.Context, *onboarding.Plan) (func() error, error) {
+	return func() error { return nil }, nil
+}
 
 func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.ServiceSnapshot, error) {
 	var snap onboarding.ServiceSnapshot

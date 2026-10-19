@@ -22,10 +22,7 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 	if e := privdir.Ensure(stateDir); e != nil {
 		return "", e
 	}
-	tags := []string{"tag:device"}
-	if ingress {
-		tags = append(tags, "tag:ingress")
-	}
+	tags := tailnetRoleTags(ingress)
 	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AdvertiseTags: tags, UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
 	if c.Mesh.AuthMethod != "browser" {
 		key, e := os.ReadFile(c.Mesh.AuthkeyFile)

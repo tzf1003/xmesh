@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import type { DataResult } from "../shared/ipc";
-import { onboardingDiagnostics, verificationPrompt, redactOnboarding, type OnboardingRequest, type OnboardingJob, type OnboardingPlan, type OnboardingInput, type OnboardingInspect } from "../shared/onboarding";
+import { onboardingDiagnostics, verificationPrompt, redactOnboardingResponse, type OnboardingRequest, type OnboardingJob, type OnboardingPlan, type OnboardingInput, type OnboardingInspect } from "../shared/onboarding";
 import { isLoginUrl } from "./browser-login";
 import { xmeshBinary } from "./cli";
 
@@ -20,7 +20,7 @@ export function runOnboarding(request: OnboardingRequest, root: string, bin = xm
       try {
         const result = JSON.parse(stdout) as DataResult<unknown>;
         if (!result || typeof result !== "object" || typeof result.ok !== "boolean" || result.ok && !("data" in result) || !result.ok && (!result.error || typeof result.error.message !== "string")) throw new Error("invalid response");
-        resolve(JSON.parse(redactOnboarding(JSON.stringify(result))) as DataResult<unknown>);
+        resolve(redactOnboardingResponse(result));
       } catch {
         resolve({ ok: false, error: { code: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" ? "binary_missing" : "setup_failed", message: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" ? "找不到 xmesh 内核，请安装或更新应用。" : "无法读取设置任务状态。请重试或运行诊断。", next_action: "检查内核版本与状态目录后重试。" } });
       }
@@ -43,7 +43,7 @@ export function createOnboardingService(root: string, open: (url: string) => Pro
       if (request.op === "doctor" && request.copy) copy(onboardingDiagnostics(result.data));
       if (request.op === "status" && request.copy_prompt) {
         const prompt = verificationPrompt(result.data as OnboardingJob);
-        if (prompt) copy(redactOnboarding(prompt));
+        if (prompt) copy(prompt);
       }
     }
     return result;
@@ -71,6 +71,7 @@ export function fakeOnboarding(root: string, state: { cliFails: boolean; setupWa
       jobs.set(job.id, job); return { ok: true, data: job };
     }
     const job = jobs.get(request.job); if (!job) return { ok: false, error: { code: "not_found", message: "Job not found" } };
+    if (request.op === "cancel") { job.status = "cancelled"; job.auth_url = ""; return { ok: true, data: job }; }
     const plan = plans.get(job.plan_id)!;
     if (request.op === "set_password") job.ingress_password_set = true;
     if (state.cliFails) { job.status = "failed"; job.next_action = "重试安装用户服务。"; job.steps = [{ id: "install", status: "failed", message: "服务安装失败", code: "install_failed", next_action: "检查服务权限后重试。" }]; }

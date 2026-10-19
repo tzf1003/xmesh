@@ -255,6 +255,40 @@ func TestConfigAtomicCASPreservesLaterEdit(t *testing.T) {
 	}
 }
 
+func TestConfigCASRechecksAfterConcurrentWriter(t *testing.T) {
+	s, in, _, _ := setupFixture(t)
+	p, err := s.Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putClientConfig(t, p.ConfigPath, "original")
+	lock, err := lockClientPath(p.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	done := make(chan error, 1)
+	go func() { done <- atomicWriteCAS(p.ConfigPath, digest([]byte("original")), []byte("replacement")) }()
+	select {
+	case err := <-done:
+		t.Fatalf("writer bypassed held lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	putClientConfig(t, p.ConfigPath, "concurrent-edit")
+	lock.Close()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stale update accepted")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer did not finish")
+	}
+	if string(readClientConfig(t, p.ConfigPath)) != "concurrent-edit" {
+		t.Fatal("concurrent edit lost")
+	}
+}
+
 func TestWriteConfigValidatesExistingPrivateFiles(t *testing.T) {
 	for _, kind := range []string{"token-content", "token-mode", "token-directory", "deny-content", "symlink"} {
 		t.Run(kind, func(t *testing.T) {

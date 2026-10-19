@@ -1,9 +1,41 @@
 package mesh
 
 import (
+	"github.com/tzf1003/xmesh/internal/config"
+	"reflect"
 	"tailscale.com/tailcfg"
 	"testing"
 )
+
+func TestTailnetRoleTagsSurviveSetupHandoff(t *testing.T) {
+	for _, ingress := range []bool{false, true} {
+		want := []string{"tag:device"}
+		if ingress {
+			want = append(want, "tag:ingress")
+		}
+		if got := tailnetRoleTags(ingress); !reflect.DeepEqual(got, want) {
+			t.Fatalf("ingress=%v tags=%v", ingress, got)
+		}
+	}
+}
+
+func TestTemporaryAdminRetainsAuthKeyTags(t *testing.T) {
+	c := &config.Config{}
+	c.Node.Roles = []string{"agent", "gateway", "ingress"}
+	c.Mesh.AuthMethod = "key"
+	c.Mesh.Ephemeral = true
+	if tags := runtimeTailnetTags(c); tags != nil {
+		t.Fatal("temporary key identity changed tags", tags)
+	}
+	c.Mesh.Ephemeral = false
+	if tags := runtimeTailnetTags(c); !reflect.DeepEqual(tags, []string{"tag:device", "tag:ingress"}) {
+		t.Fatal(tags)
+	}
+	c.Mesh.AuthMethod = "browser"
+	if tags := runtimeTailnetTags(c); !reflect.DeepEqual(tags, tailnetRoleTags(true)) {
+		t.Fatal(tags)
+	}
+}
 
 func TestOnboardingRequiresDeviceIngressAndFunnelCapabilities(t *testing.T) {
 	device := runningLoginStatus("tag:device")

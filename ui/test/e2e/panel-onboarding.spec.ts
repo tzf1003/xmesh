@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { launch, navigate, type Harness } from "./helpers";
+import * as os from "node:os";
+import * as path from "node:path";
 let h: Harness;
 test.afterEach(async () => { await h?.close(); });
 async function basics(page: Page, purpose = "local"): Promise<void> {
@@ -28,7 +30,7 @@ for (const purpose of ["local", "multi-device", "cloud"]) test(`purpose ${purpos
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
   await expect(page).toHaveTitle("xmesh");
   expect(page.url()).toMatch(/^app:\/\/panel\//);
-  if (purpose === "local") await page.screenshot({ path: "/tmp/xmesh-onboarding-purpose.png" });
+  if (purpose === "local") await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-onboarding-purpose.png") });
   await basics(page, purpose);
   await expect(page.getByTestId("permission-development")).toBeChecked();
   if (purpose !== "local") await expect(page.getByTestId("wizard-control-url")).toHaveValue("https://controlplane.tailscale.com");
@@ -37,7 +39,7 @@ for (const purpose of ["local", "multi-device", "cloud"]) test(`purpose ${purpos
   await expect(page.getByTestId("wizard-preview")).toBeHidden();
   await page.locator(".quick-yaml summary").click();
   await expect(page.getByTestId("wizard-preview")).toContainText(`mode: ${purpose === "local" ? "lan" : "tailnet"}`);
-  await page.screenshot({ path: `/tmp/xmesh-onboarding-${purpose}.png` });
+  await page.screenshot({ path: path.join(os.tmpdir(), `xmesh-onboarding-${purpose}.png`) });
   expect(errors).toEqual([]);
 });
 test("device readiness and actual client verification are separate, and feature links work", async () => {
@@ -56,7 +58,7 @@ test("device readiness and actual client verification are separate, and feature 
   await page.getByTestId("wizard-finish").click();
   await expect(page.getByTestId("page-features")).toBeVisible();
   await expect(page.locator(".feature-card")).toHaveCount(6);
-  await page.screenshot({ path: "/tmp/xmesh-feature-center.png" });
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-feature-center.png") });
   await page.getByTestId("feature-devices").click();
   await expect(page.getByTestId("page-devices")).toBeVisible();
 });
@@ -76,7 +78,7 @@ test("browser wait persists through page navigation and authorization needs expl
   await expect(page.getByTestId("setup-existing")).toBeVisible();
   await page.getByTestId(/^resume-job-/).click();
   await expect(page.getByTestId("setup-open-auth")).toBeVisible();
-  await page.screenshot({ path: "/tmp/xmesh-onboarding-waiting.png" });
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-onboarding-waiting.png") });
 });
 test("failed task can retry and deferred clients remain pending", async () => {
   h = await launch({ publish: false, lang: "en" }); const page = await h.openPanel();
@@ -89,7 +91,7 @@ test("failed task can retry and deferred clients remain pending", async () => {
   await expect(page.getByTestId("setup-readiness")).toContainText("Device ready");
   await expect(page.getByTestId("setup-readiness")).toContainText("Client verification pending");
   await page.setViewportSize({ width: 740, height: 800 });
-  await page.screenshot({ path: "/tmp/xmesh-onboarding-compact.png" });
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-onboarding-compact.png") });
 });
 
 test("cloud login password clears after save and reaches client evidence step", async () => {
@@ -136,10 +138,10 @@ test("feature statuses follow live peers, backend health and runtime warnings", 
   await expect(page.getByTestId("feature-mesh")).toHaveAttribute("data-state", "unconfigured");
   h.kernel.panel.setContent(JSON.stringify({ node: { name: "win-dev-01", roles: ["agent", "gateway"] }, agent: { backends: { mcp: { transport: "stdio", command: ["test-mcp"], policy: "shared" } } } }));
   h.kernel.setStatus({ network: { mode: "tailnet", node_id: "self", tags: [] } });
-  await expect(page.getByTestId("feature-clients")).toHaveAttribute("data-state", "ready");
+  await expect(page.getByTestId("feature-clients")).toHaveAttribute("data-state", "unconfigured");
   await expect(page.getByTestId("feature-mesh")).toHaveAttribute("data-state", "ready");
   h.kernel.setStatus({ warnings: [{ code: "tailnet_not_ready", severity: "warning", message: "network waiting" }, { code: "policy_reload_failed", severity: "error", message: "policy waiting" }] });
   await expect(page.getByTestId("feature-permissions")).toHaveAttribute("data-state", "attention");
   await expect(page.getByTestId("feature-mesh")).toContainText("Needs attention");
-  await page.screenshot({ path: "/tmp/xmesh-feature-states.png" });
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-feature-states.png") });
 });

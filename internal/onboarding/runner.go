@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
@@ -45,6 +46,27 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 		return e
 	}
 	defer unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		tick := time.NewTicker(100 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if s.cancelRequested(id) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	// Re-read after locking: another process may have finished while we waited.
 	j, e = s.LoadJob(id)
 	if e != nil {
@@ -52,6 +74,9 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 	}
 	if j.Status == "cancelled" {
 		return nil
+	}
+	if s.cancelRequested(id) {
+		return s.finishCancellation(j)
 	}
 	p, e := s.LoadPlan(j.PlanID)
 	if e != nil {
@@ -74,6 +99,9 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 		return e
 	}
 	for i := range j.Steps {
+		if s.cancelRequested(id) {
+			return s.cancelRun(ctx, p, j, h)
+		}
 		step := &j.Steps[i]
 		if e = s.reconcileConfig(p, j); e != nil {
 			markStaleJob(j)
@@ -169,6 +197,9 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 		case "clients":
 			e = s.applyClients(p, j)
 		case "verify":
+			if s.cancelRequested(id) {
+				return s.cancelRun(ctx, p, j, h)
+			}
 			if p.Input.Purpose == "cloud" && !j.IngressPasswordSet {
 				step.Status = "waiting_user"
 				step.Message = "请设置云端连接的登录口令"
@@ -180,6 +211,9 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 			}
 			var verified bool
 			verified, e = h.Evidence(ctx, p, j)
+			if s.cancelRequested(id) {
+				return s.cancelRun(ctx, p, j, h)
+			}
 			if e == nil && !verified {
 				step.Status = "waiting_user"
 				step.Message = "设备已就绪，客户端待验证"
@@ -191,6 +225,9 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 				return s.SaveJob(j)
 			}
 			j.Readiness.ClientVerified = verified
+		}
+		if s.cancelRequested(id) {
+			return s.cancelRun(ctx, p, j, h)
 		}
 		if e != nil {
 			step.Status = "failed"
@@ -267,6 +304,9 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 		if e = s.SaveJob(j); e != nil {
 			return e
 		}
+	}
+	if s.cancelRequested(id) {
+		return s.cancelRun(ctx, p, j, h)
 	}
 	j.Status = "succeeded"
 	j.NextAction = ""
@@ -512,6 +552,11 @@ func (s *Store) restoreConfig(p *Plan, j *Job) error {
 		return e
 	}
 	if p.BeforeHash == "absent" {
+		lock, err := lockClientPath(p.ConfigPath)
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
 		if latest, err := fileHash(p.ConfigPath); err != nil || latest != current {
 			return errors.New("configuration changed during recovery")
 		}
@@ -548,6 +593,9 @@ func (s *Store) Verify(ctx context.Context, id string, h Host) (*Job, error) {
 	if e != nil {
 		return nil, e
 	}
+	if s.cancelRequested(id) {
+		return j, s.cancelRun(ctx, p, j, h)
+	}
 	if !verificationStepsReady(j) {
 		return nil, problem("not_ready", "请先完成设备配置步骤后再验证客户端", "job")
 	}
@@ -563,6 +611,9 @@ func (s *Store) Verify(ctx context.Context, id string, h Host) (*Job, error) {
 	} else {
 		j.Readiness.ServiceReady = true
 		if p.Input.Purpose == "cloud" && !j.IngressPasswordSet {
+			if s.cancelRequested(id) {
+				return j, s.cancelRun(ctx, p, j, h)
+			}
 			j.Status = "waiting_user"
 			j.NextAction = "请先设置云端连接的登录口令"
 			if e = s.SaveJob(j); e != nil {
@@ -571,6 +622,9 @@ func (s *Store) Verify(ctx context.Context, id string, h Host) (*Job, error) {
 			return j, nil
 		}
 		verified, err := h.Evidence(ctx, p, j)
+		if s.cancelRequested(id) {
+			return j, s.cancelRun(ctx, p, j, h)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -588,6 +642,9 @@ func (s *Store) Verify(ctx context.Context, id string, h Host) (*Job, error) {
 			j.NextAction = fmt.Sprintf("请在客户端调用 %s，path=%s 后重试", j.VerificationTool, j.VerificationPath)
 		}
 	}
+	if s.cancelRequested(id) {
+		return j, s.cancelRun(ctx, p, j, h)
+	}
 	if e = s.SaveJob(j); e != nil {
 		return nil, e
 	}
@@ -600,8 +657,20 @@ func (s *Store) Cancel(id string) (*Job, error) {
 	if e != nil {
 		return nil, e
 	}
+	request, e := s.transaction("cancellations", id)
+	if e != nil {
+		return nil, e
+	}
+	if e = atomicWrite(request, []byte("{}\n")); e != nil {
+		return nil, e
+	}
 	unlock, e := s.lock(j.NodeName)
 	if e != nil {
+		var issue *Error
+		if errors.As(e, &issue) && issue.Code == "busy" {
+			j.NextAction = "正在取消配置任务，身份和备份将保留"
+			return j, nil
+		}
 		return nil, e
 	}
 	defer unlock()
@@ -609,11 +678,93 @@ func (s *Store) Cancel(id string) (*Job, error) {
 	if e != nil {
 		return nil, e
 	}
-	j.Status = "cancelled"
-	j.AuthURL = ""
-	j.NextAction = "登录身份和备份已保留；可在网络控制面撤销设备"
-	if e = s.SaveJob(j); e != nil {
+	if e = s.finishCancellation(j); e != nil {
 		return nil, e
 	}
 	return j, nil
+}
+
+func (s *Store) cancelRequested(id string) bool {
+	path, err := s.transaction("cancellations", id)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
+}
+
+func (s *Store) finishCancellation(j *Job) error {
+	j.Status = "cancelled"
+	j.AuthURL = ""
+	j.NextAction = "配置已取消；登录身份和备份已保留，可在网络控制面撤销设备"
+	j.Readiness.ClientVerified = false
+	return s.SaveJob(j)
+}
+
+func (s *Store) cancelRun(ctx context.Context, p *Plan, j *Job, h Host) error {
+	j.Status = "running"
+	j.AuthURL = ""
+	j.NextAction = "正在取消并恢复本次配置变更"
+	if err := s.SaveJob(j); err != nil {
+		return err
+	}
+	var recoveryErr error
+	remaining := []ClientReceipt{}
+	for i := len(j.Receipts) - 1; i >= 0; i-- {
+		if err := RollbackClient(j.Receipts[i]); err != nil {
+			recoveryErr = err
+			remaining = append(remaining, j.Receipts[i])
+		}
+	}
+	j.Receipts = remaining
+	if j.ServiceSnapshot != nil && h.Restore != nil && (j.ServiceStopped || j.ServiceOwned || j.ConfigHash != "" || j.PendingConfigHash != "") {
+		j.ServiceRestorePending = true
+		if err := s.SaveJob(j); err != nil {
+			return err
+		}
+		if err := s.restoreService(ctx, p, j, h); err != nil {
+			recoveryErr = err
+		}
+	}
+	if recoveryErr != nil {
+		j.Status = "failed"
+		j.NextAction = "取消后的恢复待处理，请检查服务和备份后重试"
+		request, _ := s.transaction("cancellations", j.ID)
+		if err := os.Remove(request); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return s.SaveJob(j)
+	}
+	return s.finishCancellation(j)
+}
+
+// QueueResume publishes a pollable state before a detached worker is launched.
+// An active authorization worker already owns progress and needs no duplicate.
+func (s *Store) QueueResume(id string) (*Job, bool, error) {
+	j, err := s.LoadJob(id)
+	if err != nil {
+		return nil, false, err
+	}
+	if j.Status == "cancelled" || s.cancelRequested(id) {
+		return nil, false, problem("cancelled", "任务已取消，请重新生成配置计划", "job")
+	}
+	unlock, err := s.lock(j.NodeName)
+	if err != nil {
+		var issue *Error
+		if errors.As(err, &issue) && issue.Code == "busy" {
+			return j, false, nil
+		}
+		return nil, false, err
+	}
+	defer unlock()
+	j, err = s.LoadJob(id)
+	if err != nil {
+		return nil, false, err
+	}
+	if s.cancelRequested(id) || j.Status == "cancelled" {
+		return nil, false, problem("cancelled", "任务已取消，请重新生成配置计划", "job")
+	}
+	j.Status = "pending"
+	j.NextAction = "准备继续配置任务"
+	return j, true, s.SaveJob(j)
 }

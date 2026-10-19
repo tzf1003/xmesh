@@ -103,14 +103,12 @@ func setupCommandIO(args []string, in io.Reader, out io.Writer) error {
 		result, e = s.LoadJob(*job)
 	case "resume":
 		var j *onboarding.Job
-		j, e = s.LoadJob(*job)
-		if e == nil && j.Status == "cancelled" {
-			e = &onboarding.Error{Code: "cancelled", Message: "任务已取消，请重新生成配置计划"}
-		}
-		if e == nil {
+		var launch bool
+		j, launch, e = s.QueueResume(*job)
+		if e == nil && launch {
 			e = launchSetupWorker(s.Root, j.ID)
-			result = j
 		}
+		result = j
 	case "verify":
 		result, e = s.Verify(ctx, *job, setupHost())
 	case "ingress-password":
@@ -197,10 +195,14 @@ func setupHost() onboarding.Host {
 		Snapshot: snapshotSetupService,
 		Restore:  restoreSetupService,
 		Stop: func(ctx context.Context, p *onboarding.Plan) error {
+			wait, err := prepareSetupServiceStop(ctx, p)
+			if err != nil {
+				return err
+			}
 			if err := runCLI(ctx, "stop", "--config", p.ConfigPath); err != nil {
 				return err
 			}
-			return waitSetupServiceStopped(ctx, p)
+			return wait()
 		},
 		Configure: func(ctx context.Context, p *onboarding.Plan) error {
 			if e := runCLI(ctx, "uninstall", "--config", p.ConfigPath); e != nil {

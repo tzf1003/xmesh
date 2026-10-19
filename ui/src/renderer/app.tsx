@@ -1,5 +1,6 @@
 import { Features } from "./pages/Features";
 import { useQuickCopy } from "./onboarding-copy";
+import { setupNeedsAttention } from "../shared/onboarding";
 import type { JSX } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
@@ -405,7 +406,19 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
 function SetupReminder({ ctx, current }: { ctx: PageContext; current: PageId }): JSX.Element | null {
   const copy = useQuickCopy();
   const [pending, setPending] = useState(false);
-  useEffect(() => { let active = true; void getApi().onboarding({ op: "inspect" }).then((r) => { if (active && r.ok) setPending(r.data.jobs.some((j) => !["succeeded", "cancelled"].includes(j.status) || !j.readiness.client_verified)); }).catch(() => undefined); return () => { active = false; }; }, [current]);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async (): Promise<void> => {
+      try {
+        const r = await getApi().onboarding({ op: "inspect" });
+        if (active && r.ok) setPending(r.data.jobs.some(setupNeedsAttention));
+      } catch { /* Keep the last known task state during a transient read failure. */ }
+      if (active) timer = setTimeout(() => void refresh(), 3000);
+    };
+    void refresh();
+    return () => { active = false; clearTimeout(timer); };
+  }, [current]);
   if (!pending || current === "setup" || current === "features") return null;
   return <div class="page strip"><Banner testid="setup-reminder"><div class="row"><span class="grow">{copy.existing}</span><button class="btn small" onClick={() => ctx.go("setup")}>{copy.resume}</button></div></Banner></div>;
 }

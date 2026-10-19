@@ -54,3 +54,9 @@ xmesh doctor --json
 ```
 
 Use `--root /absolute/state-directory` after each subcommand to keep all operations on the same state root. `setup doctor` is also accepted. Do not infer that a successful service step proves browser login, public reachability or client verification.
+
+`setup resume` publishes `pending` before starting a new worker. If authorization is already running, it returns that worker's current status. Continue polling until a new terminal state is observed. Each worker attempt has a ten-minute limit; an expired authorization attempt reports its recovery action and can be resumed after the prerequisite is resolved.
+
+To stop an authorization wait, use `xmesh setup cancel --job JOB_ID --json`. The request is durable and interrupts the running worker; poll status until `cancelled`. The worker restores an existing service baseline before completing cancellation. Identity state and backups remain available for explicit cleanup or a new setup. A failed recovery reports its next action and remains retryable. Cancelled jobs cannot be resumed.
+
+Setup and local configuration APIs serialize compare-and-replace updates through a shared file lock and recheck the approved bytes before publication. Editors that do not participate in this lock are outside that serialization boundary; close external configuration editors while applying a plan and review backups when resolving a conflict.

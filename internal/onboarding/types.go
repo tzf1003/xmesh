@@ -53,6 +53,7 @@ type Readiness struct {
 
 // ServiceSnapshot is private recovery metadata for an existing registration.
 type ServiceSnapshot struct {
+	Enabled    string `json:"enabled,omitempty"`
 	Installed  bool   `json:"installed"`
 	Running    bool   `json:"running"`
 	Definition []byte `json:"definition"`
