@@ -259,13 +259,27 @@ func Test_ControlPatsReportAbsoluteTokenPath(t *testing.T) {
 	f := newFixtureConfig(t, gatewayConfig+"  pats:\n    operator:\n      token_file: "+relative+"\n      scopes: [\"devices:read\"]\n")
 	var listed v2.PatList
 	decodeAs(t, f.ok("GET", "/v2/pats", nil, "PatList"), &listed)
-	if len(listed.Pats) != 1 || listed.Pats[0].TokenFile != tokenFile || listed.Pats[0].ModifiedAt == nil {
+	if len(listed.Pats) != 1 || !filepath.IsAbs(listed.Pats[0].TokenFile) || listed.Pats[0].ModifiedAt == nil {
 		t.Fatalf("unexpected token path or modification time: %+v", listed.Pats)
+	}
+	wantFile, err := os.Stat(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualFile, err := os.Stat(listed.Pats[0].TokenFile)
+	if err != nil || !os.SameFile(wantFile, actualFile) {
+		t.Fatalf("reported token path identifies another file: %q (%v)", listed.Pats[0].TokenFile, err)
 	}
 	if got := f.store.Get().Gateway.PATs["operator"].TokenFile; got != relative {
 		t.Fatalf("configuration token path changed: %q", got)
 	}
-	if got := patInfo("missing", config.PAT{TokenFile: "missing.token"}).TokenFile; got != filepath.Join(workingDir, "missing.token") {
+	got := patInfo("missing", config.PAT{TokenFile: "missing.token"}).TokenFile
+	wantParent, err := os.Stat(workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualParent, err := os.Stat(filepath.Dir(got))
+	if !filepath.IsAbs(got) || filepath.Base(got) != "missing.token" || err != nil || !os.SameFile(wantParent, actualParent) {
 		t.Fatalf("missing token path = %q", got)
 	}
 }
