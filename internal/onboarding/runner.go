@@ -197,8 +197,12 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 			step.Code = "setup_" + strings.ReplaceAll(step.ID, "-", "_") + "_failed"
 			step.Message = stepFailure(step.ID)
 			step.NextAction = stepRecovery(step.ID)
-			j.Status = "failed"
-			j.NextAction = step.NextAction
+			// Recovery writes its journal before restoring files and services.
+			// Publish a terminal result only after those actions have settled.
+			j.Status = "running"
+			j.NextAction = "正在恢复本次配置变更"
+			j.Readiness.ServiceReady = false
+			j.Readiness.ClientVerified = false
 			// Restore client files before returning a native service to its saved
 			// baseline. Network identity files remain available across retries.
 			if step.ID == "clients" || j.ServiceSnapshot != nil && (j.ServiceStopped || j.ConfigHash != "" || j.PendingConfigHash != "") {
@@ -251,6 +255,7 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 			if len(j.Receipts) > 0 {
 				step.NextAction = "客户端配置已有后续修改，请核对备份并手动恢复"
 			}
+			j.Status = "failed"
 			j.NextAction = step.NextAction
 			_ = s.SaveJob(j)
 			return nil // The durable result, rather than process output, owns the failure.
