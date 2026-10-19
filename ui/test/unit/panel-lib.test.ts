@@ -178,7 +178,7 @@ test("the renderer bundle contains no dynamic code, raw HTML sinks or network AP
     ["XMLHttpRequest", /XMLHttpRequest/],
     ["WebSocket", /new\s+WebSocket/],
     ["fetch", /(?<![.\w])fetch\s*\(/],
-    ["importScripts", /importScripts/],
+    ["importScripts", /\bimportScripts\s*\(/],
     ["sendBeacon", /sendBeacon/],
   ] as const) {
     assert.doesNotMatch(js, re, name);

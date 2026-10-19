@@ -474,3 +474,19 @@ progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
 .tool-detail .tabs button.active { background: var(--thumb); color: var(--text); box-shadow: var(--thumb-edge); }
 .playground input[type="number"] { background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 5px 9px; }
 .playground input[type="number"]:focus { outline: none; background: var(--surface); border-color: var(--accent); }
+
+.terminal-page { max-width: 1600px; }
+.terminal-screen { height: 470px; background: #101914; padding: 12px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.terminal-screen .xterm { height: 100%; }
+.terminal-screen .xterm-viewport { border-radius: 6px; }
+.transfer-fields { border: 0; padding: 12px 0 0; }
+.transfer-fields > .row { margin-bottom: 18px; }
+.transfer-job { display: grid; gap: 10px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.transfer-job .stat .value { font-size: 15px; }
+.transfer-job .grow { flex: 1; }
+.transfer-job pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.transfer-job .mono { overflow-wrap: anywhere; }
+.remote-files { max-height: 400px; overflow: auto; margin-top: 16px; }
+@media (max-height: 800px) { .terminal-screen { height: 340px; } }
+
+.transfer-job .bar.full > span { background: var(--accent); }

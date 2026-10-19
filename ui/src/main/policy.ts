@@ -32,14 +32,14 @@ export function panelWebPreferences(preload: string, packaged: boolean): WebPref
 }
 
 /**
- * Strict CSP for the bundled panel: same-origin scripts and styles only, no
- * inline code, no network from the page (the main process owns every
+ * Strict CSP for the bundled panel: same-origin scripts, bundled styles and
+ * per-page nonce-authorized terminal styles. No inline scripts or network from the page (the main process owns every
  * connection), no framing, no plugins.
  */
 export const PANEL_CSP = [
   "default-src 'none'",
   "script-src 'self'",
-  "style-src 'self'",
+  "style-src 'self' 'nonce-__XMESH_STYLE_NONCE__'",
   "img-src 'self' data:",
   "font-src 'self'",
   "connect-src 'none'",
