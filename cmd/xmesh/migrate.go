@@ -21,11 +21,24 @@ func migrate(args []string) error {
 	flags := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	file := flags.String("config", "xmesh.yaml", "待升级配置")
 	state := flags.String("state-dir", "", "节点状态目录")
+	name := flags.String("name", "", "读取已安装服务的实际配置路径")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("migrate 不接受位置参数")
+	}
+	if *name != "" {
+		conflict := false
+		flags.Visit(func(f *flag.Flag) { conflict = conflict || f.Name == "config" || f.Name == "state-dir" })
+		if conflict {
+			return fmt.Errorf("--name 与 --config/--state-dir 不能同时使用")
+		}
+		paths, err := installedMigrationPaths(*name)
+		if err != nil {
+			return err
+		}
+		*file, *state = paths.config, paths.state
 	}
 	path, err := filepath.Abs(*file)
 	if err != nil {

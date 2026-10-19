@@ -139,9 +139,6 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	listeners := []net.Listener{}
 	registry := newGatewayRegistry()
 	management := new(sync.Mutex)
-	if devices != nil {
-		devices.SetAdmin(deviceDrainControl(devices.Authenticate, c.Node.Name, self.Node, a, registry, management))
-	}
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go store.Watch(watchCtx, time.Second)
@@ -342,6 +339,9 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)
 	defer stopCI()
+	if devices != nil {
+		devices.SetAdmin(deviceDrainControl(devices.Authenticate, c.Node.Name, self.Node, a, registry, management, func(bool) { ciMgr.SetDraining(true) }))
+	}
 	defer startControl(controlDeps{management: management, ci: ciMgr, ciAccounts: ciAccounts, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
 		isDraining: func() bool { return registry.draining(c.Node.Name) },
 		drain:      func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },

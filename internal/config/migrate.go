@@ -107,6 +107,9 @@ func mappingValue(node *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 func setMapping(node *yaml.Node, key string, value *yaml.Node) {
+	if node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			node.Content[i+1] = value

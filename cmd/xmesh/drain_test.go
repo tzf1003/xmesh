@@ -7,6 +7,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/agent"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,33 @@ import (
 )
 
 type fakeNetwork struct{ peers []mesh.Peer }
+
+type drainRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f drainRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestControlDrainPreservesFanoutAndCallerCancellation(t *testing.T) {
+	for _, timeout := range []time.Duration{3 * time.Minute, 30 * time.Minute} {
+		ctx, cancel := context.WithCancel(t.Context())
+		client := &control.Client{RequestTimeout: 30 * time.Second, HTTP: &http.Client{Transport: drainRoundTrip(func(r *http.Request) (*http.Response, error) {
+			if deadline, ok := r.Context().Deadline(); ok {
+				if parent, hasParent := ctx.Deadline(); !hasParent || !deadline.Equal(parent) {
+					t.Fatal("fanout deadline capped", deadline)
+				}
+			}
+			cancel()
+			if r.Context().Err() != context.Canceled {
+				t.Fatal("caller cancellation lost")
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"outcomes":[{"device":"one"}]}`))}, nil
+		})}}
+		var out bytes.Buffer
+		if err := runControlDrain(ctx, &out, client, agent.DrainRequest{Scope: "mesh", Drain: "keep"}, timeout); err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+	}
+}
 
 func TestDrainReportsPartialVersion2Outcomes(t *testing.T) {
 	var out bytes.Buffer
