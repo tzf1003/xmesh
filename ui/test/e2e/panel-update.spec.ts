@@ -2,7 +2,7 @@
 // the app's test doubles (XMESH_UI_TEST=1): no network, no installer.
 
 import { type Page, expect, test } from "@playwright/test";
-import { menuHas, type Harness, launch } from "./helpers";
+import { menuHas, type Harness, launch, navigate } from "./helpers";
 
 let h: Harness;
 test.afterEach(async () => {
@@ -12,7 +12,7 @@ test.afterEach(async () => {
 async function openAbout(opts: { publish?: boolean } = {}): Promise<Page> {
   h = await launch({ ...opts });
   const page = await h.openPanel();
-  await page.getByTestId("nav-about").click();
+  await navigate(page, "about");
   await expect(page.getByTestId("page-about")).toBeVisible();
   return page;
 }

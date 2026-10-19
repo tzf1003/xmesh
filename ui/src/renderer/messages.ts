@@ -2,13 +2,16 @@
 // switching `XMESH_UI_LANG=en` shows no Chinese. test/unit/panel-messages.test.ts
 // checks that both tables have the same keys and the same {placeholders}.
 
+import { topologyEn, topologyZh } from "./topology-messages";
+
 export const zh = {
+  ...topologyZh,
   "nav.label": "主导航",
   "nav.overview": "概览",
   "nav.devices": "设备",
   "nav.sessions": "会话",
-  "nav.authz": "授权",
-  "nav.ingress": "入口",
+  "nav.authz": "访问与授权",
+  "nav.ingress": "公网入口",
   "nav.settings": "设置",
   "settings.sub": "首次运行之后也能改的设置：节点名、网络模式、角色、工作目录和禁止目录。保存时由内核校验配置。工作目录、禁止目录、网关与入口角色立即生效；节点名、网络模式和 Agent 角色的改动需要重启内核。",
   "settings.invalidDisk": "配置文件无法解析，设置页暂不可用。请先到「配置」页修正文件。",
@@ -118,6 +121,9 @@ export const zh = {
   "unresponsive.body": "这台机器上有内核的状态文件，但内核没有回应请求。重启内核通常可以恢复。",
   "unresponsive.restart": "重启内核",
   "unresponsive.restartNamed": "重启内核 {name}",
+  "stale.body": "状态文件记录的内核进程已退出。可清理残留状态文件；节点配置会保留。",
+  "stale.cleanupNamed": "清理残留状态：{name}",
+  "stale.adminNamed": "节点 {name} 的系统服务状态需由管理员清理。",
   "mismatch.title": "内核版本不匹配",
   "mismatch.body": "内核 {kernel} 的控制接口版本是 {api}，这个界面不支持。请升级内核或界面，现在只能查看日志。",
   "mismatch.upgrade": "查看升级说明",
@@ -954,6 +960,7 @@ export const zh = {
 export type Key = keyof typeof zh;
 
 export const en: Record<Key, string> = {
+  ...topologyEn,
   "nav.label": "Main navigation",
   "nav.overview": "Overview",
   "nav.devices": "Devices",
@@ -1069,6 +1076,9 @@ export const en: Record<Key, string> = {
   "unresponsive.body": "This machine has a kernel state file, but the kernel does not answer requests. Restarting the kernel usually fixes this.",
   "unresponsive.restart": "Restart kernel",
   "unresponsive.restartNamed": "Restart kernel {name}",
+  "stale.body": "The processes recorded in these state files have exited. Clear the leftover state files; node configurations are kept.",
+  "stale.cleanupNamed": "Remove leftover state: {name}",
+  "stale.adminNamed": "An administrator must clear the system service state for {name}.",
   "mismatch.title": "Kernel version mismatch",
   "mismatch.body": "Kernel {kernel} speaks control API {api}, which this app does not support. Upgrade the kernel or the app. Until then only the logs are available.",
   "mismatch.upgrade": "Upgrade instructions",

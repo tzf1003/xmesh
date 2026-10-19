@@ -56,3 +56,14 @@ func TestBrowserLoginCancelledAndFailedCallback(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestBrowserServiceRequiresGrantedRole(t *testing.T) {
+	for _, st := range []*ipnstate.Status{nil, {}, {Self: &ipnstate.PeerStatus{}}, runningLoginStatus(), runningLoginStatus("tag:peer")} {
+		if err := requireBrowserRole(st); err == nil {
+			t.Fatal("browser identity without granted tag:device was accepted")
+		}
+	}
+	if err := requireBrowserRole(runningLoginStatus("tag:device")); err != nil {
+		t.Fatal(err)
+	}
+}

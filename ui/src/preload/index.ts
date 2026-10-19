@@ -32,6 +32,7 @@ const api: PanelApi = {
   createDenyFile: (request) => invoke("xmesh:create-deny-file", request),
   reloadConfig: () => invoke("xmesh:reload-config"),
   restartUnresponsive: (node) => invoke("xmesh:restart-unresponsive", node),
+  cleanupStale: (node) => invoke("xmesh:cleanup-stale", node),
   selectInstance: (id) => invoke("xmesh:select-instance", id),
   copy: (kind) => invoke("xmesh:copy", kind),
   copyGateway: (request) => invoke("xmesh:copy-gateway", request),

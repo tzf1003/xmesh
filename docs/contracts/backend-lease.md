@@ -30,7 +30,7 @@ stdio 进程退出或 HTTP 连续失败时：
 
 ## CTR-BE-02
 
-内置工具，仅对 `policy: exclusive` 的后端有意义。对 `shared` 或 `per-caller` 调用它们返回 `invalid_args`。
+内置工具，仅对 `policy: exclusive` 的后端有意义。对 `shared` 或 `per-caller` 调用它们返回 `invalid_args`，并带 `reason: not_exclusive`；后端名不存在时同样 `invalid_args`，带 `reason: unknown_backend`。
 
 ### backend.acquire
 

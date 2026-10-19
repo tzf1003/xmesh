@@ -2,13 +2,15 @@ import type { JSX } from "preact";
 import { useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
-import { Badge, Banner, Confirm, Empty, Meter, PageHead } from "../components";
-import { errorText, useLocale, useT } from "../i18n";
+import { Banner, Confirm, PageHead } from "../components";
+import { errorText, useT } from "../i18n";
 import { useRecentCalls } from "../hooks";
-import { formatDuration, formatTime } from "../lib/format";
+import { formatTime } from "../lib/format";
 import { isDegrading } from "../../shared/control";
 import type { ActionResult, PathKind } from "../../shared/ipc";
 import { GatewayCard } from "./gateway/GatewayCard";
+import { Topology } from "./Topology";
+import { Icon } from "../icons";
 
 /** The restart and the settings the kernel could not apply are the bar's (see ApplyBar); the rest is listed here. */
 const listed = (w: { code: string }): boolean => w.code !== "restart_required" && w.code !== "policy_reload_failed";
@@ -34,14 +36,10 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
 
   return (
     <div class="page" data-testid="page-overview">
-      <PageHead title={t("nav.overview")} sub={`${s.hostname} · ${s.os}/${s.arch} · xmesh ${s.control.kernel_version}`}>
+      <PageHead title={t("topology.title")} sub={t("topology.sub")}>
         <div class="row">
-          {s.roles.map((r) => (
-            <Badge key={r} kind="info">
-              {r}
-            </Badge>
-          ))}
-          <Badge>{t(`mode.${s.network.mode}`)}</Badge>
+          <button type="button" class="btn" data-testid="topology-copy-client" onClick={() => { if (s.gateway) void run(getApi().copyGateway({ kind: "codexConfig", url: s.gateway.url }), t("overview.copied")); }} disabled={busy || !s.gateway}><Icon name="copy"/>{t("overview.copyCodex")}</button>
+          <button type="button" class="btn primary" onClick={() => s.network.mode === "tailnet" ? ctx.go("mesh", { meshTab: "onboard" }) : ctx.go("devices")}><Icon name="plus"/>{t("topology.addDevice")}</button>
         </div>
       </PageHead>
 
@@ -66,25 +64,10 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
         </Banner>
       )}
 
-      <section class="card-grid" aria-label={t("overview.quota")}>
-        <div class="card">
-          <Meter used={s.limits.pty_in_use} max={s.limits.pty_max_sessions} label={t("overview.pty")} />
-        </div>
-        <div class="card">
-          <Meter used={s.limits.exec_shared_in_use} max={s.limits.exec_shared} label={t("overview.execShared")} />
-        </div>
-        <div class="card">
-          <Meter used={s.limits.exec_exclusive_in_use} max={s.limits.exec_exclusive} label={t("overview.execExclusive")} />
-        </div>
-        <div class="card stat">
-          <h3>{t("overview.peers")}</h3>
-          <div class="value" data-testid="peers">
-            {s.peers.online} / {s.peers.total}
-          </div>
-          <span class="hint">{t("overview.peersHint")}</span>
-        </div>
-      </section>
-
+      <Topology ctx={ctx} calls={calls}/>
+      <details class="overview-advanced" id="overview-advanced" data-testid="overview-advanced">
+      <summary><Icon name="sliders"/>{t("topology.operations")}<Icon name="chevron"/></summary>
+      <div class="stack">
       <section class="card">
         <h2>{t("overview.control")}</h2>
         <div class="row">
@@ -109,7 +92,7 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
         </p>
       </section>
 
-      {s.gateway && <GatewayCard ctx={ctx} gateway={s.gateway} />}
+      {s.gateway && <div id="gateway-panel"><GatewayCard ctx={ctx} gateway={s.gateway} /></div>}
 
       <section class="card">
         <h2>{t("overview.files")}</h2>
@@ -120,11 +103,8 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
         </div>
       </section>
 
-      <section class="card">
-        <h2>{t("overview.recent")}</h2>
-        <p class="hint">{t("overview.recentHint")}</p>
-        <RecentCalls calls={calls} />
-      </section>
+      </div>
+      </details>
 
       {confirmKill && (
         <Confirm
@@ -140,39 +120,6 @@ export function Overview({ ctx }: { ctx: PageContext }): JSX.Element | null {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function RecentCalls({ calls }: { calls: ReturnType<typeof useRecentCalls> }): JSX.Element {
-  const t = useT();
-  const locale = useLocale();
-  if (calls.length === 0) return <Empty>{t("overview.noCalls")}</Empty>;
-  const rows = calls.slice(-10).reverse();
-  return (
-    <div class="table-wrap">
-      <table data-testid="recent-calls" lang={locale}>
-        <thead>
-          <tr>
-            <th scope="col">{t("col.tool")}</th>
-            <th scope="col">{t("col.device")}</th>
-            <th scope="col">{t("col.caller")}</th>
-            <th scope="col">{t("col.status")}</th>
-            <th scope="col" class="num">{t("col.duration")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((c, i) => (
-            <tr key={i}>
-              <td class="mono">{c.tool}</td>
-              <td>{c.device}</td>
-              <td>{c.oauth_client ?? c.caller}</td>
-              <td>{c.status === "ok" ? <Badge kind="ok">ok</Badge> : <Badge kind="danger">{c.error ?? "error"}</Badge>}</td>
-              <td class="num">{formatDuration(c.duration_ms)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

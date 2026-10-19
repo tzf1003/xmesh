@@ -54,7 +54,7 @@ interface Review {
   content: string;
 }
 
-export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
+export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange?(dirty: boolean): void }): JSX.Element {
   const t = useT();
   const supported = ctx.can("config.read");
   const writable = ctx.can("config.write");
@@ -69,6 +69,11 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const [denyErr, setDenyErr] = useState<ActionError | undefined>();
   const [denyReview, setDenyReview] = useState(false);
   const [denySaved, setDenySaved] = useState(false);
+  useEffect(() => {
+    const mainDirty = !!loaded && !!form && isChanged(formFromConfig(loaded.parsed), form);
+    const base = denyFile?.path === undefined ? cwdPolicy(loaded?.parsed).deny : (parseDenyList(denyFile?.text ?? "") ?? []);
+    onDirtyChange?.(mainDirty || (!!denyFile && denyListText(denyEntries) !== denyListText(base)));
+  }, [loaded, form, denyFile, denyEntries, onDirtyChange]);
 
   // Reads can overlap (a save re-reads what an earlier read is still fetching); only the latest may write the page.
   const loadSeq = useRef(0);

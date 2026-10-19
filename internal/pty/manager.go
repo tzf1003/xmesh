@@ -377,8 +377,19 @@ func (m *Manager) pump(s *Session) {
 	m.mu.Unlock()
 }
 func (s *Session) read(ctx context.Context, cursor uint64, maxBytes int, wait time.Duration) (Object, error) {
-	if maxBytes < 1 || maxBytes > 1<<20 || wait < 0 || wait > 30*time.Second {
+	// Over-large bounds clamp instead of failing, matching exec.output's
+	// limit handling (CTR-PTY-02). Negative values stay invalid.
+	if maxBytes < 0 || wait < 0 {
 		return nil, toolerr.Args("max_bytes/wait_ms")
+	}
+	if maxBytes == 0 {
+		maxBytes = 32768
+	}
+	if maxBytes > 1<<20 {
+		maxBytes = 1 << 20
+	}
+	if wait > 30*time.Second {
+		wait = 30 * time.Second
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()

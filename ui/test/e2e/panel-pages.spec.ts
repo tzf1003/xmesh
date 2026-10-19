@@ -4,8 +4,9 @@
 import { type Page, expect, test } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import type { Capability } from "../../src/shared/control";
-import { type Harness, launch } from "./helpers";
+import { type Harness, launch, navigate } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit", "gateway"];
 const LAN_STATUS = { network: { mode: "lan" as const, node_id: "win-dev-01", tags: ["tag:device"] } };
@@ -22,9 +23,11 @@ async function open(opts: Parameters<typeof launch>[0] = {}, nav?: string): Prom
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
   if (nav) {
-    await page.getByTestId(`nav-${nav}`).click();
+    await navigate(page, nav);
     await expect(page.getByTestId(`page-${nav}`)).toBeVisible();
+    if (nav === "config") await page.getByTestId("config-source-tab").click();
   }
+  if (!nav || nav === "overview") await page.getByTestId("overview-advanced").locator("summary").click();
   return page;
 }
 
@@ -42,7 +45,7 @@ test("every page renders under the CSP without violations", async () => {
   const page = await open({ kernel: { status: LAN_STATUS } });
   const violations = await watchCsp(page);
   for (const id of ["overview", "devices", "sessions", "authz", "ingress", "settings", "config", "audit", "mesh"]) {
-    await page.getByTestId(`nav-${id}`).click();
+    await navigate(page, id);
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }
   // Once a node has a config the wizard leaves the navigation; it is checked on its own below.
@@ -344,9 +347,10 @@ test("panel IPC refuses malformed data operations", async () => {
       await api.queryAudit!({ event: "rm" }),
       await api.runSetup!({ nodeName: "x", mode: "lan", roles: ["root"], workspace: "/w" }),
       await api.pickPath!("/etc"),
+      await api.cleanupStale!("../x"),
     ].map((r) => r.error?.code);
   });
-  expect(codes).toEqual(Array(7).fill("invalid_args"));
+  expect(codes).toEqual(Array(8).fill("invalid_args"));
   expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v1/pats") || r.path.startsWith("/v1/audit"))).toBe(false);
 });
 
@@ -411,4 +415,65 @@ test("wizard: the default browser login completes before installation", async ()
   expect(calls.map((c) => c.op)).toEqual(["setup-browser-login", "setup-cli", "setup-cli"]);
   const install = calls[1]!.arg as string[];
   expect(install.slice(-2)).toEqual(["--state-dir", path.join(h.root, "browser-node")]);
+});
+
+test("leftover kernel state: cleanup removes the manifest and keeps the node configuration", async () => {
+  h = await launch({ publish: false });
+  const child = spawnSync(process.execPath, ["-e", ""]);
+  expect(child.status).toBe(0);
+  const dir = path.join(h.root, "old-node");
+  fs.mkdirSync(dir);
+  const manifest = path.join(dir, "control.json");
+  fs.writeFileSync(manifest, JSON.stringify({ ...h.kernel.manifest(), pid: child.pid, endpoint: `${h.kernel.endpoint}-closed` }));
+  const config = path.join(dir, "xmesh.yaml");
+  fs.writeFileSync(config, "node:\n  name: old-node\n");
+  const page = await h.openPanel();
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await expect(page.getByTestId("state")).toContainText("内核未运行");
+  await expect(page.getByTestId("stale-state")).toContainText("内核进程已退出");
+  await expect(page.getByTestId("start-kernel-old-node")).toBeVisible();
+  await expect(page.getByTestId("restart-unresponsive-old-node")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("stale-state.png") });
+  await page.getByTestId("cleanup-stale-old-node").click();
+  await expect(page.getByTestId("stale-state")).toHaveCount(0);
+  expect(fs.existsSync(manifest)).toBe(false);
+  expect(fs.readFileSync(config, "utf8")).toBe("node:\n  name: old-node\n");
+  await page.getByTestId("start-kernel-old-node").click();
+  await expect.poll(async () => (await h.calls()).filter((c) => c.op === "cli").map((c) => c.arg)).toContain("start");
+  expect(errors).toEqual([]);
+});
+
+test("leftover kernel state without a config still offers cleanup and setup", async () => {
+  h = await launch({ publish: false });
+  const child = spawnSync(process.execPath, ["-e", ""]);
+  expect(child.status).toBe(0);
+  const dir = path.join(h.root, "old-node");
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, "control.json"), JSON.stringify({ ...h.kernel.manifest(), pid: child.pid, endpoint: `${h.kernel.endpoint}-closed` }));
+  const page = await h.openPanel();
+  await expect(page.getByTestId("cleanup-stale-old-node")).toBeVisible();
+  await expect(page.getByTestId("goto-setup")).toBeVisible();
+  await page.getByTestId("cleanup-stale-old-node").click();
+  await expect(page.getByTestId("stale-state")).toHaveCount(0);
+  await expect(page.getByTestId("page-setup")).toBeVisible();
+});
+
+
+test("stale state cleanup stays available alongside a connected node", async () => {
+  h = await launch({ publish: false });
+  const child = spawnSync(process.execPath, ["-e", ""]);
+  expect(child.status).toBe(0);
+  const dir = path.join(h.root, "aa-old");
+  fs.mkdirSync(dir);
+  const manifest = path.join(dir, "control.json");
+  fs.writeFileSync(manifest, JSON.stringify({ ...h.kernel.manifest(), pid: child.pid, endpoint: `${h.kernel.endpoint}-closed` }));
+  h.publish();
+  const page = await h.openPanel();
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
+  await expect(page.getByTestId("cleanup-stale-aa-old")).toBeVisible();
+  await h.clickMenu("action.cleanupStale.aa-old");
+  await expect(page.getByTestId("stale-state")).toHaveCount(0);
+  expect(fs.existsSync(manifest)).toBe(false);
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
 });

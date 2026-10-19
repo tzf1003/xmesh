@@ -177,3 +177,28 @@ func TestCredentialFileRoundTrip(t *testing.T) {
 		t.Fatalf("empty secret accepted: %v", err)
 	}
 }
+
+// Credential rotation must replace an existing file, including on Windows.
+func TestCredentialFileRotation(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "credential.json")
+	for _, access := range []Access{AccessRead, AccessWrite, AccessRead} {
+		cred := Credential{Kind: KindTailscale, Type: CredToken, Secret: "rotation-" + string(access), Access: access}
+		if err := WriteCredentialFile(file, cred); err != nil {
+			t.Fatalf("save %s: %v", access, err)
+		}
+		got, err := ReadCredentialFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Access != access || got.Secret != cred.Secret {
+			t.Fatalf("rotation to %s did not replace credential", access)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Dir(file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "credential.json" {
+		t.Fatalf("temporary files left after rotation: %v", entries)
+	}
+}

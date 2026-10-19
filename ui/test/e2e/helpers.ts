@@ -6,6 +6,13 @@ import { FakeKernel, type FakeKernelOptions } from "../../testserver/server";
 
 export const UI_ROOT = path.resolve(__dirname, "..", "..");
 
+/** Navigate through the disclosure used by the production sidebar. */
+export async function navigate(page: Page, id: string): Promise<void> {
+  const target = page.getByTestId(`nav-${id}`);
+  if (!(await target.isVisible())) await page.getByTestId("nav-advanced").click();
+  await target.click();
+}
+
 export interface Harness {
   app: ElectronApplication;
   root: string;

@@ -23,14 +23,14 @@ func controlTools() []*mcp.Tool {
 		},
 		{
 			Name:        "tools.search",
-			Description: "在某台设备的完整工具表中按子串查找工具，包括默认 tools/list 没有列出的后端工具。返回带前缀的 name 与 description，最多 100 条，truncated 为 true 表示结果被截断。需要 devices:read。",
+			Description: "在某台设备的完整工具表中按子串查找工具，包括默认 tools/list 没有列出的后端工具。返回带前缀的 name、description 与 inputSchema，最多 100 条，truncated 为 true 表示结果被截断。pattern 传 * 列出全部工具。需要 devices:read。",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"device", "pattern"},
 				"properties": map[string]any{
 					"device":  map[string]any{"type": "string", "description": "节点名，或 local（本机）。"},
-					"pattern": map[string]any{"type": "string", "minLength": 1, "description": "大小写不敏感的子串，不是正则；匹配工具名与描述。"},
+					"pattern": map[string]any{"type": "string", "minLength": 1, "description": "大小写不敏感的子串，不是正则；匹配工具名与描述。传 * 列出全部工具。"},
 				},
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
@@ -121,8 +121,12 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 					continue
 				}
 				full := v.g.prefix(device) + "/" + tool.Name
-				if strings.Contains(strings.ToLower(full+" "+tool.Description), strings.ToLower(pattern)) {
-					rows = append(rows, map[string]any{"name": full, "description": tool.Description})
+				if pattern == "*" || strings.Contains(strings.ToLower(full+" "+tool.Description), strings.ToLower(pattern)) {
+					row := map[string]any{"name": full, "description": tool.Description}
+					if tool.InputSchema != nil {
+						row["inputSchema"] = tool.InputSchema
+					}
+					rows = append(rows, row)
 					if len(rows) > 100 {
 						rows = rows[:100]
 						truncated = true

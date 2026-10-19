@@ -4,7 +4,7 @@
 import { type Page, expect, test } from "@playwright/test";
 import type { Capability } from "../../src/shared/control";
 import type { FakeMeshState } from "../../src/main/mesh-fake";
-import { type Harness, launch } from "./helpers";
+import { type Harness, launch, navigate } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
 
@@ -16,7 +16,7 @@ test.afterEach(async () => {
 async function open(opts: { publish?: boolean } = {}): Promise<Page> {
   h = await launch({ kernel: { capabilities: ALL }, ...opts });
   const page = await h.openPanel();
-  await page.getByTestId("nav-mesh").click();
+  await navigate(page, "mesh");
   await expect(page.getByTestId("page-mesh")).toBeVisible();
   return page;
 }
@@ -64,7 +64,7 @@ test("no credential: the page shows the login commands, copies them, and recover
   })();
   await patch({ credential: false });
   const page = await h.openPanel();
-  await page.getByTestId("nav-mesh").click();
+  await navigate(page, "mesh");
   await expect(page.getByTestId("mesh-no-credential")).toBeVisible();
   await expect(page.getByTestId("mesh-no-credential")).toContainText("xmesh mesh login");
   await page.getByTestId("mesh-copy-write").click();

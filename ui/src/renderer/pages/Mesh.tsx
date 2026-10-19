@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Dialog, Empty, PageHead, ResourceView } from "../components";
@@ -39,7 +39,8 @@ export interface MeshTabProps {
  */
 export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
-  const [tab, setTab] = useState<TabId>("devices");
+  const [tab, setTab] = useState<TabId>(ctx.focus?.meshTab ?? "devices");
+  useEffect(() => { if (ctx.focus?.meshTab) setTab(ctx.focus.meshTab); }, [ctx.focus?.meshTab]);
   const { resource, reload } = useResource(() => getApi().mesh({ op: "status" }), [ctx.snapshot.selectedInstance]);
   // After saving a credential, ask for status once more: the answer says whether
   // the key works and which access level it carries.
