@@ -1,0 +1,10 @@
+{
+  "protocol_version": 1,
+  "session_id": "REPLACE_FROM_OPEN",
+  "request_id": "query-user-001",
+  "steps": [
+    {"id":"input","action":"fill","target":{"alias":"username"},"value":"test-user"},
+    {"id":"search","action":"click","target":{"alias":"search"}},
+    {"id":"verify","action":"assert","target":{"alias":"result"},"expect":{"containsText":"test-user"}}
+  ]
+}

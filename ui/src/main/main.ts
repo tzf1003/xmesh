@@ -37,6 +37,11 @@ import { type PanelWindow, createPanelWindow, installSessionHardening, installWe
 
 const UI_ROOT = path.join(__dirname, "..", "..", "..");
 const TEST_MODE = process.env.XMESH_UI_TEST === "1" && !app.isPackaged;
+const BACKGROUND_TEST = TEST_MODE && process.env.XMESH_UI_BACKGROUND_TEST === "1";
+if (BACKGROUND_TEST) {
+  if (process.platform === "darwin") app.setActivationPolicy("prohibited");
+  (globalThis as unknown as { __xmeshUiBackgroundTest: boolean }).__xmeshUiBackgroundTest = true;
+}
 
 /** `dist/renderer` is the esbuild bundle of src/renderer (scripts/build-renderer.mjs). */
 function rendererRoot(): string {
