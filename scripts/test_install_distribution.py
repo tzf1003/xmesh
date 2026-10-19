@@ -11,10 +11,12 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
+from urllib.parse import urlsplit, unquote
 import zipfile
 
 from release_manifest import build, bundles, channel_for, validate
-from build_install_site import build as build_site
+from build_install_site import build as build_site, render_agent_documents, markdown_body
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -68,9 +70,17 @@ class ManifestTests(unittest.TestCase):
             for asset in manifest["assets"]:
                 archive=directory/f"xmesh-offline-{manifest['version']}-{asset['os']}-{asset['arch']}.zip"
                 with zipfile.ZipFile(archive) as bundle:
-                    for name in (asset["name"],"manifest.json","scripts/install.sh","scripts/install.ps1","install.sh","install.ps1","docs/agent/setup.md","llms.txt","docs/operations.md","docs/validation/real-environment-runbook.md"):
+                    for name in (asset["name"],"manifest.json","scripts/install.sh","scripts/install.ps1","install.sh","install.ps1","docs/agent/setup.md","docs/agent/setup.html","docs/agent/README.html","docs/agent/recovery.html","llms.txt","docs/operations.md","docs/validation/real-environment-runbook.md"):
                         self.assertIn(name,bundle.namelist())
                     self.assertEqual(json.loads(bundle.read("manifest.json")),manifest)
+                    for name in bundle.namelist():
+                        if not name.startswith("docs/agent/") or not name.endswith(".html"): continue
+                        parser=Links();parser.feed(bundle.read(name).decode("utf-8"))
+                        for link in parser.links:
+                            parts=urlsplit(link)
+                            if parts.scheme or not parts.path: continue
+                            path=Path(name).parent / unquote(parts.path)
+                            self.assertIn(path.as_posix(),bundle.namelist(),f"{name}: {link}")
 
 class Links(HTMLParser):
     def __init__(self): super().__init__();self.links=[]
@@ -85,20 +95,66 @@ class SiteTests(unittest.TestCase):
             directory=Path(temp);dist=directory/'dist';dist.mkdir();manifest=fixture(dist)
             site=directory/'site'
             version_dir=build_site(ROOT,site,manifest['version'],'tzf1003/xmesh','https://tzf1003.github.io/xmesh',manifest)
-            for page in (site/'index.html',version_dir/'index.html'):
+            for page in site.rglob('*.html'):
                 text=page.read_text(encoding="utf-8");self.assertNotIn('@@',text)
                 parser=Links();parser.feed(text)
                 for link in parser.links:
-                    if link.startswith(('https:','#')):continue
-                    self.assertTrue((page.parent/link).is_file(),f'{page}: {link}')
+                    parts=urlsplit(link)
+                    if parts.scheme or not parts.path:continue
+                    self.assertTrue((page.parent/unquote(parts.path)).is_file(),f'{page}: {link}')
             prompt=(version_dir/'prompt.txt').read_text(encoding="utf-8")
             self.assertIn('/versions/v1.2.3-beta.2/agent/README.md',prompt)
             self.assertIn('plan/job ID',prompt)
             self.assertIn(manifest['version'],(version_dir/'agent/install.md').read_text(encoding="utf-8"))
+            for raw in (version_dir/'agent').glob('*.md'):
+                rendered=raw.with_suffix('.html').read_text(encoding="utf-8")
+                self.assertIn('Raw Markdown',rendered)
+                self.assertIn('href="'+raw.name+'"',rendered)
+                self.assertIn('<h1 ',rendered)
+            self.assertIn('<table>',(version_dir/'agent/recovery.html').read_text(encoding="utf-8"))
+            self.assertIn('<pre><code class="language-json">',(version_dir/'agent/setup.html').read_text(encoding="utf-8"))
+            self.assertIn('agent/install.html',(site/'index.html').read_text(encoding="utf-8"))
             for navigation in (site/'llms.txt',version_dir/'llms.txt'):
                 for link in re.findall(r'\]\(([^)]+)\)',navigation.read_text(encoding="utf-8")):
                     if not link.startswith('https:'):self.assertTrue((navigation.parent/link).is_file())
             self.assertNotIn('arch.value="amd64"', (ROOT/'docs/site/install.js').read_text(encoding="utf-8").split('if(navigator.userAgentData')[0])
+
+    def test_human_documents_escape_html_and_map_local_links(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source=Path(temp)
+            (source/'README.md').write_text('# Guide 指南 <script>\n\n[Setup](setup.md#start) and [external](https://example.org/file.md).\n\n<script>alert("x")</script>\n\n[unsafe](javascript:alert)\n\n```html\n<img src=x onerror=alert(1)>\n```\n\n| Field | Value |\n| --- | --- |\n| **Name** | `a<b` |\n\n- First\n- Second\n',encoding='utf-8')
+            (source/'setup.md').write_text('# Setup\n\n## Start\n',encoding='utf-8')
+            documents=render_agent_documents(source,'v1.2.3-beta.2')
+            rendered=documents['README.html']
+            self.assertIn('指南',rendered)
+            self.assertIn('href="setup.html#start"',rendered)
+            self.assertIn('href="https://example.org/file.md"',rendered)
+            self.assertIn('&lt;script&gt;',rendered)
+            self.assertIn('&lt;img src=x onerror=alert(1)&gt;',rendered)
+            self.assertNotIn('<script>',rendered)
+            self.assertNotIn('href="javascript:',rendered)
+            self.assertIn('<table>',rendered)
+            self.assertIn('<strong>Name</strong>',rendered)
+            self.assertIn('<code>a&lt;b</code>',rendered)
+            self.assertIn('<ul>',rendered)
+            self.assertIn('href="README.md"',rendered)
+
+    def test_site_and_offline_docs_use_utf8_with_legacy_default(self):
+        original_read=Path.read_text
+        original_write=Path.write_text
+        def legacy_read(path,encoding=None,errors=None):
+            return original_read(path,encoding=encoding or 'cp1252',errors=errors)
+        def legacy_write(path,data,encoding=None,errors=None,newline=None):
+            return original_write(path,data,encoding=encoding or 'cp1252',errors=errors,newline=newline)
+        with tempfile.TemporaryDirectory() as temp:
+            directory=Path(temp)
+            with mock.patch.object(Path,'read_text',legacy_read), mock.patch.object(Path,'write_text',legacy_write):
+                manifest=fixture(directory)
+                version_dir=build_site(ROOT,directory/'site',manifest['version'],'tzf1003/xmesh','https://tzf1003.github.io/xmesh',manifest)
+                bundles(directory,manifest,ROOT)
+                self.assertIn('复制提示词',(directory/'site/index.html').read_text(encoding='utf-8'))
+                self.assertIn('请帮助我安装',(version_dir/'prompt.txt').read_text(encoding='utf-8'))
+                self.assertIn('Raw Markdown',(version_dir/'agent/README.html').read_text(encoding='utf-8'))
 
     def test_site_requires_manifest_identity(self):
         with tempfile.TemporaryDirectory() as temp:
