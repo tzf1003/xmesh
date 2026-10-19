@@ -293,13 +293,16 @@ func (p *Pairing) Confirm(ctx context.Context, req PairConfirmation) error {
 // ServerTLS permits untrusted certificates only for the isolated pairing protocol.
 func (p *Pairing) ServerTLS() *tls.Config {
 	strict := p.trust.TLS(p.identity, "", true)
+	normal := strict.GetConfigForClient
 	strict.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		for _, protocol := range hello.SupportedProtos {
 			if protocol == PairALPN {
-				return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{p.identity.Certificate}, ClientAuth: tls.RequestClientCert}, nil
+				cfg := p.identity.tlsConfig()
+				cfg.ClientAuth = tls.RequestClientCert
+				return cfg, nil
 			}
 		}
-		return nil, nil
+		return normal(hello)
 	}
 	return strict
 }
@@ -307,15 +310,15 @@ func (p *Pairing) ServerTLS() *tls.Config {
 // BootstrapTLS authenticates possession of the peer key; the password transcript and
 // optional expected device ID establish which device the user is approving.
 func (p *Pairing) BootstrapTLS() *tls.Config {
-	return &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true,
-		Certificates: []tls.Certificate{p.identity.Certificate}, NextProtos: []string{PairALPN},
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			if len(cs.PeerCertificates) != 1 {
-				return ErrPairProof
-			}
-			return verifyBootstrapCertificate(cs.PeerCertificates[0])
-		},
+	cfg := p.identity.tlsConfig()
+	cfg.InsecureSkipVerify, cfg.NextProtos = true, []string{PairALPN}
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		if len(cs.PeerCertificates) != 1 {
+			return ErrPairProof
+		}
+		return verifyBootstrapCertificate(cs.PeerCertificates[0])
 	}
+	return cfg
 }
 
 func verifyBootstrapCertificate(cert *x509.Certificate) error {

@@ -150,6 +150,18 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	}
 	if supervise {
 		n.workers.Go(n.supervise)
+		n.workers.Go(func() {
+			ticker := time.NewTicker(time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-n.ctx.Done():
+					return
+				case <-ticker.C:
+					_ = n.identity.Refresh(n.ctx, n.stateDir)
+				}
+			}
+		})
 	}
 	n.mu.Lock()
 	n.stopParent = context.AfterFunc(parent, func() { _ = n.Close() })
@@ -224,6 +236,10 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 	}
 	n.mu.Unlock()
 	peers := make([]mesh.Peer, 0, len(devices))
+	aliases, err := routeAliases(devices, n.name)
+	if err != nil {
+		return nil, err
+	}
 	for _, d := range devices {
 		a := n.links.Activity(d.DeviceID)
 		online := a.State == "online" || a.State == "reconnecting"
@@ -236,7 +252,7 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 			online = false
 			a.State = "identity_conflict"
 		}
-		peer := mesh.Peer{ID: d.DeviceID, Name: d.Alias, Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name}
+		peer := mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name}
 		if a.Path.Kind == device.Tailnet {
 			route := routes[pathHost(a.Path.Address)]
 			peer.Direct, peer.Relay, peer.OS = route.direct, route.relay, route.os
@@ -254,6 +270,33 @@ func pathHost(address string) string {
 		return host
 	}
 	return ""
+}
+
+// routeAliases reserves the local node and the gateway's local tool prefix.
+// Existing remote aliases remain occupied while colliding names receive an ID suffix.
+func routeAliases(devices []device.Device, localName string) (map[string]string, error) {
+	used := map[string]bool{localName: true, "local": true}
+	for _, d := range devices {
+		used[d.Alias] = true
+	}
+	aliases := make(map[string]string, len(devices))
+	for _, d := range devices {
+		alias := d.Alias
+		if alias == localName || alias == "local" {
+			for size := 8; ; size += 2 {
+				if size > 60 {
+					return nil, fmt.Errorf("无法为设备分配唯一路由名称")
+				}
+				alias = d.Alias[:min(len(d.Alias), 62-size)] + "-" + d.DeviceID[4:4+size]
+				if !used[alias] {
+					break
+				}
+			}
+		}
+		aliases[d.DeviceID] = alias
+		used[alias] = true
+	}
+	return aliases, nil
 }
 
 func (n *Node) Listen(context.Context) (net.Listener, error) {
@@ -519,17 +562,7 @@ func (n *Node) Addresses(ctx context.Context) ([]netip.Addr, string, error) {
 var ErrNoAddress = errors.New("设备网络地址尚未就绪")
 
 func (n *Node) Funnel() (net.Listener, error) {
-	n.mu.Lock()
-	p := n.providers[device.Tailnet]
-	var server *tsnet.Server
-	if p != nil {
-		server = p.ts
-	}
-	n.mu.Unlock()
-	if server == nil {
-		return nil, ErrNoAddress
-	}
-	return server.ListenFunnel("tcp", ":443")
+	return n.listenTailnetPort(443, true)
 }
 
 // supervise applies one configuration snapshot at a time; providers run independently.

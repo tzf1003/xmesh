@@ -50,7 +50,7 @@ func (a *Agent) Overview() v2.StatusResponse {
 	}
 	out.RestartRequired, out.PolicyReloadFailures = restartState(a.store)
 	out.PolicyReloadFailures += int(cwd.DenyFailures())
-	out.AuthkeyReadable = cfg.Mesh.Mode == "tailnet" && readable(cfg.Mesh.AuthkeyFile)
+	out.AuthkeyReadable = authkeyReadable(cfg)
 	if resolver, e := cwd.New(cfg.Agent.DefaultCWD, cfg.Agent.Workspaces, cfg.Agent.CWDPolicy); e == nil {
 		info := a.info(cfg, identity.Caller{}, resolver)
 		out.Home = resolver.Home
@@ -140,4 +140,11 @@ func (a *Agent) backendLeases() []lease.Lease {
 		}
 	}
 	return out
+}
+
+func authkeyReadable(cfg *config.Config) bool {
+	if cfg.SchemaVersion == 2 {
+		return cfg.Mesh.TailnetEnabled() && readable(cfg.Mesh.Tailnet.AuthkeyFile)
+	}
+	return cfg.Mesh.Mode == "tailnet" && readable(cfg.Mesh.AuthkeyFile)
 }

@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/meshadmin"
 	"golang.org/x/term"
 )
@@ -605,7 +606,7 @@ func meshOnboard(args []string, out io.Writer) error {
 	ttl := fs.Duration("ttl", time.Hour, "key 有效期")
 	ephemeral := fs.Bool("ephemeral", false, "临时节点")
 	user := fs.String("user", "", "Headscale 用户名")
-	keyFile := fs.String("authkey-file", "", "写入 auth key 的文件，对应 mesh.authkey_file")
+	keyFile := fs.String("authkey-file", "", "写入 auth key 的文件，对应 mesh.tailnet.authkey_file")
 	cfg := fs.String("config", "", "xmesh.yaml 路径，仅用于打印后续命令和 --install")
 	state := fs.String("state-dir", "", "传给 install 的状态目录")
 	doInstall := fs.Bool("install", false, "写好 key 后调用 xmesh install")
@@ -619,11 +620,20 @@ func meshOnboard(args []string, out io.Writer) error {
 	if *doInstall && *cfg == "" {
 		return fmt.Errorf("--install 需要 --config")
 	}
+	if *doInstall {
+		candidate, err := config.Load(*cfg)
+		if err != nil {
+			return err
+		}
+		if candidate.SchemaVersion != 2 || !candidate.Mesh.TailnetEnabled() {
+			return fmt.Errorf("请先配置 schema_version: 2 与 mesh.tailnet.enabled: true，再执行 --install")
+		}
+	}
 	if err := createAuthKey(&c, out, *tags, *ttl, false, *ephemeral, *user, *keyFile, *overwrite); err != nil {
 		return err
 	}
 	if !c.json {
-		fmt.Fprintf(out, "在 xmesh.yaml 里设置 mesh.mode: tailnet、mesh.authkey_file: %s\n", *keyFile)
+		fmt.Fprintf(out, "在 xmesh.yaml 里设置 schema_version: 2、mesh.tailnet.enabled: true、mesh.tailnet.control_url 与 mesh.tailnet.authkey_file: %s\n", *keyFile)
 	}
 	args2 := []string{"--config", *cfg}
 	if *state != "" {

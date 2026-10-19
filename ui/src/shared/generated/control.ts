@@ -978,7 +978,7 @@ export interface ConfigReloadResponse {
 }
 export interface ApplyError {
   /**
-   * 没能生效的部分，目前是 gateway。
+   * 没能生效的部分：gateway、ingress、mesh.lan 或 mesh.tailnet。
    */
   section: string;
   /**
@@ -1004,6 +1004,10 @@ export interface DrainRequest {
   mode?: "keep" | "kill";
   scope?: "local" | "device" | "mesh";
   device?: string;
+  /**
+   * Remote drain per-device timeout in milliseconds. Omitted or zero uses 15000; the caller context bounds the whole fanout.
+   */
+  timeout_ms?: number;
 }
 export interface DrainResponse {
   drain: DrainState;

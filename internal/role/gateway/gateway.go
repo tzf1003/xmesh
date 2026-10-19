@@ -33,6 +33,7 @@ type Principal struct {
 	OAuthSession string
 	Scopes       []string
 	Local        bool
+	Ingress      bool
 }
 type Dial func(context.Context, mesh.Peer, Principal, mcpmux.Options) (*mcpmux.Bridge, error)
 type Discover func(context.Context) ([]mesh.Peer, error)
@@ -190,7 +191,7 @@ func (g *Gateway) Update(peers []mesh.Peer) {
 	seen := map[string]bool{}
 	changed := false
 	for _, p := range peers {
-		if p.Name == g.opts.LocalPeer.Name {
+		if (p.ID != "" && p.ID == g.opts.LocalPeer.ID) || (p.ID == "" && p.Name == g.opts.LocalPeer.Name) {
 			continue
 		}
 		if !validName(p.Name) {

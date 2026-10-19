@@ -255,3 +255,72 @@ func TestRemoteDrainUsesDeviceTrustAndPersistentTargetID(t *testing.T) {
 		t.Fatal("revoked administrator drained device", err)
 	}
 }
+
+func TestSameNameDevicesKeepSeparateRoutingIdentity(t *testing.T) {
+	local, _ := node(t, "workstation")
+	remote, _ := node(t, "workstation")
+	if err := local.trust.Grant(t.Context(), remote.identity.Document("workstation"), []string{"tag:peer", "tag:device"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	peers, err := local.Peers(t.Context())
+	if err != nil || len(peers) != 1 {
+		t.Fatal(peers, err)
+	}
+	p := peers[0]
+	if p.ID != remote.identity.ID || p.Name == local.name || p.DisplayName != local.name || len(p.Name) > 63 {
+		t.Fatalf("same-name device lost its route: %+v", p)
+	}
+	again, err := local.Peers(t.Context())
+	if err != nil || again[0].Name != p.Name {
+		t.Fatal("route changed", again, err)
+	}
+	aliases, err := routeAliases([]device.Device{
+		{DeviceID: remote.identity.ID, Alias: "workstation"},
+		{DeviceID: local.identity.ID, Alias: p.Name},
+	}, "workstation")
+	if err != nil || aliases[remote.identity.ID] == p.Name || aliases[local.identity.ID] != p.Name {
+		t.Fatal("route alias collision", aliases, err)
+	}
+}
+
+func TestFunnelWaitsForProviderAndClosesWhilePending(t *testing.T) {
+	n, cfg := node(t, "funnel-node")
+	cfg.Mesh.Tailnet.Enabled = true
+	n.Reconfigure(cfg.Mesh)
+	listener, err := n.Funnel()
+	if err != nil {
+		t.Fatal("Funnel rejected normal provider startup", err)
+	}
+	accepted := make(chan error, 1)
+	go func() { _, err := listener.Accept(); accepted <- err }()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-accepted:
+		if err == nil {
+			t.Fatal("closed listener accepted a connection")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending Funnel listener did not stop")
+	}
+}
+
+func TestNetworkSettleReportsProviderApplyErrors(t *testing.T) {
+	n, cfg := node(t, "settle-node")
+	n.mu.Lock()
+	n.providers[device.LAN] = &provider{cfg: cfg.Mesh, err: "LAN interface is unavailable"}
+	n.mu.Unlock()
+	defer func() { n.mu.Lock(); delete(n.providers, device.LAN); n.mu.Unlock() }()
+	problems := n.Settle(t.Context())
+	if len(problems) != 1 || problems[0].Section != "mesh.lan" || problems[0].Message != "LAN interface is unavailable" {
+		t.Fatal(problems)
+	}
+	n.mu.Lock()
+	n.providers[device.LAN].ready = true
+	n.providers[device.LAN].err = ""
+	n.mu.Unlock()
+	if problems := n.Settle(t.Context()); len(problems) != 0 {
+		t.Fatal(problems)
+	}
+}

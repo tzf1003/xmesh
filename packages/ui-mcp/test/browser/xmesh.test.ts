@@ -57,6 +57,7 @@ for (const mode of ["mock", "real"] as const)
             protocol_version: 1,
             session_id: session,
             request_id: "real-heartbeat",
+            timeout_ms: 45000,
             code: `export default async ({ page, step, expect }) => {
               await step("connected", () => expect(page.locator('[data-testid="state"][data-state="ok"], [data-testid="state"][data-state="degraded"]')).toBeVisible());
               await step("control-through-idle", async () => {
@@ -67,10 +68,19 @@ for (const mode of ["mock", "real"] as const)
                   await new Promise(resolve => setTimeout(resolve, 25));
                 } while (Date.now() < until);
               });
+              await step("control-after-idle", async () => {
+                await new Promise(resolve => setTimeout(resolve, 2500));
+                const checked = await page.evaluate(async () => {
+                  const config = await window.xmesh.getConfig();
+                  if (!config.ok) return config;
+                  return window.xmesh.putConfig({ content: config.data.content, etag: config.data.etag, dryRun: true });
+                });
+                expect(checked.ok, JSON.stringify(checked.error)).toBe(true);
+              });
             };`,
           }, true);
-          const stable = await finished(controller, heartbeat.run_id, 15000);
-          assert.equal(stable.status, "passed", JSON.stringify(stable.error));
+          const stable = await finished(controller, heartbeat.run_id, 60000);
+          assert.equal(stable.status, "passed", JSON.stringify(stable));
         }
         const request = controller.submit({
           protocol_version: 1,

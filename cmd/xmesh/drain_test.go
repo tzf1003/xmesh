@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"net/http"
@@ -96,5 +97,40 @@ func Test_CTRGW05_DrainCommandFansOut(t *testing.T) {
 	}
 	if err = runDrain(context.Background(), &out, fakeNetwork{}, agent.DrainRequest{Scope: "mesh"}, time.Second); err == nil {
 		t.Fatal("an empty mesh must not look drained")
+	}
+}
+
+type cliRemoteDrainHost struct {
+	cliHost
+	received chan v2.DrainRequest
+}
+
+func (h *cliRemoteDrainHost) RemoteDrain(_ context.Context, req v2.DrainRequest) ([]v2.DrainOutcome, error) {
+	h.received <- req
+	return []v2.DrainOutcome{{Device: "remote"}}, nil
+}
+func TestDrainCommandPassesTimeoutToRunningNode(t *testing.T) {
+	host := &cliRemoteDrainHost{received: make(chan v2.DrainRequest, 1)}
+	configText := "schema_version: 2\n" + strings.Replace(cliConfig, "mesh:\n  mode: lan\n  lan:\n    mdns: true\n", "mesh: {}\n", 1)
+	state, configPath := startKernelStubOptions(t, configText, func(o *control.Options) { o.Host = host })
+	for _, item := range []struct {
+		flag         string
+		milliseconds int64
+	}{{"1s", 1000}, {"45s", 45000}, {"1ns", 1}} {
+		out, err := output(t, func() error {
+			return drain([]string{"--config", configPath, "--state-dir", state, "--scope", "mesh", "--timeout", item.flag})
+		})
+		if err != nil || !strings.Contains(out, "已下线 remote") {
+			t.Fatal(out, err)
+		}
+		req := <-host.received
+		if req.TimeoutMS != item.milliseconds {
+			t.Fatal(item, req)
+		}
+	}
+	for _, value := range []string{"0", "-1s"} {
+		if err := drain([]string{"--scope", "mesh", "--timeout", value}); err == nil {
+			t.Fatal("accepted timeout", value)
+		}
 	}
 }

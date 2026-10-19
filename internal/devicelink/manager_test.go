@@ -373,3 +373,91 @@ func TestManagerCleanShutdownEndsSessionsBeforeRecoveryWindow(t *testing.T) {
 		t.Fatal("clean exit kept the remote logical session recoverable")
 	}
 }
+
+func TestClosedOfflineSessionNotifiesRemoteAfterReconnect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	transport, err := a.manager.Open(ctx, b.id.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []*testNode{a, b} {
+		for _, kind := range []device.PathKind{device.LAN, device.Tailnet} {
+			if err := n.directory.SetProvider(kind, 2, false); err != nil {
+				t.Fatal(err)
+			}
+			n.manager.DisablePath(kind)
+		}
+	}
+	wait := func(condition func() bool) {
+		for deadline := time.Now().Add(3 * time.Second); !condition(); {
+			if time.Now().After(deadline) {
+				t.Fatal("session state did not settle")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	pa, _ := a.manager.peer(b.id.ID)
+	pb, _ := b.manager.peer(a.id.ID)
+	wait(func() bool { pa.mu.Lock(); defer pa.mu.Unlock(); return pa.active == nil })
+	if err := transport.Session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	pa.mu.Lock()
+	retained := len(pa.sessions)
+	pa.mu.Unlock()
+	if retained != 1 {
+		t.Fatal("authenticated close notification was discarded", retained)
+	}
+	for _, pair := range [][2]*testNode{{a, b}, {b, a}} {
+		local, remote := pair[0], pair[1]
+		if err := local.directory.SetProvider(device.LAN, 3, true); err != nil {
+			t.Fatal(err)
+		}
+		trust, _ := local.trust.Find(remote.id.ID)
+		now := time.Now()
+		if err := local.directory.Observe(remote.id.Certificate.Leaf, trust.Generation, device.Path{Kind: device.LAN, Address: remote.lan.URL, BootID: remote.manager.BootID(), ProviderGeneration: 3, VerifiedAt: now, ExpiresAt: now.Add(time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait(func() bool {
+		pa.mu.Lock()
+		first := len(pa.sessions)
+		pa.mu.Unlock()
+		pb.mu.Lock()
+		second := len(pb.sessions)
+		pb.mu.Unlock()
+		return first == 0 && second == 0
+	})
+}
+
+func TestUnattachedIncomingSessionExpiresWithHealthyCarrier(t *testing.T) {
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	transport, err := a.manager.Open(t.Context(), b.id.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.Session.Close()
+	pa, _ := a.manager.peer(b.id.ID)
+	pb, _ := b.manager.peer(a.id.ID)
+	// Model a caller that no longer knows the remote session after reconnect.
+	pa.mu.Lock()
+	delete(pa.sessions, transport.Session.id)
+	pa.mu.Unlock()
+	pb.mu.Lock()
+	remote := pb.sessions[transport.Session.id]
+	remote.attachedEpoch = 0
+	remote.detachedAt = time.Now().Add(-3 * time.Second)
+	pb.signalLocked()
+	pb.mu.Unlock()
+	for deadline := time.Now().Add(time.Second); !remote.session.Closed(); {
+		if time.Now().After(deadline) {
+			t.Fatal("healthy carrier retained an abandoned incoming session")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

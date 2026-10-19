@@ -73,7 +73,8 @@ func startControl(d controlDeps) (stop func()) {
 		options.CIAccounts = d.ciAccounts
 	}
 	if d.roles != nil {
-		options.Applier = d.roles
+		node, _ := d.network.(*connectivity.Node)
+		options.Applier = runtimeApplier{roles: d.roles, network: node}
 		options.IngressNow = d.roles.ingressAdmin
 	}
 	s, e := control.Start(options)

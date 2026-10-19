@@ -160,6 +160,10 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   doc.setIn(["node", "name"], f.nodeName.trim());
   doc.setIn(["node", "roles"], flowList(doc, f.roles));
   doc.setIn(["schema_version"], 2);
+  const ephemeral = doc.getIn(["mesh", "ephemeral"]);
+  if (typeof ephemeral === "boolean" && doc.getIn(["mesh", "tailnet", "ephemeral"]) === undefined) {
+    doc.setIn(["mesh", "tailnet", "ephemeral"], ephemeral);
+  }
   for (const key of ["mode", "control_url", "authkey_file", "auth_method", "ephemeral"]) doc.deleteIn(["mesh", key]);
   doc.setIn(["mesh", "lan", "enabled"], f.mode === "lan" || f.mode === "coexist");
   doc.setIn(["mesh", "tailnet", "enabled"], f.mode === "tailnet" || f.mode === "coexist");
