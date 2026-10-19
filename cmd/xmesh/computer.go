@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -17,6 +15,12 @@ import (
 )
 
 func computerCommand(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "install", "start", "stop", "restart", "uninstall":
+			return withJSON("computer."+args[0], args[1:], func(rest []string) error { return computerService(args[0], rest) })
+		}
+	}
 	if len(args) == 0 || args[0] == "help" {
 		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径]\n      xmesh computer info [--endpoint 本机套接字或管道]")
 		return nil
@@ -40,17 +44,7 @@ func computerCommand(args []string) error {
 			if err != nil {
 				return err
 			}
-			name := "xmesh-computer"
-			if runtime.GOOS == "windows" {
-				name += ".exe"
-			}
-			path = filepath.Join(filepath.Dir(exe), name)
-			if runtime.GOOS == "darwin" {
-				app := filepath.Join(filepath.Dir(exe), "xmesh-computer.app", "Contents", "MacOS", "xmesh-computer")
-				if _, err = os.Stat(app); err == nil {
-					path = app
-				}
-			}
+			path = nativeHelperPath(exe)
 		}
 		b, err := desktopbroker.Start(desktopbroker.Options{StateDir: *state, HelperPath: path, Authorize: *authorize})
 		if err != nil {
@@ -74,6 +68,17 @@ func computerCommand(args []string) error {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(v)
+	case "authorize":
+		c := computer.NewClient(*endpoint)
+		// This client does not acquire the kernel binding, so it must not disconnect
+		// an existing owner after requesting the local system permission prompt.
+		defer c.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := c.Authorize(ctx); err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]bool{"requested": true})
 	default:
 		return fmt.Errorf("未知 computer 子命令: %s", args[0])
 	}

@@ -1,6 +1,9 @@
 use super::Display;
+#[path = "wayland.rs"]
+mod wayland_backend;
 use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
 use std::time::Duration;
+pub use wayland_backend::PortalInput;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -16,7 +19,7 @@ fn wayland() -> bool {
 
 pub fn displays() -> Vec<Display> {
     if wayland() {
-        return vec![];
+        return wayland_backend::displays();
     }
     let Ok((conn, n)) = x11rb::connect(None) else {
         return vec![];
@@ -55,7 +58,10 @@ pub fn displays() -> Vec<Display> {
 }
 
 pub fn screen_permission() -> bool {
-    !wayland() && !displays().is_empty()
+    if wayland() {
+        return wayland_backend::available();
+    }
+    !displays().is_empty()
 }
 pub fn input_permission() -> bool {
     screen_permission()
@@ -86,7 +92,7 @@ pub fn locked() -> bool {
         }
     }
     if wayland() {
-        return true;
+        return !wayland_backend::available();
     }
     if let Ok((conn, n)) = x11rb::connect(None) {
         if let Ok(cookie) = conn.screensaver_query_info(conn.setup().roots[n].root) {
@@ -100,7 +106,7 @@ pub fn locked() -> bool {
 
 pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     if wayland() {
-        return Err("portal_session_required");
+        return wayland_backend::capture(display);
     }
     let (conn, n) = x11rb::connect(None).map_err(|_| "x11_unavailable")?;
     let setup = conn.setup();

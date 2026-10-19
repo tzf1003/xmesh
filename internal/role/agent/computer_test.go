@@ -18,7 +18,7 @@ import (
 type desktopFixture struct{ inputs atomic.Int32 }
 
 func (*desktopFixture) Info(context.Context) (computer.Info, error) {
-	return computer.Info{ProtocolVersion: 1, Available: true, State: "ready", DesktopID: "desktop", Epoch: "epoch", LayoutVersion: "layout"}, nil
+	return computer.Info{ProtocolVersion: 1, Available: true, State: "ready", DesktopID: "desktop", Epoch: "epoch", LayoutVersion: "layout", Capabilities: []string{"screenshot", "pointer", "keyboard", "text"}}, nil
 }
 func (*desktopFixture) Capture(context.Context, computer.CaptureRequest) (computer.Frame, error) {
 	var b bytes.Buffer

@@ -1,9 +1,11 @@
+mod input;
 mod platform;
 mod singleton;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
+use enigo::{Axis, Button, Coordinate, Direction, Key};
 use image::{DynamicImage, ImageFormat, RgbaImage};
+use input::Input;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -122,15 +124,16 @@ impl Runtime {
             "desktop_unavailable"
         } else if platform::locked() {
             "locked"
-        } else if !platform::screen_permission() || !self.input_ready.load(Ordering::Acquire) {
+        } else if !platform::screen_permission() {
             "permission_required"
         } else {
             "ready"
         };
+        let input = self.input_ready.load(Ordering::Acquire);
         json!({"protocol_version":1,"available":state=="ready","state":state,
-            "reason":if state=="permission_required"{"screen_or_input_permission"}else{state},
+            "reason":if state=="permission_required"{"screen_permission"}else if state=="ready"&&!input{"input_permission_required"}else{state},
             "desktop_id":"desktop","desktop_epoch":self.epoch,"layout_version":platform::layout(&displays),
-            "capabilities":if state=="ready"{vec!["screenshot","pointer","keyboard","text"]}else{vec![]},"displays":displays})
+            "capabilities":if state=="ready"&&input{vec!["screenshot","pointer","keyboard","text"]}else if state=="ready"{vec!["screenshot"]}else{vec![]},"displays":displays})
     }
     fn live(&self, token: u64, start: Instant) -> bool {
         token > self.revoked.load(Ordering::Acquire)
@@ -356,7 +359,7 @@ fn pause(runtime: &Runtime, token: u64, start: Instant, millis: u64) -> Result<(
 }
 
 fn action(
-    enigo: &mut Enigo,
+    enigo: &mut Input,
     runtime: &Runtime,
     token: u64,
     start: Instant,
@@ -372,6 +375,9 @@ fn action(
     let pointer = |x, y| mapped(q.frame.as_ref().ok_or("observation_required")?, x, y);
     if !runtime.live(token, start) {
         return Err("cancelled");
+    }
+    if let Some(frame) = q.frame.as_ref() {
+        enigo.select_display(&frame.display_id);
     }
     match a.kind.as_str() {
         "move" | "click" | "scroll" | "drag" => {
@@ -490,18 +496,7 @@ fn action(
 }
 
 fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, authorize: bool) {
-    let settings = Settings {
-        open_prompt_to_get_permissions: authorize,
-        release_keys_when_dropped: true,
-        ..Default::default()
-    };
-    // Linux Portal initialization is a local authorization action, never a remote tool side effect.
-    let may_connect = platform::input_permission() || authorize;
-    let mut input = if may_connect {
-        Enigo::new(&settings).ok()
-    } else {
-        None
-    };
+    let mut input = Input::new(authorize);
     runtime
         .input_ready
         .store(input.is_some(), Ordering::Release);

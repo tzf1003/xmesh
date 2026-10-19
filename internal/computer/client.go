@@ -127,6 +127,9 @@ func (c *Client) Execute(ctx context.Context, r Execution) (ActionResult, error)
 func (c *Client) Release(ctx context.Context, r Execution) error {
 	return c.call(ctx, "release", r, nil)
 }
+
+// Authorize is a local setup operation and is never registered as an MCP tool.
+func (c *Client) Authorize(ctx context.Context) error { return c.call(ctx, "authorize", nil, nil) }
 func (c *Client) Close() error {
 	c.closeOnce.Do(func() {
 		c.once.Do(func() { close(c.done) })

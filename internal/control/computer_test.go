@@ -12,7 +12,7 @@ import (
 type controlDesktop struct{}
 
 func (controlDesktop) Info(context.Context) (computer.Info, error) {
-	return computer.Info{ProtocolVersion: 1, Available: true, State: "ready", DesktopID: "desktop", Epoch: "epoch", LayoutVersion: "layout", Capabilities: []string{"screenshot"}, Displays: []computer.Display{}}, nil
+	return computer.Info{ProtocolVersion: 1, Available: true, State: "ready", DesktopID: "desktop", Epoch: "epoch", LayoutVersion: "layout", Capabilities: []string{"screenshot", "pointer", "keyboard"}, Displays: []computer.Display{}}, nil
 }
 func (controlDesktop) Capture(context.Context, computer.CaptureRequest) (computer.Frame, error) {
 	return computer.Frame{}, nil

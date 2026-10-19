@@ -12,6 +12,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,11 +126,14 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 		return Info{}, err
 	}
 	if info.ProtocolVersion != ProtocolVersion {
+		m.mu.Lock()
+		m.revokeLocked("")
+		m.mu.Unlock()
 		return Info{}, toolerr.New("desktop_unavailable", "桌面执行器协议不兼容", "reason", "protocol_mismatch")
 	}
 	m.mu.Lock()
 	for id, s := range m.sessions {
-		if !info.Available || s.Epoch != info.Epoch {
+		if !info.Available || s.Epoch != info.Epoch || (s.Mode == "control" && !inputCapable(info)) {
 			m.removeLocked(id)
 		}
 	}
@@ -154,6 +158,10 @@ func desktopReady(info Info) error {
 	return nil
 }
 
+func inputCapable(info Info) bool {
+	return slices.Contains(info.Capabilities, "pointer") && slices.Contains(info.Capabilities, "keyboard")
+}
+
 func (m *Manager) ttl(seconds int) (time.Duration, error) {
 	if seconds == 0 {
 		seconds = m.settings.LeaseSeconds
@@ -174,6 +182,9 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	}
 	if err = desktopReady(info); err != nil {
 		return Session{}, err
+	}
+	if !slices.Contains(info.Capabilities, "screenshot") || (r.Mode == "control" && !inputCapable(info)) {
+		return Session{}, toolerr.New("permission_required", "需要系统桌面权限", "reason", "desktop_capability_missing")
 	}
 	if r.DesktopID != "" && r.DesktopID != info.DesktopID {
 		return Session{}, toolerr.New("not_found", "桌面不存在", "name", r.DesktopID)

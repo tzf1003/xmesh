@@ -34,3 +34,18 @@ func TestPermissionAndEpochChangesRevokeControl(t *testing.T) {
 		t.Fatal("locked desktop kept sessions")
 	}
 }
+
+func TestScreenPermissionAllowsObservationWhileInputIsUnavailable(t *testing.T) {
+	m, p := manager(t)
+	p.mu.Lock()
+	p.info.Capabilities = []string{"screenshot"}
+	p.mu.Unlock()
+	_ = open(t, m, "viewer/session", "observe")
+	_, err := m.Open(context.Background(), "actor/session", OpenRequest{Mode: "control"})
+	if code(err) != "permission_required" {
+		t.Fatal(err)
+	}
+	if len(m.Sessions("viewer/session")) != 1 {
+		t.Fatal("input permission affected observation")
+	}
+}

@@ -159,6 +159,33 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	method := strings.TrimPrefix(r.URL.Path, "/v1/")
+	if method == "authorize" {
+		b.mu.Lock()
+		if b.closed {
+			b.mu.Unlock()
+			fail(toolerr.New("desktop_unavailable", "桌面服务已退出"))
+			return
+		}
+		old := b.provider
+		b.provider = nil
+		// Preserve the current kernel binding across local permission setup. Its next
+		// observation sees a new epoch, invalidating all old desktop authority.
+		if old != nil {
+			_ = old.Close()
+		}
+		p, err := computer.StartAuthorizedProcess(b.options.HelperPath)
+		if err == nil {
+			b.provider = p
+			b.last = time.Now()
+		}
+		b.mu.Unlock()
+		if err != nil {
+			fail(toolerr.New("desktop_unavailable", "原生桌面执行器无法启动", "reason", "executor_start_failed"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"requested": true})
+		return
+	}
 	if method != "info" && method != "capture" && method != "execute" && method != "release" && method != "heartbeat" && method != "disconnect" {
 		http.NotFound(w, r)
 		return

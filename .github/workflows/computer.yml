@@ -1,7 +1,7 @@
 name: Computer native executor
 on:
   push:
-    branches: [master]
+    branches: [master, 'codex/**']
     paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', '.github/workflows/computer.yml']
   pull_request:
     paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', '.github/workflows/computer.yml']
@@ -27,7 +27,7 @@ jobs:
           workspaces: computer-native
       - name: Linux dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libxkbcommon-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libxkbcommon-dev libpipewire-0.3-dev libclang-dev xvfb
       - run: cargo fmt --manifest-path computer-native/Cargo.toml --check
       - run: cargo clippy --manifest-path computer-native/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path computer-native/Cargo.toml --locked
