@@ -124,6 +124,7 @@ fn build_macos_background() {
         "AppKit",
         "Foundation",
         "CoreGraphics",
+        "CoreServices",
         "ApplicationServices",
     ] {
         println!("cargo:rustc-link-lib=framework={framework}");

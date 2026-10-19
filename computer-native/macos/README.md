@@ -109,3 +109,17 @@ that an unfocused window cannot redirect native keys to the app's focused window
 Run desktop acceptance sequentially
 because the native executor holds a per-user desktop lock. A locked desktop
 is reported as unavailable for input.
+
+Signed upgrade acceptance supports `--signing-identity <certificate-SHA1>` and
+`--notary-profile <Keychain-profile>` on `ui/scripts/accept-computer-upgrade-macos.mjs`.
+It signs nested code before its parent, compares designated requirements across
+versions, validates hardened runtime/timestamps, and checks notarization and
+stapling after actual DMG replacement. Add `--require-ready` to wait for local
+screen/Accessibility authorization before upgrade and assert it remains usable
+afterward. This mode requires the desktop user to grant the initial permissions.
+
+Local Electron distribution uses `node ui/scripts/package-macos-local.mjs <version>`.
+The script reads signing/profile references from the existing xmesh release
+configuration in Application Support, builds the native helper in a shared Cargo
+cache, bundles it with the kernel, verifies its presence, and signs/notarizes the
+result. `--check` validates identity and profile availability before building.

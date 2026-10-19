@@ -222,6 +222,9 @@ func xmeshAccessibilitySelectAll(pid:pid_t,window:CGWindowID,keys:[String])throw
     var range=CFRange(location:0,length:(text as NSString).length)
     guard let value=AXValueCreate(.cfRange,&range) else{throw ComputerUseError.message("selection_value")}
     try requireUsableComputerUseSession()
+    guard ownedByWindow(element,pid:pid,window:window),
+          let focused=elementAttribute(app,kAXFocusedUIElementAttribute),CFEqual(focused,element)
+    else{throw ComputerUseError.stateUnavailable("focus_changed")}
     AXUIElementSetMessagingTimeout(element,1.0)
     guard AXUIElementSetAttributeValue(element,kAXSelectedTextRangeAttribute as CFString,value) == .success else{throw ComputerUseError.message("selection_failed")}
     return true
