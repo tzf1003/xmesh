@@ -1,12 +1,9 @@
-// Tailnet administration for the panel. Each request becomes a fixed argv for
-// `xmesh mesh ... --json`; there is no shell, every value was validated by
-// parseMeshRequest and is attached with `--flag=value` so a value can never be
-// read as a flag. The control-plane credential is a 0600 JSON file, named with
-// `--credential-file`; it is never in the keychain, so headless hosts work the
-// same way. The one secret this process handles is the one a `login` request
-// carries: it is written to the CLI's stdin, never to argv, and is not kept
-// anywhere after that. The only other secret the CLI produces (a pre-auth key)
-// goes to a 0600 file the user chose, and only the path comes back.
+// Tailnet administration turns validated requests into fixed argv for
+// `xmesh mesh ... --json`. Values use --flag=value and run without a shell.
+// The CLI stores and reads the control-plane credential in a private JSON file.
+// Login secrets go through stdin; pasted DERP tokens use a temporary private
+// file removed after the call. Auth keys are written to the user's chosen file,
+// and their paths are returned to the panel.
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
