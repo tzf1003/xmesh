@@ -94,3 +94,7 @@ Windows 原生输入改用带 VIRTUALDESK 的 SendInput 物理坐标，支持负
 第八轮：提交 `fe7b094` 的原生工作流运行 39212197400 三端全部通过。Windows 除完整输入夹具外，还通过嵌入 PerMonitorV2 manifest 提取检查，以及 SYSTEM 内核经用户 SID 管道取得真实 MCP 截图、执行原生 wait 动作并关闭会话的验收；该 wait 动作验证服务到原生执行链，点击等输入由独立窗口夹具覆盖。macOS 运行实际用户 LaunchAgent 完成安装、启动、原生子进程创建、重启（PID 与 epoch 均改变）、停止和卸载；任务注册和端点清理读回通过。新增同一验收测试并接入 macOS / Windows CI，Windows 新增外部进程修饰键介入测试，等待最新提交运行。
 
 面板增加经真实 MCP 客户端的按需与两秒桌面预览，观察租约逐帧关闭；取消、清屏、离页和后台暂停有明确生命周期。476 项 UI 单元测试与桌面页面三项 Electron / Playwright 交互测试通过；交互使用协议夹具提供的应用窗口截图，证明图片渲染和会话清理，尚未证明真实远端桌面预览。人工检查常规窗口与 900×700 窄窗口，控制与接管按钮位于预览之前，图片没有造成横向溢出。原生采集新增 32 Mi 像素上限，限制应用侧原始像素分配。
+
+第九轮准备：新增真实目标验收脚本 accept_computer.py，校验连续截图的 MCP 图片与元数据、有限控制执行、动作去重 / 查询、续租和关闭；脚本不留存画面。Headscale 一次性环境支持 --computer-helper，由 hs-b 连接用户 Host，分别从 hs-a 的对等 Gateway 和 hs-i 的 OAuth 入口调用真实桌面。Linux 原生 CI 接入该链路；结果待最新工作流验证。既有脚本 24 项与验收脚本 13 项回归通过。
+
+本机 macOS 通过真实 Gateway PAT → Agent → Host → 原生执行器链路运行该脚本，连续收到两张 1280×831 截图（626290 / 626341 字节），有限控制、动作去重 / 查询、续租及关闭通过。默认 Gateway PAT 的 scope 未包含桌面权限时调用被拒绝；验收使用显式授予 computer:control scope 的独立 PAT。该记录证明本机完整 MCP 链路，跨 tailnet 与 OAuth 桌面链路仍待 CI。

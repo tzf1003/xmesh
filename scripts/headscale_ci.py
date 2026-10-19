@@ -28,9 +28,13 @@ import sys
 import tempfile
 import time
 import urllib.request
+from types import SimpleNamespace
 
 from smoke_local import MCP, address, stop_runtime, wait_for_default_token, wait_for_gateway
 from smoke_peer import verify_peer
+from accept_computer import verify_computer
+from accept_net import Endpoint, Session
+from oauth_client import obtain_tokens
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -95,6 +99,7 @@ def main():
     parser.add_argument("--expected-os", default={"linux": "linux", "darwin": "darwin"}.get(sys.platform, "linux"))
     parser.add_argument("--skip-go-test", action="store_true")
     parser.add_argument("--ingress", action="store_true", help="also run the OAuth protocol check through an ingress on hs-a")
+    parser.add_argument("--computer-helper", type=pathlib.Path, help="also verify native desktop images and finite control through peer and OAuth routes")
     options = parser.parse_args()
     headscale, binary = options.headscale.resolve(), options.binary.resolve()
     control = f"http://127.0.0.1:{CONTROL_PORT}"
@@ -145,18 +150,44 @@ def main():
 
             ports = {name: int(address().rsplit(":", 1)[1]) for name in ("hs-a", "hs-b", "hs-i")[:3 if options.ingress else 2]}
             nodes = {}
+            desktop_endpoint = None
+            desktop_pat = None
+            if options.computer_helper:
+                desktop_pat = os.urandom(32).hex()
+                desktop_pat_file = work / "computer-pat"
+                desktop_pat_file.touch(mode=0o600)
+                desktop_pat_file.write_text(desktop_pat)
+                desktop_state = work / "computer"
+                host, host_log = spawn([binary, "computer", "host", "--state-dir", desktop_state,
+                                        "--helper", options.computer_helper.resolve()], "computer-host")
+                deadline = time.monotonic() + 15
+                while True:
+                    assert host.poll() is None, "desktop host exited before readiness"
+                    status_probe = subprocess.run([binary, "computer", "status", "--state-dir", desktop_state],
+                                                  capture_output=True, text=True, timeout=5)
+                    if status_probe.returncode == 0 and json.loads(status_probe.stdout).get("running"):
+                        desktop_endpoint = json.loads(pathlib.Path(host_log.name).read_text().splitlines()[0])["endpoint"]
+                        break
+                    assert time.monotonic() < deadline, "desktop host did not become ready"
+                    time.sleep(.1)
             for name, port in ports.items():
                 node = work / name
                 (node / "workspace").mkdir(parents=True)
                 cfg = xmesh_config(name, key_file, port, control)
                 cfg["agent"].update({"default_cwd": str(node / "workspace"),
                                      "cwd_policy": {"allow": [str(node / "workspace")]}})
+                if name == "hs-b" and desktop_endpoint:
+                    cfg["agent"]["computer"] = {"enabled": True, "endpoint": desktop_endpoint}
+                if name == "hs-a" and desktop_endpoint:
+                    cfg["gateway"]["pats"] = {"computer-test": {"token_file": str(desktop_pat_file),
+                                                                "scopes": ["devices:read", "computer:control:hs-b"]}}
                 command = [binary, "serve", "--config", node / "config.json", "--state-dir", node / "state"]
                 if name == "hs-i":
                     cfg["node"]["roles"].append("ingress")
                     cfg["mesh"]["authkey_file"] = str(ingress_key_file)
                     cfg["ingress"] = {"listen": "tunnel", "oauth": {"issuer": issuer, "clients": {
-                        "codex": {"scopes": ["devices:read", "exec:*"]}}}}
+                        "codex": {"scopes": ["devices:read", "exec:*"]},
+                        **({"computer-test": {"scopes": ["devices:read", "computer:control:hs-b"]}} if desktop_endpoint else {})}}}
                     command += ["--ingress", "--tunnel-listen", tunnel, "--oauth-password-file", password_file]
                 (node / "config.json").write_text(json.dumps(cfg))
                 process, log = spawn(command, name)
@@ -167,6 +198,13 @@ def main():
             results = []
             for source, target in (("hs-a", "hs-b"), ("hs-b", "hs-a")):
                 results.append(verify_peer(nodes[source][2], target, options.expected_os, token=tokens[source]))
+            desktop_checks = []
+            if desktop_endpoint:
+                desktop_client = MCP(nodes["hs-a"][2], desktop_pat)
+                try:
+                    desktop_checks.append({"route": "peer", **verify_computer(desktop_client, "hs-b")})
+                finally:
+                    desktop_client.close()
             for client in clients.values():
                 client.close()
 
@@ -197,8 +235,17 @@ def main():
                 oauth = json.loads(sh(sys.executable, HERE / "oauth_client.py", "--base", tunnel, "--issuer", issuer,
                                       "--password-file", password_file, "--preregistered", "codex",
                                       "--device", "hs-a", "--device", "hs-b"))
+                if desktop_endpoint:
+                    endpoint = Endpoint(issuer + "=" + tunnel)
+                    access = obtain_tokens(endpoint, "computer-test", "devices:read computer:control:hs-b", password_file.read_text())
+                    session = Session(endpoint, access["access_token"])
+                    try:
+                        desktop_checks.append({"route": "oauth-ingress", **verify_computer(SimpleNamespace(request=session.rpc), "hs-b")})
+                    finally:
+                        session.close()
             print(json.dumps({"result": "PASS", "peer_checks": results, "tailnet_probe": probe is not None,
                               "oauth": oauth, "path": "direct",
+                              **({"computer": desktop_checks} if desktop_checks else {}),
                               "checks": ["join", "peer-tools-both-ways"] + (["tailnet-connectivity"] if probe else [])
                               + (["oauth-protocol"] if oauth else [])}))
         except BaseException:
