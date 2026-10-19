@@ -116,8 +116,14 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000));
       if (!(await Promise.race([quit, timeout]))) app.process().kill("SIGKILL");
       await Promise.race([kernel.stop(), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-      fs.rmSync(root, { recursive: true, force: true });
-      fs.rmSync(userData, { recursive: true, force: true });
+      // Chromium can release its Windows profile database handles just after
+      // Electron exits. Use Node's bounded native retry instead of making a
+      // test fail during cleanup with EBUSY.
+      const removeTree = (directory: string): void => {
+        fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+      };
+      removeTree(root);
+      removeTree(userData);
     },
   };
 }
