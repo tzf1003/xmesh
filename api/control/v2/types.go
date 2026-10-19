@@ -34,10 +34,15 @@ type DrainState struct {
 }
 
 type DrainRequest struct {
-	Mode   DrainMode `json:"mode,omitempty"`
-	Scope  string    `json:"scope,omitempty"`
-	Device string    `json:"device,omitempty"`
+	Mode      DrainMode `json:"mode,omitempty"`
+	Scope     string    `json:"scope,omitempty"`
+	Device    string    `json:"device,omitempty"`
+	TimeoutMS int64     `json:"timeout_ms,omitempty"`
 }
+
+// Drain timeouts are expressed in milliseconds; zero uses the default budget.
+const DefaultDrainTimeoutMS int64 = 15_000
+const MaxDrainTimeoutMS int64 = (1<<63 - 1) / 1_000_000
 
 type DrainResponse struct {
 	Drain          DrainState     `json:"drain"`

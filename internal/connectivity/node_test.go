@@ -247,3 +247,30 @@ func TestRemoteDrainUsesDeviceTrustAndPersistentTargetID(t *testing.T) {
 		t.Fatal("revoked administrator drained device", err)
 	}
 }
+
+func TestSameNameDevicesKeepSeparateRoutingIdentity(t *testing.T) {
+	local, _ := node(t, "workstation")
+	remote, _ := node(t, "workstation")
+	if err := local.trust.Grant(t.Context(), remote.identity.Document("workstation"), []string{"tag:peer", "tag:device"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	peers, err := local.Peers(t.Context())
+	if err != nil || len(peers) != 1 {
+		t.Fatal(peers, err)
+	}
+	p := peers[0]
+	if p.ID != remote.identity.ID || p.Name == local.name || p.DisplayName != local.name || len(p.Name) > 63 {
+		t.Fatalf("same-name device lost its route: %+v", p)
+	}
+	again, err := local.Peers(t.Context())
+	if err != nil || again[0].Name != p.Name {
+		t.Fatal("route changed", again, err)
+	}
+	aliases, err := routeAliases([]device.Device{
+		{DeviceID: remote.identity.ID, Alias: "workstation"},
+		{DeviceID: local.identity.ID, Alias: p.Name},
+	}, "workstation")
+	if err != nil || aliases[remote.identity.ID] == p.Name || aliases[local.identity.ID] != p.Name {
+		t.Fatal("route alias collision", aliases, err)
+	}
+}

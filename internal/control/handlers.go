@@ -160,6 +160,10 @@ func (s *Server) startDrain(w http.ResponseWriter, r *http.Request, _ *call) {
 		failWith(w, argError("mode", "mode 只能是 keep 或 kill"))
 		return
 	}
+	if req.TimeoutMS < 0 || req.TimeoutMS > v2.MaxDrainTimeoutMS {
+		failWith(w, argError("timeout_ms", "timeout_ms 超出支持范围"))
+		return
+	}
 	if req.Scope != "" && req.Scope != "local" {
 		if (req.Scope != "device" && req.Scope != "mesh") || (req.Scope == "device") != (req.Device != "") {
 			failWith(w, argError("scope", "远程排空使用 device 与设备 ID，或 mesh"))
@@ -176,6 +180,10 @@ func (s *Server) startDrain(w http.ResponseWriter, r *http.Request, _ *call) {
 			return
 		}
 		writeJSON(w, 200, v2.DrainResponse{Drain: s.currentDrain(), Outcomes: outcomes})
+		return
+	}
+	if req.TimeoutMS != 0 {
+		failWith(w, argError("timeout_ms", "本机排空不使用 timeout_ms"))
 		return
 	}
 	if req.Device != "" {

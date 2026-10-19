@@ -190,7 +190,7 @@ func (g *Gateway) Update(peers []mesh.Peer) {
 	seen := map[string]bool{}
 	changed := false
 	for _, p := range peers {
-		if p.Name == g.opts.LocalPeer.Name {
+		if (p.ID != "" && p.ID == g.opts.LocalPeer.ID) || (p.ID == "" && p.Name == g.opts.LocalPeer.Name) {
 			continue
 		}
 		if !validName(p.Name) {
