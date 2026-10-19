@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -109,6 +110,7 @@ type gatewayRole struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	listen  string
+	failed  bool
 	bound   []net.Listener
 	retired map[net.Listener]bool
 }
@@ -168,6 +170,10 @@ func (r *gatewayRole) serve(listeners []net.Listener) {
 			err := r.server.Serve(l)
 			r.mu.Lock()
 			deliberate := r.retired[l]
+			if !deliberate {
+				r.bound = slices.DeleteFunc(r.bound, func(bound net.Listener) bool { return bound == l })
+				r.failed = true
+			}
 			r.mu.Unlock()
 			if err != nil && !deliberate && !errors.Is(err, http.ErrServerClosed) && r.deps.serveFailed != nil {
 				r.deps.serveFailed(err)
@@ -196,7 +202,17 @@ func (r *gatewayRole) retire() []net.Listener {
 func (r *gatewayRole) rebind(listen string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if listen == r.listen {
+	if listen == r.listen && len(r.bound) > 0 && !r.failed {
+		return nil
+	}
+	if r.failed {
+		r.retire()
+		next, err := r.bind(listen)
+		if err != nil {
+			return err
+		}
+		r.listen, r.failed = listen, false
+		r.serve(next)
 		return nil
 	}
 	next, err := r.bind(listen)
@@ -228,6 +244,9 @@ func (r *gatewayRole) reconfigure(cfg *config.Config) {
 func (r *gatewayRole) bindAddress() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failed || len(r.bound) == 0 {
+		return ""
+	}
 	return r.listen
 }
 

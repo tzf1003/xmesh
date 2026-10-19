@@ -331,3 +331,15 @@ test("stopping the kernel says so when CI jobs are running", async () => {
   assert.ok(!details[0]!.includes("CI"));
   assert.match(details[1]!, /还有 1 个 CI 任务正在运行/);
 });
+
+test("service actions use the manifest node name for an aliased state directory",async()=>{
+ const {controller}=fakeController({...connected(),selectedInstance:"alias"});
+ controller.selectedNode=()=>"real-node";
+ const {platform}=fakePlatform();
+ const nodes:string[]=[];
+ platform.runCli=async(_command,node)=>{nodes.push(node??"");};
+ const actions=new Actions(controller,platform,t,OK_CREDENTIALS);
+ await actions.dispatch({type:"restart-kernel"});
+ await actions.dispatch({type:"stop-kernel"});
+ assert.deepEqual(nodes,["real-node","real-node"]);
+});

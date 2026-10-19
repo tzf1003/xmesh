@@ -123,8 +123,8 @@ function validFileSize(value: string): boolean {
 export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined {
   if (f.maxFileSize !== "unlimited" && !validFileSize(f.maxFileSize.trim())) return "max_file_size";
   if (!NODE_NAME.test(f.nodeName.trim())) return "node_name";
-  if (!isAbsolutePath(f.defaultCwd.trim())) return "default_cwd";
-  if (f.allowDirs.some((d) => !isAbsolutePath(d.trim()))) return "allow_dirs";
+  if (!f.defaultCwd.trim() || /[\x00-\x1f]/.test(f.defaultCwd)) return "default_cwd";
+  if (f.allowDirs.some((d) => !d.trim() || /[\x00-\x1f]/.test(d))) return "allow_dirs";
   if (f.roles.length === 0) return "roles";
   if (f.mode === "tailnet") {
     if (!isHttpsUrl(f.controlUrl.trim())) return "control_url";

@@ -370,6 +370,15 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     });
   }
 
+  /** Service commands use the configured node name, independent of the state directory ID. */
+  selectedNode(): string | undefined {
+    return this.snap.selectedInstance ? this.nodeName(this.snap.selectedInstance) : undefined;
+  }
+
+  nodeName(id:string):string {
+    return this.found.find((i)=>i.id===id)?.manifest.node || id;
+  }
+
   private instanceInfos(): InstanceInfo[] {
     return this.found.map((i) => ({ id: i.id, label: this.labels.get(i.id) ?? (i.manifest.node || i.id) }));
   }

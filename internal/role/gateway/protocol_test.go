@@ -137,3 +137,52 @@ func Test_RPCPrecheckBoundsUnknownLengthBody(t *testing.T) {
 		t.Fatalf("status=%d read=%d", w.Code, body.read)
 	}
 }
+
+func Test_RPCPrecheckRequestShape(t *testing.T) {
+	for _, body := range []string{
+		`null`, `[]`, `42`, `"request"`, `{}`, `{"jsonrpc":"1.0","id":1,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":1,"method":123}`, `{"jsonrpc":"2.0","id":1,"method":null}`,
+		`{"jsonrpc":"2.0","id":{},"method":"ping"}`, `{"jsonrpc":"2.0","id":true,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":1,"method":"ping","params":false}`,
+		`{"jsonrpc":"2.0","id":1,"method":"ping","result":{}}`, `{"jsonrpc":"2.0","id":1}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			if !precheck(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(body))) {
+				t.Fatal("invalid request reached the SDK")
+			}
+			out := rpcBody(t, w.Body.String())
+			errObj, _ := out["error"].(map[string]any)
+			if w.Code != http.StatusBadRequest || errObj["code"] != float64(codeInvalidRequest) || out["id"] != nil {
+				t.Fatalf("want 400/-32600/null, got %d %v", w.Code, out)
+			}
+		})
+	}
+}
+
+func Test_RPCPrecheckNotificationsAndResponses(t *testing.T) {
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","method":"notifications/roots/list_changed"}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":"ping","method":"ping","params":{}}`,
+		`{"jsonrpc":"2.0","id":1,"result":{"roots":[]}}`,
+		`{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"failed"}}`,
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/mcp", strings.NewReader(body))
+		if precheck(w, req) {
+			t.Fatalf("valid message refused: %s: %s", body, w.Body.String())
+		}
+		got, err := io.ReadAll(req.Body)
+		if err != nil || string(got) != body {
+			t.Fatalf("SDK body = %q, %v", got, err)
+		}
+	}
+	for _, method := range []string{"notifications/future", "no/such", ""} {
+		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method})
+		w := httptest.NewRecorder()
+		if !precheck(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(string(body)))) || w.Code != http.StatusAccepted || w.Body.Len() != 0 {
+			t.Fatalf("notification %q: status=%d body=%s", method, w.Code, w.Body.String())
+		}
+	}
+}

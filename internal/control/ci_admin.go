@@ -425,6 +425,10 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		failWith(w, argError("concurrency", "并发数在 1 到 16 之间"))
 		return
 	}
+	if req.ImportDir != "" && req.Concurrency > 1 {
+		failWith(w, reasoned(argError("concurrency", "接管的运行器只有一个实例"), "import_single_instance"))
+		return
+	}
 	if e := validateCiLabels(req.Labels); e != nil {
 		failWith(w, e)
 		return

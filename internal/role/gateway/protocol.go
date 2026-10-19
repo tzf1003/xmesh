@@ -20,22 +20,23 @@ const (
 )
 
 var rpcMethods = map[string]bool{
-	"initialize":                true,
-	"ping":                      true,
-	"logging/setLevel":          true,
-	"completion/complete":       true,
-	"resources/list":            true,
-	"resources/templates/list":  true,
-	"resources/read":            true,
-	"resources/subscribe":       true,
-	"resources/unsubscribe":     true,
-	"prompts/list":              true,
-	"prompts/get":               true,
-	"tools/list":                true,
-	"tools/call":                true,
-	"notifications/initialized": true,
-	"notifications/cancelled":   true,
-	"notifications/progress":    true,
+	"initialize":                       true,
+	"ping":                             true,
+	"logging/setLevel":                 true,
+	"completion/complete":              true,
+	"resources/list":                   true,
+	"resources/templates/list":         true,
+	"resources/read":                   true,
+	"resources/subscribe":              true,
+	"resources/unsubscribe":            true,
+	"prompts/list":                     true,
+	"prompts/get":                      true,
+	"tools/list":                       true,
+	"tools/call":                       true,
+	"notifications/initialized":        true,
+	"notifications/cancelled":          true,
+	"notifications/progress":           true,
+	"notifications/roots/list_changed": true,
 }
 
 // precheck rejects malformed JSON and unknown methods with a JSON-RPC error
@@ -60,16 +61,59 @@ func precheck(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	var probe struct {
-		ID     json.RawMessage `json:"id"`
-		Method string          `json:"method"`
-	}
-	if len(bytes.TrimSpace(body)) == 0 || json.Unmarshal(body, &probe) != nil {
+	if !json.Valid(body) {
 		writeRPCError(w, http.StatusBadRequest, nil, codeParseError, "Parse error")
 		return true
 	}
-	if probe.Method != "" && !rpcMethods[probe.Method] {
-		writeRPCError(w, http.StatusBadRequest, probe.ID, codeMethodNotFound, "Method not found: "+probe.Method)
+	var fields map[string]json.RawMessage
+	err := json.Unmarshal(body, &fields)
+	var version string
+	versionErr := json.Unmarshal(fields["jsonrpc"], &version)
+	if err != nil || fields == nil || versionErr != nil || version != "2.0" || !validRPCID(fields["id"]) {
+		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request")
+		return true
+	}
+	methodRaw, hasMethod := fields["method"]
+	if !hasMethod {
+		// Client responses to server requests belong to the SDK's session.
+		_, hasResult := fields["result"]
+		_, hasError := fields["error"]
+		if hasResult == hasError || len(fields["params"]) != 0 || len(fields["id"]) == 0 {
+			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request")
+			return true
+		}
+		return false
+	}
+	var method string
+	methodErr := json.Unmarshal(methodRaw, &method)
+	params := bytes.TrimSpace(fields["params"])
+	if methodErr != nil || bytes.Equal(bytes.TrimSpace(methodRaw), []byte("null")) || len(fields["result"]) != 0 || len(fields["error"]) != 0 ||
+		(len(params) > 0 && params[0] != '{' && params[0] != '[') {
+		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request")
+		return true
+	}
+	if !rpcMethods[method] {
+		if len(fields["id"]) == 0 {
+			w.WriteHeader(http.StatusAccepted)
+			return true
+		}
+		writeRPCError(w, http.StatusBadRequest, fields["id"], codeMethodNotFound, "Method not found: "+method)
+		return true
+	}
+	return false
+}
+
+// Validate an ID's shape without translating or remapping its original bytes.
+func validRPCID(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	switch value.(type) {
+	case nil, string, float64:
 		return true
 	}
 	return false

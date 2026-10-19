@@ -1,5 +1,5 @@
 name: 发布
-# 推送标签时，为 Windows、Linux、macOS 构建二进制与桌面 UI 安装包，并发布为正式版（Latest）。
+# 推送标签时，为 Windows、Linux、macOS 构建二进制与桌面 UI 安装包，并发布为正式版（Latest 由 GitHub 按版本与日期自动选择）。
 # 所有标签都是正式发布，包括 beta；发布说明取自 .github/release-notes/release.md（英文，__TAG__ 替换为标签），
 # 再附上 GitHub 按提交自动生成的更新列表。
 on:
@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: 标签格式
         run: |
-          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[0-9]+)?$'; then
+          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(beta|rc)\.(0|[1-9][0-9]*))?$'; then
             echo "tag $GITHUB_REF_NAME must look like v0.1.0, v0.1.0-beta.1 or v0.1.0-rc.1" >&2
             exit 1
           fi
@@ -112,5 +112,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/release.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --latest --generate-notes \
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes \
             --title "$GITHUB_REF_NAME" --notes-file notes.md

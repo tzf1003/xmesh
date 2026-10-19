@@ -359,3 +359,10 @@ func Test_PairExportReplacesWithPrivateFile(t *testing.T) {
 		t.Fatalf("%q %v", got, err)
 	}
 }
+
+func Test_ControlIngressClientsRejectsPositionalArguments(t *testing.T) {
+	_, err := output(t, func() error { return controlCommand([]string{"ingress", "clients", "unexpected"}) })
+	if err == nil {
+		t.Fatal("extra positional argument accepted")
+	}
+}

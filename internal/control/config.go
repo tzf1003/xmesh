@@ -225,6 +225,7 @@ func (s *Server) reloadConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 func (s *Server) adoptFileLocked(ctx context.Context, actor v1.Actor, retry bool) (v1.ConfigReloadResponse, error) {
 	snapshot := s.o.Store.RefreshSnapshot()
 	if snapshot.ReadError != nil {
+		s.failures = snapshot.Failures
 		return v1.ConfigReloadResponse{}, snapshot.ReadError
 	}
 	raw := snapshot.Raw

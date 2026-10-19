@@ -1,3 +1,4 @@
+import {execFileSync} from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -122,14 +123,27 @@ export function stoppedNodes(configured: string[], found: Instance[]): string[] 
 }
 
 /** A missing PID proves exit; access errors and invalid PIDs leave the process state unknown. */
-export function kernelGone(pid: number): boolean {
+export function kernelGone(pid: number, startedAt?: string, birth: (pid:number)=>number|undefined = processBirth): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
-    return false;
+    const published=startedAt ? Date.parse(startedAt) : NaN;
+    const created=Number.isFinite(published)?birth(pid):undefined;
+    return created!==undefined && created>published+2000;
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === "ESRCH";
   }
+}
+
+/** Process creation time proves PID reuse; lookup failures keep identity unknown. */
+function processBirth(pid:number): number|undefined {
+  try {
+    const output=process.platform==="win32"
+      ? execFileSync("powershell.exe",["-NoProfile","-NonInteractive","-Command",`(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`],{encoding:"utf8",timeout:2000,windowsHide:true})
+      : execFileSync("ps",["-p",String(pid),"-o","lstart="],{encoding:"utf8",timeout:2000,env:{...process.env,LC_ALL:"C"}});
+    const result=Date.parse(output.trim());
+    return Number.isFinite(result)?result:undefined;
+  }catch{return undefined;}
 }
 
 /**

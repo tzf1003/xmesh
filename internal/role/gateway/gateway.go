@@ -725,7 +725,7 @@ func (v *view) publish(generation uint64) {
 		v.names = append(v.names, full)
 	}
 	sort.Strings(v.names)
-	encoded, _ := json.Marshal([]any{entries, visibility})
+	encoded, _ := json.Marshal([]any{entries, visibility, v.defaultDeviceLocked()})
 	catalog := sha256.Sum256(encoded)
 	same := v.catalog == catalog && v.generation == generation
 	v.catalog = catalog

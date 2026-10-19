@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,7 +45,8 @@ func userTaskAction(action string, c *service.Config) error {
 	name := userTaskName(c.Name, user.User.Sid.String())
 	// A task that was never registered is reported by schtasks in the system language, so ask
 	// it directly: /Query exits 1 when there is no such task.
-	if _, err := taskCommand(directory, "/Query", "/TN", name); err != nil {
+	document, err := taskCommand(directory, "/Query", "/TN", name, "/XML")
+	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() == 1 {
 			return errTaskMissing
@@ -59,7 +63,15 @@ func userTaskAction(action string, c *service.Config) error {
 		return run("/End", "/TN", name)
 	case "restart":
 		// /End fails when the task is not running; restart then just starts it.
-		old, known := runningKernel(c.Name)
+		dir, err := taskStateDir(taskDocumentText(document), c.Name)
+		if err != nil {
+			return err
+		}
+		old, err := control.ReadEndpoint(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		known := err == nil
 		_ = run("/End", "/TN", name)
 		// /End returns before the old kernel has exited. Starting the task at once makes a second
 		// kernel that cannot bind the gateway and agent ports yet: it exits with 1 and nothing
@@ -69,27 +81,52 @@ func userTaskAction(action string, c *service.Config) error {
 				return err
 			}
 		}
+		started := time.Now()
 		if err := run("/Run", "/TN", name); err != nil {
 			return err
 		}
-		if known {
-			return waitKernelStart(c.Name, old.PID, kernelStartLimit)
-		}
-		return nil
+		return waitKernelStart(dir, old, started, kernelStartLimit)
 	}
 	return fmt.Errorf("未知服务操作: %s", action)
 }
 
-// runningKernel is the control endpoint of the kernel that serves the service, read from the
-// default state directory. It reports false when there is none, for instance because the kernel
-// keeps its state in a --state-dir the restart does not know about.
-func runningKernel(serviceID string) (control.Endpoint, bool) {
-	dir, err := app.StateDir(strings.TrimPrefix(serviceID, "xmesh-"))
+// taskStateDir resolves the state directory from the task's actual command line and working
+// directory. Installed tasks created before --state-dir was set retain the per-node default.
+func taskStateDir(document, serviceID string) (string, error) {
+	task, err := parseUserTask(document)
 	if err != nil {
-		return control.Endpoint{}, false
+		return "", err
 	}
-	e, err := control.ReadEndpoint(dir)
-	return e, err == nil
+	args, err := windows.DecomposeCommandLine("xmesh.exe " + task.Actions.Exec.Arguments)
+	if err != nil {
+		return "", err
+	}
+	state := ""
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if arg == "--state-dir" || arg == "-state-dir" {
+			i++
+			if i == len(args) {
+				return "", fmt.Errorf("登录任务的 --state-dir 需要目录")
+			}
+			state = args[i]
+		} else if strings.HasPrefix(arg, "--state-dir=") || strings.HasPrefix(arg, "-state-dir=") {
+			state = strings.SplitN(arg, "=", 2)[1]
+		}
+	}
+	if state == "" {
+		return app.StateDir(strings.TrimPrefix(serviceID, "xmesh-"))
+	}
+	if !filepath.IsAbs(state) {
+		if task.Actions.Exec.WorkingDirectory == "" {
+			return "", fmt.Errorf("登录任务的相对状态目录需要 WorkingDirectory")
+		}
+		state = filepath.Join(task.Actions.Exec.WorkingDirectory, state)
+	}
+	return state, nil
 }
 
 // waitKernelExit returns once the process that wrote e has exited. control.json outlives a
@@ -123,15 +160,21 @@ func waitKernelExit(e control.Endpoint, limit time.Duration) error {
 	return nil
 }
 
-// waitKernelStart checks that the task started a kernel: it publishes a control.json with another
-// PID. Without this a kernel that exits during startup would still make restart report success.
-func waitKernelStart(serviceID string, oldPID int, limit time.Duration) error {
-	for deadline := time.Now().Add(limit); ; {
-		if e, ok := runningKernel(serviceID); ok && e.PID != oldPID {
-			return nil
+// waitKernelStart requires a fresh endpoint and a successful control request before accepting
+// the restarted task, including when the previous kernel had already stopped.
+func waitKernelStart(dir string, old control.Endpoint, started time.Time, limit time.Duration) error {
+	deadline := time.Now().Add(limit)
+	for {
+		if e, err := control.ReadEndpoint(dir); err == nil && e.StartedAt.After(old.StartedAt.Time) && !e.StartedAt.Before(started.Add(-2*time.Second)) {
+			ctx, cancel := context.WithDeadline(context.Background(), deadline)
+			r, err := control.NewClient(e).Do(ctx, "GET", "/v1/status", nil, nil)
+			cancel()
+			if err == nil && r.Error() == nil {
+				return nil
+			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s 内没有看到新内核发布 control.json（进程已变化才算启动），请用 xmesh status 确认或查看节点日志", limit)
+			return fmt.Errorf("内核在 %s 内启动验收超时，请用 xmesh status 确认或查看节点日志", limit)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

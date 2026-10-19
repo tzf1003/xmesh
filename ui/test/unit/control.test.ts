@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   apiMajor,
+  ControlRequestError,
   hasCapability,
   isDegrading,
   isSupportedApiVersion,
@@ -48,6 +49,53 @@ test("every contract StatusResponse fixture parses and keeps its fields", () => 
     const raw = statusFixture(v);
     assert.deepEqual(parseStatus(JSON.parse(JSON.stringify(raw))), raw);
   }
+});
+
+test("manifest endpoints match their local transport", () => {
+  for (const endpoint of ["x.sock", "http://127.0.0.1:7434", "\\\\.\\pipe\\xmesh-node", "/x\0.sock"]) {
+    assert.equal(parseManifest({ endpoint, transport: "unix", api_version: "1.0" }), undefined, endpoint);
+  }
+  for (const endpoint of ["/x.sock", "\\\\remote\\pipe\\xmesh-node", "\\\\.\\pipe\\", "\\\\.\\pipe\\xmesh\0node", "\\\\.\\pipe\\xmesh/node"]) {
+    assert.equal(parseManifest({ endpoint, transport: "pipe", api_version: "1.0" }), undefined, endpoint);
+  }
+  assert.ok(parseManifest({ endpoint: "/tmp/xmesh.sock", transport: "unix", api_version: "1.0" }));
+  assert.ok(parseManifest({ endpoint: "\\\\.\\pipe\\xmesh-node", transport: "pipe", api_version: "1.0" }));
+});
+
+test("status validates fields the shell and renderer consume", () => {
+  const mutations: Array<(raw: Record<string, any>) => void> = [
+    (raw) => { delete raw.network; },
+    (raw) => { raw.network = null; },
+    (raw) => { raw.network.mode = "unknown"; },
+    (raw) => { raw.network.tags = [null]; },
+    (raw) => { raw.control.boot_id = 5; },
+    (raw) => { raw.control.capabilities = [null]; },
+    (raw) => { raw.drain.draining = "false"; },
+    (raw) => { raw.paths.config_file = {}; },
+    (raw) => { raw.limits.pty_in_use = "20"; },
+    (raw) => { raw.peers.online = -1; },
+    (raw) => { raw.roles = [null]; },
+    (raw) => { raw.shells = null; },
+    (raw) => { raw.workspaces = [null]; },
+    (raw) => { raw.backends = [null]; },
+    (raw) => { raw.gateway = null; },
+    (raw) => { raw.gateway = { listen: ":1", url: "http://localhost", auth: "pat", addresses: [null] }; },
+    (raw) => { raw.gateway = { listen: ":1", url: "http://localhost", auth: "pat", access: {} }; },
+    (raw) => { raw.ingress = { listen: "tunnel", issuer: {} }; },
+    (raw) => { raw.ci = { bindings: [null] }; },
+    (raw) => { raw.ci = { bindings: [{ id: "b", target: "o/r", scope: "repo", source: "token", labels: [], concurrency: 1, instances: [null] }] }; },
+  ];
+  for (const mutate of mutations) {
+    const raw = structuredClone(statusFixture());
+    mutate(raw);
+    assert.throws(() => parseStatus(raw), (err: unknown) => err instanceof ControlRequestError && err.code === "internal");
+  }
+});
+
+test("status retains compatibility with gateways preceding reach fields", () => {
+  const raw = JSON.parse(JSON.stringify(statusFixture()));
+  raw.gateway = { listen: "127.0.0.1:7433", url: "http://127.0.0.1:7433/mcp", auth: "pat" };
+  assert.deepEqual(parseStatus(raw).gateway, { ...raw.gateway, access: [], hosts: [], addresses: [] });
 });
 
 test("parseStatus refuses garbage and tolerates a missing capability list", () => {

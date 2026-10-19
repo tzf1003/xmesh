@@ -338,7 +338,8 @@ func (r *roleRuntime) gatewayListen() (listen string, ok bool) {
 	if role == nil {
 		return "", false
 	}
-	return role.bindAddress(), true
+	listen = role.bindAddress()
+	return listen, listen != ""
 }
 
 // ingressAdmin is the running ingress as the control channel manages it; nil while none runs.

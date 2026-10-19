@@ -53,6 +53,7 @@ type Agent struct {
 	fileMu          sync.Mutex
 	transfers       *toolsfs.Transfers
 	closeOnce       sync.Once
+	stopDenyFile    func()
 	watchers        sync.WaitGroup
 	views           map[string]*mcp.Server
 	viewMu          sync.Mutex
@@ -83,6 +84,13 @@ func WithBackendEnv(env *backendenv.Store) Option {
 
 func New(store *config.Store, options ...Option) (*Agent, error) {
 	c := store.Get()
+	stopDenyFile := retainConfiguredDenyFile(store, c)
+	retained := false
+	defer func() {
+		if !retained {
+			stopDenyFile()
+		}
+	}()
 	if _, e := cwd.New(c.Agent.DefaultCWD, c.Agent.Workspaces, c.Agent.CWDPolicy); e != nil {
 		return nil, e
 	}
@@ -95,6 +103,7 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	}
 	reg := identity.NewRegistry()
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
+	a.stopDenyFile = stopDenyFile
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
 	a.transfers = toolsfs.NewTransfers()
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
@@ -115,7 +124,42 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	defer cancel()
 	a.Backends.WaitReady(ctx)
 	go a.supervise(c)
+	retained = true
 	return a, nil
+}
+
+// Retain the current configuration's fallback across cache eviction and hot reloads.
+func retainConfiguredDenyFile(store *config.Store, initial *config.Config) func() {
+	var mu sync.Mutex
+	release := cwd.RetainDenyFile(initial.Agent.CWDPolicy.DenyFile)
+	notified, closed := false, false
+	replace := func(next *config.Config) {
+		keep := cwd.RetainDenyFile(next.Agent.CWDPolicy.DenyFile)
+		release()
+		release = keep
+	}
+	unsubscribe := store.Subscribe(func(next *config.Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		notified = true
+		if !closed {
+			replace(next)
+		}
+	})
+	// Catch a generation adopted before Subscribe. A notification already holds the latest pin.
+	current := store.Get()
+	mu.Lock()
+	if !notified {
+		replace(current)
+	}
+	mu.Unlock()
+	return func() {
+		unsubscribe()
+		mu.Lock()
+		defer mu.Unlock()
+		closed = true
+		release()
+	}
 }
 
 func (a *Agent) supervise(previous *config.Config) {
@@ -577,5 +621,6 @@ func (a *Agent) Close() {
 		a.Backends.Close()
 		a.Leases.Close()
 		a.transfers.Close()
+		a.stopDenyFile()
 	})
 }

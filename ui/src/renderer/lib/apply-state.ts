@@ -44,11 +44,12 @@ export function waitingSettings(paths: string[]): string[] {
  * connected). A save settles the apply errors itself, so while it is shown the status's list is not mixed in; the
  * restart is the kernel's own too, so either source can ask for it.
  */
-export function applyView(fresh: SaveOutcome | undefined, status: StatusResponse | undefined): ApplyView {
-  const restart = (fresh?.restart ?? false) || (status?.restart_required ?? false);
+export function applyView(fresh: SaveOutcome | undefined, status: StatusResponse | undefined, baseline:StatusResponse|undefined=status): ApplyView {
+  const current=fresh && status===baseline ? fresh : undefined;
+  const restart = (current?.restart ?? false) || (status?.restart_required ?? false);
   const waiting = waitingSettings(fresh?.paths ?? []);
-  const problems = fresh ? [...fresh.applyErrors] : (status?.warnings ?? []).filter((w) => w.code === "policy_reload_failed").map((w) => w.message);
-  const loadError = fresh?.loadError;
+  const problems = current ? [...current.applyErrors] : (status?.warnings ?? []).filter((w) => w.code === "policy_reload_failed").map((w) => w.message);
+  const loadError = current?.loadError;
   return { restart, waiting, problems, loadError, applied: fresh !== undefined && !restart && problems.length === 0 && loadError === undefined };
 }
 

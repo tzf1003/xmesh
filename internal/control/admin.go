@@ -207,6 +207,11 @@ func newPatToken() (string, error) {
 
 func patInfo(name string, pat config.PAT) v1.PatInfo {
 	info := v1.PatInfo{Name: name, Scopes: append([]string{}, pat.Scopes...), TokenFile: pat.TokenFile}
+	if pat.TokenFile != "" {
+		if absolute, err := filepath.Abs(pat.TokenFile); err == nil {
+			info.TokenFile = absolute
+		}
+	}
 	if st, err := os.Stat(pat.TokenFile); err == nil {
 		t := v1.At(st.ModTime())
 		info.ModifiedAt = &t

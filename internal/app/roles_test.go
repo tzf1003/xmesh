@@ -327,3 +327,26 @@ func Test_RoleRuntimeReportsAndRetriesAFailedMove(t *testing.T) {
 		t.Fatal("the report outlived the repair")
 	}
 }
+
+func Test_GatewayRoleRebindsAfterListenerFailure(t *testing.T) {
+	addr := address(t)
+	cfg := parseConfig(t, []string{"gateway"}, addr)
+	role, err := startGatewayRole(gatewayDepsFor(t, cfg), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(role.stop)
+	role.mu.Lock()
+	listener := role.bound[0]
+	role.mu.Unlock()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "failed listener no longer serving", func() bool { return role.bindAddress() == "" })
+	if err := role.rebind(addr); err != nil {
+		t.Fatal(err)
+	}
+	if !answers(addr) || role.bindAddress() != addr {
+		t.Fatal("same-address retry did not restore gateway")
+	}
+}

@@ -206,3 +206,43 @@ test("download replacement uses private permissions, keeps hardlinks and restore
     assert.equal(fs.readdirSync(dir).some(name=>name.startsWith(".xmesh-replaced-")),false);
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test("upload and download continue after short file reads and writes",async()=>{
+ const kernel=await FakeKernel.start({playground:true});
+ const workspace=kernel.playground!.enableWorkspace();
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"xmesh-short-io-"));
+ const input=path.join(dir,"source"),output=path.join(dir,"output");
+ const bytes=Buffer.alloc(128*1024,0xa7);fs.writeFileSync(input,bytes);
+ const controller={snapshot:{...EMPTY_SNAPSHOT,selectedInstance:"n",connection:{kind:"connected" as const,status:kernel.currentStatus,peers:[]}},requireCapable:()=>({call:async()=>({pats:kernel.panel.pats})})} as unknown as Pick<ShellController,"snapshot"|"requireCapable">;
+ const playground=new PlaygroundService(controller);
+ const service=new TransferService(playground,controller,{upload:async()=>input,download:async()=>output,overwrite:async()=>true});
+ const nativeOpen=fs.promises.open.bind(fs.promises);
+ const stub=mock.method(fs.promises,"open",async(...args:Parameters<typeof fs.promises.open>)=>{
+  const handle=await nativeOpen(...args);
+  if(args[0]===input) {
+   const read=handle.read.bind(handle);
+   handle.read=((buffer:Buffer,offset=0,length=buffer.length,position:number|null=null)=>read(buffer,offset,Math.min(length,4096),position)) as unknown as typeof handle.read;
+  }
+  if(String(args[0]).includes(".xmesh-download-")) {
+   const write=handle.write.bind(handle);
+   handle.write=((buffer:Buffer,offset=0,length=buffer.length)=>write(buffer,offset,Math.min(length,4096))) as unknown as typeof handle.write;
+  }
+  return handle;
+ });
+ const finish=async(id:string)=>{
+  for(let i=0;i<1000;i++) {
+   const state=await service.request({op:"status",instance:"n"});assert.ok(state.ok);
+   const job=state.data.states!.find(x=>x.id===id)!;
+   if(["complete","failed","cancelled"].includes(job.phase)) {assert.equal(job.phase,"complete",job.error??"");return;}
+   await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  assert.fail("short I/O transfer timed out");
+ };
+ try {
+  const pick=await service.request({op:"pick",instance:"n"});assert.ok(pick.ok);
+  const upload=await service.request({op:"start",instance:"n",device:"local",direction:"upload",path:"/work/file",ticket:pick.data.ticket!});assert.ok(upload.ok);await finish(upload.data.id!);
+  assert.deepEqual(workspace.files.get("/work/file"),bytes);
+  const download=await service.request({op:"start",instance:"n",device:"local",direction:"download",path:"/work/file"});assert.ok(download.ok);await finish(download.data.id!);
+  assert.deepEqual(fs.readFileSync(output),bytes);
+ }finally {stub.mock.restore();service.reset();await playground.close();await kernel.stop();fs.rmSync(dir,{recursive:true,force:true});}
+});

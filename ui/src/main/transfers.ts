@@ -203,8 +203,12 @@ export class TransferService {
         do {
           const amount = chunked ? Math.min(CHUNK, before.size - offset) : before.size;
           const data = Buffer.alloc(amount);
-          const read = (await handle.read(data, 0, amount, offset)).bytesRead;
-          if (read !== amount) throw new Error("Source changed during upload");
+          let read=0;
+          while(read<amount) {
+            const n=(await handle.read(data,read,amount-read,offset+read)).bytesRead;
+            if(!n) throw new Error("Source changed during upload");
+            read+=n;
+          }
           const final = offset + read === before.size;
           if (final) {
             const current = await handle.stat();
@@ -273,8 +277,12 @@ export class TransferService {
           if (bytes.toString("base64") !== body.data || body.bytes !== bytes.length || body.sha256 !== hash(bytes))
             throw new Error("Download chunk checksum mismatch");
           if (chunked && body.file_bytes !== stat.size) throw new Error("Source changed during download");
-          const written = await handle.write(bytes);
-          if (written.bytesWritten !== bytes.length) throw new Error("Incomplete local write");
+          let at=0;
+          while(at<bytes.length) {
+            const written=await handle.write(bytes,at,bytes.length-at);
+            if(!written.bytesWritten) throw new Error("Incomplete local write");
+            at+=written.bytesWritten;
+          }
           digest.update(bytes);
           offset += bytes.length;
           job.state.bytes = offset;

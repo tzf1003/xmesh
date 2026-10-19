@@ -1,5 +1,5 @@
 import type { JSX } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { PageContext } from "../../app";
 import { getApi } from "../../api";
 import { Badge, Banner, Confirm, Dialog, Field } from "../../components";
@@ -285,20 +285,25 @@ function RepoPicker({ accountId, picked, onPick, disabled }: { accountId: string
   const [repos, setRepos] = useState<CiRepo[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | { error: ActionError }>("loading");
+  const generation=useRef(0);
 
   const load = async (query: string, page?: string): Promise<void> => {
+    const seq=++generation.current;
     setState("loading");
     const r = await getApi().ci({ op: "repos", id: accountId, ...(query !== "" && { q: query }), ...(page !== undefined && { page }) });
+    if(seq!==generation.current) return;
     if (!r.ok) return setState({ error: r.error });
     setRepos((prev) => (page === undefined ? r.data.repos : [...prev, ...r.data.repos]));
     setNext(r.data.next_page);
     setState("ready");
   };
   useEffect(() => {
+    generation.current++;
+    setRepos([]);setNext(null);setState("loading");
     if (accountId === "") return;
     // The search runs shortly after typing stops, so each keystroke is not a request to GitHub.
     const timer = setTimeout(() => void load(q.trim()), q === "" ? 0 : 350);
-    return () => clearTimeout(timer);
+    return () => {clearTimeout(timer);generation.current++;};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, q]);
 

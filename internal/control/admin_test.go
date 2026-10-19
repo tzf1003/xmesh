@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/mesh"
 )
 
@@ -234,6 +235,35 @@ type fakeIngress struct {
 	clients  map[string]bool
 	password string
 	failWith error
+}
+
+func Test_ControlPatsReportAbsoluteTokenPath(t *testing.T) {
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenFile := filepath.Join(t.TempDir(), "operator.token")
+	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("a", 40)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(workingDir, tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An inherited PWD may name a different directory than the process actually uses.
+	t.Setenv("PWD", t.TempDir())
+	f := newFixtureConfig(t, gatewayConfig+"  pats:\n    operator:\n      token_file: "+relative+"\n      scopes: [\"devices:read\"]\n")
+	var listed v1.PatList
+	decodeAs(t, f.ok("GET", "/v1/pats", nil, "PatList"), &listed)
+	if len(listed.Pats) != 1 || listed.Pats[0].TokenFile != tokenFile || listed.Pats[0].ModifiedAt == nil {
+		t.Fatalf("unexpected token path or modification time: %+v", listed.Pats)
+	}
+	if got := f.store.Get().Gateway.PATs["operator"].TokenFile; got != relative {
+		t.Fatalf("configuration token path changed: %q", got)
+	}
+	if got := patInfo("missing", config.PAT{TokenFile: "missing.token"}).TokenFile; got != filepath.Join(workingDir, "missing.token") {
+		t.Fatalf("missing token path = %q", got)
+	}
 }
 
 func (g *fakeIngress) Issuer() string { return "https://x.example.com" }
