@@ -15,14 +15,24 @@ private var sessionTarget: Action?
 private let bridgeLock = NSLock()
 private enum BridgeStop: Error { case userIntervention, targetChanged, keyboardTargetUnfocused }
 
+func xmeshValidateDelivery(cleanup:Bool,authority:()->Bool,window:()->Bool,intervention:()->Bool)throws{
+    guard authority() else{throw ComputerUseError.stateUnavailable("session_cancelled")}
+    // The Rust cleanup callback keeps the process-start fence while relaxing
+    // lease/permission checks. Releases must also survive window disappearance.
+    if cleanup{return}
+    guard window() else{throw BridgeStop.targetChanged}
+    if intervention(){throw BridgeStop.userIntervention}
+}
+
 func requireUsableComputerUseSession() throws {
-    guard sessionCheck?(sessionContext,releasingInput) == true else { throw ComputerUseError.stateUnavailable("session_cancelled") }
-    if let target=sessionTarget{
+    try xmeshValidateDelivery(cleanup:releasingInput,authority:{sessionCheck?(sessionContext,releasingInput) == true},window:{
+        guard let target=sessionTarget else{return true}
         let windows=currentWindowInfo()
-        guard skyKeyWindowMatchesTarget(windowInfo:windows,windowID:target.window,pid:target.pid) else{throw BridgeStop.targetChanged}
-        if !releasingInput && !targetMatchesWindow(target,windows){throw BridgeStop.targetChanged}
-    }
-    if !releasingInput, let target=sessionTargetPID, xmeshFrontmostPID()==target {throw BridgeStop.userIntervention}
+        return skyKeyWindowMatchesTarget(windowInfo:windows,windowID:target.window,pid:target.pid) && targetMatchesWindow(target,windows)
+    },intervention:{
+        guard let target=sessionTargetPID else{return false}
+        return xmeshFrontmostPID()==target
+    })
 }
 
 func xmeshReleaseInput(_ operation:()->Void){
@@ -354,10 +364,9 @@ private func stamp(_ event:CGEvent,_ point:CGPoint,_ action:Action) throws {
 }
 
 private func releasePointer(_ action:Action,_ point:CGPoint) throws{
-    let windows=CGWindowListCopyWindowInfo([.optionAll],kCGNullWindowID) as? [[String:Any]] ?? []
-    guard skyKeyWindowMatchesTarget(windowInfo:windows,windowID:action.window,pid:action.pid) else{return}
     let previous=releasingInput;releasingInput=true
     defer{releasingInput=previous}
+    try requireUsableComputerUseSession()
     guard let source=CGEventSource(stateID:.privateState),
           let event=CGEvent(mouseEventSource:source,mouseType:.leftMouseUp,mouseCursorPosition:point,mouseButton:.left) else{return}
     try stamp(event,point,action)

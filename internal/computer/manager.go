@@ -59,7 +59,7 @@ type Manager struct {
 	stop        chan struct{}
 	done        chan struct{}
 	workers     sync.WaitGroup
-	authorize   func(string) bool
+	authorize   func(string, string) bool
 	now         func() time.Time
 }
 
@@ -133,6 +133,11 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 	}
 	info, err := m.provider.Info(ctx)
 	if err != nil {
+		// Cancellation belongs to this request, including the background sweep's
+		// deadline. It does not establish a lost desktop or executor identity.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return Info{}, err
+		}
 		m.mu.Lock()
 		m.revokeLocked("")
 		m.mu.Unlock()
@@ -271,6 +276,13 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	if err = m.availableLocked(); err != nil {
 		return Session{}, err
 	}
+	tool := "computer.observe"
+	if r.Mode == "control" {
+		tool = "computer.act"
+	}
+	if err = m.authorizedLocked(caller, tool, ""); err != nil {
+		return Session{}, err
+	}
 	if r.Mode == "control" && r.Interaction == "foreground" && info.DefaultInteraction == "background" && !m.settings.AllowForeground {
 		return Session{}, toolerr.New("policy_denied", "此设备未授权共享前台输入", "rule", "computer.foreground_disabled")
 	}
@@ -313,6 +325,27 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	return s.Session, nil
 }
 
+func (m *Manager) authorizedLocked(caller, tool, sessionID string) error {
+	if m.authorize != nil && !m.authorize(caller, tool) {
+		if sessionID != "" {
+			m.removeLocked(sessionID)
+		}
+		return toolerr.New("policy_denied", "桌面工具授权已撤销", "rule", "computer.authorization_revoked", "tool", tool)
+	}
+	return nil
+}
+
+func (m *Manager) observationLocked(caller string, r SessionRequest) (*ownedSession, error) {
+	s, err := m.sessionLocked(caller, r, false)
+	if err != nil {
+		return nil, err
+	}
+	if err = m.authorizedLocked(caller, "computer.observe", s.ID); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 func (m *Manager) sessionLocked(caller string, r SessionRequest, control bool) (*ownedSession, error) {
 	if err := m.availableLocked(); err != nil {
 		return nil, err
@@ -329,9 +362,8 @@ func (m *Manager) sessionLocked(caller string, r SessionRequest, control bool) (
 		return nil, toolerr.New("conflict", "桌面会话代次已变化", "reason", "desktop_epoch")
 	}
 	if control {
-		if m.authorize != nil && !m.authorize(caller) {
-			m.removeLocked(s.ID)
-			return nil, toolerr.New("policy_denied", "桌面控制授权已撤销", "rule", "computer.authorization_revoked")
+		if err := m.authorizedLocked(caller, "computer.act", s.ID); err != nil {
+			return nil, err
 		}
 		if m.paused {
 			return nil, toolerr.New("policy_denied", "桌面控制已暂停", "rule", "computer.paused")
@@ -369,7 +401,7 @@ func (m *Manager) Observe(ctx context.Context, caller string, r ObserveRequest) 
 		return Frame{}, toolerr.Args("region")
 	}
 	m.mu.Lock()
-	s, err := m.sessionLocked(caller, r.SessionRequest, false)
+	s, err := m.observationLocked(caller, r.SessionRequest)
 	m.mu.Unlock()
 	if err != nil {
 		return Frame{}, err
@@ -393,13 +425,25 @@ func (m *Manager) Observe(ctx context.Context, caller string, r ObserveRequest) 
 		return Frame{}, toolerr.Args("display_id")
 	}
 	r.TargetID = s.TargetID
+	m.mu.Lock()
+	_, err = m.observationLocked(caller, r.SessionRequest)
+	m.mu.Unlock()
+	if err != nil {
+		return Frame{}, err
+	}
+	if err = ctx.Err(); err != nil {
+		return Frame{}, err
+	}
 	f, err := m.provider.Capture(ctx, r.CaptureRequest)
 	if err != nil {
 		return Frame{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, err = m.sessionLocked(caller, r.SessionRequest, false); err != nil {
+	if _, err = m.observationLocked(caller, r.SessionRequest); err != nil {
+		return Frame{}, err
+	}
+	if err = ctx.Err(); err != nil {
 		return Frame{}, err
 	}
 	if f.Epoch != s.Epoch || f.TargetID != s.TargetID || f.LayoutVersion != frameLayout(info, s.TargetID) {

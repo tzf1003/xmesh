@@ -116,10 +116,10 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 		}
 		a.computerUnprotect = policy.ProtectPath(endpoint)
 	}
-	a.Computer.SetAuthorization(func(owner string) bool {
+	a.Computer.SetAuthorization(func(owner, tool string) bool {
 		caller, ok := a.Callers.Get(owner)
 		cfg := a.store.Get()
-		return ok && cfg.Agent.Computer.Enabled && !slices.Contains(cfg.Agent.DisabledTools, "computer.act") && Allowed(cfg, caller, "computer.act", "")
+		return ok && cfg.Agent.Computer.Enabled && !slices.Contains(cfg.Agent.DisabledTools, tool) && Allowed(cfg, caller, tool, "")
 	})
 	var backendOptions []backend.Option
 	if a.backendEnv != nil {
