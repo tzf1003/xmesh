@@ -539,6 +539,8 @@ function formFromRow(row: BackendRow, rows: readonly AuthzRow[]): BackendForm {
     grants: exactGrants(rows, row.name),
     newTag: "",
     favorite: row.favorite,
+    shutdownTimeout: row.shutdownTimeout,
+    processCleanup: row.processCleanup,
     env: [],
   };
 }
