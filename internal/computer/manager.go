@@ -644,6 +644,14 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 		execution.TargetID = s.TargetID
 	}
 	m.mu.Lock()
+	// Info can wait for the native executor while the caller's tool policy
+	// changes. Check the live session again at the dispatch boundary.
+	_, err = m.sessionLocked(s.Owner, r.SessionRequest, true)
+	if err != nil {
+		m.mu.Unlock()
+		result.Error = errorCode(err)
+		return
+	}
 	if m.settings.PauseOnUserInput {
 		serial := s.userInputSerial
 		execution.UserInputSerial = &serial
