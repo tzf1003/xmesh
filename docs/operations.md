@@ -567,3 +567,5 @@ Windows SYSTEM 内核需要显式配置 `agent.computer.endpoint` 指向登录�
 macOS 的真实内核与面板预览验收脚本为 `ui/scripts/accept-computer-macos.mjs`。它要求预先构建 UI、测试配置的 Electron fuses，以及绝对路径的 `XMESH_TEST_COMPUTER_SERVICE_BINARY` 和 `XMESH_TEST_COMPUTER_HELPER`；打开窗口前须取得本机用户同意，并设置 `XMESH_TEST_ALLOW_DESKTOP_UI=1`。脚本使用独立节点、PAT、Host 和用户数据目录，结束后清理。与输入夹具组合运行时还要求输入验收开关；单独运行只观察桌面和验证控制状态。可选 `XMESH_TEST_COMPUTER_UI_EVIDENCE` 仅在清除画面后保存面板截图，原始桌面图像保留在内存。
 
 后台临时窗口验收使用 `scripts/accept_computer_background.py --helper <原生执行器绝对路径> --binary <xmesh绝对路径> --fixture appkit|electron`，须预先取得用户批准并设置 `XMESH_TEST_ALLOW_BACKGROUND_INPUT=1`。该脚本通过真实 Gateway / Agent / Host 执行并验证实际控件变化，监测系统指针和前台应用；AppKit 的 `--occluded` 使用同一测试应用的第二个窗口覆盖目标。桌面验收须串行运行，以遵守每用户单执行器约束。
+
+macOS 升级验收使用 `ui/scripts/accept-computer-upgrade-macos.mjs`，显式设置 `XMESH_TEST_ALLOW_COMPUTER_UPGRADE=1`，并传入绝对路径的 `--old-binary`、`--new-binary`、`--old-helper`、`--new-helper`；两组内核 / 原生执行器的版本须匹配且前后不同。先构建 UI，使脚本运行实际 Updater、macApplier 和 computerHostServices。验收要求本机用户桌面服务未安装，使用临时 bundle、无窗口入口、真实 hdiutil DMG 和原生二进制，校验交接失败后的旧 Host 恢复及成功替换后的新版本 / PID / epoch，最后卸载自己的服务和临时文件。该脚本不请求系统授权；ad-hoc 包升级后报告 permission_required 时，需要本机显式授权，不能据此声明签名发行包的权限延续已通过。

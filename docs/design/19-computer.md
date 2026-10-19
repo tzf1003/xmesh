@@ -177,3 +177,7 @@ PR 合成提交的 Go 运行 39240797123 在 Ubuntu 的 Test_Gate2_TwoMCPClients
 第十八轮：定位并修复 AppKit 原生组合键缺口。普通 AppKit 接受后台 PID 定向键盘事件，统一施加 Chromium 的合成 key-window 流程会使本机 AppKit 丢弃原生按键。现沿用上游框架检测，在保留其菜单快捷键和文字派发器的同时，普通 AppKit 选择直接进程投递，Chromium / Electron 保留原合成流程。原始 vendored 文件与校验和保持不变，仅在构建暂存目录应用该集成条件。
 
 修复后，真实 MCP 链路在 pause_on_user_input=true 下通过 AppKit 与 Electron 的点击、中文、连续追加、辅助功能全选替换、原生 Meta+Backspace、拖拽及滚动。AppKit 目标被同应用第二窗口完全遮挡；随后向第二窗口申请控制并发送原生按键，因应用当前焦点仍属于第一窗口，执行器在投递前返回 failed / background_action_unsupported / executed=0，第一窗口值保持一致。该轮有四个真实用户活动事件且干扰监测通过。此前第十七轮记录的 AppKit 原生键盘缺口由本轮关闭；其他应用、系统版本和完整前台 first-responder 状态仍不由这些夹具推断。
+
+第十九轮：合入 origin/master 的 0a0986b，保留 Runtime / 角色 / 布局与 Computer 入口。合并后 Go 全仓 1327 项竞态测试、UI 488 项单元测试、类型检查、契约正反例与 146/146 符合性检查通过。继承的后台 UI 测试模式下，Computer 四项 Electron E2E 通过（撤销 / 接管、旧内核提示、图片 / 租约清理、窗口选择 / 关闭 / 恢复）；其间记录 316 个用户活动事件，独立指针和前台应用监测通过。截图检查了目标窗口选择器和主分支布局，未包含真实桌面图片。
+
+增加真实 hdiutil DMG 的隔离升级验收。测试用 0.0.1 / 0.0.2 两组实际 Go 内核及 Rust 执行器，在临时 bundle 内运行产品 Updater、macApplier、computerHostServices：模拟交接启动失败后，旧 Host 与原生子进程按新 PID / epoch 恢复；随后真实挂载 DMG、替换 bundle、启动新无窗口入口，恢复并核对新 Host 版本、两级 PID 与桌面代次，卸载及临时文件清理通过。独立监测器确认第一轮升级未改变指针 / 前台应用。应用入口是无窗口回执夹具，发行包签名为 ad-hoc；升级后原生状态为 permission_required，不能作为 TCC 授权跨版本延续或正式 Electron 安装程序 / 签名 / 公证已验收的证据。该测试已加入 macOS 原生 CI，等待新提交运行。
