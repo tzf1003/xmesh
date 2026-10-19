@@ -21,6 +21,8 @@ import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
 import { Overview } from "./pages/Overview";
 import { Settings } from "./pages/Settings";
+import { Terminal } from "./pages/Terminal";
+import { Transfers } from "./pages/Transfers";
 import { Playground } from "./pages/Playground";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
@@ -28,7 +30,7 @@ import { Configuration } from "./pages/Configuration";
 import { Icon } from "./icons";
 import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
-export type PageId = "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
+export type PageId = "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
@@ -258,6 +260,10 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Overview ctx={ctx} />;
     case "devices":
       return <Devices ctx={ctx} />;
+    case "terminal":
+      return <Terminal ctx={ctx} />;
+    case "transfers":
+      return <Transfers ctx={ctx} />;
     case "playground":
       return <Playground ctx={ctx} />;
     case "sessions":

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import { protocol } from "electron";
 import { PANEL_SCHEME, mimeFor, panelHeaders, resolvePanelFile } from "./policy";
@@ -19,8 +20,14 @@ export function servePanel(root: string): void {
     const type = file === undefined ? undefined : mimeFor(file);
     if (file === undefined || type === undefined) return new Response(null, { status: 404 });
     try {
-      const body = await fs.promises.readFile(file);
-      return new Response(request.method === "HEAD" ? null : body, { status: 200, headers: panelHeaders(type) });
+      let body = await fs.promises.readFile(file);
+      const nonce = randomBytes(24).toString("base64");
+      const headers = panelHeaders(type);
+      if (type.startsWith("text/html")) {
+        body = Buffer.from(body.toString("utf8").replaceAll("__XMESH_STYLE_NONCE__", nonce));
+        headers["Content-Security-Policy"] = headers["Content-Security-Policy"]!.replaceAll("__XMESH_STYLE_NONCE__", nonce);
+      }
+      return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
     } catch {
       return new Response(null, { status: 404 });
     }

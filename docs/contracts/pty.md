@@ -100,3 +100,5 @@ idle 的定义：`lastIO` 距今超过 `idle_timeout`。`open`、`write`、`read
 | `cwd` | 启动时的 `resolved_path`，不跟踪后续 `cd` |
 
 列表不包含环形缓冲里的文本。
+
+`pty.list` 顶层响应还包含 `caller_id`，值来自当前认证连接，用于客户端展示自己的身份并对孤儿会话请求 `pty.transfer`。会话列表的每项字段保持上述形状，服务端仍执行所有权和预算校验。

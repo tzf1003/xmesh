@@ -12,6 +12,7 @@ import { fakeMeshRunner, freshFakeMesh } from "./mesh-fake";
 import * as fs from "node:fs";
 import { runBrowserLogin } from "./browser-login";
 import { MeshService, execMeshRunner, meshCredentialPath } from "./mesh-service";
+import { TransferService } from "./transfers";
 import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
@@ -252,14 +253,28 @@ async function start(): Promise<void> {
       return true;
     },
   });
+  const transfers = new TransferService(playground, controller, {
+    upload: async () => {
+      if (TEST_MODE) return answers.picked || undefined;
+      const result = await dialog.showOpenDialog({ properties: ["openFile"] });
+      return result.canceled ? undefined : result.filePaths[0];
+    },
+    download: async (name) => {
+      if (TEST_MODE) return answers.picked || undefined;
+      const result = await dialog.showSaveDialog({ defaultPath: name });
+      return result.canceled ? undefined : result.filePath;
+    },
+    overwrite: async (remote, device) => platform.confirm({ title: controller.snapshot.settings.locale === "en" ? "Overwrite remote file?" : "覆盖远端文件？", detail: `${device}: ${remote}`, confirmLabel: controller.snapshot.settings.locale === "en" ? "Overwrite" : "覆盖", cancelLabel: controller.snapshot.settings.locale === "en" ? "Cancel" : "取消" }),
+  });
   let playgroundKey = "";
   controller.on("change", (s: import("../shared/state").Snapshot) => {
     const c = s.connection;
     const key = JSON.stringify([s.selectedInstance, c.kind, c.kind === "connected" ? c.status.control.boot_id : "", c.kind === "connected" ? c.status.gateway : null]);
-    if (key !== playgroundKey) { playgroundKey = key; void playground.close(); }
+    if (key !== playgroundKey) { playgroundKey = key; transfers.reset(); void playground.close(); }
   });
   registerIpc({
     playground,
+    transfers,
     controller,
     actions,
     service: new PanelService(controller),
@@ -280,6 +295,7 @@ async function start(): Promise<void> {
   });
 
   app.on("before-quit", () => {
+    transfers.reset();
     void playground.close();
     void controller.stop();
   });
