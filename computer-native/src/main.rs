@@ -170,6 +170,8 @@ impl Runtime {
                     "background:pointer",
                     "background:keyboard",
                     "background:text",
+                    "background:drag",
+                    "background:scroll",
                 ]);
             }
         }
@@ -181,10 +183,32 @@ impl Runtime {
             "targets":targets,"default_interaction":if cfg!(target_os="macos"){"background"}else{"foreground"}})
     }
     fn live(&self, token: u64, start: Instant, target: &str) -> bool {
+        self.live_with_permissions(
+            token,
+            start,
+            target,
+            platform::screen_permission(),
+            platform::input_permission(),
+            platform::locked(),
+        )
+    }
+    fn live_with_permissions(
+        &self,
+        token: u64,
+        start: Instant,
+        target: &str,
+        screen: bool,
+        input: bool,
+        locked: bool,
+    ) -> bool {
+        if locked || !screen || !input {
+            // Permission restoration must not resume the authority that was
+            // executing when the desktop became unavailable.
+            self.revoked.fetch_max(token, Ordering::AcqRel);
+            return false;
+        }
         token > self.revoked.load(Ordering::Acquire)
             && start.elapsed() < Duration::from_secs(5)
-            && !platform::locked()
-            && platform::input_permission()
             && (!self.pause_on_input.load(Ordering::Acquire)
                 || (platform::input_monitor_available()
                     && platform::target_input_serial(target)
@@ -879,6 +903,34 @@ fn serve_stdio(authorize: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn permission_loss_fences_the_active_lease_across_permission_restoration() {
+        let runtime = Runtime {
+            epoch: "test".into(),
+            revoked: AtomicU64::new(0),
+            input_ready: AtomicBool::new(true),
+            pause_on_input: AtomicBool::new(false),
+            input_baseline: AtomicU64::new(0),
+            output: Mutex::new(io::stdout()),
+        };
+        let start = Instant::now();
+        assert!(runtime.live_with_permissions(1, start, "", true, true, false));
+        for (index, (screen, input, locked)) in [
+            (false, true, false),
+            (true, false, false),
+            (true, true, true),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let token = index as u64 + 1;
+            assert!(runtime.live_with_permissions(token, start, "", true, true, false));
+            assert!(!runtime.live_with_permissions(token, start, "", screen, input, locked));
+            assert_eq!(runtime.revoked.load(Ordering::Acquire), token);
+            assert!(!runtime.live_with_permissions(token, start, "", true, true, false));
+        }
+        assert!(runtime.live_with_permissions(4, start, "", true, true, false));
+    }
     #[test]
     fn release_request_accepts_the_go_metadata_only_envelope() {
         let request: Execution = serde_json::from_str(
