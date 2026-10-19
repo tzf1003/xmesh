@@ -92,7 +92,13 @@ background-input flag requires the desktop user's prior approval. The harness
 uses an independent observer, stops on unexplained pointer/focus changes,
 verifies native MCP images plus action deduplication/status/renewal/close, and
 removes its private profiles, tokens, processes and temporary files. It saves
-neither desktop images nor user input text. `--cancel-drag` with AppKit and without `--binary` additionally verifies native
+neither desktop images nor user input text. The observer compares opaque AX
+foreground-window/control identity every 50ms and requires an available AX
+baseline before input. It reads no titles, values or selections; this covers
+sampled exposed focus identity rather than transient or app-private focus.
+Synthetic-focus cleanup checks real foreground identity so user activation of
+the target is retained while held input is released.
+`--cancel-drag` with AppKit and without `--binary` additionally verifies native
 lease cancellation after a drag has begun and observes its button release.
 Use `--pause-on-user-input` with `--binary` to exercise the kernel intervention
 policy. `--steps click,text,append,key,native_key,drag,scroll` additionally checks

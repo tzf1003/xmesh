@@ -34,9 +34,23 @@ def main():
     with tempfile.TemporaryDirectory(prefix="xmesh-background-recipes-") as temporary:
         output = pathlib.Path(temporary) / "checks"
         sources = sorted((bridge / "Sources").glob("*.swift")) + sorted(vendor.glob("*.swift"))
+        # Exercise the same hooks as build.rs while preserving pinned snapshots.
+        staged = []
+        for source in sources:
+            if source.name in ("SkyClickSimulation.swift", "SkyKeyboardSimulation.swift"):
+                text = source.read_text()
+                assert text.count("NSWorkspace.shared.frontmostApplication?.processIdentifier") == 1
+                text = text.replace("NSWorkspace.shared.frontmostApplication?.processIdentifier", "xmeshFrontmostPID()")
+                if source.name == "SkyKeyboardSimulation.swift":
+                    text = text.replace("if xmeshFrontmostPID() == target.pid {", "if try xmeshUseDirectKeyboard(target.pid, window: target.windowID) || xmeshFrontmostPID() == target.pid {")
+                assert text.count("spi.endSyntheticTargetFocus(focusContext)") == 2
+                text = text.replace("spi.endSyntheticTargetFocus(focusContext)", "xmeshEndSyntheticTargetFocus(spi, focusContext, pid: target.pid)")
+                source = pathlib.Path(temporary) / source.name
+                source.write_text(text)
+            staged.append(source)
         subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
                         "-module-name", "XmeshBackgroundChecks", "-target", target + "-apple-macosx14.0",
-                        "-o", str(output), *map(str, sources), str(bridge / "Tests/RecipeChecks.swift")], check=True)
+                        "-o", str(output), *map(str, staged), str(bridge / "Tests/RecipeChecks.swift")], check=True)
         imports=subprocess.check_output(["xcrun","nm","-u",str(output)],text=True)
         symbols={line.split()[-1] for line in imports.splitlines() if line.split()}
         assert "_CGEventPostToPid" in symbols, "process-directed delivery was not linked"

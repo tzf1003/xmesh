@@ -71,11 +71,16 @@ class MouseTrace:
             self.thread.join(timeout=2)
 
 
-def pointer_and_focus():
+def pointer_and_focus(fresh_after=None):
     assert observation_file is not None, "desktop observer unavailable"
+    if fresh_after is not None:
+        deadline=time.monotonic()+2
+        while observation_file.stat().st_mtime<=fresh_after:
+            assert time.monotonic()<deadline,"desktop observer did not publish a fresh baseline"
+            time.sleep(.005)
     assert time.time() - observation_file.stat().st_mtime < .5, "desktop observer stale"
     value = json.loads(observation_file.read_text())
-    return value["x"], value["y"], value["pid"],value.get("app_name","")
+    return value["x"], value["y"], value["pid"],value.get("app_name",""),value["focus_generation"],value["focus_available"]
 
 
 def stop_process(child):
@@ -260,10 +265,11 @@ def main():
                             hardware_focus=sum(kind in (1,3,10,12,25) and pid==0 and marker==0 for kind,pid,marker in recent)
                             pointer_changed=current[:2]!=baseline[:2]
                             foreground_changed=current[2]!=baseline[2]
-                            if current[2]!=fixture.pid and own==0 and (not pointer_changed or hardware_motion) and (not foreground_changed or hardware_focus):
+                            control_focus_changed=current[4:]!=baseline[4:]
+                            if current[2]!=fixture.pid and own==0 and (not pointer_changed or hardware_motion) and (not foreground_changed or hardware_focus) and (not control_focus_changed or hardware_focus):
                                 baseline=current
                                 continue
-                            interference.append({"pointer_changed":pointer_changed,"foreground_changed":foreground_changed,"foreground_before_pid":baseline[2],"foreground_after_pid":current[2],"foreground_before_app":baseline[3],"foreground_after_app":current[3],"fixture_pid":fixture.pid,"fixture_activated":current[2]==fixture.pid,"executor_activated":current[2]==native_pid,"hardware_motion_events":hardware_motion,"executor_motion_events":own,"hardware_focus_events":hardware_focus})
+                            interference.append({"pointer_changed":pointer_changed,"foreground_changed":foreground_changed,"control_focus_changed":control_focus_changed,"foreground_focus_available":current[5],"foreground_before_pid":baseline[2],"foreground_after_pid":current[2],"foreground_before_app":baseline[3],"foreground_after_app":current[3],"fixture_pid":fixture.pid,"fixture_activated":current[2]==fixture.pid,"executor_activated":current[2]==native_pid,"hardware_motion_events":hardware_motion,"executor_motion_events":own,"hardware_focus_events":hardware_focus})
                             helper.kill()
                             return
                     except Exception:
@@ -287,8 +293,9 @@ def main():
             mouse_trace.start()
             # The listener must be live before the baseline: user movement
             # during listener setup cannot have provenance in its event list.
-            baseline=pointer_and_focus()
+            baseline=pointer_and_focus(fresh_after=time.time())
             assert baseline[2] not in (fixture.pid,native_pid),"test process became foreground before input"
+            assert baseline[5],"foreground AX focus identity unavailable; no input emitted"
             watch = threading.Thread(target=monitor, daemon=True); watch.start()
             state = json.loads(state_file.read_text())
             assert state.get("occluded",False)==options.occluded
@@ -367,7 +374,7 @@ def main():
                     assert not interference and pointer_and_focus()==baseline
                     print(json.dumps({"background_step":"other-window-key","result":"PASS","state":refused["state"],"executed":0}),flush=True)
                 finally:tool("close",other_identity)
-            print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded,"pause_on_user_input":options.pause_on_user_input, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []),*( ["reject-other-window-key"] if options.reject_other_window_key else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation"]}, ensure_ascii=False))
+            print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded,"pause_on_user_input":options.pause_on_user_input, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []),*( ["reject-other-window-key"] if options.reject_other_window_key else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation", "foreground-AX-control-and-window-identity"]}, ensure_ascii=False))
         finally:
             stopped.set()
             mouse_trace.stop()

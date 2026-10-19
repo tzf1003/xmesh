@@ -80,6 +80,14 @@ fn build_macos_background() {
             } else {
                 source
             };
+            // A user can enter the target during renderer settlement. Cleanup
+            // must preserve their real activation while still releasing input.
+            let original = "spi.endSyntheticTargetFocus(focusContext)";
+            assert_eq!(source.matches(original).count(), 2);
+            let source = source.replace(
+                original,
+                "xmeshEndSyntheticTargetFocus(spi, focusContext, pid: target.pid)",
+            );
             let staged = output.join(file.file_name().unwrap());
             std::fs::write(&staged, source).unwrap();
             compiler.arg(staged);

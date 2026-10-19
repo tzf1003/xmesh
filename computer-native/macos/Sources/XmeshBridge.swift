@@ -231,6 +231,18 @@ func xmeshUseDirectKeyboard(_ pid:pid_t,window:CGWindowID)throws->Bool{
     return true
 }
 
+func xmeshShouldEndSyntheticFocus(targetPID:pid_t,frontmostPID:pid_t?)->Bool{
+    guard let frontmostPID else{return false}
+    return frontmostPID != targetPID
+}
+
+func xmeshEndSyntheticTargetFocus(_ spi:SkyLightSPI,_ context:SkyLightSyntheticFocusContext,pid:pid_t)throws{
+    // Synthetic activation ends only while the user remains in another app.
+    // Releasing held keys/buttons is independent and still runs on cancellation.
+    guard xmeshShouldEndSyntheticFocus(targetPID:pid,frontmostPID:xmeshFrontmostPID()) else{return}
+    try spi.endSyntheticTargetFocus(context)
+}
+
 private func withTargetFocus(_ action:Action,_ operation:() throws -> Void) throws {
     let spi=SkyLightSPI.shared
     let focus=try spi.beginSyntheticTargetFocus(targetPID:action.pid,targetWindowID:action.window)
@@ -239,8 +251,8 @@ private func withTargetFocus(_ action:Action,_ operation:() throws -> Void) thro
         // Key-window records are reserved for the keyboard dispatcher.
         try operation()
         Thread.sleep(forTimeInterval:SkyKeyboardDispatcher.releaseSettle)
-    } catch {try? spi.endSyntheticTargetFocus(focus);throw error}
-    try spi.endSyntheticTargetFocus(focus)
+    } catch {try? xmeshEndSyntheticTargetFocus(spi,focus,pid:action.pid);throw error}
+    try xmeshEndSyntheticTargetFocus(spi,focus,pid:action.pid)
 }
 
 // Adapted from minghinmatthewlam/computer-use-mcp Input.swift at

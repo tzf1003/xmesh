@@ -8,6 +8,9 @@ import AppKit
     static func main() throws {
         xmeshBackgroundInitialize()
         precondition(NSApplication.shared.activationPolicy() == .prohibited)
+        precondition(xmeshShouldEndSyntheticFocus(targetPID:42,frontmostPID:43))
+        precondition(!xmeshShouldEndSyntheticFocus(targetPID:42,frontmostPID:42))
+        precondition(!xmeshShouldEndSyntheticFocus(targetPID:42,frontmostPID:nil))
         precondition(!xmeshRequiresSyntheticKeyboardFocus(frameworkNames:[]))
         precondition(!xmeshRequiresSyntheticKeyboardFocus(frameworkNames:["AppKit.framework","WebKit.framework"]))
         for framework in ["Electron Framework.framework","Chromium Framework.framework","CEF.framework"]{
