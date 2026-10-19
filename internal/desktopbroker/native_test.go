@@ -3,6 +3,8 @@ package desktopbroker
 import (
 	"context"
 	"os"
+	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -54,4 +56,17 @@ func TestNativeDesktopRoundTrip(t *testing.T) {
 		t.Fatal(frame.ID, frame.Width, frame.Height, err)
 	}
 	t.Logf("native screenshot: %dx%d, %d bytes, %s", frame.Width, frame.Height, len(frame.Image), time.Since(start).Round(time.Millisecond))
+	if count, _ := strconv.Atoi(os.Getenv("XMESH_TEST_COMPUTER_CAPTURE_SAMPLES")); count > 1 && count <= 50 {
+		durations := []time.Duration{}
+		for range count {
+			start = time.Now()
+			f, e := m.Observe(ctx, "native-test/session", computer.ObserveRequest{SessionRequest: computer.SessionRequest{SessionID: s.ID, Epoch: s.Epoch}, CaptureRequest: computer.CaptureRequest{MaxWidth: 1280}})
+			if e != nil || len(f.Image) == 0 {
+				t.Fatal("capture benchmark", e)
+			}
+			durations = append(durations, time.Since(start))
+		}
+		sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+		t.Logf("native screenshot %d samples: median=%s p95=%s max=%s", count, durations[count/2].Round(time.Millisecond), durations[(count*95+99)/100-1].Round(time.Millisecond), durations[count-1].Round(time.Millisecond))
+	}
 }

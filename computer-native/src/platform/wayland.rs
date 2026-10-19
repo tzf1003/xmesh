@@ -35,7 +35,6 @@ type Pixels = (i32, i32, Vec<u8>);
 struct Shared {
     active: AtomicBool,
     streams: Vec<Stream>,
-    remote: OwnedFd,
     commands: tokio::sync::mpsc::Sender<Command>,
 }
 
@@ -44,6 +43,7 @@ enum Event {
     Button(i32, bool),
     Key(u32, bool),
     Scroll(i32, i32),
+    OpenRemote(mpsc::SyncSender<Result<OwnedFd, &'static str>>),
     Close,
 }
 
@@ -161,14 +161,14 @@ impl PortalInput {
                         streams.push(Stream{node:stream.pipe_wire_node_id(),display:Display{id:stream.pipe_wire_node_id().to_string(),name:stream.id().unwrap_or("Shared display").to_owned(),x,y,width,height,scale:1.0,rotation:0}});
                     }
                     if streams.is_empty()||streams.len()>32{return Err("portal_streams_missing");}
-                    let fd=screencast.open_pipe_wire_remote(&session).await.map_err(|_|"portal_pipewire")?;
+                    let _probe=screencast.open_pipe_wire_remote(&session).await.map_err(|_|"portal_pipewire")?;
                     if let Some(token)=response.restore_token(){save_token(&path,token)?;}
-                    Ok((streams,fd))
+                    Ok(streams)
                 };
                 let limit=if authorize{Duration::from_secs(120)}else{Duration::from_secs(3)};
-                let(streams,fd)=match tokio::time::timeout(limit,initialized).await{Ok(Ok(v))=>v,Ok(Err(e))=>{let _=session.close().await;let _=tx.send(Err(e));return;},Err(_)=>{let _=session.close().await;let _=tx.send(Err("portal_authorization_required"));return;}};
+                let streams=match tokio::time::timeout(limit,initialized).await{Ok(Ok(v))=>v,Ok(Err(e))=>{let _=session.close().await;let _=tx.send(Err(e));return;},Err(_)=>{let _=session.close().await;let _=tx.send(Err("portal_authorization_required"));return;}};
                 let(commands,mut requests)=tokio::sync::mpsc::channel::<Command>(32);
-                let shared=Arc::new(Shared{active:AtomicBool::new(true),streams,remote:fd,commands});
+                let shared=Arc::new(Shared{active:AtomicBool::new(true),streams,commands});
                 if tx.send(Ok(Arc::clone(&shared))).is_err(){let _=session.close().await;return;}
                 let mut closed=match session.receive_closed().await{Ok(v)=>v,Err(_)=>{shared.active.store(false,Ordering::Release);let _=session.close().await;return;}};
                 let mut keys=HashSet::new();let mut buttons=HashSet::new();
@@ -184,6 +184,7 @@ impl PortalInput {
                                     Event::Button(button,pressed)=>{if pressed{buttons.insert(button);}remote.notify_pointer_button(&session,button,if pressed{KeyState::Pressed}else{KeyState::Released}).await.map_err(|_|"input_failed")?;if !pressed{buttons.remove(&button);}}
                                     Event::Key(key,pressed)=>{if pressed{keys.insert(key);}remote.notify_keyboard_keysym(&session,key as i32,if pressed{KeyState::Pressed}else{KeyState::Released}).await.map_err(|_|"input_failed")?;if !pressed{keys.remove(&key);}}
                                     Event::Scroll(axis,steps)=>remote.notify_pointer_axis_discrete(&session,if axis==1{PortalAxis::Horizontal}else{PortalAxis::Vertical},steps).await.map_err(|_|"input_failed")?,
+                                    Event::OpenRemote(reply)=>{let result=screencast.open_pipe_wire_remote(&session).await.map_err(|_|"portal_pipewire");let failed=result.is_err();let _=reply.send(result);if failed{return Err("portal_pipewire");}}
                                     Event::Close=>{}
                                 };Ok(())
                             };
@@ -297,7 +298,20 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
         .iter()
         .find(|s| s.display.id == display.id)
         .ok_or("display_not_found")?;
-    let fd = shared.remote.try_clone().map_err(|_| "portal_pipewire")?;
+    // Each PipeWire core needs a fresh remote connection. Duplicating a socket
+    // descriptor would reuse an already-consumed protocol stream on capture two.
+    let (tx, rx) = mpsc::sync_channel(1);
+    let (done, _) = mpsc::sync_channel(1);
+    shared
+        .commands
+        .try_send(Command {
+            event: Event::OpenRemote(tx),
+            result: done,
+        })
+        .map_err(|_| "portal_busy")?;
+    let fd = rx
+        .recv_timeout(Duration::from_millis(750))
+        .map_err(|_| "portal_pipewire_timeout")??;
     pipewire_frame(fd, stream.node, &shared.active)
 }
 

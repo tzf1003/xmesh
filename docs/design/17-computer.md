@@ -72,3 +72,7 @@ Windows、macOS、Linux 上的 Agent 经现有 Streamable HTTP MCP、Gateway / I
 macOS 采集改用 SCScreenshotManager 的单帧接口，发布构建单次截图为 203ms，尚需多次采样确认 p95。独立 Electron 测试窗口经真实 broker 和原生执行器验证点击、中文文本、组合键、拖动及滚动，连续三次通过；测试也修正了滚动定位和方向。测试窗口使用独立用户数据目录，不保存桌面图片或输入到工作区。
 
 新增本机 `computer setup|install|start|stop|restart|uninstall|authorize`、图形会话自启配置、面板初始化按钮，以及原生执行器在 UI 和六平台归档中的打包路径。macOS 执行器采用 `app.xmesh.computer` 应用标识。该轮安装包和跨平台输入 CI 仍待完成，正式签名和公证依赖发布凭据。
+
+第四轮：macOS arm64 本机 UI 安装目录构建通过，包内原生应用的签名结构检查、内核与执行器版本握手、release fuses，以及应用对假内核控制通道的启动冒烟检查通过。该证据覆盖解包后的应用目录，Windows 安装程序与 DMG 的安装 / 升级仍待 CI 和平台验收。
+
+macOS 发布构建对 1280×831 截图连续采样 10 次，中位数 115ms、p95 122ms、最大 122ms；该结果只代表本机环境。Linux 截图为每次采集重新取得授权会话的 PipeWire remote socket，防止重复使用已经消费的协议连接。执行器限制同时存活的原始采集任务，超时后继续返回忙状态，直至原始任务结束。

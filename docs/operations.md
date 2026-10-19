@@ -517,7 +517,7 @@ xmesh mesh derp sync --profile home --admission-url http://127.0.0.1:8480 --admi
 `--verify-client-url-fail-open=false` 不能省：上游默认在准入服务不可达时放行。准入只在连接建立时判断，已有连接要重连才受影响。
 
 验证状态：Headscale 一侧用真实 v0.29.5 做过集成测试（`policy.mode=database`，含生成的 DERP 文件被其加载）；Tailscale 一侧只对照官方客户端的请求形状做了夹具测试，没有联调真实 tailnet；第三方 DERP 的探测与准入在本机回环验证过，没有跨公网验证。计量、计费、多租户目录没有实现。
-# Computer 桌面接入
+## Computer 桌面接入
 
 在目标设备的图形用户会话中打开面板“桌面控制”，开启桌面能力，再点击“安装桌面服务并授权”。系统会请求屏幕录制与输入控制权限。桌面 host 独立于面板运行，用户注销后按平台会话规则退出。
 
