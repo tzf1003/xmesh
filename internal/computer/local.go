@@ -7,8 +7,8 @@ import (
 )
 
 // SetAuthorization installs the owning Agent's current tag/configuration check.
-// It is re-evaluated immediately before each queued input operation.
-func (m *Manager) SetAuthorization(check func(string) bool) {
+// Tool-specific checks run at session creation and input/capture boundaries.
+func (m *Manager) SetAuthorization(check func(caller, tool string) bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.authorize = check

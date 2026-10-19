@@ -114,7 +114,7 @@ def main():
     steps=options.steps.split(',')
     assert steps and all(step in ('click','sky_click','text','append','key','native_key','drag','scroll') for step in steps)
     root = pathlib.Path(__file__).resolve().parents[1]
-    with tempfile.TemporaryDirectory(prefix="xmesh-background-accept-", dir="/tmp") as temporary, ExitStack() as cleanup:
+    with tempfile.TemporaryDirectory(prefix="xmesh-background-accept-") as temporary, ExitStack() as cleanup:
         directory = pathlib.Path(temporary)
         observer_binary=directory/'observer'
         subprocess.run(['xcrun','swiftc','-swift-version','5','-parse-as-library','-o',str(observer_binary),str(root/'computer-native/macos/Tests/DesktopObserver.swift')],check=True)

@@ -329,3 +329,51 @@ pub fn execute(
         _ => Err("input_failed"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+
+    #[test]
+    fn cleanup_keeps_the_process_start_fence_after_lease_revocation() {
+        let pid = std::process::id() as i32;
+        let started = process_start(pid).expect("test process identity unavailable");
+        let runtime = crate::Runtime {
+            epoch: "cleanup-test".into(),
+            revoked: AtomicU64::new(u64::MAX),
+            input_ready: AtomicBool::new(false),
+            pause_on_input: AtomicBool::new(false),
+            input_baseline: AtomicU64::new(0),
+            output: Mutex::new(std::io::stdout()),
+        };
+        let mut target = WindowTarget {
+            view: Target {
+                id: "closed-window".into(),
+                app_id: "fixture".into(),
+                name: "fixture".into(),
+                layout_version: "old".into(),
+                width: 100,
+                height: 80,
+                user_input_serial: 0,
+            },
+            pid,
+            started,
+            window: 0,
+            x: 0.0,
+            y: 0.0,
+        };
+        let invoke = |target: &WindowTarget| {
+            let guard = Guard {
+                runtime: &runtime,
+                token: 1,
+                start: std::time::Instant::now(),
+                target,
+            };
+            check((&guard as *const Guard<'_>).cast_mut().cast(), true)
+        };
+        assert!(invoke(&target));
+        target.started.1 ^= 1;
+        assert!(!invoke(&target));
+    }
+}

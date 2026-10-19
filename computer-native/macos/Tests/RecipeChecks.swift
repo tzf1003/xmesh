@@ -54,6 +54,20 @@ import AppKit
         precondition(!targetMatchesWindow(target,[]))
         let wrongOwner:[[String:Any]]=[[kCGWindowNumber as String:NSNumber(value:4),kCGWindowOwnerPID as String:NSNumber(value:43),kCGWindowBounds as String:CGRect(x:0,y:0,width:100,height:80).dictionaryRepresentation]]
         precondition(!targetMatchesWindow(target,wrongOwner))
+        for windows in [matching,moved,[],wrongOwner]{
+            var released=false
+            try xmeshValidateDelivery(cleanup:true,authority:{true},window:{preconditionFailure("release queried a disappeared window")},intervention:{preconditionFailure("release queried user focus")})
+            released=true
+            precondition(released)
+            do{
+                try xmeshValidateDelivery(cleanup:false,authority:{true},window:{targetMatchesWindow(target,windows)},intervention:{false})
+                precondition(targetMatchesWindow(target,windows))
+            }catch{precondition(!targetMatchesWindow(target,windows))}
+        }
+        do{
+            try xmeshValidateDelivery(cleanup:true,authority:{false},window:{true},intervention:{false})
+            preconditionFailure("cleanup bypassed the process identity fence")
+        }catch{}
         print("PASS: upstream click/focus/window-owner/key/Unicode recipes and pre-dispatch cancellation; no native input emitted")
     }
 }

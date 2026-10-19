@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/computer"
@@ -32,6 +33,128 @@ func (p *desktopFixture) Execute(_ context.Context, r computer.Execution) (compu
 }
 func (*desktopFixture) Release(context.Context, computer.Execution) error { return nil }
 func (*desktopFixture) Close() error                                      { return nil }
+
+type revocableObservationFixture struct {
+	desktopFixture
+	block    atomic.Bool
+	stage    string
+	entered  chan struct{}
+	resume   chan struct{}
+	captures atomic.Int32
+}
+
+func (p *revocableObservationFixture) gate(ctx context.Context) error {
+	if !p.block.Load() {
+		return nil
+	}
+	select {
+	case p.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-p.resume:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (p *revocableObservationFixture) Info(ctx context.Context) (computer.Info, error) {
+	if p.stage == "info" {
+		if err := p.gate(ctx); err != nil {
+			return computer.Info{}, err
+		}
+	}
+	return p.desktopFixture.Info(ctx)
+}
+func (p *revocableObservationFixture) Capture(ctx context.Context, r computer.CaptureRequest) (computer.Frame, error) {
+	p.captures.Add(1)
+	if p.stage == "capture" {
+		if err := p.gate(ctx); err != nil {
+			return computer.Frame{}, err
+		}
+	}
+	return p.desktopFixture.Capture(ctx, r)
+}
+
+func TestObservationPolicyReloadFencesInflightMCPImages(t *testing.T) {
+	for _, stage := range []string{"info", "capture"} {
+		for _, policy := range []string{"tag", "disabled_tool"} {
+			t.Run(stage+"/"+policy, func(t *testing.T) {
+				file, store := configuration(t)
+				b, _ := os.ReadFile(file)
+				var doc map[string]any
+				_ = json.Unmarshal(b, &doc)
+				cfg := doc["agent"].(map[string]any)
+				cfg["computer"] = map[string]any{"enabled": true}
+				cfg["authz"] = map[string]any{"tag:peer": map[string]any{"tools": []string{"computer.*"}, "backends": []string{}}}
+				write := func() {
+					b, _ := json.Marshal(doc)
+					if err := os.WriteFile(file, b, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				write()
+				p := &revocableObservationFixture{stage: stage, entered: make(chan struct{}, 1), resume: make(chan struct{})}
+				a, err := New(store, WithComputerProvider(p))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(a.Close)
+				ts := httptest.NewServer(a.HTTP(Local))
+				t.Cleanup(ts.Close)
+				client := connect(t, ts.URL+"/mcp")
+				s := object(t, tool(t, client, "computer.open", map[string]any{"mode": "observe"}))
+				if s["session_id"] == nil {
+					t.Fatal(s)
+				}
+				p.block.Store(true)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				type outcome struct {
+					result *mcp.CallToolResult
+					err    error
+				}
+				result := make(chan outcome, 1)
+				go func() {
+					r, e := client.CallTool(ctx, &mcp.CallToolParams{Name: "computer.observe", Arguments: map[string]any{"session_id": s["session_id"], "desktop_epoch": s["desktop_epoch"]}})
+					result <- outcome{r, e}
+				}()
+				select {
+				case <-p.entered:
+				case <-ctx.Done():
+					t.Fatal("observation did not reach native preflight")
+				}
+				if policy == "tag" {
+					cfg["authz"] = map[string]any{"tag:peer": map[string]any{"tools": []string{"computer.info", "computer.open"}, "backends": []string{}}}
+				} else {
+					cfg["disabled_tools"] = []string{"computer.observe"}
+				}
+				write()
+				close(p.resume)
+				select {
+				case out := <-result:
+					if out.err != nil {
+						t.Fatal(out.err)
+					}
+					v := object(t, out.result)
+					if v["error"] != "policy_denied" {
+						t.Fatal(v)
+					}
+					for _, content := range out.result.Content {
+						if _, ok := content.(*mcp.ImageContent); ok {
+							t.Fatal("revoked screenshot was returned")
+						}
+					}
+				case <-ctx.Done():
+					t.Fatal("revoked observation did not finish")
+				}
+				if stage == "info" && p.captures.Load() != 0 {
+					t.Fatal("revoked observation reached native capture")
+				}
+			})
+		}
+	}
+}
 
 func TestComputerMCPImagesOwnershipAndHotDisable(t *testing.T) {
 	path, store := configuration(t)
