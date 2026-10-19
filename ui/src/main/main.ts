@@ -30,6 +30,7 @@ import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
 import { computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
+import { registerComputerShortcut } from "./computer-shortcut";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -296,10 +297,10 @@ async function start(): Promise<void> {
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
     update: new UpdateActions(updater),
   });
-  if (!TEST_MODE) globalShortcut.register("CommandOrControl+Alt+Shift+Escape", () => {
+  if (!TEST_MODE) controller.setComputerShortcutAvailable(registerComputerShortcut(globalShortcut, () => {
     void panelService.computer({ op: "pause", paused: true });
     void emergencyStopComputerHost().catch((error: unknown) => notifyError(error instanceof Error ? error.message : String(error)));
-  });
+  }));
   updater.on("change", (state) => controller.setUpdate(state));
 
   let prev: Snapshot = controller.snapshot;

@@ -64,7 +64,7 @@ async function setup(capabilities: Capability[] = ALL, status: Partial<StatusRes
 
 const last = (k: FakeKernel, method: string, p: string) => k.requests.filter((r) => r.method === method && r.path.startsWith(p)).at(-1);
 
-test("resuming desktop control first restores the user Host and surfaces local failure", async () => {
+test("resuming desktop control clears Agent pause even when the user Host is unavailable", async () => {
   const { k, c } = await setup([...ALL, "computer"]);
   const order: string[] = [];
   const service = new PanelService(c, undefined, async () => { order.push("host-resume"); });
@@ -73,10 +73,14 @@ test("resuming desktop control first restores the user Host and surfaces local f
   assert.deepEqual(order, ["host-resume"]);
   assert.equal(k.panel.computer.paused, false);
   k.panel.computer.paused = true;
+  k.panel.computer.info.available = false;
+  k.panel.computer.info.state = "desktop_unavailable";
   const denied = new PanelService(c, undefined, async () => { throw new Error("Host resume denied"); });
   const result = await denied.computer({ op: "pause", paused: false });
-  assert.equal(result.ok, false);
-  assert.equal(k.panel.computer.paused, true);
+  assert.equal(result.ok, true);
+  assert.equal(k.panel.computer.paused, false);
+  assert.ok(result.ok && !result.data.info.available);
+  assert.ok(last(k, "POST", "/v1/computer/pause"));
 });
 
 test("sessions and config reads return the kernel's documents", async () => {

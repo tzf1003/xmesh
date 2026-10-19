@@ -358,7 +358,9 @@ export class PanelService {
         case "get": return client.call("GET", "/v1/computer");
         case "setup": await this.setupDesktop(); return client.call("GET", "/v1/computer");
         case "pause": {
-          if (!request.paused) await this.resumeDesktop();
+          // Agent pause is independent of Host availability. A suspended Host
+          // continues enforcing its own local guard if its resume fails.
+          if (!request.paused) await this.resumeDesktop().catch(() => undefined);
           return client.call("POST", "/v1/computer/pause", { body: { paused: request.paused } });
         }
         case "revoke": return client.call("POST", "/v1/computer/revoke", { body: { session_id: request.session_id } });

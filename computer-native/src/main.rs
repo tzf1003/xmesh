@@ -237,6 +237,16 @@ fn capture_access_error(screen: bool, locked: bool) -> Option<&'static str> {
     }
 }
 
+fn capture_failure(reason: &'static str, screen: bool, locked: bool) -> &'static str {
+    // This response asks the supervisor to retire a blocked platform thread.
+    // Permission changes are reported by the replacement executor's discovery.
+    if reason == "capture_timeout" {
+        reason
+    } else {
+        capture_access_error(screen, locked).unwrap_or(reason)
+    }
+}
+
 fn scaled_span(origin: i32, extent: i32, scale: f64, pixels: u32) -> (u32, u32) {
     let start = ((f64::from(origin) * scale).floor() as u32).min(pixels.saturating_sub(1));
     let end = ((f64::from(origin + extent) * scale).ceil() as u32)
@@ -917,11 +927,11 @@ fn serve_stdio(authorize: bool) {
                         Ok(r) => match capture(&rt, r) {
                             Ok(v) => rt.reply(q.id, v),
                             Err(reason) => {
-                                let reason = capture_access_error(
+                                let reason = capture_failure(
+                                    reason,
                                     platform::screen_permission(),
                                     platform::locked(),
-                                )
-                                .unwrap_or(reason);
+                                );
                                 rt.error(q.id, capture_error_code(reason), reason);
                             }
                         },
@@ -941,6 +951,23 @@ fn serve_stdio(authorize: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capture_timeout_keeps_the_supervisors_retirement_signal() {
+        for (screen, locked) in [(true, false), (false, false), (true, true), (false, true)] {
+            assert_eq!(
+                capture_failure("capture_timeout", screen, locked),
+                "capture_timeout"
+            );
+        }
+        assert_eq!(
+            capture_failure("capture_failed", false, true),
+            "permission_required"
+        );
+        assert_eq!(
+            capture_failure("capture_failed", true, true),
+            "desktop_locked"
+        );
+    }
     #[test]
     fn scaled_crop_uses_shared_endpoints_at_fractional_scale() {
         assert_eq!(scaled_span(1, 1919, 1.5, 2880), (1, 2879));

@@ -92,6 +92,13 @@ func (p *Process) read(r io.Reader) {
 		if json.Unmarshal(s.Bytes(), &response) != nil {
 			break
 		}
+		if response.Error != nil && response.Error.Reason == "capture_timeout" {
+			// EOF lets native guards cancel actions and release held input before
+			// the bounded Close fallback. Handle late replies after caller cancellation
+			// too: their blocked platform thread must not poison future captures.
+			_ = p.input.Close()
+			go func() { _ = p.Close() }()
+		}
 		p.mu.Lock()
 		ch := p.pending[response.ID]
 		delete(p.pending, response.ID)

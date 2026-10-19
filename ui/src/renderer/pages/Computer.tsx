@@ -73,7 +73,9 @@ function ComputerPage({ ctx }: { ctx: PageContext }): JSX.Element {
           <button type="button" class="btn danger" disabled={busy || !state.enabled || state.paused} onClick={() => void run({ op: "pause", paused: true })} data-testid="computer-takeover">{t("computer.takeover")}</button>
         </div>
         <p class="hint">{t("computer.takeoverHint")}</p>
-        <p class="hint">{t("computer.shortcut")}</p>
+        {ctx.snapshot.computerShortcutAvailable
+          ? <p class="hint" data-testid="computer-shortcut-available">{t("computer.shortcut")}</p>
+          : <Banner kind="warn" testid="computer-shortcut-unavailable">{t("computer.shortcutUnavailable")}</Banner>}
         <label><input type="checkbox" checked={state.pause_on_user_input === true} disabled={busy || !ctx.can("config.write") || (!state.info.user_input_monitor && !state.pause_on_user_input)} onChange={(e) => void pauseOnInput(e.currentTarget.checked)} data-testid="computer-pause-on-input" /> {t("computer.pauseOnInput")}</label>
         {!state.info.user_input_monitor && <p class="hint">{t("computer.inputMonitorUnavailable")}</p>}
       </section>
