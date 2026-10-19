@@ -14,6 +14,7 @@ import { DesktopPreview } from "./DesktopPreview";
 function status(state: ComputerState, t: T): string {
   if (!state.enabled) return t("computer.disabled");
   if (state.paused) return t("computer.paused");
+  if (state.info.reason === "input_permission_required") return t("computer.permissionRequired");
   if (state.info.available) return t("computer.ready");
   if (state.info.state === "permission_required") return t("computer.permissionRequired");
   if (state.info.state === "locked") return t("computer.locked");
@@ -65,7 +66,7 @@ function ComputerPage({ ctx }: { ctx: PageContext }): JSX.Element {
     <PageHead title={t("nav.computer")} sub={t("computer.sub")}><button type="button" class="btn" onClick={reload}>{t("common.refresh")}</button></PageHead>
     <ResourceView resource={resource}>{(state) => <>
       <section class="card stack">
-        <div><Badge kind={state.info.available && !state.paused ? "ok" : "warn"}><span data-testid="computer-state">{status(state, t)}</span></Badge></div>
+        <div><Badge kind={state.info.available && state.info.reason !== "input_permission_required" && !state.paused ? "ok" : "warn"}><span data-testid="computer-state">{status(state, t)}</span></Badge></div>
         <div class="computer-actions">
           <button type="button" class="btn" disabled={busy || !ctx.can("config.write")} onClick={() => void toggle(!state.enabled)} data-testid="computer-toggle">{t(state.enabled ? "computer.disable" : "computer.enable")}</button>
           <button type="button" class="btn" disabled={busy || !state.enabled} onClick={() => void run({ op: "pause", paused: !state.paused })} data-testid="computer-pause">{t(state.paused ? "computer.resume" : "computer.pause")}</button>
