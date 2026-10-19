@@ -179,8 +179,8 @@ export class Controller {
     ) {
       // Electron keeps its fuse wire in the executable (or the framework binary on macOS).
       const framework = path.resolve(
-        e.executable,
-        "../../../Frameworks/Electron Framework.framework/Electron Framework",
+        path.dirname(e.executable),
+        "../Frameworks/Electron Framework.framework/Electron Framework",
       );
       const file = fs.existsSync(framework) ? framework : e.executable;
       try {

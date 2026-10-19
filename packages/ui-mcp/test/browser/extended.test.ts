@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { Controller } from "../../src/controller.js";
-import { config, site, executable, finished } from "../helpers.js";
+import { cleanup, config, site, executable, finished } from "../helpers.js";
 
 test("files, frames, popup selection, secrets and node resource limits", async () => {
   const web = await site(),
@@ -80,6 +80,6 @@ test("files, frames, popup selection, secrets and node resource limits", async (
     await a.close();
     await b.close();
     await web.close();
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });

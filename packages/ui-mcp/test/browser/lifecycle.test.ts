@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Controller } from "../../src/controller.js";
-import { config, site, executable, finished } from "../helpers.js";
+import { cleanup, config, site, executable, finished } from "../helpers.js";
 
 test("abrupt backend death terminates its test processes and marks the retained run interrupted", async () => {
   const web = await site(),
@@ -80,7 +80,7 @@ test("abrupt backend death terminates its test processes and marks the retained 
   } finally {
     await client.close().catch(() => {});
     await web.close();
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 
@@ -114,6 +114,6 @@ test("evidence quota stops a running script and preserves its diagnostic", async
   } finally {
     await controller.close();
     await web.close();
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });

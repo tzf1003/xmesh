@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Controller } from "../../src/controller.js";
 import type { RunRequest, ScriptRequest } from "../../src/types.js";
-import { config, site, executable, finished } from "../helpers.js";
+import { cleanup, config, site, executable, finished } from "../helpers.js";
 
 test("Web batches, prevalidation, deduplication, evidence and session isolation", async () => {
   const web = await site(),
@@ -143,7 +143,7 @@ test("Web batches, prevalidation, deduplication, evidence and session isolation"
   } finally {
     await controller.close();
     await web.close();
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 
@@ -194,6 +194,6 @@ test("active scripts can be cancelled and timed out while control requests remai
   } finally {
     await controller.close();
     await web.close();
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });

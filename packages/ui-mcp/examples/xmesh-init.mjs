@@ -15,6 +15,8 @@ export default async ({
   const vars = environment.env ?? {},
     stateRoot = path.join(sessionDir, "state");
   let cleanup;
+  const workspace = path.join(sessionDir, "workspace");
+  fs.mkdirSync(workspace, { recursive: true });
   if (vars.XMESH_UI_FIXTURE_MODULE) {
     const { FakeKernel } = await import(
       pathToFileURL(vars.XMESH_UI_FIXTURE_MODULE).href
@@ -36,6 +38,17 @@ export default async ({
         "gateway",
       ],
     });
+    kernel.panel.setContent(
+      JSON.stringify({
+        node: { name: "ui-test", roles: ["agent", "gateway"] },
+        mesh: { mode: "lan", lan: { mdns: true } },
+        gateway: { listen: "127.0.0.1:8080" },
+        agent: {
+          default_cwd: workspace,
+          cwd_policy: { allow: [workspace], deny: [] },
+        },
+      }),
+    );
     kernel.writeManifest(stateRoot, "node-a");
     cleanup = () => kernel.stop();
   } else if (vars.XMESH_UI_KERNEL_BINARY) {
@@ -45,8 +58,6 @@ export default async ({
     await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
     const port = listener.address().port;
     await new Promise((resolve) => listener.close(resolve));
-    const workspace = path.join(sessionDir, "workspace");
-    fs.mkdirSync(workspace);
     const config = path.join(sessionDir, "kernel.json");
     fs.writeFileSync(
       config,
@@ -74,7 +85,7 @@ export default async ({
         "--listen",
         "127.0.0.1:0",
       ],
-      { stdio: ["ignore", log, log] },
+      { stdio: ["ignore", log, log], windowsHide: true },
     );
     registerProcess?.(child.pid);
     fs.closeSync(log);

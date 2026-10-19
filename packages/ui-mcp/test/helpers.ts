@@ -6,15 +6,22 @@ import type { Config, RunResult } from "../src/types.js";
 import { defaults } from "../src/config.js";
 import { Controller } from "../src/controller.js";
 
-export function config(
-  root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-ui-test-")),
-): Config {
+export function config(root?: string): Config {
+  if (!root) {
+    const base = process.env.XMESH_UI_TEST_OUTPUT ?? os.tmpdir();
+    fs.mkdirSync(base, { recursive: true });
+    root = fs.mkdtempSync(path.join(base, "xmesh-ui-test-"));
+  }
   return {
     version: 1,
     state_dir: fs.realpathSync(root),
     environments: {},
     limits: { ...defaults },
   };
+}
+export function cleanup(c: Config): void {
+  if (!process.env.XMESH_UI_TEST_OUTPUT)
+    fs.rmSync(c.state_dir, { recursive: true, force: true });
 }
 export async function site(): Promise<{
   url: string;

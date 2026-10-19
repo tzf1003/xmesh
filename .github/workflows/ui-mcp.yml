@@ -11,6 +11,8 @@ concurrency:
 jobs:
   verify:
     timeout-minutes: 30
+    env:
+      XMESH_UI_TEST_OUTPUT: ${{ runner.temp }}/ui-mcp-evidence
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +37,14 @@ jobs:
       - run: npm test --prefix packages/ui-mcp
       - run: npm run build --prefix ui
       - run: node ui/scripts/flip-fuses.mjs --profile test
+      - name: Reuse browser binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/Library/Caches/ms-playwright
+            ~/AppData/Local/ms-playwright
+          key: ui-mcp-browser-${{ runner.os }}-${{ hashFiles('packages/ui-mcp/package-lock.json') }}
       - run: node packages/ui-mcp/node_modules/playwright/cli.js install --with-deps chromium
       - name: Kernel and backend lifecycle regression
         run: go test ./internal/config ./internal/backend ./internal/exec
@@ -61,5 +71,6 @@ jobs:
           path: |
             packages/ui-mcp/*.tgz
             packages/ui-mcp/*.sha256
+            ${{ runner.temp }}/ui-mcp-evidence
           if-no-files-found: ignore
           retention-days: 7

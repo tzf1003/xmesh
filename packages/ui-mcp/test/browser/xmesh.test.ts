@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Controller } from "../../src/controller.js";
-import { config, finished } from "../helpers.js";
+import { parse } from "yaml";
+import { cleanup, config, finished } from "../helpers.js";
 
 for (const mode of ["mock", "real"] as const)
   test(
@@ -21,6 +22,7 @@ for (const mode of ["mock", "real"] as const)
       c.environments.xmesh = {
         driver: "electron",
         background_capable: true,
+        script_enabled: true,
         executable: process.env.XMESH_UI_TEST_ELECTRON,
         args: [...(process.platform === "linux" ? ["--no-sandbox"] : []), app],
         env: {
@@ -43,6 +45,7 @@ for (const mode of ["mock", "real"] as const)
           "electron-renderer",
           mode === "mock" ? "mock-kernel" : "real-kernel",
           "panel-open-hook",
+          "tray-menu-hook",
         ],
       };
       const controller = new Controller(c);
@@ -83,6 +86,29 @@ for (const mode of ["mock", "real"] as const)
               expect: { visible: true },
             },
             { id: "capture", action: "screenshot" },
+            {
+              id: "edit-allow",
+              action: "click",
+              target: { testId: "settings-allow-remove-0" },
+            },
+            {
+              id: "review",
+              action: "click",
+              target: { testId: "settings-review" },
+            },
+            {
+              id: "confirm",
+              action: "assert",
+              target: { testId: "confirm" },
+              expect: { visible: true },
+            },
+            { id: "save", action: "click", target: { testId: "confirm-ok" } },
+            {
+              id: "applied",
+              action: "assert",
+              target: { testId: "apply-applied" },
+              expect: { visible: true },
+            },
           ],
         });
         const result = await finished(controller, request.run_id, 40000);
@@ -103,9 +129,41 @@ for (const mode of ["mock", "real"] as const)
         }
         assert.equal(result.status, "passed", JSON.stringify(result));
         assert.equal(result.fixtures, mode);
+        if (mode === "real") {
+          const saved = parse(
+            fs.readFileSync(
+              path.join(
+                c.state_dir,
+                "instances",
+                controller.instance_id,
+                "sessions",
+                session,
+                "kernel.json",
+              ),
+              "utf8",
+            ),
+          );
+          assert.deepEqual(saved.agent.cwd_policy.allow, []);
+        }
+        const tray = controller.submit(
+          {
+            protocol_version: 1,
+            session_id: session,
+            request_id: "tray-script",
+            code: fs.readFileSync(
+              fileURLToPath(
+                new URL("../../../examples/xmesh-tray.mjs", import.meta.url),
+              ),
+              "utf8",
+            ),
+          },
+          true,
+        );
+        const trayResult = await finished(controller, tray.run_id, 30000);
+        assert.equal(trayResult.status, "passed", JSON.stringify(trayResult));
       } finally {
         await controller.close();
-        fs.rmSync(c.state_dir, { recursive: true, force: true });
+        cleanup(c);
       }
     },
   );

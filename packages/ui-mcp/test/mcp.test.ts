@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { config } from "./helpers.js";
+import { cleanup, config } from "./helpers.js";
 import { spawnSync } from "node:child_process";
 
 test("stdio MCP lists tools without launching a browser and closes on EOF", async () => {
@@ -61,7 +61,7 @@ test("stdio MCP lists tools without launching a browser and closes on EOF", asyn
     assert.equal(invalid.isError, true);
   } finally {
     await client.close();
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 

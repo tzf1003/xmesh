@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Controller } from "../../src/controller.js";
-import { config, finished } from "../helpers.js";
+import { cleanup, config, finished } from "../helpers.js";
 
 test(
   "Electron dedicated instance navigates, confirms and captures evidence",
@@ -78,7 +78,7 @@ test(
       await controller.closeSession(session);
     } finally {
       await controller.close();
-      fs.rmSync(c.state_dir, { recursive: true, force: true });
+      cleanup(c);
     }
   },
 );

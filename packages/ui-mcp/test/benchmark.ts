@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { config, site, executable } from "./helpers.js";
+import { cleanup, config, site, executable } from "./helpers.js";
 
 const c = config(),
   web = await site(),
@@ -136,5 +136,5 @@ try {
   await client.close();
   await browser.close();
   await web.close();
-  fs.rmSync(c.state_dir, { recursive: true, force: true });
+  cleanup(c);
 }

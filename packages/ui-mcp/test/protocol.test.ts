@@ -4,9 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { validate, checkSteps } from "../src/protocol.js";
 import { loadConfig, inside } from "../src/config.js";
-import { config } from "./helpers.js";
+import { cleanup, config } from "./helpers.js";
 import { redact, Evidence, gc } from "../src/artifacts.js";
 import { Locks } from "../src/locks.js";
+import { Controller } from "../src/controller.js";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -94,7 +95,7 @@ test("configuration resolves paths and rejects misspelled capabilities", () => {
     );
     assert.throws(() => loadConfig(file), /configuration/);
   } finally {
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 test("file references reject traversal and symlink escape", () => {
@@ -111,7 +112,7 @@ test("file references reject traversal and symlink escape", () => {
       assert.throws(() => inside(root, "link"), /outside/);
     }
   } finally {
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 test("evidence is owned by opaque ID and redacts known secrets", () => {
@@ -137,7 +138,7 @@ test("evidence is owned by opaque ID and redacts known secrets", () => {
     );
     assert.equal(gc(c).removed, 1);
   } finally {
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 test("resource locks exclude another holder and release idempotently", () => {
@@ -154,7 +155,7 @@ test("resource locks exclude another holder and release idempotently", () => {
     a.close();
     b.close();
   } finally {
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
   }
 });
 
@@ -191,6 +192,50 @@ test("resource locks serialize concurrent backend processes", async () => {
       "12",
     );
   } finally {
-    fs.rmSync(c.state_dir, { recursive: true, force: true });
+    cleanup(c);
+  }
+});
+
+test("Electron preflight reads app-bundle fuses and requires background capability", async () => {
+  const c = config(),
+    app = path.join(c.state_dir, "Fixture.app", "Contents"),
+    executable = path.join(app, "MacOS", "Electron"),
+    framework = path.join(
+      app,
+      "Frameworks",
+      "Electron Framework.framework",
+      "Electron Framework",
+    );
+  fs.mkdirSync(path.dirname(executable), { recursive: true });
+  fs.mkdirSync(path.dirname(framework), { recursive: true });
+  fs.writeFileSync(executable, "");
+  const wire = (values: string) =>
+    Buffer.concat([
+      Buffer.from("dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX"),
+      Buffer.from([1, 9]),
+      Buffer.from(values),
+    ]);
+  fs.writeFileSync(framework, wire("111011111"));
+  const controller = new Controller(c);
+  try {
+    assert.ok(
+      controller
+        .preflight({ driver: "electron", executable, background_capable: true })
+        .issues.includes("electron_inspect_disabled"),
+    );
+    fs.writeFileSync(framework, wire("111111111"));
+    assert.ok(
+      !controller
+        .preflight({ driver: "electron", executable, background_capable: true })
+        .issues.includes("electron_inspect_disabled"),
+    );
+    assert.ok(
+      controller
+        .preflight({ driver: "electron", executable })
+        .issues.includes("background_support_unconfirmed"),
+    );
+  } finally {
+    await controller.close();
+    cleanup(c);
   }
 });

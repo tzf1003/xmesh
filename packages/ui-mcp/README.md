@@ -20,7 +20,7 @@ npm install --prefix /opt/xmesh-ui xmesh-ui-mcp-0.1.0.tgz
 /opt/xmesh-ui/node_modules/.bin/xmesh-ui-mcp doctor --config /opt/xmesh-ui/environments.yaml
 ```
 
-On Windows use a user-owned prefix such as `%LOCALAPPDATA%\xmesh-ui`, and configure xmesh with `node.exe` plus the absolute `dist\src\cli.js` path. This avoids invoking a `.cmd` wrapper through a shell. On macOS use a user-owned prefix under `~/Library/Application Support/xmesh-ui` and a LaunchAgent with an active graphical session for headed tests. Linux Electron requires a display or Xvfb.
+On Windows use a user-owned prefix such as `%LOCALAPPDATA%\xmesh-ui`, and configure xmesh with `node.exe` plus the absolute `dist\src\cli.js` path. This avoids invoking a `.cmd` wrapper through a shell. On macOS use a user-owned prefix under `~/Library/Application Support/xmesh-ui` and a LaunchAgent with an active graphical session for Electron tests. Linux Electron requires a display or Xvfb.
 
 Browser downloads occur only through the explicit `install-browser` command. Reuse the node's Playwright cache; an optional `--cache DIRECTORY` selects a shared cache, and runtime must use the same `PLAYWRIGHT_BROWSERS_PATH`. Dependencies, browsers and generated files are excluded from Git. Keep the lockfile when building release artifacts.
 
@@ -78,9 +78,9 @@ environments:
 
 Store account configuration and login-state files with permissions restricted to the node user. Accounts and resource names are locks across all caller processes using the same state directory. Browser contexts and application data are dedicated to each session. Web navigation is limited to configured HTTP(S) origins, including redirects and frame navigation. This navigation rule is not a network sandbox; full scripts and applications retain the OS account's network permissions.
 
-Electron environments specify `executable`, `args`, optional `cwd`, `env`, and `init_module`. The application receives a unique `--user-data-dir` and `XMESH_UI_STATE_ROOT`. `state_template` is copied into the session's state directory. The optional administrator-owned initialization module exports a default function accepting `{context, electronApp, sessionDir, environment}` and may return an async cleanup function.
+Electron environments specify `executable`, `args`, optional `cwd`, `env`, and `init_module`. The application receives a unique `--user-data-dir` and `XMESH_UI_STATE_ROOT`. `state_template` is copied into the session's state directory. The optional administrator-owned initialization module exports a default function accepting `{context, electronApp, sessionDir, environment, registerProcess}` and may return an async cleanup function. Register any helper process IDs with `registerProcess(pid)` for owned-process cleanup. Electron screenshots use `webContents.capturePage` with `stayHidden: true`, applying configured masking before capture.
 
-Use an inspect-enabled Electron **test build**. The doctor checks the binary fuse when available and reports `electron_inspect_disabled`; runtime launch remains the authoritative compatibility check. Native menus/dialogs can use an explicitly configured test hook; include that coverage in the environment's `coverage` list. The included `examples/xmesh-init.mjs` demonstrates both a fake kernel and a real kernel, with a panel-opening hook. Production fuse settings stay governed by the application's release process.
+Use an inspect-enabled Electron **test build**. The doctor checks the binary fuse when available and reports `electron_inspect_disabled`; runtime launch remains the authoritative compatibility check. Native menus/dialogs can use an explicitly configured test hook; include that coverage in the environment's `coverage` list. The included `examples/xmesh-init.mjs` demonstrates both a fake kernel and a real kernel, with a panel-opening hook; `examples/xmesh-tray.mjs` demonstrates pause/resume via a tray-menu hook. Production fuse settings stay governed by the application's release process.
 
 ## MCP tools and agent workflow
 
