@@ -19,7 +19,11 @@ def verify(root, target_os, arch, version):
         with (app / "Contents" / "Info.plist").open("rb") as stream:
             info = plistlib.load(stream)
         assert info["CFBundleIdentifier"] == "app.xmesh.computer", "application identity mismatch"
-        assert info["CFBundleVersion"] == version.lstrip("v"), "application version mismatch"
+        release = version.removeprefix("v")
+        numeric = release.split("-", 1)[0]
+        assert info["CFBundleVersion"] == numeric, "application build version mismatch"
+        assert info["CFBundleShortVersionString"] == numeric, "application short version mismatch"
+        assert info["XmeshReleaseVersion"] == release, "application release version mismatch"
         notices=(app / "Contents/Resources/ThirdPartyNotices.txt").read_text()
         assert all(name in notices for name in ("2026 Leo","2025 Cua AI, Inc.","Matthew Lam","yabai")), "background engine license notices missing"
         subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)

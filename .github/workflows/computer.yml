@@ -38,6 +38,8 @@ jobs:
       - run: cargo test --manifest-path computer-native/Cargo.toml --locked
       - name: Pinned background input sources and pure recipes
         run: python3 scripts/test_computer_background.py
+      - name: Native bundle release metadata and verifier
+        run: python3 scripts/test_package_computer.py
       - run: cargo build --manifest-path computer-native/Cargo.toml --locked
       - uses: actions/setup-go@v5
         with:
