@@ -9,7 +9,9 @@ try {
     let release: (() => void) | undefined;
     while (!(release = locks.acquire("shared"))) {
       if (Date.now() > deadline) throw new Error("lock acquisition timed out");
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) =>
+        setTimeout(resolve, 10 + Math.floor(Math.random() * 40)),
+      );
     }
     try {
       const flag = path.join(root, "critical");

@@ -98,15 +98,6 @@ export class Locks {
     // Bakery tickets use unique claim files. A stale claim is ignored, never
     // renamed over another process's newly acquired lock.
     const claim = path.join(dir, `${randomUUID()}.json`);
-    fs.writeFileSync(
-      `${claim}.tmp`,
-      JSON.stringify({ ...this.owner, ticket: 0 }),
-      {
-        mode: 0o600,
-        flag: "wx",
-      },
-    );
-    fs.renameSync(`${claim}.tmp`, claim);
     const read = (): Owner[] =>
       fs
         .readdirSync(dir)
@@ -124,6 +115,16 @@ export class Locks {
             return [{ pid: 0, birth: "", nonce: "", ticket: 0 }];
           }
         });
+    // Refuse an already claimed resource before publishing a choosing ticket.
+    // This lets its owner finish arbitration instead of competing with every
+    // busy poll, which is particularly expensive on Windows.
+    if (read().length) return undefined;
+    fs.writeFileSync(
+      `${claim}.tmp`,
+      JSON.stringify({ ...this.owner, ticket: 0 }),
+      { mode: 0o600, flag: "wx" },
+    );
+    fs.renameSync(`${claim}.tmp`, claim);
     try {
       const ticket = 1 + Math.max(0, ...read().map((o) => o.ticket || 0));
       const temporary = `${claim}.tmp`;
