@@ -2,7 +2,7 @@
 //! ScreenCast streams. Coordinates and stream IDs never come from separate grants.
 use super::Display;
 use ashpd::desktop::{
-    remote_desktop::{DeviceType, KeyState, RemoteDesktop},
+    remote_desktop::{Axis as PortalAxis, DeviceType, KeyState, RemoteDesktop},
     screencast::{CursorMode, Screencast, SourceType},
     PersistMode,
 };
@@ -181,7 +181,7 @@ impl PortalInput {
                                     Event::Move(id,x,y)=>{let stream=shared.streams.iter().find(|s|s.display.id==id).ok_or("display_not_found")?;let d=&stream.display;let x=x-d.x;let y=y-d.y;if x<0||y<0||x>=d.width||y>=d.height{return Err("invalid_coordinates");}remote.notify_pointer_motion_absolute(&session,stream.node,f64::from(x),f64::from(y)).await.map_err(|_|"input_failed")?;}
                                     Event::Button(button,pressed)=>{if pressed{buttons.insert(button);}remote.notify_pointer_button(&session,button,if pressed{KeyState::Pressed}else{KeyState::Released}).await.map_err(|_|"input_failed")?;if !pressed{buttons.remove(&button);}}
                                     Event::Key(key,pressed)=>{if pressed{keys.insert(key);}remote.notify_keyboard_keysym(&session,key as i32,if pressed{KeyState::Pressed}else{KeyState::Released}).await.map_err(|_|"input_failed")?;if !pressed{keys.remove(&key);}}
-                                    Event::Scroll(axis,steps)=>remote.notify_pointer_axis_discrete(&session,axis as u32,steps).await.map_err(|_|"input_failed")?,
+                                    Event::Scroll(axis,steps)=>remote.notify_pointer_axis_discrete(&session,if axis==1{PortalAxis::Horizontal}else{PortalAxis::Vertical},steps).await.map_err(|_|"input_failed")?,
                                     Event::Close=>{}
                                 };Ok(())
                             };
