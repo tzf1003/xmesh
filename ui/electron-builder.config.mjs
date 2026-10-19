@@ -5,10 +5,11 @@
 // Bundled kernel: the Go binary for the same OS/arch is shipped as resources/bin/xmesh[.exe] and the
 // tray finds it there (src/main/cli.ts). ui-package.yml builds it with the same flags as release.yml.
 //
-// Signing is opt-in and only ever driven by environment variables that CI maps from repository secrets:
+// Signing is opt-in through environment variables; CI maps them from repository secrets:
 //   Windows  CSC_LINK + CSC_KEY_PASSWORD            (Authenticode certificate, .pfx / base64)
 //   macOS    CSC_LINK + CSC_KEY_PASSWORD            (Developer ID Application certificate)
 //            APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID   (notarization)
+//   Local Mac CSC_NAME=<certificate SHA-1> + APPLE_KEYCHAIN_PROFILE=<notarytool profile>
 // Without them the build is unsigned and still succeeds.
 
 import { FuseV1Options } from "@electron/fuses";
@@ -20,8 +21,9 @@ if (!kernel && /electron-builder/.test(process.argv[1] ?? "")) {
 }
 
 const hasValue = (name) => (process.env[name] ?? "").trim() !== "";
-const macSigning = hasValue("CSC_LINK") && hasValue("CSC_KEY_PASSWORD");
-const macNotarize = macSigning && hasValue("APPLE_ID") && hasValue("APPLE_APP_SPECIFIC_PASSWORD") && hasValue("APPLE_TEAM_ID");
+const macSigning = (hasValue("CSC_LINK") && hasValue("CSC_KEY_PASSWORD")) || hasValue("CSC_NAME");
+const macNotarize = macSigning && (hasValue("APPLE_KEYCHAIN_PROFILE") ||
+  (hasValue("APPLE_ID") && hasValue("APPLE_APP_SPECIFIC_PASSWORD") && hasValue("APPLE_TEAM_ID")));
 
 /** scripts/fuses.config.mjs is the single source of truth; electron-builder wants camelCase names. */
 export function builderFuses(profile) {
