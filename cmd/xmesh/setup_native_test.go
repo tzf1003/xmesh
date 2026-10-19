@@ -186,7 +186,15 @@ func TestOnboardingNativeService(t *testing.T) {
 		t.Fatal(e)
 	}
 	if !bytes.Equal(content, originalConfig) {
-		t.Fatal("existing config not restored")
+		store, err := onboarding.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		persisted, err := store.LoadJob(failed.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("existing config not restored: steps=%+v next_action=%q recovery_pending=%v config_committed=%v restore_journaled=%v backup_present=%v", failed.Steps, failed.NextAction, persisted.ServiceRestorePending, persisted.ConfigHash != "", persisted.PendingRestore, persisted.ConfigBackup != "")
 	}
 	content, e = os.ReadFile(clientPath)
 	if e != nil || !strings.Contains(string(content), "concurrent-edit") {
