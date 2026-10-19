@@ -119,17 +119,19 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
         // guard, then wait for the native process before deleting its profile.
         const child = app.process();
         if (child.exitCode === null && child.signalCode === null) {
-          await stopNativeTestProcess(child, () => app.evaluate(({ app }) => app.exit(0)));
+          await stopNativeTestProcess(child, () => app.evaluate(({ app, BrowserWindow }) => {
+            for (const window of BrowserWindow.getAllWindows()) window.destroy();
+            app.quit();
+          }));
         }
         await Promise.race([kernel.stop(), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-        // Chromium can release its Windows profile database handles just after
-        // Electron exits. Use Node's bounded native retry instead of making a
-        // test fail during cleanup with EBUSY.
-        const removeTree = (directory: string): void => {
-          fs.rmSync(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+        // Let process and pipe cleanup callbacks run while Windows releases
+        // Chromium profile handles, with bounded retries for transient locks.
+        const removeTree = async (directory: string): Promise<void> => {
+          await fs.promises.rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
         };
-        removeTree(root);
-        removeTree(userData);
+        await removeTree(root);
+        await removeTree(userData);
       })();
       return closing;
     },
