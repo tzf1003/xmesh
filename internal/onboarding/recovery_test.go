@@ -383,6 +383,66 @@ func TestNativeServiceBaselineRestoredAndRetried(t *testing.T) {
 	}
 }
 
+func TestFailureIsPublishedAfterServiceRecovery(t *testing.T) {
+	for _, recoveryFails := range []bool{false, true} {
+		t.Run(map[bool]string{false: "restored", true: "recovery_pending"}[recoveryFails], func(t *testing.T) {
+			s, in, h, _ := setupFixture(t)
+			first, err := s.Plan(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := first.Config + "# original configuration\n"
+			putClientConfig(t, first.ConfigPath, original)
+			p, err := s.Plan(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			j, err := s.CreateJob(p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.Snapshot = func(context.Context, *Plan) (ServiceSnapshot, error) {
+				return ServiceSnapshot{Installed: true}, nil
+			}
+			h.Installed = func(*Plan) (bool, error) { return true, nil }
+			h.Health = func(context.Context, *Plan) error { return errors.New("service not ready") }
+			recovered := false
+			h.Restore = func(context.Context, *Plan, ServiceSnapshot) error {
+				// A separate CLI/UI reader must not see a terminal result while
+				// the native registration is still being restored.
+				visible, err := s.LoadJob(j.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if visible.Status != "running" || !visible.ServiceRestorePending {
+					t.Fatalf("recovery published premature terminal status: %s", visible.Status)
+				}
+				if visible.Readiness.ServiceReady || visible.Readiness.ClientVerified {
+					t.Fatal("recovery retained connection readiness")
+				}
+				recovered = true
+				if recoveryFails {
+					return errors.New("native recovery requires attention")
+				}
+				return nil
+			}
+			if err := s.Run(t.Context(), j.ID, h); err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.LoadJob(j.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !recovered || result.Status != "failed" || result.ServiceRestorePending != recoveryFails {
+				t.Fatalf("incorrect completed recovery: %+v", result)
+			}
+			if string(readClientConfig(t, p.ConfigPath)) != original {
+				t.Fatal("terminal failure retained the replacement config")
+			}
+		})
+	}
+}
+
 func TestEvidenceRequiresExactChallengeAndPaginates(t *testing.T) {
 	_, in, _, _ := setupFixture(t)
 	p := &Plan{Input: in}
