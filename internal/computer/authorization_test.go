@@ -3,8 +3,66 @@ package computer
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+type blockingInfoDesktop struct {
+	*fakeDesktop
+	block   atomic.Bool
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (p *blockingInfoDesktop) Info(ctx context.Context) (Info, error) {
+	if p.block.Load() {
+		select {
+		case p.entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-p.resume:
+		case <-ctx.Done():
+			return Info{}, ctx.Err()
+		}
+	}
+	return p.fakeDesktop.Info(ctx)
+}
+
+func TestAuthorizationRevokedDuringNativePreflightPreventsDispatch(t *testing.T) {
+	p := &blockingInfoDesktop{fakeDesktop: newFake(), entered: make(chan struct{}, 1), resume: make(chan struct{})}
+	m := New(p, Settings{Enabled: true})
+	t.Cleanup(func() { _ = m.Close() })
+	allowed := atomic.Bool{}
+	allowed.Store(true)
+	m.SetAuthorization(func(string) bool { return allowed.Load() })
+	s := open(t, m, "node/session", "control")
+	r := click(t, m, "node/session", s, "revoked-during-info")
+	p.block.Store(true)
+	result := make(chan ActionResult, 1)
+	go func() { out, _ := m.Act(context.Background(), "node/session", r); result <- out }()
+	select {
+	case <-p.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("native preflight did not start")
+	}
+	allowed.Store(false)
+	close(p.resume)
+	select {
+	case out := <-result:
+		if out.State != "failed" || out.Error != "policy_denied" || out.Executed != 0 {
+			t.Fatal(out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("revoked action did not complete")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.calls != 0 {
+		t.Fatal("revoked action reached native input", p.calls)
+	}
+}
 
 func TestQueuedActionsRecheckCurrentAuthorization(t *testing.T) {
 	m, _ := manager(t)

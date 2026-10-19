@@ -3,6 +3,7 @@
 import argparse
 import pathlib
 import plistlib
+import re
 import shutil
 
 
@@ -13,6 +14,11 @@ def package(binary, output, platform, version):
     if output.exists():
         raise ValueError("output already exists")
     if platform == "darwin":
+        release = version.removeprefix("v")
+        match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?", release)
+        if not match:
+            raise ValueError("unsupported macOS release version")
+        numeric = match.group(1)
         target = output / "Contents" / "MacOS" / "xmesh-computer"
         target.parent.mkdir(parents=True)
         info = {
@@ -20,8 +26,9 @@ def package(binary, output, platform, version):
             "CFBundleName": "XmeSh Computer",
             "CFBundleExecutable": "xmesh-computer",
             "CFBundlePackageType": "APPL",
-            "CFBundleVersion": version.lstrip("v"),
-            "CFBundleShortVersionString": version.lstrip("v").split("-")[0],
+            "CFBundleVersion": numeric,
+            "CFBundleShortVersionString": numeric,
+            "XmeshReleaseVersion": release,
             "LSMinimumSystemVersion": "14.0",
             "LSUIElement": True,
             "NSHighResolutionCapable": True,

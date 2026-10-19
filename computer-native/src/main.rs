@@ -237,6 +237,12 @@ fn capture_access_error(screen: bool, locked: bool) -> Option<&'static str> {
     }
 }
 
+fn scaled_span(origin: i32, extent: i32, scale: f64) -> (u32, u32) {
+    let start = (f64::from(origin) * scale).round() as u32;
+    let end = (f64::from(origin + extent) * scale).round() as u32;
+    (start, end.saturating_sub(start))
+}
+
 fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> {
     if let Some(reason) = capture_access_error(platform::screen_permission(), platform::locked()) {
         return Err(reason);
@@ -325,10 +331,8 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     let full = RgbaImage::from_raw(width as u32, height as u32, pixels).ok_or("capture_format")?;
     let sx = width as f64 / display.width as f64;
     let sy = height as f64 / display.height as f64;
-    let x = (region.x as f64 * sx).round() as u32;
-    let y = (region.y as f64 * sy).round() as u32;
-    let crop_width = (region.width as f64 * sx).round() as u32;
-    let crop_height = (region.height as f64 * sy).round() as u32;
+    let (x, crop_width) = scaled_span(region.x, region.width, sx);
+    let (y, crop_height) = scaled_span(region.y, region.height, sy);
     if crop_width == 0
         || crop_height == 0
         || x + crop_width > width as u32
@@ -935,6 +939,19 @@ fn serve_stdio(authorize: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scaled_crop_uses_shared_endpoints_at_fractional_scale() {
+        assert_eq!(scaled_span(1, 1919, 1.5), (2, 2878));
+        for scale in [0.5, 1.0, 1.25, 1.5, 1.75, 2.0] {
+            for origin in [0, 1, 2, 17, 1919] {
+                let (start, extent) = scaled_span(origin, 1920 - origin, scale);
+                assert_eq!(start + extent, (1920.0 * scale).round() as u32);
+                let (next, _) = scaled_span(origin + 1, 1919 - origin, scale);
+                let (_, one) = scaled_span(origin, 1, scale);
+                assert_eq!(start + one, next);
+            }
+        }
+    }
     #[test]
     fn capture_errors_preserve_the_callers_recovery_path() {
         for (reason, code) in [
