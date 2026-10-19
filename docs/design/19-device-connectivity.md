@@ -11,7 +11,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 撤销 xmesh 信任终止该设备的全部路径与会话。
 
 升级使用配置及设备协议版本 2，结束旧版连接并重新配对。
-升级前保存旧配置和信任文件；回滚使用原程序及原配置。
+升级前保存旧配置和信任文件；回滚使用原程序及原配置。旧 Tailnet 配置若仅声明 `tag:device` 的应用授权，迁移将该授权的原有工具与后端限制复制为版本 2 本机使用的 `tag:peer`；已经声明的 `tag:peer` 保持原样。
 
 ## 身份与配对
 
@@ -63,7 +63,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 
 恢复保留 PTY 的 PID、owner 和 cursor、已接受的 exec 任务及结果、per-caller 后端，
 以及仍在 TTL 内的租约。请求超时、显式取消和租约到期继续生效。
-用户关闭、撤销设备信任、恢复窗口到期或服务退出时执行一次完整清理。恢复期限独立于在途拨号，到期后的握手结果不能复活旧会话。
+用户关闭、撤销设备信任、恢复窗口到期或服务退出时执行一次完整清理。正常退出先在 500 毫秒的总预算内通知对端结束逻辑会话，再关闭网络组件；网络中断保留恢复窗口。恢复期限独立于在途拨号，到期后的握手结果不能复活旧会话。
 远端进程身份变化结束旧会话；结果不确定的写入或执行不会自动作为新操作再次执行。
 
 ## 并发约束与回归
@@ -76,6 +76,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 | provider 关闭、失败重试、旧握手或旧发现迟到 | 关闭时立即撤销旧 provider 代次，提交时再次校验；其余网络独立运行 | `connectivity/node_test.go`、`device/directory_test.go` |
 | 配对确认与密码轮换、设备撤销交错 | 同一事务内验证密码版本与设备信任版本；确认回执绑定当前信任 | `device/pairing_concurrency_test.go` |
 | 同一公钥对应多个进程 | 发现、拨号、激活与业务接收均检查冲突；结束原会话 | `device/directory_test.go`、`devicelink/manager_test.go` |
+| 探测失败与较新成功交错、旧进程地址失效 | 失败按探测开始时间撤销路径证据；迟到失败与旧探测结果不能覆盖较新成功，已失效旧实例证据退出身份冲突判断 | `device/directory_test.go`、`connectivity/node.go` |
 | 旧拨号失败、旧 sys.info 回读覆盖新连接 | 仅当前设备与连接代次能发布结果；路径退避分别保存 | `role/gateway/coexist_race_test.go` |
 | 断线路径恢复、ACK 丢失、业务重发 | 双向序列与确认去重，恢复已有 MCP 会话；健康路径保持 | `devicelink/session_test.go`、`devicelink/manager_test.go` |
 | 恢复期限到达时仍有拨号在途 | 独立执行期限清理，拒绝迟到的激活结果 | `devicelink/manager_test.go` |
@@ -118,7 +119,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 
 当前验收记录：
 
-- macOS 上的真实临时 Headscale：两个 tsnet 节点使用新版设备信任与链路双向调用文件、exec、PTY；第三节点的 Ingress 通过完整 OAuth 协议检查。
+- macOS 上的真实临时 Headscale：两个 tsnet 节点使用新版设备信任与链路双向调用文件、exec、PTY；第三节点的 Ingress 通过完整 OAuth 协议检查；临时 Tailnet 节点完成两轮入网与双向工具调用，xmesh 设备 ID 保持，正常退出及时离线。
 - 独立 TLS 端点的连接恢复：覆盖消息确认去重、稳定路径、双向同时打开与恢复窗口；真实 Agent 验证 PTY、exec 单次执行、per-caller 后端、有效租约和分块文件完整性。
 - Linux arm64 的两个独立 Docker 网络空间：一条设备记录、首次 LAN、LAN 关闭后 Tailnet 接替、LAN 恢复后保持 Tailnet、Tailnet 网络授权撤销后回到 LAN；exec 仅执行一次，PTY 与 per-caller 后端 PID 保持，Gateway 租约心跳和跨路径分块文件哈希正确；远程排空按设备 ID 定位，并检查 xmesh 信任中的管理角色。常规路径恢复约 1.6 秒，禁用直连 UDP、强制经过嵌入 DERP 的相同测试约 0.6 秒。脚本为 `scripts/coexist_ci.py`，属于同一宿主机上的网络隔离验收。
 - Windows amd64 与 Linux arm64 交叉构建成功。跨构建不代表对应平台已经完成实际运行验收。

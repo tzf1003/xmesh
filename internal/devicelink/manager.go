@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -108,14 +109,15 @@ type peerLink struct {
 // Manager owns one physical carrier for each device pair and isolated logical sessions on it.
 // A healthy carrier is sticky. Physical errors reconnect it without closing the SDK sessions.
 type Manager struct {
-	mu      sync.Mutex
-	opts    Options
-	ctx     context.Context
-	cancel  context.CancelFunc
-	peers   map[string]*peerLink
-	budget  *Budget
-	workers sync.WaitGroup
-	closed  bool
+	mu       sync.Mutex
+	opts     Options
+	ctx      context.Context
+	cancel   context.CancelFunc
+	peers    map[string]*peerLink
+	budget   *Budget
+	workers  sync.WaitGroup
+	closed   bool
+	stopping atomic.Bool
 }
 
 func NewManager(ctx context.Context, opts Options) (*Manager, error) {
@@ -732,7 +734,7 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 	}
 	generation, enabled := m.opts.Directory.Provider(c.path.Kind)
 	_, trusted := m.opts.Trust.Find(p.id)
-	if p.closed || p.active != c || m.ctx.Err() != nil || !enabled || generation != c.path.ProviderGeneration || !trusted || m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+	if p.closed || p.active != c || m.ctx.Err() != nil || m.stopping.Load() || !enabled || generation != c.path.ProviderGeneration || !trusted || m.opts.Directory.IdentityConflict(p.id, time.Now()) {
 		c.cancel()
 		_ = c.conn.CloseNow()
 		if p.active == c {
@@ -769,9 +771,18 @@ func (m *Manager) serveCarrier(ctx context.Context, p *peerLink, c *carrier) {
 		if p.active == c {
 			p.active = nil
 			p.disconnected = time.Now()
-			state := "reconnecting"
-			if p.closed || m.ctx.Err() != nil {
-				state = "offline"
+			state := "offline"
+			if !p.closed && m.ctx.Err() == nil {
+				for _, l := range p.pending {
+					if l.err == nil {
+						state = "reconnecting"
+					}
+				}
+				for _, l := range p.sessions {
+					if l.err == nil && !l.session.Closed() {
+						state = "reconnecting"
+					}
+				}
 			}
 			m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: state})
 			p.signalLocked()
@@ -810,6 +821,26 @@ func (m *Manager) Close() error {
 		return nil
 	}
 	m.closed = true
+	m.stopping.Store(true)
+	active := []*carrier{}
+	for _, p := range m.peers {
+		p.mu.Lock()
+		if p.active != nil && p.active.committed {
+			active = append(active, p.active)
+		}
+		p.mu.Unlock()
+	}
+	m.mu.Unlock()
+	// A clean process exit ends its logical sessions. Network loss instead keeps
+	// them recoverable; the bounded shutdown notice distinguishes those cases.
+	ctx, stop := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	var notifications sync.WaitGroup
+	for _, c := range active {
+		notifications.Go(func() { _ = writeFrame(ctx, c.conn, frame{Type: "shutdown", Epoch: c.epoch}) })
+	}
+	notifications.Wait()
+	stop()
+	m.mu.Lock()
 	m.cancel()
 	for _, p := range m.peers {
 		p.mu.Lock()

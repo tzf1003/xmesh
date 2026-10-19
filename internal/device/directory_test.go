@@ -125,3 +125,46 @@ func TestDirectoryNotifiesEverySubscriber(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedProbeCannotRetireNewerEvidence(t *testing.T) {
+	d, id, generation := directory(t)
+	path := observedPath(LAN, "https://192.168.1.2:7433", "boot-new")
+	oldProbe := path.VerifiedAt.Add(-time.Second)
+	if err := d.Observe(id.Certificate.Leaf, generation, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.ProbeFailed(id.ID, LAN, path.Address, 1, oldProbe); !errors.Is(err, ErrStalePath) {
+		t.Fatal("old failure overwrote current evidence", err)
+	}
+	devices, _ := d.Snapshot(time.Now())
+	if !devices[0].Paths[0].Reachable {
+		t.Fatal("new path retired")
+	}
+	if err := d.ProbeFailed(id.ID, LAN, path.Address, 1, path.VerifiedAt.Add(time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = d.Snapshot(time.Now())
+	if devices[0].Paths[0].Reachable {
+		t.Fatal("failed endpoint stayed reachable")
+	}
+}
+
+func TestFailedOldProcessEvidenceClearsIdentityConflict(t *testing.T) {
+	d, id, generation := directory(t)
+	old := observedPath(LAN, "https://192.168.1.2:7433", "old-process")
+	newPath := observedPath(Tailnet, "https://100.64.0.2:7433", "new-process")
+	for _, path := range []Path{old, newPath} {
+		if err := d.Observe(id.Certificate.Leaf, generation, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !d.IdentityConflict(id.ID, time.Now()) {
+		t.Fatal("simultaneous live identities were merged")
+	}
+	if err := d.ProbeFailed(id.ID, old.Kind, old.Address, 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if d.IdentityConflict(id.ID, time.Now()) {
+		t.Fatal("failed old process kept device in conflict")
+	}
+}

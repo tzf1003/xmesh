@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -43,5 +44,30 @@ func TestDeviceMigrationKeepsJSONAsJSON(t *testing.T) {
 	}
 	if !json.Valid(got) {
 		t.Fatal("JSON configuration changed format", string(got))
+	}
+}
+
+func TestDeviceMigrationPreservesLocalTailnetGrant(t *testing.T) {
+	for _, existing := range []string{"", "\n    tag:peer:\n      tools: [fs.stat]\n      backends: []"} {
+		raw := []byte("node:\n  name: old-node\n  roles: [agent]\nmesh:\n  mode: tailnet\n  control_url: https://controlplane.tailscale.com\n  auth_method: browser\nagent:\n  cwd_policy:\n    allow: []\n  authz:\n    tag:device:\n      tools: [sys.info]\n      backends: []" + existing + "\n")
+		before, err := Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		converted, err := MigrateDeviceConfig(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, err := Parse(converted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := before.Agent.Authz["tag:device"]
+		if existing != "" {
+			want = before.Agent.Authz["tag:peer"]
+		}
+		if !reflect.DeepEqual(after.Agent.Authz["tag:peer"], want) || !reflect.DeepEqual(after.Agent.Authz["tag:device"], before.Agent.Authz["tag:device"]) {
+			t.Fatal("local grant changed", string(converted))
+		}
 	}
 }

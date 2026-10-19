@@ -52,6 +52,16 @@ func MigrateDeviceConfig(raw []byte) ([]byte, error) {
 	for _, key := range []string{"mode", "control_url", "authkey_file", "auth_method", "ephemeral"} {
 		deleteMapping(mesh, key)
 	}
+	// The v2 local device uses tag:peer. Preserve the previous Tailnet local
+	// grant when the file only declared tag:device, retaining its exact limits.
+	if cfg.Mesh.Mode == "tailnet" {
+		authz := mappingValue(mappingValue(root, "agent"), "authz")
+		if authz != nil && mappingValue(authz, "tag:peer") == nil {
+			if grant := mappingValue(authz, "tag:device"); grant != nil {
+				setMapping(authz, "tag:peer", grant)
+			}
+		}
+	}
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)
 	encoder.SetIndent(2)
@@ -80,6 +90,15 @@ func MigrateDeviceConfig(raw []byte) ([]byte, error) {
 }
 
 func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.AliasNode {
+		node = node.Alias
+		if node == nil {
+			return nil
+		}
+	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == key {
 			return node.Content[i+1]

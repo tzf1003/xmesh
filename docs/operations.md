@@ -88,7 +88,7 @@ agent:
   cwd_policy:
     allow: [/srv/workspace]
   authz:
-    tag:device:
+    tag:peer:
       tools: ['*']
       backends: ['*']
 ```
@@ -144,10 +144,12 @@ go test ./internal/mesh -run Test_TailnetPeerConnectivity -v -timeout=60s
 python3 scripts/smoke_sandbox.py --binary /opt/xmesh \
   --auth-key-file /run/secrets/xmesh-authkey \
   --peer mac-dev:darwin --peer linux-dev:linux \
+  --peer-password-file mac-dev=/run/secrets/mac-device-password \
+  --peer-password-file linux-dev=/run/secrets/linux-device-password \
   --observer-gateway 127.0.0.1:8080 --observer-token-file /path/to/observer-state/pats/default.token
 ```
 
-`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
+`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。每个对端先设置连接密码，并通过 `--peer-password-file 名称=文件` 提供私有口令文件，用于首次建立双向 xmesh 信任。观察节点也须列在配对对端中。脚本启动两个生命周期，验证 Tailnet 临时入网、持久设备 ID 保持、远端文件/exec/PTY、网络凭据状态不落盘和临时工作目录清理；入网 key 与配对口令均通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
 
 ## 本机 Gateway PAT
 

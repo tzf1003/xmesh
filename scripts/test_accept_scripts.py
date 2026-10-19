@@ -59,6 +59,15 @@ class AcceptConfig(unittest.TestCase):
         self.assertNotIn("tskey", json.dumps(config) + out)
         self.assertIn("tag:ingress", config["agent"]["authz"])
 
+    def test_coexist_node_enables_both_providers(self):
+        code, _, err = generate("coexist", "--name", "dev-a", "--out", str(self.root / "both"), "--authkey-file", str(self.key))
+        self.assertEqual(code, 0, err)
+        config = self.config("both")
+        self.assertEqual(config["schema_version"], 2)
+        self.assertTrue(config["mesh"]["lan"]["enabled"])
+        self.assertTrue(config["mesh"]["tailnet"]["enabled"])
+        self.assertNotIn("mode", config["mesh"])
+
     def test_ingress_node_and_password(self):
         code, out, err = generate("ingress", "--name", "ing-a", "--out", str(self.root / "i"), "--authkey-file", str(self.key),
                                   "--issuer", "https://ing-a.tail1234.ts.net/", "--max-pty-per-client", "3",

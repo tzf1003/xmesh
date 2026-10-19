@@ -354,3 +354,22 @@ func TestManagerRecoveryDeadlineFencesPendingDial(t *testing.T) {
 		t.Fatal("late dial committed after recovery expired", got)
 	}
 }
+
+func TestManagerCleanShutdownEndsSessionsBeforeRecoveryWindow(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	if err := b.manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- client.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("clean exit kept the remote logical session recoverable")
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"slices"
 	"sort"
 	"time"
 
@@ -44,12 +43,6 @@ func (s *Server) snapshot() v2.StatusResponse {
 	}
 	if s.auditDropped.Load() {
 		st.Warnings = append(st.Warnings, v2.Warning{Code: v2.WarnAuditDropped, Severity: v2.SeverityWarning, Message: "有审计记录因含正文被拒绝写入"})
-	}
-	if s.pairPending.Load() {
-		st.RestartRequired = true
-		if !slices.ContainsFunc(st.Warnings, func(w v2.Warning) bool { return w.Code == v2.WarnRestartRequired }) {
-			st.Warnings = append(st.Warnings, v2.Warning{Code: v2.WarnRestartRequired, Severity: v2.SeverityInfo, Message: "已导入对端配对证书，需要重启后生效"})
-		}
 	}
 	// Order by code so two snapshots of the same state compare equal.
 	sort.SliceStable(st.Warnings, func(i, j int) bool { return st.Warnings[i].Code < st.Warnings[j].Code })

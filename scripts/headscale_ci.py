@@ -201,6 +201,20 @@ extendedKeyUsage=serverAuth
             for client in clients.values():
                 client.close()
 
+            device_password = work / "device-password"
+            device_password.write_text("device-pairing-" + os.urandom(16).hex())
+            device_password.chmod(0o600)
+            sh(binary, "control", "pair", "password", "set", "--state-dir", work / "hs-a" / "state",
+               "--password-file", device_password)
+            sandbox = sh(sys.executable, HERE / "smoke_sandbox.py", "--binary", binary,
+                         "--control-url", control, "--auth-key-file", key_file,
+                         "--peer", "hs-a:" + options.expected_os,
+                         "--peer-password-file", "hs-a=" + str(device_password),
+                         "--observer-gateway", nodes["hs-a"][2],
+                         "--observer-token-file", work / "hs-a" / "state" / "pats" / "default.token",
+                         env=node_env, timeout=180)
+            sandbox_result = json.loads(sandbox.strip().splitlines()[-1])
+
             # The application calls above traverse real tsnet paths and the version 2 device link.
             # Legacy unauthenticated Agent HTTP probes cannot validate this protocol.
             probe = None
@@ -210,8 +224,8 @@ extendedKeyUsage=serverAuth
                                       "--password-file", password_file, "--preregistered", "codex",
                                       "--device", "hs-a", "--device", "hs-b"))
             print(json.dumps({"result": "PASS", "peer_checks": results, "tailnet_probe": probe is not None,
-                              "oauth": oauth, "path": "tailnet",
-                              "checks": ["join", "public-key-pairing", "device-link", "peer-tools-both-ways"] + (["tailnet-connectivity"] if probe else [])
+                              "oauth": oauth, "path": "tailnet", "sandbox": sandbox_result,
+                              "checks": ["join", "public-key-pairing", "device-link", "peer-tools-both-ways", "ephemeral-network-stable-device"] + (["tailnet-connectivity"] if probe else [])
                               + (["oauth-protocol"] if oauth else [])}))
         except BaseException:
             for log in logs:

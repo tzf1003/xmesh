@@ -75,6 +75,7 @@ type Node struct {
 	candidates     map[string]Candidate
 	workers        sync.WaitGroup
 	closed         bool
+	stopParent     func() bool
 	lock           *os.File
 	probes         chan Candidate
 	probing        map[string]bool
@@ -116,7 +117,8 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	parent := ctx
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	n := &Node{ctx: ctx, cancel: cancel, stateDir: stateDir, name: c.Node.Name, cfg: c.Mesh, identity: id, trust: trust, pairing: pairing, providers: map[device.PathKind]*provider{}, candidates: map[string]Candidate{}}
 	n.lock = lock
 	n.probes = make(chan Candidate, 128)
@@ -143,6 +145,9 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	if supervise {
 		n.workers.Go(n.supervise)
 	}
+	n.mu.Lock()
+	n.stopParent = context.AfterFunc(parent, func() { _ = n.Close() })
+	n.mu.Unlock()
 	keepLock = true
 	return n, nil
 }
@@ -401,6 +406,13 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if !ok {
 		return
 	}
+	started := time.Now()
+	verified := false
+	defer func() {
+		if !verified {
+			_ = n.directory.ProbeFailed(c.DeviceID, c.Kind, c.Address, c.Generation, started)
+		}
+	}()
 	client, err := n.httpClient(c.Kind, c.DeviceID, false)
 	if err != nil {
 		return
@@ -427,8 +439,7 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if json.NewDecoder(http.MaxBytesReader(nil, response.Body, 16<<10)).Decode(&body) != nil || body.Identity.Validate() != nil || body.Identity.DeviceID != c.DeviceID || body.BootID == "" {
 		return
 	}
-	now := time.Now()
-	_ = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: now, ExpiresAt: now.Add(30 * time.Second)})
+	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, ExpiresAt: started.Add(30 * time.Second)}) == nil
 }
 
 func (n *Node) Close() error {
@@ -439,9 +450,12 @@ func (n *Node) Close() error {
 		return nil
 	}
 	n.closed = true
-	n.cancel()
+	if n.stopParent != nil {
+		n.stopParent()
+	}
 	n.mu.Unlock()
 	_ = n.links.Close()
+	n.cancel()
 	n.workers.Wait()
 	n.directory.Close()
 	_ = n.lock.Close()

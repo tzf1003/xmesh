@@ -46,6 +46,14 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			return ErrUnavailable
 		}
 		switch value.Type {
+		case "shutdown":
+			for _, l := range p.sessions {
+				closeLogical(l, ErrRestarted)
+			}
+			for _, l := range p.pending {
+				closeLogical(l, ErrRestarted)
+			}
+			err = ErrRestarted
 		case "revoked":
 			for _, l := range p.sessions {
 				closeLogical(l, device.ErrUntrusted)

@@ -171,6 +171,18 @@ func (d *Directory) Observe(cert *x509.Certificate, trustGeneration uint64, path
 
 // Lost changes only one provider path. It neither revokes the device nor ends its sessions.
 func (d *Directory) Lost(id string, kind PathKind, address string, generation uint64) error {
+	return d.lost(id, kind, address, generation, time.Time{})
+}
+
+// ProbeFailed retires evidence only if a newer probe has not already replaced it.
+func (d *Directory) ProbeFailed(id string, kind PathKind, address string, generation uint64, started time.Time) error {
+	if started.IsZero() {
+		return ErrStalePath
+	}
+	return d.lost(id, kind, address, generation, started)
+}
+
+func (d *Directory) lost(id string, kind PathKind, address string, generation uint64, started time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -182,6 +194,9 @@ func (d *Directory) Lost(id string, kind PathKind, address string, generation ui
 	}
 	key := pathKey{kind, address}
 	if path, ok := d.paths[id][key]; ok && path.Reachable {
+		if !started.IsZero() && path.VerifiedAt.After(started) {
+			return ErrStalePath
+		}
 		path.Reachable = false
 		d.paths[id][key] = path
 		d.notifyLocked()

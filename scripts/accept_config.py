@@ -9,6 +9,7 @@ a missing OAuth password file is created with a random value (mode 0600) and nev
 
   lan        step A: LAN node discovered over mDNS, peers authorised through `xmesh pair`
   tailnet    steps D-F: tailnet node (Agent + Gateway) that joins with a registration key file
+  coexist    step H: independently enabled LAN and Tailnet paths with shared device trust
   ingress    steps B, C, E: tailnet node that also serves the OAuth ingress
 """
 
@@ -41,11 +42,11 @@ def build(kind, options):
         # Peers are paired with --tags tag:peer,tag:device; the receiving side decides what they may call.
         config["agent"]["authz"] = {"tag:peer": dict(GRANT), "tag:device": dict(GRANT)}
         return config
-    config["mesh"] = {"lan": {"enabled": False}, "tailnet": {"enabled": True, "control_url": options.control_url, "authkey_file": str(options.authkey_file)}}
+    config["mesh"] = {"lan": {"enabled": kind == "coexist", "mdns": True}, "tailnet": {"enabled": True, "control_url": options.control_url, "authkey_file": str(options.authkey_file)}}
     if options.ephemeral:
         config["mesh"]["tailnet"]["ephemeral"] = True
     # Devices must accept calls from other devices and, for the ingress, from the tag:ingress node.
-    config["agent"]["authz"] = {"tag:device": dict(GRANT), "tag:ingress": dict(GRANT)}
+    config["agent"]["authz"] = {"tag:peer": dict(GRANT), "tag:device": dict(GRANT), "tag:ingress": dict(GRANT)}
     if kind == "ingress":
         ingress = {"listen": options.listen, "max_pty_per_client": options.max_pty_per_client,
                    "oauth": {"issuer": options.issuer.rstrip("/"),
@@ -69,7 +70,7 @@ def csv(text):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("kind", choices=["lan", "tailnet", "ingress"])
+    p.add_argument("kind", choices=["lan", "tailnet", "coexist", "ingress"])
     p.add_argument("--name", required=True, help="node.name: letters, digits and hyphens")
     p.add_argument("--out", required=True, type=pathlib.Path, help="directory that receives config.json, state/ and work/")
     p.add_argument("--roles", type=csv, help="comma separated; default agent,gateway (plus ingress for `ingress`)")
