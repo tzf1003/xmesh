@@ -14,13 +14,15 @@ import (
 )
 
 type fakeDesktop struct {
-	mu       sync.Mutex
-	info     Info
-	calls    int
-	releases []Execution
-	start    chan struct{}
-	unblock  chan struct{}
-	err      error
+	mu         sync.Mutex
+	info       Info
+	calls      int
+	releases   []Execution
+	start      chan struct{}
+	unblock    chan struct{}
+	err        error
+	captures   []CaptureRequest
+	executions []Execution
 }
 
 func newFake() *fakeDesktop {
@@ -31,16 +33,24 @@ func (f *fakeDesktop) Info(context.Context) (Info, error) {
 	defer f.mu.Unlock()
 	return f.info, nil
 }
-func (f *fakeDesktop) Capture(context.Context, CaptureRequest) (Frame, error) {
+func (f *fakeDesktop) Capture(_ context.Context, request CaptureRequest) (Frame, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var b bytes.Buffer
 	_ = png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 100, 80)))
-	return Frame{Epoch: f.info.Epoch, DisplayID: "display", LayoutVersion: f.info.LayoutVersion, Width: 100, Height: 80, Region: Region{Width: 200, Height: 160}, Image: b.Bytes()}, nil
+	f.captures = append(f.captures, request)
+	display := "display"
+	layout := f.info.LayoutVersion
+	if request.TargetID != "" {
+		display = ""
+		layout = frameLayout(f.info, request.TargetID)
+	}
+	return Frame{Epoch: f.info.Epoch, DisplayID: display, TargetID: request.TargetID, LayoutVersion: layout, Width: 100, Height: 80, Region: Region{Width: 200, Height: 160}, Image: b.Bytes()}, nil
 }
 func (f *fakeDesktop) Execute(ctx context.Context, e Execution) (ActionResult, error) {
 	f.mu.Lock()
 	f.calls++
+	f.executions = append(f.executions, e)
 	start, unblock, err := f.start, f.unblock, f.err
 	f.mu.Unlock()
 	if start != nil {

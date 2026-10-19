@@ -128,6 +128,8 @@ func TestComputerSchemasExposeSupportedActionsAndCoordinateRequirements(t *testi
 		valid      bool
 	}{
 		{"computer.open", `{"mode":"control","ttl_seconds":30}`, true},
+		{"computer.open", `{"mode":"control","interaction":"background","target_id":"window-one"}`, true},
+		{"computer.open", `{"mode":"control","interaction":"global"}`, false},
 		{"computer.open", `{"mode":"operator"}`, false},
 		{"computer.open", `{"mode":"observe","ttl_seconds":601}`, false},
 		{"computer.observe", `{"session_id":"s","desktop_epoch":"e","max_width":8193}`, false},

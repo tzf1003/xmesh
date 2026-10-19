@@ -29,7 +29,12 @@ def verify_computer(client, device):
             break
         assert time.monotonic() < deadline, {"desktop_state": info.get("state"), "reason": info.get("reason")}
         time.sleep(.1)
-    _, session = call("open", {"mode": "control", "ttl_seconds": 30})
+    opened = {"mode": "control", "ttl_seconds": 30}
+    if info.get("default_interaction") == "background":
+        targets = info.get("targets", [])
+        assert targets, "background acceptance requires an available application window"
+        opened.update(interaction="background", target_id=targets[0]["id"])
+    _, session = call("open", opened)
     identity = {key: session[key] for key in ("session_id", "desktop_epoch", "lease_token")}
     try:
         images = []

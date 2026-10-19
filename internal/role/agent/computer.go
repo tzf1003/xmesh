@@ -127,8 +127,8 @@ func computerSpecs() map[string]spec {
 	action := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": actionProps,
 		"allOf": []any{when([]string{"move", "click", "drag", "scroll"}, "x", "y"), when([]string{"drag"}, "to_x", "to_y"), when([]string{"key"}, "keys"), when([]string{"text"}, "text"), when([]string{"wait"}, "duration_ms")}}
 	definitions := map[string][3]string{
-		"computer.info":          {"Inspect desktop availability, system permissions, desktop_epoch, displays and supported screenshot/input capabilities. Missing system permission requires local setup.", "", ""},
-		"computer.open":          {"Open an observation or exclusive control session. One controller owns the whole desktop, including all displays. Keep session_id, desktop_epoch and the control lease_token; renew before expiry and close when finished.", "mode", "desktop_id mode ttl_seconds"},
+		"computer.info":          {"Inspect desktop availability, system permissions, desktop_epoch, displays, application window targets and supported screenshot/input capabilities. Use an executor-issued target ID for background control; never invent a PID. Missing system permission requires local setup.", "", ""},
+		"computer.open":          {"Open an observation or exclusive control session. On macOS control defaults to background and requires target_id from info.targets. Background is bound to that window and never falls back to global input. Explicit foreground shares the system pointer and keyboard focus. One controller owns the whole desktop. Keep session_id, desktop_epoch and the control lease_token; renew before expiry and close when finished.", "mode", "desktop_id mode ttl_seconds interaction target_id"},
 		"computer.observe":       {"Capture the current desktop as native MCP image content plus frame metadata. Select a display if needed. Pointer actions must use the returned image pixel coordinates and frame_id. Observe again after UI changes.", "session_id desktop_epoch", "session_id desktop_epoch lease_token display_id max_width region"},
 		"computer.act":           {"Submit 1-8 finite mouse, keyboard, text or wait actions, with a five-second queue/execution budget. Pointer actions require a fresh frame_id and image pixel coordinates. Reuse action_id only for the identical request. After a lost response query action_status; unknown means observe before deciding what to do. executed means input was submitted: verify the business result in a new observation.", "session_id desktop_epoch lease_token action_id actions", "session_id desktop_epoch lease_token action_id frame_id actions observe_after"},
 		"computer.action_status": {"Query an accepted action_id after a lost response. States: accepted, executed, failed, unknown. executed counts the completed action prefix. For unknown, observe current application state before choosing another action.", "session_id desktop_epoch action_id", "session_id desktop_epoch lease_token action_id"},
@@ -155,6 +155,10 @@ func computerSpecs() map[string]spec {
 		}
 		if _, ok := props["mode"]; ok {
 			props["mode"] = map[string]any{"type": "string", "enum": []string{"observe", "control"}}
+		}
+		if _, ok := props["interaction"]; ok {
+			props["interaction"] = map[string]any{"type": "string", "enum": []string{"background", "foreground"}, "description": "Background binds input to the selected app window; foreground shares the system pointer and focus. macOS defaults to background; its explicit foreground requires a separate local allow_foreground grant. Remote arguments cannot enable that grant."}
+			props["target_id"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "description": "Opaque target ID returned by info.targets. Bound for the session lifetime; required for background."}
 		}
 		if _, ok := props["frame_id"]; ok {
 			props["frame_id"] = map[string]any{"type": "string", "description": "A screenshot from this session, at most 60 seconds old. Layout or desktop changes invalidate it earlier."}

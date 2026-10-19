@@ -12,6 +12,9 @@ import (
 )
 
 func TestNativeUserIntervention(t *testing.T) {
+	if os.Getenv("XMESH_TEST_ALLOW_DESKTOP_INPUT") != "1" {
+		t.Skip("requires explicit authorization to use the desktop pointer and keyboard")
+	}
 	if (runtime.GOOS != "darwin" && runtime.GOOS != "windows") || os.Getenv("XMESH_TEST_COMPUTER_FIXTURE") == "" {
 		t.Skip("native local input monitor acceptance requires an isolated supported desktop fixture")
 	}
@@ -42,9 +45,9 @@ func TestNativeUserIntervention(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	m := computer.New(c, computer.Settings{Enabled: true, PauseOnUserInput: true})
+	m := computer.New(c, computer.Settings{Enabled: true, PauseOnUserInput: true, AllowForeground: true})
 	defer m.Close()
-	s, err := m.Open(ctx, "native-intervention/session", computer.OpenRequest{Mode: "control"})
+	s, err := m.Open(ctx, "native-intervention/session", computer.OpenRequest{Mode: "control", Interaction: "foreground"})
 	if err != nil {
 		t.Fatal(err)
 	}

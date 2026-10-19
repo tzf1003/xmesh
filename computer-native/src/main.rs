@@ -44,6 +44,8 @@ struct CaptureRequest {
     #[serde(default)]
     max_width: u32,
     region: Option<Region>,
+    #[serde(default)]
+    target_id: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -54,6 +56,8 @@ struct Frame {
     image_width: i32,
     image_height: i32,
     capture_region: Region,
+    #[serde(default)]
+    target_id: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -93,6 +97,10 @@ struct Execution {
     frame: Option<Frame>,
     #[serde(default)]
     actions: Vec<Action>,
+    #[serde(default)]
+    interaction: String,
+    #[serde(default)]
+    target_id: String,
 }
 
 struct Runtime {
@@ -149,20 +157,37 @@ impl Runtime {
         }
         #[cfg(not(target_os = "linux"))]
         let _ = &mut capabilities;
+        let targets = if state == "ready" {
+            platform::targets()
+        } else {
+            Vec::new()
+        };
+        #[cfg(target_os = "macos")]
+        if state == "ready" {
+            capabilities.push("background:screenshot");
+            if input && platform::background_available() {
+                capabilities.extend([
+                    "background:pointer",
+                    "background:keyboard",
+                    "background:text",
+                ]);
+            }
+        }
         json!({"protocol_version":1,"available":state=="ready","state":state,
             "reason":if state=="permission_required"{"screen_permission"}else if state=="ready"&&!input{"input_permission_required"}else{state},
             "desktop_id":"desktop","desktop_epoch":self.epoch,"layout_version":platform::layout(&displays),
             "capabilities":capabilities,"displays":displays,
-			"user_input_monitor":platform::input_monitor_available(),"user_input_serial":platform::user_input_serial()})
+            "user_input_monitor":platform::input_monitor_available(),"user_input_serial":platform::user_input_serial(),
+            "targets":targets,"default_interaction":if cfg!(target_os="macos"){"background"}else{"foreground"}})
     }
-    fn live(&self, token: u64, start: Instant) -> bool {
+    fn live(&self, token: u64, start: Instant, target: &str) -> bool {
         token > self.revoked.load(Ordering::Acquire)
             && start.elapsed() < Duration::from_secs(5)
             && !platform::locked()
             && platform::input_permission()
             && (!self.pause_on_input.load(Ordering::Acquire)
                 || (platform::input_monitor_available()
-                    && platform::user_input_serial()
+                    && platform::target_input_serial(target)
                         == self.input_baseline.load(Ordering::Acquire)))
     }
 }
@@ -172,12 +197,36 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
         return Err("permission_required");
     }
     let displays = platform::displays();
-    let layout = platform::layout(&displays);
-    let display = displays
-        .iter()
-        .find(|d| q.display_id.is_empty() || d.id == q.display_id)
-        .ok_or("display_not_found")?
-        .clone();
+    let target = if q.target_id.is_empty() {
+        None
+    } else {
+        Some(platform::target(&q.target_id)?)
+    };
+    if target.is_some() && !q.display_id.is_empty() {
+        return Err("invalid_display");
+    }
+    let layout = target
+        .as_ref()
+        .map(|target| target.layout_version.clone())
+        .unwrap_or_else(|| platform::layout(&displays));
+    let display = if let Some(target) = &target {
+        platform::Display {
+            id: String::new(),
+            name: target.name.clone(),
+            x: 0,
+            y: 0,
+            width: target.width,
+            height: target.height,
+            scale: 1.0,
+            rotation: 0,
+        }
+    } else {
+        displays
+            .iter()
+            .find(|d| q.display_id.is_empty() || d.id == q.display_id)
+            .ok_or("display_not_found")?
+            .clone()
+    };
     let region = q.region.unwrap_or(Region {
         x: 0,
         y: 0,
@@ -206,9 +255,13 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     }
     let (tx, rx) = mpsc::sync_channel(1);
     let capture_display = display.clone();
+    let capture_target = target.clone();
     thread::spawn(move || {
-        let result = std::panic::catch_unwind(|| capture_raw(&capture_display))
-            .unwrap_or(Err("capture_unavailable"));
+        let result = std::panic::catch_unwind(|| match capture_target {
+            Some(target) => platform::capture_target(&target),
+            None => capture_raw(&capture_display),
+        })
+        .unwrap_or(Err("capture_unavailable"));
         RAW_CAPTURE_ACTIVE.store(false, Ordering::Release);
         let _ = tx.send(result);
     });
@@ -257,12 +310,17 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     if encoded.get_ref().len() > 4 << 20 {
         return Err("image_too_large");
     }
-    if platform::layout(&platform::displays()) != layout || platform::locked() {
+    let current_layout = if let Some(target) = &target {
+        platform::target(&target.id)?.layout_version
+    } else {
+        platform::layout(&platform::displays())
+    };
+    if current_layout != layout || platform::locked() {
         return Err("layout_changed");
     }
     Ok(
         json!({"desktop_epoch":runtime.epoch,"display_id":display.id,"layout_version":layout,"image_width":img.width(),"image_height":img.height(),
-        "capture_region":{"x":region.x,"y":region.y,"width":region.width,"height":region.height},"mime_type":mime,"image":STANDARD.encode(encoded.into_inner())}),
+        "capture_region":{"x":region.x,"y":region.y,"width":region.width,"height":region.height},"target_id":q.target_id,"mime_type":mime,"image":STANDARD.encode(encoded.into_inner())}),
     )
 }
 
@@ -324,7 +382,28 @@ fn mapped(frame: &Frame, x: i32, y: i32) -> Result<(i32, i32), &'static str> {
     {
         return Err("invalid_coordinates");
     }
-    let displays = platform::displays();
+    let displays = if frame.target_id.is_empty() {
+        platform::displays()
+    } else {
+        let target = platform::target(&frame.target_id)?;
+        if target.layout_version != frame.layout_version {
+            return Err("layout_changed");
+        }
+        let r = &frame.capture_region;
+        if r.x < 0
+            || r.y < 0
+            || r.width < 1
+            || r.height < 1
+            || r.x.checked_add(r.width).is_none_or(|v| v > target.width)
+            || r.y.checked_add(r.height).is_none_or(|v| v > target.height)
+        {
+            return Err("invalid_region");
+        }
+        return Ok((
+            r.x + ((x as i64 * r.width as i64) / frame.image_width as i64) as i32,
+            r.y + ((y as i64 * r.height as i64) / frame.image_height as i64) as i32,
+        ));
+    };
     if platform::layout(&displays) != frame.layout_version {
         return Err("layout_changed");
     }
@@ -348,10 +427,16 @@ fn mapped(frame: &Frame, x: i32, y: i32) -> Result<(i32, i32), &'static str> {
     ))
 }
 
-fn pause(runtime: &Runtime, token: u64, start: Instant, millis: u64) -> Result<(), &'static str> {
+fn pause(
+    runtime: &Runtime,
+    token: u64,
+    start: Instant,
+    millis: u64,
+    target: &str,
+) -> Result<(), &'static str> {
     let end = Instant::now() + Duration::from_millis(millis);
     while Instant::now() < end {
-        if !runtime.live(token, start) {
+        if !runtime.live(token, start, target) {
             return Err("cancelled");
         }
         thread::sleep(Duration::from_millis(10));
@@ -374,7 +459,7 @@ fn action(
         _ => return Err("invalid_button"),
     };
     let pointer = |x, y| mapped(q.frame.as_ref().ok_or("observation_required")?, x, y);
-    if !runtime.live(token, start) {
+    if !runtime.live(token, start, &q.target_id) {
         return Err("cancelled");
     }
     if let Some(frame) = q.frame.as_ref() {
@@ -392,12 +477,12 @@ fn action(
             // Let the compositor route the pointer to the target before a button,
             // wheel or keyboard event uses its focus. This is cancellable.
             if a.kind != "move" {
-                pause(runtime, token, start, 50)?;
+                pause(runtime, token, start, 50, &q.target_id)?;
             }
             match a.kind.as_str() {
                 "click" => {
                     for _ in 0..a.clicks.max(1) {
-                        if !runtime.live(token, start) {
+                        if !runtime.live(token, start, &q.target_id) {
                             return Err("cancelled");
                         }
                         enigo
@@ -427,7 +512,13 @@ fn action(
                         .map_err(|_| "input_failed")?;
                     let result: Result<(), &'static str> = (|| {
                         for i in 1..=20 {
-                            pause(runtime, token, start, a.duration_ms.max(200) / 20)?;
+                            pause(
+                                runtime,
+                                token,
+                                start,
+                                a.duration_ms.max(200) / 20,
+                                &q.target_id,
+                            )?;
                             enigo
                                 .move_mouse(
                                     x + (tx - x) * i / 20,
@@ -472,7 +563,7 @@ fn action(
                 }
             }
             result?;
-            pause(runtime, token, start, 50)?;
+            pause(runtime, token, start, 50, &q.target_id)?;
         }
         "text" => {
             if a.text.is_empty() || a.text.len() > 65536 || a.text.contains('\0') {
@@ -482,7 +573,7 @@ fn action(
             for ch in a.text.chars() {
                 chunk.push(ch);
                 if chunk.chars().count() >= 8 {
-                    if !runtime.live(token, start) {
+                    if !runtime.live(token, start, &q.target_id) {
                         return Err("cancelled");
                     }
                     enigo.text(&chunk).map_err(|_| "input_failed")?;
@@ -490,16 +581,39 @@ fn action(
                 }
             }
             if !chunk.is_empty() {
-                if !runtime.live(token, start) {
+                if !runtime.live(token, start, &q.target_id) {
                     return Err("cancelled");
                 }
                 enigo.text(&chunk).map_err(|_| "input_failed")?;
             }
         }
-        "wait" => pause(runtime, token, start, a.duration_ms)?,
+        "wait" => pause(runtime, token, start, a.duration_ms, &q.target_id)?,
         _ => return Err("invalid_action"),
     };
     Ok(())
+}
+
+fn background_action(
+    runtime: &Runtime,
+    token: u64,
+    start: Instant,
+    q: &Execution,
+    a: &Action,
+) -> Result<(), &'static str> {
+    if !runtime.live(token, start, &q.target_id) {
+        return Err("cancelled");
+    }
+    if a.kind == "wait" {
+        return pause(runtime, token, start, a.duration_ms, &q.target_id);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        platform::execute_background(runtime, token, start, q, a)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("background_unavailable")
+    }
 }
 
 fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, authorize: bool) {
@@ -553,7 +667,7 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
             cache.clear();
             previous_token = token;
         }
-        let payload = json!({"user_input_serial":q.user_input_serial,"actions":q.actions.iter().map(|a|json!({"type":a.kind,"x":a.x,"y":a.y,"to_x":a.to_x,"to_y":a.to_y,"button":a.button,"clicks":a.clicks,"keys":a.keys,"text":a.text,"delta_x":a.delta_x,"delta_y":a.delta_y,"duration_ms":a.duration_ms})).collect::<Vec<_>>(),"frame":q.frame.as_ref().map(|f|json!({"epoch":f.desktop_epoch,"display":f.display_id,"layout":f.layout_version,"w":f.image_width,"h":f.image_height,"region":[f.capture_region.x,f.capture_region.y,f.capture_region.width,f.capture_region.height]}))});
+        let payload = json!({"interaction":q.interaction,"target":q.target_id,"user_input_serial":q.user_input_serial,"actions":q.actions.iter().map(|a|json!({"type":a.kind,"x":a.x,"y":a.y,"to_x":a.to_x,"to_y":a.to_y,"button":a.button,"clicks":a.clicks,"keys":a.keys,"text":a.text,"delta_x":a.delta_x,"delta_y":a.delta_y,"duration_ms":a.duration_ms})).collect::<Vec<_>>(),"frame":q.frame.as_ref().map(|f|json!({"epoch":f.desktop_epoch,"target":f.target_id,"display":f.display_id,"layout":f.layout_version,"w":f.image_width,"h":f.image_height,"region":[f.capture_region.x,f.capture_region.y,f.capture_region.width,f.capture_region.height]}))});
         if let Some((old, result)) = cache.get(&q.action_id) {
             if *old == payload {
                 runtime.reply(id, result.clone());
@@ -581,6 +695,15 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
             runtime.error(id, "conflict", "desktop_epoch");
             continue;
         }
+        if !matches!(q.interaction.as_str(), "" | "foreground" | "background")
+            || (q.interaction == "background") != !q.target_id.is_empty()
+            || q.frame
+                .as_ref()
+                .is_some_and(|frame| frame.target_id != q.target_id)
+        {
+            runtime.error(id, "invalid_args", "invalid_target");
+            continue;
+        }
         let mut executed = 0;
         runtime
             .pause_on_input
@@ -590,7 +713,17 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
             .store(q.user_input_serial.unwrap_or(0), Ordering::Release);
         let mut error = None;
         let start = Instant::now();
-        if let Some(enigo) = input.as_mut() {
+        if q.interaction == "background" {
+            for a in &q.actions {
+                match background_action(&runtime, token, start, &q, a) {
+                    Ok(()) => executed += 1,
+                    Err(reason) => {
+                        error = Some(reason);
+                        break;
+                    }
+                }
+            }
+        } else if let Some(enigo) = input.as_mut() {
             for a in &q.actions {
                 match action(enigo, &runtime, token, start, &q, a) {
                     Ok(()) => executed += 1,
@@ -601,14 +734,14 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
                 }
             }
         } else {
-            error = Some("permission_required");
+            error.get_or_insert("permission_required");
         }
         if q.user_input_serial
-            .is_some_and(|serial| serial != platform::user_input_serial())
+            .is_some_and(|serial| serial != platform::target_input_serial(&q.target_id))
         {
             error = Some("human_intervention");
         }
-        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled"|"human_intervention")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
+        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled"|"human_intervention"|"focus_changed")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
         cache.insert(q.action_id.clone(), (payload, result.clone()));
         runtime.reply(id, result);
     }
@@ -727,6 +860,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn release_request_accepts_the_go_metadata_only_envelope() {
+        let request: Execution = serde_json::from_str(
+            r#"{"desktop_epoch":"epoch","lease_token":"1","action_id":"","frame":null}"#,
+        )
+        .unwrap();
+        assert!(request.actions.is_empty());
+        assert!(request.interaction.is_empty());
+        assert!(request.target_id.is_empty());
+    }
     #[test]
     fn keys_are_explicit() {
         assert!(key("Control").is_ok());

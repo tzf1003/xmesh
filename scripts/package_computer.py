@@ -30,6 +30,10 @@ def package(binary, output, platform, version):
         }
         with (output / "Contents" / "Info.plist").open("wb") as stream:
             plistlib.dump(info, stream)
+        notices = pathlib.Path(__file__).resolve().parents[1] / "computer-native/macos/THIRD_PARTY_NOTICES.txt"
+        resources = output / "Contents/Resources"
+        resources.mkdir()
+        shutil.copy2(notices, resources / "ThirdPartyNotices.txt")
     else:
         target = output
         target.parent.mkdir(parents=True, exist_ok=True)

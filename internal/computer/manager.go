@@ -34,11 +34,12 @@ type operation struct {
 
 type ownedSession struct {
 	Session
-	userInputSerial uint64
-	frames          map[string]Frame
-	actions         map[string]*operation
-	ctx             context.Context
-	cancel          context.CancelFunc
+	userInputSerial      uint64
+	foregroundRestricted bool
+	frames               map[string]Frame
+	actions              map[string]*operation
+	ctx                  context.Context
+	cancel               context.CancelFunc
 }
 
 // Manager keeps authority on the target Agent, including across Gateway reconnects.
@@ -103,6 +104,13 @@ func (m *Manager) Configure(settings Settings) {
 	if !m.settings.PauseOnUserInput && settings.PauseOnUserInput {
 		m.removeLocked(m.controller)
 	}
+	if !settings.AllowForeground {
+		for id, s := range m.sessions {
+			if s.foregroundRestricted {
+				m.removeLocked(id)
+			}
+		}
+	}
 	m.settings = settings
 }
 
@@ -138,12 +146,21 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 	}
 	m.mu.Lock()
 	for id, s := range m.sessions {
-		if s.Mode == "control" && m.settings.PauseOnUserInput && (!info.UserInputMonitor || s.userInputSerial != info.UserInputSerial) {
+		serial := info.UserInputSerial
+		if s.TargetID != "" {
+			target, ok := targetOf(info, s.TargetID)
+			if !ok {
+				m.removeLocked(id)
+				continue
+			}
+			serial = target.UserInputSerial
+		}
+		if s.Mode == "control" && m.settings.PauseOnUserInput && (!info.UserInputMonitor || s.userInputSerial != serial) {
 			m.paused = true
 			m.removeLocked(id)
 			continue
 		}
-		if !info.Available || s.Epoch != info.Epoch || (s.Mode == "control" && !inputCapable(info)) {
+		if !info.Available || s.Epoch != info.Epoch || (s.Mode == "control" && !interactionCapable(info, s.Interaction)) {
 			m.removeLocked(id)
 		}
 	}
@@ -172,6 +189,30 @@ func inputCapable(info Info) bool {
 	return slices.Contains(info.Capabilities, "pointer") && slices.Contains(info.Capabilities, "keyboard")
 }
 
+func interactionCapable(info Info, interaction string) bool {
+	if interaction == "background" {
+		return slices.Contains(info.Capabilities, "background:pointer") && slices.Contains(info.Capabilities, "background:keyboard")
+	}
+	return inputCapable(info)
+}
+
+func targetOf(info Info, id string) (Target, bool) {
+	for _, target := range info.Targets {
+		if target.ID == id {
+			return target, true
+		}
+	}
+	return Target{}, false
+}
+
+func frameLayout(info Info, targetID string) string {
+	if targetID == "" {
+		return info.LayoutVersion
+	}
+	target, _ := targetOf(info, targetID)
+	return target.LayoutVersion
+}
+
 func (m *Manager) ttl(seconds int) (time.Duration, error) {
 	if seconds == 0 {
 		seconds = m.settings.LeaseSeconds
@@ -183,6 +224,9 @@ func (m *Manager) ttl(seconds int) (time.Duration, error) {
 }
 
 func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Session, error) {
+	if len(r.TargetID) > 128 {
+		return Session{}, toolerr.Args("target_id")
+	}
 	if r.Mode != "observe" && r.Mode != "control" {
 		return Session{}, toolerr.Args("mode")
 	}
@@ -193,7 +237,30 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	if err = desktopReady(info); err != nil {
 		return Session{}, err
 	}
-	if !slices.Contains(info.Capabilities, "screenshot") || (r.Mode == "control" && !inputCapable(info)) {
+	if r.Interaction == "" {
+		r.Interaction = "foreground"
+		if r.TargetID != "" || (r.Mode == "control" && info.DefaultInteraction == "background") {
+			r.Interaction = "background"
+		}
+	}
+	if r.Interaction != "foreground" && r.Interaction != "background" {
+		return Session{}, toolerr.Args("interaction")
+	}
+	if (r.Interaction == "background") != (r.TargetID != "") {
+		return Session{}, toolerr.Args("target_id")
+	}
+	var target Target
+	if r.TargetID != "" {
+		var ok bool
+		target, ok = targetOf(info, r.TargetID)
+		if !ok {
+			return Session{}, toolerr.New("not_found", "目标窗口不存在", "name", r.TargetID)
+		}
+		if !slices.Contains(info.Capabilities, "background:screenshot") {
+			return Session{}, toolerr.New("desktop_unavailable", "当前执行器不支持后台窗口截图", "reason", "background_unavailable")
+		}
+	}
+	if !slices.Contains(info.Capabilities, "screenshot") || (r.Mode == "control" && !interactionCapable(info, r.Interaction)) {
 		return Session{}, toolerr.New("permission_required", "需要系统桌面权限", "reason", "desktop_capability_missing")
 	}
 	if r.DesktopID != "" && r.DesktopID != info.DesktopID {
@@ -203,6 +270,9 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	defer m.mu.Unlock()
 	if err = m.availableLocked(); err != nil {
 		return Session{}, err
+	}
+	if r.Mode == "control" && r.Interaction == "foreground" && info.DefaultInteraction == "background" && !m.settings.AllowForeground {
+		return Session{}, toolerr.New("policy_denied", "此设备未授权共享前台输入", "rule", "computer.foreground_disabled")
 	}
 	if r.Mode == "control" && m.settings.PauseOnUserInput && !info.UserInputMonitor {
 		return Session{}, toolerr.New("permission_required", "当前桌面无法监测本机用户输入", "reason", "input_monitor_unavailable")
@@ -228,8 +298,12 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 		return Session{}, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &ownedSession{Session: Session{ID: "cs-" + rand.Text(), DesktopID: info.DesktopID, Epoch: info.Epoch, Mode: r.Mode, Owner: caller, ExpiresAt: m.now().Add(ttl)}, frames: map[string]Frame{}, actions: map[string]*operation{}, ctx: ctx, cancel: cancel}
+	s := &ownedSession{Session: Session{ID: "cs-" + rand.Text(), DesktopID: info.DesktopID, Epoch: info.Epoch, Mode: r.Mode, Owner: caller, ExpiresAt: m.now().Add(ttl), Interaction: r.Interaction, TargetID: r.TargetID}, frames: map[string]Frame{}, actions: map[string]*operation{}, ctx: ctx, cancel: cancel}
 	s.userInputSerial = info.UserInputSerial
+	s.foregroundRestricted = r.Mode == "control" && r.Interaction == "foreground" && info.DefaultInteraction == "background"
+	if r.TargetID != "" {
+		s.userInputSerial = target.UserInputSerial
+	}
 	if r.Mode == "control" {
 		m.serial++
 		s.Token = strconv.FormatUint(m.serial, 10)
@@ -312,6 +386,13 @@ func (m *Manager) Observe(ctx context.Context, caller string, r ObserveRequest) 
 		m.invalidate(s.ID)
 		return Frame{}, toolerr.New("conflict", "桌面会话已重建", "reason", "desktop_epoch")
 	}
+	if r.TargetID != "" && r.TargetID != s.TargetID {
+		return Frame{}, toolerr.Args("target_id")
+	}
+	if s.TargetID != "" && r.DisplayID != "" {
+		return Frame{}, toolerr.Args("display_id")
+	}
+	r.TargetID = s.TargetID
 	f, err := m.provider.Capture(ctx, r.CaptureRequest)
 	if err != nil {
 		return Frame{}, err
@@ -321,7 +402,7 @@ func (m *Manager) Observe(ctx context.Context, caller string, r ObserveRequest) 
 	if _, err = m.sessionLocked(caller, r.SessionRequest, false); err != nil {
 		return Frame{}, err
 	}
-	if f.Epoch != s.Epoch || f.LayoutVersion != info.LayoutVersion {
+	if f.Epoch != s.Epoch || f.TargetID != s.TargetID || f.LayoutVersion != frameLayout(info, s.TargetID) {
 		return Frame{}, toolerr.New("conflict", "采集期间桌面布局已变化", "reason", "layout_changed")
 	}
 	if len(f.Image) == 0 || len(f.Image) > m.settings.MaxImageBytes {
@@ -549,7 +630,7 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 		m.invalidate(s.ID)
 		return
 	}
-	if info.Epoch != s.Epoch || (frame != nil && info.LayoutVersion != frame.LayoutVersion) {
+	if info.Epoch != s.Epoch || (frame != nil && frameLayout(info, s.TargetID) != frame.LayoutVersion) {
 		result.Error = "stale_frame"
 		return
 	}
@@ -558,6 +639,10 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 		return
 	}
 	execution := Execution{Epoch: s.Epoch, Token: s.Token, ActionID: r.ActionID, Frame: frame, Actions: r.Actions}
+	if s.Interaction == "background" {
+		execution.Interaction = s.Interaction
+		execution.TargetID = s.TargetID
+	}
 	m.mu.Lock()
 	if m.settings.PauseOnUserInput {
 		serial := s.userInputSerial
@@ -566,7 +651,7 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 	m.mu.Unlock()
 	result, err = m.provider.Execute(ctx, execution)
 	result.ActionID = r.ActionID
-	if result.Error == "human_intervention" {
+	if result.Error == "human_intervention" || result.Error == "focus_changed" {
 		m.Pause(true)
 	}
 	if err != nil || (result.State != "executed" && result.State != "failed" && result.State != "unknown") {

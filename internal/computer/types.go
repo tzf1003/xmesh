@@ -23,17 +23,31 @@ type Display struct {
 }
 
 type Info struct {
-	ProtocolVersion  int       `json:"protocol_version"`
-	Available        bool      `json:"available"`
-	State            string    `json:"state"`
-	Reason           string    `json:"reason,omitempty"`
-	DesktopID        string    `json:"desktop_id"`
-	Epoch            string    `json:"desktop_epoch"`
-	LayoutVersion    string    `json:"layout_version"`
-	Capabilities     []string  `json:"capabilities"`
-	Displays         []Display `json:"displays"`
-	UserInputMonitor bool      `json:"user_input_monitor,omitempty"`
-	UserInputSerial  uint64    `json:"user_input_serial,omitempty"`
+	ProtocolVersion    int       `json:"protocol_version"`
+	Available          bool      `json:"available"`
+	State              string    `json:"state"`
+	Reason             string    `json:"reason,omitempty"`
+	DesktopID          string    `json:"desktop_id"`
+	Epoch              string    `json:"desktop_epoch"`
+	LayoutVersion      string    `json:"layout_version"`
+	Capabilities       []string  `json:"capabilities"`
+	Displays           []Display `json:"displays"`
+	UserInputMonitor   bool      `json:"user_input_monitor,omitempty"`
+	UserInputSerial    uint64    `json:"user_input_serial,omitempty"`
+	Targets            []Target  `json:"targets,omitempty"`
+	DefaultInteraction string    `json:"default_interaction,omitempty"`
+}
+
+// Target is an executor-issued application window identity, scoped to Epoch.
+// Clients select its opaque ID; they cannot supply a PID or change a session's target.
+type Target struct {
+	ID              string `json:"id"`
+	AppID           string `json:"app_id"`
+	Name            string `json:"name"`
+	LayoutVersion   string `json:"layout_version"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+	UserInputSerial uint64 `json:"user_input_serial"`
 }
 
 type Region struct {
@@ -47,6 +61,7 @@ type CaptureRequest struct {
 	DisplayID string  `json:"display_id,omitempty"`
 	MaxWidth  int     `json:"max_width,omitempty"`
 	Region    *Region `json:"region,omitempty"`
+	TargetID  string  `json:"target_id,omitempty"`
 }
 
 type Frame struct {
@@ -61,6 +76,7 @@ type Frame struct {
 	CoordinateSpace string    `json:"coordinate_space"`
 	MIMEType        string    `json:"mime_type"`
 	Image           []byte    `json:"-"`
+	TargetID        string    `json:"target_id,omitempty"`
 }
 
 type Action struct {
@@ -79,19 +95,23 @@ type Action struct {
 }
 
 type OpenRequest struct {
-	DesktopID  string `json:"desktop_id,omitempty"`
-	Mode       string `json:"mode"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	DesktopID   string `json:"desktop_id,omitempty"`
+	Mode        string `json:"mode"`
+	TTLSeconds  int    `json:"ttl_seconds,omitempty"`
+	Interaction string `json:"interaction,omitempty"`
+	TargetID    string `json:"target_id,omitempty"`
 }
 
 type Session struct {
-	ID        string    `json:"session_id"`
-	DesktopID string    `json:"desktop_id"`
-	Epoch     string    `json:"desktop_epoch"`
-	Mode      string    `json:"mode"`
-	Token     string    `json:"lease_token,omitempty"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Owner     string    `json:"owner"`
+	ID          string    `json:"session_id"`
+	DesktopID   string    `json:"desktop_id"`
+	Epoch       string    `json:"desktop_epoch"`
+	Mode        string    `json:"mode"`
+	Token       string    `json:"lease_token,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Owner       string    `json:"owner"`
+	Interaction string    `json:"interaction,omitempty"`
+	TargetID    string    `json:"target_id,omitempty"`
 }
 
 type SessionRequest struct {
@@ -138,7 +158,9 @@ type Execution struct {
 	Token           string   `json:"lease_token"`
 	ActionID        string   `json:"action_id"`
 	Frame           *Frame   `json:"frame,omitempty"`
-	Actions         []Action `json:"actions"`
+	Actions         []Action `json:"actions,omitempty"`
+	Interaction     string   `json:"interaction,omitempty"`
+	TargetID        string   `json:"target_id,omitempty"`
 }
 
 // Provider is the authenticated connection to the user-session desktop executor.
@@ -153,6 +175,7 @@ type Provider interface {
 }
 
 type Settings struct {
+	AllowForeground  bool   `json:"allow_foreground,omitempty"`
 	PauseOnUserInput bool   `json:"pause_on_user_input,omitempty"`
 	Enabled          bool   `json:"enabled"`
 	Endpoint         string `json:"endpoint,omitempty"`

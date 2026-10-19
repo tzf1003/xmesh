@@ -544,14 +544,24 @@ xmesh mesh derp sync --profile home --admission-url http://127.0.0.1:8480 --admi
 验证状态：Headscale 一侧用真实 v0.29.5 做过集成测试（`policy.mode=database`，含生成的 DERP 文件被其加载）；Tailscale 一侧只对照官方客户端的请求形状做了夹具测试，没有联调真实 tailnet；第三方 DERP 的探测与准入在本机回环验证过，没有跨公网验证。计量、计费、多租户目录没有实现。
 ## Computer 桌面接入
 
+当前通用 computer 执行器操作目标设备的活跃用户桌面，鼠标和键盘焦点与该设备用户共享。Agent 操作另一台机器时，输入发生在远端；目标就是正在使用的本机时，会影响本机操作。macOS 应用 / 窗口后台后端正按[设计与验收门](design/19-computer.md#macos-应用后台执行)建设，尚不能将当前全局输入路径视为后台操作。专用设备或独立虚拟机可提供各自独立的桌面；虚拟显示器本身不隔离输入。
+
+macOS 后台后端已接入窗口列表、单窗口采集及固定版本的开源输入实现。Agent 先调用 `computer.info`，从 `targets` 选择窗口，再用 `computer.open` 的 `mode: control`、`interaction: background`、`target_id` 建立会话；后续 observe / act 沿用同一目标。macOS 控制的默认 interaction 为 background，缺少目标时报错。显式 foreground 会使用共享桌面输入。后台点击当前支持左键单击 / 双击，其他形式返回不支持。该后端的 AppKit / Electron 实际兼容性和用户并行使用效果仍待验收。
+
 在目标设备的图形用户会话中打开面板“桌面控制”，开启桌面能力，再点击“安装桌面服务并授权”。系统会请求屏幕录制与输入控制权限。桌面 host 独立于面板运行，用户注销后按平台会话规则退出。
 
 CLI 对应步骤：`xmesh computer setup` 安装并启动当前用户的桌面服务并请求系统授权；`xmesh computer info` 查询执行器状态；`xmesh computer stop|start|restart|uninstall` 管理用户服务。需要前台诊断时运行 `xmesh computer host --authorize`。这些命令要求发行包中同时存在 `xmesh` 与原生桌面执行器；macOS 原生执行器位于同目录的 `xmesh-computer.app`。
 
 在节点配置中设置 `agent.computer.enabled: true`，并按用途向节点 tag 授予 `computer.info`、`computer.open`、`computer.observe`、`computer.sessions`、`computer.renew`、`computer.close`；控制还需要 `computer.act` 和 `computer.action_status`。Gateway PAT / Ingress OAuth 使用 `computer:observe:<设备名>` 或 `computer:control:<设备名>`。
 
+面板预览须显式选择具有目标设备观察权限的凭据。默认 Gateway PAT 未包含桌面 scope 时，到“授权”页创建观察凭据，再回到桌面页选择它。页面只接触凭据名称，令牌由主进程读取；控制 scope 也可观察，剪贴板 scope 不授予预览权限。
+
 Windows SYSTEM 内核需要显式配置 `agent.computer.endpoint` 指向登录用户 SID 的 `\\.\pipe\xmesh-<SID>-computer` 管道，桌面 host 由该用户的登录任务启动。Linux 服务绑定 `graphical-session.target`；Wayland 还需要 RemoteDesktop 与 ScreenCast Portal、PipeWire，以及支持对应接口的桌面后端。Linux 二进制运行时依赖 libdbus、libxkbcommon 和 libpipewire。
 
 本机接管可在面板暂停 Agent，或执行 `xmesh control computer --action pause --node <节点名>`；`--action resume` 恢复，Agent 随后重新获取控制会话。紧急快捷键在面板应用运行期间有效。各平台实测进度见 [Computer 方案](design/19-computer.md)，工具参数见 [契约](contracts/computer.md)。
 
 内核不可用时，执行 `xmesh computer emergency-stop` 直接停止用户桌面 Host 的画面和输入共享；自定义用户目录使用 `--state-dir <目录>`。停止状态保留到 Host 重启之后。执行 `xmesh computer resume` 清除本机停止状态，再按需恢复节点控制；面板的恢复操作会依次恢复本机 Host 和内核。新的远程会话须重新截图和获取租约。
+
+原生输入验收会共用目标桌面的系统指针和键盘，须先取得该桌面用户的明确同意，再设置 `XMESH_TEST_ALLOW_DESKTOP_INPUT=1` 运行 `ui/scripts/test-native-desktop.mjs`。普通本机测试保留此变量未设置，输入用例自动跳过，启动器会在创建窗口之前拒绝运行。CI 的一次性 runner 显式启用该开关。
+
+macOS 的真实内核与面板预览验收脚本为 `ui/scripts/accept-computer-macos.mjs`。它要求预先构建 UI、测试配置的 Electron fuses，以及绝对路径的 `XMESH_TEST_COMPUTER_SERVICE_BINARY` 和 `XMESH_TEST_COMPUTER_HELPER`；打开窗口前须取得本机用户同意，并设置 `XMESH_TEST_ALLOW_DESKTOP_UI=1`。脚本使用独立节点、PAT、Host 和用户数据目录，结束后清理。与输入夹具组合运行时还要求输入验收开关；单独运行只观察桌面和验证控制状态。可选 `XMESH_TEST_COMPUTER_UI_EVIDENCE` 仅在清除画面后保存面板截图，原始桌面图像保留在内存。

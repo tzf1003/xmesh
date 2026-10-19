@@ -8,8 +8,8 @@
 
 | 工具 | 必填参数 | 语义 |
 | --- | --- | --- |
-| `computer.info` | 无 | 协议版本、可用状态、桌面代次、显示器、能力 |
-| `computer.open` | `mode` | observe 或 control；可选 desktop_id、ttl_seconds |
+| `computer.info` | 无 | 协议版本、可用状态、桌面代次、显示器、窗口 targets、default_interaction、能力 |
+| `computer.open` | `mode` | observe 或 control；可选 desktop_id、ttl_seconds、interaction、target_id；后台会话须指定 target_id |
 | `computer.observe` | session_id、desktop_epoch | 当前截图，可选 display_id、max_width、region |
 | `computer.act` | session_id、desktop_epoch、lease_token、action_id、actions | 最多八个有限动作，可选 frame_id、observe_after |
 | `computer.action_status` | session_id、desktop_epoch、action_id | 查询当前会话中已接收的动作 |
@@ -39,6 +39,16 @@ Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop
 
 审计记录动作 ID、会话 ID、参数键和字节数。输入正文、图片和其可猜测摘要不写入审计。完整桌面控制具有用户级 GUI 权限；文件路径策略不会自动约束 GUI。Ingress 处理工具结果，是截图数据的信任边界。
 
+前台交互模式操作目标设备的活跃用户桌面，与该设备的本机用户共用系统指针和键盘焦点。调用端访问另一台设备时，输入发生在目标设备。macOS 应用 / 窗口后台交互单独绑定目标，能力及验收状态按下述契约报告。虚拟显示器及用户介入暂停策略本身不等同于后台输入会话。
+
+macOS 执行器现在报告 `default_interaction: background`。控制会话省略 interaction 时按此默认值处理，并要求 `target_id` 来自当前 `info.targets`；观察会话省略 target 时仍采集桌面。`foreground` 需要明确选择，使用共享的系统鼠标与焦点。后台会话固定目标，观察和动作不能重新指定另一窗口。后台能力以 `background:screenshot`、`background:pointer`、`background:keyboard`、`background:text` 报告；私有接口缺失时不报告相关输入能力。
+
+默认后台的设备还要求本机配置 `agent.computer.allow_foreground: true` 才接受显式前台控制。该值默认 false，远程工具参数不能开启；本机撤销该配置会立即回收受其授权的前台会话。后台操作能力缺失时返回错误。
+
+后台 frame 另有 `target_id`，布局版本属于目标窗口，坐标相对返回窗口图片。执行器校验窗口归属、进程启动身份、窗口布局及会话代次，目标关闭或切换身份后旧会话失效。目标窗口移动 / 缩放后需重新观察。当前上游左键单击 / 双击配方被复用；其他点击形式明确返回 `background_action_unsupported`。输入已经提交后出错、用户进入目标应用、前台状态变化或取消可能返回 unknown，调用方重新观察。
+
+后台输入复用固定提交的 MIT Swift 代码，经内部 C ABI 静态链接进 Rust 执行器。原始来源、哈希、集成变更和兼容性验收边界见 [macOS 后端说明](../../computer-native/macos/README.md)。当前编译、配方和模拟会话验证不代表 AppKit / Electron 实桌面兼容性已经通过。
+
 `agent.computer.pause_on_user_input` 默认关闭。启用时，控制会话绑定原生执行器报告的本机输入序号；检测到其他输入来源的点击或按键后，输入执行和下一次状态检查会撤销控制并暂停。执行器的标记用于区别自己产生的事件，同用户进程不属于独立安全边界。`user_input_monitor` 为 false 时，启用该策略的控制申请返回 permission_required；不会默默放行。Wayland compositor 尚未提供全局输入监测时可使用本机接管按钮和暂停快捷键。
 
 将该策略从关闭改为启用会立即回收已有控制租约；调用方重新打开控制会话后绑定当前输入基线。本机状态读取完成桌面状态复核后才列出会话，因此同一次响应反映权限撤销及本机输入暂停。
@@ -56,6 +66,8 @@ Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道�
 `xmesh computer status` 查询本机 Host 的运行状态、PID、版本和原生子进程 PID；该查询不启动执行器、不取得内核绑定。服务不存在时返回 running=false，身份检查与协议错误仍返回失败。`--state-dir` 在 Unix 上选择对应用户端点，Windows 按用户 SID 定位管道。
 
 面板桌面预览经当前 Gateway 调用同一组 MCP computer 工具，按所选设备的观察权限获取图片；每次预览创建十秒观察租约并在获取画面后关闭。手动请求或用户开启的两秒刷新均串行执行；隐藏页面暂停采集，切换节点、设备、显示器、连接代次或离开页面时取消请求并清除画面。预览不写入调用历史或持久存储，保留画面采集时间。截图和输入仍共享目标 Agent 的授权与会话管理。
+
+预览由用户显式选择具有目标设备 observe 或 control scope 的已有 PAT；令牌只由主进程根据内核报告的文件读取，页面只传凭据名称。缺少授权时引导到授权页。默认 Gateway PAT 的权限保持原配置；各凭据分别使用 MCP 会话，预览不会为了切换凭据而终止其他凭据下的调用。
 
 原生采集限制单帧最多 32 Mi 像素；在分配应用侧原始像素缓冲之前检查，覆盖 Windows、macOS、X11 和 PipeWire 路径。当前上限包含 7680×4320 的单显示器画面。
 

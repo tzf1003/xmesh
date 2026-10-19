@@ -75,7 +75,7 @@ export class GatewayCredentials {
     private readonly files: TokenFiles = realTokenFiles,
   ) {}
 
-  async read(): Promise<string> {
+  async read(name?: string): Promise<string> {
     let list: unknown;
     try {
       list = await this.controller.requireCapable("pats").call("GET", "/v1/pats");
@@ -83,8 +83,8 @@ export class GatewayCredentials {
       throw new TokenUnavailableError(e instanceof Error ? e.message : String(e));
     }
     const pats = (list as Partial<PatList> | null)?.pats;
-    const pat = Array.isArray(pats) ? copyPat(pats) : undefined;
-    if (pat === undefined) throw new TokenUnavailableError("the kernel has no PAT");
+    const pat = Array.isArray(pats) ? (name === undefined ? copyPat(pats) : pats.find((p) => p.name === name)) : undefined;
+    if (pat === undefined) throw new TokenUnavailableError(name === undefined ? "the kernel has no PAT" : "the selected PAT is unavailable");
     return readTokenFile(pat.token_file, this.files);
   }
 }

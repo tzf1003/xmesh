@@ -787,6 +787,17 @@ export interface ComputerInfo {
   displays: ComputerDisplay[];
   user_input_monitor?: boolean;
   user_input_serial?: number;
+  targets?: ComputerTarget[];
+  default_interaction?: "background" | "foreground";
+}
+export interface ComputerTarget {
+  id: string;
+  app_id: string;
+  name: string;
+  layout_version: string;
+  width: number;
+  height: number;
+  user_input_serial: number;
 }
 export interface ComputerSession {
   session_id: string;
@@ -795,6 +806,8 @@ export interface ComputerSession {
   mode: "observe" | "control";
   expires_at: string;
   owner: string;
+  target_id?: string;
+  interaction?: "background" | "foreground";
 }
 export interface ComputerState {
   enabled: boolean;

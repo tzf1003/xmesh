@@ -7,6 +7,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// Native events share the signed-in user's pointer and keyboard focus. Require
+// explicit authorization before even opening or focusing the acceptance window.
+if (process.env.XMESH_TEST_ALLOW_DESKTOP_INPUT !== "1") {
+  throw new Error("Native desktop acceptance uses the system mouse and keyboard. Obtain the user's approval, then set XMESH_TEST_ALLOW_DESKTOP_INPUT=1; use a dedicated desktop for unattended runs.");
+}
 const token = randomBytes(24).toString("hex");
 const data = mkdtempSync(path.join(tmpdir(), "xmesh-native-fixture-"));
 const args = [`--user-data-dir=${data}`, path.join(root, "ui/scripts/native-desktop-fixture.cjs")];

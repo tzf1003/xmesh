@@ -86,6 +86,18 @@
         "user_input_serial": {
           "type": "integer",
           "minimum": 0
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ComputerTarget"
+          }
+        },
+        "default_interaction": {
+          "enum": [
+            "background",
+            "foreground"
+          ]
         }
       },
       "required": [
@@ -124,6 +136,15 @@
         },
         "owner": {
           "type": "string"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "interaction": {
+          "enum": [
+            "background",
+            "foreground"
+          ]
         }
       },
       "required": [
@@ -188,6 +209,45 @@
       },
       "required": [
         "session_id"
+      ]
+    },
+    "ComputerTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "app_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "layout_version": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "user_input_serial": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "app_id",
+        "name",
+        "layout_version",
+        "width",
+        "height",
+        "user_input_serial"
       ]
     }
   }

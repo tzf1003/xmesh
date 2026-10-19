@@ -36,11 +36,14 @@ test("desktop preview renders MCP images with observation leases and clears on e
   const h = await launch({ kernel: { playground: true, capabilities: ["status", "events", "peers", "sessions", "computer", "pats", "config.read", "config.write"] } });
   try {
     const desktop = h.kernel.playground!.enableDesktop();
+    h.kernel.panel.pats.find((p) => p.name === "default")!.scopes.push("computer:observe:*");
     const page = await h.openPanel();
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
     await navigate(page, "computer");
+    await expect(page.getByTestId("computer-preview-refresh")).toBeDisabled();
+    await page.getByTestId("computer-preview-pat").selectOption("default");
     desktop.image = (await page.screenshot({ scale: "css" })).toString("base64");
     const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
     desktop.width = viewport.width; desktop.height = viewport.height;
@@ -67,6 +70,7 @@ test("desktop preview renders MCP images with observation leases and clears on e
     await navigate(page, "overview");
     await navigate(page, "computer");
     await expect(image).toHaveCount(0);
+    await expect(page.getByTestId("computer-preview-refresh")).toBeDisabled();
     expect(errors).toEqual([]);
   } finally { await h.close(); }
 });

@@ -259,6 +259,7 @@
           "properties": {
             "enabled": { "type": "boolean", "default": false },
             "pause_on_user_input": { "type": "boolean", "default": false },
+            "allow_foreground": { "type": "boolean", "default": false, "description": "Permit explicit foreground control when the executor defaults to background. Configured locally; remote open requests cannot enable it." },
             "endpoint": { "type": "string", "minLength": 1, "description": "用户桌面执行器的本机套接字或命名管道；改变需要重启。" },
             "max_sessions": { "type": "integer", "minimum": 1, "maximum": 32, "default": 16 },
             "lease_seconds": { "type": "integer", "minimum": 10, "maximum": 600, "default": 120 },

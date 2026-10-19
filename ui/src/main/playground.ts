@@ -14,8 +14,8 @@ export function localGatewayUrl(raw: string): URL {
 }
 
 export class PlaygroundService {
-  private connection?: { key: string; client: Client; transport: StreamableHTTPClientTransport };
-  private connecting?: Promise<Client>;
+  private readonly connections = new Map<string, { key: string; client: Client; transport: StreamableHTTPClientTransport }>();
+  private readonly connecting = new Map<string, Promise<Client>>();
   private epoch = 0;
   private revision = 0;
   private readonly waiting = new Map<string, { cancelled: boolean }>();
@@ -29,11 +29,20 @@ export class PlaygroundService {
     for (const c of this.running.values()) c.abort();
     this.running.clear();
     for (const k of Object.keys(this.progress)) delete this.progress[k];
-    const old = this.connection;
-    this.connection = undefined;
-    if (old) {
+    const old = [...this.connections.values()];
+    this.connections.clear();
+    await Promise.all(old.map(async (old) => {
       await old.transport.terminateSession().catch(() => undefined);
       await old.client.close().catch(() => undefined);
+    }));
+  }
+
+  private async closeCredential(slot: string): Promise<void> {
+    const connection=this.connections.get(slot);
+    this.connections.delete(slot);
+    if (connection){
+      await connection.transport.terminateSession().catch(()=>undefined);
+      await connection.client.close().catch(()=>undefined);
     }
   }
 
@@ -43,24 +52,34 @@ export class PlaygroundService {
     if (!s.connection.status.roles.includes("gateway")) throw new Error("Enable the Gateway role to use the playground");
   }
 
-  private async client(instance: string): Promise<Client> {
+  private async client(instance: string, pat?: string): Promise<Client> {
     this.check(instance);
-    if (this.connecting) { await this.connecting; this.check(instance); }
+    const slot = pat ?? "";
+    const pending = this.connecting.get(slot);
+    if (pending) { await pending; this.check(instance); }
     const c = this.controller.snapshot.connection;
     if (c.kind !== "connected") throw new Error("Gateway is unavailable");
     const raw = c.status.gateway?.addresses?.find((a) => a.kind === "localhost")?.url ?? c.status.gateway?.url;
     if (!raw) throw new Error("Local Gateway address is unavailable");
     const url = localGatewayUrl(raw);
     const epoch = this.epoch;
-    const token = await new GatewayCredentials(this.controller).read();
+    const token = await new GatewayCredentials(this.controller).read(pat);
     this.check(instance);
     if (epoch !== this.epoch) throw new Error("Gateway connection changed");
     const key = JSON.stringify([instance, c.status.control.boot_id, url.href, token]);
-    if (this.connection?.key === key) return this.connection.client;
-    if (this.connecting) { await this.connecting; return this.client(instance); }
-    this.connecting = (async () => {
-      await this.close(false);
-      const generation = this.epoch;
+    const current = this.connections.get(slot);
+    if (current?.key === key) return current.client;
+    const connecting = this.connecting.get(slot);
+    if (connecting) { await connecting; return this.client(instance, pat); }
+    if (!current && this.connections.size + this.connecting.size >= 8) throw new Error("Too many Gateway credentials are connected");
+    const opening = (async () => {
+      this.connections.delete(slot);
+      if (current) {
+        await current.transport.terminateSession().catch(() => undefined);
+        await current.client.close().catch(() => undefined);
+      }
+      if (epoch !== this.epoch) throw new Error("Gateway connection changed");
+      const generation = epoch;
       const client = new Client({ name: "xmesh-panel", version: "1.0.0" }, { capabilities: {} });
       const transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}`, "X-Xmesh-Origin": "panel" }, redirect: "error" } });
       client.setNotificationHandler(ToolListChangedNotificationSchema, () => { this.revision++; });
@@ -69,21 +88,22 @@ export class PlaygroundService {
         this.check(instance);
         if (generation !== this.epoch) throw new Error("Gateway connection changed");
       } catch (e) { await client.close().catch(() => undefined); throw e; }
-      client.onclose = () => { if (this.connection?.client === client) this.connection = undefined; };
-      this.connection = { key, client, transport };
+      client.onclose = () => { if (this.connections.get(slot)?.client === client) this.connections.delete(slot); };
+      this.connections.set(slot, { key, client, transport });
       this.revision++;
       return client;
     })();
-    try { return await this.connecting; } finally { this.connecting = undefined; }
+    this.connecting.set(slot, opening);
+    try { return await opening; } finally { if (this.connecting.get(slot) === opening) this.connecting.delete(slot); }
   }
 
-  async call(instance: string, id: string, name: string, args: Record<string, unknown>, timeoutMs: number): Promise<CallOutcome> {
+  async call(instance: string, id: string, name: string, args: Record<string, unknown>, timeoutMs: number, pat?: string): Promise<CallOutcome> {
     if (this.waiting.has(id) || this.running.has(id) || this.waiting.size + this.running.size >= 8) throw new Error("Too many calls or duplicate call id");
     const pending = { cancelled: false };
     this.waiting.set(id, pending);
     const started = Date.now();
     try {
-      const client = await this.client(instance);
+      const client = await this.client(instance, pat);
       if (pending.cancelled) throw new Error("Call cancelled");
       this.waiting.delete(id);
       const abort = new AbortController();
@@ -94,7 +114,7 @@ export class PlaygroundService {
       });
       return { result: result as ToolResult, durationMs: Date.now() - started };
     } catch (e) {
-      if ((e as { code?: number }).code === 404 || (e instanceof Error && /session.*(not found|expired|invalid)/i.test(e.message))) await this.close();
+      if ((e as { code?: number }).code === 404 || (e instanceof Error && /session.*(not found|expired|invalid)/i.test(e.message))) await this.closeCredential(pat ?? "");
       throw e;
     } finally { this.waiting.delete(id); this.running.delete(id); delete this.progress[id]; }
   }
@@ -115,7 +135,7 @@ export class PlaygroundService {
           break;
         }
         case "status": data = { revision: this.revision, progress: { ...this.progress } }; break;
-        case "call": data = await this.call(req.instance, req.id, req.name, req.arguments, req.timeoutMs); break;
+        case "call": data = await this.call(req.instance, req.id, req.name, req.arguments, req.timeoutMs, req.pat); break;
         case "list": {
           const client = await this.client(req.instance);
           if (req.device === "gateway") {

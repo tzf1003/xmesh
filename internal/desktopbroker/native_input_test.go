@@ -28,6 +28,9 @@ type inputFixture struct {
 }
 
 func TestNativeInputFixture(t *testing.T) {
+	if os.Getenv("XMESH_TEST_ALLOW_DESKTOP_INPUT") != "1" {
+		t.Skip("requires explicit authorization to use the desktop pointer and keyboard")
+	}
 	helper, endpoint, token := os.Getenv("XMESH_TEST_COMPUTER_HELPER"), os.Getenv("XMESH_TEST_COMPUTER_FIXTURE"), os.Getenv("XMESH_TEST_COMPUTER_FIXTURE_TOKEN")
 	if helper == "" || endpoint == "" {
 		t.Skip("native input acceptance requires the isolated Electron fixture and native executor")
@@ -75,9 +78,9 @@ func TestNativeInputFixture(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	m := computer.New(c, computer.Settings{Enabled: true, PauseOnUserInput: info.UserInputMonitor})
+	m := computer.New(c, computer.Settings{Enabled: true, PauseOnUserInput: info.UserInputMonitor, AllowForeground: true})
 	defer m.Close()
-	s, err := m.Open(ctx, "native-fixture/session", computer.OpenRequest{Mode: "control"})
+	s, err := m.Open(ctx, "native-fixture/session", computer.OpenRequest{Mode: "control", Interaction: "foreground"})
 	if err != nil {
 		t.Fatal(err)
 	}

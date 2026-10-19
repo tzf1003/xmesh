@@ -1,6 +1,20 @@
 use super::Display;
 use std::ffi::c_void;
 
+#[path = "macos_background.rs"]
+mod background;
+pub use background::{available as background_available, execute as execute_background, targets};
+pub fn target_input_serial(id: &str) -> u64 {
+    if id.is_empty() {
+        super::user_input_serial()
+    } else {
+        background::input_serial(id)
+    }
+}
+pub fn capture_target(target: &super::Target) -> Result<(i32, i32, Vec<u8>), &'static str> {
+    background::capture(target)
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Point {
@@ -155,6 +169,8 @@ extern "C" fn input_event(
         && unsafe { CGEventGetIntegerValueField(event, 41) } != i64::from(std::process::id())
     {
         super::INPUT_SERIAL.fetch_add(1, Ordering::AcqRel);
+        let pid = background::event_target(event, kind);
+        background::record_input(pid);
     }
     event
 }
@@ -216,7 +232,7 @@ pub fn locked() -> bool {
 }
 
 pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
-    use cidre::{cv, ns, sc};
+    use cidre::{ns, sc};
     futures::executor::block_on(async {
         let content = sc::ShareableContent::current()
             .await
@@ -227,53 +243,66 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
             .find(|d| d.display_id().0.to_string() == display.id)
             .ok_or("display_not_found")?;
         let filter = sc::ContentFilter::with_display_excluding_windows(target, &ns::Array::new());
-        let mut config = sc::StreamCfg::new();
         let width = (f64::from(display.width) * display.scale).round() as usize;
         let height = (f64::from(display.height) * display.scale).round() as usize;
-        if !super::valid_capture_size(width, height) {
-            return Err("capture_size");
-        }
-        config.set_width(width);
-        config.set_height(height);
-        config.set_pixel_format(cv::PixelFormat::_32_BGRA);
-        config.set_shows_cursor(true);
-        let mut sample = sc::ScreenshotManager::capture_sample_buf(&filter, &config)
-            .await
-            .map_err(|_| "capture_failed")?;
-        let pixels = sample.image_buf_mut().ok_or("capture_empty")?;
-        let width = pixels.width();
-        let height = pixels.height();
-        if !super::valid_capture_size(width, height)
-            || pixels.pixel_format() != cv::PixelFormat::_32_BGRA
-        {
-            return Err("capture_format");
-        }
-        unsafe {
-            pixels
-                .lock_base_addr(cv::pixel_buffer::LockFlags::READ_ONLY)
-                .result()
-                .map_err(|_| "capture_lock")?;
-        }
-        let ptr = pixels.plane_base_address(0);
-        let stride = pixels.plane_bytes_per_row(0);
-        let result = if ptr.is_null() || stride < width * 4 {
-            Err("capture_format")
-        } else {
-            let mut data = Vec::with_capacity(width * height * 4);
-            for row in 0..height {
-                // CoreVideo owns the locked buffer until unlock below. Each row is
-                // copied without its alignment padding into the bounded output.
-                let line = unsafe { std::slice::from_raw_parts(ptr.add(row * stride), width * 4) };
-                data.extend_from_slice(line);
-            }
-            Ok((width as i32, height as i32, data))
-        };
-        let unlocked = unsafe {
-            pixels
-                .unlock_lock_base_addr(cv::pixel_buffer::LockFlags::READ_ONLY)
-                .result()
-        };
-        unlocked.map_err(|_| "capture_unlock")?;
-        result
+        capture_filter(&filter, width, height, true).await
     })
+}
+
+async fn capture_filter(
+    filter: &cidre::sc::ContentFilter,
+    width: usize,
+    height: usize,
+    cursor: bool,
+) -> Result<(i32, i32, Vec<u8>), &'static str> {
+    use cidre::{cv, sc};
+    let mut config = sc::StreamCfg::new();
+    if !super::valid_capture_size(width, height) {
+        return Err("capture_size");
+    }
+    config.set_width(width);
+    config.set_height(height);
+    config.set_pixel_format(cv::PixelFormat::_32_BGRA);
+    config.set_shows_cursor(cursor);
+    if !cursor {
+        config.set_ignore_shadows_single_window(true);
+    }
+    let mut sample = sc::ScreenshotManager::capture_sample_buf(filter, &config)
+        .await
+        .map_err(|_| "capture_failed")?;
+    let pixels = sample.image_buf_mut().ok_or("capture_empty")?;
+    let width = pixels.width();
+    let height = pixels.height();
+    if !super::valid_capture_size(width, height)
+        || pixels.pixel_format() != cv::PixelFormat::_32_BGRA
+    {
+        return Err("capture_format");
+    }
+    unsafe {
+        pixels
+            .lock_base_addr(cv::pixel_buffer::LockFlags::READ_ONLY)
+            .result()
+            .map_err(|_| "capture_lock")?;
+    }
+    let ptr = pixels.plane_base_address(0);
+    let stride = pixels.plane_bytes_per_row(0);
+    let result = if ptr.is_null() || stride < width * 4 {
+        Err("capture_format")
+    } else {
+        let mut data = Vec::with_capacity(width * height * 4);
+        for row in 0..height {
+            // CoreVideo owns the locked buffer until unlock below. Each row is
+            // copied without its alignment padding into the bounded output.
+            let line = unsafe { std::slice::from_raw_parts(ptr.add(row * stride), width * 4) };
+            data.extend_from_slice(line);
+        }
+        Ok((width as i32, height as i32, data))
+    };
+    let unlocked = unsafe {
+        pixels
+            .unlock_lock_base_addr(cv::pixel_buffer::LockFlags::READ_ONLY)
+            .result()
+    };
+    unlocked.map_err(|_| "capture_unlock")?;
+    result
 }

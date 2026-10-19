@@ -48,6 +48,45 @@ pub struct Display {
     pub rotation: i32,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct Target {
+    pub id: String,
+    pub app_id: String,
+    pub name: String,
+    pub layout_version: String,
+    pub width: i32,
+    pub height: i32,
+    pub user_input_serial: u64,
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn targets() -> Vec<Target> {
+    Vec::new()
+}
+
+pub fn target(id: &str) -> Result<Target, &'static str> {
+    targets()
+        .into_iter()
+        .find(|target| target.id == id)
+        .ok_or("target_unavailable")
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn target_input_serial(id: &str) -> u64 {
+    if id.is_empty() {
+        user_input_serial()
+    } else {
+        target(id)
+            .map(|target| target.user_input_serial)
+            .unwrap_or(u64::MAX)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn capture_target(_target: &Target) -> Result<(i32, i32, Vec<u8>), &'static str> {
+    Err("background_unavailable")
+}
+
 pub fn layout(displays: &[Display]) -> String {
     // Complete topology, including scaling and origins, is the version identity.
     serde_json::to_string(displays).unwrap_or_default()

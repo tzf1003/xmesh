@@ -20,6 +20,10 @@ class NativePackageTests(unittest.TestCase):
             self.assertEqual(info["CFBundleIdentifier"], "app.xmesh.computer")
             self.assertEqual(info["LSMinimumSystemVersion"], "14.0")
             self.assertEqual(info["CFBundleShortVersionString"], "1.2.3")
+            notices=(output / "Contents/Resources/ThirdPartyNotices.txt").read_text()
+            self.assertIn("Copyright (c) 2026 Leo",notices)
+            self.assertIn("Copyright (c) 2025 Cua AI, Inc.",notices)
+            self.assertIn("Copyright (c) 2026 Matthew Lam",notices)
             with self.assertRaises(ValueError):
                 package(binary, output, "darwin", "v1.2.3")
 

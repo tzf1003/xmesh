@@ -20,6 +20,8 @@ def verify(root, target_os, arch, version):
             info = plistlib.load(stream)
         assert info["CFBundleIdentifier"] == "app.xmesh.computer", "application identity mismatch"
         assert info["CFBundleVersion"] == version.lstrip("v"), "application version mismatch"
+        notices=(app / "Contents/Resources/ThirdPartyNotices.txt").read_text()
+        assert all(name in notices for name in ("2026 Leo","2025 Cua AI, Inc.","Matthew Lam","yabai")), "background engine license notices missing"
         subprocess.run(["codesign", "--verify", "--strict", str(app)], check=True)
     with binary.open("rb") as stream:
         header = stream.read(64)
