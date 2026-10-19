@@ -124,10 +124,42 @@ type Agent struct {
 	Backends   map[string]Backend       `json:"backends"`
 	Authz      map[string]Grant         `json:"authz"`
 	// DisabledTools names built-in tools that are switched off; absent means all are on.
-	DisabledTools []string `json:"disabled_tools"`
-	Policy        Policy   `json:"policy"`
-	Quota         Quota    `json:"quota"`
+	DisabledTools []string     `json:"disabled_tools"`
+	Policy        Policy       `json:"policy"`
+	Quota         Quota        `json:"quota"`
+	FS            FileTransfer `json:"fs"`
 }
+
+type FileTransfer struct {
+	MaxFileSize string `json:"max_file_size"`
+}
+
+var fileSizePattern = regexp.MustCompile(`^([0-9]+)([KMGT]iB|B)?$`)
+
+// Limit returns the per-file byte limit. Zero explicitly means unlimited.
+func (f FileTransfer) Limit() (int64, error) {
+	s := f.MaxFileSize
+	if s == "" {
+		s = "1GiB"
+	}
+	if s == "unlimited" {
+		return 0, nil
+	}
+	m := fileSizePattern.FindStringSubmatch(s)
+	if m == nil {
+		return 0, fmt.Errorf("文件大小无效")
+	}
+	n, err := strconv.ParseUint(m[1], 10, 64)
+	shift := uint(0)
+	if m[2] != "" && m[2] != "B" {
+		shift = uint(strings.Index("KMGT", m[2][:1])+1) * 10
+	}
+	if err != nil || n == 0 || n > uint64(math.MaxInt64)>>shift {
+		return 0, fmt.Errorf("文件大小必须为正数，且不超过 int64 字节范围")
+	}
+	return int64(n << shift), nil
+}
+
 type Exec struct {
 	MaxConcurrent     int    `json:"max_concurrent"`
 	ExclusiveSlots    int    `json:"exclusive_slots"`
@@ -278,6 +310,7 @@ func Parse(b []byte) (*Config, error) {
 	c := &Config{}
 	c.Agent.Exec = Exec{4, 1, "120s", 200, "256KiB"}
 	c.Agent.PTY = PTY{20, 8, "30m", "10m", "1MiB", "auto", "5m", 20}
+	c.Agent.FS.MaxFileSize = "1GiB"
 	c.Agent.Policy.Isolation = "L1"
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
@@ -417,6 +450,9 @@ func (c *Config) Validate() error {
 		if _, e := regexp.Compile(p); e != nil {
 			return fail("/agent/policy/exec/deny_patterns")
 		}
+	}
+	if _, err := c.Agent.FS.Limit(); err != nil {
+		return fail("/agent/fs/max_file_size")
 	}
 	return c.validateCI()
 }

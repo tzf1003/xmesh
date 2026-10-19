@@ -20,7 +20,7 @@ export const TLS_MODES = ["autocert", "file"] as const;
 export type TLSMode = (typeof TLS_MODES)[number];
 
 /** The sections of the settings page; a link to the page names one. */
-export const SECTIONS = ["node", "roles", "workdirs", "denylist"] as const;
+export const SECTIONS = ["node", "roles", "workdirs", "transfers", "denylist"] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export interface SettingsForm {
@@ -40,6 +40,7 @@ export interface SettingsForm {
   defaultCwd: string;
   /** `agent.cwd_policy.allow`. Empty means every directory the deny list does not cover. */
   allowDirs: string[];
+  maxFileSize: string;
 }
 
 export type SettingsProblem =
@@ -52,7 +53,8 @@ export type SettingsProblem =
   | "domain"
   | "cert_files"
   | "default_cwd"
-  | "allow_dirs";
+  | "allow_dirs"
+  | "max_file_size";
 
 /** The wizard's loopback default, so a gateway added here works without a second edit. */
 const GATEWAY_LISTEN = "127.0.0.1:8080";
@@ -96,6 +98,7 @@ export function formFromConfig(parsed: unknown): SettingsForm {
     keyFile: text(ingress.key_file),
     defaultCwd: text(agent.default_cwd),
     allowDirs: strings(policy.allow),
+    maxFileSize: text(record(agent.fs).max_file_size) || "1GiB",
   };
 }
 
@@ -109,8 +112,16 @@ export function isChanged(current: SettingsForm, next: SettingsForm): boolean {
   return JSON.stringify(current) !== JSON.stringify(next);
 }
 
+function validFileSize(value: string): boolean {
+  const m = /^([1-9][0-9]*)([KMGT]iB|B)?$/.exec(value);
+  if (!m) return false;
+  const shift = m[2] && m[2] !== "B" ? ("KMGT".indexOf(m[2][0]!) + 1) * 10 : 0;
+  return (BigInt(m[1]!) << BigInt(shift)) <= 9223372036854775807n;
+}
+
 /** The first thing the form gets wrong, found before the kernel is asked. */
 export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined {
+  if (f.maxFileSize !== "unlimited" && !validFileSize(f.maxFileSize.trim())) return "max_file_size";
   if (!NODE_NAME.test(f.nodeName.trim())) return "node_name";
   if (!isAbsolutePath(f.defaultCwd.trim())) return "default_cwd";
   if (f.allowDirs.some((d) => !isAbsolutePath(d.trim()))) return "allow_dirs";
@@ -133,7 +144,7 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
 /**
  * The config text with the form applied. Only the keys the form owns change: `node.name` and `node.roles`,
  * `mesh.mode` and for tailnet its control URL and key file, the gateway listen address when the gateway role
- * is new, the ingress keys, and `agent.default_cwd` and `agent.cwd_policy.allow`. The deny list lives in its
+ * is new, the ingress keys, and `agent.default_cwd`, `agent.cwd_policy.allow` and `agent.fs.max_file_size`. The deny list lives in its
  * own file and is not touched here. Undefined when the text is not YAML at all.
  */
 export function applySettingsForm(content: string, f: SettingsForm): string | undefined {
@@ -158,6 +169,7 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   if (f.roles.includes("ingress")) applyIngress(doc, f);
   doc.setIn(["agent", "default_cwd"], f.defaultCwd.trim());
   doc.setIn(["agent", "cwd_policy", "allow"], flowList(doc, f.allowDirs.map((d) => d.trim())));
+  doc.setIn(["agent", "fs", "max_file_size"], f.maxFileSize.trim());
   // No padding inside brackets, as the wizard writes them.
   return doc.toString({ flowCollectionPadding: false });
 }

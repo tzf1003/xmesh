@@ -134,3 +134,49 @@
 - 目录且 `recursive` 为 true：路径必须通过 cwd 策略。成功返回 `removed` 计数。中途失败时错误里带 `removed` 已删除数量，调用方不得假设原子。目录递归删除做不到与文件写一样的原子性，契约明确这一点。
 
 符号链接：删除链接本身，不删除目标。
+
+## CTR-FS-08
+
+### 文件大小与分块
+
+`agent.fs.max_file_size` 默认 `1GiB`（1,073,741,824 字节）。可在面板「设置 → 文件互传」填写正数大小（例如 `512MiB`、`2GiB`），或选择「无限制」（配置值 `unlimited`）。设置热更新生效，也会检查已开始传输的后续分块。限制针对整文件大小；每个原始分块最多 **1 MiB**，独立于整文件上限，内存和 MCP 信封保持有界。
+
+两种工具均接受 `path`（必须）、`cwd`（可选）、`transfer_id`（后续分块必须）、`byte_offset`（下一块的字节偏移，首块默认 0）。每次调用重新检查路径策略与工具权限。会话绑定真实调用方，ID 使用随机值；传入身份字段不能改变归属。后续请求必须携带同一路径及准确偏移，错误偏移返回 `invalid_args` 和 `next_offset`，调用方可据此继续。传输失败时客户端应重新开始。
+
+每个调用方最多 8 个活动传输，节点最多 64 个；空闲 10 分钟的会话关闭并清理上传暂存文件，正常停机也清理。进程崩溃可能留下隐藏暂存文件，目标文件保持提交前状态。服务重启后需重新开始传输。
+
+### fs.download
+
+新增可选参数 `chunk_size`，范围 1..1048576，默认 1048576。
+
+首块打开普通文件并保留句柄。每块返回：`resolved_path`、`encoding: "base64"`、`data`、`sha256`（**该块**原始字节哈希）、`bytes`（该块大小）、`file_bytes`（整文件大小）、`next_offset`、`eof`。未到末尾时返回 `transfer_id`；末块额外返回 `file_sha256`（按顺序收到的完整文件的哈希），并关闭会话。空文件直接返回末块。
+
+下载支持二进制、BOM、UTF-16 和混合换行，原样保留字节。每块读取前后复核同一句柄的大小和修改时间；末块返回前再次流式计算同一句柄的完整哈希，与已发送分块的累计哈希比较，元数据保持不变的原地改写也会被拒绝。源文件变化返回 `conflict`（`path`、`op: "fs.download"`），并关闭会话。源路径被原子替换时，句柄继续读取完整原文件。外部程序原地写入源文件时应先协调停止写入，以取得稳定版本。接收端应逐块校验，并核对 `file_sha256`、`file_bytes`，最后原子安装本地文件。
+
+### fs.upload
+
+| 参数 | 要求 |
+| --- | --- |
+| `path` | 必须，目标文件路径，父目录须已存在 |
+| `cwd` | 可选，相对路径的起点 |
+| `data` | 必须，该块原始字节的标准 Base64，空文件使用空字符串 |
+| `sha256` | 必须，**整文件**原始字节的小写 SHA-256，每块一致 |
+| `force` | 可选，默认 false；为 true 时允许覆盖已有普通文件，每块一致 |
+| `transfer_id` | 首块省略，后续分块使用上一响应的 ID |
+| `byte_offset` | 首块为 0，后续使用上一响应的 `next_offset` |
+| `final` | 默认 true。多块上传时除末块外设为 false |
+
+首块创建同目录暂存文件，后续分块按顺序追加并累计哈希。非末块返回 `resolved_path`、`transfer_id`、`next_offset`、`bytes`（累计大小）、`complete: false`，目标文件保持原样。末块核对整文件 SHA-256，通过后设置权限、fsync、关闭并原子发布；成功返回 `resolved_path`、`sha256`、`bytes`、`complete: true`。新文件权限为 `0600`，覆盖时保留目标权限。读者看到旧或新文件的完整内容。
+
+目标存在（即使内容相同）且 force 为 false：`conflict`（`path`、`op: "fs.upload"`）。首块与最终发布都检查冲突，默认通过排他重命名或硬链接发布；并发创建只允许一个成功。force 为 true 才允许原子覆盖，目录及特殊文件不允许覆盖。校验、大小限制、写入、取消或最终发布失败时清理会话及暂存文件，保留原目标；参数错误允许修正后继续。
+
+超限返回 `too_large`（`path`、`size`、`limit`；编码长度预检时 size 是解码大小上界）。整文件与单块限制分别生效，`unlimited` 解除整文件上限。所有路径通过统一 Resolver；符号链接按解析后的目标处理，allow/deny 仍生效。上传需要 `fs:write:<设备名>`，下载需要 `fs:read:<设备名>`；授权、工具开关、调用配额与审计摘要同样适用。
+
+单块 Gateway 调用示例（文件内容 `hello`）：
+
+```json
+{"name":"local/fs.upload","arguments":{"path":"artifact.bin","data":"aGVsbG8=","sha256":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}}
+{"name":"local/fs.download","arguments":{"path":"artifact.bin"}}
+```
+
+大文件上传按上述 `final: false → transfer_id / next_offset → final: true` 循环；下载持续请求直到 `eof: true`。保存客户端示例见 [`scripts/file_transfer.py`](../../scripts/file_transfer.py)，它通过标准 MCP 使用分块传输，并在本地下载时校验后原子安装。

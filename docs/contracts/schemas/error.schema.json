@@ -112,7 +112,13 @@
         "properties": { "error": { "const": "conflict" } },
         "required": ["error"]
       },
-      "then": { "required": ["path", "current_sha256", "mtime"] }
+      "then": {
+        "required": ["path"],
+        "anyOf": [
+          { "required": ["current_sha256", "mtime"] },
+          { "required": ["op"], "properties": { "op": { "enum": ["fs.upload", "fs.download"] } } }
+        ]
+      }
     },
     {
       "if": {

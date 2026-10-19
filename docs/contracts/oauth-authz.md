@@ -116,8 +116,8 @@ backend-name = 字母数字、`-`，长度 1 到 63
 | `<device>/sys.*` | `sys:<device>` 或 `sys:*` |
 | `<device>/exec.*` | `exec:<device>` 或 `exec:*` |
 | `<device>/pty.*` | `pty:<device>` 或 `pty:*` |
-| `<device>/fs.read`、`fs.glob`、`fs.grep`、`fs.list`、`fs.stat`、`fs.sha256` | `fs:read:<device>` |
-| `<device>/fs.write`、`fs.edit`、`fs.mkdir`、`fs.move`、`fs.delete` | `fs:write:<device>` |
+| `<device>/fs.read`、`fs.download`、`fs.glob`、`fs.grep`、`fs.list`、`fs.stat`、`fs.sha256` | `fs:read:<device>` |
+| `<device>/fs.write`、`fs.upload`、`fs.edit`、`fs.mkdir`、`fs.move`、`fs.delete` | `fs:write:<device>` |
 | `<device>/<backend>.<tool>` | `backend:<device>:<backend>` 或带 `*` 的相应项 |
 | `<device>/backend.acquire` 等 | 与该后端相同的 backend scope |
 | `session.set_defaults` | `devices:read` |
