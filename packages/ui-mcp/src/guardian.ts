@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { terminateProcesses, type OwnedProcess } from "./processes.js";
 import { atomicJSON } from "./artifacts.js";
+import { failure } from "./errors.js";
 
 // An independent process survives an abruptly killed controller and owns only
 // the identities registered over its private IPC channel.
@@ -14,8 +15,13 @@ process.on(
   "disconnect",
   () =>
     void (async () => {
+      let cleanupError: ReturnType<typeof failure> | undefined;
       try {
         await terminateProcesses(processes);
+      } catch (error) {
+        cleanupError = failure(error);
+      }
+      try {
         const runs = path.join(root, "runs");
         if (fs.existsSync(runs))
           for (const entry of fs
@@ -29,6 +35,7 @@ process.on(
                 result.ended_at = new Date().toISOString();
                 result.outcome_unknown = true;
                 result.evidence_incomplete = true;
+                if (cleanupError) result.error = cleanupError;
                 atomicJSON(file, result);
               }
             } catch {
@@ -36,7 +43,7 @@ process.on(
             }
           }
       } finally {
-        process.exit(0);
+        process.exit(cleanupError ? 1 : 0);
       }
     })(),
 );

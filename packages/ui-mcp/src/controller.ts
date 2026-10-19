@@ -70,6 +70,63 @@ function digest(input: unknown): string {
     .update(JSON.stringify(canonical(input)))
     .digest("hex");
 }
+function recoverUnfinished(config: Config): void {
+  const root = path.join(config.state_dir, "instances");
+  if (!fs.existsSync(root)) return;
+  for (const entry of fs
+    .readdirSync(root, { withFileTypes: true })
+    .filter((e) => e.isDirectory())) {
+    const dir = path.join(root, entry.name);
+    if (fs.existsSync(path.join(dir, "closed.json"))) continue;
+    try {
+      const owner = JSON.parse(
+        fs.readFileSync(path.join(dir, "owner.json"), "utf8"),
+      );
+      if (
+        !Number.isSafeInteger(owner.pid) ||
+        owner.pid <= 0 ||
+        typeof owner.birth !== "string"
+      )
+        continue;
+      let dead = false;
+      try {
+        process.kill(owner.pid, 0);
+        const current = processIdentity(owner.pid);
+        dead = !!current && current !== owner.birth;
+      } catch (error) {
+        dead = (error as NodeJS.ErrnoException).code === "ESRCH";
+      }
+      if (!dead) continue;
+      const runs = path.join(dir, "runs");
+      if (!fs.existsSync(runs)) continue;
+      for (const run of fs
+        .readdirSync(runs, { withFileTypes: true })
+        .filter((e) => e.isDirectory())) {
+        const file = path.join(runs, run.name, "result.json");
+        try {
+          const result = JSON.parse(fs.readFileSync(file, "utf8"));
+          if (!result.ended_at)
+            atomicJSON(file, {
+              ...result,
+              status: "interrupted",
+              ended_at: new Date().toISOString(),
+              outcome_unknown: true,
+              evidence_incomplete: true,
+              error: {
+                code: "application_exited",
+                message: "previous backend instance exited during run",
+                details: {},
+              },
+            });
+        } catch {
+          /* Preserve incomplete journals for inspection. */
+        }
+      }
+    } catch {
+      /* An unrecognized owner is never assumed dead. */
+    }
+  }
+}
 export class Controller {
   readonly instance_id = `i_${randomUUID()}`;
   private sessions = new Map<string, Session>();
@@ -81,6 +138,7 @@ export class Controller {
   private guardian: ChildProcess;
   constructor(readonly config: Config) {
     privateDir(config.state_dir);
+    recoverUnfinished(config);
     gc(config);
     this.locks = new Locks(path.join(config.state_dir, "locks"));
     privateDir(path.join(config.state_dir, "instances", this.instance_id));

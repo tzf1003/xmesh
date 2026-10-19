@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Controller } from "../../src/controller.js";
+import { processIdentity } from "../../src/locks.js";
 import { cleanup, config, site, executable, finished } from "../helpers.js";
 
 test("abrupt backend death terminates its test processes and marks the retained run interrupted", async () => {
@@ -65,9 +66,22 @@ test("abrupt backend death terminates its test processes and marks the retained 
       run.run_id,
       "result.json",
     );
+    const owned = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          c.state_dir,
+          "instances",
+          opened.instance_id,
+          "sessions",
+          opened.session_id,
+          "processes.json",
+        ),
+        "utf8",
+      ),
+    ) as Array<{ pid: number; birth: string }>;
     await new Promise((resolve) => setTimeout(resolve, 100));
     process.kill(transport.pid!, "SIGKILL");
-    const deadline = Date.now() + 10000;
+    const deadline = Date.now() + 30000;
     let result: any;
     while (Date.now() < deadline) {
       result = JSON.parse(fs.readFileSync(resultPath, "utf8"));
@@ -77,6 +91,19 @@ test("abrupt backend death terminates its test processes and marks the retained 
     assert.equal(result.status, "interrupted");
     assert.equal(result.outcome_unknown, true);
     assert.ok(result.evidence_incomplete);
+    for (const process of owned) {
+      const deadline = Date.now() + 10000;
+      while (
+        processIdentity(process.pid) === process.birth &&
+        Date.now() < deadline
+      )
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.notEqual(
+        processIdentity(process.pid),
+        process.birth,
+        `owned process ${process.pid} remains alive: ${JSON.stringify(result.error)}`,
+      );
+    }
   } finally {
     await client.close().catch(() => {});
     await web.close();

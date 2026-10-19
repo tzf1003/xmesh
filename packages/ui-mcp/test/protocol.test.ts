@@ -239,3 +239,34 @@ test("Electron preflight reads app-bundle fuses and requires background capabili
     cleanup(c);
   }
 });
+
+test("backend startup marks unfinished journals from a previous process identity interrupted", async () => {
+  const c = config(),
+    instance = path.join(c.state_dir, "instances", "previous"),
+    run = path.join(instance, "runs", "r_previous");
+  fs.mkdirSync(run, { recursive: true });
+  fs.writeFileSync(
+    path.join(instance, "owner.json"),
+    JSON.stringify({ pid: process.pid, birth: "previous-process-identity" }),
+  );
+  const file = path.join(run, "result.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      run_id: "r_previous",
+      status: "running",
+      steps: [{ id: "write", status: "started" }],
+    }),
+  );
+  const controller = new Controller(c);
+  try {
+    const result = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.equal(result.status, "interrupted");
+    assert.equal(result.outcome_unknown, true);
+    assert.ok(result.ended_at);
+    assert.throws(() => controller.result("r_previous"), /unknown run/);
+  } finally {
+    await controller.close();
+    cleanup(c);
+  }
+});
