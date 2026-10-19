@@ -24,6 +24,15 @@ func (a *Agent) Transport(ctx context.Context, p Principal) (mcp.Transport, erro
 	return &mcpmux.SessionTransport{Base: clientSide, ID: id}, nil
 }
 
+// ConnectDevice attaches a process-authenticated, stable device transport. The connectivity
+// boundary validates trust and isolates this logical session from physical path changes.
+func (a *Agent) ConnectDevice(ctx context.Context, p Principal, transport mcp.Transport) (*mcp.ServerSession, error) {
+	if !identity.Valid(p.Node + "/init") {
+		return nil, toolerr.New("unauthenticated", "设备身份无效")
+	}
+	return a.server(p).Connect(ctx, transport, nil)
+}
+
 func (a *Agent) upstream(caller string) *mcp.ServerSession {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -1,5 +1,48 @@
 # 运行手册
 
+## 设备网络版本 2
+
+设备公钥配对、双路径选择和逻辑会话恢复见 [设备连接设计](design/19-device-connectivity.md)。局域网与 Tailnet 独立启用，共用同一份设备信任：
+
+```yaml
+schema_version: 2
+node:
+  name: workstation
+  roles: [agent, gateway]
+mesh:
+  lan:
+    enabled: true
+    mdns: true
+  tailnet:
+    enabled: true
+    control_url: https://controlplane.tailscale.com
+    auth_method: browser
+gateway:
+  listen: 127.0.0.1:8080
+agent:
+  cwd_policy:
+    allow: []
+  authz:
+    tag:peer:
+      tools: ["*"]
+      backends: ["*"]
+```
+
+旧节点先停止，运行 `xmesh migrate --config xmesh.yaml`。命令保留原配置及旧信任/网络状态备份，并维持原来的路径启用选择。之后启动新版并重新配对。旧信任文件保留用于回滚；新版设备信任写入独立的 `identity-v2`。
+
+在目标节点设置连接密码，再从调用节点通过任一可用路径配对：
+
+```bash
+xmesh login --config xmesh.yaml
+xmesh serve --config xmesh.yaml
+xmesh control pair password set --password-stdin --node workstation
+xmesh control pair connect --path lan --address https://192.168.1.20:7433 --password-stdin --node client
+xmesh control pair connect --path tailnet --address https://100.100.1.20:7433 --password-stdin --node client
+xmesh control pair revoke --device-id dev-<公钥摘要> --node client
+```
+
+两条 connect 命令是可选连接方式，同一设备只需完成一次配对。首次连接或断线恢复优先局域网，连接成功后保持当前路径。Tailnet 网络授权撤销不改变 xmesh 设备信任；撤销设备信任会结束该设备全部路径的会话。下面部署材料中的单模式配置可先运行 migrate 转成版本 2。
+
 ## 构建与本机验证
 
 需要 Go 1.27.1。复用 Go 模块和构建缓存：
@@ -45,7 +88,7 @@ agent:
   cwd_policy:
     allow: [/srv/workspace]
   authz:
-    tag:device:
+    tag:peer:
       tools: ['*']
       backends: ['*']
 ```
@@ -60,7 +103,7 @@ agent:
 - **粘贴 key**：直接粘贴 Tailscale 或 Headscale 生成的 key，向导会把它写进同一个 `0600` 文件，配置文件只引用路径。
 - **使用 key 文件**：填写已有的绝对路径。
 
-控制面须授予节点 `tag:device`；Gateway 仅发现在线、未过期、带该 tag 的设备。网络策略须允许调用节点访问目标 TCP 7433；Agent 再按 `agent.authz` 检查 WhoIs 的可信 tag。生产环境应按设备用途收窄工具和后端授权。
+网络策略须允许调用节点访问目标 TCP 7433。完成 xmesh 公钥配对后，Gateway 按设备身份合并已验证路径；Agent 使用本地信任记录授予的应用标签检查 `agent.authz`。控制面的网络标签只决定路径准入，生产环境应分别收窄网络规则和应用授权。
 
 ```bash
 bin/xmesh serve --config /secure/xmesh.yaml --state-dir /secure/xmesh-state
@@ -101,10 +144,12 @@ go test ./internal/mesh -run Test_TailnetPeerConnectivity -v -timeout=60s
 python3 scripts/smoke_sandbox.py --binary /opt/xmesh \
   --auth-key-file /run/secrets/xmesh-authkey \
   --peer mac-dev:darwin --peer linux-dev:linux \
+  --peer-password-file mac-dev=/run/secrets/mac-device-password \
+  --peer-password-file linux-dev=/run/secrets/linux-device-password \
   --observer-gateway 127.0.0.1:8080 --observer-token-file /path/to/observer-state/pats/default.token
 ```
 
-`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。脚本启动两个生命周期，验证身份变化、远端文件/exec/PTY、身份状态不落盘和临时工作目录清理；key 通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
+`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。每个对端先设置连接密码，并通过 `--peer-password-file 名称=文件` 提供私有口令文件，用于首次建立双向 xmesh 信任。观察节点也须列在配对对端中。脚本启动两个生命周期，验证 Tailnet 临时入网、持久设备 ID 保持、远端文件/exec/PTY、网络凭据状态不落盘和临时工作目录清理；入网 key 与配对口令均通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
 
 ## 本机 Gateway PAT
 
@@ -133,12 +178,12 @@ python3 scripts/smoke_local.py --binary bin/xmesh --pat
 
 认证逐请求读取当前配置与凭据文件，替换文件即可轮转 token，删除配置项即可撤销该凭据。任一已配置文件无效或同一 token 对应多个名称时，认证失败。scope 变更后应创建新 MCP 会话；每个 PAT 名称具有独立会话身份与调用预算。PAT 的 scope 在 Gateway 检查，Agent 按 Gateway 的可信节点身份和 tag 再检查授权。
 
-## LAN 配对
+## 设备配对
 
-LAN 模式通过 mDNS 发现，配对记录中的证书用于 mTLS 验证。最常用的方式是连接密码，在面板的「设备」页完成：
+局域网通过 mDNS 发现，Tailnet 通过网络候选发现；两种路径共用设备公钥信任并进行 mTLS 验证。最常用的方式是连接密码，在面板的「设备」页完成：
 
 1. 在 A 设备上设置一个连接密码（10 到 128 个字符，首尾不能有空白）。
-2. 在 B 设备的「内网中的设备」里看到 A，点「连接」，输入 A 的连接密码。或者在「手动添加设备」里输入 A 的地址和密码。
+2. 在 B 设备的发现列表里看到 A，点「连接」，输入 A 的连接密码。或者在「手动添加设备」里输入 A 的地址和密码。
 3. 密码正确即刻互信，无需重启。
 
 连接密码不会在界面上再次显示，也不写入配置文件。错误的密码会被计数，连续失败后对端暂停接受密码配对一段时间，成功一次即清零。清除连接密码后，对方不能再用它配对，已配对的设备不受影响。
@@ -152,7 +197,7 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --export /tmp/node-
 bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-public.json --fingerprint VERIFIED_SHA256 --tags tag:peer,tag:device
 ```
 
-两种方式完成后，文档导入需要重启才生效，密码配对不需要。`tag:device` 用于发现，调用权限由接收方 `authz` 决定。LAN 模式的 ingress 配置会被拒绝。LAN 模式的 Agent 固定监听 TCP 7433（`mesh.AgentPort`，没有配置项），同一台机器上无法同时运行两个 LAN 节点。
+两种配对方式都立即生效。设备目录按已配对公钥合并路径，调用权限由接收方的 xmesh 信任标签及 `authz` 决定。局域网的设备监听使用所选网卡的 TCP 7433；同一地址只能运行一个 LAN 监听器。Funnel 需要启用 Tailnet。
 
 ## 状态目录权限
 
@@ -271,7 +316,7 @@ Agent 与 Gateway 的工具调用预算缺省为每主体每小时 10000 次、�
 
 审计写入状态目录的 `audit`，默认保留 720 小时；记录工具、路径、状态、耗时等元数据。PTY 读操作按分钟汇总字节量，审计编码器限制可写字段。
 
-`/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使收到消息的进程的 Agent 与 Gateway 进入 drain。用 `xmesh drain --scope mesh` 向所有在线设备逐台发送，`--scope device --device NAME` 只下线一台，`--mode kill` 同时终止 PTY 并释放租约；tailnet 模式须提供带 `tag:admin` 的 `--authkey-file`，LAN 模式须在各设备上用 `--tags tag:admin` 导入管理员机器的配对文件。其他节点的 Gateway 一旦在调用中看到 `mesh.draining` 就停止路由该设备。重启重置内存 drain 状态。
+`/control/drain` 只接受可信 `tag:admin` 控制请求。`keep` 拒绝新的 exec、PTY 与后端占用，已有资源按期限结束；`kill` 清理本机 PTY 与租约。`scope:mesh` 使收到消息的进程的 Agent 与 Gateway 进入 drain。用 `xmesh drain --scope mesh` 向所有在线设备逐台发送，`--scope device --device NAME` 只下线一台，`--mode kill` 同时终止 PTY 并释放租约；版本 2 由运行中的管理节点通过本机控制通道发送远程排空；在各目标设备的 xmesh 信任中为管理设备授予 `tag:admin`，网络控制面标签不授予该权限。其他节点的 Gateway 一旦在调用中看到 `mesh.draining` 就停止路由该设备。重启重置内存 drain 状态。
 
 `install` 使用持久位置的二进制与配置。macOS 使用 LaunchAgent，Linux 使用 systemd 用户服务。Windows 默认注册当前用户的登录计划任务，以 `InteractiveToken` 和 `LeastPrivilege` 配置运行，登录后启动；保持该用户登录以运行 GUI 后端。任务直接执行二进制，保留配置所在工作目录，持续运行并在失败后每分钟重试，最多 999 次。同一用户的同名任务已存在时安装失败，应在任务计划程序中检查后再更新。任务名会打印在安装结果中，可在任务计划程序中立即运行、停止和删除。
 
@@ -421,26 +466,27 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 
 内核声明并实现的能力：`status`、`events`、`peers`、`sessions`、`drain`、`pair`、`ingress`、`audit`，以及有配置文件时的 `config.read`、`config.write`、`pats`、`gateway`。
 
-- `GET /v1/status`：`sys.info` 的超集，不按调用方 tag 过滤，另含 `control`、`lifecycle`、`drain`、`paths`、`gateway`、`peers`。`warnings` 是 `{code, severity, message}`。
-- `GET /v1/events`：SSE，首条 `hello`；`Last-Event-ID`（`<boot_id>.<seq>`）续传，保留最近 1024 条，id 属于上一次启动或已滚出缓存时先发 `reset`。事件由每秒一次的状态采样推导，短于一个采样周期的 exec 可能不会出现，`call` 事件来自审计记录，不受此限。字段是白名单，带 stdout 等内容的事件被拒绝（INV-10）。
-- `GET /v1/sessions`：PTY、排队和运行中的 exec（只有可执行文件基名）、后端租约（`token` 是 fencing 序号）。
-- `POST /v1/drain`、`POST /v1/resume`：`keep` 重复是 no-op，`keep` 可升级为 `kill`，`kill` 降级返回 `conflict`（`drain_downgrade`）。恢复只让本节点重新接受新调用，`kill` 已结束的终端和租约不会回来；同一进程里的 Gateway 一并恢复，其他节点上的 Gateway 自己的排空标记不由这里清除。
-- `GET /v1/config`、`PUT /v1/config`：整文件读写。`PUT` 必须带 `If-Match`（缺少 428，过期 412 并附 `current_etag`），内容经 `config.Parse` 校验（失败 422 `config_invalid`，带逐条诊断），临时文件加重命名原子替换，注释与格式由提交的内容决定。响应的 `diff` 是 JSON Pointer 操作列表，`weakens_security` 只是给 UI 弹确认的提示，内核不拦截，因为同一用户的进程本来就能直接改配置文件。`xmesh control config set --set/--delete` 在客户端读当前文件、改好再整体提交。
-- `POST /v1/pair/export`、`POST /v1/pair/import`：只在 `lan` 模式可用（否则 `unsupported_mode`）。导入要同时核对三处指纹：用户确认的、配对文件里写的、证书本身算出的，任一不符返回 `fingerprint_mismatch`；成功后同样需要重启节点才生效（响应 `restart_required: true`）。文件落在 `<状态目录>/lan/`，与 `xmesh pair` 相同。
-- `GET/POST /v1/pats`、`POST /v1/pats/{name}/rotate`、`DELETE /v1/pats/{name}`：改 `gateway.pats` 与令牌文件，Gateway 逐请求读取，立即生效。控制通道创建的令牌放在 `<状态目录>/pats/<名字>.token`（`0600`），先写文件再写配置条目，删除时先删条目再删文件；配置里指向别处的令牌文件可以轮转，但删除 PAT 时不会被删。节点没有 `gateway` 配置时创建返回 `conflict`（`gateway_not_configured`）。令牌正文只在创建与轮转的响应里出现一次。
-- `GET /v1/ingress/clients`、`DELETE /v1/ingress/clients/{client_id}`、`PUT /v1/ingress/password`：没有 `ingress` 角色返回 `role_disabled`。撤销客户端同时清掉它的授权码、access 与 refresh token 并持久化；写在 `ingress.oauth.clients` 里的客户端下次启动会重新登记，但旧 token 不会复活。轮转口令先原子重写口令文件（`0600`）再让运行中的服务切换，已签发的 token 不受影响；口令长度 12 到 256 个字符，首尾不能有空白。
-- `GET /v1/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
+- `GET /v2/status`：`sys.info` 的超集，不按调用方 tag 过滤，另含 `control`、`lifecycle`、`drain`、`paths`、`gateway`、`peers`。`warnings` 是 `{code, severity, message}`。
+- `GET /v2/events`：SSE，首条 `hello`；`Last-Event-ID`（`<boot_id>.<seq>`）续传，保留最近 1024 条，id 属于上一次启动或已滚出缓存时先发 `reset`。事件由每秒一次的状态采样推导，短于一个采样周期的 exec 可能不会出现，`call` 事件来自审计记录，不受此限。字段是白名单，带 stdout 等内容的事件被拒绝（INV-10）。
+- `GET /v2/sessions`：PTY、排队和运行中的 exec（只有可执行文件基名）、后端租约（`token` 是 fencing 序号）。
+- `POST /v2/drain`、`POST /v2/resume`：`keep` 重复是 no-op，`keep` 可升级为 `kill`，`kill` 降级返回 `conflict`（`drain_downgrade`）。恢复只让本节点重新接受新调用，`kill` 已结束的终端和租约不会回来；同一进程里的 Gateway 一并恢复，其他节点上的 Gateway 自己的排空标记不由这里清除。
+- `GET /v2/config`、`PUT /v2/config`：整文件读写。`PUT` 必须带 `If-Match`（缺少 428，过期 412 并附 `current_etag`），内容经 `config.Parse` 校验（失败 422 `config_invalid`，带逐条诊断），临时文件加重命名原子替换，注释与格式由提交的内容决定。响应的 `diff` 是 JSON Pointer 操作列表，`weakens_security` 只是给 UI 弹确认的提示，内核不拦截，因为同一用户的进程本来就能直接改配置文件。`xmesh control config set --set/--delete` 在客户端读当前文件、改好再整体提交。
+- `POST /v2/pair/export`、`POST /v2/pair/import`：使用统一的版本 2 设备身份，与网络模式无关。导入同时核对用户确认的指纹、文档指纹和公钥摘要，任一不符返回 `fingerprint_mismatch`；成功后立即生效（`restart_required: false`）。身份与信任保存在 `<状态目录>/identity-v2/`，与 `xmesh pair` 共用。`DELETE /v2/pair/trust/{device_id}` 撤销该设备的所有路径与会话。
+- `GET/POST /v2/pats`、`POST /v2/pats/{name}/rotate`、`DELETE /v2/pats/{name}`：改 `gateway.pats` 与令牌文件，Gateway 逐请求读取，立即生效。控制通道创建的令牌放在 `<状态目录>/pats/<名字>.token`（`0600`），先写文件再写配置条目，删除时先删条目再删文件；配置里指向别处的令牌文件可以轮转，但删除 PAT 时不会被删。节点没有 `gateway` 配置时创建返回 `conflict`（`gateway_not_configured`）。令牌正文只在创建与轮转的响应里出现一次。
+- `GET /v2/ingress/clients`、`DELETE /v2/ingress/clients/{client_id}`、`PUT /v2/ingress/password`：没有 `ingress` 角色返回 `role_disabled`。撤销客户端同时清掉它的授权码、access 与 refresh token 并持久化；写在 `ingress.oauth.clients` 里的客户端下次启动会重新登记，但旧 token 不会复活。轮转口令先原子重写口令文件（`0600`）再让运行中的服务切换，已签发的 token 不受影响；口令长度 12 到 256 个字符，首尾不能有空白。
+- `GET /v2/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
 
-经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 时只能按路径前缀（`/node/name`、`/node/roles`、`/mesh`、`/audit`）估计。
+经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 按需重启的配置路径及角色变化估计。版本 2 的 `mesh.lan` 与 `mesh.tailnet` 由各自的网络组件热应用。
 
 ### 命令行
 
 ```
 xmesh status --control [--node 名 | --state-dir 目录] [--json]
-xmesh control status|peers|sessions|events|audit|drain|resume|config get|config set ...
+xmesh control status|peers|sessions|events|audit|drain|resume|config get|config set|config reload ...
 xmesh control pair password show | set (--password-stdin | --password-file 文件) | clear
-xmesh control pair discover | connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)
+xmesh control pair discover | connect (--address 地址 | --fingerprint 指纹) [--path lan|tailnet] (--password-stdin | --password-file 文件)
 xmesh control pair export [--out 文件] | pair import --file 文件 --fingerprint 指纹 [--tags ...]
+xmesh control pair revoke --device-id 设备ID
 xmesh control pats list | create --name 名字 --scope S[,S...] | rotate 名字 | delete 名字
 xmesh control ingress clients | revoke 客户端ID | password [--password-file 文件]
 xmesh install|pair|uninstall|start|stop|restart ... --json
@@ -450,8 +496,8 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 
 `pair`、`pats`、`ingress` 三组命令调用上面同名的接口，节点不需要停：
 
-- `pair password set` 设置或修改连接密码，口令只从标准输入或 `--password-file` 读取，与 `ingress password` 相同；`pair password show` 只报告是否设置、最近修改时间与失败计数，不回显口令；`pair password clear` 清除。`pair discover` 列出内网中尚未配对的设备。`pair connect` 用对端的连接密码配对，`--address` 与 `--fingerprint` 至少给一个：只给指纹时地址取自发现列表，同时给出时核对对端证书。
-- `pair export` 打印本机公开配对文档（`{"pair": {...}}`）；加 `--out 文件` 则把文档写成 `0600` 的文件，stdout 只给出节点名与指纹，该文件可直接交给对端的 `xmesh pair --import` 或 `xmesh control pair import`。`pair import --file 文件 --fingerprint 指纹` 导入对端文件，`--fingerprint` 必须是从对端另行拿到的值（冒号与大小写不限），不能从配对文件里抄；`--tags` 缺省为 `tag:peer,tag:device`。两者都只在 `lan` 模式可用，导入后要重启节点才生效。`pair import` 也接受 `pair export` 的完整输出作文件。
+- `pair password set` 设置或修改连接密码，口令只从标准输入或 `--password-file` 读取，与 `ingress password` 相同；`pair password show` 只报告是否设置、最近修改时间与失败计数，不回显口令；`pair password clear` 清除。`pair discover` 列出 LAN 和 Tailnet 中尚未配对的设备。`pair connect` 用对端的连接密码配对，`--address` 与 `--fingerprint` 至少给一个：只给指纹时地址取自发现列表，同时给出时核对对端公钥。`--path` 指定配对路径，缺省为 LAN；配对后的信任可用于两种路径。
+- `pair export` 打印本机公开配对文档（`{"pair": {...}}`）；加 `--out 文件` 则把文档写成 `0600` 的文件，stdout 只给出节点名与指纹，该文件可直接交给对端的 `xmesh pair --import` 或 `xmesh control pair import`。`pair import --file 文件 --fingerprint 指纹` 导入对端文件，`--fingerprint` 必须是从对端另行拿到的值（冒号与大小写不限），不能从配对文件里抄；`--tags` 缺省为 `tag:peer,tag:device`。导入立即生效，与网络模式无关；也接受 `pair export` 的完整输出作文件。`pair revoke` 按设备 ID 撤销 xmesh 信任，终止该设备全部会话。
 - `pats create` 的 `--scope` 可重复或用逗号分隔（语法见 [CTR-OAUTH-02](contracts/oauth-authz.md#ctr-oauth-02)，如 `devices:read`、`exec:<设备>`、`fs:read:<设备>`）；`pats rotate`、`pats delete` 的名字写在子命令后面或用 `--name`。令牌正文只在 `create` 和 `rotate` 的输出里出现一次，`list` 不含令牌，请在拿到时保存。删除成功输出 `{"deleted": true, "name": …}`。
 - `ingress clients` 列出 issuer 和已注册的 OAuth 客户端，`ingress revoke 客户端ID` 撤销并使其令牌失效，输出 `{"revoked": true, "client_id": …}`。`ingress password` 从 `--password-file` 或标准输入读新登录口令（交互终端下不回显），口令不接受命令行参数，以免进入 shell 历史和进程列表；长度 12 到 256 个字符，首尾空白会被去掉。口令不是来自文件时节点返回 `conflict`（`password_source_not_file`）。`uninstall`、`start`、`stop`、`restart` 操作 `install` 注册的服务（`xmesh-<节点名>`；Windows 默认是当前用户的登录任务，`--system` 为 SCM 服务）。所有子命令加 `--json` 时，stdout 只输出一个对象 `{"ok":…, "action":…, "messages":[…]}`，失败时 `ok` 为 false、带 `error`，退出码仍非零。服务或登录任务没安装时，`start`、`stop`、`restart`、`uninstall` 返回 `error: "not_found"`、`reason: "not_installed"` 和 `name`，不转述 `schtasks` 等系统工具的原文（它们按系统语言输出）。
 

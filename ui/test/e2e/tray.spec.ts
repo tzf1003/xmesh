@@ -52,14 +52,14 @@ test("drain and resume from the menu reach the kernel and flip the menu entry", 
 
   await h.clickMenu("action.drain");
   await expectIcon(h, "draining");
-  expect(h.kernel.requests.find((r) => r.method === "POST" && r.path === "/v1/drain")?.body).toEqual({ mode: "keep" });
+  expect(h.kernel.requests.find((r) => r.method === "POST" && r.path === "/v2/drain")?.body).toEqual({ mode: "keep" });
   const draining = await h.tray();
   expect(menuHas(draining.menu, "action.drain")).toBeUndefined();
   expect(menuHas(draining.menu, "action.resume")?.enabled).toBe(true);
 
   await h.clickMenu("action.resume");
   await expectIcon(h, "ok");
-  expect(h.kernel.requests.some((r) => r.method === "POST" && r.path === "/v1/resume")).toBe(true);
+  expect(h.kernel.requests.some((r) => r.method === "POST" && r.path === "/v2/resume")).toBe(true);
 });
 
 test("restart_required shows the restart icon and a notification", async () => {
@@ -71,7 +71,7 @@ test("restart_required shows the restart icon and a notification", async () => {
 });
 
 test("an incompatible control version shows the mismatch state and recovers when the kernel is upgraded", async () => {
-  h = await launch({ kernel: { controlVersion: "2.0", kernelVersion: "9.9.9" } });
+  h = await launch({ kernel: { controlVersion: "3.0", kernelVersion: "9.9.9" } });
   await expectIcon(h, "mismatch");
   const t = await h.tray();
   expect(menuHas(t.menu, "hint.mismatch")?.label).toContain("9.9.9");
@@ -81,7 +81,7 @@ test("an incompatible control version shows the mismatch state and recovers when
   expect(h.kernel.requests).toHaveLength(0);
 
   // The kernel is replaced by one that speaks v1 and rewrites control.json.
-  h.kernel.setControlVersion("1.0");
+  h.kernel.setControlVersion("2.0");
   h.publish();
   await expectIcon(h, "ok");
 });
@@ -89,10 +89,10 @@ test("an incompatible control version shows the mismatch state and recovers when
 test("a kernel whose response header disagrees with control.json is also reported as a mismatch", async () => {
   h = await launch();
   await expectIcon(h, "ok");
-  h.kernel.setControlVersion("2.0");
+  h.kernel.setControlVersion("3.0");
   h.kernel.dropStreams();
   await expectIcon(h, "mismatch");
-  h.kernel.setControlVersion("1.0");
+  h.kernel.setControlVersion("2.0");
   await expectIcon(h, "ok");
 });
 
@@ -107,7 +107,7 @@ test("an event stream that breaks reconnects with Last-Event-ID and keeps follow
 
   h.kernel.dropStreams();
   await expect.poll(() => h.kernel.connectedStreams).toBe(1);
-  const reopen = h.kernel.requests.filter((r) => r.path === "/v1/events").at(-1);
+  const reopen = h.kernel.requests.filter((r) => r.path === "/v2/events").at(-1);
   expect(reopen?.lastEventId).toBeDefined();
 
   h.kernel.setWarnings([]);

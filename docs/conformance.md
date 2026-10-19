@@ -155,7 +155,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CON-ARCH-10 | 事件订阅者不告而别（模拟 UI 崩溃）后，终端会话、节点状态与通道本身不变，终端仍可正常关闭 |
 | CON-SEC-12 | Unix：只接受内核同一 euid 的对端（别的 uid 被丢弃），套接字 0600、目录 0700；Windows：描述符只含当前用户、SYSTEM、管理员与显式追加的 SID，别名与宽泛主体被拒，运行中的管道不含 Everyone 与 AppContainer；L2 工作区含套接字时被拒绝；非 GET 请求以 `actor=control` 写审计（`Test_ControlCallsAreAudited`） |
 | CTR-CTL-14 | 内核实现：值只写不读，响应、配置、状态、审计、事件里都没有值；非法变量名、含空字符或过长的值、同名同时 set 与 unset、超过 64 个、被策略拒绝的名字（`reason` 为 `env_denied`）返回 `invalid_args` 且不写文件；没有存储时 `unavailable`；删除配置里的后端时一并清掉它的变量，先于后端存放的变量保留（`Test_ControlBackendEnvKeepsValuesWriteOnly`、`Test_ControlBackendEnvRejectsWithoutWriting`、`Test_ControlBackendEnvGoesWithItsBackend`） |
-| CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 | 内核实现：连接密码只写不读、长度与首尾空白规则、限流锁定与清零、连接错误映射到 `pair_rejected` / `rate_limited` / `invalid_args`，并在确认前核对指定指纹（`Test_CTRCTL08_*`）；配对导入同时核对用户确认的、文件里的与证书算出的三处指纹，非 lan 模式 `unsupported_mode`；PAT 创建、轮转、删除后正在运行的 Gateway 立即按新凭据认证，令牌正文只出现在 `PatSecret`，配置外的令牌文件删除时保留；入口路由无角色 `role_disabled`，撤销客户端使其 token 全部失效，口令只写不读（`Test_ControlPairExportImport`、`Test_ControlPats`、`Test_ControlIngress`、`Test_ControlPatsReachTheGateway`） |
+| CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 | 内核实现：连接密码只写不读、长度与首尾空白规则、限流锁定与清零、连接错误映射到 `pair_rejected` / `rate_limited` / `invalid_args`，并在确认前核对指定指纹（`Test_CTRCTL08_*`）；配对导入核对用户确认的指纹、文档指纹及设备公钥摘要，LAN 与 Tailnet 共用设备信任并立即生效；PAT 创建、轮转、删除后正在运行的 Gateway 立即按新凭据认证，令牌正文只出现在 `PatSecret`，配置外的令牌文件删除时保留；入口路由无角色 `role_disabled`，撤销客户端使其 token 全部失效，口令只写不读（`Test_ControlPairExportImport`、`Test_ControlPats`、`Test_ControlIngress`、`Test_ControlPatsReachTheGateway`） |
 
 ## 模式夹具
 

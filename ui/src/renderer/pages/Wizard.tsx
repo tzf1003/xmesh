@@ -102,6 +102,7 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
               </span>
             </label>
           </fieldset>
+          <label class="check"><input type="radio" name="mode" checked={form.mode === "coexist"} onChange={() => set("mode", "coexist")} data-testid="wizard-coexist"/><span><strong>{t("mode.coexist")}</strong><br/><span class="hint">{t("device.preferLan")}</span></span></label>
           <fieldset>
             <legend>{t("wizard.roles")}</legend>
             <label class="check">
@@ -136,7 +137,7 @@ export function Wizard({ ctx }: { ctx: PageContext }): JSX.Element {
               </button>
             </div>
           </Field>
-          {form.mode === "tailnet" && (
+          {form.mode !== "lan" && (
             <>
               <Field label={t("wizard.controlUrl")} hint={t("wizard.controlUrlHint")}>
                 <input type="text" value={form.controlUrl} onInput={(e) => set("controlUrl", (e.currentTarget as HTMLInputElement).value)} aria-invalid={problem === "control_url"} data-testid="wizard-control-url" />

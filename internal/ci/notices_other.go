@@ -2,6 +2,6 @@
 
 package ci
 
-import v1 "github.com/tzf1003/xmesh/api/control/v1"
+import v2 "github.com/tzf1003/xmesh/api/control/v2"
 
-func platformNotices() []v1.CiNotice { return nil }
+func platformNotices() []v2.CiNotice { return nil }

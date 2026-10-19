@@ -67,24 +67,40 @@ export class ControlClient {
   }
 
   async getStatus(): Promise<StatusResponse> {
-    return parseStatus((await this.json("GET", "/v1/status")).body);
+    return parseStatus((await this.json("GET", "/v2/status")).body);
+  }
+
+  /** Read the upgrade paths before stopping a v1 or v2 service. */
+  async getUpgradePaths(): Promise<{ configFile: string; stateDir: string }> {
+    for (const route of ["/v2/status", "/v1/status"]) {
+      const reply = await this.request("GET", route);
+      if (reply.status === 404) continue;
+      const major = headerValue(reply.headers, VERSION_HEADER).split(".")[0];
+      const body = reply.body as { paths?: { config_file?: unknown; state_dir?: unknown } } | null;
+      if (reply.status !== 200 || !["1", "2"].includes(major ?? "") ||
+          typeof body?.paths?.config_file !== "string" || typeof body.paths.state_dir !== "string") {
+        throw new Error("无法读取升级所需的内核配置路径");
+      }
+      return { configFile: body.paths.config_file, stateDir: body.paths.state_dir };
+    }
+    throw new Error("内核未提供升级所需的配置路径");
   }
 
   async getPeers(): Promise<Peer[]> {
-    return parsePeers((await this.json("GET", "/v1/peers")).body);
+    return parsePeers((await this.json("GET", "/v2/peers")).body);
   }
 
   /** `keep` refuses new calls and leaves running PTYs and execs alone. */
   async drain(mode: "keep" | "kill" = "keep"): Promise<DrainResponse> {
-    return (await this.json("POST", "/v1/drain", { mode })).body as DrainResponse;
+    return (await this.json("POST", "/v2/drain", { mode })).body as DrainResponse;
   }
 
   async resume(): Promise<DrainResponse> {
-    return (await this.json("POST", "/v1/resume")).body as DrainResponse;
+    return (await this.json("POST", "/v2/resume")).body as DrainResponse;
   }
 
   /**
-   * Opens `GET /v1/events` and delivers parsed events (including `hello` and
+   * Opens `GET /v2/events` and delivers parsed events (including `hello` and
    * `reset`). Reconnecting is the caller's job: this client remembers the last
    * event id and sends it as `Last-Event-ID` the next time it opens a stream,
    * and the kernel answers with the missed events or a `reset`.
@@ -95,7 +111,7 @@ export class ControlClient {
     const done = new Promise<void>((resolve) => {
       const headers: Record<string, string> = { Accept: "text/event-stream", Host: HOST };
       if (this.lastEventId !== undefined) headers["Last-Event-ID"] = this.lastEventId;
-      req = http.request({ socketPath: this.endpoint, path: "/v1/events", method: "GET", headers }, (res) => {
+      req = http.request({ socketPath: this.endpoint, path: "/v2/events", method: "GET", headers }, (res) => {
         if (res.statusCode !== 200 || !isSupportedApiVersion(headerValue(res.headers, VERSION_HEADER))) {
           res.resume();
           resolve();

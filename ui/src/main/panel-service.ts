@@ -125,23 +125,23 @@ export class PanelService {
   }
 
   getSessions(): Promise<DataResult<SessionsResponse>> {
-    return this.data("sessions", (c) => c.call("GET", "/v1/sessions"));
+    return this.data("sessions", (c) => c.call("GET", "/v2/sessions"));
   }
 
   getConfig(): Promise<DataResult<ConfigResponse>> {
-    return this.data("config.read", (c) => c.call("GET", "/v1/config"));
+    return this.data("config.read", (c) => c.call("GET", "/v2/config"));
   }
 
   putConfig(req: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>> {
     return this.data("config.write", (c) =>
-      c.call("PUT", "/v1/config", { body: { content: req.content, dry_run: req.dryRun }, ifMatch: req.etag }),
+      c.call("PUT", "/v2/config", { body: { content: req.content, dry_run: req.dryRun }, ifMatch: req.etag }),
     );
   }
 
-  /** `PATCH /v1/config` through the generic client call: If-Match from the etag, the same error mapping as PUT. */
+  /** `PATCH /v2/config` through the generic client call: If-Match from the etag, the same error mapping as PUT. */
   patchConfig(req: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>> {
     return this.data("config.write", (c) =>
-      c.call("PATCH", "/v1/config", { body: { edits: req.edits, dry_run: req.dryRun }, ifMatch: req.etag }),
+      c.call("PATCH", "/v2/config", { body: { edits: req.edits, dry_run: req.dryRun }, ifMatch: req.etag }),
     );
   }
 
@@ -153,11 +153,11 @@ export class PanelService {
     const body: { set?: Record<string, string>; unset?: string[] } = {};
     if (Object.keys(req.set).length > 0) body.set = req.set;
     if (req.unset.length > 0) body.unset = req.unset;
-    return this.data("config.write", (c) => c.call("PATCH", `/v1/backends/${encodeURIComponent(req.name)}/env`, { body }));
+    return this.data("config.write", (c) => c.call("PATCH", `/v2/backends/${encodeURIComponent(req.name)}/env`, { body }));
   }
 
   clearBackendEnv(name: string): Promise<ActionResult> {
-    return this.action("config.write", (c) => c.call("DELETE", `/v1/backends/${encodeURIComponent(name)}/env`));
+    return this.action("config.write", (c) => c.call("DELETE", `/v2/backends/${encodeURIComponent(name)}/env`));
   }
 
   /** The deny list file the config names. The path comes from the config, so the renderer cannot point this at another file. */
@@ -221,28 +221,28 @@ export class PanelService {
 
   /** Has the kernel reload its config in place. A kernel without the route answers with an error, and the page restarts instead. */
   reloadConfig(): Promise<DataResult<ConfigReloadResponse>> {
-    return this.data("config.write", (c) => c.call("POST", "/v1/config/reload"));
+    return this.data("config.write", (c) => c.call("POST", "/v2/config/reload"));
   }
 
   listPats(): Promise<DataResult<PatList>> {
-    return this.data("pats", (c) => c.call("GET", "/v1/pats"));
+    return this.data("pats", (c) => c.call("GET", "/v2/pats"));
   }
 
   createPat(args: PatCreateArgs): Promise<DataResult<PatSecret>> {
-    return this.data("pats", (c) => c.call("POST", "/v1/pats", { body: { name: args.name, scopes: args.scopes } }));
+    return this.data("pats", (c) => c.call("POST", "/v2/pats", { body: { name: args.name, scopes: args.scopes } }));
   }
 
   /** `name` is a validated node name, so it is safe as a path segment. */
   rotatePat(name: string): Promise<DataResult<PatSecret>> {
-    return this.data("pats", (c) => c.call("POST", `/v1/pats/${encodeURIComponent(name)}/rotate`));
+    return this.data("pats", (c) => c.call("POST", `/v2/pats/${encodeURIComponent(name)}/rotate`));
   }
 
   /**
-   * PUT /v1/gateway: the whole reach replacement. Access and hosts apply at once; a changed listen
+   * PUT /v2/gateway: the whole reach replacement. Access and hosts apply at once; a changed listen
    * needs a restart, which the response's `restart_required` says.
    */
   updateGateway(req: GatewayUpdateRequest): Promise<DataResult<GatewayUpdateResponse>> {
-    return this.data("gateway", (c) => c.call("PUT", "/v1/gateway", { body: req }));
+    return this.data("gateway", (c) => c.call("PUT", "/v2/gateway", { body: req }));
   }
 
   /**
@@ -251,60 +251,65 @@ export class PanelService {
    */
   rotateGatewayPat(): Promise<DataResult<GatewayPatRotated>> {
     return this.data("pats", async (c) => {
-      const list = (await c.call("GET", "/v1/pats")) as PatList;
+      const list = (await c.call("GET", "/v2/pats")) as PatList;
       if (!list.pats.some((p) => p.name === GATEWAY_PAT)) throw new ControlRequestError("not_found", "the kernel has no default PAT");
-      const secret = (await c.call("POST", `/v1/pats/${encodeURIComponent(GATEWAY_PAT)}/rotate`)) as PatSecret;
+      const secret = (await c.call("POST", `/v2/pats/${encodeURIComponent(GATEWAY_PAT)}/rotate`)) as PatSecret;
       return { name: secret.pat.name, modified_at: secret.pat.modified_at };
     });
   }
 
   deletePat(name: string): Promise<ActionResult> {
-    return this.action("pats", (c) => c.call("DELETE", `/v1/pats/${encodeURIComponent(name)}`));
+    return this.action("pats", (c) => c.call("DELETE", `/v2/pats/${encodeURIComponent(name)}`));
   }
 
   listIngressClients(): Promise<DataResult<IngressClientsResponse>> {
-    return this.data("ingress", (c) => c.call("GET", "/v1/ingress/clients"));
+    return this.data("ingress", (c) => c.call("GET", "/v2/ingress/clients"));
   }
 
   revokeIngressClient(clientId: string): Promise<ActionResult> {
-    return this.action("ingress", (c) => c.call("DELETE", `/v1/ingress/clients/${encodeURIComponent(clientId)}`));
+    return this.action("ingress", (c) => c.call("DELETE", `/v2/ingress/clients/${encodeURIComponent(clientId)}`));
   }
 
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>> {
-    return this.data("ingress", (c) => c.call("PUT", "/v1/ingress/password", { body: { password } }));
+    return this.data("ingress", (c) => c.call("PUT", "/v2/ingress/password", { body: { password } }));
   }
 
   exportPair(): Promise<DataResult<PairExportResponse>> {
-    return this.data("pair", (c) => c.call("POST", "/v1/pair/export"));
+    return this.data("pair", (c) => c.call("POST", "/v2/pair/export"));
   }
 
   importPair(args: PairImportArgs): Promise<DataResult<PairImportResponse>> {
     const body: Record<string, unknown> = { pair: args.pair, fingerprint: args.fingerprint };
     if (args.tags !== undefined) body.tags = args.tags;
-    return this.data("pair", (c) => c.call("POST", "/v1/pair/import", { body }));
+    return this.data("pair", (c) => c.call("POST", "/v2/pair/import", { body }));
   }
 
   getPairPassword(): Promise<DataResult<PairPasswordState>> {
-    return this.data("pair", (c) => c.call("GET", "/v1/pair/password"));
+    return this.data("pair", (c) => c.call("GET", "/v2/pair/password"));
   }
 
   setPairPassword(password: string): Promise<DataResult<PairPasswordState>> {
-    return this.data("pair", (c) => c.call("PUT", "/v1/pair/password", { body: { password } }));
+    return this.data("pair", (c) => c.call("PUT", "/v2/pair/password", { body: { password } }));
+  }
+
+  revokeDevice(deviceId: string): Promise<ActionResult> {
+    return this.action("pair", (c) => c.call("DELETE", `/v2/pair/trust/${deviceId}`));
   }
 
   clearPairPassword(): Promise<ActionResult> {
-    return this.action("pair", (c) => c.call("DELETE", "/v1/pair/password"));
+    return this.action("pair", (c) => c.call("DELETE", "/v2/pair/password"));
   }
 
   discoverPairs(): Promise<DataResult<PairDiscoveredResponse>> {
-    return this.data("pair", (c) => c.call("GET", "/v1/pair/discovered"));
+    return this.data("pair", (c) => c.call("GET", "/v2/pair/discovered"));
   }
 
   connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>> {
     const body: Record<string, unknown> = { password: args.password };
+    if (args.path !== undefined) body.path = args.path;
     if (args.address !== undefined) body.address = args.address;
     if (args.fingerprint !== undefined) body.fingerprint = args.fingerprint;
-    return this.data("pair", (c) => c.call("POST", "/v1/pair/connect", { body }));
+    return this.data("pair", (c) => c.call("POST", "/v2/pair/connect", { body }));
   }
 
   /**
@@ -318,35 +323,35 @@ export class PanelService {
     const r = req as CiRequest;
     switch (r.op) {
       case "get":
-        return run((c) => c.call("GET", "/v1/ci"));
+        return run((c) => c.call("GET", "/v2/ci"));
       case "account.create": {
         const body: Record<string, unknown> = { token: r.token };
         if (r.host !== undefined) body.host = r.host;
-        return run((c) => c.call("POST", "/v1/ci/accounts", { body }));
+        return run((c) => c.call("POST", "/v2/ci/accounts", { body }));
       }
       case "account.delete":
-        return run((c) => c.call("DELETE", `/v1/ci/accounts/${id(r.id)}`));
+        return run((c) => c.call("DELETE", `/v2/ci/accounts/${id(r.id)}`));
       case "repos": {
         const params = new URLSearchParams();
         if (r.q !== undefined && r.q !== "") params.set("q", r.q);
         if (r.page !== undefined) params.set("page", r.page);
         const qs = params.toString();
-        return run((c) => c.call("GET", `/v1/ci/accounts/${id(r.id)}/repos${qs === "" ? "" : `?${qs}`}`));
+        return run((c) => c.call("GET", `/v2/ci/accounts/${id(r.id)}/repos${qs === "" ? "" : `?${qs}`}`));
       }
       case "binding.create":
-        return run((c) => c.call("POST", "/v1/ci/bindings", { body: r.args }));
+        return run((c) => c.call("POST", "/v2/ci/bindings", { body: r.args }));
       case "binding.patch":
-        return run((c) => c.call("PATCH", `/v1/ci/bindings/${id(r.id)}`, { body: r.patch }));
+        return run((c) => c.call("PATCH", `/v2/ci/bindings/${id(r.id)}`, { body: r.patch }));
       case "binding.delete":
-        return run((c) => c.call("DELETE", `/v1/ci/bindings/${id(r.id)}${r.force === true ? "?force=true" : ""}`));
+        return run((c) => c.call("DELETE", `/v2/ci/bindings/${id(r.id)}${r.force === true ? "?force=true" : ""}`));
       case "binding.restart":
-        return run((c) => c.call("POST", `/v1/ci/bindings/${id(r.id)}/restart`));
+        return run((c) => c.call("POST", `/v2/ci/bindings/${id(r.id)}/restart`));
       case "binding.repair": {
         const body = r.registration_token === undefined ? undefined : { registration_token: r.registration_token };
-        return run((c) => c.call("POST", `/v1/ci/bindings/${id(r.id)}/repair`, body === undefined ? {} : { body }));
+        return run((c) => c.call("POST", `/v2/ci/bindings/${id(r.id)}/repair`, body === undefined ? {} : { body }));
       }
       case "import.inspect":
-        return run((c) => c.call("POST", "/v1/ci/import/inspect", { body: { dir: r.dir } }));
+        return run((c) => c.call("POST", "/v2/ci/import/inspect", { body: { dir: r.dir } }));
     }
   }
 
@@ -354,7 +359,7 @@ export class PanelService {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(q)) if (typeof v === "string") params.set(k, v);
     const qs = params.toString();
-    return this.data("audit", (c) => c.call("GET", qs === "" ? "/v1/audit" : `/v1/audit?${qs}`));
+    return this.data("audit", (c) => c.call("GET", qs === "" ? "/v2/audit" : `/v2/audit?${qs}`));
   }
 
   recentCalls(): CallEventData[] {

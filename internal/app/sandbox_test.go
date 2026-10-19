@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
-	"github.com/tzf1003/xmesh/api/control/v1/schemacheck"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/api/control/v2/schemacheck"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/sandbox"
@@ -208,21 +208,21 @@ func Test_Runtime_WindowsL2AccountRefusalIsExplained(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := control.NewClient(endpoint).Do(context.Background(), "GET", "/v1/status", nil, nil)
+	reply, err := control.NewClient(endpoint).Do(context.Background(), "GET", "/v2/status", nil, nil)
 	if err != nil || reply.Status != 200 {
 		t.Fatal(reply, err)
 	}
 	if err := schemacheck.Validate("StatusResponse", reply.Body); err != nil {
 		t.Fatal(err)
 	}
-	var st v1.StatusResponse
+	var st v2.StatusResponse
 	if err := json.Unmarshal(reply.Body, &st); err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, w := range st.Warnings {
-		if w.Code == v1.WarnSandboxUnavailable {
-			found = w.Severity == v1.SeverityWarning && strings.Contains(w.Message, accountReason) && !strings.Contains(w.Message, "Access is denied")
+		if w.Code == v2.WarnSandboxUnavailable {
+			found = w.Severity == v2.SeverityWarning && strings.Contains(w.Message, accountReason) && !strings.Contains(w.Message, "Access is denied")
 		}
 	}
 	if !found {

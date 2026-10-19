@@ -11,7 +11,7 @@ import (
 	"time"
 
 	winio "github.com/tailscale/go-winio"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"golang.org/x/sys/windows"
 )
 
@@ -34,7 +34,7 @@ func Listen(o ListenOptions) (net.Listener, Bound, error) {
 	if err != nil {
 		return nil, Bound{}, err
 	}
-	return &pipeListener{Listener: l}, Bound{Transport: v1.TransportPipe, Address: name}, nil
+	return &pipeListener{Listener: l}, Bound{Transport: v2.TransportPipe, Address: name}, nil
 }
 
 // pipeListener makes Close reliable on go-winio's listener. Its accept loop retries when a

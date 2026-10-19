@@ -81,6 +81,7 @@ export const CHANNELS = {
   clearPairPassword: "xmesh:clear-pair-password",
   discoverPairs: "xmesh:discover-pairs",
   connectPair: "xmesh:connect-pair",
+  revokeDevice: "xmesh:revoke-device",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
   previewSetup: "xmesh:preview-setup",
@@ -160,7 +161,7 @@ export interface ConfigSaveRequest {
 }
 
 /**
- * One edit of `PATCH /v1/config`. `value` is any JSON value (the schema does not constrain it), so it is
+ * One edit of `PATCH /v2/config`. `value` is any JSON value (the schema does not constrain it), so it is
  * typed `unknown` here; the generated `ConfigEdit` narrows it to an object, which arrays and strings are not.
  */
 export interface ConfigPatchEdit {
@@ -181,7 +182,7 @@ export interface ConfigPatchRequest {
 }
 
 /**
- * Variables of one stdio backend (`PATCH /v1/backends/{name}/env`). The values are write-only: they go to the
+ * Variables of one stdio backend (`PATCH /v2/backends/{name}/env`). The values are write-only: they go to the
  * kernel and are never returned, so nothing here comes back out of the panel's own state.
  */
 export interface BackendEnvRequest {
@@ -207,6 +208,7 @@ export interface PairImportArgs {
 
 /** Pairing with a device found on the LAN or typed in. The password is the other device's connection password. */
 export interface PairConnectArgs {
+  path?: "lan" | "tailnet";
   /** Host or host:port; the kernel uses port 7433 when none is given. */
   address?: string;
   /** The certificate fingerprint the user saw in discovery; the kernel refuses any other certificate. */
@@ -216,7 +218,7 @@ export interface PairConnectArgs {
 
 export interface SetupParams {
   nodeName: string;
-  mode: "lan" | "tailnet";
+  mode: "lan" | "tailnet" | "coexist";
   roles: ("agent" | "gateway")[];
   /** Absolute directory the agent may work in (`agent.cwd_policy.allow` and `default_cwd`). */
   workspace: string;
@@ -298,7 +300,7 @@ export interface PanelApi {
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
   putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
-  /** Applies JSON Pointer edits to the config on disk (`PATCH /v1/config`); the form-style settings write through here. */
+  /** Applies JSON Pointer edits to the config on disk (`PATCH /v2/config`); the form-style settings write through here. */
   patchConfig(request: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>>;
   /** Sets and removes environment variables of a stdio backend (control API 1.7). The kernel restarts only that backend; the answer lists names, never values. */
   patchBackendEnv(request: BackendEnvRequest): Promise<DataResult<BackendEnvResponse>>;
@@ -317,7 +319,7 @@ export interface PanelApi {
   /** Rotates the PAT named "default" (the gateway token). The new token is never returned to the page. */
   rotateGatewayPat(): Promise<DataResult<GatewayPatRotated>>;
   deletePat(name: string): Promise<ActionResult>;
-  /** Replaces the gateway's reach settings (PUT /v1/gateway). */
+  /** Replaces the gateway's reach settings (PUT /v2/gateway). */
   updateGateway(request: GatewayUpdateRequest): Promise<DataResult<GatewayUpdateResponse>>;
   listIngressClients(): Promise<DataResult<IngressClientsResponse>>;
   revokeIngressClient(clientId: string): Promise<ActionResult>;
@@ -330,6 +332,7 @@ export interface PanelApi {
   clearPairPassword(): Promise<ActionResult>;
   discoverPairs(): Promise<DataResult<PairDiscoveredResponse>>;
   connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>>;
+  revokeDevice(deviceId: string): Promise<ActionResult>;
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
@@ -391,6 +394,7 @@ export const PANEL_API_METHODS = [
   "clearPairPassword",
   "discoverPairs",
   "connectPair",
+  "revokeDevice",
   "queryAudit",
   "getRecentCalls",
   "onCalls",
@@ -479,9 +483,9 @@ const ETAG = /^sha256-[0-9a-f]{64}$/;
 const FINGERPRINT = /^([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}$/;
 const CLIENT_ID = /^[\x21-\x7e]{1,256}$/;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
-const PAIR_TAGS = ["tag:peer", "tag:device", "tag:ingress"] as const;
+const PAIR_TAGS = ["tag:peer", "tag:device", "tag:ingress", "tag:admin"] as const;
 
-/** PUT /v1/config accepts at most 1 MiB; this counts bytes, not UTF-16 units. */
+/** PUT /v2/config accepts at most 1 MiB; this counts bytes, not UTF-16 units. */
 export const CONFIG_MAX_BYTES = 1024 * 1024;
 export const PASSWORD_MIN = 12;
 export const PASSWORD_MAX = 256;
@@ -698,10 +702,14 @@ function cleanFingerprint(v: unknown): string | undefined {
 }
 
 export function parsePairConnect(v: unknown): PairConnectArgs | undefined {
-  if (!isRecord(v) || !onlyKeys(v, ["address", "fingerprint", "password"])) return undefined;
+  if (!isRecord(v) || !onlyKeys(v, ["path", "address", "fingerprint", "password"])) return undefined;
   const password = parsePairPassword(v.password);
   if (password === undefined) return undefined;
   const out: PairConnectArgs = { password };
+  if (v.path !== undefined) {
+    if (v.path !== "lan" && v.path !== "tailnet") return undefined;
+    out.path = v.path;
+  }
   if (v.address !== undefined) {
     if (typeof v.address !== "string" || v.address.trim() === "" || v.address.length > 260) return undefined;
     out.address = v.address.trim();
@@ -718,11 +726,11 @@ export function parsePairConnect(v: unknown): PairConnectArgs | undefined {
 export function parsePairImport(v: unknown): PairImportArgs | undefined {
   if (!isRecord(v) || !onlyKeys(v, ["pair", "fingerprint", "tags"])) return undefined;
   const { pair, fingerprint, tags } = v;
-  if (!isRecord(pair) || !onlyKeys(pair, ["name", "fingerprint", "certificate_pem", "tags"])) return undefined;
+  if (!isRecord(pair) || !onlyKeys(pair, ["version", "device_id", "public_key", "name", "fingerprint", "tags"])) return undefined;
   if (parseNodeName(pair.name) === undefined) return undefined;
-  if (typeof pair.fingerprint !== "string" || typeof pair.certificate_pem !== "string") return undefined;
-  if (!pair.certificate_pem.startsWith("-----BEGIN CERTIFICATE-----") || pair.certificate_pem.length > 16 * 1024) return undefined;
-  // `xmesh pair --export` of earlier kernels wrote `"tags": null`, and a hand-trimmed file may omit it; the importer picks the roles anyway.
+  if (pair.version !== 2 || typeof pair.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(pair.fingerprint)) return undefined;
+  if (pair.device_id !== `dev-${pair.fingerprint}` || typeof pair.public_key !== "string" || !/^MCowBQYDK2VwAyEA[A-Za-z0-9+/]{43}=$/.test(pair.public_key)) return undefined;
+  // Import roles are selected locally; the document contains only public identity data.
   const pairTags = pair.tags ?? [];
   if (!Array.isArray(pairTags) || !pairTags.every((t) => typeof t === "string" && TAG.test(t))) return undefined;
   if (typeof fingerprint !== "string" || !FINGERPRINT.test(fingerprint)) return undefined;
@@ -730,7 +738,9 @@ export function parsePairImport(v: unknown): PairImportArgs | undefined {
     pair: {
       name: pair.name as string,
       fingerprint: pair.fingerprint,
-      certificate_pem: pair.certificate_pem,
+      version: 2,
+      device_id: pair.device_id as string,
+      public_key: pair.public_key,
       tags: pairTags as string[],
     },
     fingerprint,
@@ -760,6 +770,11 @@ const AUDIT_EVENTS = [
   "progress_unrouted",
   "audit_dropped",
   "control_call",
+  "device_link_online",
+  "device_link_reconnecting",
+  "device_link_offline",
+  "device_link_revoked",
+  "device_link_identity_conflict",
 ] as const;
 
 export function parseAuditQuery(v: unknown): AuditQuery | undefined {

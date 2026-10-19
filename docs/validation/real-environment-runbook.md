@@ -1,6 +1,6 @@
 # 真实环境验收步骤（面向无需读代码的操作者）
 
-本页把仓库里还缺的真实环境验收拆成独立小步骤。每一项都可以单独做，做完把“交回什么”里的内容贴回即可；做不到某一项就跳过它，其余不受影响。凭据（注册 key、OAuth 口令、PAT）只放在本机文件里，不要贴到聊天里。
+本页把真实环境验收拆成独立小步骤。设备连接使用配置版本 2；旧版配置先停止服务并执行 `xmesh migrate`，然后重新配对。每一项都可以单独做，做完把“交回什么”里的内容贴回即可；做不到某一项就跳过它，其余不受影响。凭据（注册 key、OAuth 口令、PAT）只放在本机文件里，不要贴到聊天里。
 
 | 步骤 | 验什么 | 需要什么 | 大致工作量 |
 | --- | --- | --- | --- |
@@ -11,6 +11,7 @@
 | [D](#d-云沙箱出站与入网) | 云沙箱出站与入网 | Codex Cloud 或 Claude 云沙箱 | 20 分钟 |
 | [E](#e-跨主机入口-pty-总预算) | 跨主机入口 PTY 总预算 | 两台入口主机加一台常驻 Agent | 40 分钟 |
 | [F](#f-windows-普通用户登录会话) | Windows 普通用户登录会话；L2 应被拒绝 | 一台 Windows，加一个第二用户 | 30 分钟 |
+| [H](#h-lan--tailnet-共存与跨路径恢复) | 同一设备双路径、会话恢复与信任边界 | 两台独立主机，含 Windows、macOS 或 Linux | 30 分钟 |
 | [G](#g-claude-code-连接观察) | Claude Code 连接本机 Gateway | 装了 Claude Code 的电脑 | 10 分钟 |
 
 ## 0. 取得 beta 并验证
@@ -31,7 +32,7 @@ beta 是 GitHub 预发布版（Releases 页，标签形如 `v0.1.0-beta.1`），
 
 - 命令按 Linux/macOS 书写。Windows（PowerShell）把 `python3` 换成 `py -3`，`./xmesh` 换成 `.\xmesh.exe`，路径里的 `/` 换成 `\`，`~/` 换成 `$HOME\`。
 - 所有节点的文件放在 `~/xmesh-accept/<节点名>/` 下：`config.json`、`state/`（状态目录）、`work/`（Agent 唯一允许操作的目录）。下面用 `ACC=~/xmesh-accept` 指代这个目录；Windows 写 `$ACC = "$HOME\xmesh-accept"`。
-- 配置由 `scripts/accept_config.py` 生成，不用手写。它只引用密钥文件的路径，不把密钥写进配置。需要口令的文件（OAuth 口令、PAT）缺失时自动生成随机值，权限 `0600`，不会打印。
+- 配置由 `scripts/accept_config.py` 生成，不用手写。需要远程调用的设备先通过连接密码或独立核对公钥文档完成 xmesh 配对，LAN 与 Tailnet 共用这份信任；仅加入同一个 Tailnet 不授予应用访问权限。它只引用密钥文件的路径，不把密钥写进配置。需要口令的文件（OAuth 口令、PAT）缺失时自动生成随机值，权限 `0600`，不会打印。
 - 要让另一台机器上的 Windows 设备被 `exec.run` 验证，那台 Windows 上须装有 PowerShell 7（命令 `pwsh` 在 PATH 中），验证脚本用它执行命令。
 - 每一步结束都可以用 `scripts/accept_collect.py` 打包要交回的内容（版本、状态、审计里的工具名与结果，不含路径与参数；已去除形如注册 key 与 Bearer 的内容）。发出之前仍请自己看一遍：
 
@@ -170,10 +171,10 @@ python3 scripts/oauth_client.py --base 127.0.0.1:9000 --issuer https://mcp.examp
 4. 在沙箱里执行：
 
    ```bash
-   python3 scripts/smoke_sandbox.py --binary ./xmesh --auth-key-file ./authkey --peer home-server:linux
+   python3 scripts/smoke_sandbox.py --binary ./xmesh --auth-key-file ./authkey --peer home-server:linux --peer-password-file home-server=/secure/home-device-password
    ```
 
-   `--peer` 是 `<设备名>:<系统>`，可重复。脚本启动两个生命周期，验证沙箱节点加入 tailnet、调用对端的文件/exec/PTY、重启后身份变化、身份状态不落盘。
+   `--peer` 是 `<设备名>:<系统>`，可重复。在对端设置连接密码，口令仅通过本机私有文件提供。脚本在首次启动时通过 Tailnet 完成双向 xmesh 配对，再启动两个生命周期，验证对端文件/exec/PTY、重启后设备 ID 保持及临时网络凭据不落盘。
 5. 如果沙箱无法联网，脚本会在第一步失败。记下失败信息即可，这本身就是“该云沙箱出站被禁止”的记录。
 
 **通过标准：** 最后一行 `{"result": "PASS", ...}`，或者在第一步因网络被拒而失败（记录为“出站被禁止”）。
@@ -286,3 +287,28 @@ python3 scripts/oauth_client.py --base 127.0.0.1:9000 --issuer https://mcp.examp
 ## 不需要你提供的部分
 
 Windows 生产 L2 的原生验收只通过 GitHub 托管 runner 完成，不需要你的机器；但由于生产启动链路尚未接通，当前仍返回 `sandbox.unavailable`，所以 F 的预期是“被拒绝”。L2 接通并进入发布后，F 的第 3 步会改成验证成功路径。
+
+## H. LAN / Tailnet 共存与跨路径恢复
+
+使用两台独立主机，分别记录系统、架构与提交版本。每台运行：
+
+```sh
+python3 scripts/accept_config.py coexist --name coexist-a --out $ACC/coexist-a --authkey-file /secure/registration-key
+```
+
+按步骤 A 交换并独立核对设备公钥文档，在任一路径配对一次，然后启动节点。整个验收保留原状态目录与同一个持续运行的 MCP 客户端。
+
+| 操作 | 必须观察到的结果 |
+| --- | --- |
+| 查看两端的 `xmesh control peers` | 对端只有一条设备记录；路径包含 LAN 与 Tailnet，Tailnet 可同时有 IPv4/IPv6；首次业务连接走 LAN |
+| 同一个客户端打开远程 PTY，启动长任务并记录 PID、owner、调用结果与执行计数 | 记录归属设备 ID 和逻辑会话；后续使用同一个客户端核对 |
+| 在本机运行 `xmesh control config set --set /mesh/lan/enabled=false --state-dir ...` | 链路自动通过 Tailnet 恢复；PTY PID/owner、已接受任务结果与单次执行计数保持，仍有效的租约继续续期 |
+| 恢复 `/mesh/lan/enabled=true` | LAN 重新成为可用路径，健康的 Tailnet 连接继续使用原路径 |
+| 使 Tailnet 路径失联，同时保留可达 LAN | 通过 LAN 恢复同一个逻辑会话；设备 ID 和 xmesh 配对记录保持 |
+| 跨路径进行分块上传与下载 | 最终文件大小与 SHA-256 一致 |
+| 两种路径都断开超过 120 秒 | 原逻辑会话到期，资源按结束流程清理；迟到的握手不能恢复原会话 |
+| 撤销 xmesh 设备信任 | 全部路径上的设备会话结束；重新授予信任建立新会话 |
+
+在禁用 LAN 时记录墙钟时间与恢复时间，正常硬断目标为 10 秒以内，静默丢包为 20 秒以内；超出目标保留两端的元数据审计与错误。独立宿主机的 DERP 验收应阻断设备间的直连 UDP，保留控制面与中继可达，确认业务仍可通过 Tailnet 完成。
+
+**交回：** 每次操作前后的 `peers`、资源 PID/owner、执行计数、文件哈希、恢复耗时、版本及系统信息；敏感凭据继续保存在本机。独立网络空间的自动化对照脚本是 `scripts/coexist_ci.py`，可加 `--force-derp`；它的结果单独标注为同一宿主机的容器网络验收。

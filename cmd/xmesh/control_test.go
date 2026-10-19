@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/kardianos/service"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -21,18 +21,18 @@ const cliConfig = "node:\n  name: cli-node\n  roles: [agent]\nmesh:\n  mode: lan
 
 type cliHost struct{ draining atomic.Bool }
 
-func (h *cliHost) Status() v1.StatusResponse {
-	return v1.StatusResponse{
-		OS: "linux", Arch: "amd64", Hostname: "cli-node", Home: "/h", Roles: []string{"agent"}, PathSep: "/", Shells: []string{}, Workspaces: []v1.Workspace{}, Backends: []v1.Backend{},
-		Warnings: []v1.Warning{{Code: v1.WarnRestartRequired, Severity: v1.SeverityInfo, Message: "示例警告"}},
-		Network:  v1.NetworkIdentity{Mode: "lan", NodeID: "cli-node", Tags: []string{"tag:peer"}},
+func (h *cliHost) Status() v2.StatusResponse {
+	return v2.StatusResponse{
+		OS: "linux", Arch: "amd64", Hostname: "cli-node", Home: "/h", Roles: []string{"agent"}, PathSep: "/", Shells: []string{}, Workspaces: []v2.Workspace{}, Backends: []v2.Backend{},
+		Warnings: []v2.Warning{{Code: v2.WarnRestartRequired, Severity: v2.SeverityInfo, Message: "示例警告"}},
+		Network:  v2.NetworkIdentity{Mode: "lan", NodeID: "cli-node", Tags: []string{"tag:peer"}},
 	}
 }
 func (h *cliHost) Draining() bool { return h.draining.Load() }
-func (h *cliHost) Peers(context.Context) ([]v1.Peer, error) {
-	return []v1.Peer{{Name: "cli-node", Self: true, NodeID: "cli-node", Tags: []string{}, Online: true, Connection: "local", Addrs: []string{}}, {Name: "box", NodeID: "n2", Tags: []string{}, Online: true, Connection: "direct", Addrs: []string{}}}, nil
+func (h *cliHost) Peers(context.Context) ([]v2.Peer, error) {
+	return []v2.Peer{{Name: "cli-node", Self: true, NodeID: "cli-node", Tags: []string{}, Online: true, Connection: "local", Addrs: []string{}}, {Name: "box", NodeID: "n2", Tags: []string{}, Online: true, Connection: "direct", Addrs: []string{}}}, nil
 }
-func (h *cliHost) Sessions() v1.SessionsResponse { return v1.SessionsResponse{} }
+func (h *cliHost) Sessions() v2.SessionsResponse { return v2.SessionsResponse{} }
 func (h *cliHost) Drain(bool) (int, int)         { h.draining.Store(true); return 0, 0 }
 func (h *cliHost) Resume()                       { h.draining.Store(false) }
 
@@ -114,6 +114,9 @@ func Test_CLIControlSubcommands(t *testing.T) {
 	if got["content"] != cliConfig {
 		t.Fatal(got)
 	}
+	if reloaded := object("config", "reload"); reloaded["valid"] != true || reloaded["applied"] != false {
+		t.Fatal(reloaded)
+	}
 	dry := object("config", "set", "--if-match", etag, "--dry-run", "--set", "/agent/policy/allow_dangerous=true")
 	if dry["applied"] != false || len(dry["diff"].([]any)) != 1 {
 		t.Fatal(dry)
@@ -193,7 +196,7 @@ func Test_CLIControlTargetErrors(t *testing.T) {
 		if err = os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err = control.WriteEndpoint(dir, v1.ControlEndpointFile{APIVersion: v1.APIVersion, Transport: v1.TransportUnix, Endpoint: "/x/" + node, Node: node}); err != nil {
+		if err = control.WriteEndpoint(dir, v2.ControlEndpointFile{APIVersion: v2.APIVersion, Transport: v2.TransportUnix, Endpoint: "/x/" + node, Node: node}); err != nil {
 			t.Fatal(err)
 		}
 	}

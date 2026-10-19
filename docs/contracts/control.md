@@ -1,6 +1,6 @@
 # 本机控制通道
 
-本篇是 [桌面 UI 与本机控制通道](../design/12-ui-and-control.md) 的契约部分：内核向本机用户暴露的控制通道 v1。UI（Electron）、`xmesh` CLI 的 `--control` 读法、内核实现和假内核都以这里为准。方案与契约冲突时以契约为准。
+本篇是 [桌面 UI 与本机控制通道](../design/12-ui-and-control.md) 的契约部分：内核向本机用户暴露的控制通道 v2。UI（Electron）、`xmesh` CLI 的 `--control` 读法、内核实现和假内核都以这里为准。方案与契约冲突时以契约为准。
 
 机器可读的部分是 JSON Schema，它是唯一来源：
 
@@ -9,8 +9,8 @@
 | [schemas/control-common.schema.json](schemas/control-common.schema.json) | 版本、时间戳、ETag、能力、警告等公共类型 |
 | [schemas/control-endpoint.schema.json](schemas/control-endpoint.schema.json) | `control.json` |
 | [schemas/control-error.schema.json](schemas/control-error.schema.json) | 错误体、错误码与 HTTP 状态 |
-| [schemas/control-status.schema.json](schemas/control-status.schema.json) | `GET /v1/status` |
-| [schemas/control-events.schema.json](schemas/control-events.schema.json) | `GET /v1/events` 的事件 |
+| [schemas/control-status.schema.json](schemas/control-status.schema.json) | `GET /v2/status` |
+| [schemas/control-events.schema.json](schemas/control-events.schema.json) | `GET /v2/events` 的事件 |
 | [schemas/control-peers.schema.json](schemas/control-peers.schema.json)、[control-sessions](schemas/control-sessions.schema.json) | 对端与会话视图 |
 | [schemas/control-drain.schema.json](schemas/control-drain.schema.json) | drain 与 resume |
 | [schemas/control-config.schema.json](schemas/control-config.schema.json) | 配置读写 |
@@ -48,7 +48,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 
 | 项 | 限制 |
 | --- | --- |
-| 请求体 | `PUT /v1/config` 最大 1 MiB，其余最大 64 KiB，超过返回 `payload_too_large` |
+| 请求体 | `PUT /v2/config` 最大 1 MiB，其余最大 64 KiB，超过返回 `payload_too_large` |
 | 内容类型 | 有请求体时必须是 `application/json`，UTF-8 |
 | 并发 | 同一资源的写操作在内核内串行；读不被写阻塞 |
 
@@ -56,7 +56,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 
 ### 约定
 
-- 路径前缀 `/v1`。成功响应体与请求体是对应路由的 JSON，字段见路由表。失败响应体是 `ControlError`，HTTP 状态取自 [control-error.schema.json](schemas/control-error.schema.json) 的 `x-http-status`。
+- 路径前缀 `/v2`。成功响应体与请求体是对应路由的 JSON，字段见路由表。失败响应体是 `ControlError`，HTTP 状态取自 [control-error.schema.json](schemas/control-error.schema.json) 的 `x-http-status`。
 - 信封与 [CTR-ERR-01](errors.md#ctr-err-01) 相同（`error`、`message`、`retry_after_ms`），错误码集合不同，因为这里的错误不是工具错误。`message` 是中文一行，调用方不得据此分支。
 - 每个响应带头 `X-Xmesh-Control-Version: <主>.<次>`，值也在 `control.json` 与 `status.control.api_version`。
 - 服务端拒绝请求体里的未知字段（`invalid_args`，`field` 指出位置），因为请求模式是封闭的。客户端必须忽略响应里的未知字段，并把未知枚举值当作「未知」处理。
@@ -64,14 +64,14 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 
 ### 版本与兼容
 
-- 只加不改。次版本增加字段、路由、枚举值与能力；删除、改名、改语义必须升主版本并换前缀，内核同时提供上一主版本至少一个发布周期。
+- 只加不改。次版本增加字段、路由、枚举值与能力；删除、改名、改语义必须升主版本并换前缀，设备身份升级使用新主版本；旧节点停止后转换配置并重新配对。
 - 客户端遇到主版本不同的内核，进入「版本不匹配」状态，只保留打开日志目录与升级入口。
 - 同一主版本内，新旧内核与 UI 混用靠能力协商：内核在 `control.json` 与 `status.control.capabilities` 里声明已实现的能力（`Capability`），UI 只对已声明的能力启用入口。路由表里每条路由属于一个能力；未声明能力的路由返回 `not_implemented`（501）。
 - 客户端不得发送比内核 `api_version` 更新的请求字段。
 
 ### 并发控制
 
-只有配置有 ETag。`GET /v1/config` 的响应头 `ETag: "sha256-<64 位十六进制>"`（强校验器）与体内 `etag` 相同，是磁盘上配置文件字节的 SHA-256。`PUT /v1/config` 必须带 `If-Match`：缺失返回 `precondition_required`（428），不匹配返回 `precondition_failed`（412）并在 `current_etag` 给出当前值。其他变更路由是幂等或按名字寻址的，不使用 ETag。
+只有配置有 ETag。`GET /v2/config` 的响应头 `ETag: "sha256-<64 位十六进制>"`（强校验器）与体内 `etag` 相同，是磁盘上配置文件字节的 SHA-256。`PUT /v2/config` 必须带 `If-Match`：缺失返回 `precondition_required`（428），不匹配返回 `precondition_failed`（412）并在 `current_etag` 给出当前值。其他变更路由是幂等或按名字寻址的，不使用 ETag。
 
 ### 审计
 
@@ -83,7 +83,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 
 ## CTR-CTL-03
 
-### GET /v1/status
+### GET /v2/status
 
 响应 `StatusResponse`，也是 `status` 事件的 `data`。字段包含 [CTR-SYS-01](sys.md#ctr-sys-01) 的全部字段，语义相同，只有 `warnings` 不同，见 [RUL-15](rulings.md#rul-15)。新增字段：
 
@@ -129,7 +129,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 
 ## CTR-CTL-04
 
-### GET /v1/events
+### GET /v2/events
 
 `Content-Type: text/event-stream`，长连接。每个 SSE 事件是：
 
@@ -158,25 +158,29 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 - 事件 id 是 `<boot_id>.<seq>`。`boot_id` 在内核每次启动时随机生成；`seq` 在一次启动内从 1 单调递增。
 - 内核保留最近 1024 条事件。客户端带 `Last-Event-ID` 重连时，若该 id 属于当前启动且仍在缓存内，内核先补发其后的全部事件；否则先发 `reset`：`boot_changed`（id 属于上一次启动）或 `gap`（id 比缓存里最旧的更早）。
-- 客户端收到 `reset` 必须丢弃增量状态，重新读取 `/v1/status`、`/v1/peers`、`/v1/sessions`，再从 `reset.data.head` 之后继续。首次连接（无 `Last-Event-ID`）同样应该先读快照再订阅，用 `hello.data.head` 对齐。
+- 客户端收到 `reset` 必须丢弃增量状态，重新读取 `/v2/status`、`/v2/peers`、`/v2/sessions`，再从 `reset.data.head` 之后继续。首次连接（无 `Last-Event-ID`）同样应该先读快照再订阅，用 `hello.data.head` 对齐。
 - 空闲时内核每 15 秒发一行 SSE 注释 `: ping`。客户端 45 秒收不到任何字节，应断开并带 `Last-Event-ID` 重连，退避重试。
 - 每个连接有有限的发送队列；消费者太慢时内核关闭该连接，不丢弃事件、不无限缓存。客户端重连即可续传或重置。
 
 ## CTR-CTL-05
 
-### GET /v1/peers
+### GET /v2/peers
+
+新版设备以 `device_id` 合并，`name` 是稳定本地别名，`display_name` 是显示名称；`paths` 分别报告路径地址、可达性和验证时间，`active_path` 与 `connection_state` 报告当前链路。自连、本地开发模式和尚未探测的字段按模式规定省略。
 
 响应 `PeersResponse`。`self` 为真的恰有一项（本机）。`connection` 是 `direct`、`derp`、`unknown`（离线或尚未探测）、`local`（本机自己）。数据来自 mesh 层，不触发任何工具调用。
 
 自 1.1 起，每个在线的对端可带 `info`（`PeerInfo`），即网关在后台对它读取 `sys.info` 的结果：`refreshed_at` 是最近一次成功读取的时间，`error` 是最近一次读取失败的原因。两者都为 null 表示第一次读取尚未完成，面板显示「正在获取设备信息」。本节点自己、离线设备，以及没有网关角色的节点上省略 `info`。网关每分钟对每个在线对端读取一次，读取失败后同样每分钟重试；这个读取与 `devices.list` 按 MCP 会话缓存的 `stale` 相互独立。
 
-### GET /v1/sessions
+### GET /v2/sessions
 
 响应 `SessionsResponse`：`pty`（[CTR-PTY-01](pty.md#ctr-pty-01) 里除 `released` 外的会话）、`exec`（排队中与运行中）、`leases`（后端租约，`token` 是 fencing 序号，不是密钥）。只读视图。PTY 的字段与 [`pty.list`](pty.md#ctr-pty-02) 对应，加上 `oauth_client` 与 `created_at`；`exec.cmd` 只有可执行文件基名。没有终端缓冲、参数、stdin、环境变量。
 
 ## CTR-CTL-06
 
-### POST /v1/drain、POST /v1/resume
+### POST /v2/drain、POST /v2/resume
+
+远程排空的 `DrainRequest.timeout_ms` 指定每台设备的请求超时（毫秒），省略或零使用 15000。CLI 的 `--timeout` 会传入此字段；调用方的 context 限制整个 fanout 的总时长，本机排空不使用该字段。
 
 请求 `DrainRequest`（`mode` 缺省 `keep`），响应 `DrainResponse`。语义与 [CTR-GW-05](gateway.md#ctr-gw-05) 的 drain 相同，作用于本进程的 Agent 与同进程的 Gateway：
 
@@ -188,13 +192,15 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 规则见 [RUL-16](rulings.md#rul-16)：对已在 drain 的进程重复 `keep` 是 no-op；`keep` 升级到 `kill` 允许，且 `since` 不重置；`kill` 降级到 `keep` 返回 `conflict`，`reason` 为 `drain_downgrade`；未在 drain 时 `resume` 是 no-op。两个路由都返回完整的 `DrainState`。
 
+版本 2 还支持通过此路由排空远端设备：`scope: "device"` 搭配设备 ID 或本地 alias，或 `scope: "mesh"` 选择全部在线 `tag:device` 设备。省略 scope 或使用 `local` 保持本机语义。远程操作使用当前运行节点的已验证路径，目标按设备 ID 核验并检查 xmesh 信任授予的 `tag:admin`。响应的 `outcomes` 逐台提供 `{device, error?}`；远程排空不改变调用节点的本机 drain 状态。部分失败保留各台结果，CLI 返回失败退出码。`xmesh drain --config ... --scope device|mesh` 在版本 2 使用该本机控制通道。
+
 ## CTR-CTL-07
 
-### GET /v1/config
+### GET /v2/config
 
 响应 `ConfigResponse`：`content` 是文件原文（含注释），`parsed` 是 YAML 1.2 转 JSON 数据模型后的对象（形状见 [config.schema.json](schemas/config.schema.json)），`valid` 与 `load_error` 说明磁盘上的内容能否通过 `config.Parse`。`effective_etag` 是正在生效的那份配置对应的文件 ETag；与 `etag` 不同，说明磁盘上的新内容尚未生效（热加载失败，或属于需要重启的变更）。
 
-### PUT /v1/config
+### PUT /v2/config
 
 请求 `ConfigPutRequest`，必须带 `If-Match`。`dry_run: true` 只校验并计算 diff，不写文件，供 UI 保存前展示。
 
@@ -206,13 +212,13 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 4. 写同目录临时文件（保持原文件权限）、`fsync`、重命名覆盖。Windows 使用等价的原子替换。注释与格式由客户端提交的 `content` 原样保留，内核不重新序列化。
 5. 返回 `applied: true`、新 `etag`、`diff`、`restart_required`，发 `config` 事件（`actor: control`），写审计。
 
-### PATCH /v1/config
+### PATCH /v2/config
 
 请求 `ConfigEditRequest`，必须带 `If-Match`，与 `PUT` 的 ETag 规则相同。`edits` 是按 JSON Pointer 依次应用到磁盘当前文件上的修改（数组整体替换，缺失的映射自动创建，`delete: true` 删除路径），注释与未修改的部分原样保留。内核先在当前文件上应用全部修改，再走与 `PUT` 相同的 `config.Parse` 校验、diff、原子写入与事件；任一步失败整批都不写入。无法应用的修改（例如路径穿过标量）返回 `conflict`（409）。`dry_run: true` 只返回 diff。UI 的表单式设置（MCP 服务器、内置工具开关、授权）都经此路由写入，避免客户端整文件改写 YAML。
 
-写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。`gateway.listen`、`gateway.expose_backends`、`ingress` 段和 `node.roles` 里 `gateway`、`ingress` 的增减不在其中：运行中的进程自己应用它们。diff 里 `node.roles` 是一项变更（整个数组），`restart_required` 只看哪些角色变了。
+写入后不直接改内存配置：生效走与手工改文件相同的热加载路径，因此「需要重启」的段（`config.RestartPaths`：`node.name`、`node.roles` 里 `agent` 的增减、`audit`、`agent.policy.windows_appcontainer`）只置 `restart_required`，与 [CTR-CFG-01](config.md#ctr-cfg-01) 的热加载规则一致。版本 2 的 `mesh.lan`、`mesh.tailnet`、`gateway.listen`、`gateway.expose_backends`、`ingress` 段和 `node.roles` 里 `gateway`、`ingress` 的增减由运行中的进程应用。diff 里 `node.roles` 是一项变更（整个数组），`restart_required` 只看哪些角色变了。
 
-### POST /v1/config/reload
+### POST /v2/config/reload
 
 请求没有体。立即重读磁盘上的配置文件，不等待文件监视器的下一次轮询，响应 `ConfigReloadResponse`（自 API 1.4 起；`apply_errors` 自 1.6 起）。能力为 `config.write`。UI 在它自己写入配置文件之外的途径修改了文件后调用它，或要确认当前生效的是哪一份。
 
@@ -222,7 +228,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 | `valid` | 磁盘上的内容能否通过与启动相同的校验。为 `false` 时 `load_error` 给出第一条错误，生效的配置保持不变 |
 | `etag`、`effective_etag` | 磁盘上当前内容，与正在生效的那份对应的文件 ETag。需重启的段待生效时两者不同 |
 | `changed_paths` | 本次生效的变更的 JSON Pointer，与 `config` 事件的 `changed_paths` 相同；未生效时为空数组 |
-| `restart_required`、`restart_paths` | 磁盘上是否有需重启的段尚未运行，以及它们的路径（`config.RestartPaths` 中的一项或多项，例如 `/mesh`） |
+| `restart_required`、`restart_paths` | 磁盘上是否有需重启的段尚未运行，以及它们的路径（`config.RestartPaths` 中的一项或多项，例如 `/node/name`） |
 | `apply_errors` | 有效但没能在运行中的进程里生效的部分，`{section, message}`；目前 `section` 只有 `gateway`（新的 `listen` 绑不上，或 Gateway 没能启动）。进程保持原样，不进入 `restart_paths`。调用本接口时会先重试上一次失败的部分，再等本代次应用完（最多约 10 秒）。没有时为空数组 |
 
 行为：
@@ -231,7 +237,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 - 无效的内容：`applied: false`、`valid: false`、给出 `load_error`，继续使用上一份有效配置；首次出现时发 `config` 事件（`change: reload_failed`），`policy_reload_failed` 计数加一。
 - 没有变化：`applied: false`，不发事件，只返回当前状态。
 
-`POST /v1/config/reload` 是幂等的：连续两次调用，第二次的 `applied` 为 `false`。
+`POST /v2/config/reload` 是幂等的：连续两次调用，第二次的 `applied` 为 `false`。
 
 ### diff 与 `weakens_security`
 
@@ -251,27 +257,27 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 每台 `lan` 节点可以设置一个连接密码。另一台设备输入它即可直接配对，无需交换文件。
 
-- `GET /v1/pair/password` 返回 `PairPasswordState`：`set`、`updated_at`、`failed_attempts`、`locked_until`。从不包含口令或派生值。
-- `PUT /v1/pair/password` 的请求是 `PairPasswordRequest {password}`，长度 10 到 128 个 Unicode 码点，首尾不能有空白，违反返回 `invalid_args`（字段 `password`）。设置或修改立即生效，并清除锁定。
-- `DELETE /v1/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
+- `GET /v2/pair/password` 返回 `PairPasswordState`：`set`、`updated_at`、`failed_attempts`、`locked_until`。从不包含口令或派生值。
+- `PUT /v2/pair/password` 的请求是 `PairPasswordRequest {password}`，长度 10 到 128 个 Unicode 码点，首尾不能有空白，违反返回 `invalid_args`（字段 `password`）。设置或修改立即生效，并清除锁定。
+- `DELETE /v2/pair/password` 清除口令，204。之后这台设备不接受密码配对，已配对的设备不受影响。
 - 口令只写不读：没有任何响应包含它。磁盘上只保存 Argon2id 的派生密钥与盐。
 
-### 内网发现与连接（1.5 起）
+### 设备发现与连接
 
-- `GET /v1/pair/discovered` 返回 `PairDiscoveredResponse {devices[]}`：尚未配对、宣告了 `pairing=1` 的设备，每项 `name`、`fingerprint`、`address`（主机:端口）、`seen_at`。不含证书，已配对的设备不出现。
-- `POST /v1/pair/connect` 的请求是 `PairConnectRequest {address?, fingerprint?, password}`，`address` 与 `fingerprint` 至少给一个。只给 `fingerprint` 时地址取自发现列表，找不到返回 `not_found`。同时给出时，对端证书与 `fingerprint` 不符则在确认前停止，返回 `invalid_args`（字段 `fingerprint`，`reason` 为 `fingerprint_mismatch`），不会钉入任何证书。成功返回 `PairConnectResponse {name, fingerprint, address, tags}`，立即生效，无需重启。
+- `GET /v2/pair/discovered` 返回尚未配对的候选路径，包含 `device_id`、`path`（`lan` 或 `tailnet`）、`name`、公钥 `fingerprint`、`address` 和 `seen_at`。发现信息只提供候选，密码确认或独立公钥核对后才建立信任。
+- `POST /v2/pair/connect` 接收 `{path?, address?, fingerprint?, password}`，默认路径为 `lan`。地址与指纹至少提供一个；只给指纹时从所选路径的发现列表查找。成功返回设备 ID、名称、指纹、路径、HTTPS 地址和本地角色。
+- 路径不改变应用权限。同一设备配对一次后可使用任一已启用路径。Tailnet 的控制面授权只影响 Tailnet 网络可达性。
+- 指纹不匹配在确认前失败，返回 `invalid_args`，字段为 `fingerprint`、原因为 `fingerprint_mismatch`。口令不匹配、未设置口令、协议版本不兼容与不可达分别使用 `pair_rejected` 的稳定原因码。限流返回 `rate_limited` 和重试时间。
 
-连接失败时，`pair_rejected`（422）的 `reason` 为 `wrong_password`、`no_password`、`unsupported_peer`、`unreachable` 或 `bad_peer`。`wrong_password` 同时表示对端不是待配对的 xmesh 设备，客户端无法区分两者。`rate_limited`（429）带 `retry_after_ms`，表示对端正在限流：每台节点按连续失败次数锁定，最长 30 分钟，成功配对后清零。
+### 公钥配对文档与撤销
 
-这些路由只在 `mesh.mode` 为 `lan` 时可用，否则返回 `unsupported_mode`。
+`POST /v2/pair/export` 返回 `{version:2, device_id, name, public_key, fingerprint, tags}` 的公开文档。`public_key` 为 SPKI DER 的 base64；指纹为该公钥的完整 SHA-256；`device_id` 是 `dev-` 加同一摘要。私钥和口令不进入文档。
 
-### 配对文档（高级用法）
+`POST /v2/pair/import` 接收文档、用户独立确认的指纹及本地授予的角色。内核同时验证版本、公钥、设备 ID 和指纹的一致性。默认授予 `tag:peer`、`tag:device`；`tag:ingress` 和 `tag:admin` 必须显式指定。导入由共享信任服务即时应用，`restart_required` 为 `false`。
 
-`POST /v1/pair/export`（无请求体）返回本机公开配对文档 `PairDocument`，等价于 `xmesh pair --export`，只含节点名、证书指纹、公开证书与 `tags`（导出时为空数组）。
+`DELETE /v2/pair/trust/{device_id}` 撤销设备信任，返回 204。全部连接路径使用同一撤销记录，现有逻辑会话结束；撤销前启动的迟到配对事务不能恢复信任。移除 Tailnet 网络授权不改变 xmesh 的设备信任。
 
-`POST /v1/pair/import` 的请求是 `PairImportRequest`：对端的 `pair`，加上 UI 向用户展示并由用户确认过的 `fingerprint`。内核比较它与 `pair.fingerprint`（忽略冒号与大小写）以及证书本身算出的指纹，不一致返回 `fingerprint_mismatch`（422）。`tags` 只允许 `tag:peer`、`tag:device`、`tag:ingress`，缺省 `["tag:peer","tag:device"]`。成功后 `restart_required` 与 `xmesh pair --import` 一致。
-
-两个路由只在 `mesh.mode` 为 `lan` 时可用，否则返回 `unsupported_mode`（409）。导入的指纹必须来自用户，UI 不得自动填入。
+密码管理和公钥文档操作与网络模式解耦。未启动设备配对服务时，密码与主动连接路由返回 `unavailable`。
 
 ## CTR-CTL-09
 
@@ -281,10 +287,10 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 | 路由 | 作用 |
 | --- | --- |
-| `GET /v1/pats` | `PatList`：名字、scope、令牌文件路径、文件修改时间；`enforced` 表示 `gateway.pats` 非空。不含令牌 |
-| `POST /v1/pats` | 创建。`name` 同节点名字符集，`scopes` 用 [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) 的语法。内核生成至少 32 字符的 URL 安全随机令牌，写入 `0600` 文件，并在配置里加条目。名字已存在返回 `conflict`。响应 `201 PatSecret` |
-| `POST /v1/pats/{name}/rotate` | 生成新令牌并原子替换令牌文件，配置不变，旧令牌立即失效。响应 `PatSecret` |
-| `DELETE /v1/pats/{name}` | 删除配置条目与令牌文件，`204`。这是最后一个 PAT 时返回 `conflict`，`reason` 为 `last_pat`：Gateway 每个请求都要令牌，至少保留一个 |
+| `GET /v2/pats` | `PatList`：名字、scope、令牌文件路径、文件修改时间；`enforced` 表示 `gateway.pats` 非空。不含令牌 |
+| `POST /v2/pats` | 创建。`name` 同节点名字符集，`scopes` 用 [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) 的语法。内核生成至少 32 字符的 URL 安全随机令牌，写入 `0600` 文件，并在配置里加条目。名字已存在返回 `conflict`。响应 `201 PatSecret` |
+| `POST /v2/pats/{name}/rotate` | 生成新令牌并原子替换令牌文件，配置不变，旧令牌立即失效。响应 `PatSecret` |
+| `DELETE /v2/pats/{name}` | 删除配置条目与令牌文件，`204`。这是最后一个 PAT 时返回 `conflict`，`reason` 为 `last_pat`：Gateway 每个请求都要令牌，至少保留一个 |
 
 令牌正文**只**出现在 `PatSecret` 里，即创建与轮转的那一次响应；之后任何接口都读不回。
 
@@ -298,15 +304,15 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 | 路由 | 作用 |
 | --- | --- |
-| `GET /v1/ingress/clients` | `IngressClientsResponse`：issuer 与已注册的 OAuth 客户端（不含 `secret_hash`） |
-| `DELETE /v1/ingress/clients/{client_id}` | 撤销客户端，并使其已签发的 access / refresh token 失效。`204`；不存在返回 `not_found` |
-| `PUT /v1/ingress/password` | 轮转登录口令。只写不读：请求体是新口令，响应只有 `rotated_at`。口令写入内核启动参数 `--oauth-password-file` 指向的文件（`0600`，原子替换）并更新内存。口令不是来自文件时返回 `conflict`，`reason` 为 `password_source_not_file` |
+| `GET /v2/ingress/clients` | `IngressClientsResponse`：issuer 与已注册的 OAuth 客户端（不含 `secret_hash`） |
+| `DELETE /v2/ingress/clients/{client_id}` | 撤销客户端，并使其已签发的 access / refresh token 失效。`204`；不存在返回 `not_found` |
+| `PUT /v2/ingress/password` | 轮转登录口令。只写不读：请求体是新口令，响应只有 `rotated_at`。口令写入内核启动参数 `--oauth-password-file` 指向的文件（`0600`，原子替换）并更新内存。口令不是来自文件时返回 `conflict`，`reason` 为 `password_source_not_file` |
 
 口令轮转不撤销已有 token；要让现有客户端全部失效，UI 对每个客户端调用 `DELETE`。口令长度 12 到 256 字符，不在响应、事件、审计、日志中出现。
 
 ## CTR-CTL-11
 
-### GET /v1/audit
+### GET /v2/audit
 
 查询串对应 `AuditQuery`（所有值都是字符串）；按时间从新到旧返回，`limit` 默认 100、最大 1000，`next_cursor` 是对客户端不透明的游标，没有更多时为 `null`。`events` 的元素就是 [CTR-AUD-01](audit.md#ctr-aud-01) 的事件，原样透传，不加字段，所以继续满足「不含正文」。审计未启用时 `enabled` 为 `false`、`events` 为空。内核只读 `audit/*.jsonl`，被保留期删除的记录读不到。
 
@@ -319,8 +325,8 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 | 产物 | 位置 | 如何保持一致 |
 | --- | --- | --- |
 | 夹具 | `schemas/examples/control/<定义名>.<变体>.json` 与 `invalid/` | [`check_control.py`](schemas/check_control.py)（由 `check_examples.py` 调用，接入 `contracts.yml`）：正例通过同名定义，反例失败；路由表里出现的每个请求与响应定义至少有一个正例 |
-| Go 类型 | `api/control/v1`；校验辅助 `api/control/v1/schemacheck` | 测试把每个正例解码进 Go 类型（拒绝未知字段）再编码，结果必须与原文件语义相同；Go 常量必须覆盖模式里的枚举，错误码的 HTTP 状态必须与 `x-http-status` 相同 |
-| TypeScript 类型 | `api/control/v1/ts/control.ts` | `scripts/gen-control-ts` 从模式生成，含类型、`CONTROL_ROUTES`、`ControlRouteTypes`（路由编号到请求/响应类型）、`CONTROL_ERROR_STATUS`。`contracts.yml` 重新生成后要求工作区无变化，并过 `tsc --strict` |
+| Go 类型 | `api/control/v2`；校验辅助 `api/control/v2/schemacheck` | 测试把每个正例解码进 Go 类型（拒绝未知字段）再编码，结果必须与原文件语义相同；Go 常量必须覆盖模式里的枚举，错误码的 HTTP 状态必须与 `x-http-status` 相同 |
+| TypeScript 类型 | `api/control/v2/ts/control.ts` | `scripts/gen-control-ts` 从模式生成，含类型、`CONTROL_ROUTES`、`ControlRouteTypes`（路由编号到请求/响应类型）、`CONTROL_ERROR_STATUS`。`contracts.yml` 重新生成后要求工作区无变化，并过 `tsc --strict` |
 
 改契约的顺序：先改本文与模式，再改夹具，跑 `python3 docs/contracts/schemas/check_examples.py`、`go test ./api/...`、`node scripts/gen-control-ts/generate.mjs`，把生成物一并提交。加路由时必须同时：在路由表加一行、选一个已有或新增的能力、为请求与响应各补正例、在内核的路由注册测试里断言它出现。
 
@@ -332,24 +338,24 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 ## CTR-CTL-13
 
-### PUT /v1/gateway
+### PUT /v2/gateway
 
-`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`access` 与 `hosts` 立即生效（每个请求读取）；自 API 1.6 起 `listen` 也在运行中生效：Gateway 先绑定新地址再放弃旧地址，Agent 与会话不受影响，所以 `restart_required` 恒为 `false`（字段保留给旧客户端）。新地址绑不上（例如端口被占用）时写入仍然完成，Gateway 留在旧地址，原因在 `apply_errors`，之后再调用一次 `POST /v1/config/reload` 可重试。能力为 `gateway`（API 1.2 起）。
+`roles` 不含 `gateway` 时返回 `role_disabled`（409）。请求体 `GatewayUpdateRequest` 整份替换 `gateway.listen`、`gateway.access`、`gateway.hosts`，写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件。校验失败返回 `config_invalid`（422），不写任何东西。响应 `GatewayUpdateResponse`：`access` 与 `hosts` 立即生效（每个请求读取）；自 API 1.6 起 `listen` 也在运行中生效：Gateway 先绑定新地址再放弃旧地址，Agent 与会话不受影响，所以 `restart_required` 恒为 `false`（字段保留给旧客户端）。新地址绑不上（例如端口被占用）时写入仍然完成，Gateway 留在旧地址，原因在 `apply_errors`，之后再调用一次 `POST /v2/config/reload` 可重试。能力为 `gateway`（API 1.2 起）。
 
 ## CTR-CTL-14
 
 ### 后端环境变量
 
-给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v1/status` 只给变量名。能力为 `config.write`（API 1.7 起）。
+给 stdio 后端（`agent.backends.<name>`，`transport: stdio`）设置 API Key 之类的环境变量。值只写不读：写入后任何接口都读不回，响应和 `GET /v2/status` 只给变量名。能力为 `config.write`（API 1.7 起）。
 
 | 路由 | 作用 |
 | --- | --- |
-| `PATCH /v1/backends/{name}/env` | 请求体 `BackendEnvPatch`：`unset`（变量名列表，先生效）与 `set`（变量名到值的对象）。至少一项；每次最多 64 项，每个后端最多 64 个变量，值不含空字符且不超过 8192 字节。响应 `BackendEnvResponse`：修改之后这个后端还有哪些变量名，按字母序 |
-| `DELETE /v1/backends/{name}/env` | 清空这个后端的所有变量，`204`；没有变量也是 `204` |
+| `PATCH /v2/backends/{name}/env` | 请求体 `BackendEnvPatch`：`unset`（变量名列表，先生效）与 `set`（变量名到值的对象）。至少一项；每次最多 64 项，每个后端最多 64 个变量，值不含空字符且不超过 8192 字节。响应 `BackendEnvResponse`：修改之后这个后端还有哪些变量名，按字母序 |
+| `DELETE /v2/backends/{name}/env` | 清空这个后端的所有变量，`204`；没有变量也是 `204` |
 
 后端名要符合配置里的后端名语法，但不要求已经在配置里：先存变量、再添加后端的客户端，后端第一次启动就带着变量。变量名是 `[A-Za-z_][A-Za-z0-9_]{0,127}`。节点策略不允许的名字（见 [CON-TOOL-12](../constraints/tools.md#con-tool-12)）返回 `invalid_args`，`field` 指到那个变量，`reason` 为 `env_denied`，整个请求不生效。内核没有环境变量存储时（状态目录不可写、文件损坏）返回 `unavailable`。
 
-存储在状态目录的 `backend-env.json`，`0600`，原子替换，不是 `xmesh.yaml` 的一部分：`GET/PUT/PATCH /v1/config`、配置差异、`config` 事件都不含它。变量改动立即生效，只重启受影响的后端；手工编辑这个文件的结果内核在一秒内应用。通过控制通道把后端从配置里删除时，它的变量一并删除；从没出现在配置里的名字保持原样，由 `DELETE` 清理。
+存储在状态目录的 `backend-env.json`，`0600`，原子替换，不是 `xmesh.yaml` 的一部分：`GET/PUT/PATCH /v2/config`、配置差异、`config` 事件都不含它。变量改动立即生效，只重启受影响的后端；手工编辑这个文件的结果内核在一秒内应用。通过控制通道把后端从配置里删除时，它的变量一并删除；从没出现在配置里的名字保持原样，由 `DELETE` 清理。
 
 `StatusResponse.backends[].env_names` 列出 stdio 后端已设置的变量名（没有时省略）。审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名（`set`、`unset`）与大小，不含变量名与值。
 
@@ -359,27 +365,27 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 内核在本机监督官方 `actions/runner` 进程：一台机器可以绑定多个仓库，每个绑定可以有多个并发实例，进程崩溃自动重启，随内核服务开机拉起。方案见 [15 GitHub Actions 运行器托管](../design/15-github-runner.md)。能力为 `ci`（API 1.8 起）；内核没有这项能力时整组路由返回 `not_implemented`。类型在 [control-ci.schema.json](schemas/control-ci.schema.json)。
 
-绑定与账号的非密钥部分存在 `xmesh.yaml` 的 `ci` 段（[CTR-CFG-01](config.md#ctr-cfg-01)），经与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入修改，并发 `config` 事件；GitHub 凭据存在状态目录的 `ci-accounts/` 私有文件里（与网关 PAT 同样的目录保护），不在配置、响应、状态、事件、审计和日志里出现。运行状态不另设事件：`GET /v1/status` 的 `ci`（`CiSummary`）随每次状态采样变化，UI 从 `status` 事件得到更新。
+绑定与账号的非密钥部分存在 `xmesh.yaml` 的 `ci` 段（[CTR-CFG-01](config.md#ctr-cfg-01)），经与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入修改，并发 `config` 事件；GitHub 凭据存在状态目录的 `ci-accounts/` 私有文件里（与网关 PAT 同样的目录保护），不在配置、响应、状态、事件、审计和日志里出现。运行状态不另设事件：`GET /v2/status` 的 `ci`（`CiSummary`）随每次状态采样变化，UI 从 `status` 事件得到更新。
 
 | 路由 | 作用 |
 | --- | --- |
-| `GET /v1/ci` | `CiOverview`：账号（只有掩码）、绑定与每个实例的状态、需要用户处理的提示（`notices`）、运行器包缓存、睡眠与停止超时设置 |
-| `POST /v1/ci/accounts` | 请求体 `CiAccountCreate`：令牌与可选主机。内核用令牌调用 `GET /user` 取得登录名，成功后保存令牌，响应 `CiAccount`（令牌只有掩码）。同一主机同一登录名再次提交就是更换令牌。GitHub 拒绝令牌时 `invalid_args`，`field` 为 `token`，`reason` 为 `github_rejected`；连不上 GitHub 时 `unavailable`，`reason` 为 `github_unreachable` |
-| `DELETE /v1/ci/accounts/{id}` | 删除账号与令牌，`204`。仍有绑定引用它时 `conflict`，`reason` 为 `account_in_use` |
-| `GET /v1/ci/accounts/{id}/repos` | 查询串 `CiReposQuery`。列出账号有管理员权限的仓库（只有这些能注册运行器），带私有或公开标记与已有绑定，分页用 `next_page` |
-| `POST /v1/ci/bindings` | 请求体 `CiBindingCreate`，三种方式恰好用一种：`target` 加 `account`（内核签发注册令牌），`target` 加 `registration_token`（用户从仓库网页复制的一次性令牌，不留长期凭据），或 `import_dir`（接管已有运行器目录，仓库与运行器名读自目录里的 `.runner`）。响应 `CiBinding`，实例在后台依次 `installing`、`registering`、`starting`、`idle`。目标是公开仓库而 `confirm_public` 不为真时 `invalid_args`，`reason` 为 `public_repo_requires_confirm`；同一仓库已有绑定、`id` 重复时 `conflict`；账号不存在 `not_found`；`import_dir` 里没有运行器、运行器是一次性的、装着官方服务或正在运行时 `invalid_args`，`reason` 分别为 `not_a_runner`、`ephemeral_runner`、`service_installed`、`runner_running` |
-| `PATCH /v1/ci/bindings/{id}` | 请求体 `CiBindingPatch`：并发数、标签、暂停与恢复、补上账号。立即生效：加实例、排空后减实例、暂停时排空 |
-| `DELETE /v1/ci/bindings/{id}` | 解绑。查询串 `CiDeleteQuery`：`force=true` 不等正在跑的任务。响应 `CiBinding`，`removing` 为真；实例排空后内核向 GitHub 注销运行器（绑定有账号时）并删除目录与配置项。没有凭据时只做本地清理，GitHub 上的运行器留给网页删除或 14 天后自动消失 |
-| `POST /v1/ci/bindings/{id}/restart` | 重启这个绑定的所有实例，`204` |
-| `POST /v1/ci/bindings/{id}/repair` | 重新注册（运行器被 GitHub 删除、会话冲突排除后、注册信息损坏）。有账号时内核自己签发令牌，没有时请求体必须带 `registration_token`。响应 `CiBinding` |
-| `POST /v1/ci/import/inspect` | 请求体 `CiImportInspectRequest`：目录。只读检查，不改任何东西：仓库、运行器名、标签、是否装着官方服务（带卸载命令）、是否正在运行、是否一次性。目录里没有 `.runner` 时 `not_found` |
+| `GET /v2/ci` | `CiOverview`：账号（只有掩码）、绑定与每个实例的状态、需要用户处理的提示（`notices`）、运行器包缓存、睡眠与停止超时设置 |
+| `POST /v2/ci/accounts` | 请求体 `CiAccountCreate`：令牌与可选主机。内核用令牌调用 `GET /user` 取得登录名，成功后保存令牌，响应 `CiAccount`（令牌只有掩码）。同一主机同一登录名再次提交就是更换令牌。GitHub 拒绝令牌时 `invalid_args`，`field` 为 `token`，`reason` 为 `github_rejected`；连不上 GitHub 时 `unavailable`，`reason` 为 `github_unreachable` |
+| `DELETE /v2/ci/accounts/{id}` | 删除账号与令牌，`204`。仍有绑定引用它时 `conflict`，`reason` 为 `account_in_use` |
+| `GET /v2/ci/accounts/{id}/repos` | 查询串 `CiReposQuery`。列出账号有管理员权限的仓库（只有这些能注册运行器），带私有或公开标记与已有绑定，分页用 `next_page` |
+| `POST /v2/ci/bindings` | 请求体 `CiBindingCreate`，三种方式恰好用一种：`target` 加 `account`（内核签发注册令牌），`target` 加 `registration_token`（用户从仓库网页复制的一次性令牌，不留长期凭据），或 `import_dir`（接管已有运行器目录，仓库与运行器名读自目录里的 `.runner`）。响应 `CiBinding`，实例在后台依次 `installing`、`registering`、`starting`、`idle`。目标是公开仓库而 `confirm_public` 不为真时 `invalid_args`，`reason` 为 `public_repo_requires_confirm`；同一仓库已有绑定、`id` 重复时 `conflict`；账号不存在 `not_found`；`import_dir` 里没有运行器、运行器是一次性的、装着官方服务或正在运行时 `invalid_args`，`reason` 分别为 `not_a_runner`、`ephemeral_runner`、`service_installed`、`runner_running` |
+| `PATCH /v2/ci/bindings/{id}` | 请求体 `CiBindingPatch`：并发数、标签、暂停与恢复、补上账号。立即生效：加实例、排空后减实例、暂停时排空 |
+| `DELETE /v2/ci/bindings/{id}` | 解绑。查询串 `CiDeleteQuery`：`force=true` 不等正在跑的任务。响应 `CiBinding`，`removing` 为真；实例排空后内核向 GitHub 注销运行器（绑定有账号时）并删除目录与配置项。没有凭据时只做本地清理，GitHub 上的运行器留给网页删除或 14 天后自动消失 |
+| `POST /v2/ci/bindings/{id}/restart` | 重启这个绑定的所有实例，`204` |
+| `POST /v2/ci/bindings/{id}/repair` | 重新注册（运行器被 GitHub 删除、会话冲突排除后、注册信息损坏）。有账号时内核自己签发令牌，没有时请求体必须带 `registration_token`。响应 `CiBinding` |
+| `POST /v2/ci/import/inspect` | 请求体 `CiImportInspectRequest`：目录。只读检查，不改任何东西：仓库、运行器名、标签、是否装着官方服务（带卸载命令）、是否正在运行、是否一次性。目录里没有 `.runner` 时 `not_found` |
 
 实例状态机和退出码分流见设计文档。契约只规定可观察的部分：
 
 - `busy` 时 `job` 给出 job 名与开始时间；`last_result` 给出最近一次跑完的 job 与结果。两者来自运行器 stdout 的固定状态行，不含任务日志、参数或环境变量（沿用 [INV-10](../constraints/invariants.md#inv-10)）。
 - `broken` 的实例带 `problem`，`code` 稳定、`message` 中文一行；`backoff` 的实例带上一次退出的原因。同一个 `code` 之下用户的下一步固定：`session_conflict` 关掉另一处的运行器后调用 `restart`；`runner_removed`、`registration_failed` 调用 `repair`；`auth_failed` 更换账号令牌；`download_failed`、`missing_dependency`、`start_failed` 按 `message` 处理后 `restart`。
-- 节点排空（`POST /v1/drain`）时运行器不再接新任务，`CiSummary.draining` 为真；`POST /v1/resume` 恢复。排空只停空闲实例，正在跑的任务跑完再停；超过 `ci.stop_timeout` 仍未结束的任务被结束。
+- 节点排空（`POST /v2/drain`）时运行器不再接新任务，`CiSummary.draining` 为真；`POST /v2/resume` 恢复。排空只停空闲实例，正在跑的任务跑完再停；超过 `ci.stop_timeout` 仍未结束的任务被结束。
 - `notices` 描述会让运行器扛不过重启或退出登录的环境条件，各带可复制的 `command`（有的话）：Linux 没有 `loginctl enable-linger`、Windows 没有自动登录、PATH 里没有 `git`、缺系统库、官方运行器不支持当前系统。
 - 公开仓库默认拒绝（见上），因为公开仓库的 fork PR 可以在这台机器上执行代码。CI 任务以内核运行用户的完整权限执行，不受 `cwd_policy`、禁止目录和 L2 沙箱约束；这些只约束 MCP 工具调用。运行器目录默认写入禁止目录文件，工具读不到运行器自己的凭据。
 
-审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名与大小，不含令牌；绑定、解绑、重启、重新注册各记一条。job 的开始与结束只出现在 `GET /v1/status` 的 `ci`，不写审计：运行器自己的日志留在运行器目录。
+审计记录沿用 [CTR-CTL-02](#ctr-ctl-02)：只含请求体的键名与大小，不含令牌；绑定、解绑、重启、重新注册各记一条。job 的开始与结束只出现在 `GET /v2/status` 的 `ci`，不写审计：运行器自己的日志留在运行器目录。

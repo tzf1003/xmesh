@@ -9,22 +9,22 @@ import (
 	"sort"
 	"strings"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/privdir"
 )
 
 // FileName is written into the node's state directory while the channel is up.
-const FileName = v1.ControlFileName
+const FileName = v2.ControlFileName
 
 // Bound is where a listener ended up: the transport and its address (socket path or pipe name).
 type Bound struct {
-	Transport v1.Transport
+	Transport v2.Transport
 	Address   string
 }
 
 // Endpoint is control.json plus the directory it was read from.
 type Endpoint struct {
-	v1.ControlEndpointFile
+	v2.ControlEndpointFile
 	// Dir is the state directory the file was read from. Not serialised.
 	Dir string `json:"-"`
 }
@@ -33,7 +33,7 @@ type Endpoint struct {
 // granted read access to the written file (the state directory itself stays private), so the UI of
 // the user who installed a SYSTEM service can find the channel; the grant is repeated on every
 // write because the rename brings in a new file.
-func WriteEndpoint(dir string, e v1.ControlEndpointFile, readers ...string) error {
+func WriteEndpoint(dir string, e v2.ControlEndpointFile, readers ...string) error {
 	raw, err := json.MarshalIndent(e, "", "  ")
 	if err != nil {
 		return err
@@ -68,7 +68,7 @@ func WriteEndpoint(dir string, e v1.ControlEndpointFile, readers ...string) erro
 // RemoveEndpoint deletes control.json if it still describes the server that wrote owner: the same
 // process and the same start time. A replacement server in this process started later and must keep
 // its file.
-func RemoveEndpoint(dir string, owner v1.ControlEndpointFile) {
+func RemoveEndpoint(dir string, owner v2.ControlEndpointFile) {
 	if e, err := ReadEndpoint(dir); err == nil && e.PID == owner.PID && e.StartedAt.Equal(owner.StartedAt.Time) {
 		_ = os.Remove(filepath.Join(dir, FileName))
 	}
@@ -82,7 +82,7 @@ func ReadEndpoint(dir string) (Endpoint, error) {
 	if err = json.Unmarshal(raw, &e.ControlEndpointFile); err != nil {
 		return Endpoint{}, err
 	}
-	if e.ControlEndpointFile.Endpoint == "" || (e.Transport != v1.TransportUnix && e.Transport != v1.TransportPipe) {
+	if e.ControlEndpointFile.Endpoint == "" || (e.Transport != v2.TransportUnix && e.Transport != v2.TransportPipe) {
 		return Endpoint{}, errors.New("control.json 无效")
 	}
 	e.Dir = dir

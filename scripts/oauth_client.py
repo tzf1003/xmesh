@@ -166,9 +166,14 @@ def main():
     client = mcp(ingress, tokens)
     names = {tool["name"] for tool in client.request("tools/list", {})["tools"]}
     assert "devices.list" in names and not any(name.endswith("/exec.run") for name in names), sorted(names)
-    devices = {row["id"] for row in client.call("devices.list")["devices"]}
-    for entry in options.device:
-        assert entry.split(":")[0] in devices, (entry, devices)
+    expected = {entry.split(":")[0] for entry in options.device}
+    deadline = time.monotonic() + 30
+    while True:
+        devices = {row["id"] for row in client.call("devices.list")["devices"]}
+        if expected <= devices:
+            break
+        assert time.monotonic() < deadline, (expected, devices)
+        time.sleep(0.25)
     client.close()
     tokens = check_refresh_rotation(ingress, dynamic, tokens)
     checks += ["dynamic-registration", "pkce", "scope-filtered-tools", "refresh-rotation"]

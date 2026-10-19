@@ -4,15 +4,19 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"time"
 )
@@ -42,6 +46,9 @@ func drain(args []string) error {
 	if e := flags.Parse(args); e != nil {
 		return e
 	}
+	if *timeout <= 0 {
+		return fmt.Errorf("--timeout 必须大于零")
+	}
 	request, e := drainRequest(*scope, *device, *mode)
 	if e != nil {
 		return e
@@ -50,14 +57,75 @@ func drain(args []string) error {
 	if e != nil {
 		return e
 	}
-	ctx, stop := context.WithTimeout(context.Background(), 2*time.Minute+*discover)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if cfg.SchemaVersion == 2 {
+		if *authkey != "" {
+			return fmt.Errorf("版本 2 使用运行节点的设备信任；请在目标设备授予此设备 tag:admin")
+		}
+		dir := *state
+		if dir == "" {
+			dir, e = app.StateDir(cfg.Node.Name)
+			if e != nil {
+				return e
+			}
+		}
+		endpoint, err := control.ReadEndpoint(dir)
+		if err != nil {
+			return fmt.Errorf("请先启动管理节点以使用已配对的设备连接: %w", err)
+		}
+		client := control.NewClient(endpoint)
+		return runControlDrain(ctx, os.Stdout, client, request, *timeout)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute+*discover)
+	defer cancel()
 	network, closeNetwork, e := openDrainNetwork(ctx, cfg, *authkey, *state, *discover)
 	if e != nil {
 		return e
 	}
 	defer closeNetwork()
 	return runDrain(ctx, os.Stdout, network, request, *timeout)
+}
+
+func runControlDrain(ctx context.Context, out io.Writer, client *control.Client, request agent.DrainRequest, timeout time.Duration) error {
+	timeoutMS := int64((timeout-1)/time.Millisecond) + 1
+	if timeoutMS > v2.MaxDrainTimeoutMS {
+		return fmt.Errorf("--timeout 不能超过 %s", time.Duration(v2.MaxDrainTimeoutMS)*time.Millisecond)
+	}
+	// Each device's deadline begins when its fanout slot becomes available.
+	// The enclosing request remains cancellable across every fanout wave.
+	client.RequestTimeout = 0
+	response, err := client.Do(ctx, "POST", "/v2/drain", v2.DrainRequest{Mode: v2.DrainMode(request.Drain), Scope: request.Scope, Device: request.Device, TimeoutMS: timeoutMS}, nil)
+	if err != nil {
+		return err
+	}
+	if err = response.Error(); err != nil {
+		return err
+	}
+	var result v2.DrainResponse
+	if err := json.Unmarshal(response.Body, &result); err != nil {
+		return err
+	}
+	return printDrainOutcomes(out, result.Outcomes, request)
+}
+
+func printDrainOutcomes(out io.Writer, outcomes []v2.DrainOutcome, request agent.DrainRequest) error {
+	failed := 0
+	for _, outcome := range outcomes {
+		if outcome.Error != "" {
+			failed++
+			fmt.Fprintf(out, "失败 %s: %s\n", outcome.Device, outcome.Error)
+		} else {
+			fmt.Fprintf(out, "已下线 %s (scope=%s, mode=%s)\n", outcome.Device, request.Scope, request.Drain)
+		}
+	}
+	if len(outcomes) == 0 {
+		return fmt.Errorf("没有匹配的在线设备")
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d/%d 台设备未能下线", failed, len(outcomes))
+	}
+	return nil
 }
 
 func drainRequest(scope, device, mode string) (agent.DrainRequest, error) {

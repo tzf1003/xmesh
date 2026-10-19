@@ -229,9 +229,13 @@ func (s *Store) load() (*Config, bool) {
 	// Sections in RestartPaths keep the startup values until restart; the file's
 	// values are reported as pending.
 	s.restart = restartChanged(s.startup, c)
+	meshHot := c.SchemaVersion == 2 && s.startup.SchemaVersion == 2
 	c.Node.Name = s.startup.Node.Name
+	c.SchemaVersion = s.startup.SchemaVersion
 	c.Node.Roles = mergeRoles(s.startup.Node.Roles, c.Node.Roles)
-	c.Mesh = s.startup.Mesh
+	if !meshHot {
+		c.Mesh = s.startup.Mesh
+	}
 	c.Audit = s.startup.Audit
 	c.Agent.Policy.WindowsAppContainer = s.startup.Agent.Policy.WindowsAppContainer
 	s.current = c
@@ -253,7 +257,8 @@ func restartChanged(startup, next *Config) []string {
 	}
 	add("/node/name", startup.Node.Name != next.Node.Name)
 	add("/node/roles", RolesNeedRestart(startup.Node.Roles, next.Node.Roles))
-	add("/mesh", !reflect.DeepEqual(startup.Mesh, next.Mesh))
+	add("/schema_version", startup.SchemaVersion != next.SchemaVersion)
+	add("/mesh", (startup.SchemaVersion != 2 || next.SchemaVersion != 2) && !reflect.DeepEqual(startup.Mesh, next.Mesh))
 	add("/audit", !reflect.DeepEqual(startup.Audit, next.Audit))
 	add("/agent/policy/windows_appcontainer", startup.Agent.Policy.WindowsAppContainer != next.Agent.Policy.WindowsAppContainer)
 	return out

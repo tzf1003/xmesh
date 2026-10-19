@@ -37,9 +37,9 @@ class AcceptConfig(unittest.TestCase):
         code, _, err = generate("lan", "--name", "lan-a", "--out", str(self.root / "a"))
         self.assertEqual(code, 0, err)
         config = self.config("a")
-        self.assertEqual(config["mesh"], {"mode": "lan", "lan": {"mdns": True}})
+        self.assertEqual(config["mesh"], {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}})
         self.assertEqual(config["node"], {"name": "lan-a", "roles": ["agent", "gateway"]})
-        self.assertEqual(config["agent"]["cwd_policy"]["allow"], [str(self.root / "a" / "work")])
+        self.assertEqual(config["agent"]["cwd_policy"]["allow"], [str((self.root / "a" / "work").resolve())])
         self.assertIn("tag:peer", config["agent"]["authz"])
         self.assertTrue((self.root / "a" / "state").is_dir())
 
@@ -55,9 +55,18 @@ class AcceptConfig(unittest.TestCase):
         code, out, err = generate("tailnet", "--name", "dev-a", "--out", str(self.root / "t"), "--authkey-file", str(self.key))
         self.assertEqual(code, 0, err)
         config = self.config("t")
-        self.assertEqual(config["mesh"]["authkey_file"], str(self.key))
+        self.assertEqual(config["mesh"]["tailnet"]["authkey_file"], str(self.key))
         self.assertNotIn("tskey", json.dumps(config) + out)
         self.assertIn("tag:ingress", config["agent"]["authz"])
+
+    def test_coexist_node_enables_both_providers(self):
+        code, _, err = generate("coexist", "--name", "dev-a", "--out", str(self.root / "both"), "--authkey-file", str(self.key))
+        self.assertEqual(code, 0, err)
+        config = self.config("both")
+        self.assertEqual(config["schema_version"], 2)
+        self.assertTrue(config["mesh"]["lan"]["enabled"])
+        self.assertTrue(config["mesh"]["tailnet"]["enabled"])
+        self.assertNotIn("mode", config["mesh"])
 
     def test_ingress_node_and_password(self):
         code, out, err = generate("ingress", "--name", "ing-a", "--out", str(self.root / "i"), "--authkey-file", str(self.key),
@@ -182,7 +191,9 @@ class FakeIngress(http.server.BaseHTTPRequestHandler):
 class PtyBudget(unittest.TestCase):
     def serve(self, limit):
         FakeIngress.opened, FakeIngress.limit = [], limit
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeIngress)
+        class BurstServer(http.server.ThreadingHTTPServer):
+            request_queue_size = 128
+        server = BurstServer(("127.0.0.1", 0), FakeIngress)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
         self.addCleanup(server.server_close)

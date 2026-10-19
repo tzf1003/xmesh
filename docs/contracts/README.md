@@ -50,8 +50,8 @@
 | [CTR-MESH-05](meshadmin.md#ctr-mesh-05) | meshadmin | DERP 准入与放行名单同步 |
 | [CTR-CTL-01](control.md#ctr-ctl-01) | 控制通道 | 传输、发现、身份 |
 | [CTR-CTL-02](control.md#ctr-ctl-02) | 控制通道 | 约定、版本兼容、ETag、审计 |
-| [CTR-CTL-03](control.md#ctr-ctl-03) | 控制通道 | `GET /v1/status`、警告、托盘状态判定 |
-| [CTR-CTL-04](control.md#ctr-ctl-04) | 控制通道 | `GET /v1/events` 事件流 |
+| [CTR-CTL-03](control.md#ctr-ctl-03) | 控制通道 | `GET /v2/status`、警告、托盘状态判定 |
+| [CTR-CTL-04](control.md#ctr-ctl-04) | 控制通道 | `GET /v2/events` 事件流 |
 | [CTR-CTL-05](control.md#ctr-ctl-05) | 控制通道 | 对端与会话视图 |
 | [CTR-CTL-06](control.md#ctr-ctl-06) | 控制通道 | drain / resume |
 | [CTR-CTL-07](control.md#ctr-ctl-07) | 控制通道 | 配置读写 |

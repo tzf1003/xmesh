@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/connectivity"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
@@ -77,17 +79,16 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	defer log.Close()
 	var network mesh.Network
+	var devices *connectivity.Node
 	self := identity.Principal{Node: "local", Tags: []string{"tag:peer"}}
 	if !o.Local {
-		if c.Mesh.Mode == "tailnet" {
-			network, e = mesh.OpenTailnet(ctx, c, filepath.Join(o.StateDir, "network"))
-		} else {
-			network, e = mesh.OpenLAN(ctx, c.Node.Name, filepath.Join(o.StateDir, "lan"), mesh.LANOptions{MDNS: c.Mesh.LAN.MDNS, Interface: c.Mesh.LAN.Interface})
-		}
+		devices, e = connectivity.Open(ctx, c, o.StateDir)
+		network = devices
 		if e != nil {
 			return e
 		}
 		defer func() { runErr = errors.Join(runErr, network.Close()) }()
+		devices.SetAudit(log)
 		self, e = network.Self(ctx)
 		if e != nil {
 			return e
@@ -116,6 +117,9 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		a.SetSandbox(runnerOrNil(runner), notes...)
 		a.SetSandboxUnavailable(unavailable)
 		mode := c.Mesh.Mode
+		if devices != nil {
+			mode = c.Mesh.NetworkMode()
+		}
 		if o.Local {
 			mode = "local"
 		}
@@ -125,9 +129,16 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		defer a.Close()
 	}
+	if devices != nil && a != nil {
+		devices.SetAgent(func(ctx context.Context, p identity.Principal, transport mcp.Transport) error {
+			_, err := a.ConnectDevice(ctx, p, transport)
+			return err
+		})
+	}
 	servers := []*http.Server{}
 	listeners := []net.Listener{}
 	registry := newGatewayRegistry()
+	management := new(sync.Mutex)
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	go store.Watch(watchCtx, time.Second)
@@ -176,7 +187,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}()
 		fmt.Fprintln(os.Stderr, label+": "+listener.Addr().String()+"/mcp")
 	}
-	if a != nil {
+	if a != nil && devices == nil {
 		var listener net.Listener
 		auth := agent.Authenticate(agent.Local)
 		if o.Local {
@@ -211,18 +222,36 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	localPeer := mesh.Peer{}
 	if a != nil {
 		localPeer = mesh.Peer{ID: "self", Name: c.Node.Name, Online: true, Tags: self.Tags}
+		if devices != nil {
+			localPeer.ID = self.Node
+		}
 	}
 	var discover gateway.Discover
 	var changed <-chan struct{}
 	if network != nil {
 		discover = network.Peers
+		if devices != nil {
+			discover = func(ctx context.Context) ([]mesh.Peer, error) {
+				peers, err := devices.Peers(ctx)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]mesh.Peer, 0, len(peers))
+				for _, peer := range peers {
+					if peer.Online {
+						out = append(out, peer)
+					}
+				}
+				return out, nil
+			}
+		}
 		if notifier, ok := network.(mesh.Notifier); ok {
 			changed = notifier.Changed()
 		}
 	}
 	dialPeer := func(ctx context.Context, peer mesh.Peer, p gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
-		if peer.ID == "self" {
-			principal := self
+		if peer.ID == localPeer.ID {
+			principal := localAgentPrincipal(self, p)
 			if p.ClientID != "" {
 				principal.OAuthClient = p.ClientID
 			}
@@ -235,10 +264,20 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		if network == nil {
 			return nil, fmt.Errorf("尚未连接设备网络")
 		}
+		if devices != nil {
+			transport, err := devices.Transport(ctx, peer, p.ClientID)
+			if err != nil {
+				return nil, err
+			}
+			return mcpmux.Connect(ctx, transport, opts)
+		}
 		return gateway.RemoteDial(network.HTTPClient(peer))(ctx, peer, p, opts)
 	}
 	// Both the catalogue refresh and the device info read dial through here; the pacing is per peer.
 	dial := gateway.Paced(dialPeer, time.Now)
+	if devices != nil {
+		dial = dialPeer
+	}
 	roles = newRoleRuntime(gatewayDeps{store: store, registry: registry, log: log, network: network, nodeID: self.Node, localPeer: localPeer, discover: discover, changed: changed, dial: dial, mode: c.Mesh.Mode}, o.StateDir, func(e error) {
 		select {
 		case errc <- e:
@@ -250,6 +289,12 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	// on every call. Sections in config.RestartPaths keep their startup values. The roles follow in
 	// the worker, which starts below.
 	unsubscribe := store.Subscribe(func(next *config.Config) {
+		if devices != nil {
+			devices.Reconfigure(next.Mesh)
+		}
+		if a != nil {
+			setAgentNetwork(a, next, o.Local, self)
+		}
 		for _, g := range registry.all() {
 			g.Reconfigure(next.Gateway.Quota, next.Gateway.ExposeBackends == "favorite")
 		}
@@ -268,10 +313,13 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	}
 	_, serving := roles.gatewayListen()
 	_, ingressServing := roles.ingressConfig()
-	if len(servers) == 0 && !serving && !ingressServing {
+	if len(servers) == 0 && !serving && !ingressServing && devices == nil {
 		return fmt.Errorf("没有可启动的角色")
 	}
 	mode := c.Mesh.Mode
+	if devices != nil {
+		mode = c.Mesh.NetworkMode()
+	}
 	if o.Local {
 		mode = "local"
 	}
@@ -286,14 +334,18 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		return readings(registry.all()), true
 	}
 	var pairing control.PairingAdmin
-	if lan, ok := network.(*mesh.LAN); ok {
-		pairing = lan
+	if devices != nil {
+		pairing = devicePairing{node: devices}
 	}
 	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)
 	defer stopCI()
-	defer startControl(controlDeps{ci: ciMgr, ciAccounts: ciAccounts, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
-		drain:  func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },
-		resume: func() { registry.resume(c.Node.Name, ""); ciMgr.SetDraining(false) }})()
+	if devices != nil {
+		devices.SetAdmin(deviceDrainControl(devices.Authenticate, c.Node.Name, self.Node, a, registry, management, func(bool) { ciMgr.SetDraining(true) }))
+	}
+	defer startControl(controlDeps{management: management, ci: ciMgr, ciAccounts: ciAccounts, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
+		isDraining: func() bool { return registry.draining(c.Node.Name) },
+		drain:      func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },
+		resume:     func() { registry.resume(c.Node.Name, ""); ciMgr.SetDraining(false) }})()
 	select {
 	case <-ctx.Done():
 		return nil
@@ -308,4 +360,20 @@ func runnerOrNil(r l2Runner) sandbox.Runner {
 		return nil
 	}
 	return r
+}
+
+// localAgentPrincipal applies the same ingress grant to same-process Agent calls.
+func localAgentPrincipal(self identity.Principal, p gateway.Principal) identity.Principal {
+	if p.Ingress {
+		self.Tags = []string{"tag:ingress"}
+	}
+	return self
+}
+
+func setAgentNetwork(a *agent.Agent, cfg *config.Config, local bool, self identity.Principal) {
+	mode := cfg.Mesh.NetworkMode()
+	if local {
+		mode = "local"
+	}
+	a.SetNetwork(mode, self)
 }

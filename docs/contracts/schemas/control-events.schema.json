@@ -1,18 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-events:1",
+  "$id": "urn:xmesh:schema:control-events:2",
   "title": "ControlEvents",
-  "description": "CTR-CTL-04。GET /v1/events 的 SSE 流。每个 SSE 事件的 data 行是下面某个事件对象的紧凑 JSON；id 行等于对象里的 id。事件只含元数据，禁止出现命令、参数、路径内容、stdout、stderr、终端数据、环境变量值。",
+  "description": "CTR-CTL-04。GET /v2/events 的 SSE 流。每个 SSE 事件的 data 行是下面某个事件对象的紧凑 JSON；id 行等于对象里的 id。事件只含元数据，禁止出现命令、参数、路径内容、stdout、stderr、终端数据、环境变量值。",
   "$defs": {
     "HelloData": {
       "type": "object",
       "additionalProperties": false,
       "required": ["boot_id", "head", "heartbeat_s"],
       "properties": {
-        "boot_id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/BootId" },
+        "boot_id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/BootId" },
         "head": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
             { "type": "null" }
           ],
           "description": "环形缓存里最新一条事件的 id。还没有事件时是 null。"
@@ -31,7 +31,7 @@
         },
         "head": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
             { "type": "null" }
           ]
         }
@@ -43,7 +43,7 @@
       "required": ["type", "time", "data"],
       "properties": {
         "type": { "const": "hello" },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "data": { "$ref": "#/$defs/HelloData" }
       }
     },
@@ -53,7 +53,7 @@
       "required": ["type", "time", "data"],
       "properties": {
         "type": { "const": "reset" },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "data": { "$ref": "#/$defs/ResetData" }
       }
     },
@@ -63,7 +63,7 @@
       "required": ["change", "peer"],
       "properties": {
         "change": { "enum": ["added", "updated", "removed", "online", "offline"] },
-        "peer": { "$ref": "urn:xmesh:schema:control-peers:1#/$defs/Peer" }
+        "peer": { "$ref": "urn:xmesh:schema:control-peers:2#/$defs/Peer" }
       }
     },
     "CallEventData": {
@@ -72,7 +72,7 @@
       "required": ["tool", "device", "caller", "oauth_client", "status", "error", "duration_ms"],
       "properties": {
         "tool": { "type": "string", "minLength": 1, "description": "对外工具名，如 exec.run。" },
-        "device": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName", "description": "工具实际执行的节点。" },
+        "device": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName", "description": "工具实际执行的节点。" },
         "caller": { "type": "string", "minLength": 1 },
         "oauth_client": { "type": ["string", "null"] },
         "status": { "enum": ["ok", "error"] },
@@ -99,7 +99,7 @@
       "required": ["change", "session"],
       "properties": {
         "change": { "enum": ["opened", "updated", "closed", "released"] },
-        "session": { "$ref": "urn:xmesh:schema:control-sessions:1#/$defs/Session" }
+        "session": { "$ref": "urn:xmesh:schema:control-sessions:2#/$defs/Session" }
       }
     },
     "WarningEventData": {
@@ -108,7 +108,7 @@
       "required": ["change", "warning"],
       "properties": {
         "change": { "enum": ["raised", "cleared"] },
-        "warning": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Warning" }
+        "warning": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Warning" }
       }
     },
     "ConfigEventData": {
@@ -117,10 +117,10 @@
       "required": ["change", "actor", "etag", "restart_required", "changed_paths"],
       "properties": {
         "change": { "enum": ["reloaded", "reload_failed", "written"] },
-        "actor": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Actor" },
+        "actor": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Actor" },
         "etag": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag" },
+            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag" },
             { "type": "null" }
           ],
           "description": "磁盘上文件的 ETag。读不到文件时是 null。"
@@ -139,7 +139,7 @@
       "required": ["change", "drain"],
       "properties": {
         "change": { "enum": ["running", "draining", "resumed", "stopping"] },
-        "drain": { "$ref": "urn:xmesh:schema:control-drain:1#/$defs/DrainState" }
+        "drain": { "$ref": "urn:xmesh:schema:control-drain:2#/$defs/DrainState" }
       }
     },
     "StatusEvent": {
@@ -147,11 +147,11 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "status" },
-        "data": { "$ref": "urn:xmesh:schema:control-status:1#/$defs/StatusResponse" }
+        "data": { "$ref": "urn:xmesh:schema:control-status:2#/$defs/StatusResponse" }
       }
     },
     "PeerEvent": {
@@ -159,9 +159,9 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "peer" },
         "data": { "$ref": "#/$defs/PeerEventData" }
       }
@@ -171,9 +171,9 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "call" },
         "data": { "$ref": "#/$defs/CallEventData" }
       }
@@ -183,9 +183,9 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "session" },
         "data": { "$ref": "#/$defs/SessionEventData" }
       }
@@ -195,9 +195,9 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "warning" },
         "data": { "$ref": "#/$defs/WarningEventData" }
       }
@@ -207,9 +207,9 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "config" },
         "data": { "$ref": "#/$defs/ConfigEventData" }
       }
@@ -219,9 +219,9 @@
       "additionalProperties": false,
       "required": ["id", "seq", "time", "type", "data"],
       "properties": {
-        "id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/EventId" },
+        "id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/EventId" },
         "seq": { "type": "integer", "minimum": 1 },
-        "time": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "time": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "type": { "const": "lifecycle" },
         "data": { "$ref": "#/$defs/LifecycleEventData" }
       }

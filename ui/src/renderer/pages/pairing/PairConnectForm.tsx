@@ -16,6 +16,7 @@ export function PairConnectForm({
   ctx,
   address,
   fingerprint,
+  path,
   onDone,
   testid,
 }: {
@@ -24,11 +25,13 @@ export function PairConnectForm({
   address?: string;
   /** The certificate fingerprint shown in discovery; the kernel refuses any other certificate. */
   fingerprint?: string;
+  path?: "lan" | "tailnet";
   onDone?: () => void;
   testid: string;
 }): JSX.Element {
   const t = useT();
   const [typed, setTyped] = useState("");
+  const [selectedPath, setSelectedPath] = useState<"lan" | "tailnet">("lan");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError | undefined>();
@@ -40,7 +43,7 @@ export function PairConnectForm({
     e.preventDefault();
     if (!addressOk || !valid || busy) return;
     setBusy(true);
-    const args: PairConnectArgs = { address: target, password: pw };
+    const args: PairConnectArgs = { address: target, password: pw, path: path ?? selectedPath };
     if (fingerprint !== undefined) args.fingerprint = fingerprint;
     const r = await getApi().connectPair(args);
     setBusy(false);
@@ -55,6 +58,7 @@ export function PairConnectForm({
 
   return (
     <form onSubmit={(e) => void submit(e)} data-testid={testid}>
+      {path === undefined && <Field label={t("device.path")}><select value={selectedPath} onChange={(e) => setSelectedPath(e.currentTarget.value as "lan" | "tailnet")} data-testid={`${testid}-path`}><option value="lan">{t("mode.lan")}</option><option value="tailnet">{t("mode.tailnet")}</option></select></Field>}
       {address === undefined ? (
         <Field label={t("pair.address")} hint={t("pair.addressHint")}>
           <input type="text" value={typed} onInput={(e) => setTyped((e.currentTarget as HTMLInputElement).value)} autocomplete="off" spellcheck={false} data-testid={`${testid}-address`} />

@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/oauth"
 )
@@ -19,10 +19,10 @@ var _ control.IngressAdmin = (*ingressAdmin)(nil)
 
 func (a *ingressAdmin) Issuer() string { return a.auth.Issuer() }
 
-func (a *ingressAdmin) Clients() []v1.IngressClient {
-	out := []v1.IngressClient{}
+func (a *ingressAdmin) Clients() []v2.IngressClient {
+	out := []v2.IngressClient{}
 	for _, c := range a.auth.Clients() {
-		out = append(out, v1.IngressClient{ClientID: c.ID, ClientName: c.Name, RedirectURIs: append([]string{}, c.Redirects...), Scopes: append([]string{}, c.Scopes...), TokenEndpointAuthMethod: c.Method})
+		out = append(out, v2.IngressClient{ClientID: c.ID, ClientName: c.Name, RedirectURIs: append([]string{}, c.Redirects...), Scopes: append([]string{}, c.Scopes...), TokenEndpointAuthMethod: c.Method})
 	}
 	return out
 }
