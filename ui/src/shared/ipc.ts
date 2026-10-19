@@ -1,7 +1,6 @@
-// The only surface the renderer gets: a fixed set of operations, each with a
-// validated argument. There is deliberately no generic `invoke`, no raw
-// channel access, and nothing that reaches the filesystem or a subprocess with
-// renderer-chosen input.
+// The renderer receives fixed operations with validated arguments. Tool calls go
+// through the selected local Gateway and its policies; local transfer paths are
+// issued by native dialogs and represented by opaque tickets.
 
 import type {
   AuditQuery,
@@ -33,6 +32,8 @@ import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { CiRequest, CiResultFor } from "./ci";
 import type { ComputerRequest, ComputerResult } from "./computer";
 import type { MeshRequest, MeshResultFor } from "./mesh";
+import type { TransferRequest, TransferReply } from "./transfers";
+import type { PlaygroundApi } from "./playground";
 import type { Snapshot } from "./state";
 
 /** `ipcMain.handle` channels. The preload script hard-codes the same strings; a unit test checks they agree. */
@@ -89,6 +90,8 @@ export const CHANNELS = {
   mesh: "xmesh:mesh",
   ci: "xmesh:ci",
   computer: "xmesh:computer",
+  playground: "xmesh:playground",
+  transfers: "xmesh:transfers",
 } as const;
 
 /** Main -> renderer push channel. */
@@ -264,6 +267,8 @@ export interface SetupPreview {
 
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
+  playground: PlaygroundApi;
+  transfers(request: TransferRequest): Promise<DataResult<TransferReply>>;
   getSnapshot(): Promise<Snapshot>;
   onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
   /** `keep` (default) refuses new calls; `kill` also ends every PTY and lease. */
@@ -342,6 +347,8 @@ export interface PanelApi {
 }
 
 export const PANEL_API_METHODS = [
+  "playground",
+  "transfers",
   "getSnapshot",
   "onSnapshot",
   "drain",

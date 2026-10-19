@@ -265,6 +265,10 @@ export interface AuditEvent {
    * 调用经由哪条通道发生。缺省等于 mcp。control 表示本机控制通道（CTR-CTL-01），此时 caller 形如 control:<系统身份>，tool 是路由编号（如 control.config.put）。
    */
   actor?: "mcp" | "control";
+  /**
+   * Gateway 客户端声明的调用来源。缺省表示未声明；仅供展示和关联，不构成身份或权限证明。
+   */
+  origin?: "panel";
   caller: string;
   oauth_client?: string;
   oauth_session?: string;

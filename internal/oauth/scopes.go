@@ -64,7 +64,7 @@ func Allows(scopes []string, device, tool, backend string) bool {
 	case strings.HasPrefix(tool, "pty."):
 		required = "pty:" + device
 	case strings.HasPrefix(tool, "fs."):
-		read := tool == "fs.read" || tool == "fs.glob" || tool == "fs.grep" || tool == "fs.list" || tool == "fs.stat" || tool == "fs.sha256"
+		read := tool == "fs.read" || tool == "fs.download" || tool == "fs.glob" || tool == "fs.grep" || tool == "fs.list" || tool == "fs.stat" || tool == "fs.sha256"
 		if read {
 			required = "fs:read:" + device
 		} else {

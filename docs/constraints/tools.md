@@ -36,11 +36,11 @@ deny 优先于 allow。路径同时匹配两边时拒绝。
 
 ## CON-TOOL-08
 
-`fs.write` 与 `fs.edit` 在目标文件的同一目录创建临时文件，写完并 fsync 后 `rename` 覆盖目标。父目录不存在时返回 `invalid_cwd`，`reason` 为 `parent_missing`，禁止自动 `mkdir -p`。`fs.mkdir` 才是创建目录的工具。
+`fs.write` 与 `fs.edit` 在目标文件的同一目录创建临时文件，写完并 fsync 后原子替换目标。`fs.upload` 使用相同的暂存流程，默认以排他重命名或硬链接原子发布，目标存在时返回 `conflict`；只有 `force: true` 才允许原子覆盖。父目录不存在时返回 `invalid_cwd`，`reason` 为 `parent_missing`，禁止自动 `mkdir -p`。`fs.mkdir` 才是创建目录的工具。
 
 ## CON-TOOL-09
 
-`fs.edit` 在 `replace_all` 不为 `true` 时，`old_string` 必须恰好匹配一处。零处匹配返回 `edit_not_found`（见 [CTR-FS-03](../contracts/fs.md#ctr-fs-03)；`conflict` 只表示 `expected_sha256` 不一致或移动目标已存在），多处匹配返回 `edit_ambiguous`，并带匹配行号。两种情况都不得修改文件。
+`fs.edit` 在 `replace_all` 不为 `true` 时，`old_string` 必须恰好匹配一处。零处匹配返回 `edit_not_found`（见 [CTR-FS-03](../contracts/fs.md#ctr-fs-03)；`conflict` 表示 `expected_sha256` 不一致、移动或上传目标已存在，或下载源变化），多处匹配返回 `edit_ambiguous`，并带匹配行号。两种情况都不得修改文件。
 
 ## CON-TOOL-10
 

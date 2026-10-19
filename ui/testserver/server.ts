@@ -16,9 +16,11 @@ import {
   type Warning,
 } from "../src/shared/control";
 import { fixture, peersFixture, statusFixture } from "./fixtures";
+import { FakePlayground } from "./playground";
 import { PanelData } from "./panel-routes";
 
 export interface FakeKernelOptions {
+  playground?: boolean;
   /** Defaults to a unique socket (POSIX) or named pipe (Windows). */
   endpoint?: string;
   /** Value of X-Xmesh-Control-Version and of api_version in control.json. Default: the UI's CONTROL_API_VERSION. */
@@ -73,6 +75,7 @@ const iso = (): string => new Date().toISOString();
  */
 export class FakeKernel {
   readonly endpoint: string;
+  playground?: FakePlayground;
   readonly kernelVersion: string;
   readonly requests: RecordedRequest[] = [];
   /** Data behind the panel routes (config, PATs, gateway, ingress, pairing, audit, sessions). */
@@ -123,6 +126,12 @@ export class FakeKernel {
       k.server.once("error", reject);
       k.server.listen(k.endpoint, () => resolve());
     });
+    if (opts.playground) {
+      k.playground = new FakePlayground(() => k.panel.tokenOf("default"));
+      await k.playground.start();
+      k.status.roles = ["agent", "gateway"];
+      k.refreshDerived();
+    }
     return k;
   }
 
@@ -226,6 +235,7 @@ export class FakeKernel {
   }
 
   async stop(): Promise<void> {
+    await this.playground?.stop();
     clearInterval(this.ping);
     this.dropStreams();
     this.server.closeAllConnections();
@@ -247,6 +257,7 @@ export class FakeKernel {
       ...this.status,
       // The gateway block always follows the reach the panel data holds, as the kernel's status does.
       ...(this.status.gateway !== undefined && { gateway: this.panel.gatewayInfo() }),
+      ...(this.playground && { gateway: { ...this.panel.gatewayInfo(), url: this.playground.url, addresses: [{ kind: "localhost" as const, host: "127.0.0.1", url: this.playground.url }] } }),
       // So do the backends: the configured ones, with the names (never the values) of their environment variables.
       backends: this.panel.backendRows(),
       control: {

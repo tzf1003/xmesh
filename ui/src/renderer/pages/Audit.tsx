@@ -133,7 +133,7 @@ export function Audit({ ctx }: { ctx: PageContext }): JSX.Element {
                     <tr key={`${e.time}-${i}`}>
                       <td>{formatTime(e.time)}</td>
                       <td>
-                        {e.event} {e.actor === "control" && <Badge kind="info">control</Badge>}
+                        {e.event} {e.origin === "panel" && <Badge kind="info">{t("pg.origin")}</Badge>} {e.actor === "control" && <Badge kind="info">control</Badge>}
                       </td>
                       <td class="mono">{e.tool}</td>
                       <td>{e.device}</td>

@@ -67,3 +67,5 @@ PTY 的 `read` 默认不写每条记录，只在 `pty.read` 返回非空数据�
 `audit.retention` 缺省 `720h`。到期的文件删除。审计文件的目录本身受 cwd 策略之外的固定权限：只允许运行 xmesh 的用户读取。
 
 模式：[schemas/audit-event.schema.json](schemas/audit-event.schema.json)。
+
+面板工具调用复用 Gateway 的现有 PAT，通过 `X-Xmesh-Origin: panel` 在初始化时声明来源。Gateway 的调用审计可带 `origin: "panel"`，Control 审计视图保留此字段。它是客户端声明的展示标志，不参与授权；未声明来源不能据此判定为 AI。远端 Agent 保持自身的调用审计格式。

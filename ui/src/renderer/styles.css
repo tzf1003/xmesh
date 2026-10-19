@@ -441,3 +441,53 @@ progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
   .graph-node, .edge-dim, .activity-row { transition: border-color .15s, box-shadow .15s, opacity .2s; }
 }
 .computer-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+/* Tool playground */
+.playground { max-width: 1600px; }
+.tool-toolbar { gap: 16px; align-items: end; }
+.tool-toolbar label { display: grid; gap: 6px; min-width: 200px; }
+.tool-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; align-items: start; }
+.tool-list { padding: 10px; max-height: calc(100vh - 240px); overflow: auto; position: sticky; top: 16px; }
+.tool-list summary { display: flex; justify-content: space-between; padding: 9px 10px; font-weight: 600; cursor: pointer; }
+.tool-item { display: grid; text-align: left; gap: 4px; width: 100%; border: 1px solid transparent; padding: 10px 12px; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; }
+.tool-item:hover, .tool-item.active { background: var(--accent-soft); border-color: var(--border); }
+.tool-item small { font-size: 11px; opacity: .65; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.tool-detail { min-width: 0; display: grid; gap: 16px; }
+.tool-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-argument-set { border: 0; padding: 0; margin: 16px 0; min-width: 0; }
+.tool-fields { display: grid; gap: 18px; }
+.tool-field { display: grid; gap: 6px; }
+.tool-field label { display: flex; align-items: center; gap: 10px; }
+.tool-field input, .tool-field select, .tool-field textarea, .tool-json { width: 100%; }
+.tool-required { color: var(--danger, #b43c36); font-size: 12px; }
+.tool-json { resize: vertical; min-height: 200px; }
+.tool-runbar { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); align-items: end; }
+.tool-runbar label { display: grid; gap: 5px; }
+.tool-runbar input { width: 130px; }
+.tool-result pre, .tool-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; padding: 14px; border-radius: 6px; background: var(--surface-2); font-size: 12px; }
+.tool-detail details { margin-top: 14px; }
+.tool-detail details summary { cursor: pointer; }
+@media (max-width: 980px) { .tool-workspace { grid-template-columns: 210px minmax(0, 1fr); } }
+@media (max-width: 750px) { .tool-workspace { grid-template-columns: 1fr; } .tool-list { position: static; max-height: 220px; } .tool-toolbar label { min-width: 100%; } }
+
+.tool-detail .tabs { display: inline-flex; padding: 3px; gap: 3px; background: var(--surface-2); border-radius: 9px; }
+.tool-detail .tabs button { background: transparent; border: 0; border-radius: 7px; padding: 6px 13px; color: var(--muted); cursor: pointer; }
+.tool-detail .tabs button.active { background: var(--thumb); color: var(--text); box-shadow: var(--thumb-edge); }
+.playground input[type="number"] { background: var(--surface-2); border: 1px solid transparent; border-radius: 8px; padding: 5px 9px; }
+.playground input[type="number"]:focus { outline: none; background: var(--surface); border-color: var(--accent); }
+
+.terminal-page { max-width: 1600px; }
+.terminal-screen { height: 470px; background: #101914; padding: 12px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.terminal-screen .xterm { height: 100%; }
+.terminal-screen .xterm-viewport { border-radius: 6px; }
+.transfer-fields { border: 0; padding: 12px 0 0; }
+.transfer-fields > .row { margin-bottom: 18px; }
+.transfer-job { display: grid; gap: 10px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.transfer-job .stat .value { font-size: 15px; }
+.transfer-job .grow { flex: 1; }
+.transfer-job pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.transfer-job .mono { overflow-wrap: anywhere; }
+.remote-files { max-height: 400px; overflow: auto; margin-top: 16px; }
+@media (max-height: 800px) { .terminal-screen { height: 340px; } }
+
+.transfer-job .bar.full > span { background: var(--accent); }

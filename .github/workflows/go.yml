@@ -20,6 +20,11 @@ jobs:
         if: ${{ !cancelled() }}
       - run: go vet ./...
         if: ${{ !cancelled() }}
+      - name: 1 GiB file transfer roundtrip
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_LARGE_TRANSFER: "1"
+        run: go test ./internal/fs -run '^Test_LargeFileTransfer$' -count=1 -timeout=300s
       - run: go build ./cmd/xmesh
         if: ${{ !cancelled() }}
       - name: Cross-compile every release target

@@ -1,3 +1,5 @@
+import { workspaceZh, workspaceEn } from "./workspace-messages";
+import { playgroundZh, playgroundEn } from "./playground-messages";
 // String tables for the panel. Chinese is the default; English is complete so
 // switching `XMESH_UI_LANG=en` shows no Chinese. test/unit/panel-messages.test.ts
 // checks that both tables have the same keys and the same {placeholders}.
@@ -7,6 +9,8 @@ import { computerEn, computerZh } from "./computer-messages";
 
 export const zh = {
   ...computerZh,
+  ...playgroundZh,
+  ...workspaceZh,
   ...topologyZh,
   "nav.label": "主导航",
   "nav.overview": "概览",
@@ -21,6 +25,11 @@ export const zh = {
   "settings.restarting": "正在重启内核",
   "settings.restartTitle": "现在重启内核？",
   "settings.restartBody": "重启期间正在进行的调用会中断，几秒后恢复。",
+  "settings.transfersTitle": "文件互传",
+  "settings.maxFileSize": "单文件大小上限",
+  "settings.maxFileSizeHint": "默认 1GiB。支持 B、KiB、MiB、GiB、TiB，保存后立即生效。",
+  "settings.fileUnlimited": "无限制",
+  "settings.problem.max_file_size": "请输入有效的正数文件大小，例如 512MiB 或 2GiB。",
   "settings.nodeTitle": "节点与网络",
   "settings.nodeName": "节点名",
   "settings.mode": "网络模式",
@@ -963,6 +972,8 @@ export type Key = keyof typeof zh;
 
 export const en: Record<Key, string> = {
   ...computerEn,
+  ...playgroundEn,
+  ...workspaceEn,
   ...topologyEn,
   "nav.label": "Main navigation",
   "nav.overview": "Overview",
@@ -977,6 +988,11 @@ export const en: Record<Key, string> = {
   "settings.restarting": "Restarting the kernel",
   "settings.restartTitle": "Restart the kernel now?",
   "settings.restartBody": "Calls in progress are interrupted during the restart and resume within seconds.",
+  "settings.transfersTitle": "File transfers",
+  "settings.maxFileSize": "Maximum file size",
+  "settings.maxFileSizeHint": "Default: 1GiB. Supports B, KiB, MiB, GiB and TiB. Applies immediately after saving.",
+  "settings.fileUnlimited": "Unlimited",
+  "settings.problem.max_file_size": "Enter a positive file size, such as 512MiB or 2GiB.",
   "settings.nodeTitle": "Node and network",
   "settings.nodeName": "Node name",
   "settings.mode": "Network mode",

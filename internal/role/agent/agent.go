@@ -55,6 +55,7 @@ type Agent struct {
 	sessions        map[string]identity.Caller
 	servers         map[*mcp.ServerSession]bool
 	fileMu          sync.Mutex
+	transfers       *toolsfs.Transfers
 	closeOnce       sync.Once
 	watchers        sync.WaitGroup
 	views           map[string]*mcp.Server
@@ -99,6 +100,7 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	reg := identity.NewRegistry()
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	a.transfers = toolsfs.NewTransfers()
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
 	for _, option := range options {
 		option(a)
@@ -427,7 +429,7 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			case strings.HasPrefix(name, "fs."):
 				// Keep optimistic file mutations synchronized across configuration generations.
 				a.fileMu.Lock()
-				service := toolsfs.Service{Resolver: resolver}
+				service := toolsfs.Service{Resolver: resolver, Transfers: a.transfers, Caller: caller.ID, TransferConfig: cfg.Agent.FS}
 				out, e = service.Call(ctx, name, raw)
 				a.fileMu.Unlock()
 			case name == "exec.run":
@@ -609,5 +611,6 @@ func (a *Agent) Close() {
 		a.Exec.Close()
 		a.Backends.Close()
 		a.Leases.Close()
+		a.transfers.Close()
 	})
 }

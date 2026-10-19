@@ -18,6 +18,14 @@ type renameInfo struct {
 }
 
 func atomicReplace(source, target string) error {
+	return atomicRename(source, target, windows.FILE_RENAME_REPLACE_IF_EXISTS|windows.FILE_RENAME_POSIX_SEMANTICS)
+}
+
+func atomicCreate(source, target string) error {
+	return atomicRename(source, target, windows.FILE_RENAME_POSIX_SEMANTICS)
+}
+
+func atomicRename(source, target string, flags uint32) error {
 	nativeSource, err := nativePath(source)
 	if err != nil {
 		return err
@@ -43,7 +51,7 @@ func atomicReplace(source, target string) error {
 	offset := unsafe.Offsetof(header.Name)
 	buffer := make([]byte, int(offset)+2*len(encoded))
 	info := (*renameInfo)(unsafe.Pointer(&buffer[0]))
-	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
+	info.Flags = flags
 	// Keep the UTF-16 terminator in the backing buffer. The Win32 rename path
 	// consumes a terminated name even though FileNameLength excludes that NUL.
 	// Otherwise adjacent heap data can become part of the destination filename.

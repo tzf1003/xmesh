@@ -26,6 +26,7 @@ import (
 
 type Principal struct {
 	ClientID     string
+	Origin       string
 	CredentialID string
 	// OAuthSession identifies the OAuth grant behind an ingress request. It is
 	// only used to correlate audit records and is never written verbatim.
@@ -283,6 +284,10 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 		if e != nil {
 			return nil
 		}
+		// Origin is client-reported audit metadata; authentication and scopes are unchanged.
+		if r.Header.Get("X-Xmesh-Origin") == "panel" {
+			p.Origin = "panel"
+		}
 		return g.newView(p).server
 	}, &mcp.StreamableHTTPOptions{SessionTimeout: 30 * time.Minute, MaxRequestBodyBytes: 16 << 20})
 	protected := http.NewCrossOriginProtection().Handler(handler)
@@ -352,7 +357,7 @@ func (g *Gateway) newView(p Principal) *view {
 						out = agent.Result(nil, toolerr.Internal("tools.call", e))
 					}
 					device, caller := v.auditIdentity(call.Params.Name, call.Session.ID())
-					if err := g.opts.Audit.RecordSession(v.oauthAudit, caller, v.p.ClientID, device, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+					if err := g.opts.Audit.RecordSessionOrigin(v.p.Origin, v.oauthAudit, caller, v.p.ClientID, device, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
 						result, e = agent.Result(nil, err), nil
 					}
 				}()

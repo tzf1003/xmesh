@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,34 @@ import (
 	"testing"
 	"time"
 )
+
+func Test_FileTransferAuditSummaries(t *testing.T) {
+	dir := t.TempDir()
+	l, err := New(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	secret := "TRANSFER_PRIVATE_CONTENT"
+	data := base64.StdEncoding.EncodeToString([]byte(secret))
+	args, _ := json.Marshal(map[string]any{"path": "artifact", "data": data, "sha256": hash([]byte(secret)), "force": true})
+	for _, tool := range []string{"fs.upload", "fs.download"} {
+		out := map[string]any{"resolved_path": "/tmp/artifact", "encoding": "base64", "data": data, "sha256": hash([]byte(secret)), "bytes": len(secret)}
+		if err := l.Record("node/session", "client", "node", tool, args, out, false, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := records(t, dir)
+	if len(rows) != 2 {
+		t.Fatal("transfer audit missing", len(rows))
+	}
+	for _, row := range rows {
+		body, _ := json.Marshal(row)
+		if bytes.Contains(body, []byte(secret)) || bytes.Contains(body, []byte(data)) || row["event"] == "audit_dropped" {
+			t.Fatal("transfer body appeared in audit")
+		}
+	}
+}
 
 func records(t *testing.T, dir string) []map[string]any {
 	t.Helper()

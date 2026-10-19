@@ -123,6 +123,11 @@ func (l *Logger) Record(caller, client, device, tool string, args json.RawMessag
 // RecordSession is Record for entry layers that also know the OAuth session
 // behind the call (CTR-AUD-01 oauth_session). An empty session is omitted.
 func (l *Logger) RecordSession(oauthSession, caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
+	return l.RecordSessionOrigin("", oauthSession, caller, client, device, tool, args, result, isError, duration)
+}
+
+// RecordSessionOrigin adds a client-reported origin for display and correlation only.
+func (l *Logger) RecordSessionOrigin(origin, oauthSession, caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
 	b, e := json.Marshal(result)
 	if e != nil {
 		return toolerr.Internal("audit.result", e)
@@ -167,6 +172,9 @@ func (l *Logger) RecordSession(oauthSession, caller, client, device, tool string
 		if len(meta.SessionID) <= 128 && meta.SessionID != "" {
 			digest["session_id"] = meta.SessionID
 		}
+	}
+	if origin == "panel" {
+		record["origin"] = origin
 	}
 	if client != "" {
 		record["oauth_client"] = client

@@ -25,7 +25,9 @@ func fixture(t *testing.T) (*Service, string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	return &Service{Resolver: r}, root
+	m := NewTransfers()
+	t.Cleanup(m.Close)
+	return &Service{Resolver: r, Transfers: m}, root
 }
 func call(t *testing.T, s *Service, name string, a Object) Object {
 	t.Helper()

@@ -1,4 +1,8 @@
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
+import { parseTransfer } from "../shared/transfers";
+import type { TransferService } from "./transfers";
+import { parsePlayground } from "../shared/playground";
+import type { PlaygroundService } from "./playground";
 import { parseCiRequest } from "../shared/ci";
 import { parseComputerRequest } from "../shared/computer";
 import {
@@ -55,6 +59,8 @@ export function isTrustedSender(
 }
 
 export interface IpcDeps {
+  playground: PlaygroundService;
+  transfers: TransferService;
   controller: ShellController;
   actions: Actions;
   service: PanelService;
@@ -68,7 +74,7 @@ export interface IpcDeps {
   update: UpdateActions;
 }
 
-export function registerIpc({ controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
+export function registerIpc({ transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -81,6 +87,14 @@ export function registerIpc({ controller, actions, service, previewSetup, setup,
     });
   };
 
+  handle(CHANNELS.transfers, (request: unknown) => {
+    const req = parseTransfer(request);
+    return req ? transfers.request(req) : bad("transfer request");
+  });
+  handle(CHANNELS.playground, (request: unknown) => {
+    const req = parsePlayground(request);
+    return req ? playground.request(req) : bad("playground request");
+  });
   handle(CHANNELS.getSnapshot, (): Snapshot => controller.snapshot);
   handle(CHANNELS.drain, (mode: unknown) => {
     if (mode === undefined) return actions.drain();

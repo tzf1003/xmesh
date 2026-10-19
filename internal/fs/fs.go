@@ -1,4 +1,4 @@
-// Package fs implements CTR-FS-01..07. Paths always pass through cwd.Resolver.
+// Package fs implements CTR-FS-01..08. Paths always pass through cwd.Resolver.
 package fs
 
 import (
@@ -19,13 +19,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
 type Service struct {
-	Resolver *cwd.Resolver
-	mu       sync.Mutex
+	Resolver       *cwd.Resolver
+	Transfers      *Transfers
+	Caller         string
+	TransferConfig config.FileTransfer
+	mu             sync.Mutex
 }
 type Args struct {
 	Path           string `json:"path"`
@@ -33,6 +37,13 @@ type Args struct {
 	From           string `json:"from"`
 	To             string `json:"to"`
 	Content        string `json:"content"`
+	Data           string `json:"data"`
+	SHA256         string `json:"sha256"`
+	Force          bool   `json:"force"`
+	TransferID     string `json:"transfer_id"`
+	ByteOffset     int64  `json:"byte_offset"`
+	ChunkSize      int    `json:"chunk_size"`
+	Final          bool   `json:"final"`
 	Old            string `json:"old_string"`
 	New            string `json:"new_string"`
 	Expected       string `json:"expected_sha256"`
@@ -59,7 +70,7 @@ type Object = map[string]any
 func Hash(b []byte) string     { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func Stamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (Object, error) {
-	a := Args{Offset: 1, Limit: 2000, Depth: 1, HeadLimit: 200}
+	a := Args{Offset: 1, Limit: 2000, Depth: 1, HeadLimit: 200, Final: true, ChunkSize: transferChunkLimit}
 	if name == "fs.glob" {
 		a.Limit = 1000
 	}
@@ -75,7 +86,7 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 	}
 	mode := cwd.Existing
 	switch name {
-	case "fs.write", "fs.stat", "fs.mkdir":
+	case "fs.write", "fs.upload", "fs.stat", "fs.mkdir":
 		mode = cwd.Create
 		if a.Parents && name == "fs.mkdir" {
 			mode = cwd.Parents
@@ -99,6 +110,12 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 	}
 	path := p.Path
 	switch name {
+	case "fs.download":
+		return s.transfer(ctx, path, a, false)
+	case "fs.upload":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.transfer(ctx, path, a, true)
 	case "fs.read":
 		if a.Offset < 1 || a.Limit < 1 || a.Limit > 5000 {
 			return nil, toolerr.Args("offset/limit")

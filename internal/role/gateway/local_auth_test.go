@@ -126,16 +126,19 @@ func Test_PATGatewayScopesAndSessionBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	found, foundDownload := false, false
 	for _, tool := range list.Tools {
 		if tool.Name == "local/fs.read" {
 			found = true
 		}
-		if strings.HasSuffix(tool.Name, "fs.write") || strings.Contains(tool.Name, "pty.") {
+		if tool.Name == "local/fs.download" {
+			foundDownload = true
+		}
+		if strings.HasSuffix(tool.Name, "fs.write") || strings.HasSuffix(tool.Name, "fs.upload") || strings.Contains(tool.Name, "pty.") {
 			t.Fatal("scope catalog", tool.Name)
 		}
 	}
-	if !found {
+	if !found || !foundDownload {
 		t.Fatal("scoped file tools missing")
 	}
 	if out := call(t, s, "local/fs.read", map[string]any{"path": "readable"}); out.IsError || !strings.Contains(object(t, out)["content"].(string), "PAT roundtrip") {
@@ -143,6 +146,12 @@ func Test_PATGatewayScopesAndSessionBinding(t *testing.T) {
 	}
 	if out := call(t, s, "local/fs.write", map[string]any{"path": "blocked", "content": "blocked"}); !out.IsError || object(t, out)["error"] != "unauthorized" {
 		t.Fatal(out)
+	}
+	if out := call(t, s, "local/fs.download", map[string]any{"path": "readable"}); out.IsError || object(t, out)["bytes"] != float64(len("PAT roundtrip")) {
+		t.Fatal("reader PAT download failed")
+	}
+	if out := call(t, s, "local/fs.upload", map[string]any{"path": "blocked", "data": "", "sha256": strings.Repeat("0", 64)}); !out.IsError || object(t, out)["error"] != "unauthorized" {
+		t.Fatal("reader PAT upload accepted")
 	}
 	// Another PAT with identical scope still has a distinct MCP session identity.
 	r, _ := http.NewRequest("POST", server.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":99,"method":"tools/list","params":{}}`))

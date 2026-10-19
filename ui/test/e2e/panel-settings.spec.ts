@@ -189,3 +189,34 @@ test("a restart the kernel is waiting on shows on every page, with the restart b
   await page.getByTestId("nav-audit").click();
   await expect(page.getByTestId("apply-restart")).toBeEnabled();
 });
+
+
+test("settings: file transfer limit defaults to 1GiB, saves custom values and unlimited", async () => {
+  const page = await open();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await expect(page).toHaveTitle(/xmesh/i);
+  h.kernel.panel.setContent(FULL_CONFIG);
+  await page.getByTestId("nav-settings").click();
+  await expect(page.getByTestId("settings-max-file-size")).toHaveValue("1GiB");
+  await page.getByTestId("settings-max-file-size").fill("2GiB");
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("settings-max-file-size")).toHaveValue("2GiB");
+  expect(h.kernel.panel.content).toContain("max_file_size: 2GiB");
+  await page.getByTestId("settings-file-unlimited").check();
+  await expect(page.getByTestId("settings-max-file-size")).toHaveCount(0);
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("settings-file-unlimited")).toBeChecked();
+  expect(h.kernel.panel.content).toContain("max_file_size: unlimited");
+  await page.getByTestId("settings-file-unlimited").uncheck();
+  await page.getByTestId("settings-max-file-size").fill("0");
+  await expect(page.getByTestId("settings-review")).toBeDisabled();
+  await page.getByTestId("settings-max-file-size").fill("1GiB");
+  await page.getByTestId("settings-transfers").scrollIntoViewIfNeeded();
+  await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-file-transfer-settings.png") });
+});
