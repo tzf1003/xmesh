@@ -45,6 +45,8 @@ export interface Snapshot {
   cliCommand: string;
   /** Version check and one-click update of the app and the kernel inside it. */
   update: UpdateState;
+  /** Actual local registration result; omitted clients treat it as unavailable. */
+  computerShortcutAvailable?: boolean;
 }
 
 /**

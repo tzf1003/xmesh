@@ -138,6 +138,10 @@ func TestComputerSchemasExposeSupportedActionsAndCoordinateRequirements(t *testi
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"drag","x":20,"y":30}]}`, false},
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"key","keys":[]}]}`, false},
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"shell"}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"wait"}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"wait","duration_ms":0}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"wait","duration_ms":1}]}`, true},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"drag","x":0,"y":0,"to_x":1,"to_y":1,"duration_ms":0}]}`, true},
 	} {
 		if err := specs[example.tool].validate(json.RawMessage(example.args)); (err == nil) != example.valid {
 			t.Fatal("computer contract validation", example.tool, example.args, err)

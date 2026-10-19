@@ -124,8 +124,10 @@ func computerSpecs() map[string]spec {
 	when := func(types []string, fields ...string) map[string]any {
 		return map[string]any{"if": map[string]any{"properties": map[string]any{"type": map[string]any{"enum": types}}}, "then": map[string]any{"required": fields}}
 	}
+	wait := map[string]any{"if": map[string]any{"properties": map[string]any{"type": map[string]any{"const": "wait"}}},
+		"then": map[string]any{"required": []string{"duration_ms"}, "properties": map[string]any{"duration_ms": map[string]any{"minimum": 1}}}}
 	action := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": actionProps,
-		"allOf": []any{when([]string{"move", "click", "drag", "scroll"}, "x", "y"), when([]string{"drag"}, "to_x", "to_y"), when([]string{"key"}, "keys"), when([]string{"text"}, "text"), when([]string{"wait"}, "duration_ms")}}
+		"allOf": []any{when([]string{"move", "click", "drag", "scroll"}, "x", "y"), when([]string{"drag"}, "to_x", "to_y"), when([]string{"key"}, "keys"), when([]string{"text"}, "text"), wait}}
 	definitions := map[string][3]string{
 		"computer.info":          {"Inspect desktop availability, system permissions, desktop_epoch, displays, application window targets and supported screenshot/input capabilities. Use an executor-issued target ID for background control; never invent a PID. Missing system permission requires local setup.", "", ""},
 		"computer.open":          {"Open an observation or exclusive control session. On macOS control defaults to background and requires target_id from info.targets. Background is bound to that window and never falls back to global input. Explicit foreground shares the system pointer and keyboard focus. One controller owns the whole desktop. Keep session_id, desktop_epoch and the control lease_token; renew before expiry and close when finished.", "mode", "desktop_id mode ttl_seconds interaction target_id"},

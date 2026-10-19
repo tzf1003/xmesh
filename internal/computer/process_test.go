@@ -1,8 +1,11 @@
 package computer
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -26,6 +29,10 @@ func (w *observedNativeWriter) Write(data []byte) (int, error) {
 }
 
 func TestMain(m *testing.M) {
+	if mode := os.Getenv("XMESH_TEST_NATIVE_CAPTURE_TIMEOUT"); mode != "" {
+		serveCaptureTimeoutFixture(mode)
+		os.Exit(0)
+	}
 	if os.Getenv("XMESH_TEST_NATIVE_STALLED_READER") == "1" {
 		// Run as a native executor that starts successfully but never consumes
 		// its input pipe. The parent must recover without waiting for this sleep.
@@ -33,6 +40,106 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+// This test process speaks only metadata over inherited pipes and exits on EOF.
+func serveCaptureTimeoutFixture(mode string) {
+	scanner := bufio.NewScanner(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	var output sync.Mutex
+	send := func(value any) { output.Lock(); defer output.Unlock(); _ = encoder.Encode(value) }
+	timeout := func(id uint64) {
+		send(map[string]any{"id": id, "error": map[string]any{"error": "desktop_unavailable", "message": "fixture capture timeout", "reason": "capture_timeout"}})
+	}
+	var pending uint64
+	for scanner.Scan() {
+		var request struct {
+			ID     uint64 `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &request) != nil {
+			return
+		}
+		switch request.Method {
+		case "info":
+			send(map[string]any{"id": request.ID, "result": Info{ProtocolVersion: 1, Epoch: fmt.Sprint(os.Getpid()), State: "ready", Available: true}})
+			if pending != 0 {
+				id := pending
+				pending = 0
+				time.AfterFunc(100*time.Millisecond, func() { timeout(id) })
+			}
+		case "capture":
+			if mode == "after-info" {
+				pending = request.ID
+			} else {
+				timeout(request.ID)
+			}
+		}
+	}
+}
+
+func TestCaptureTimeoutRetiresNativeProcessIncludingCancelledCallReplies(t *testing.T) {
+	for _, mode := range []string{"immediate", "after-info"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("XMESH_TEST_NATIVE_CAPTURE_TIMEOUT", mode)
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := StartProcess(executable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = p.Close() })
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			before, err := p.Info(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "immediate" {
+				_, err = p.Capture(ctx, CaptureRequest{})
+				if err == nil {
+					t.Fatal("capture timeout was accepted")
+				}
+			} else {
+				writer := &observedNativeWriter{WriteCloser: p.input, started: make(chan struct{}), finished: make(chan struct{})}
+				p.input = writer
+				callContext, cancelCall := context.WithCancel(ctx)
+				defer cancelCall()
+				result := make(chan error, 1)
+				go func() { _, e := p.Capture(callContext, CaptureRequest{}); result <- e }()
+				select {
+				case <-writer.finished:
+				case <-ctx.Done():
+					t.Fatal("capture request was not written")
+				}
+				// Cancel during response waiting, after the pipe write was admitted.
+				time.Sleep(20 * time.Millisecond)
+				cancelCall()
+				if e := <-result; !errors.Is(e, context.Canceled) {
+					t.Fatal(e)
+				}
+				if _, e := p.Info(ctx); e != nil {
+					t.Fatal("cancelled caller retired the child before the late timeout", e)
+				}
+			}
+			select {
+			case <-p.exited:
+			case <-ctx.Done():
+				t.Fatal("timed-out capture left the native child alive")
+			}
+			next, err := StartProcess(executable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = next.Close() })
+			after, err := next.Info(ctx)
+			if err != nil || after.Epoch == before.Epoch {
+				t.Fatal("replacement reused desktop authority", before, after, err)
+			}
+		})
+	}
 }
 
 func TestProcessWriteCancellationTerminatesStalledExecutor(t *testing.T) {
