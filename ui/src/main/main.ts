@@ -315,6 +315,10 @@ async function start(): Promise<void> {
   controller.start();
   void updater.finishPending().finally(() => updater.start());
 
+  if (discoverConfigured(roots).length === 0 && discoverInstances(roots).length === 0) {
+    showPanel();
+  }
+
   if (TEST_MODE) {
     // Reachable only from Playwright's main-process evaluate; never set in a packaged app.
     (globalThis as Record<string, unknown>).__xmeshUiTest = {
