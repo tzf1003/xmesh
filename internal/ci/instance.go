@@ -18,13 +18,14 @@ import (
 // instance is one runner: a directory with an installed, registered runner and the process that
 // listens for jobs. Its goroutine (run) is the only thing that starts or stops that process.
 type instance struct {
-	m        *Manager
-	bid      string
-	idx      int
-	dir      string
-	name     string
-	finished chan struct{}
-	wakeC    chan struct{}
+	m           *Manager
+	bid         string
+	idx         int
+	dir         string
+	name        string
+	finished    chan struct{}
+	cleanupDone chan struct{} // protected by Manager.mu; scale-down owns cleanup until closed
+	wakeC       chan struct{}
 
 	mu        sync.Mutex
 	snap      v1.CiInstance

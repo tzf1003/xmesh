@@ -587,6 +587,7 @@ func Test_ScaleDownUpWaitsForOldInstanceCleanup(t *testing.T) {
 
 func Test_SleepInhibitionTracksStoppingProcessAndConfig(t *testing.T) {
 	r := newRig(t)
+	r.apply()
 	i := &instance{m: r.m, snap: v1.CiInstance{State: v1.CiIdle}, wakeC: make(chan struct{}, 1)}
 	i.onLine("Running job: build")
 	if r.awake.Load() != 1 {
@@ -615,6 +616,72 @@ func Test_SleepInhibitionTracksStoppingProcessAndConfig(t *testing.T) {
 	i.setState(v1.CiStopped, nil)
 	if r.awake.Load() != 0 {
 		t.Fatal("process exit kept sleep inhibition")
+	}
+}
+
+func Test_JobSleepPolicyUsesAppliedConfiguration(t *testing.T) {
+	r := newRig(t)
+	r.m.Apply(config.CI{PreventSleepWhileBusy: true})
+	// The getter can still expose an older snapshot while Apply reconciles a newer one.
+	r.mu.Lock()
+	r.cfg.PreventSleepWhileBusy = false
+	r.mu.Unlock()
+	r.m.busyChanged(1)
+	if r.awake.Load() != 1 {
+		t.Fatal("job start replaced the applied sleep policy with an older snapshot")
+	}
+	r.m.Apply(config.CI{PreventSleepWhileBusy: false})
+	r.mu.Lock()
+	r.cfg.PreventSleepWhileBusy = true
+	r.mu.Unlock()
+	r.m.busyChanged(1)
+	if r.awake.Load() != 0 {
+		t.Fatal("job start re-enabled the old sleep policy")
+	}
+	r.m.busyChanged(-2)
+}
+
+func Test_BindingRemovalWaitsForScaledInstanceCleanup(t *testing.T) {
+	removed := filepath.Join(t.TempDir(), "removed")
+	t.Setenv("CI_REMOVED_LOG", removed)
+	r := newRig(t)
+	r.m.o.Token = func(context.Context, config.CIBinding) (string, error) { return "REG", nil }
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	r.m.o.RemoveToken = func(context.Context, config.CIBinding) (string, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return "REMOVE", nil
+	}
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	spec := config.CIBinding{ID: "a", Scope: "repo", Target: "o/a", Source: "account", Account: "me", Concurrency: 2}
+	r.apply(spec)
+	r.wait("both idle", func() bool { return r.state("a", 1) == v1.CiIdle && r.state("a", 2) == v1.CiIdle })
+	spec.Concurrency = 1
+	r.apply(spec)
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("scale-down did not begin deregistration")
+	}
+	r.apply()
+	// While scale-down is blocked, binding removal must wait for its cleanup ownership.
+	select {
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("binding removal overlapped scale-down deregistration: %d requests", got)
+	}
+	releaseOnce.Do(func() { close(release) })
+	r.wait("binding gone", func() bool { return r.m.Gone("a") })
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("each of two runners must deregister once: %d requests", got)
+	}
+	if r.exists(filepath.Join(r.root, "ci", "a")) {
+		t.Fatal("binding directory remains after cleanup")
 	}
 }
 
