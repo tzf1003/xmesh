@@ -2075,6 +2075,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "windows-capture",
+ "windows-sys",
  "x11rb",
  "xkeysym",
  "zbus",

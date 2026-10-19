@@ -25,11 +25,6 @@ func (m *Manager) LocalState(ctx context.Context) LocalState {
 	v := LocalState{Enabled: m.settings.Enabled, Paused: m.paused, Info: Info{ProtocolVersion: ProtocolVersion, State: "disabled", Capabilities: []string{}, Displays: []Display{}}, Sessions: []Session{}}
 	v.PauseOnUserInput = m.settings.PauseOnUserInput
 	m.expireLocked()
-	for _, s := range m.sessions {
-		session := s.Session
-		session.Token = ""
-		v.Sessions = append(v.Sessions, session)
-	}
 	m.mu.Unlock()
 	if v.Enabled {
 		info, err := m.Info(ctx)
@@ -40,6 +35,19 @@ func (m *Manager) LocalState(ctx context.Context) LocalState {
 			v.Info = info
 		}
 	}
+	// Info can revoke sessions or pause input after observing permissions and
+	// local activity. Project that resulting authority in this same response.
+	m.mu.Lock()
+	v.Enabled = m.settings.Enabled
+	v.Paused = m.paused
+	v.PauseOnUserInput = m.settings.PauseOnUserInput
+	m.expireLocked()
+	for _, s := range m.sessions {
+		session := s.Session
+		session.Token = ""
+		v.Sessions = append(v.Sessions, session)
+	}
+	m.mu.Unlock()
 	if v.Info.Capabilities == nil {
 		v.Info.Capabilities = []string{}
 	}

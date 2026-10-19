@@ -1,6 +1,6 @@
 # Computer 工具与桌面执行器
 
-状态：实现中。交付与真机验收记录见 [三端方案](../design/17-computer.md)。
+状态：实现中。交付与真机验收记录见 [三端方案](../design/19-computer.md)。
 
 ## 会话
 
@@ -17,7 +17,7 @@
 | `computer.close` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；释放输入 |
 | `computer.sessions` | 无 | 仅调用方拥有的会话 |
 
-租期默认 120 秒，范围 10–600 秒；观察会话也需要续期。会话上限默认 16，配置范围 1–32。每个会话最多缓存四张图和 128 个动作结果。已过期会话立即拒绝；内核断开 caller、禁用 computer、暂停或 kill drain 时撤销其会话。新的控制会话获得新的 fencing 序号。
+租期默认 120 秒，范围 10–600 秒；观察会话也需要续期。会话上限默认 16，配置范围 1–32。每个会话最多缓存四张图和 128 个动作结果，全部会话共享 64 MiB 的截图缓存预算，超过预算按采集时间淘汰旧图。已过期会话立即拒绝；内核断开 caller、禁用 computer 或 kill drain 时撤销其会话。本机暂停只回收控制租约，观察会话保持有效。新的控制会话获得新的 fencing 序号。
 
 ## 画面与动作
 
@@ -39,6 +39,8 @@ Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop
 
 `agent.computer.pause_on_user_input` 默认关闭。启用时，控制会话绑定原生执行器报告的本机输入序号；检测到其他输入来源的点击或按键后，输入执行和下一次状态检查会撤销控制并暂停。执行器的标记用于区别自己产生的事件，同用户进程不属于独立安全边界。`user_input_monitor` 为 false 时，启用该策略的控制申请返回 permission_required；不会默默放行。Wayland compositor 尚未提供全局输入监测时可使用本机接管按钮和暂停快捷键。
 
+将该策略从关闭改为启用会立即回收已有控制租约；调用方重新打开控制会话后绑定当前输入基线。本机状态读取完成桌面状态复核后才列出会话，因此同一次响应反映权限撤销及本机输入暂停。
+
 ## 本机执行器通道
 
 `xmesh computer host` 在图形用户会话中运行，使用用户专用 Unix socket 或 Windows 命名管道接入目标内核，并通过匿名继承管道监督 Rust 原生执行器。此 host 不承载 Agent / Gateway / Ingress，也不接入 mesh。Windows SYSTEM 内核通过配置的用户 SID 管道连接图形会话。
@@ -46,5 +48,7 @@ Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop
 Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道服务器进程 token 的 SID 与管道名中目标 SID 一致。每个用户桌面执行器还有排他文件锁。一条 broker 只绑定一个管理内核；内核以独立标识每两秒心跳，超过六秒没有心跳时关闭执行器并释放绑定。重建后原生执行器重新生成 desktop_epoch。
 
 本机 HTTP 请求仅使用受保护的本机传输，路径为 /v1/info、heartbeat、capture、execute、release、disconnect。原生匿名管道为每行一个 JSON 对象：请求包含 id、method、params，响应包含 id 和 result 或 error。协议版本为 1；请求限 1 MiB，响应限 8 MiB。外部 Agent 只看到 MCP。
+
+原生管道写入和等待均受上下文限制；执行器停止读取导致写入超时后，监督进程终止该执行器，后续调用经新的桌面代次重新建立权限。
 
 本机显式执行 `xmesh computer host --authorize` 请求系统权限。普通远程请求遇到未授权状态直接失败。权限初始化和自动启动仍按三端验收清单逐项验证。

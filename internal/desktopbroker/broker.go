@@ -106,6 +106,10 @@ func (b *Broker) get(owner string) (computer.Provider, error) {
 	if b.owner != "" && b.owner != owner {
 		return nil, toolerr.New("resource_busy", "此桌面已绑定另一节点", "reason", "desktop_bound")
 	}
+	if child, ok := b.provider.(interface{ Exited() bool }); ok && child.Exited() {
+		_ = b.provider.Close()
+		b.provider = nil
+	}
 	if b.provider == nil {
 		p, err := b.options.Factory()
 		if err != nil {

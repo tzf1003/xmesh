@@ -15,6 +15,8 @@ import (
 
 	"github.com/kardianos/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/computer"
+	"github.com/tzf1003/xmesh/internal/desktopbroker"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -42,6 +44,28 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	configFile := filepath.Join(root, "config & 中文.json")
 	stateDir := filepath.Join(root, "state 中文")
 	body := serviceFixture(t, name, root)
+	computerEnabled := os.Getenv("XMESH_TEST_COMPUTER_HELPER") != ""
+	if computerEnabled {
+		// This broker and its native child run as the interactive installing user;
+		// the kernel below runs in session 0 as LocalSystem.
+		broker, err := desktopbroker.Start(desktopbroker.Options{StateDir: filepath.Join(root, "computer"), HelperPath: os.Getenv("XMESH_TEST_COMPUTER_HELPER")})
+		if err != nil {
+			t.Fatal("user desktop broker", err)
+		}
+		t.Cleanup(func() { _ = broker.Close() })
+		if broker.Endpoint != computer.DefaultEndpoint() {
+			t.Fatal("desktop broker did not use the installing user's pipe")
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		doc["agent"].(map[string]any)["computer"] = map[string]any{"enabled": true, "endpoint": broker.Endpoint}
+		body, err = json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(configFile, body, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +198,9 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 	if info["hostname"] != name || info["os"] != "windows" {
 		t.Fatal("SCM runtime identity", info)
 	}
+	if computerEnabled {
+		verifySCMComputer(t, ctx, client)
+	}
 	scmTool(t, ctx, client, "fs.write", map[string]any{"path": "service-proof.txt", "content": "SCM runtime proof"})
 	proof, err := os.ReadFile(filepath.Join(root, "service-proof.txt"))
 	if err != nil || string(proof) != "SCM runtime proof" {
@@ -215,6 +242,45 @@ func Test_WindowsSystemServiceRuntime(t *testing.T) {
 		connection.Close()
 		t.Fatal("stopped service retained MCP listener")
 	}
+}
+
+func verifySCMComputer(t *testing.T, ctx context.Context, client *mcp.ClientSession) {
+	t.Helper()
+	var info map[string]any
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		info = scmTool(t, ctx, client, "computer.info", map[string]any{})
+		if info["available"] == true && len(info["capabilities"].([]any)) > 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("SYSTEM kernel could not reach the interactive desktop", info)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	session := scmTool(t, ctx, client, "computer.open", map[string]any{"mode": "control"})
+	identity := map[string]any{"session_id": session["session_id"], "desktop_epoch": session["desktop_epoch"], "lease_token": session["lease_token"]}
+	if identity["desktop_epoch"] != info["desktop_epoch"] {
+		t.Fatal("SCM desktop identity changed", identity, info)
+	}
+	observed, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "computer.observe", Arguments: identity})
+	if err != nil || observed == nil || observed.IsError {
+		t.Fatal("SCM desktop screenshot", observed, err)
+	}
+	image := false
+	for _, content := range observed.Content {
+		if v, ok := content.(*mcp.ImageContent); ok && len(v.Data) > 32 && (v.MIMEType == "image/png" || v.MIMEType == "image/jpeg") {
+			image = true
+		}
+	}
+	if !image {
+		t.Fatal("SCM desktop screenshot did not deliver MCP image content")
+	}
+	action := map[string]any{"session_id": session["session_id"], "desktop_epoch": session["desktop_epoch"], "lease_token": session["lease_token"], "action_id": "scm-native-dispatch", "actions": []map[string]any{{"type": "wait", "duration_ms": 10}}}
+	if result := scmTool(t, ctx, client, "computer.act", action); result["state"] != "executed" {
+		t.Fatal("SCM desktop input dispatch", result)
+	}
+	scmTool(t, ctx, client, "computer.close", identity)
+	t.Log("LocalSystem kernel delivered the user-session desktop image and native execution over its authenticated pipe")
 }
 
 func waitSCMState(s *mgr.Service, state svc.State, timeout time.Duration) (svc.Status, error) {

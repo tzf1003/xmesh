@@ -1,7 +1,9 @@
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-pub const INPUT_MARKER: u64 = 0x584d455348;
+// Keep the event marker representable in both 32-bit and 64-bit user sessions.
+// Windows input can cross a WOW64 boundary before a low-level hook sees it.
+pub const INPUT_MARKER: u64 = 0x584d5348;
 pub(crate) static INPUT_SERIAL: AtomicU64 = AtomicU64::new(0);
 pub(crate) static INPUT_MONITOR_READY: AtomicBool = AtomicBool::new(false);
 pub fn user_input_serial() -> u64 {

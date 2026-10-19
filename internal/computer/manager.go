@@ -43,26 +43,27 @@ type ownedSession struct {
 
 // Manager keeps authority on the target Agent, including across Gateway reconnects.
 type Manager struct {
-	mu         sync.Mutex
-	provider   Provider
-	settings   Settings
-	paused     bool
-	closed     bool
-	serial     uint64
-	tail       <-chan struct{}
-	sessions   map[string]*ownedSession
-	controller string
-	queue      chan struct{}
-	executing  chan struct{}
-	stop       chan struct{}
-	done       chan struct{}
-	workers    sync.WaitGroup
-	authorize  func(string) bool
-	now        func() time.Time
+	mu          sync.Mutex
+	provider    Provider
+	settings    Settings
+	paused      bool
+	closed      bool
+	serial      uint64
+	tail        <-chan struct{}
+	sessions    map[string]*ownedSession
+	frameBudget int
+	controller  string
+	queue       chan struct{}
+	executing   chan struct{}
+	stop        chan struct{}
+	done        chan struct{}
+	workers     sync.WaitGroup
+	authorize   func(string) bool
+	now         func() time.Time
 }
 
 func New(p Provider, settings Settings) *Manager {
-	m := &Manager{provider: p, settings: settings.Effective(), sessions: map[string]*ownedSession{}, queue: make(chan struct{}, 8), executing: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), now: time.Now}
+	m := &Manager{provider: p, settings: settings.Effective(), sessions: map[string]*ownedSession{}, frameBudget: 64 << 20, queue: make(chan struct{}, 8), executing: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), now: time.Now}
 	ready := make(chan struct{})
 	close(ready)
 	m.tail = ready
@@ -98,6 +99,9 @@ func (m *Manager) Configure(settings Settings) {
 	settings = settings.Effective()
 	if m.settings.Enabled && !settings.Enabled {
 		m.revokeLocked("")
+	}
+	if !m.settings.PauseOnUserInput && settings.PauseOnUserInput {
+		m.removeLocked(m.controller)
 	}
 	m.settings = settings
 }
@@ -342,7 +346,31 @@ func (m *Manager) Observe(ctx context.Context, caller string, r ObserveRequest) 
 		delete(s.frames, oldest)
 	}
 	s.frames[f.ID] = f
+	m.trimFramesLocked()
 	return f, nil
+}
+
+// All desktop sessions share a memory budget in addition to the four-frame
+// per-session bound. Action records keep metadata and reference this cache.
+func (m *Manager) trimFramesLocked() {
+	for {
+		size := 0
+		var oldestSession *ownedSession
+		oldestID := ""
+		var oldest time.Time
+		for _, session := range m.sessions {
+			for id, frame := range session.frames {
+				size += len(frame.Image)
+				if oldestSession == nil || frame.CapturedAt.Before(oldest) {
+					oldestSession, oldestID, oldest = session, id, frame.CapturedAt
+				}
+			}
+		}
+		if size <= m.frameBudget || oldestSession == nil {
+			return
+		}
+		delete(oldestSession.frames, oldestID)
+	}
 }
 
 func validActions(actions []Action) error {
@@ -676,7 +704,7 @@ func (m *Manager) Pause(paused bool) {
 	defer m.mu.Unlock()
 	m.paused = paused
 	if paused {
-		m.revokeLocked("")
+		m.removeLocked(m.controller)
 	}
 }
 

@@ -81,3 +81,24 @@ func TestUnsupportedInputMonitoringFailsControlExplicitly(t *testing.T) {
 	}
 	_ = open(t, m, "viewer/session", "observe")
 }
+
+func TestInputMonitoringPolicyChangeRequiresFreshControlLease(t *testing.T) {
+	m, p := manager(t)
+	p.mu.Lock()
+	p.info.UserInputMonitor = true
+	p.info.UserInputSerial = 8
+	p.mu.Unlock()
+	old := open(t, m, "agent/session", "control")
+	_ = open(t, m, "observer/session", "observe")
+	m.Configure(Settings{Enabled: true, PauseOnUserInput: true})
+	if len(m.Sessions("agent/session")) != 0 || len(m.Sessions("observer/session")) != 1 {
+		t.Fatal("policy change retained old control or revoked the observer")
+	}
+	next := open(t, m, "agent/session", "control")
+	if next.Token == old.Token {
+		t.Fatal("new policy reused the old lease")
+	}
+	if state := m.LocalState(context.Background()); state.Paused || len(state.Sessions) != 2 {
+		t.Fatal("fresh monitoring baseline was not established", state)
+	}
+}

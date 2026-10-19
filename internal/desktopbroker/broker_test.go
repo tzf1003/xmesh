@@ -26,6 +26,7 @@ func (d *desktop) Execute(context.Context, computer.Execution) (computer.ActionR
 }
 func (d *desktop) Release(context.Context, computer.Execution) error { return nil }
 func (d *desktop) Close() error                                      { d.closed.Store(true); return nil }
+func (d *desktop) Exited() bool                                      { return d.closed.Load() }
 
 func TestLocalBrokerHasOneKernelOwnerAndRestartsEpoch(t *testing.T) {
 	var generation atomic.Int32
@@ -57,5 +58,37 @@ func TestLocalBrokerHasOneKernelOwnerAndRestartsEpoch(t *testing.T) {
 	info, err = other.Info(context.Background())
 	if err != nil || info.Epoch != "2" {
 		t.Fatal(info, err)
+	}
+}
+
+func TestNativeCrashChangesEpochAndPreservesKernelBinding(t *testing.T) {
+	first := &desktop{epoch: "before-crash"}
+	var starts atomic.Int32
+	b, err := Start(Options{StateDir: t.TempDir(), Factory: func() (computer.Provider, error) {
+		if starts.Add(1) == 1 {
+			return first, nil
+		}
+		return &desktop{epoch: "after-crash"}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	owner := computer.NewClient(b.Endpoint)
+	defer owner.Close()
+	other := computer.NewClient(b.Endpoint)
+	defer other.Close()
+	if info, err := owner.Info(context.Background()); err != nil || info.Epoch != "before-crash" {
+		t.Fatal(info, err)
+	}
+	first.closed.Store(true)
+	if _, err := other.Info(context.Background()); err == nil {
+		t.Fatal("native crash transferred the kernel binding")
+	}
+	if info, err := owner.Info(context.Background()); err != nil || info.Epoch != "after-crash" {
+		t.Fatal("native process was not replaced", info, err)
+	}
+	if starts.Load() != 2 {
+		t.Fatal("unexpected native process restarts", starts.Load())
 	}
 }

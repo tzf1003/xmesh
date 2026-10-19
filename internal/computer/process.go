@@ -31,7 +31,7 @@ type Process struct {
 	cmd       *exec.Cmd
 	input     io.WriteCloser
 	mu        sync.Mutex
-	write     sync.Mutex
+	write     chan struct{}
 	serial    uint64
 	pending   map[uint64]chan nativeResponse
 	done      chan struct{}
@@ -77,7 +77,7 @@ func startProcess(path string, authorize bool) (*Process, error) {
 		_ = out.Close()
 		return nil, err
 	}
-	p := &Process{cmd: cmd, input: in, pending: map[uint64]chan nativeResponse{}, done: make(chan struct{}), exited: make(chan struct{})}
+	p := &Process{cmd: cmd, input: in, write: make(chan struct{}, 1), pending: map[uint64]chan nativeResponse{}, done: make(chan struct{}), exited: make(chan struct{})}
 	go p.read(out)
 	go func() { _ = cmd.Wait(); close(p.exited) }()
 	return p, nil
@@ -119,11 +119,38 @@ func (p *Process) call(ctx context.Context, method string, in, out any) error {
 	if len(raw) > 1<<20 {
 		return toolerr.Args("request_size")
 	}
-	p.write.Lock()
-	_, err = p.input.Write(append(raw, '\n'))
-	p.write.Unlock()
-	if err != nil {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.done:
+		return toolerr.New("desktop_unavailable", "桌面执行器已退出", "reason", "executor_exited")
+	case p.write <- struct{}{}:
+	}
+	// A native process can stop reading stdin while still keeping stdout open.
+	// Bound both the wait for the writer and the pipe write itself. Killing that
+	// process is necessary once a partial request might be on its byte stream.
+	if err := ctx.Err(); err != nil {
+		<-p.write
 		return err
+	}
+	written := make(chan error, 1)
+	go func() {
+		_, err := p.input.Write(append(raw, '\n'))
+		<-p.write
+		written <- err
+	}()
+	select {
+	case <-ctx.Done():
+		_ = p.cmd.Process.Kill()
+		_ = p.input.Close()
+		return ctx.Err()
+	case <-p.done:
+		return toolerr.New("desktop_unavailable", "桌面执行器已退出", "reason", "executor_exited")
+	case err := <-written:
+		if err != nil {
+			_ = p.cmd.Process.Kill()
+			return err
+		}
 	}
 	select {
 	case <-ctx.Done():
@@ -168,6 +195,20 @@ func (p *Process) Execute(ctx context.Context, r Execution) (ActionResult, error
 func (p *Process) Release(ctx context.Context, r Execution) error {
 	return p.call(ctx, "release", r, nil)
 }
+
+// Exited lets the local host replace a failed native child without transferring
+// the desktop binding to another kernel.
+func (p *Process) Exited() bool {
+	select {
+	case <-p.done:
+		return true
+	case <-p.exited:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Process) Close() error {
 	p.closeOnce.Do(func() {
 		_ = p.input.Close()

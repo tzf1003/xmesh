@@ -2,9 +2,9 @@ name: Computer native executor
 on:
   push:
     branches: [master, 'codex/**']
-    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', '.github/workflows/computer.yml']
+    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', '.github/workflows/computer.yml']
   pull_request:
-    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', '.github/workflows/computer.yml']
+    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', '.github/workflows/computer.yml']
 permissions:
   contents: read
 concurrency:
@@ -58,6 +58,27 @@ jobs:
         run: |
           $env:XMESH_TEST_COMPUTER_HELPER = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
           node ui/scripts/test-native-desktop.mjs
+      - name: Windows native DPI manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\mt.exe" | Sort-Object FullName | Select-Object -Last 1
+          if (!$mt) { throw 'Windows manifest tool is unavailable' }
+          $helper = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          $manifest = Join-Path $env:RUNNER_TEMP 'computer-embedded.manifest'
+          & $mt.FullName -nologo "-inputresource:$helper;#1" "-out:$manifest"
+          if ($LASTEXITCODE -ne 0) { throw 'Native executor manifest extraction failed' }
+          if (!(Get-Content -Raw $manifest).Contains('PerMonitorV2')) { throw 'Native executor is not per-monitor DPI aware' }
+      - name: Windows SYSTEM kernel to user desktop
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:XMESH_TEST_COMPUTER_HELPER = Join-Path $env:GITHUB_WORKSPACE 'computer-native\target\debug\xmesh-computer.exe'
+          $env:XMESH_TEST_WINDOWS_BINARY = Join-Path $env:RUNNER_TEMP 'xmesh-computer-service-test.exe'
+          $env:XMESH_TEST_WINDOWS_SYSTEM_SERVICE = '1'
+          go build -o $env:XMESH_TEST_WINDOWS_BINARY ./cmd/xmesh
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -race ./cmd/xmesh -run WindowsSystemServiceRuntime -v -count=1 -timeout=180s
       - name: Native IPC
         if: runner.os != 'Windows'
         env:

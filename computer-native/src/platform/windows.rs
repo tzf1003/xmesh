@@ -1,5 +1,21 @@
 use super::Display;
 use std::ffi::c_void;
+use windows_sys::Win32::{
+    Graphics::Gdi::{
+        EnumDisplaySettingsW, GetMonitorInfoW, DEVMODEW, ENUM_CURRENT_SETTINGS, MONITORINFOEXW,
+    },
+    UI::{
+        HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
+        Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_MOVE,
+            MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT,
+        },
+        WindowsAndMessaging::{
+            GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+            SM_YVIRTUALSCREEN,
+        },
+    },
+};
 
 #[repr(C)]
 #[derive(Default)]
@@ -9,14 +25,6 @@ struct Rect {
     right: i32,
     bottom: i32,
 }
-#[repr(C)]
-struct MonitorInfo {
-    size: u32,
-    monitor: Rect,
-    work: Rect,
-    flags: u32,
-}
-
 #[link(name = "user32")]
 extern "system" {
     fn EnumDisplayMonitors(
@@ -25,7 +33,6 @@ extern "system" {
         callback: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut Rect, isize) -> i32,
         data: isize,
     ) -> i32;
-    fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfo) -> i32;
     fn OpenInputDesktop(flags: u32, inherit: i32, access: u32) -> *mut c_void;
     fn GetUserObjectInformationW(
         handle: *mut c_void,
@@ -132,27 +139,91 @@ unsafe extern "system" fn monitor(
     data: isize,
 ) -> i32 {
     let displays = &mut *(data as *mut Vec<Display>);
-    let mut info = MonitorInfo {
-        size: std::mem::size_of::<MonitorInfo>() as u32,
-        monitor: Rect::default(),
-        work: Rect::default(),
-        flags: 0,
-    };
-    if GetMonitorInfoW(handle, &mut info) != 0 {
-        // scap identifies displays by the same HMONITOR numeric handle.
-        let id = handle as usize as u32;
+    let mut info = MONITORINFOEXW::default();
+    info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+    if GetMonitorInfoW(handle, &mut info.monitorInfo) != 0 {
+        let id = handle as usize;
+        let mut mode = DEVMODEW {
+            dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+            ..Default::default()
+        };
+        let rotation = if EnumDisplaySettingsW(
+            info.szDevice.as_ptr(),
+            ENUM_CURRENT_SETTINGS,
+            &mut mode,
+        ) != 0
+        {
+            (mode.Anonymous1.Anonymous2.dmDisplayOrientation % 4) as i32 * 90
+        } else {
+            0
+        };
+        let (mut dpi_x, mut dpi_y) = (96, 96);
+        let scale = if GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == 0 {
+            f64::from(dpi_x) / 96.0
+        } else {
+            1.0
+        };
+        let rect = info.monitorInfo.rcMonitor;
+        let len = info
+            .szDevice
+            .iter()
+            .position(|v| *v == 0)
+            .unwrap_or(info.szDevice.len());
         displays.push(Display {
             id: id.to_string(),
-            name: format!("Display {id}"),
-            x: info.monitor.left,
-            y: info.monitor.top,
-            width: info.monitor.right - info.monitor.left,
-            height: info.monitor.bottom - info.monitor.top,
-            scale: 1.0,
-            rotation: 0,
+            name: String::from_utf16_lossy(&info.szDevice[..len]),
+            x: rect.left,
+            y: rect.top,
+            width: rect.right - rect.left,
+            height: rect.bottom - rect.top,
+            scale,
+            rotation,
         });
     }
     1
+}
+
+fn normalized_axis(coordinate: i32, origin: i32, extent: i32) -> Result<i32, &'static str> {
+    let relative = i64::from(coordinate) - i64::from(origin);
+    if extent < 1 || relative < 0 || relative >= i64::from(extent) {
+        return Err("invalid_coordinates");
+    }
+    // Aim at the center of the physical pixel in the virtual desktop. The
+    // primary display can have a different DPI and need not be at its origin.
+    Ok(((relative * 65536 + 32768) / i64::from(extent)).min(65535) as i32)
+}
+
+pub fn move_mouse_absolute(x: i32, y: i32) -> Result<(), &'static str> {
+    unsafe {
+        let dx = normalized_axis(
+            x,
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+        )?;
+        let dy = normalized_axis(
+            y,
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )?;
+        let input = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx,
+                    dy,
+                    mouseData: 0,
+                    dwFlags: MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                    time: 0,
+                    dwExtraInfo: super::INPUT_MARKER as usize,
+                },
+            },
+        };
+        if SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) == 1 {
+            Ok(())
+        } else {
+            Err("input_failed")
+        }
+    }
 }
 pub fn displays() -> Vec<Display> {
     let mut out = vec![];
@@ -250,7 +321,7 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     let target = Monitor::enumerate()
         .map_err(|_| "display_unavailable")?
         .into_iter()
-        .find(|m| (m.as_raw_hmonitor() as usize as u32).to_string() == display.id)
+        .find(|m| (m.as_raw_hmonitor() as usize).to_string() == display.id)
         .ok_or("display_not_found")?;
     let result = Arc::new(Mutex::new(None));
     let settings = Settings::new(
@@ -266,4 +337,24 @@ pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {
     SingleFrame::start(settings).map_err(|_| "capture_failed")?;
     let mut guard = result.lock().map_err(|_| "capture_failed")?;
     guard.take().ok_or("capture_empty")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalized_axis;
+
+    #[test]
+    fn virtual_desktop_maps_negative_origins_and_pixel_edges() {
+        for (origin, extent) in [(-2560, 6400), (0, 1920), (-1080, 3000), (0, 1)] {
+            for offset in [0, extent / 2, extent - 1] {
+                let normalized = normalized_axis(origin + offset, origin, extent).unwrap();
+                assert_eq!(
+                    (i64::from(normalized) * i64::from(extent)) >> 16,
+                    i64::from(offset)
+                );
+            }
+            assert!(normalized_axis(origin - 1, origin, extent).is_err());
+            assert!(normalized_axis(origin + extent, origin, extent).is_err());
+        }
+    }
 }

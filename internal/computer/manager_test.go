@@ -319,3 +319,40 @@ func TestImagesAreBoundedAndNotSerializedInMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFrameMemoryBudgetIsSharedAcrossObservers(t *testing.T) {
+	m, _ := manager(t)
+	one := open(t, m, "viewer/one", "observe")
+	two := open(t, m, "viewer/two", "observe")
+	first, err := m.Observe(context.Background(), "viewer/one", ObserveRequest{SessionRequest: request(one)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.frameBudget = 3 * len(first.Image)
+	m.mu.Unlock()
+	for range 2 {
+		for _, v := range []struct {
+			owner   string
+			session Session
+		}{{"viewer/one", one}, {"viewer/two", two}} {
+			if _, err := m.Observe(context.Background(), v.owner, ObserveRequest{SessionRequest: request(v.session)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	size := 0
+	for _, session := range m.sessions {
+		for _, frame := range session.frames {
+			size += len(frame.Image)
+		}
+	}
+	if size != m.frameBudget {
+		t.Fatal("shared frame budget was not enforced", size, m.frameBudget)
+	}
+	if _, retained := m.sessions[one.ID].frames[first.ID]; retained {
+		t.Fatal("oldest frame was retained after global eviction")
+	}
+}

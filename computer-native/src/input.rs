@@ -39,6 +39,10 @@ impl Input {
         y: i32,
         coordinate: Coordinate,
     ) -> Result<(), &'static str> {
+        #[cfg(target_os = "windows")]
+        if coordinate == Coordinate::Abs {
+            return crate::platform::move_mouse_absolute(x, y);
+        }
         match self {
             Self::Native(input) => input
                 .move_mouse(x, y, coordinate)
