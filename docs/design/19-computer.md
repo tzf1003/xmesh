@@ -250,3 +250,9 @@ db9de5b 的 macOS UI MCP 导航测试在 popup 重定向的请求计数断言失
 第三十五轮：0.0.11 正式应用 / DMG 的 Developer ID 签名、公证、装订及包内版本 / fuses 校验通过，运行时代码对应 a655194，1227 个跟踪文件逐一核对一致。真实 0.0.10→0.0.11 升级通过，新 Electron 入口恢复 Host 和业务节点，前后 Gateway MCP 调用、新 PID / 版本 / desktop_epoch、安装后签名及清理通过，独立指针 / 前台 / AX 身份监测通过且记录零个硬件活动事件。两侧服务状态均为 permission_required，授权延续仍由既有已授权服务验收覆盖；Gatekeeper 本机安全策略覆盖状态继续单列。
 
 首次复测在前台 AX 基线不可用时于启动前停止；下一轮在旧 Electron 初始化完成前启动更新，旧入口的 finishPending 清理删除了夹具刚放入的 DMG，挂载失败，随后清理阶段停止已卸载的服务掩盖原始错误。验收现等待旧入口实际清除自有启动标记后再准备安装包，处理已停止的自有服务并同时保留验收及清理错误。失败轮次的两份自有 LaunchAgent 配置与临时状态核对归属后回收；修改后的完整升级及清理通过。此轮后续源码仅变更验收脚本和证据文档，发行运行时代码保持 a655194。
+
+2026-10-20 API 2 集成验收：`afaad5e` 的真实 Gateway → Agent → Host → native 链路分别在遮挡 AppKit 与 Electron 专用窗口通过七项输入、状态断言、去重、续租及关闭；独立指针 / 前台应用 / AX 身份监测通过，两轮各记录零个硬件活动事件。Control 发布的自定义 Host 端点经实际面板停止 / 恢复函数验证，内核退出后仍选择正确 Host。
+
+正式签名 0.0.12 应用与 DMG 对应 `afaad5e`，Developer ID 签名、公证、装订和发行 fuses 通过。实际 0.0.11→0.0.12 升级完成 API 1→2 配置迁移、新 Electron 入口的 Host / 业务节点恢复、升级前后 MCP 调用、新 PID / 版本 / epoch 和资源清理；指针 / 前台 / AX 监测通过，零个硬件活动事件。验收脚本按各服务 manifest 声明的 Control 版本读取状态及 Computer 信息。两侧正式服务均报告 permission_required；已授权外层服务的权限延续由前述独立签名夹具覆盖。DMG SHA-256 为 `70085a8237a03438a7f029826c865f5841477af790062f42eafd57bb5dc369a0`。
+
+API 2 的 Tailnet 路径状态复用本地主分支的实现，按当前已认证连接的地址关联 tsnet 状态，向 Control 提供直连标记、中继区域与操作系统。修复前本机复现 forced-DERP 返回 unknown；修复后的本机 Headscale 强制 DERP、双向文件 / exec / PTY、临时节点恢复与 OAuth 全链路通过，读取到 derp 及中继区域后才计为通过。Connectivity / DeviceLink / App 竞态测试通过。0.0.12 产物先于这项网络状态修复；最新提交的 CI 与签名产物另行核对。

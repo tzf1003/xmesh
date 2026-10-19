@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -19,7 +20,6 @@ const { macApplier } = require("../dist/src/main/update/apply.js");
 const { computerHostServices, runComputerHost } = require("../dist/src/main/computer-host.js");
 const { kernelServices } = require("../dist/src/main/update/kernels.js");
 const { discoverInstances } = require("../dist/src/main/discovery.js");
-const { ControlClient } = require("../dist/src/main/client.js");
 const { runXmeshRaw } = require("../dist/src/main/cli.js");
 const { installerName, CHECKSUM_FILE } = require("../dist/src/main/update/releases.js");
 const { parseVersion } = require("../dist/src/shared/version.js");
@@ -104,12 +104,34 @@ async function launch() {
 async function nodeStatus() {
   const instance = discoverInstances(states).find(i => i.id === node);
   assert.ok(instance, "business node manifest missing");
-  return { instance, status: await new ControlClient({ endpoint: instance.manifest.endpoint }).getStatus() };
+  return { instance, status: await nodeRead(instance, "status") };
+}
+async function nodeRead(instance, resource) {
+  const major = instance.manifest.api_version.split(".")[0];
+  assert.ok(major === "1" || major === "2", "unsupported control API");
+  // The fixture spans the Control API migration; read each installed version
+  // through its advertised protocol while production clients retain v2 checks.
+  return new Promise((resolve, reject) => {
+    const request = http.get({ socketPath: instance.manifest.endpoint, path: `/v${major}/${resource}`,
+      headers: { Host: "xmesh-control", Accept: "application/json" } }, response => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", chunk => { body += chunk; });
+      response.on("error", reject);
+      response.on("end", () => {
+        try {
+          assert.equal(response.statusCode, 200);
+          assert.equal(String(response.headers["x-xmesh-control-version"]).split(".")[0], major);
+          resolve(JSON.parse(body));
+        } catch (error) { reject(error); }
+      });
+    });
+    request.setTimeout(5000, () => request.destroy(new Error("fixture control request timed out")));
+    request.on("error", reject);
+  });
 }
 async function computerInfo(snapshot) {
-  const major = snapshot.instance.manifest.api_version.split(".")[0];
-  assert.ok(major === "1" || major === "2", "unsupported control API");
-  return (await new ControlClient({ endpoint: snapshot.instance.manifest.endpoint }).call("GET", `/v${major}/computer`)).info;
+  return (await nodeRead(snapshot.instance, "computer")).info;
 }
 async function freeAddress() {
   const server = net.createServer();
