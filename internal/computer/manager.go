@@ -385,6 +385,13 @@ func (m *Manager) Renew(caller string, r RenewRequest) (Session, error) {
 	if s.Mode == "control" && r.Token != s.Token {
 		return Session{}, toolerr.New("lease_required", "控制租约已失效")
 	}
+	tool := "computer.observe"
+	if s.Mode == "control" {
+		tool = "computer.act"
+	}
+	if err := m.authorizedLocked(caller, tool, s.ID); err != nil {
+		return Session{}, err
+	}
 	ttl, err := m.ttl(r.TTLSeconds)
 	if err != nil {
 		return Session{}, err
@@ -625,7 +632,7 @@ func (m *Manager) wait(ctx context.Context, s *ownedSession, op *operation) (Act
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return materialize(s, op.result), nil
+	return m.materializeLocked(s, op.result)
 }
 
 func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *Frame) {
@@ -703,6 +710,11 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 	m.mu.Unlock()
 	result, err = m.provider.Execute(ctx, execution)
 	result.ActionID = r.ActionID
+	if err != nil {
+		// Native error cleanup fences this token. Retire the manager's matching
+		// session too so a fresh controller can acquire usable authority.
+		m.invalidate(s.ID)
+	}
 	if result.Error == "human_intervention" || result.Error == "focus_changed" {
 		m.Pause(true)
 	}
@@ -754,19 +766,23 @@ func (m *Manager) ActionStatus(caller string, r StatusRequest) (ActionResult, er
 	if op == nil {
 		return ActionResult{}, toolerr.New("not_found", "动作不存在", "name", r.ActionID)
 	}
-	return materialize(s, op.result), nil
+	return m.materializeLocked(s, op.result)
 }
 
 // Cached actions retain only frame metadata; the bounded frame cache owns image bytes.
-func materialize(s *ownedSession, r ActionResult) ActionResult {
+func (m *Manager) materializeLocked(s *ownedSession, r ActionResult) (ActionResult, error) {
 	if r.Frame != nil {
+		if _, err := m.observationLocked(s.Owner, SessionRequest{SessionID: s.ID, Epoch: s.Epoch, Token: s.Token}); err != nil {
+			return ActionResult{}, err
+		}
 		f := *r.Frame
+		f.Image = nil
 		if cached, ok := s.frames[f.ID]; ok {
 			f.Image = cached.Image
 		}
 		r.Frame = &f
 	}
-	return r
+	return r, nil
 }
 
 func (m *Manager) CloseSession(caller string, r SessionRequest) error {

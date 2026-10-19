@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -52,17 +53,20 @@ func serveCaptureTimeoutFixture(mode string) {
 		send(map[string]any{"id": id, "error": map[string]any{"error": "desktop_unavailable", "message": "fixture capture timeout", "reason": "capture_timeout"}})
 	}
 	var pending uint64
+	var revoked uint64
+	firstExecution := true
 	for scanner.Scan() {
 		var request struct {
-			ID     uint64 `json:"id"`
-			Method string `json:"method"`
+			ID     uint64    `json:"id"`
+			Method string    `json:"method"`
+			Params Execution `json:"params"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			return
 		}
 		switch request.Method {
 		case "info":
-			send(map[string]any{"id": request.ID, "result": Info{ProtocolVersion: 1, Epoch: fmt.Sprint(os.Getpid()), State: "ready", Available: true}})
+			send(map[string]any{"id": request.ID, "result": Info{ProtocolVersion: 1, Epoch: fmt.Sprint(os.Getpid()), State: "ready", Available: true, DesktopID: "fixture", LayoutVersion: "fixture", Capabilities: []string{"screenshot", "pointer", "keyboard", "text"}}})
 			if pending != 0 {
 				id := pending
 				pending = 0
@@ -74,7 +78,57 @@ func serveCaptureTimeoutFixture(mode string) {
 			} else {
 				timeout(request.ID)
 			}
+		case "execute":
+			if mode != "execution-timeout" {
+				continue
+			}
+			token, _ := strconv.ParseUint(request.Params.Token, 10, 64)
+			if firstExecution {
+				firstExecution = false
+				continue
+			}
+			if token <= revoked {
+				send(map[string]any{"id": request.ID, "error": map[string]string{"error": "lease_required", "message": "revoked token"}})
+			} else {
+				send(map[string]any{"id": request.ID, "result": ActionResult{State: "executed", Executed: len(request.Params.Actions)}})
+			}
+		case "release":
+			token, _ := strconv.ParseUint(request.Params.Token, 10, 64)
+			if token > revoked {
+				revoked = token
+			}
+			send(map[string]any{"id": request.ID, "result": map[string]bool{"released": true}})
 		}
+	}
+}
+
+func TestNativeExecutionDeadlineRetiresManagerLeaseAndAllowsFreshController(t *testing.T) {
+	t.Setenv("XMESH_TEST_NATIVE_CAPTURE_TIMEOUT", "execution-timeout")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := StartProcess(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(p, Settings{Enabled: true})
+	t.Cleanup(func() { _ = m.Close() })
+	s := open(t, m, "old-owner", "control")
+	out, err := m.Act(context.Background(), "old-owner", ActRequest{SessionRequest: request(s), ActionID: "timeout", Actions: []Action{{Type: "wait", DurationMS: 1}}})
+	if err != nil || out.State != "unknown" || p.Exited() {
+		t.Fatal("expected unknown execution on a live native process", out, err)
+	}
+	if len(m.Sessions("old-owner")) != 0 {
+		t.Fatal("native error cleanup retained manager controller")
+	}
+	next := open(t, m, "new-owner", "control")
+	if next.Token == s.Token {
+		t.Fatal("fenced token reused")
+	}
+	out, err = m.Act(context.Background(), "new-owner", ActRequest{SessionRequest: request(next), ActionID: "fresh", Actions: []Action{{Type: "wait", DurationMS: 1}}})
+	if err != nil || out.State != "executed" || out.Executed != 1 {
+		t.Fatal("fresh authority remained poisoned", out, err)
 	}
 }
 

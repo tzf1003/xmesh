@@ -9,6 +9,65 @@ import (
 	"time"
 )
 
+func TestRevokedObservationCannotMaterializeCachedActionImages(t *testing.T) {
+	for _, access := range []string{"status", "duplicate", "completed_wait"} {
+		t.Run(access, func(t *testing.T) {
+			m, p := manager(t)
+			var allowed atomic.Bool
+			allowed.Store(true)
+			m.SetAuthorization(func(_ string, tool string) bool { return tool != "computer.observe" || allowed.Load() })
+			s := open(t, m, "owner", "control")
+			r := ActRequest{SessionRequest: request(s), ActionID: "with-frame", Actions: []Action{{Type: "wait", DurationMS: 1}}, ObserveAfter: true}
+			out, err := m.Act(context.Background(), "owner", r)
+			if err != nil || out.Frame == nil || len(out.Frame.Image) == 0 {
+				t.Fatal(out, err)
+			}
+			allowed.Store(false)
+			switch access {
+			case "status":
+				out, err = m.ActionStatus("owner", StatusRequest{SessionRequest: request(s), ActionID: r.ActionID})
+			case "duplicate":
+				out, err = m.Act(context.Background(), "owner", r)
+			case "completed_wait":
+				m.mu.Lock()
+				owned := m.sessions[s.ID]
+				op := owned.actions[r.ActionID]
+				m.mu.Unlock()
+				out, err = m.wait(context.Background(), owned, op)
+			}
+			if code(err) != "policy_denied" || out.Frame != nil {
+				t.Fatal("cached observation bypassed revocation", out, err)
+			}
+			if len(m.Sessions("owner")) != 0 {
+				t.Fatal("revoked session retained cached images")
+			}
+			p.mu.Lock()
+			calls := p.calls
+			p.mu.Unlock()
+			if calls != 1 {
+				t.Fatal("cached result replayed input", calls)
+			}
+		})
+	}
+}
+
+func TestRenewRetiresSessionsWhoseModeAuthorizationWasRevoked(t *testing.T) {
+	for _, mode := range []string{"control", "observe"} {
+		t.Run(mode, func(t *testing.T) {
+			m, _ := manager(t)
+			s := open(t, m, "revoked", mode)
+			m.SetAuthorization(func(owner, _ string) bool { return owner != "revoked" })
+			if _, err := m.Renew("revoked", RenewRequest{SessionRequest: request(s)}); code(err) != "policy_denied" {
+				t.Fatal(err)
+			}
+			if len(m.Sessions("revoked")) != 0 {
+				t.Fatal("renew retained revoked session")
+			}
+			_ = open(t, m, "authorized", "control")
+		})
+	}
+}
+
 type gatedObservationDesktop struct {
 	*fakeDesktop
 	beforeInfo    func(context.Context) error
