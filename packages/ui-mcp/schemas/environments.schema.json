@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "state_dir", "environments"],
+  "properties": {
+    "version": { "const": 1 },
+    "state_dir": { "type": "string", "minLength": 1 },
+    "limits": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "sessions",
+          "node_sessions",
+          "session_idle_ms",
+          "step_timeout_ms",
+          "run_timeout_ms",
+          "max_run_timeout_ms",
+          "max_steps",
+          "requests",
+          "retention_days",
+          "run_bytes",
+          "total_bytes"
+        ]
+      },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "environments": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-zA-Z0-9_-]{1,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/Environment" }
+    }
+  },
+  "$defs": {
+    "Strings": { "type": "array", "items": { "type": "string" } },
+    "StringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "Account": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storage_state": { "type": "string" },
+        "secrets": { "$ref": "#/$defs/StringMap" }
+      }
+    },
+    "Environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["driver"],
+      "properties": {
+        "name": { "type": "string" },
+        "driver": { "enum": ["web", "electron"] },
+        "url": { "type": "string" },
+        "allowed_origins": { "$ref": "#/$defs/Strings" },
+        "executable": { "type": "string" },
+        "args": { "$ref": "#/$defs/Strings" },
+        "cwd": { "type": "string" },
+        "env": { "$ref": "#/$defs/StringMap" },
+        "headless": { "const": true },
+        "background_capable": { "type": "boolean" },
+        "script_enabled": { "type": "boolean" },
+        "trace": { "type": "boolean" },
+        "mask": { "$ref": "#/$defs/Strings" },
+        "upload_root": { "type": "string" },
+        "state_template": { "type": "string" },
+        "init_module": { "type": "string" },
+        "locators": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "urn:xmesh:ui:protocol:1#/$defs/Target"
+          }
+        },
+        "accounts": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Account" }
+        },
+        "resources": { "$ref": "#/$defs/Strings" },
+        "coverage": { "$ref": "#/$defs/Strings" },
+        "fixtures": { "enum": ["real", "mock"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "driver": { "const": "web" } } },
+          "then": { "required": ["url"] }
+        },
+        {
+          "if": { "properties": { "driver": { "const": "electron" } } },
+          "then": { "required": ["executable"] }
+        }
+      ]
+    }
+  }
+}

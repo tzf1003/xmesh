@@ -31,7 +31,7 @@ export interface ImportResult {
 }
 
 /** Fields the kernel's backend shape (and this importer) understands, outside the transport-specific ones. */
-const COMMON_KEYS = ["type", "transport", "cwd", "policy", "idle_timeout", "favorite", "env"];
+const COMMON_KEYS = ["type", "transport", "cwd", "policy", "idle_timeout", "favorite", "env", "shutdown_timeout", "process_cleanup"];
 // The kernel has no SSE client, so an `sse` entry is refused rather than written as a backend that cannot connect.
 const HTTP_TYPES = ["http", "streamable-http"];
 
@@ -116,6 +116,21 @@ function convertEntry(name: string, raw: unknown): Converted {
   if (cwd !== undefined) value.cwd = cwd;
   if (idle !== undefined) value.idle_timeout = idle;
   if (raw.favorite === true) value.favorite = true;
+  if (raw.shutdown_timeout !== undefined || raw.process_cleanup !== undefined) {
+    if (transport !== "stdio") return fail("entry");
+    if (raw.process_cleanup !== undefined) {
+      if (raw.process_cleanup !== "tree") return fail("entry");
+      value.process_cleanup = "tree";
+    }
+    if (raw.shutdown_timeout !== undefined) {
+      if (typeof raw.shutdown_timeout !== "string" || !DURATION.test(raw.shutdown_timeout)) return fail("entry");
+      const units: Record<string,number> = {ns:1e-9,us:1e-6,"µs":1e-6,ms:1e-3,s:1,m:60,h:3600};
+      let seconds=0;
+      for (const match of raw.shutdown_timeout.matchAll(/([0-9]+(?:\.[0-9]+)?)(ns|us|µs|ms|s|m|h)/g)) seconds += Number(match[1])*units[match[2]!]!;
+      if (!(seconds>0 && seconds<=30)) return fail("entry");
+      value.shutdown_timeout=raw.shutdown_timeout;
+    }
+  }
 
   const warnings: ImportNote[] = [];
   let env: Record<string, string> | undefined;
