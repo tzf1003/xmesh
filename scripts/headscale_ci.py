@@ -161,7 +161,7 @@ def main():
                 (node / "config.json").write_text(json.dumps(cfg))
                 process, log = spawn(command, name)
                 nodes[name] = (process, log, f"127.0.0.1:{port}")
-            tokens = {name: wait_for_default_token(work / name / "state") for name in nodes}
+            tokens = {name: wait_for_default_token(binary, work / name / "state") for name in nodes}
             clients = {name: wait_for_gateway(process, gateway, log, tokens[name], seconds=90)
                        for name, (process, log, gateway) in nodes.items()}
             results = []

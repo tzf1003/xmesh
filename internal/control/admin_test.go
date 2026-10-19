@@ -238,11 +238,12 @@ type fakeIngress struct {
 }
 
 func Test_ControlPatsReportAbsoluteTokenPath(t *testing.T) {
+	t.Chdir(t.TempDir())
 	workingDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenFile := filepath.Join(t.TempDir(), "operator.token")
+	tokenFile := filepath.Join(workingDir, "operator.token")
 	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("a", 40)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

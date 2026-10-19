@@ -117,7 +117,7 @@ class ReleaseGate(unittest.TestCase):
         self.assertEqual(code, 1)
 
 
-from test_accept_scripts import AcceptCollect, AcceptConfig, PtyBudget  # noqa: E402,F401  (picked up by unittest.main)
+from test_accept_scripts import AcceptCollect, AcceptConfig, GatewayTokenDiscovery, PtyBudget  # noqa: E402,F401  (picked up by unittest.main)
 
 
 if __name__ == "__main__":

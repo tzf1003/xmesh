@@ -181,6 +181,10 @@ func writeManagedPatFile(file, name, token string) error {
 func writeNewPatFile(path string, body []byte) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
+		// Windows reports access denied when exclusive creation meets a directory.
+		if _, statErr := os.Lstat(path); statErr == nil {
+			return &os.PathError{Op: "create", Path: path, Err: os.ErrExist}
+		}
 		return err
 	}
 	_, err = f.Write(body)

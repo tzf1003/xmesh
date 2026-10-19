@@ -196,10 +196,15 @@ class FakeIngress(http.server.BaseHTTPRequestHandler):
         self.reply({"jsonrpc": "2.0", "id": request["id"], "result": result}, session="s-1")
 
 
+class BurstHTTPServer(http.server.ThreadingHTTPServer):
+    # Ten clients initialize concurrently before the test checks the three-session budget.
+    request_queue_size = 32
+
+
 class PtyBudget(unittest.TestCase):
     def serve(self, limit):
         FakeIngress.opened, FakeIngress.limit = [], limit
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeIngress)
+        server = BurstHTTPServer(("127.0.0.1", 0), FakeIngress)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
         self.addCleanup(server.server_close)

@@ -109,7 +109,7 @@ def main():
                                         "--state-dir", str(root / "state"), "--listen", direct],
                                        stdout=runtime_log, stderr=runtime_log)
             try:
-                gateway_token = wait_for_default_token(root / "state")
+                gateway_token = wait_for_default_token(binary, root / "state")
                 first = wait_for_gateway(process, gateway, runtime_log, gateway_token)
                 second = MCP(gateway, gateway_token)
                 assert first.session != second.session
