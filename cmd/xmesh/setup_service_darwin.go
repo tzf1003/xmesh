@@ -12,6 +12,8 @@ import (
 	"github.com/tzf1003/xmesh/internal/onboarding"
 )
 
+func waitSetupServiceStopped(context.Context, *onboarding.Plan) error { return nil }
+
 func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.ServiceSnapshot, error) {
 	var snap onboarding.ServiceSnapshot
 	home, e := os.UserHomeDir()

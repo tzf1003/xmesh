@@ -8,11 +8,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/onboarding"
 	"golang.org/x/sys/windows"
 )
+
+func waitSetupServiceStopped(ctx context.Context, p *onboarding.Plan) error {
+	ep, err := control.ReadEndpoint(filepath.Dir(p.ConfigPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	limit := kernelExitLimit
+	if deadline, ok := ctx.Deadline(); ok {
+		limit = min(limit, time.Until(deadline))
+	}
+	if limit <= 0 {
+		return context.DeadlineExceeded
+	}
+	return waitKernelExit(ep, limit)
+}
 
 func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.ServiceSnapshot, error) {
 	var snap onboarding.ServiceSnapshot
@@ -67,6 +86,11 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 		return e
 	}
 	_, _ = taskCommand(dir, "/End", "/TN", snap.Path)
+	// Task Scheduler acknowledges /End before the old kernel releases ports.
+	// Wait for that exact process before restoring and starting its replacement.
+	if e = waitSetupServiceStopped(ctx, p); e != nil {
+		return e
+	}
 	tmp, e := os.CreateTemp("", "xmesh-service-restore-*.xml")
 	if e != nil {
 		return e
@@ -85,6 +109,24 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 	}
 	if snap.Running {
 		_, e = taskCommand(dir, "/Run", "/TN", snap.Path)
+		if e != nil {
+			return e
+		}
+		for {
+			// The restored config may predate onboarding and its PAT grant.
+			// Use the same owner-only status channel as the saved baseline.
+			if ep, err := control.ReadEndpoint(filepath.Dir(p.ConfigPath)); err == nil {
+				var status any
+				if control.NewClient(ep).Fetch(ctx, "/v1/status", &status) == nil {
+					return nil
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
 	}
 	return e
 }
