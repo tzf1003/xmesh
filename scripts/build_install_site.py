@@ -24,10 +24,10 @@ def build(source, output, version, repo, base_url, manifest=None, homepage=True)
     docs = version_dir / "agent"
     docs.mkdir(parents=True, exist_ok=True)
     for file in (source / "docs/agent").glob("*.md"):
-        (docs / file.name).write_text(file.read_text().replace("v1.2.3", version))
+        (docs / file.name).write_text(file.read_text(encoding="utf-8").replace("v1.2.3", version), encoding="utf-8")
     for name in ("install.sh", "install.ps1"):
         shutil.copy2(source / "scripts" / name, version_dir / name)
-    (version_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (version_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     for file in (source / "docs/site").iterdir():
         if file.suffix in (".js", ".css"):
             shutil.copy2(file, version_dir / file.name)
@@ -37,12 +37,12 @@ def build(source, output, version, repo, base_url, manifest=None, homepage=True)
               "请确认我的用途（本机/多设备/云端）、工作目录、开发或只读权限、Codex/Claude Code 客户端；"
               "展示 setup plan 后等待我确认，再 apply。浏览器登录由我完成。保存 plan/job ID，"
               "遇到问题使用 status/resume/verify/doctor，并在真实客户端请求验证后报告完成。")
-    (version_dir / "prompt.txt").write_text(prompt + "\n")
-    navigation = (source / "llms.txt").read_text().replace("docs/agent/", "agent/")
+    (version_dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
+    navigation = (source / "llms.txt").read_text(encoding="utf-8").replace("docs/agent/", "agent/")
     navigation = navigation.replace("(docs/", f"(https://raw.githubusercontent.com/{repo}/{version}/docs/")
-    (version_dir / "llms.txt").write_text(navigation)
+    (version_dir / "llms.txt").write_text(navigation, encoding="utf-8")
     config = {"version": version, "release": release, "assets": [x for x in manifest["assets"] if x["kind"] == "desktop"]}
-    template = (source / "docs/site/template.html").read_text()
+    template = (source / "docs/site/template.html").read_text(encoding="utf-8")
     def render(prefix):
         values = {"VERSION": version, "CHANNEL": channel, "RELEASE": f"https://github.com/{repo}/releases/tag/{version}",
                   "REPO": f"https://github.com/{repo}", "DOCS": prefix + "agent", "LLMS": prefix + "llms.txt",
@@ -52,11 +52,11 @@ def build(source, output, version, repo, base_url, manifest=None, homepage=True)
         for key, value in values.items():
             page = page.replace("@@" + key + "@@", value if key == "CONFIG" else html.escape(value, quote=True))
         return page
-    (version_dir / "index.html").write_text(render(""))
+    (version_dir / "index.html").write_text(render(""), encoding="utf-8")
     if homepage:
         output.mkdir(parents=True, exist_ok=True)
-        (output / "index.html").write_text(render(f"versions/{version}/"))
-        (output / "llms.txt").write_text(navigation.replace("(agent/", f"(versions/{version}/agent/"))
+        (output / "index.html").write_text(render(f"versions/{version}/"), encoding="utf-8")
+        (output / "llms.txt").write_text(navigation.replace("(agent/", f"(versions/{version}/agent/"), encoding="utf-8")
     return version_dir
 
 def main():
@@ -71,7 +71,7 @@ def main():
     args = parser.parse_args()
     try:
         build(args.source, args.output, args.version, args.repo, args.base_url,
-              json.loads(args.manifest.read_text()), not args.version_only)
+              json.loads(args.manifest.read_text(encoding="utf-8")), not args.version_only)
     except (ValueError, OSError, KeyError) as exc:
         parser.exit(1, f"install site: {exc}\n")
 

@@ -101,7 +101,7 @@ def main():
     try:
         manifest = build(args.dist, args.version, args.repo)
         output = args.output or args.dist / "manifest.json"
-        output.write_text(json.dumps(manifest, indent=2) + "\n")
+        output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         if args.offline_bundles:
             bundles(args.dist, manifest, Path(__file__).resolve().parent.parent)
     except (OSError, ValueError, KeyError) as exc:

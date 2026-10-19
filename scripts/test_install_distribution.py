@@ -24,9 +24,9 @@ def fixture(directory, version="v1.2.3-beta.2", signed=False):
             label, ext = ("mac", "dmg") if osname == "darwin" else ("win", "exe")
             machine = "x64" if arch == "amd64" else arch
             (directory / f"xmesh-ui-{version[1:]}-{label}-{machine}.{ext}").write_bytes(f"fixture {osname}/{arch}".encode())
-            (directory / f"signing-{osname}-{arch}.json").write_text(json.dumps({"signed":signed,"notarized":signed,"stapled":signed}))
+            (directory / f"signing-{osname}-{arch}.json").write_text(json.dumps({"signed":signed,"notarized":signed,"stapled":signed}), encoding="utf-8")
     manifest = build(directory, version, "tzf1003/xmesh")
-    (directory / "manifest.json").write_text(json.dumps(manifest))
+    (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return manifest
 
 class ManifestTests(unittest.TestCase):
@@ -86,19 +86,19 @@ class SiteTests(unittest.TestCase):
             site=directory/'site'
             version_dir=build_site(ROOT,site,manifest['version'],'tzf1003/xmesh','https://tzf1003.github.io/xmesh',manifest)
             for page in (site/'index.html',version_dir/'index.html'):
-                text=page.read_text();self.assertNotIn('@@',text)
+                text=page.read_text(encoding="utf-8");self.assertNotIn('@@',text)
                 parser=Links();parser.feed(text)
                 for link in parser.links:
                     if link.startswith(('https:','#')):continue
                     self.assertTrue((page.parent/link).is_file(),f'{page}: {link}')
-            prompt=(version_dir/'prompt.txt').read_text()
+            prompt=(version_dir/'prompt.txt').read_text(encoding="utf-8")
             self.assertIn('/versions/v1.2.3-beta.2/agent/README.md',prompt)
             self.assertIn('plan/job ID',prompt)
-            self.assertIn(manifest['version'],(version_dir/'agent/install.md').read_text())
+            self.assertIn(manifest['version'],(version_dir/'agent/install.md').read_text(encoding="utf-8"))
             for navigation in (site/'llms.txt',version_dir/'llms.txt'):
-                for link in re.findall(r'\]\(([^)]+)\)',navigation.read_text()):
+                for link in re.findall(r'\]\(([^)]+)\)',navigation.read_text(encoding="utf-8")):
                     if not link.startswith('https:'):self.assertTrue((navigation.parent/link).is_file())
-            self.assertNotIn('arch.value="amd64"', (ROOT/'docs/site/install.js').read_text().split('if(navigator.userAgentData')[0])
+            self.assertNotIn('arch.value="amd64"', (ROOT/'docs/site/install.js').read_text(encoding="utf-8").split('if(navigator.userAgentData')[0])
 
     def test_site_requires_manifest_identity(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -142,7 +142,7 @@ class BootstrapTests(unittest.TestCase):
                 for asset in manifest['assets']:
                     asset['trust']['notarized']=False
                     asset['trust']['stapled']=False
-                (directory/'manifest.json').write_text(json.dumps(manifest))
+                (directory/'manifest.json').write_text(json.dumps(manifest), encoding="utf-8")
                 options=['--download-only'] if osname=='darwin' else ['-DownloadOnly']
                 result,events=self.invoke(directory,osname,*options)
                 self.assertEqual(result.returncode,0,result.stderr+result.stdout)
@@ -164,7 +164,7 @@ class BootstrapTests(unittest.TestCase):
             with self.subTest(os=osname),tempfile.TemporaryDirectory() as temp:
                 directory=Path(temp);manifest=fixture(directory)
                 for asset in manifest['assets']:asset['url']='https://example.org/installer'
-                (directory/'manifest.json').write_text(json.dumps(manifest))
+                (directory/'manifest.json').write_text(json.dumps(manifest), encoding="utf-8")
                 options=['--download-only','--allow-unsigned'] if osname=='darwin' else ['-DownloadOnly','-AllowUnsigned']
                 result,events=self.invoke(directory,osname,*options)
                 self.assertNotEqual(result.returncode,0);self.assertEqual(events[-1]['phase'],'manifest')
