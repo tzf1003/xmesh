@@ -32,6 +32,19 @@ test("older kernels explain desktop capability availability", async () => {
   finally { await h.close(); }
 });
 
+test("capture availability still reports missing input authorization", async () => {
+  const h = await launch({ kernel: { capabilities: ["status", "events", "computer"] } });
+  try {
+    h.kernel.panel.computer.info.reason = "input_permission_required";
+    h.kernel.panel.computer.info.capabilities = ["screenshot"];
+    const page = await h.openPanel();
+    await navigate(page, "computer");
+    const state = page.getByTestId("computer-state");
+    await expect(state).toHaveText("需要系统授权");
+    await expect(state.locator("..")).toHaveClass(/warn/);
+  } finally { await h.close(); }
+});
+
 test("desktop preview renders MCP images with observation leases and clears on exit", async () => {
   const h = await launch({ kernel: { playground: true, capabilities: ["status", "events", "peers", "sessions", "computer", "pats", "config.read", "config.write"] } });
   try {
