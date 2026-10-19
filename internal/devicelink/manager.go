@@ -564,13 +564,23 @@ func readFrame(ctx context.Context, conn *websocket.Conn) (frame, error) {
 
 // Handler binds the listener's path kind rather than accepting a client-supplied network label.
 func (m *Manager) Handler(kind device.PathKind) http.Handler {
+	return m.handler(kind, 0)
+}
+
+// HandlerAt binds an HTTP listener to the provider generation that created it.
+// A request queued on a retired listener cannot adopt a replacement's generation.
+func (m *Manager) HandlerAt(kind device.PathKind, generation uint64) http.Handler {
+	return m.handler(kind, generation)
+}
+
+func (m *Manager) handler(kind device.PathKind, listenerGeneration uint64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != LinkPath {
 			http.NotFound(w, r)
 			return
 		}
 		generation, enabled := m.opts.Directory.Provider(kind)
-		if !enabled {
+		if !enabled || (listenerGeneration != 0 && generation != listenerGeneration) {
 			http.Error(w, "连接路径已关闭", 503)
 			return
 		}

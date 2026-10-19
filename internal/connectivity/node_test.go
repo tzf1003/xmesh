@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -192,5 +193,20 @@ func TestProbeSchedulingSeparatesDevicesAfterAddressReuse(t *testing.T) {
 	n.mu.Unlock()
 	if !queued {
 		t.Fatal("old device's probe suppressed the current occupant")
+	}
+}
+
+func TestRetiredListenerRejectsRequestsAfterReplacementIsReady(t *testing.T) {
+	n, _ := node(t, "local")
+	old := n.handler(device.LAN, 1)
+	if err := n.directory.SetProvider(device.LAN, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{device.PairPath + "identity", devicelink.LinkPath} {
+		response := httptest.NewRecorder()
+		old.ServeHTTP(response, httptest.NewRequest("POST", route, nil))
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatal("retired listener served request", route, response.Code)
+		}
 	}
 }

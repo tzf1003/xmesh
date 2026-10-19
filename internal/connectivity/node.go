@@ -324,8 +324,16 @@ func (n *Node) dialLink(ctx context.Context, id string, path device.Path) (*webs
 }
 
 func (n *Node) Handler(kind device.PathKind) http.Handler {
+	return n.handler(kind, 0)
+}
+
+func (n *Node) handler(kind device.PathKind, generation uint64) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle(devicelink.LinkPath, n.links.Handler(kind))
+	if generation == 0 {
+		mux.Handle(devicelink.LinkPath, n.links.Handler(kind))
+	} else {
+		mux.Handle(devicelink.LinkPath, n.links.HandlerAt(kind, generation))
+	}
 	mux.HandleFunc("GET "+identityPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(struct {
@@ -336,7 +344,15 @@ func (n *Node) Handler(kind device.PathKind) http.Handler {
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "设备协议已升级，请更新 xmesh 并重新配对", 426)
 	})
-	return n.pairing.Handler(mux)
+	paired := n.pairing.Handler(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current, enabled := n.directory.Provider(kind)
+		if generation != 0 && (!enabled || current != generation) {
+			http.Error(w, "连接路径已关闭", http.StatusServiceUnavailable)
+			return
+		}
+		paired.ServeHTTP(w, r)
+	})
 }
 
 func (n *Node) PairWith(ctx context.Context, kind device.PathKind, address, password, expected string) (device.Document, error) {
@@ -570,7 +586,7 @@ func (n *Node) retireProvider(kind device.PathKind, p *provider) {
 }
 
 func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, listener net.Listener, discovery func(context.Context)) error {
-	server := &http.Server{Handler: n.Handler(kind), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	server := &http.Server{Handler: n.handler(kind, p.generation), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	listener = tls.NewListener(listener, n.pairing.ServerTLS())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
