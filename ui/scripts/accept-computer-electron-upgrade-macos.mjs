@@ -98,6 +98,11 @@ async function nodeStatus() {
   assert.ok(instance, "business node manifest missing");
   return { instance, status: await new ControlClient({ endpoint: instance.manifest.endpoint }).getStatus() };
 }
+async function computerInfo(snapshot) {
+  const major = snapshot.instance.manifest.api_version.split(".")[0];
+  assert.ok(major === "1" || major === "2", "unsupported control API");
+  return (await new ControlClient({ endpoint: snapshot.instance.manifest.endpoint }).call("GET", `/v${major}/computer`)).info;
+}
 async function freeAddress() {
   const server = net.createServer();
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -139,7 +144,7 @@ try {
   await exec(binary, ["computer", "start", "--json"]);
   await exec(binary, ["start", "--name", nodeLabel, "--json"]);
   await waitFor(async () => { try { beforeNode = await nodeStatus(); return true; } catch { return false; } }, "old business node");
-  beforeInfo = (await new ControlClient({ endpoint: beforeNode.instance.manifest.endpoint }).call("GET", "/v1/computer")).info;
+  beforeInfo = await computerInfo(beforeNode);
   beforeHost = await runComputerHost("status", binary);
   assert.equal(beforeHost.version, "v" + beforeVersion); assert.ok(beforeHost.native_pid > 0);
   assert.equal(beforeNode.status.control.kernel_version, "v" + beforeVersion);
@@ -190,7 +195,7 @@ try {
   await waitFor(() => installer.exitCode !== null || installer.signalCode !== null, "DMG installer exit", 120000); assert.equal(installer.exitCode, 0);
   await waitFor(async () => { const pids = await appProcesses(); if (pids.length !== 1 || pids[0] === oldPid) return false; newPid = pids[0]; ownedPids.add(newPid); return true; }, "replacement formal Electron startup");
   await waitFor(async () => { try { afterHost = await runComputerHost("status", binary); afterNode = await nodeStatus(); return !fs.existsSync(pendingFile) && afterHost.running && afterHost.version === "v" + afterVersion && afterNode.status.control.kernel_version === "v" + afterVersion; } catch { return false; } }, "formal app pending-update restoration", 90000);
-  afterInfo = (await new ControlClient({ endpoint: afterNode.instance.manifest.endpoint }).call("GET", "/v1/computer")).info;
+  afterInfo = await computerInfo(afterNode);
   afterHost = await runComputerHost("status", binary);
   for (const pid of [afterHost.pid, afterHost.native_pid, afterNode.instance.manifest.pid]) if (pid) ownedPids.add(pid);
   assert.notEqual(afterHost.pid, beforeHost.pid); assert.ok(afterHost.native_pid > 0 && afterHost.native_pid !== beforeHost.native_pid);

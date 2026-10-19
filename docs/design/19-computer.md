@@ -236,3 +236,5 @@ macOS 已持有输入的释放路径允许原目标窗口消失，继续要求�
 此验收从产品 Updater 模块触发，应用入口与升级后恢复为真实发行代码；使用 background open 包装器传递隔离 user-data 与节点发现路径，尚未从菜单点击触发完整升级。服务升级前后均报告 permission_required，该轮不证明授权延续；已授权服务的延续仍由第二十二轮单独覆盖。0.0.9 产物对应 db9de5b 的运行时代码，应用与 DMG 公证均 Accepted；本机 Gatekeeper 仍报告 security disabled override。DiskImages 在外接 sparsebundle 内挂载返回权限被拒绝，验收改用 /tmp 挂载点，包与主要数据保留外接盘。
 
 db9de5b 的 macOS UI MCP 导航测试在 popup 重定向的请求计数断言失败，其他平台结果单列。新增测试请求类型诊断；本机 Chrome 与 CI 同版 Chromium 156.0.8078.4 各连续二十轮通过。原失败作业已请求重跑，原因尚未确认，最终门禁继续等待对应结果。
+
+合并核对时复用本地 master 的 7f83e06 导航夹具修复：允许的 fetch / image 子资源与被阻止的文档导航分别计数，未分类请求仍计入拒绝断言。新增显式图片请求，验证它实际到达服务端且不影响后续文档 / popup / iframe 拒绝检查；修复后的 CI 同版 Chromium 连续二十轮通过。升级脚本依据节点 manifest 的 Control API 主版本选择 Computer 路由，正式包升级和业务 MCP 复测通过。db9de5b 的第二次 CI 尝试被后续提交取代而取消，不能作为重跑通过。

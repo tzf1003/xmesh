@@ -303,16 +303,14 @@ test("navigation policy allows subresources and denies off-origin documents", as
     frameRedirects = 0,
     posts = 0,
     finalPosts = 0;
-  const outsideRequests: {
-    url: string | undefined;
-    destination: string | undefined;
-  }[] = [];
+  const outsideRequests: string[] = [];
   const outside = http.createServer((req, res) => {
-    hits++;
-    outsideRequests.push({
-      url: req.url,
-      destination: req.headers["sec-fetch-dest"] as string | undefined,
-    });
+    const destination = req.headers["sec-fetch-dest"];
+    outsideRequests.push(`${req.method} ${req.url} ${destination ?? "unknown"}`);
+    // Subresources (including a popup's favicon) remain permitted. Count only
+    // document navigations when checking the origin restriction.
+    // Unclassified requests also count, so missing metadata fails closed.
+    if (destination !== "empty" && destination !== "image") hits++;
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.end("outside");
   });
@@ -379,6 +377,16 @@ test("navigation policy allows subresources and denies off-origin documents", as
       "outside",
     );
     const allowedHits = hits;
+    // Image requests, such as a popup's favicon, are permitted subresources.
+    // Wait for completion before testing the document-navigation boundary.
+    await driver.page.evaluate((address) => new Promise<void>((resolve) => {
+      const image = new Image();
+      image.onload = image.onerror = () => resolve();
+      image.src = address + "/fixture-icon";
+      document.body.append(image);
+    }), outsideUrl);
+    assert.ok(outsideRequests.some(request => request.includes("/fixture-icon image")), JSON.stringify(outsideRequests));
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const forbidden = await driver.context.newPage();
     await assert.rejects(forbidden.goto(outsideUrl), /ERR_BLOCKED_BY_CLIENT/);
     await forbidden.close();
