@@ -1,3 +1,4 @@
+import { FakeWorkspace } from "./workspace";
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -8,6 +9,8 @@ import type { ToolDescriptor } from "../src/shared/playground";
 /** A protocol-speaking test Gateway; the panel uses its production MCP client against it. */
 export class FakePlayground {
   url = "";
+  workspace?: FakeWorkspace;
+  enableWorkspace(): FakeWorkspace { this.workspace = new FakeWorkspace(); this.tools.push(...this.workspace.tools()); return this.workspace; }
   readonly calls: { name: string; args: Record<string, unknown>; origin?: string }[] = [];
   readonly sessions = new Map<string, { transport: StreamableHTTPServerTransport; server: Server }>();
   tools: ToolDescriptor[] = [
@@ -46,6 +49,9 @@ export class FakePlayground {
       if (name === "tools.search") {
         const prefix = String(args.device) + "/";
         body = { tools: this.tools.filter((t) => t.name.startsWith(prefix) && (args.pattern === "*" || `${t.name} ${t.description}`.toLowerCase().includes(String(args.pattern).toLowerCase()))), truncated: false };
+      } else if (this.workspace && /\/(fs|pty)\./.test(name)) {
+        body = await this.workspace.call(name.split("/").at(-1)!, args, transport.sessionId ?? "owner", extra.signal);
+        isError = typeof body.error === "string";
       } else if (name.endsWith("/demo.denied")) { body = { error: "policy_denied", rule: "test.deny", message: "Denied by remote policy" }; isError = true; }
       else if (name.endsWith("/demo.slow")) {
         await extra.sendNotification({ method: "notifications/progress", params: { progressToken: request.params._meta?.progressToken ?? 0, progress: 1, total: 10, message: "working" } });

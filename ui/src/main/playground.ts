@@ -18,12 +18,14 @@ export class PlaygroundService {
   private connecting?: Promise<Client>;
   private epoch = 0;
   private revision = 0;
+  private readonly waiting = new Map<string, { cancelled: boolean }>();
   private readonly running = new Map<string, AbortController>();
   private readonly progress: Record<string, { progress: number; total?: number; message?: string }> = Object.create(null) as Record<string, { progress: number; total?: number; message?: string }>;
   constructor(private readonly controller: Controller, private readonly desktop?: { copy(text: string): void; save(text: string): Promise<boolean> }) {}
 
-  async close(): Promise<void> {
+  async close(cancelPending = true): Promise<void> {
     this.epoch++;
+    if (cancelPending) for (const pending of this.waiting.values()) pending.cancelled = true;
     for (const c of this.running.values()) c.abort();
     this.running.clear();
     for (const k of Object.keys(this.progress)) delete this.progress[k];
@@ -57,7 +59,7 @@ export class PlaygroundService {
     if (this.connection?.key === key) return this.connection.client;
     if (this.connecting) { await this.connecting; return this.client(instance); }
     this.connecting = (async () => {
-      await this.close();
+      await this.close(false);
       const generation = this.epoch;
       const client = new Client({ name: "xmesh-panel", version: "1.0.0" }, { capabilities: {} });
       const transport = new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${token}`, "X-Xmesh-Origin": "panel" }, redirect: "error" } });
@@ -76,18 +78,25 @@ export class PlaygroundService {
   }
 
   async call(instance: string, id: string, name: string, args: Record<string, unknown>, timeoutMs: number): Promise<CallOutcome> {
-    const client = await this.client(instance);
-    if (this.running.has(id) || this.running.size >= 8) throw new Error("Too many calls or duplicate call id");
-    const abort = new AbortController();
-    this.running.set(id, abort);
+    if (this.waiting.has(id) || this.running.has(id) || this.waiting.size + this.running.size >= 8) throw new Error("Too many calls or duplicate call id");
+    const pending = { cancelled: false };
+    this.waiting.set(id, pending);
     const started = Date.now();
     try {
+      const client = await this.client(instance);
+      if (pending.cancelled) throw new Error("Call cancelled");
+      this.waiting.delete(id);
+      const abort = new AbortController();
+      this.running.set(id, abort);
       const result = await client.callTool({ name, arguments: args }, undefined, {
         signal: abort.signal, timeout: timeoutMs, maxTotalTimeout: timeoutMs,
         onprogress: (p) => { this.progress[id] = { progress: p.progress, total: p.total, message: p.message }; },
       });
       return { result: result as ToolResult, durationMs: Date.now() - started };
-    } finally { this.running.delete(id); delete this.progress[id]; }
+    } catch (e) {
+      if ((e as { code?: number }).code === 404 || (e instanceof Error && /session.*(not found|expired|invalid)/i.test(e.message))) await this.close();
+      throw e;
+    } finally { this.waiting.delete(id); this.running.delete(id); delete this.progress[id]; }
   }
 
   async request<R extends PlaygroundRequest>(req: R): Promise<DataResult<PlaygroundResult<R>>> {
@@ -100,7 +109,9 @@ export class PlaygroundService {
         case "cancel": {
           const pending = this.running.get(req.id);
           pending?.abort();
-          data = { cancelled: pending !== undefined };
+          const queued = this.waiting.get(req.id);
+          if (queued) queued.cancelled = true;
+          data = { cancelled: pending !== undefined || queued !== undefined };
           break;
         }
         case "status": data = { revision: this.revision, progress: { ...this.progress } }; break;
@@ -119,7 +130,11 @@ export class PlaygroundService {
           } else {
             const out = await client.callTool({ name: "tools.search", arguments: { device: req.device, pattern: req.pattern ?? "*" } }) as ToolResult;
             const raw: Record<string, unknown> = out.structuredContent ?? JSON.parse(out.content.filter((c) => c.type === "text").map((c) => c.text).join("")) as Record<string, unknown>;
-            if (out.isError) throw new Error(JSON.stringify(raw));
+            if (out.isError) {
+              const error = new Error(String(raw.message ?? JSON.stringify(raw))) as Error & { code: string };
+              error.code = typeof raw.error === "string" ? raw.error : "tool_error";
+              throw error;
+            }
             data = { tools: raw.tools ?? [], truncated: raw.truncated === true, revision: this.revision };
           }
           break;
@@ -127,7 +142,8 @@ export class PlaygroundService {
       }
       return { ok: true, data: data as PlaygroundResult<R> };
     } catch (e) {
-      let code = "unavailable";
+      let code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "playground_error";
+      if (e instanceof Error && e.name === "TokenUnavailableError") code = "token_unavailable";
       if (e instanceof McpError) code = e.code === -32001 ? "timeout" : "protocol_error";
       if (e instanceof Error && /abort|cancel/i.test(e.message)) code = "cancelled";
       return { ok: false, error: { code, message: e instanceof Error ? e.message : String(e) } };

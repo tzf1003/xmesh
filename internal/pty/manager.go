@@ -87,7 +87,7 @@ func (m *Manager) Call(ctx context.Context, c identity.Caller, r *cwd.Resolver, 
 		return m.open(c, r, p, a)
 	}
 	if name == "pty.list" {
-		return Object{"sessions": m.List()}, nil
+		return Object{"sessions": m.List(), "caller_id": c.ID}, nil
 	}
 	m.mu.Lock()
 	s := m.sessions[a.SessionID]
