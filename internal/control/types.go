@@ -31,6 +31,10 @@ type Host interface {
 	Resume()
 }
 
+type RemoteDrainer interface {
+	RemoteDrain(context.Context, v2.DrainRequest) ([]v2.DrainOutcome, error)
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	h := w.Header()
 	h.Set("Content-Type", v2.ContentTypeJSON)

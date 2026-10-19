@@ -34,13 +34,21 @@ type DrainState struct {
 }
 
 type DrainRequest struct {
-	Mode DrainMode `json:"mode,omitempty"`
+	Mode   DrainMode `json:"mode,omitempty"`
+	Scope  string    `json:"scope,omitempty"`
+	Device string    `json:"device,omitempty"`
 }
 
 type DrainResponse struct {
-	Drain          DrainState `json:"drain"`
-	ClosedPTY      int        `json:"closed_pty"`
-	ReleasedLeases int        `json:"released_leases"`
+	Drain          DrainState     `json:"drain"`
+	ClosedPTY      int            `json:"closed_pty"`
+	ReleasedLeases int            `json:"released_leases"`
+	Outcomes       []DrainOutcome `json:"outcomes,omitempty"`
+}
+
+type DrainOutcome struct {
+	Device string `json:"device"`
+	Error  string `json:"error,omitempty"`
 }
 
 // StatusResponse is GET /v2/status and the data of a status event (control-status.schema.json).

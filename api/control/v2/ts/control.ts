@@ -939,6 +939,8 @@ export interface DrainRequest {
    * 与 CTR-GW-05 的 drain 载荷同义。keep 拒绝新调用并保留现有资源，kill 另外终止本机全部 PTY 并释放全部租约。
    */
   mode?: "keep" | "kill";
+  scope?: "local" | "device" | "mesh";
+  device?: string;
 }
 export interface DrainResponse {
   drain: DrainState;
@@ -950,6 +952,11 @@ export interface DrainResponse {
    * 这次请求新释放的租约数。keep 与 resume 恒为 0。
    */
   released_leases: number;
+  outcomes?: DrainOutcome[];
+}
+export interface DrainOutcome {
+  device: string;
+  error?: string;
 }
 export interface ControlEndpointFile {
   api_version: ApiVersion;
@@ -1734,7 +1741,8 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "if_match": "none",
     "errors": [
       "invalid_args",
-      "conflict"
+      "conflict",
+      "unavailable"
     ]
   },
   {

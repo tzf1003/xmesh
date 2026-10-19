@@ -70,6 +70,7 @@ type Node struct {
 	directory      *device.Directory
 	links          *devicelink.Manager
 	accept         func(context.Context, identity.Principal, mcp.Transport) error
+	admin          http.Handler
 	providers      map[device.PathKind]*provider
 	candidates     map[string]Candidate
 	workers        sync.WaitGroup
@@ -151,12 +152,14 @@ func (n *Node) SetAgent(accept func(context.Context, identity.Principal, mcp.Tra
 	n.accept = accept
 	n.mu.Unlock()
 }
-func (n *Node) Reconfigure(cfg config.Mesh)  { n.mu.Lock(); n.cfg = cfg; n.mu.Unlock() }
-func (n *Node) Identity() *device.Identity   { return n.identity }
-func (n *Node) Trust() *device.TrustStore    { return n.trust }
-func (n *Node) Pairing() *device.Pairing     { return n.pairing }
-func (n *Node) Directory() *device.Directory { return n.directory }
-func (n *Node) Links() *devicelink.Manager   { return n.links }
+
+func (n *Node) SetAdmin(handler http.Handler) { n.mu.Lock(); n.admin = handler; n.mu.Unlock() }
+func (n *Node) Reconfigure(cfg config.Mesh)   { n.mu.Lock(); n.cfg = cfg; n.mu.Unlock() }
+func (n *Node) Identity() *device.Identity    { return n.identity }
+func (n *Node) Trust() *device.TrustStore     { return n.trust }
+func (n *Node) Pairing() *device.Pairing      { return n.pairing }
+func (n *Node) Directory() *device.Directory  { return n.directory }
+func (n *Node) Links() *devicelink.Manager    { return n.links }
 
 type ProviderStatus struct {
 	Kind           device.PathKind
@@ -343,6 +346,16 @@ func (n *Node) handler(kind device.PathKind, generation uint64) http.Handler {
 	})
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "设备协议已升级，请更新 xmesh 并重新配对", 426)
+	})
+	mux.HandleFunc("/control/drain", func(w http.ResponseWriter, r *http.Request) {
+		n.mu.Lock()
+		admin := n.admin
+		n.mu.Unlock()
+		if admin == nil {
+			http.NotFound(w, r)
+			return
+		}
+		admin.ServeHTTP(w, r)
 	})
 	paired := n.pairing.Handler(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

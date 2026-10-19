@@ -190,6 +190,8 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 规则见 [RUL-16](rulings.md#rul-16)：对已在 drain 的进程重复 `keep` 是 no-op；`keep` 升级到 `kill` 允许，且 `since` 不重置；`kill` 降级到 `keep` 返回 `conflict`，`reason` 为 `drain_downgrade`；未在 drain 时 `resume` 是 no-op。两个路由都返回完整的 `DrainState`。
 
+版本 2 还支持通过此路由排空远端设备：`scope: "device"` 搭配设备 ID 或本地 alias，或 `scope: "mesh"` 选择全部在线 `tag:device` 设备。省略 scope 或使用 `local` 保持本机语义。远程操作使用当前运行节点的已验证路径，目标按设备 ID 核验并检查 xmesh 信任授予的 `tag:admin`。响应的 `outcomes` 逐台提供 `{device, error?}`；远程排空不改变调用节点的本机 drain 状态。部分失败保留各台结果，CLI 返回失败退出码。`xmesh drain --config ... --scope device|mesh` 在版本 2 使用该本机控制通道。
+
 ## CTR-CTL-07
 
 ### GET /v2/config

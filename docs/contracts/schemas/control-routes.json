@@ -71,7 +71,8 @@
       "if_match": "none",
       "errors": [
         "invalid_args",
-        "conflict"
+        "conflict",
+        "unavailable"
       ]
     },
     {

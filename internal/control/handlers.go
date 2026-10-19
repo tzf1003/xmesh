@@ -167,6 +167,28 @@ func (s *Server) startDrain(w http.ResponseWriter, r *http.Request, _ *call) {
 		failWith(w, argError("mode", "mode 只能是 keep 或 kill"))
 		return
 	}
+	if req.Scope != "" && req.Scope != "local" {
+		if (req.Scope != "device" && req.Scope != "mesh") || (req.Scope == "device") != (req.Device != "") {
+			failWith(w, argError("scope", "远程排空使用 device 与设备 ID，或 mesh"))
+			return
+		}
+		host, ok := s.o.Host.(RemoteDrainer)
+		if !ok {
+			failWith(w, newError(v2.ErrUnavailable, "设备连接服务不可用"))
+			return
+		}
+		outcomes, err := host.RemoteDrain(r.Context(), req)
+		if err != nil {
+			failWith(w, newError(v2.ErrUnavailable, err.Error()))
+			return
+		}
+		writeJSON(w, 200, v2.DrainResponse{Drain: s.currentDrain(), Outcomes: outcomes})
+		return
+	}
+	if req.Device != "" {
+		failWith(w, argError("device", "本机排空不使用 device"))
+		return
+	}
 	s.drainMu.Lock()
 	state := s.reconcileLocked(s.o.Host.Draining())
 	resp := v2.DrainResponse{Drain: state}

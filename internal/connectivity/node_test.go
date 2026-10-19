@@ -210,3 +210,40 @@ func TestRetiredListenerRejectsRequestsAfterReplacementIsReady(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteDrainUsesDeviceTrustAndPersistentTargetID(t *testing.T) {
+	a, _ := node(t, "admin")
+	b, cfg := node(t, "workstation")
+	ag, err := agent.New(config.Static(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ag.Close)
+	ag.SetNetwork("lan", identity.Principal{Node: b.identity.ID})
+	b.SetAdmin(ag.Control(b.Authenticate, nil))
+	server := serveNode(t, b)
+	if err := b.pairing.SetPassword("correct horse battery"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.PairWith(t.Context(), device.LAN, server.URL, "correct horse battery", b.identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	peer := mesh.Peer{ID: b.identity.ID, Name: "local-alias"}
+	req := agent.DrainRequest{Scope: "device", Device: peer.ID, Drain: "keep"}
+	if err := a.SendDrain(t.Context(), peer, req); err == nil || ag.Draining() {
+		t.Fatal("network reachability granted administration", err)
+	}
+	if err := b.trust.Grant(t.Context(), a.identity.Document("admin"), []string{"tag:admin"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SendDrain(t.Context(), peer, req); err != nil || !ag.Draining() {
+		t.Fatal("paired administrator could not drain by device ID", err)
+	}
+	ag.Resume()
+	if err := b.trust.Revoke(t.Context(), a.identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SendDrain(t.Context(), peer, req); err == nil || ag.Draining() {
+		t.Fatal("revoked administrator drained device", err)
+	}
+}

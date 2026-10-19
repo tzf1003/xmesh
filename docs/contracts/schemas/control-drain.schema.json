@@ -2,34 +2,75 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xmesh:schema:control-drain:2",
   "title": "ControlDrain",
-  "description": "CTR-CTL-06。POST /v2/drain 与 POST /v2/resume。drain 状态只在内存，内核重启后复位。",
+  "description": "CTR-CTL-06\u3002POST /v2/drain \u4e0e POST /v2/resume\u3002drain \u72b6\u6001\u53ea\u5728\u5185\u5b58\uff0c\u5185\u6838\u91cd\u542f\u540e\u590d\u4f4d\u3002",
   "$defs": {
     "DrainState": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["draining", "mode", "since"],
+      "required": [
+        "draining",
+        "mode",
+        "since"
+      ],
       "properties": {
-        "draining": { "type": "boolean" },
+        "draining": {
+          "type": "boolean"
+        },
         "mode": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/DrainMode" },
-            { "type": "null" }
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/DrainMode"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "draining 为 false 时是 null。"
+          "description": "draining \u4e3a false \u65f6\u662f null\u3002"
         },
         "since": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
-            { "type": "null" }
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "进入当前 drain 的时间。keep 升级为 kill 时不重置。draining 为 false 时是 null。"
+          "description": "\u8fdb\u5165\u5f53\u524d drain \u7684\u65f6\u95f4\u3002keep \u5347\u7ea7\u4e3a kill \u65f6\u4e0d\u91cd\u7f6e\u3002draining \u4e3a false \u65f6\u662f null\u3002"
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "draining": { "const": true } }, "required": ["draining"] },
-          "then": { "properties": { "mode": { "type": "string" }, "since": { "type": "string" } } },
-          "else": { "properties": { "mode": { "type": "null" }, "since": { "type": "null" } } }
+          "if": {
+            "properties": {
+              "draining": {
+                "const": true
+              }
+            },
+            "required": [
+              "draining"
+            ]
+          },
+          "then": {
+            "properties": {
+              "mode": {
+                "type": "string"
+              },
+              "since": {
+                "type": "string"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "mode": {
+                "type": "null"
+              },
+              "since": {
+                "type": "null"
+              }
+            }
+          }
         }
       ]
     },
@@ -40,24 +81,64 @@
         "mode": {
           "$ref": "urn:xmesh:schema:control-common:2#/$defs/DrainMode",
           "default": "keep"
+        },
+        "scope": {
+          "enum": [
+            "local",
+            "device",
+            "mesh"
+          ]
+        },
+        "device": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         }
       }
     },
     "DrainResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["drain", "closed_pty", "released_leases"],
+      "required": [
+        "drain",
+        "closed_pty",
+        "released_leases"
+      ],
       "properties": {
-        "drain": { "$ref": "#/$defs/DrainState" },
+        "drain": {
+          "$ref": "#/$defs/DrainState"
+        },
         "closed_pty": {
           "type": "integer",
           "minimum": 0,
-          "description": "这次请求新终止的 PTY 数。keep 与 resume 恒为 0。"
+          "description": "\u8fd9\u6b21\u8bf7\u6c42\u65b0\u7ec8\u6b62\u7684 PTY \u6570\u3002keep \u4e0e resume \u6052\u4e3a 0\u3002"
         },
         "released_leases": {
           "type": "integer",
           "minimum": 0,
-          "description": "这次请求新释放的租约数。keep 与 resume 恒为 0。"
+          "description": "\u8fd9\u6b21\u8bf7\u6c42\u65b0\u91ca\u653e\u7684\u79df\u7ea6\u6570\u3002keep \u4e0e resume \u6052\u4e3a 0\u3002"
+        },
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DrainOutcome"
+          }
+        }
+      }
+    },
+    "DrainOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device"
+      ],
+      "properties": {
+        "device": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error": {
+          "type": "string"
         }
       }
     }

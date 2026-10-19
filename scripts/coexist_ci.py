@@ -7,7 +7,7 @@ run and are removed on exit. A temporary test CA is trusted only by its processe
 Use --force-derp to repeat the same resource recovery checks through DERP.
 """
 
-import argparse, base64, concurrent.futures, hashlib, json, pathlib, secrets, ssl, subprocess, sys, tempfile, time, urllib.request
+import argparse, base64, concurrent.futures, hashlib, json, os, pathlib, secrets, ssl, subprocess, sys, tempfile, time, urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from smoke_local import MCP
@@ -23,6 +23,7 @@ parser.add_argument(
 )
 options = parser.parse_args()
 image = "python:3.12-slim-bookworm"
+container_user = f"{os.getuid()}:{os.getgid()}"
 suffix = secrets.token_hex(4)
 network = "xmesh-coexist-" + suffix
 containers = []
@@ -117,6 +118,10 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         (root / "headscale.yaml").write_text(config)
         docker(
             "run",
+            "--user",
+            container_user,
+            "-e",
+            "HOME=/tmp",
             "-d",
             "--name",
             hs,
@@ -250,6 +255,10 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         for name in names:
             docker(
                 "run",
+                "--user",
+                container_user,
+                "-e",
+                "HOME=/tmp",
                 "-d",
                 "--name",
                 name,
@@ -457,6 +466,32 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
                 for e in audit
             )
         ), audit
+        control(
+            b,
+            "pair",
+            "import",
+            "--file",
+            f"/work/{a}/device-pair.json",
+            "--fingerprint",
+            docs[a]["fingerprint"],
+            "--tags",
+            "tag:admin",
+        )
+        docker(
+            "exec",
+            a,
+            "/bin/xmesh",
+            "drain",
+            "--config",
+            f"/work/{a}/config.json",
+            "--state-dir",
+            f"/work/{a}/state",
+            "--scope",
+            "device",
+            "--device",
+            docs[b]["device_id"],
+        )
+        assert control(b, "status")["drain"]["draining"]
         client.close()
         executor.shutdown(wait=True)
         print(
@@ -478,6 +513,7 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
                         "per-caller-backend",
                         "gateway-lease-heartbeat",
                         "chunked-upload-download-hash",
+                        "remote-drain-device-trust",
                     ],
                     "failover_seconds": round(elapsed, 3),
                 }

@@ -87,7 +87,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 
 控制 API、Schema、Go/TypeScript 类型、CLI 和 UI 统一升级到 v2。
 设备返回设备 ID、alias、信任、路径集合、活动路径和连接状态；
-设备列表与拓扑使用设备 ID 合并显示。外部 MCP 客户端继续使用 `/mcp` 的 PAT/OAuth。
+设备列表与拓扑使用设备 ID 合并显示。远程排空通过运行节点的本机控制通道转发，使用已验证设备路径和 xmesh `tag:admin` 授权，按设备 ID 定位目标并逐台报告结果。外部 MCP 客户端继续使用 `/mcp` 的 PAT/OAuth。
 
 交付检查：
 
@@ -106,7 +106,7 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 - [x] 真实 Agent 的终端、exec、租约、后端和分块传输在受控链路重建中恢复；实际多机路径验收见末项。
 - [x] 控制 v2、UI、设备列表和拓扑。
 - [x] 并发 dial、后台信息、配对、管理状态、恢复期限和停机的回归覆盖。
-- [x] Go race、控制契约及生成类型一致性、470 项 UI 单元检查和 16 项相关 Electron 交互检查。
+- [x] Go race、控制契约及生成类型一致性、492 项 UI 单元检查、11 项上游组合 Electron 检查与 2 项 UI-MCP 真实/模拟内核检查。
 - [x] Linux 独立网络空间的真实 LAN / Tailnet 与强制 DERP 验收。
 - [ ] 不同物理主机的 macOS、Linux、Windows 网络验收。
 
@@ -114,12 +114,12 @@ LAN 与 Tailnet 是它的连接路径。首次连接及断线恢复按 LAN、Tai
 真实双机测试检查设备只显示一次、PTY PID/owner 保持、exec 执行计数为一、
 有效租约延续、文件哈希正确，以及双路失联后的恢复窗口和资源清理。
 
-运行时、CLI、桌面设置与首次运行向导均使用版本 2 设备协议。`xmesh migrate` 转换旧配置并保存配置和旧状态备份。控制契约及类型同步升级为版本 2；桌面设备列表展示活动/备用路径、重连和撤销信任。实际多机、Tailnet/DERP 与跨平台验收完成前，变更保持草稿 PR。
+运行时、CLI、桌面设置与首次运行向导均使用版本 2 设备协议。`xmesh migrate` 转换旧配置并保存配置和旧状态备份。控制契约及类型同步升级为版本 2；桌面设备列表展示活动/备用路径、重连和撤销信任。独立物理主机的跨平台网络验收完成前，变更保持草稿 PR。
 
 当前验收记录：
 
 - macOS 上的真实临时 Headscale：两个 tsnet 节点使用新版设备信任与链路双向调用文件、exec、PTY；第三节点的 Ingress 通过完整 OAuth 协议检查。
 - 独立 TLS 端点的连接恢复：覆盖消息确认去重、稳定路径、双向同时打开与恢复窗口；真实 Agent 验证 PTY、exec 单次执行、per-caller 后端、有效租约和分块文件完整性。
-- Linux arm64 的两个独立 Docker 网络空间：一条设备记录、首次 LAN、LAN 关闭后 Tailnet 接替、LAN 恢复后保持 Tailnet、Tailnet 网络授权撤销后回到 LAN；exec 仅执行一次，PTY 与 per-caller 后端 PID 保持，Gateway 租约心跳和跨路径分块文件哈希正确。常规路径恢复约 1.6 秒，禁用直连 UDP、强制经过嵌入 DERP 的相同测试约 0.6 秒。脚本为 `scripts/coexist_ci.py`，属于同一宿主机上的网络隔离验收。
+- Linux arm64 的两个独立 Docker 网络空间：一条设备记录、首次 LAN、LAN 关闭后 Tailnet 接替、LAN 恢复后保持 Tailnet、Tailnet 网络授权撤销后回到 LAN；exec 仅执行一次，PTY 与 per-caller 后端 PID 保持，Gateway 租约心跳和跨路径分块文件哈希正确；远程排空按设备 ID 定位，并检查 xmesh 信任中的管理角色。常规路径恢复约 1.6 秒，禁用直连 UDP、强制经过嵌入 DERP 的相同测试约 0.6 秒。脚本为 `scripts/coexist_ci.py`，属于同一宿主机上的网络隔离验收。
 - Windows amd64 与 Linux arm64 交叉构建成功。跨构建不代表对应平台已经完成实际运行验收。
 - Electron 页面已检查单设备双路径、当前与备用路径、Tailnet 保持、重连状态和撤销信任操作。

@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
@@ -43,6 +44,7 @@ type controlDeps struct {
 	pairing    control.PairingAdmin // nil unless the node runs the LAN network
 	drain      func(kill bool)      // Run's own bookkeeping for gateways, beyond the agent
 	resume     func()
+	management *sync.Mutex
 	// peerInfo is the gateways' sys.info readings by device; ok is false while the node runs no gateway.
 	peerInfo func() (readings map[string]gateway.DeviceInfo, ok bool)
 	// roles starts, stops and moves the roles that follow the configuration.
@@ -354,6 +356,10 @@ func (h *controlHost) Sessions() v2.SessionsResponse {
 	return h.d.agent.Sessions()
 }
 func (h *controlHost) Drain(kill bool) (closedPTY, releasedLeases int) {
+	if h.d.management != nil {
+		h.d.management.Lock()
+		defer h.d.management.Unlock()
+	}
 	if h.d.agent != nil {
 		if kill {
 			closedPTY, releasedLeases = h.d.agent.DrainCounts()
@@ -365,6 +371,10 @@ func (h *controlHost) Drain(kill bool) (closedPTY, releasedLeases int) {
 	return closedPTY, releasedLeases
 }
 func (h *controlHost) Resume() {
+	if h.d.management != nil {
+		h.d.management.Lock()
+		defer h.d.management.Unlock()
+	}
 	if h.d.agent != nil {
 		h.d.agent.Resume()
 	}

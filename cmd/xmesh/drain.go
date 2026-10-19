@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"io"
@@ -52,12 +55,59 @@ func drain(args []string) error {
 	}
 	ctx, stop := context.WithTimeout(context.Background(), 2*time.Minute+*discover)
 	defer stop()
+	if cfg.SchemaVersion == 2 {
+		if *authkey != "" {
+			return fmt.Errorf("版本 2 使用运行节点的设备信任；请在目标设备授予此设备 tag:admin")
+		}
+		dir := *state
+		if dir == "" {
+			dir, e = app.StateDir(cfg.Node.Name)
+			if e != nil {
+				return e
+			}
+		}
+		endpoint, err := control.ReadEndpoint(dir)
+		if err != nil {
+			return fmt.Errorf("请先启动管理节点以使用已配对的设备连接: %w", err)
+		}
+		response, err := control.NewClient(endpoint).Do(ctx, "POST", "/v2/drain", v2.DrainRequest{Mode: v2.DrainMode(request.Drain), Scope: request.Scope, Device: request.Device}, nil)
+		if err != nil {
+			return err
+		}
+		if err = response.Error(); err != nil {
+			return err
+		}
+		var result v2.DrainResponse
+		if err := json.Unmarshal(response.Body, &result); err != nil {
+			return err
+		}
+		return printDrainOutcomes(os.Stdout, result.Outcomes, request)
+	}
 	network, closeNetwork, e := openDrainNetwork(ctx, cfg, *authkey, *state, *discover)
 	if e != nil {
 		return e
 	}
 	defer closeNetwork()
 	return runDrain(ctx, os.Stdout, network, request, *timeout)
+}
+
+func printDrainOutcomes(out io.Writer, outcomes []v2.DrainOutcome, request agent.DrainRequest) error {
+	failed := 0
+	for _, outcome := range outcomes {
+		if outcome.Error != "" {
+			failed++
+			fmt.Fprintf(out, "失败 %s: %s\n", outcome.Device, outcome.Error)
+		} else {
+			fmt.Fprintf(out, "已下线 %s (scope=%s, mode=%s)\n", outcome.Device, request.Scope, request.Drain)
+		}
+	}
+	if len(outcomes) == 0 {
+		return fmt.Errorf("没有匹配的在线设备")
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d/%d 台设备未能下线", failed, len(outcomes))
+	}
+	return nil
 }
 
 func drainRequest(scope, device, mode string) (agent.DrainRequest, error) {

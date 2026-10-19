@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net/http"
+	"sync"
 )
 
 // Drain is a control-plane operation, separate from the public MCP tool table.
@@ -15,6 +16,11 @@ func (a *Agent) Drain(kill bool) {
 	}
 }
 func (a *Agent) Control(auth Authenticate, onDrain func(string)) http.Handler {
+	return a.ControlSerialized(auth, onDrain, nil)
+}
+
+// ControlSerialized shares the runtime management lock with local drain/resume.
+func (a *Agent) ControlSerialized(auth Authenticate, onDrain func(string), management sync.Locker) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/control/drain" || r.Method != "POST" {
 			http.NotFound(w, r)
@@ -46,9 +52,17 @@ func (a *Agent) Control(auth Authenticate, onDrain func(string)) http.Handler {
 			return
 		}
 		name := a.store.Get().Node.Name
-		if request.Scope == "device" && request.Device != name {
+		deviceID := ""
+		if info := a.networkInfo.Load(); info != nil {
+			deviceID = info.Node
+		}
+		if request.Scope == "device" && request.Device != name && (deviceID == "" || request.Device != deviceID) {
 			http.Error(w, "目标设备不存在", 404)
 			return
+		}
+		if management != nil {
+			management.Lock()
+			defer management.Unlock()
 		}
 		a.Drain(request.Drain == "kill")
 		if onDrain != nil {

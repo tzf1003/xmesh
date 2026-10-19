@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"net/http"
@@ -14,6 +15,14 @@ import (
 )
 
 type fakeNetwork struct{ peers []mesh.Peer }
+
+func TestDrainReportsPartialVersion2Outcomes(t *testing.T) {
+	var out bytes.Buffer
+	err := printDrainOutcomes(&out, []v2.DrainOutcome{{Device: "one"}, {Device: "two", Error: "permission denied"}}, agent.DrainRequest{Scope: "mesh", Drain: "keep"})
+	if err == nil || !strings.Contains(out.String(), "已下线 one") || !strings.Contains(out.String(), "失败 two") {
+		t.Fatal(out.String(), err)
+	}
+}
 
 func (n fakeNetwork) Peers(context.Context) ([]mesh.Peer, error) { return n.peers, nil }
 func (n fakeNetwork) HTTPClient(mesh.Peer) *http.Client          { return http.DefaultClient }
