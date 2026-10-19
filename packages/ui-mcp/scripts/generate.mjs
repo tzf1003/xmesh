@@ -28,6 +28,10 @@ const text = await compile(clean, "UIProtocol", {
 });
 const out = new URL("../src/protocol.gen.ts", import.meta.url);
 if (process.argv.includes("--check")) {
-  if (!fs.existsSync(out) || fs.readFileSync(out, "utf8") !== text)
+  if (
+    !fs.existsSync(out) ||
+    fs.readFileSync(out, "utf8").replace(/\r\n/g, "\n") !==
+      text.replace(/\r\n/g, "\n")
+  )
     throw new Error("protocol.gen.ts is stale");
 } else fs.writeFileSync(out, text);
