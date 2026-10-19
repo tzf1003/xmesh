@@ -17,7 +17,7 @@ const require = createRequire(import.meta.url);
 const { Updater } = require("../dist/src/main/update/updater.js");
 const { UpdateStore } = require("../dist/src/main/update/store.js");
 const { macApplier } = require("../dist/src/main/update/apply.js");
-const { computerHostServices, runComputerHost } = require("../dist/src/main/computer-host.js");
+const { ComputerUpdateTarget, computerHostServices, runComputerHost } = require("../dist/src/main/computer-host.js");
 const { kernelServices } = require("../dist/src/main/update/kernels.js");
 const { discoverInstances } = require("../dist/src/main/discovery.js");
 const { runXmeshRaw } = require("../dist/src/main/cli.js");
@@ -55,6 +55,10 @@ const installed = fs.mkdtempSync(path.join(applications, "xmesh-electron-accept-
 const app = path.join(installed, "xmesh.app");
 const executable = path.join(app, "Contents/MacOS/xmesh");
 const binary = path.join(app, "Contents/Resources/bin/xmesh");
+const customHost = args.includes("--custom-host-state");
+const installedHostState = customHost ? fs.mkdtempSync(path.join("/tmp", "xmesh-electron-host-")) : hostState;
+const hostEndpoint = customHost ? path.join(installedHostState, "control.sock") : undefined;
+const hostCommand = command => runComputerHost(command, binary, hostEndpoint);
 const userData = path.join(root, "user-data"), states = path.join(root, "nodes");
 const node = "upgrade-" + randomBytes(5).toString("hex"), nodeLabel = "xmesh-" + node;
 const nodePlist = path.join(launchAgents, nodeLabel + ".plist");
@@ -162,20 +166,25 @@ try {
   fs.writeFileSync(config, JSON.stringify({ node: { name: node, roles: ["agent", "gateway"] },
     mesh: { mode: "lan", lan: { mdns: true } }, gateway: { listen: gateway },
     agent: { default_cwd: root, cwd_policy: { allow: [root] }, policy: { isolation: "L1" },
-      computer: { enabled: true }, authz: { "tag:peer": { tools: ["*"], backends: ["*"] } } } }));
+      computer: { enabled: true, ...(hostEndpoint && { endpoint: hostEndpoint }) }, authz: { "tag:peer": { tools: ["*"], backends: ["*"] } } } }));
   await exec(binary, ["install", "--config", config, "--state-dir", state]); nodeInstalled = true;
   const installedService = await plist(nodePlist);
   assert.equal(installedService.ProgramArguments[0], binary);
   // Keep the owned business fixture on loopback, using the real CLI's local mode.
   installedService.ProgramArguments.push("--local", "--listen", direct);
   fs.writeFileSync(nodePlist, JSON.stringify(installedService)); await exec("plutil", ["-convert", "xml1", nodePlist]);
-  await exec(binary, ["computer", "install", "--json"]); hostInstalled = true;
+  await exec(binary, ["computer", "install", "--state-dir", installedHostState, "--json"]); hostInstalled = true;
   assert.equal((await plist(hostPlist)).ProgramArguments[0], binary);
   await exec(binary, ["computer", "start", "--json"]);
   await exec(binary, ["start", "--name", nodeLabel, "--json"]);
   await waitFor(async () => { try { beforeNode = await nodeStatus(); return true; } catch { return false; } }, "old business node");
   beforeInfo = await computerInfo(beforeNode);
-  beforeHost = await runComputerHost("status", binary);
+  beforeHost = await hostCommand("status");
+  if (customHost) {
+    assert.equal((await runComputerHost("status", binary)).running, false);
+    assert.equal(fs.existsSync(hostState), false);
+    events.push("custom-host-ready-default-endpoint-absent");
+  }
   assert.equal(beforeHost.version, "v" + beforeVersion); assert.ok(beforeHost.native_pid > 0);
   assert.equal(beforeNode.status.control.kernel_version, "v" + beforeVersion);
   await businessCall(gateway);
@@ -200,7 +209,9 @@ try {
     text: async () => `${sha}  ${name}\n`,
     download: async (_tag, _asset, dest, progress, signal) => { signal.throwIfAborted(); fs.writeFileSync(dest, body); progress({ received: body.length, total: body.length }); return { sha256: sha, bytes: body.length }; },
   };
-  const computer = computerHostServices({ version: beforeVersion, run: command => runComputerHost(command, binary) });
+  const computerTarget = new ComputerUpdateTarget(path.join(userData, "computer-update-target.json"), { discover: () => discoverInstances(states) });
+  const computer = computerHostServices({ version: beforeVersion, beforeStop: () => computerTarget.capture(),
+    run: command => runComputerHost(command, binary, computerTarget.endpoint()) });
   const kernels = kernelServices({ version: beforeVersion, discover: () => discoverInstances(states), run: (command, name) => runXmeshRaw(command, name, binary) });
   // open's environment options keep the disposable app's custom discovery and
   // user-data directories across the normal production handover script.
@@ -224,9 +235,15 @@ try {
   events.push("production-updater-stopped-host-native-and-business-node");
   await waitFor(() => installer.exitCode !== null || installer.signalCode !== null, "DMG installer exit", 120000); assert.equal(installer.exitCode, 0);
   await waitFor(async () => { const pids = await appProcesses(); if (pids.length !== 1 || pids[0] === oldPid) return false; newPid = pids[0]; ownedPids.add(newPid); return true; }, "replacement formal Electron startup");
-  await waitFor(async () => { try { afterHost = await runComputerHost("status", binary); afterNode = await nodeStatus(); return !fs.existsSync(pendingFile) && afterHost.running && afterHost.version === "v" + afterVersion && afterNode.status.control.kernel_version === "v" + afterVersion; } catch { return false; } }, "formal app pending-update restoration", 90000);
+  await waitFor(async () => { try { afterHost = await hostCommand("status"); afterNode = await nodeStatus(); return !fs.existsSync(pendingFile) && afterHost.running && afterHost.version === "v" + afterVersion && afterNode.status.control.kernel_version === "v" + afterVersion; } catch { return false; } }, "formal app pending-update restoration", 90000);
   afterInfo = await computerInfo(afterNode);
-  afterHost = await runComputerHost("status", binary);
+  afterHost = await hostCommand("status");
+  if (customHost) {
+    assert.equal(computerTarget.endpoint(), hostEndpoint);
+    assert.equal((await runComputerHost("status", binary)).running, false);
+    assert.equal(fs.existsSync(hostState), false);
+    events.push("custom-host-endpoint-retained-through-electron-restart");
+  }
   for (const pid of [afterHost.pid, afterHost.native_pid, afterNode.instance.manifest.pid]) if (pid) ownedPids.add(pid);
   assert.notEqual(afterHost.pid, beforeHost.pid); assert.ok(afterHost.native_pid > 0 && afterHost.native_pid !== beforeHost.native_pid);
   assert.notEqual(afterNode.instance.manifest.pid, beforeNode.instance.manifest.pid);
@@ -241,7 +258,7 @@ try {
   outcome = { result: "PASS", from: beforeVersion, to: afterVersion, application_entry: "formal-packaged-electron", trigger: "production-updater-module", launch: "background-open-with-isolated-data-and-discovery", checks: events,
     host_pid_changed: true, native_pid_changed: true, business_node_pid_changed: true, app_pid_changed: true,
     before_desktop_state: beforeInfo.state, after_desktop_state: afterInfo.state,
-    desktop_epoch_changed: true, installer_sha256: sha };
+    desktop_epoch_changed: true, custom_host_state: customHost, installer_sha256: sha };
 } catch (error) {
   failure = error;
 } finally {
@@ -258,16 +275,17 @@ try {
     }
     if (hostInstalled && fs.existsSync(hostPlist)) {
       assert.equal((await plist(hostPlist)).ProgramArguments[0], binary, "Host ownership changed");
-      const status = await runComputerHost("status", binary);
+      const status = await hostCommand("status");
       for (const pid of [status.pid, status.native_pid]) if (pid) ownedPids.add(pid);
       if (await serviceAbsent(hostLabel)) fs.unlinkSync(hostPlist);
       else await exec(binary, ["computer", "uninstall", "--json"]);
       assert.equal(fs.existsSync(hostPlist), false); assert.ok(await serviceAbsent(hostLabel));
-      fs.rmSync(hostState, { recursive: true, force: true });
+      fs.rmSync(installedHostState, { recursive: true, force: true });
     }
     await waitFor(() => [...ownedPids].every(gone), "owned application and service process cleanup");
     if (mounts) for (const mount of fs.readdirSync(mounts)) { await exec("hdiutil", ["detach", path.join(mounts, mount), "-force"]); }
     if (mounts) fs.rmSync(mounts, { recursive: true, force: true });
+    if (customHost) fs.rmSync(installedHostState, { recursive: true, force: true });
     fs.rmSync(installed, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true });
   } catch (cleanupError) {
     throw failure ? new AggregateError([failure, cleanupError], "upgrade acceptance and cleanup failed") : cleanupError;

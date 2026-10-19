@@ -30,7 +30,7 @@ import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
-import { ComputerEmergencyTargets, computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
+import { ComputerEmergencyTargets, ComputerUpdateTarget, computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
 import { registerComputerShortcut } from "./computer-shortcut";
 import { KernelConfigs } from "./update/kernel-configs";
 import { type UpdateNotice, Updater } from "./update/updater";
@@ -138,7 +138,9 @@ async function start(): Promise<void> {
       prepare: (node: string) => kernelConfigs.prepare(node),
     }),
     ...(kernelBundled && { version: app.getVersion() }) });
-  const updateComputer = computerHostServices({ run: (command) => runComputerHost(command), version: app.getVersion() });
+  const updateComputerTarget = new ComputerUpdateTarget(path.join(app.getPath("userData"), "computer-update-target.json"), { discover: () => discoverInstances(roots) });
+  const updateComputer = computerHostServices({ beforeStop: () => updateComputerTarget.capture(),
+    run: (command) => runComputerHost(command, undefined, updateComputerTarget.endpoint()), version: app.getVersion() });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
     packaged: app.isPackaged || TEST_MODE,
