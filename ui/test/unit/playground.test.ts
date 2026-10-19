@@ -72,7 +72,7 @@ async function credentialPool() {
   const status = statusFixture(); status.roles = ["agent", "gateway"]; status.gateway = { listen: "127.0.0.1:1", url: gateway.url, auth: "pat", addresses: [], access: ["localhost"], hosts: [] };
   const controller = { snapshot: { ...EMPTY_SNAPSHOT, selectedInstance: "node", connection: { kind: "connected", status, peers: [] } }, requireCapable: () => ({ call: async () => ({ pats }) }) } as unknown as Pick<ShellController, "snapshot" | "requireCapable">;
   const service = new PlaygroundService(controller);
-  return { gateway, service, async close() { await service.close(); await gateway.stop(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { gateway, service, rotateDefault() { fs.writeFileSync(pats[0]!.token_file, tokens[1]!, { mode: 0o600 }); }, async close() { await service.close(); await gateway.stop(); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
 
 test("credential pool evicts idle sessions while a default call stays active", async () => {
@@ -112,6 +112,29 @@ test("credential pool preserves eight active sessions and reuses capacity after 
     assert.equal((await service.request({ op: "list", instance: "node", device: "gateway" })).ok, true);
     assert.equal(gateway.sessions.size, 8);
   } finally { await pool.close(); await Promise.all(calls); }
+});
+
+test("rotating a credential preserves its active call until completion before reconnecting", async () => {
+  const pool = await credentialPool();
+  const { service, gateway } = pool;
+  try {
+    const slow = service.request({ op: "call", instance: "node", id: "rotation", name: "local/demo.slow", arguments: {}, timeoutMs: 10000 });
+    for (let n = 0; gateway.calls.length < 1 && n < 200; n++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(gateway.calls.length, 1);
+    const original = [...gateway.sessions.keys()];
+    pool.rotateDefault();
+    const rotated = await service.request({ op: "list", instance: "node", device: "gateway" });
+    assert.equal(rotated.ok, false);
+    if (!rotated.ok) assert.match(rotated.error.message, /credential changed.*active/);
+    assert.deepEqual([...gateway.sessions.keys()], original);
+    const progress = await service.request({ op: "status", instance: "node" });
+    assert.ok(progress.ok && progress.data.progress.rotation);
+    await service.request({ op: "cancel", instance: "node", id: "rotation" });
+    assert.equal((await slow).ok, false);
+    assert.equal((await service.request({ op: "list", instance: "node", device: "gateway" })).ok, true);
+    assert.equal(gateway.sessions.size, 1);
+    assert.notDeepEqual([...gateway.sessions.keys()], original);
+  } finally { await pool.close(); }
 });
 
 test("production MCP path reuses PAT, stamps origin, handles errors, cancellation, changes and token rotation", async () => {
