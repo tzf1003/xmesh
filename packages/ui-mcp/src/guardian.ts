@@ -90,7 +90,7 @@ if (
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      `[System.Diagnostics.Process]::GetProcessById(${parent}).WaitForExit()`,
+      `try { $xmeshParent = [System.Diagnostics.Process]::GetProcessById(${parent}); $xmeshParent.WaitForExit(); exit 0 } catch { if ($_.Exception -is [System.ArgumentException] -or $_.Exception.InnerException -is [System.ArgumentException]) { exit 0 }; exit 2 }`,
     ],
     {
       stdio: "ignore",
@@ -113,3 +113,11 @@ if (
   });
   parentWaiter.once("error", () => {});
 }
+atomicJSON(path.join(root, "guardian.json"), {
+  state: "ready",
+  pid: process.pid,
+  parent,
+  time: new Date().toISOString(),
+});
+if (process.connected) process.send?.({ type: "ready" });
+else void close();

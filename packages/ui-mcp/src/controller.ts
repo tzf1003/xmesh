@@ -137,6 +137,7 @@ export class Controller {
   private timer: NodeJS.Timeout;
   private closed = false;
   private guardian: ChildProcess;
+  private guardianReady: Promise<void>;
   constructor(readonly config: Config) {
     privateDir(config.state_dir);
     recoverUnfinished(config);
@@ -152,6 +153,16 @@ export class Controller {
         started_at: new Date().toISOString(),
       },
     );
+    const guardianLog = fs.openSync(
+      path.join(
+        config.state_dir,
+        "instances",
+        this.instance_id,
+        "guardian.log",
+      ),
+      "a",
+      0o600,
+    );
     this.guardian = fork(
       fileURLToPath(new URL("./guardian.js", import.meta.url)),
       [
@@ -160,11 +171,40 @@ export class Controller {
       ],
       {
         execArgv: [],
-        stdio: ["ignore", "ignore", "ignore", "ipc"],
+        stdio: ["ignore", "ignore", guardianLog, "ipc"],
         detached: process.platform !== "win32",
         windowsHide: true,
       },
     );
+    fs.closeSync(guardianLog);
+    this.guardianReady = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(
+            new UIError(
+              "preflight_failed",
+              "process guardian did not become ready",
+            ),
+          ),
+        15000,
+      );
+      timer.unref();
+      this.guardian.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      this.guardian.once("exit", () => {
+        clearTimeout(timer);
+        reject(new UIError("preflight_failed", "process guardian exited"));
+      });
+      this.guardian.on("message", (message: any) => {
+        if (message?.type === "ready") {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    void this.guardianReady.catch(() => {});
     this.guardian.unref();
     this.guardian.on("error", () => {
       void this.close().catch(() => {});
@@ -257,6 +297,7 @@ export class Controller {
     return { ready: issues.length === 0, issues };
   }
   async open(id: string, accountId?: string): Promise<Record<string, unknown>> {
+    await this.guardianReady;
     requireValue(!this.closed, "session_closed", "backend is closing");
     const e = environment(this.config, id);
     requireValue(
