@@ -256,3 +256,7 @@ db9de5b 的 macOS UI MCP 导航测试在 popup 重定向的请求计数断言失
 正式签名 0.0.12 应用与 DMG 对应 `afaad5e`，Developer ID 签名、公证、装订和发行 fuses 通过。实际 0.0.11→0.0.12 升级完成 API 1→2 配置迁移、新 Electron 入口的 Host / 业务节点恢复、升级前后 MCP 调用、新 PID / 版本 / epoch 和资源清理；指针 / 前台 / AX 监测通过，零个硬件活动事件。验收脚本按各服务 manifest 声明的 Control 版本读取状态及 Computer 信息。两侧正式服务均报告 permission_required；已授权外层服务的权限延续由前述独立签名夹具覆盖。DMG SHA-256 为 `70085a8237a03438a7f029826c865f5841477af790062f42eafd57bb5dc369a0`。
 
 API 2 的 Tailnet 路径状态复用本地主分支的实现，按当前已认证连接的地址关联 tsnet 状态，向 Control 提供直连标记、中继区域与操作系统。修复前本机复现 forced-DERP 返回 unknown；修复后的本机 Headscale 强制 DERP、双向文件 / exec / PTY、临时节点恢复与 OAuth 全链路通过，读取到 derp 及中继区域后才计为通过。Connectivity / DeviceLink / App 竞态测试通过。0.0.12 产物先于这项网络状态修复；最新提交的 CI 与签名产物另行核对。
+
+`38b0737` 的 Linux 原生作业 `118231716623` 已通过十三项 Rust 测试、Clippy、原生输入 / IPC，以及直连和强制 DERP 的对等 / OAuth Computer 截图与有限控制。每条桌面路径连续交付两张 1280×800 图像，动作去重、查询、续租及关闭通过。
+
+更新生命周期现保存运行内核报告的有效 Host 端点，并在替换后的 Electron 进程中读取该记录验收 Host。服务停止 / 启动继续通过已安装的每用户服务，状态查询指向保存的端点；多个不同端点或状态读取失败在停止服务前阻止替换。Control API 1 / 2、端点跨进程保留、无效状态、已退出内核和多端点保护由 UI 单元测试覆盖。正式升级脚本增加自定义 Host 状态目录场景，验证默认端点缺失时的实际交接，结果由对应签名包验收单独记录。

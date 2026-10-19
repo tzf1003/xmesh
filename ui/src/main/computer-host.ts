@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { xmeshBinary } from "./cli";
-import { kernelGone } from "./discovery";
+import { type Instance, kernelGone } from "./discovery";
+import { ControlClient } from "./client";
 import { sameVersion } from "../shared/version";
 import type { Snapshot } from "../shared/state";
 import type { StopResult } from "./update/updater";
@@ -37,9 +40,11 @@ export class ComputerEmergencyTargets {
 }
 
 /** Lifecycle commands use a fixed program and argument list, never renderer data. */
-export function runComputerHost(command: ComputerHostCommand, binary: string = xmeshBinary()): Promise<ComputerHostStatus | void> {
+export function runComputerHost(command: ComputerHostCommand, binary: string = xmeshBinary(), endpoint?: string): Promise<ComputerHostStatus | void> {
   return new Promise((resolve, reject) => {
-    execFile(binary, ["computer", command, ...(command === "status" ? [] : ["--json"])], { timeout: 30000, windowsHide: true, maxBuffer: 64 * 1024 }, (error, stdout, stderr) => {
+    // Lifecycle commands address the installed per-user service. Status probes
+    // must use that service's effective socket, including custom state paths.
+    execFile(binary, ["computer", command, ...(command === "status" ? (endpoint ? ["--endpoint", endpoint] : []) : ["--json"])], { timeout: 30000, windowsHide: true, maxBuffer: 64 * 1024 }, (error, stdout, stderr) => {
       try {
         const result = JSON.parse(stdout) as Partial<ComputerHostStatus> & { ok?: boolean; error?: { message?: string } };
         if (error) throw new Error(result.error?.message || stderr.trim() || "桌面服务操作失败");
@@ -68,6 +73,7 @@ interface HostServicesEnv {
   gone?: (pid: number) => boolean;
   timeoutMs?: number;
   pollMs?: number;
+  beforeStop?(): Promise<void>;
 }
 
 export function computerHostServices(env: HostServicesEnv): { stop(): Promise<StopResult>; start(): Promise<void> } {
@@ -80,6 +86,7 @@ export function computerHostServices(env: HostServicesEnv): { stop(): Promise<St
   };
   return {
     async stop() {
+      await env.beforeStop?.();
       const current = await status();
       if (!current.running) return "absent";
       await env.run("stop");
@@ -104,6 +111,40 @@ export function computerHostServices(env: HostServicesEnv): { stop(): Promise<St
       throw new Error("桌面服务启动验收失败：运行版本或本机通道未就绪");
     },
   };
+}
+
+/** Retains the effective Host endpoint while kernels and the desktop app restart. */
+export class ComputerUpdateTarget {
+  constructor(private readonly file: string, private readonly env: {
+    discover(): Instance[];
+    readEndpoint?(instance: Instance): Promise<string | undefined>;
+    gone?(pid: number): boolean;
+  }) {}
+
+  async capture(): Promise<void> {
+    const endpoints = new Set<string>();
+    for (const instance of this.env.discover()) {
+      if ((this.env.gone ?? kernelGone)(instance.manifest.pid)) continue;
+      const endpoint = await (this.env.readEndpoint?.(instance) ??
+        new ControlClient({ endpoint: instance.manifest.endpoint }).getUpgradeComputerEndpoint());
+      if (endpoint !== undefined) endpoints.add(endpoint);
+    }
+    if (endpoints.size > 1) throw new Error("运行中的内核使用不同桌面服务端点，请分别完成服务交接后更新");
+    const endpoint = endpoints.values().next().value ?? null;
+    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(this.file + ".tmp", JSON.stringify({ endpoint }), { mode: 0o600 });
+    fs.renameSync(this.file + ".tmp", this.file);
+  }
+
+  endpoint(): string | undefined {
+    let value: unknown;
+    try { value = JSON.parse(fs.readFileSync(this.file, "utf8")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+    const endpoint = (value as { endpoint?: unknown } | null)?.endpoint;
+    if (endpoint === null) return undefined;
+    if (typeof endpoint !== "string" || endpoint === "") throw new Error("无效的桌面服务升级端点记录");
+    return endpoint;
+  }
 }
 
 /** The renderer can request setup but cannot choose the program, arguments or OS endpoint. */
