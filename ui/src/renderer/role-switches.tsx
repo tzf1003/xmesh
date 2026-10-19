@@ -6,13 +6,14 @@ import { Confirm } from "./components";
 import { useResource } from "./hooks";
 import { errorText, useT } from "./i18n";
 import { applyConfigEdits } from "./lib/apply-config";
+import { diffRows, type DiffRow } from "./lib/config";
 import { applySaved } from "./lib/reload";
-import { formFromConfig, ROLES, toggleRole, type Role } from "./lib/settings";
+import { checkIngressSettings, formFromConfig, ROLES, toggleRole, type Role } from "./lib/settings";
 import type { ConfigPatchEdit } from "../shared/ipc";
 import type { Key } from "./messages";
 
 const HINT: Record<Role, Key> = { agent: "wizard.agentHint", gateway: "wizard.gatewayHint", ingress: "settings.ingressHint" };
-interface Review { etag: string; edits: ConfigPatchEdit[]; roles: Role[]; restart: boolean }
+interface Review { etag: string; edits: ConfigPatchEdit[]; rows: DiffRow[]; restart: boolean }
 
 export function RoleSwitches({ ctx }: { ctx: PageContext }): JSX.Element | null {
   const t = useT();
@@ -20,7 +21,7 @@ export function RoleSwitches({ ctx }: { ctx: PageContext }): JSX.Element | null 
   const supported = ctx.can("config.read");
   const liveRoles: readonly Role[] = connection.kind === "connected" ? connection.status.roles : [];
   const restartPending = connection.kind === "connected" && connection.status.restart_required;
-  const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance, supported, ctx.configRevision, ctx.configDirty, restartPending, liveRoles.join(",")]);
+  const { resource, reload } = useResource(() => getApi().getConfig(), [ctx.snapshot.selectedInstance, supported, ctx.configRevision, ctx.configDirty, restartPending, liveRoles.join(",")], supported ? 2000 : undefined);
   const [busy, setBusy] = useState(false);
   const [review, setReview] = useState<Review>();
   if (connection.kind !== "connected") return null;
@@ -36,7 +37,7 @@ export function RoleSwitches({ ctx }: { ctx: PageContext }): JSX.Element | null 
       const form = formFromConfig(current.data.parsed);
       const roles = toggleRole(form.roles, role, !form.roles.includes(role));
       if (roles.length === 0) { ctx.toast(t("settings.problem.roles"), true); return; }
-      if (role === "ingress" && roles.includes("ingress") && (form.mode !== "tailnet" || !form.issuer)) {
+      if (role === "ingress" && roles.includes("ingress") && checkIngressSettings(form) !== undefined) {
         ctx.go("settings", { section: "roles", role: "ingress" });
         return;
       }
@@ -45,11 +46,11 @@ export function RoleSwitches({ ctx }: { ctx: PageContext }): JSX.Element | null 
       if (roles.includes("gateway") && !parsed?.gateway?.listen) edits.push({ path: "/gateway/listen", value: "127.0.0.1:8080" });
       const result = await applyConfigEdits(current.data.etag, edits, true);
       if (!result.ok) { ctx.toast(errorText(t, result.error), true); reload(); return; }
-      setReview({ etag: current.data.etag, edits, roles, restart: result.data.restart_required });
+      setReview({ etag: current.data.etag, edits, rows: diffRows(result.data.diff), restart: result.data.restart_required });
     } finally { setBusy(false); }
   };
   const save = async (): Promise<void> => {
-    if (!review || busy) return;
+    if (!review || busy || ctx.configDirty) return;
     setBusy(true);
     try {
       const result = await applyConfigEdits(review.etag, review.edits);
@@ -70,6 +71,12 @@ export function RoleSwitches({ ctx }: { ctx: PageContext }): JSX.Element | null 
         </button>;
       })}
     </div>
-    {review && <Confirm title={t("roles.reviewTitle")} body={<><p>{review.roles.join(" · ")}</p>{review.restart && <p class="hint">{t("apply.restart")}</p>}</>} confirmLabel={t("roles.review")} busy={busy} onCancel={() => setReview(undefined)} onConfirm={() => void save()} />}
+    {review && <Confirm title={t("roles.reviewTitle")} body={<>
+      <div class="table-wrap" data-testid="role-config-diff"><table>
+        <thead><tr><th>{t("config.path")}</th><th>{t("config.before")}</th><th>{t("config.after")}</th></tr></thead>
+        <tbody>{review.rows.map((row) => <tr key={row.pointer}><td class="mono">{row.pointer}</td><td class="mono">{row.before}</td><td class="mono">{row.after}</td></tr>)}</tbody>
+      </table></div>
+      {review.restart && <p class="hint">{t("apply.restart")}</p>}
+    </>} confirmLabel={t("roles.review")} busy={busy || ctx.configDirty} onCancel={() => setReview(undefined)} onConfirm={() => void save()} />}
   </>;
 }

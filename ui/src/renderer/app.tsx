@@ -100,12 +100,12 @@ export function App(): JSX.Element {
   // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
   const [fresh, setFresh] = useState<SaveOutcome | undefined>(undefined);
   const navigate = (next: PageId, nextFocus?: PageFocus): void => {
-    setConfigDirty(false);
+    if (next !== current) setConfigDirty(false);
     setFocus(nextFocus);
     setPage(next);
     setFresh(undefined);
   };
-  useEffect(() => setFresh(undefined), [snapshot.selectedInstance]);
+  useEffect(() => { setFresh(undefined); setConfigDirty(false); }, [snapshot.selectedInstance]);
 
   useEffect(() => {
     document.documentElement.lang = snapshot.settings.locale === "en" ? "en" : "zh-CN";
@@ -162,7 +162,7 @@ export function App(): JSX.Element {
               toast={push}
             />
             {(meshVisited || current === "mesh") && <div hidden={current !== "mesh"}><Mesh ctx={ctx} /></div>}
-            {current !== "mesh" && <PageSwitch key={`${snapshot.selectedInstance}:${configRevision}`} page={current} ctx={ctx} />}
+            {current !== "mesh" && <PageSwitch key={`${snapshot.selectedInstance}:${current === "config" || current === "settings" ? configRevision : 0}`} page={current} ctx={ctx} />}
           </main>
         </div>
       </div>

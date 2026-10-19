@@ -45,6 +45,8 @@ test("enabling a gateway supplies its initial listen address", async () => {
   const page = await open(ALL, { ...config, node: { ...config.node, roles: ["agent"] } });
   await page.getByTestId("role-gateway").focus();
   await page.keyboard.press("Space");
+  await expect(page.getByTestId("role-config-diff")).toContainText("/gateway/listen");
+  await expect(page.getByTestId("role-config-diff")).toContainText("127.0.0.1:8080");
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("role-gateway")).toHaveAttribute("aria-checked", "true");
   expect(JSON.parse(h.kernel.panel.content).gateway.listen).toBe("127.0.0.1:8080");
@@ -124,4 +126,57 @@ test("read-only and disconnected nodes cannot toggle roles", async () => {
   expect(h.kernel.requests.filter((r) => r.method === "PATCH")).toEqual([]);
   await h.kernel.stop();
   await expect(page.getByTestId("role-switches")).toHaveCount(0);
+});
+
+for (const id of ["settings", "config"]) {
+  test(`same-page navigation preserves ${id} draft protection`, async () => {
+    const page = await open();
+    await navigate(page, id);
+    if (id === "config") await page.getByTestId("config-source-tab").click();
+    const editor = page.getByTestId(id === "config" ? "config-editor" : "settings-name");
+    const draft = id === "config" ? "# unsaved draft\n" : "unsaved-node";
+    await editor.fill(draft);
+    await expect(page.getByTestId("role-gateway")).toBeDisabled();
+    await navigate(page, id);
+    await expect(editor).toHaveValue(draft);
+    await expect(page.getByTestId("role-gateway")).toBeDisabled();
+    expect(h.kernel.panel.writes).toEqual([]);
+  });
+}
+
+test("external role edits refresh while the restart status stays pending", async () => {
+  const page = await open();
+  h.kernel.setStatus({ restart_required: true });
+  await expect(page.getByTestId("apply-restart-needed")).toBeVisible();
+  h.kernel.panel.setContent(JSON.stringify({ ...CONFIG, node: { ...CONFIG.node, roles: ["gateway"] } }));
+  await expect(page.getByTestId("role-agent")).toHaveAttribute("aria-checked", "false");
+  h.kernel.panel.setContent(JSON.stringify(CONFIG));
+  await expect(page.getByTestId("role-agent")).toHaveAttribute("aria-checked", "true");
+});
+
+for (const missing of ["domain", "certificate"]) {
+  test(`ingress with missing ${missing} opens its settings`, async () => {
+    const page = await open(ALL, { ...CONFIG, mesh: { mode: "tailnet" }, ingress: {
+      listen: "public:443", oauth: { issuer: "https://xmesh.example.com" },
+      ...(missing === "certificate" && { domain: "xmesh.example.com", tls: "file" }),
+    } });
+    await page.getByTestId("role-ingress").click();
+    await expect(page.getByTestId("settings-ingress")).toBeVisible();
+    await expect(page.getByTestId("settings-domain")).toBeVisible();
+    if (missing === "certificate") await expect(page.getByTestId("settings-cert")).toBeVisible();
+    expect(h.kernel.panel.writes).toEqual([]);
+  });
+}
+
+test("role saves retain the current transfer draft", async () => {
+  h = await launch({ kernel: { playground: true, capabilities: ALL, status: { roles: ["agent", "gateway"] } } });
+  h.kernel.playground!.enableWorkspace();
+  h.kernel.panel.setContent(JSON.stringify(CONFIG));
+  const page = await h.openPanel();
+  await navigate(page, "transfers");
+  await page.getByTestId("transfer-path").fill("/work/unsaved.bin");
+  await page.getByTestId("role-gateway").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("role-gateway")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("transfer-path")).toHaveValue("/work/unsaved.bin");
 });
