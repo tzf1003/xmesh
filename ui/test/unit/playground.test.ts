@@ -127,9 +127,8 @@ test("rotating a credential preserves its active call until completion before re
     assert.equal(rotated.ok, false);
     if (!rotated.ok) assert.match(rotated.error.message, /credential changed.*active/);
     assert.deepEqual([...gateway.sessions.keys()], original);
-    const progress = await service.request({ op: "status", instance: "node" });
-    assert.ok(progress.ok && progress.data.progress.rotation);
-    await service.request({ op: "cancel", instance: "node", id: "rotation" });
+    const cancel = await service.request({ op: "cancel", instance: "node", id: "rotation" });
+    assert.ok(cancel.ok && cancel.data.cancelled, "credential rotation interrupted the active call");
     assert.equal((await slow).ok, false);
     assert.equal((await service.request({ op: "list", instance: "node", device: "gateway" })).ok, true);
     assert.equal(gateway.sessions.size, 1);
