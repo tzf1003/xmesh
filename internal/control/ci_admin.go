@@ -259,6 +259,14 @@ func (s *Server) deleteCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 			return
 		}
 	}
+	if s.o.CI != nil {
+		for _, b := range s.o.CI.Overview().Bindings {
+			if b.Account == id {
+				failWith(w, reasoned(newError(v1.ErrConflict, "运行器仍在停止或注销，请等待清理完成"), "account_in_use"))
+				return
+			}
+		}
+	}
 	edit := Edit{Path: "/ci/accounts", Value: list}
 	if len(list) == 0 {
 		edit = Edit{Path: "/ci/accounts", Delete: true}

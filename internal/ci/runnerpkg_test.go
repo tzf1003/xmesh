@@ -331,3 +331,28 @@ func Test_ExtractKeepsSafeForwardSymlink(t *testing.T) {
 		t.Fatalf("%q %v", got, err)
 	}
 }
+
+func Test_ExtractPreservesExistingJobWorkspaceLinks(t *testing.T) {
+	dst := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dst, "_work"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dst, "_work", "job-link")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink privilege unavailable")
+		}
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "runner.tar.gz")
+	if err := os.WriteFile(archive, tarGz(t, map[string]string{"!run.sh": "updated"}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(archive, dst); err != nil {
+		t.Fatal("workspace link blocked reinstall", err)
+	}
+	if target, err := os.Readlink(link); err != nil || target != outside {
+		t.Fatalf("workspace link changed: %q %v", target, err)
+	}
+}

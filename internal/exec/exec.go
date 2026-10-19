@@ -308,11 +308,12 @@ func (m *Manager) Output(caller string, raw json.RawMessage) (Object, error) {
 		}
 		b := make([]byte, a.Limit)
 		n, e := f.ReadAt(b, a.Offset)
-		f.Close()
 		if e != nil && e != io.EOF {
+			f.Close()
 			return nil, e
 		}
-		out[name] = decodeOutput(b[:n], a.Offset > 0)
+		out[name] = decodeOutputPage(f, b[:n], a.Offset)
+		f.Close()
 		maxRead = max(maxRead, n)
 		eof = eof && a.Offset+int64(n) >= st.Size()
 	}

@@ -563,3 +563,96 @@ func Test_CTRCTL15_ImportedRunnerIsNotDeregisteredOnUnbind(t *testing.T) {
 		t.Fatalf("the imported runner was changed: %v", err)
 	}
 }
+
+func Test_ScaleDownUpWaitsForOldInstanceCleanup(t *testing.T) {
+	r := newRig(t)
+	r.m.HoldToken("a", "TOKEN")
+	r.apply(tokenBinding("a", "o/a", 2))
+	r.wait("both idle", func() bool { return r.state("a", 1) == v1.CiIdle && r.state("a", 2) == v1.CiIdle })
+	dir := r.dirOf("a", 2)
+	r.write(filepath.Join(dir, "startjob"), "")
+	r.wait("second busy", func() bool { return r.state("a", 2) == v1.CiBusy })
+	old := r.instance("a", 2).PID
+	r.apply(tokenBinding("a", "o/a", 1))
+	r.apply(tokenBinding("a", "o/a", 2))
+	if current := r.instance("a", 2).PID; current != old {
+		t.Fatal("reused directory before prior process stopped", old, current)
+	}
+	r.write(filepath.Join(dir, "finishjob"), "")
+	r.wait("replacement idle", func() bool { in := r.instance("a", 2); return in.State == v1.CiIdle && in.PID != 0 && in.PID != old })
+	if !r.exists(filepath.Join(dir, ".runner")) {
+		t.Fatal("replacement directory removed")
+	}
+}
+
+func Test_SleepInhibitionTracksStoppingProcessAndConfig(t *testing.T) {
+	r := newRig(t)
+	i := &instance{m: r.m, snap: v1.CiInstance{State: v1.CiIdle}, wakeC: make(chan struct{}, 1)}
+	i.onLine("Running job: build")
+	if r.awake.Load() != 1 {
+		t.Fatal("job did not inhibit")
+	}
+	i.setState(v1.CiStopping, nil)
+	if r.awake.Load() != 1 {
+		t.Fatal("stopping released sleep before process exit")
+	}
+	r.mu.Lock()
+	r.cfg.PreventSleepWhileBusy = false
+	cfg := r.cfg
+	r.mu.Unlock()
+	r.m.Apply(cfg)
+	if r.awake.Load() != 0 {
+		t.Fatal("configuration did not release sleep")
+	}
+	r.mu.Lock()
+	r.cfg.PreventSleepWhileBusy = true
+	cfg = r.cfg
+	r.mu.Unlock()
+	r.m.Apply(cfg)
+	if r.awake.Load() != 1 {
+		t.Fatal("configuration did not reacquire sleep")
+	}
+	i.setState(v1.CiStopped, nil)
+	if r.awake.Load() != 0 {
+		t.Fatal("process exit kept sleep inhibition")
+	}
+}
+
+func Test_AccountRunnersRecoverRemovedAndDeprecatedVersions(t *testing.T) {
+	i := &instance{m: &Manager{o: Options{Token: func(context.Context, config.CIBinding) (string, error) { return "", nil }}}, spec: config.CIBinding{Source: "account", Account: "account"}}
+	if _, _, broken := i.classify(exitInfo{removed: true}, time.Minute); broken {
+		t.Fatal("account runner requires manual registration")
+	}
+	if !i.rereg {
+		t.Fatal("removed runner did not request registration")
+	}
+	if _, _, broken := i.classify(exitInfo{authFail: true}, time.Minute); broken {
+		t.Fatal("expired account registration requires manual recovery")
+	}
+	if _, _, broken := i.classify(exitInfo{deprec: true}, time.Minute); broken || !i.reinstall {
+		t.Fatal("managed deprecated runner did not update")
+	}
+}
+
+func Test_ImportedRunnerRepairUsesTheNewToken(t *testing.T) {
+	r := newRig(t)
+	dir := filepath.Join(r.root, "imported")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.sh"), []byte(fakeConfigSh), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(fakeRunSh), 0700); err != nil {
+		t.Fatal(err)
+	}
+	r.write(filepath.Join(dir, ".runner"), `{"agentName":"existing","gitHubUrl":"https://github.com/o/a","workFolder":"_work"}`)
+	r.apply(config.CIBinding{ID: "a", Scope: "repo", Target: "o/a", Source: "import", Dir: dir, Concurrency: 1})
+	r.wait("import idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	if err := r.m.Repair("a", "NEW_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+	r.wait("import registered again", func() bool {
+		return strings.Contains(r.read(filepath.Join(dir, "config-env")), "NEW_TOKEN") && r.state("a", 1) == v1.CiIdle
+	})
+}

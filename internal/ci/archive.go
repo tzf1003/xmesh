@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,26 +25,29 @@ func Extract(archive, dst string) error {
 		return err
 	}
 	defer root.Close()
+	var links []string
 	if strings.HasSuffix(archive, ".zip") {
 		err = extractZip(archive, root)
 	} else {
-		err = extractTarGz(archive, root)
+		err = extractTarGz(archive, root, &links)
 	}
 	if err != nil {
 		return err
 	}
-	return fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+	for _, name := range links {
+		st, err := root.Lstat(name)
 		if err != nil {
 			return err
 		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if err := validateArchiveLink(root, name); err != nil {
-				_ = root.Remove(name)
-				return err
-			}
+		if st.Mode()&os.ModeSymlink == 0 {
+			continue
 		}
-		return nil
-	})
+		if err := validateArchiveLink(root, name); err != nil {
+			_ = root.Remove(name)
+			return err
+		}
+	}
+	return nil
 }
 
 // rooted reports whether name starts at a root on any system. A leading slash is rooted on Windows too, where
@@ -64,7 +66,7 @@ func inside(dst, name string) (string, error) {
 	return rel, nil
 }
 
-func extractTarGz(archive string, root *os.Root) error {
+func extractTarGz(archive string, root *os.Root, links *[]string) error {
 	f, err := os.Open(archive)
 	if err != nil {
 		return err
@@ -100,6 +102,9 @@ func extractTarGz(archive string, root *os.Root) error {
 			err = writeFile(root, target, tr, h.FileInfo().Mode().Perm())
 		case tar.TypeSymlink:
 			err = makeSymlink(root, target, h.Linkname)
+			if err == nil {
+				*links = append(*links, target)
+			}
 		case tar.TypeLink:
 			var from string
 			if from, err = inside(".", h.Linkname); err == nil {

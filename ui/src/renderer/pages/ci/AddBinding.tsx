@@ -53,7 +53,7 @@ export function AddBinding({ ctx, overview, onClose, onCreated }: { ctx: PageCon
     const r = await getApi().ci({ op: "binding.create", args: a });
     setBusy(false);
     setConfirmPublic(false);
-    if (way === "token") setRegToken("");
+    if (way === "token" && (r.ok || !needsPublicConfirm(r.error))) setRegToken("");
     if (r.ok) {
       ctx.toast(t("ci.created", { repo: r.data.target }));
       return onCreated();

@@ -481,6 +481,9 @@ func (v *view) defaultDeviceLocked() string {
 	}
 	var device string
 	_ = json.Unmarshal(raw, &device)
+	if device == "local" && !v.g.opts.Ingress {
+		device = v.g.opts.LocalPeer.Name
+	}
 	return device
 }
 

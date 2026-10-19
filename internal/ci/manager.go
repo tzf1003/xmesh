@@ -156,6 +156,7 @@ func (m *Manager) Apply(c config.CI) {
 	if m.closed {
 		return
 	}
+	m.updateSleepLocked(c.PreventSleepWhileBusy)
 	seen := map[string]bool{}
 	for _, spec := range c.Bindings {
 		seen[spec.ID] = true
@@ -189,9 +190,10 @@ func (m *Manager) Apply(c config.CI) {
 		}
 		for idx, in := range b.instances {
 			if idx > want {
-				in.shutdown(false)
-				delete(b.instances, idx)
-				m.cleanupAfter(b, in, false)
+				if stopping, _, _ := in.flags(); !stopping {
+					in.shutdown(false)
+					m.cleanupAfter(b, in, false)
+				}
 			}
 		}
 	}
@@ -241,12 +243,29 @@ func (m *Manager) cleanupAfter(b *binding, in *instance, _ bool) {
 		return
 	}
 	dir := in.dir
+	spec := b.spec
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 		<-in.finished
-		m.deregister(b.spec, in)
+		m.deregister(spec, in)
 		_ = os.RemoveAll(dir)
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if b.instances[in.idx] != in {
+			return
+		}
+		delete(b.instances, in.idx)
+		want := b.spec.Concurrency
+		if want < 1 {
+			want = 1
+		}
+		if !m.closed && !b.removing && in.idx <= want {
+			replacement := m.newInstance(b, in.idx)
+			b.instances[in.idx] = replacement
+			m.wg.Add(1)
+			go func() { defer m.wg.Done(); replacement.run() }()
+		}
 	}()
 }
 
@@ -383,16 +402,18 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 // busyChanged is called by instances as jobs start and end; it holds the sleep inhibition while
 // any job runs.
 func (m *Manager) busyChanged(delta int) {
+	prevent := m.o.Config().PreventSleepWhileBusy
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.busy += delta
-	if m.busy < 0 {
-		m.busy = 0
-	}
-	if m.busy > 0 && m.release == nil && m.o.Inhibit != nil {
+	m.busy = max(0, m.busy+delta)
+	m.updateSleepLocked(prevent)
+}
+
+func (m *Manager) updateSleepLocked(prevent bool) {
+	if m.busy > 0 && prevent && m.release == nil && m.o.Inhibit != nil {
 		m.release = m.o.Inhibit()
 	}
-	if m.busy == 0 && m.release != nil {
+	if (m.busy == 0 || !prevent) && m.release != nil {
 		m.release()
 		m.release = nil
 	}

@@ -44,8 +44,7 @@ export function cliCommandText(
   resourcesPath: string | undefined = (process as { resourcesPath?: string }).resourcesPath,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const bin = env.XMESH_BIN || bundledXmesh(resourcesPath, platform);
-  return bin ? quoteForTerminal(bin, platform) : "xmesh";
+  return quoteForTerminal(xmeshBinary(env,resourcesPath,platform),platform);
 }
 
 export class CliError extends Error {

@@ -69,3 +69,16 @@ func Test_SearchStarListsEverything(t *testing.T) {
 		}
 	}
 }
+
+func Test_DefaultDeviceNormalizesLocalAlias(t *testing.T) {
+	g, _ := fixture(t, false)
+	v := g.newView(Principal{Local: true})
+	defer v.close()
+	v.mu.Lock()
+	v.defaults["device"] = []byte(`"local"`)
+	got := v.defaultDeviceLocked()
+	v.mu.Unlock()
+	if got != g.opts.LocalPeer.Name {
+		t.Fatalf("local alias: %q", got)
+	}
+}

@@ -125,20 +125,20 @@ func (i *instance) snapshot() v1.CiInstance {
 
 func (i *instance) setState(state v1.CiInstanceState, problem *v1.CiProblem) {
 	i.mu.Lock()
-	wasBusy := i.snap.State == v1.CiBusy
+	wasBusy := i.snap.Job != nil
 	if i.snap.State != state {
 		i.snap.Since = v1.Now()
 	}
 	i.snap.State = state
 	i.snap.Problem = problem
-	if state != v1.CiBusy {
+	if state != v1.CiBusy && state != v1.CiStopping {
 		i.snap.Job = nil
 	}
 	if state != v1.CiStarting && state != v1.CiIdle && state != v1.CiBusy && state != v1.CiStopping {
 		i.snap.PID = 0
 	}
 	i.mu.Unlock()
-	if wasBusy && state != v1.CiBusy {
+	if wasBusy && state != v1.CiBusy && state != v1.CiStopping {
 		i.m.busyChanged(-1)
 	}
 }
@@ -212,6 +212,7 @@ func (i *instance) run() {
 		}
 		started := time.Now()
 		exit := i.runOnce()
+		i.setState(v1.CiStopped, nil)
 		ranFor := time.Since(started)
 		if ranFor >= i.m.o.StableAfter {
 			attempt = 0
@@ -295,7 +296,9 @@ func (i *instance) ensureRegistered() *v1.CiProblem {
 		if !registered {
 			return i.problem(v1.CiProblemRegistrationFailed, "目录里没有 .runner，这个运行器还没有注册。")
 		}
-		return nil
+		if !rereg {
+			return nil
+		}
 	}
 	if registered && !rereg {
 		return nil
@@ -613,15 +616,23 @@ func (i *instance) classify(e exitInfo, ranFor time.Duration) (wait time.Duratio
 	case e.removed:
 		i.mu.Lock()
 		i.rereg, i.removed = true, true
+		automatic := i.spec.Account != "" && i.m.o.Token != nil
 		i.mu.Unlock()
-		return time.Second, i.problem(v1.CiProblemRunnerRemoved, "GitHub 已经删除了这个运行器，请选择「重新注册」。"), true
+		return time.Second, i.problem(v1.CiProblemRunnerRemoved, "GitHub 已经删除了这个运行器，请选择「重新注册」。"), !automatic
 	case e.authFail:
-		return time.Second, i.problem(v1.CiProblemAuthFailed, "GitHub 拒绝了这个运行器的凭据，请选择「重新注册」。"), true
+		i.mu.Lock()
+		automatic := i.spec.Account != "" && i.m.o.Token != nil
+		if automatic {
+			i.rereg = true
+		}
+		i.mu.Unlock()
+		return time.Second, i.problem(v1.CiProblemAuthFailed, "GitHub 拒绝了这个运行器的凭据，请选择「重新注册」。"), !automatic
 	case e.deprec || e.code == 7:
 		i.mu.Lock()
 		i.reinstall = true
+		automatic := i.spec.Source != "import"
 		i.mu.Unlock()
-		return time.Second, i.problem(v1.CiProblemVersionDeprecated, "运行器版本已被弃用，重启后会换成最新版本。"), true
+		return time.Second, i.problem(v1.CiProblemVersionDeprecated, "运行器版本已被弃用，重启后会换成最新版本。"), !automatic
 	case e.conflict || e.code == 5:
 		i.mu.Lock()
 		i.conflicts++
