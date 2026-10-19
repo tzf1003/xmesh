@@ -49,3 +49,35 @@ func TestScreenPermissionAllowsObservationWhileInputIsUnavailable(t *testing.T) 
 		t.Fatal("input permission affected observation")
 	}
 }
+
+func TestLocalUserInputPausesControlAndPreservesObservers(t *testing.T) {
+	m, p := manager(t)
+	p.mu.Lock()
+	p.info.UserInputMonitor = true
+	p.info.UserInputSerial = 7
+	p.mu.Unlock()
+	m.Configure(Settings{Enabled: true, PauseOnUserInput: true})
+	_ = open(t, m, "agent/session", "control")
+	_ = open(t, m, "observer/session", "observe")
+	p.mu.Lock()
+	p.info.UserInputSerial++
+	p.mu.Unlock()
+	if _, err := m.Info(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Sessions("agent/session")) != 0 || len(m.Sessions("observer/session")) != 1 {
+		t.Fatal("human input did not revoke only the controller")
+	}
+	if _, err := m.Open(context.Background(), "agent/session", OpenRequest{Mode: "control"}); code(err) != "policy_denied" {
+		t.Fatal(err)
+	}
+}
+
+func TestUnsupportedInputMonitoringFailsControlExplicitly(t *testing.T) {
+	m, _ := manager(t)
+	m.Configure(Settings{Enabled: true, PauseOnUserInput: true})
+	if _, err := m.Open(context.Background(), "agent/session", OpenRequest{Mode: "control"}); code(err) != "permission_required" {
+		t.Fatal(err)
+	}
+	_ = open(t, m, "viewer/session", "observe")
+}

@@ -84,6 +84,8 @@ struct Action {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Execution {
+    #[serde(default)]
+    user_input_serial: Option<u64>,
     desktop_epoch: String,
     lease_token: String,
     #[serde(default)]
@@ -97,6 +99,8 @@ struct Runtime {
     epoch: String,
     revoked: AtomicU64,
     input_ready: AtomicBool,
+    pause_on_input: AtomicBool,
+    input_baseline: AtomicU64,
     output: Mutex<io::Stdout>,
 }
 
@@ -133,13 +137,18 @@ impl Runtime {
         json!({"protocol_version":1,"available":state=="ready","state":state,
             "reason":if state=="permission_required"{"screen_permission"}else if state=="ready"&&!input{"input_permission_required"}else{state},
             "desktop_id":"desktop","desktop_epoch":self.epoch,"layout_version":platform::layout(&displays),
-            "capabilities":if state=="ready"&&input{vec!["screenshot","pointer","keyboard","text"]}else if state=="ready"{vec!["screenshot"]}else{vec![]},"displays":displays})
+            "capabilities":if state=="ready"&&input{vec!["screenshot","pointer","keyboard","text"]}else if state=="ready"{vec!["screenshot"]}else{vec![]},"displays":displays,
+			"user_input_monitor":platform::input_monitor_available(),"user_input_serial":platform::user_input_serial()})
     }
     fn live(&self, token: u64, start: Instant) -> bool {
         token > self.revoked.load(Ordering::Acquire)
             && start.elapsed() < Duration::from_secs(5)
             && !platform::locked()
             && platform::input_permission()
+            && (!self.pause_on_input.load(Ordering::Acquire)
+                || (platform::input_monitor_available()
+                    && platform::user_input_serial()
+                        == self.input_baseline.load(Ordering::Acquire)))
     }
 }
 
@@ -371,7 +380,7 @@ fn action(
             // Let the compositor route the pointer to the target before a button,
             // wheel or keyboard event uses its focus. This is cancellable.
             if a.kind != "move" {
-                pause(runtime, token, start, 20)?;
+                pause(runtime, token, start, 50)?;
             }
             match a.kind.as_str() {
                 "click" => {
@@ -483,6 +492,9 @@ fn action(
 
 fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, authorize: bool) {
     let mut input = Input::new(authorize);
+    if input.is_some() {
+        platform::start_input_monitor();
+    }
     runtime
         .input_ready
         .store(input.is_some(), Ordering::Release);
@@ -512,7 +524,7 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
             cache.clear();
             previous_token = token;
         }
-        let payload = json!({"actions":q.actions.iter().map(|a|json!({"type":a.kind,"x":a.x,"y":a.y,"to_x":a.to_x,"to_y":a.to_y,"button":a.button,"clicks":a.clicks,"keys":a.keys,"text":a.text,"delta_x":a.delta_x,"delta_y":a.delta_y,"duration_ms":a.duration_ms})).collect::<Vec<_>>(),"frame":q.frame.as_ref().map(|f|json!({"epoch":f.desktop_epoch,"display":f.display_id,"layout":f.layout_version,"w":f.image_width,"h":f.image_height,"region":[f.capture_region.x,f.capture_region.y,f.capture_region.width,f.capture_region.height]}))});
+        let payload = json!({"user_input_serial":q.user_input_serial,"actions":q.actions.iter().map(|a|json!({"type":a.kind,"x":a.x,"y":a.y,"to_x":a.to_x,"to_y":a.to_y,"button":a.button,"clicks":a.clicks,"keys":a.keys,"text":a.text,"delta_x":a.delta_x,"delta_y":a.delta_y,"duration_ms":a.duration_ms})).collect::<Vec<_>>(),"frame":q.frame.as_ref().map(|f|json!({"epoch":f.desktop_epoch,"display":f.display_id,"layout":f.layout_version,"w":f.image_width,"h":f.image_height,"region":[f.capture_region.x,f.capture_region.y,f.capture_region.width,f.capture_region.height]}))});
         if let Some((old, result)) = cache.get(&q.action_id) {
             if *old == payload {
                 runtime.reply(id, result.clone());
@@ -541,6 +553,12 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
             continue;
         }
         let mut executed = 0;
+        runtime
+            .pause_on_input
+            .store(q.user_input_serial.is_some(), Ordering::Release);
+        runtime
+            .input_baseline
+            .store(q.user_input_serial.unwrap_or(0), Ordering::Release);
         let mut error = None;
         let start = Instant::now();
         if let Some(enigo) = input.as_mut() {
@@ -556,7 +574,12 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         } else {
             error = Some("permission_required");
         }
-        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
+        if q.user_input_serial
+            .is_some_and(|serial| serial != platform::user_input_serial())
+        {
+            error = Some("human_intervention");
+        }
+        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled"|"human_intervention")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
         cache.insert(q.action_id.clone(), (payload, result.clone()));
         runtime.reply(id, result);
     }
@@ -598,6 +621,8 @@ fn main() {
         ),
         revoked: AtomicU64::new(0),
         input_ready: AtomicBool::new(false),
+        pause_on_input: AtomicBool::new(false),
+        input_baseline: AtomicU64::new(0),
         output: Mutex::new(io::stdout()),
     });
     let (tx, rx) = mpsc::sync_channel(8);

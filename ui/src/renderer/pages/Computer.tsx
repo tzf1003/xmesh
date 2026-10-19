@@ -49,6 +49,17 @@ function ComputerPage({ ctx }: { ctx: PageContext }): JSX.Element {
       reload();
     } finally { setBusy(false); }
   };
+  const pauseOnInput = async (enabled: boolean): Promise<void> => {
+    setBusy(true);
+    try {
+      const config = await getApi().getConfig();
+      if (!config.ok) { ctx.toast(config.error.message, true); return; }
+      const saved = await getApi().patchConfig({ edits: [{ path: "/agent/computer/pause_on_user_input", value: enabled }], etag: config.data.etag, dryRun: false });
+      if (!saved.ok) ctx.toast(saved.error.message, true);
+      else { ctx.applied(await applySaved(saved.data.restart_required)); ctx.toast(t("computer.saved")); }
+      reload();
+    } finally { setBusy(false); }
+  };
   return <div class="page" data-testid="page-computer">
     <PageHead title={t("nav.computer")} sub={t("computer.sub")}><button type="button" class="btn" onClick={reload}>{t("common.refresh")}</button></PageHead>
     <ResourceView resource={resource}>{(state) => <>
@@ -61,6 +72,8 @@ function ComputerPage({ ctx }: { ctx: PageContext }): JSX.Element {
         </div>
         <p class="hint">{t("computer.takeoverHint")}</p>
         <p class="hint">{t("computer.shortcut")}</p>
+        <label><input type="checkbox" checked={state.pause_on_user_input === true} disabled={busy || !ctx.can("config.write") || (!state.info.user_input_monitor && !state.pause_on_user_input)} onChange={(e) => void pauseOnInput(e.currentTarget.checked)} data-testid="computer-pause-on-input" /> {t("computer.pauseOnInput")}</label>
+        {!state.info.user_input_monitor && <p class="hint">{t("computer.inputMonitorUnavailable")}</p>}
       </section>
       <section class="card stack">
         <h2>{t("computer.permissions")}</h2>

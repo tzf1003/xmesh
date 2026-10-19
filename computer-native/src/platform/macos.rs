@@ -39,6 +39,17 @@ extern "C" {
         ...
     ) -> *mut c_void;
     fn CGEventPost(tap: u32, event: *const c_void);
+    fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
+    fn CGEventGetIntegerValueField(event: *const c_void, field: u32) -> i64;
+    fn CGEventTapCreate(
+        tap: u32,
+        placement: u32,
+        options: u32,
+        mask: u64,
+        callback: extern "C" fn(*mut c_void, u32, *mut c_void, *mut c_void) -> *mut c_void,
+        context: *mut c_void,
+    ) -> *mut c_void;
+    fn CGEventTapEnable(tap: *mut c_void, enabled: bool);
 }
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
@@ -54,6 +65,15 @@ extern "C" {
     fn CFDictionaryGetValue(dictionary: *const c_void, key: *const c_void) -> *const c_void;
     fn CFBooleanGetValue(value: *const c_void) -> bool;
     fn CFRelease(value: *const c_void);
+    fn CFMachPortCreateRunLoopSource(
+        allocator: *const c_void,
+        port: *mut c_void,
+        order: isize,
+    ) -> *mut c_void;
+    fn CFRunLoopGetCurrent() -> *mut c_void;
+    fn CFRunLoopAddSource(loop_: *mut c_void, source: *mut c_void, mode: *const c_void);
+    fn CFRunLoopRun();
+    static kCFRunLoopCommonModes: *const c_void;
 }
 
 pub fn displays() -> Vec<Display> {
@@ -108,10 +128,63 @@ pub fn scroll(length: i32, axis: enigo::Axis) -> Result<(), &'static str> {
             return Err("input_failed");
         }
         CGEventSetLocation(event, location);
+        CGEventSetIntegerValueField(event, 42, super::INPUT_MARKER as i64);
         CGEventPost(0, event);
         CFRelease(event);
     }
     Ok(())
+}
+
+static INPUT_TAP: std::sync::atomic::AtomicPtr<c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+extern "C" fn input_event(
+    _: *mut c_void,
+    kind: u32,
+    event: *mut c_void,
+    _: *mut c_void,
+) -> *mut c_void {
+    use std::sync::atomic::Ordering;
+    if kind >= 0xfffffffe {
+        let tap = INPUT_TAP.load(Ordering::Acquire);
+        if !tap.is_null() {
+            unsafe { CGEventTapEnable(tap, true) }
+        };
+        return event;
+    }
+    if !event.is_null()
+        && unsafe { CGEventGetIntegerValueField(event, 42) } != super::INPUT_MARKER as i64
+        && unsafe { CGEventGetIntegerValueField(event, 41) } != i64::from(std::process::id())
+    {
+        super::INPUT_SERIAL.fetch_add(1, Ordering::AcqRel);
+    }
+    event
+}
+pub fn start_input_monitor() {
+    static START: std::sync::Once = std::sync::Once::new();
+    START.call_once(|| {
+        std::thread::spawn(|| unsafe {
+            let mask = [1u32, 3, 10, 12, 25]
+                .into_iter()
+                .fold(0u64, |m, v| m | (1u64 << v));
+            let tap = CGEventTapCreate(1, 0, 1, mask, input_event, std::ptr::null_mut());
+            if tap.is_null() {
+                return;
+            }
+            let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
+            if source.is_null() {
+                CFRelease(tap);
+                return;
+            }
+            INPUT_TAP.store(tap, std::sync::atomic::Ordering::Release);
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
+            CGEventTapEnable(tap, true);
+            super::INPUT_MONITOR_READY.store(true, std::sync::atomic::Ordering::Release);
+            CFRunLoopRun();
+            super::INPUT_MONITOR_READY.store(false, std::sync::atomic::Ordering::Release);
+            CFRelease(source);
+            CFRelease(tap);
+        });
+    });
 }
 pub fn input_permission() -> bool {
     unsafe { AXIsProcessTrusted() }

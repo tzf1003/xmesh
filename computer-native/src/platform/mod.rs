@@ -1,4 +1,15 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+pub const INPUT_MARKER: u64 = 0x584d455348;
+pub(crate) static INPUT_SERIAL: AtomicU64 = AtomicU64::new(0);
+pub(crate) static INPUT_MONITOR_READY: AtomicBool = AtomicBool::new(false);
+pub fn user_input_serial() -> u64 {
+    INPUT_SERIAL.load(Ordering::Acquire)
+}
+pub fn input_monitor_available() -> bool {
+    INPUT_MONITOR_READY.load(Ordering::Acquire)
+}
 
 #[cfg(target_os = "macos")]
 mod macos;

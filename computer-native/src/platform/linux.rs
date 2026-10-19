@@ -17,6 +17,78 @@ fn wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
+pub fn start_input_monitor() {
+    if wayland() {
+        return;
+    }
+    static START: std::sync::Once = std::sync::Once::new();
+    START.call_once(|| {
+        std::thread::spawn(|| {
+            use std::{collections::HashSet, sync::atomic::Ordering};
+            use x11rb::protocol::{
+                xinput::{ConnectionExt, Device, EventMask, XIEventMask},
+                Event,
+            };
+            let Ok((conn, n)) = x11rb::connect(None) else {
+                return;
+            };
+            let Ok(version) = conn.xinput_xi_query_version(2, 0) else {
+                return;
+            };
+            if version.reply().is_err() {
+                return;
+            }
+            let Ok(devices) = conn.xinput_xi_query_device(Device::ALL) else {
+                return;
+            };
+            let Ok(devices) = devices.reply() else {
+                return;
+            };
+            let synthetic: HashSet<u16> = devices
+                .infos
+                .iter()
+                .filter(|d| String::from_utf8_lossy(&d.name).contains("XTEST"))
+                .map(|d| d.deviceid)
+                .collect();
+            let mask = XIEventMask::RAW_KEY_PRESS | XIEventMask::RAW_BUTTON_PRESS;
+            if conn
+                .xinput_xi_select_events(
+                    conn.setup().roots[n].root,
+                    &[EventMask {
+                        deviceid: Device::ALL_MASTER.into(),
+                        mask: vec![mask],
+                    }],
+                )
+                .is_err()
+                || conn.flush().is_err()
+            {
+                return;
+            }
+            super::INPUT_MONITOR_READY.store(true, Ordering::Release);
+            loop {
+                match conn.poll_for_event() {
+                    Ok(Some(event)) => {
+                        let source = match event {
+                            Event::XinputRawKeyPress(e) => Some(e.sourceid),
+                            Event::XinputRawButtonPress(e) => Some(e.sourceid),
+                            Event::XinputRawMotion(e) => Some(e.sourceid),
+                            _ => None,
+                        };
+                        if source.is_some_and(|id| !synthetic.contains(&id)) {
+                            super::INPUT_SERIAL.fetch_add(1, Ordering::AcqRel);
+                        }
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                    Err(_) => {
+                        super::INPUT_MONITOR_READY.store(false, Ordering::Release);
+                        return;
+                    }
+                }
+            }
+        });
+    });
+}
+
 pub fn displays() -> Vec<Display> {
     if wayland() {
         return wayland_backend::displays();

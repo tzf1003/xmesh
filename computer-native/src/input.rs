@@ -24,6 +24,8 @@ impl Input {
             return None;
         }
         let settings = Settings {
+            windows_dw_extra_info: Some(crate::platform::INPUT_MARKER as usize),
+            event_source_user_data: Some(crate::platform::INPUT_MARKER as i64),
             open_prompt_to_get_permissions: authorize,
             release_keys_when_dropped: true,
             ..Default::default()

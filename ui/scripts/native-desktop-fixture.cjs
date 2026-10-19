@@ -17,7 +17,7 @@ app.whenReady().then(async () => {
     try {
       const data = await window.webContents.executeJavaScript(`(() => {const point=(id,dx=0)=>{const r=document.querySelector(id).getBoundingClientRect();return {x:r.x+r.width/2+dx,y:r.y+r.height/2}};return {click:point('#click'),text:point('#text'),dragPoint:point('#drag',-100),dragTo:point('#drag',100),scroll:point('#scroll'),value:document.querySelector('#text').value,scrollTop:document.querySelector('#scroll').scrollTop,...observed}})()`);
       response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify({ ...data, content: window.getContentBounds(), display: screen.getDisplayMatching(window.getBounds()).bounds, scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }));
+      response.end(JSON.stringify({ ...data, cursor: screen.getCursorScreenPoint(), content: window.getContentBounds(), display: screen.getDisplayMatching(window.getBounds()).bounds, scale: screen.getDisplayMatching(window.getBounds()).scaleFactor }));
     } catch { response.writeHead(500); response.end(); }
   });
   server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ endpoint: `http://127.0.0.1:${server.address().port}` })));

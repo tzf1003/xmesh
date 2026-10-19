@@ -79,6 +79,13 @@
           "items": {
             "$ref": "#/$defs/ComputerDisplay"
           }
+        },
+        "user_input_monitor": {
+          "type": "boolean"
+        },
+        "user_input_serial": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -146,6 +153,9 @@
           "items": {
             "$ref": "#/$defs/ComputerSession"
           }
+        },
+        "pause_on_user_input": {
+          "type": "boolean"
         }
       },
       "required": [

@@ -13,15 +13,17 @@ func (m *Manager) SetAuthorization(check func(string) bool) {
 // LocalState is metadata for the owner's local control channel. Lease tokens,
 // typed text and images are deliberately absent from this view.
 type LocalState struct {
-	Enabled  bool      `json:"enabled"`
-	Paused   bool      `json:"paused"`
-	Info     Info      `json:"info"`
-	Sessions []Session `json:"sessions"`
+	Enabled          bool      `json:"enabled"`
+	Paused           bool      `json:"paused"`
+	PauseOnUserInput bool      `json:"pause_on_user_input,omitempty"`
+	Info             Info      `json:"info"`
+	Sessions         []Session `json:"sessions"`
 }
 
 func (m *Manager) LocalState(ctx context.Context) LocalState {
 	m.mu.Lock()
 	v := LocalState{Enabled: m.settings.Enabled, Paused: m.paused, Info: Info{ProtocolVersion: ProtocolVersion, State: "disabled", Capabilities: []string{}, Displays: []Display{}}, Sessions: []Session{}}
+	v.PauseOnUserInput = m.settings.PauseOnUserInput
 	m.expireLocked()
 	for _, s := range m.sessions {
 		session := s.Session

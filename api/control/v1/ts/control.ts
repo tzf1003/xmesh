@@ -781,6 +781,8 @@ export interface ComputerInfo {
   layout_version: string;
   capabilities: string[];
   displays: ComputerDisplay[];
+  user_input_monitor?: boolean;
+  user_input_serial?: number;
 }
 export interface ComputerSession {
   session_id: string;
@@ -795,6 +797,7 @@ export interface ComputerState {
   paused: boolean;
   info: ComputerInfo;
   sessions: ComputerSession[];
+  pause_on_user_input?: boolean;
 }
 export interface ComputerPauseRequest {
   paused: boolean;

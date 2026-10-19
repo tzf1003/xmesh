@@ -36,11 +36,93 @@ extern "system" {
     ) -> i32;
     fn CloseDesktop(desktop: *mut c_void) -> i32;
     fn SetThreadDpiAwarenessContext(value: isize) -> isize;
+    fn SetWindowsHookExW(
+        kind: i32,
+        callback: unsafe extern "system" fn(i32, usize, isize) -> isize,
+        module: *mut c_void,
+        thread: u32,
+    ) -> *mut c_void;
+    fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize;
+    fn UnhookWindowsHookEx(hook: *mut c_void) -> i32;
+    fn GetMessageW(message: *mut Message, window: *mut c_void, min: u32, max: u32) -> i32;
 }
 #[link(name = "kernel32")]
 extern "system" {
     fn GetCurrentProcessId() -> u32;
     fn ProcessIdToSessionId(pid: u32, session: *mut u32) -> i32;
+    fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+}
+
+#[repr(C)]
+struct Message {
+    window: *mut c_void,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    time: u32,
+    x: i32,
+    y: i32,
+    private: u32,
+}
+#[repr(C)]
+struct KeyboardHook {
+    vk: u32,
+    scan: u32,
+    flags: u32,
+    time: u32,
+    extra: usize,
+}
+#[repr(C)]
+struct MouseHook {
+    x: i32,
+    y: i32,
+    data: u32,
+    flags: u32,
+    time: u32,
+    extra: usize,
+}
+unsafe extern "system" fn keyboard_event(code: i32, wparam: usize, lparam: isize) -> isize {
+    if code >= 0 && (wparam == 0x100 || wparam == 0x104) {
+        let event = &*(lparam as *const KeyboardHook);
+        if event.extra != super::INPUT_MARKER as usize {
+            super::INPUT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+}
+unsafe extern "system" fn mouse_event(code: i32, wparam: usize, lparam: isize) -> isize {
+    if code >= 0 && wparam != 0x200 {
+        let event = &*(lparam as *const MouseHook);
+        if event.extra != super::INPUT_MARKER as usize {
+            super::INPUT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+}
+pub fn start_input_monitor() {
+    static START: std::sync::Once = std::sync::Once::new();
+    START.call_once(|| {
+        std::thread::spawn(|| unsafe {
+            let module = GetModuleHandleW(std::ptr::null());
+            let keyboard = SetWindowsHookExW(13, keyboard_event, module, 0);
+            let mouse = SetWindowsHookExW(14, mouse_event, module, 0);
+            if keyboard.is_null() || mouse.is_null() {
+                if !keyboard.is_null() {
+                    UnhookWindowsHookEx(keyboard);
+                }
+                if !mouse.is_null() {
+                    UnhookWindowsHookEx(mouse);
+                }
+                return;
+            }
+            super::INPUT_MONITOR_READY.store(true, std::sync::atomic::Ordering::Release);
+            let mut message: Message = std::mem::zeroed();
+            while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {}
+            super::INPUT_MONITOR_READY.store(false, std::sync::atomic::Ordering::Release);
+            UnhookWindowsHookEx(keyboard);
+            UnhookWindowsHookEx(mouse);
+        });
+    });
 }
 
 unsafe extern "system" fn monitor(

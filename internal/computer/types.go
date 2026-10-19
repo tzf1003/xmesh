@@ -23,15 +23,17 @@ type Display struct {
 }
 
 type Info struct {
-	ProtocolVersion int       `json:"protocol_version"`
-	Available       bool      `json:"available"`
-	State           string    `json:"state"`
-	Reason          string    `json:"reason,omitempty"`
-	DesktopID       string    `json:"desktop_id"`
-	Epoch           string    `json:"desktop_epoch"`
-	LayoutVersion   string    `json:"layout_version"`
-	Capabilities    []string  `json:"capabilities"`
-	Displays        []Display `json:"displays"`
+	ProtocolVersion  int       `json:"protocol_version"`
+	Available        bool      `json:"available"`
+	State            string    `json:"state"`
+	Reason           string    `json:"reason,omitempty"`
+	DesktopID        string    `json:"desktop_id"`
+	Epoch            string    `json:"desktop_epoch"`
+	LayoutVersion    string    `json:"layout_version"`
+	Capabilities     []string  `json:"capabilities"`
+	Displays         []Display `json:"displays"`
+	UserInputMonitor bool      `json:"user_input_monitor,omitempty"`
+	UserInputSerial  uint64    `json:"user_input_serial,omitempty"`
 }
 
 type Region struct {
@@ -131,11 +133,12 @@ type ActionResult struct {
 
 // Execution carries the authority and exact observation that an adapter must validate again.
 type Execution struct {
-	Epoch    string   `json:"desktop_epoch"`
-	Token    string   `json:"lease_token"`
-	ActionID string   `json:"action_id"`
-	Frame    *Frame   `json:"frame,omitempty"`
-	Actions  []Action `json:"actions"`
+	UserInputSerial *uint64  `json:"user_input_serial,omitempty"`
+	Epoch           string   `json:"desktop_epoch"`
+	Token           string   `json:"lease_token"`
+	ActionID        string   `json:"action_id"`
+	Frame           *Frame   `json:"frame,omitempty"`
+	Actions         []Action `json:"actions"`
 }
 
 // Provider is the authenticated connection to the user-session desktop executor.
@@ -150,11 +153,12 @@ type Provider interface {
 }
 
 type Settings struct {
-	Enabled       bool   `json:"enabled"`
-	Endpoint      string `json:"endpoint,omitempty"`
-	MaxSessions   int    `json:"max_sessions,omitempty"`
-	LeaseSeconds  int    `json:"lease_seconds,omitempty"`
-	MaxImageBytes int    `json:"max_image_bytes,omitempty"`
+	PauseOnUserInput bool   `json:"pause_on_user_input,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	Endpoint         string `json:"endpoint,omitempty"`
+	MaxSessions      int    `json:"max_sessions,omitempty"`
+	LeaseSeconds     int    `json:"lease_seconds,omitempty"`
+	MaxImageBytes    int    `json:"max_image_bytes,omitempty"`
 }
 
 func (s Settings) Effective() Settings {

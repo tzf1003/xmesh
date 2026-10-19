@@ -37,6 +37,8 @@ Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop
 
 审计记录动作 ID、会话 ID、参数键和字节数。输入正文、图片和其可猜测摘要不写入审计。完整桌面控制具有用户级 GUI 权限；文件路径策略不会自动约束 GUI。Ingress 处理工具结果，是截图数据的信任边界。
 
+`agent.computer.pause_on_user_input` 默认关闭。启用时，控制会话绑定原生执行器报告的本机输入序号；检测到其他输入来源的点击或按键后，输入执行和下一次状态检查会撤销控制并暂停。执行器的标记用于区别自己产生的事件，同用户进程不属于独立安全边界。`user_input_monitor` 为 false 时，启用该策略的控制申请返回 permission_required；不会默默放行。Wayland compositor 尚未提供全局输入监测时可使用本机接管按钮和暂停快捷键。
+
 ## 本机执行器通道
 
 `xmesh computer host` 在图形用户会话中运行，使用用户专用 Unix socket 或 Windows 命名管道接入目标内核，并通过匿名继承管道监督 Rust 原生执行器。此 host 不承载 Agent / Gateway / Ingress，也不接入 mesh。Windows SYSTEM 内核通过配置的用户 SID 管道连接图形会话。

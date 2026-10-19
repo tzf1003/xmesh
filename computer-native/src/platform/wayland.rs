@@ -3,7 +3,7 @@
 use super::Display;
 use ashpd::desktop::{
     remote_desktop::{Axis as PortalAxis, DeviceType, KeyState, RemoteDesktop},
-    screencast::{CursorMode, Screencast, SourceType},
+    screencast::Screencast,
     PersistMode,
 };
 use enigo::{Axis, Button, Coordinate, Direction, Key};
@@ -53,6 +53,57 @@ struct Command {
 }
 
 static PORTAL: OnceLock<Arc<Shared>> = OnceLock::new();
+
+async fn select_monitor_sources(
+    screencast: &Screencast<'_>,
+    session: &ashpd::desktop::Session<'_, RemoteDesktop<'_>>,
+) -> Result<(), &'static str> {
+    use std::collections::HashMap;
+    use zbus::zvariant::{OwnedValue, Value};
+    let connection = screencast.connection();
+    let sender = connection
+        .unique_name()
+        .ok_or("portal_identity")?
+        .as_str()
+        .trim_start_matches(':')
+        .replace('.', "_");
+    let token = format!("xmesh_sources_{}", std::process::id());
+    let path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
+    let request = zbus::Proxy::new(
+        connection,
+        "org.freedesktop.portal.Desktop",
+        path.as_str(),
+        "org.freedesktop.portal.Request",
+    )
+    .await
+    .map_err(|_| "portal_request")?;
+    let mut response = request
+        .receive_signal("Response")
+        .await
+        .map_err(|_| "portal_request")?;
+    let options: HashMap<&str, Value<'_>> = HashMap::from([
+        ("handle_token", Value::from(token.as_str())),
+        ("types", Value::from(1u32)),
+        ("cursor_mode", Value::from(2u32)),
+        ("multiple", Value::from(true)),
+    ]);
+    // Combined sessions persist only through RemoteDesktop.SelectDevices.
+    // The typed ScreenCast helper always serializes persistence options, so
+    // send this request on the same authenticated connection with those omitted.
+    screencast
+        .call_method("SelectSources", &(session, options))
+        .await
+        .map_err(|_| "portal_select_sources")?;
+    let message = response.next().await.ok_or("portal_request_closed")?;
+    let (code, _): (u32, HashMap<String, OwnedValue>) = message
+        .body()
+        .deserialize()
+        .map_err(|_| "portal_response")?;
+    if code != 0 {
+        return Err("portal_permission");
+    }
+    Ok(())
+}
 
 pub fn available() -> bool {
     PORTAL
@@ -150,7 +201,7 @@ impl PortalInput {
                 let session=match remote.create_session().await{Ok(v)=>v,Err(_)=>{let _=tx.send(Err("portal_session"));return;}};
                 let initialized=async{
                     remote.select_devices(&session,DeviceType::Keyboard|DeviceType::Pointer,restore.as_deref(),PersistMode::ExplicitlyRevoked).await.map_err(|_|"portal_select_devices")?.response().map_err(|_|"portal_permission")?;
-                    screencast.select_sources(&session,CursorMode::Embedded,SourceType::Monitor.into(),true,None,PersistMode::DoNot).await.map_err(|_|"portal_select_sources")?.response().map_err(|_|"portal_permission")?;
+                    select_monitor_sources(&screencast,&session).await?;
                     let response=remote.start(&session,None).await.map_err(|_|"portal_start")?.response().map_err(|_|"portal_permission")?;
                     if !response.devices().contains(DeviceType::Keyboard)||!response.devices().contains(DeviceType::Pointer){return Err("portal_devices_missing");}
                     let mut streams=Vec::new();

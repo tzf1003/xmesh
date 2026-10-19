@@ -34,10 +34,11 @@ type operation struct {
 
 type ownedSession struct {
 	Session
-	frames  map[string]Frame
-	actions map[string]*operation
-	ctx     context.Context
-	cancel  context.CancelFunc
+	userInputSerial uint64
+	frames          map[string]Frame
+	actions         map[string]*operation
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // Manager keeps authority on the target Agent, including across Gateway reconnects.
@@ -133,6 +134,11 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 	}
 	m.mu.Lock()
 	for id, s := range m.sessions {
+		if s.Mode == "control" && m.settings.PauseOnUserInput && (!info.UserInputMonitor || s.userInputSerial != info.UserInputSerial) {
+			m.paused = true
+			m.removeLocked(id)
+			continue
+		}
 		if !info.Available || s.Epoch != info.Epoch || (s.Mode == "control" && !inputCapable(info)) {
 			m.removeLocked(id)
 		}
@@ -186,6 +192,9 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	if !slices.Contains(info.Capabilities, "screenshot") || (r.Mode == "control" && !inputCapable(info)) {
 		return Session{}, toolerr.New("permission_required", "需要系统桌面权限", "reason", "desktop_capability_missing")
 	}
+	if r.Mode == "control" && m.settings.PauseOnUserInput && !info.UserInputMonitor {
+		return Session{}, toolerr.New("permission_required", "当前桌面无法监测本机用户输入", "reason", "input_monitor_unavailable")
+	}
 	if r.DesktopID != "" && r.DesktopID != info.DesktopID {
 		return Session{}, toolerr.New("not_found", "桌面不存在", "name", r.DesktopID)
 	}
@@ -216,6 +225,7 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &ownedSession{Session: Session{ID: "cs-" + rand.Text(), DesktopID: info.DesktopID, Epoch: info.Epoch, Mode: r.Mode, Owner: caller, ExpiresAt: m.now().Add(ttl)}, frames: map[string]Frame{}, actions: map[string]*operation{}, ctx: ctx, cancel: cancel}
+	s.userInputSerial = info.UserInputSerial
 	if r.Mode == "control" {
 		m.serial++
 		s.Token = strconv.FormatUint(m.serial, 10)
@@ -519,8 +529,18 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 		result.Error = "cancelled"
 		return
 	}
-	result, err = m.provider.Execute(ctx, Execution{Epoch: s.Epoch, Token: s.Token, ActionID: r.ActionID, Frame: frame, Actions: r.Actions})
+	execution := Execution{Epoch: s.Epoch, Token: s.Token, ActionID: r.ActionID, Frame: frame, Actions: r.Actions}
+	m.mu.Lock()
+	if m.settings.PauseOnUserInput {
+		serial := s.userInputSerial
+		execution.UserInputSerial = &serial
+	}
+	m.mu.Unlock()
+	result, err = m.provider.Execute(ctx, execution)
 	result.ActionID = r.ActionID
+	if result.Error == "human_intervention" {
+		m.Pause(true)
+	}
 	if err != nil || (result.State != "executed" && result.State != "failed" && result.State != "unknown") {
 		result.State = "unknown"
 		result.Error = "execution_unknown"

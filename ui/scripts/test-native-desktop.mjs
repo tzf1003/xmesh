@@ -20,7 +20,7 @@ try {
   });
   await (await app.firstWindow()).bringToFront();
   const exit = await new Promise((resolve) => {
-    const child = spawn("go", ["test", "./internal/desktopbroker", "-run", "TestNativeInputFixture", "-v", "-count=1"], { cwd: root, stdio: "inherit", env: { ...process.env, XMESH_TEST_COMPUTER_FIXTURE: endpoint, XMESH_TEST_COMPUTER_FIXTURE_TOKEN: token } });
+    const child = spawn("go", ["test", "./internal/desktopbroker", "-run", "TestNative(InputFixture|UserIntervention)", "-v", "-count=1", "-timeout=90s"], { cwd: root, stdio: "inherit", env: { ...process.env, XMESH_TEST_COMPUTER_FIXTURE: endpoint, XMESH_TEST_COMPUTER_FIXTURE_TOKEN: token } });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
   });

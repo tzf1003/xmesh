@@ -2077,6 +2077,7 @@ dependencies = [
  "windows-capture",
  "x11rb",
  "xkeysym",
+ "zbus",
 ]
 
 [[package]]

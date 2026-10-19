@@ -18,6 +18,7 @@ type fixtureRectangle struct{ X, Y, Width, Height float64 }
 type inputFixture struct {
 	Click, Text, DragPoint, DragTo, Scroll fixturePoint
 	Content, Display                       fixtureRectangle
+	Cursor                                 fixturePoint
 	Value                                  string
 	Clicks                                 int
 	DragComplete                           bool `json:"dragComplete"`
@@ -69,18 +70,28 @@ func TestNativeInputFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(info.Capabilities) > 1 {
+		if len(info.Capabilities) > 1 && (os.Getenv("XMESH_TEST_COMPUTER_MONITOR") != "1" || info.UserInputMonitor) {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	m := computer.New(c, computer.Settings{Enabled: true})
+	m := computer.New(c, computer.Settings{Enabled: true, PauseOnUserInput: info.UserInputMonitor})
 	defer m.Close()
 	s, err := m.Open(ctx, "native-fixture/session", computer.OpenRequest{Mode: "control"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	identity := computer.SessionRequest{SessionID: s.ID, Epoch: s.Epoch, Token: s.Token}
+	interrupted := func() {
+		t.Helper()
+		latest, e := c.Info(ctx)
+		if e == nil && info.UserInputMonitor && latest.UserInputSerial != info.UserInputSerial {
+			if os.Getenv("CI") != "" {
+				t.Fatal("desktop input fixture received external local input")
+			}
+			t.Skip("native input acceptance interrupted by local user activity; input authority was revoked")
+		}
+	}
 	v := read()
 	var display computer.Display
 	for _, d := range info.Displays {
@@ -94,6 +105,7 @@ func TestNativeInputFixture(t *testing.T) {
 	}
 	frame, err := m.Observe(ctx, "native-fixture/session", computer.ObserveRequest{SessionRequest: identity, CaptureRequest: computer.CaptureRequest{DisplayID: display.ID, MaxWidth: 1600}})
 	if err != nil {
+		interrupted()
 		t.Fatal(err)
 	}
 	point := func(p fixturePoint) (*int, *int) {
@@ -106,6 +118,7 @@ func TestNativeInputFixture(t *testing.T) {
 		t.Helper()
 		r, e := m.Act(ctx, "native-fixture/session", computer.ActRequest{SessionRequest: identity, ActionID: id, FrameID: frame.ID, Actions: actions})
 		if e != nil || r.State != "executed" {
+			interrupted()
 			t.Fatal(id, r, e)
 		}
 	}
@@ -132,5 +145,6 @@ func TestNativeInputFixture(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	interrupted()
 	t.Fatal("native input did not match fixture state", read())
 }
