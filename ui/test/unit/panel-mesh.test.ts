@@ -42,6 +42,8 @@ test("every op is accepted in its documented shape", () => {
     { op: "onboard", tags: ["tag:device"], ttl: "1h", ephemeral: false, file: "/home/u/key.txt", overwrite: true },
     { op: "onboard", tags: ["tag:device"], ttl: "24h", ephemeral: true, user: "alice", file: "C:\\Users\\u\\key.txt", overwrite: false },
     { op: "policy.show" },
+    { op: "policy.document", edit: { text: "{}" } },
+    { op: "policy.publish", text: "{}", expectVersion: "v1", apply: false },
     { op: "policy.snapshots" },
     { op: "policy.template", template: "team", owner: "autogroup:admin", apply: false },
     { op: "policy.template", template: "team", owner: "tag:admins", apply: false },
@@ -176,7 +178,10 @@ test("the CLI's Go quirks become clean values", () => {
   assert.equal(s.capabilities.policyWrite, true);
   assert.equal(s.capabilities.derpViaPolicy, false);
   // Nonsense in, empty values out; never an exception.
-  for (const op of MESH_OPS) assert.doesNotThrow(() => normalizeResult(op, "not an object"));
+  for (const op of MESH_OPS) {
+    if (op === "policy.document") assert.throws(() => normalizeResult(op, "not an object"));
+    else assert.doesNotThrow(() => normalizeResult(op, "not an object"));
+  }
   assert.deepEqual(normalizeResult("matrix", undefined), { port: 0, cells: [] });
 });
 

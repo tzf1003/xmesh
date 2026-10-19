@@ -26,12 +26,31 @@ export interface DerpRegionInput {
 export type MeshControlPlane = "tailscale" | "headscale";
 export type MeshAccess = "read" | "write";
 
+export interface PolicyDocumentEdit {
+  text: string;
+  template?: MeshTemplate;
+  owner?: string;
+  port?: number;
+  regions?: DerpRegionInput[];
+  region?: { id: number; text: string };
+  removeID?: number;
+  omitDefault?: boolean;
+}
+
+export interface MeshPolicyDocument {
+  text: string;
+  regions: { id: number; code: string; name: string; hosts: string[]; text: string }[];
+  omitDefault: boolean;
+}
+
 export type MeshRequest =
   | { op: "login"; kind: MeshControlPlane; access: MeshAccess; url?: string; tailnet?: string; clientId?: string; secret: string }
   | { op: "status" }
   | { op: "tags"; device: string; tags: string[]; apply: boolean }
   | { op: "onboard"; tags: string[]; ttl: string; ephemeral: boolean; user?: string; file: string; overwrite: boolean }
   | { op: "policy.show" }
+  | { op: "policy.document"; edit: PolicyDocumentEdit }
+  | { op: "policy.publish"; text: string; expectVersion: string; apply: boolean }
   | { op: "policy.snapshots" }
   | { op: "policy.template"; template: MeshTemplate; owner: string; port?: number; apply: boolean; expectVersion?: string }
   | { op: "policy.rollback"; snapshot: string; apply: boolean; expectVersion?: string }
@@ -49,6 +68,8 @@ export const MESH_OPS = [
   "tags",
   "onboard",
   "policy.show",
+  "policy.document",
+  "policy.publish",
   "policy.snapshots",
   "policy.template",
   "policy.rollback",
@@ -190,6 +211,27 @@ const bad = (field: string): MeshParse => ({ ok: false, field });
 export function parseMeshRequest(v: unknown): MeshParse {
   if (!isRecord(v) || typeof v.op !== "string") return bad("op");
   switch (v.op) {
+    case "policy.document": {
+      if (!onlyKeys(v, ["op", "edit"]) || !isRecord(v.edit)) return bad("edit");
+      const e = v.edit;
+      if (!onlyKeys(e, ["text", "template", "owner", "port", "regions", "region", "removeID", "omitDefault"])) return bad("keys");
+      if (typeof e.text !== "string" || e.text.length > 262144 || e.text.trim() === "") return bad("text");
+      if (e.template !== undefined && !MESH_TEMPLATES.includes(e.template as MeshTemplate)) return bad("template");
+      if (e.owner !== undefined && (typeof e.owner !== "string" || !OWNER.test(e.owner))) return bad("owner");
+      if (e.template !== undefined && e.owner === undefined) return bad("owner");
+      if (e.port !== undefined && port(e.port) === undefined) return bad("port");
+      if (e.regions !== undefined && parseRegions(e.regions) === undefined) return bad("regions");
+      if (e.region !== undefined && (!isRecord(e.region) || !onlyKeys(e.region, ["id", "text"]) || !Number.isInteger(e.region.id) || Number(e.region.id) <= 0 || typeof e.region.text !== "string" || e.region.text.length > 262144)) return bad("region");
+      if (e.removeID !== undefined && (!Number.isInteger(e.removeID) || Number(e.removeID) <= 0)) return bad("removeID");
+      if (e.omitDefault !== undefined && typeof e.omitDefault !== "boolean") return bad("omitDefault");
+      return { ok: true, value: { op: "policy.document", edit: e as unknown as PolicyDocumentEdit } };
+    }
+    case "policy.publish":
+      if (!onlyKeys(v, ["op", "text", "expectVersion", "apply"])) return bad("keys");
+      if (typeof v.text !== "string" || v.text.trim() === "" || v.text.length > 262144) return bad("text");
+      if (typeof v.expectVersion !== "string" || !VERSION.test(v.expectVersion)) return bad("expectVersion");
+      if (typeof v.apply !== "boolean") return bad("apply");
+      return { ok: true, value: { op: "policy.publish", text: v.text, expectVersion: v.expectVersion, apply: v.apply } };
     case "login": {
       if (!onlyKeys(v, ["op", "kind", "access", "url", "tailnet", "clientId", "secret"])) return bad("keys");
       if (v.kind !== "tailscale" && v.kind !== "headscale") return bad("kind");
@@ -519,6 +561,8 @@ export interface MeshResults {
   tags: MeshTagPlan;
   onboard: MeshKeyResult;
   "policy.show": MeshPolicy;
+  "policy.document": MeshPolicyDocument;
+  "policy.publish": MeshPlanResult;
   "policy.snapshots": { snapshots: MeshSnapshot[] };
   "policy.template": MeshPlanResult;
   "policy.rollback": MeshPlanResult;
@@ -790,6 +834,16 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
         return normalizeKey(json);
       case "policy.show":
         return normalizePolicy(json);
+      case "policy.document": {
+        if (!isRecord(json) || typeof json.text !== "string" || typeof json.omitDefault !== "boolean" || !Array.isArray(json.regions)) throw new Error("Invalid policy document response");
+        const regions = json.regions.map((r) => {
+          if (!isRecord(r) || !Number.isInteger(r.id) || Number(r.id) <= 0 || typeof r.code !== "string" || typeof r.name !== "string" || typeof r.text !== "string" || !Array.isArray(r.hosts) || !r.hosts.every((h) => typeof h === "string")) throw new Error("Invalid policy region response");
+          return { id: r.id as number, code: r.code, name: r.name, text: r.text, hosts: r.hosts as string[] };
+        });
+        return { text: json.text, omitDefault: json.omitDefault, regions };
+      }
+      case "policy.publish":
+        return normalizePlanResult(json);
       case "policy.snapshots":
         return normalizeSnapshots(json);
       case "policy.template":

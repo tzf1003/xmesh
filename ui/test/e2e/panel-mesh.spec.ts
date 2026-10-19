@@ -21,7 +21,7 @@ async function open(opts: { publish?: boolean } = {}): Promise<Page> {
   return page;
 }
 
-type Patch = Partial<Pick<FakeMeshState, "credential" | "writeCredential" | "acceptKeys" | "provider" | "version" | "delayMs">>;
+type Patch = Partial<Pick<FakeMeshState, "credential" | "writeCredential" | "acceptKeys" | "provider" | "version" | "delayMs" | "policyText">>;
 const patch = (p: Patch): Promise<void> =>
   h.app.evaluate((_e, v) => {
     Object.assign((globalThis as unknown as { __xmeshUiTest: { mesh: object } }).__xmeshUiTest.mesh, v);
@@ -195,6 +195,9 @@ test("policy: template preview, confirmed write with the previewed version, snap
 
   await page.getByTestId("mesh-template").selectOption("team");
   await page.getByTestId("mesh-template-preview").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/xmesh:managed/);
+  await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
+  await page.getByTestId("mesh-draft-preview").click();
   await expect(page.getByTestId("mesh-policy-plan")).toBeVisible();
   await expect(page.getByTestId("mesh-diff")).toContainText("tagOwners");
   expect(await fake("version")).toBe(1);
@@ -209,10 +212,14 @@ test("policy: template preview, confirmed write with the previewed version, snap
   expect(await fake("version")).toBe(2);
   const applied = (await fake("calls")).find((c) => c.includes("--apply"))!;
   expect(applied).toContain("--expect-version=v1");
-  expect(applied).toContain("--owner=autogroup:admin");
+  expect(applied.slice(0, 3)).toEqual(["mesh", "policy", "publish"]);
 
   await page.getByTestId("mesh-rollback-snap-1").click();
-  await expect(page.getByTestId("mesh-policy-plan")).toContainText("rollback to snap-1");
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/"acls": \[\]/);
+  expect(await fake("version")).toBe(2);
+  await page.getByTestId("mesh-draft-preview").click();
+  await expect(page.getByTestId("mesh-policy-plan")).toBeVisible();
   await page.getByTestId("mesh-plan-apply").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
@@ -223,12 +230,15 @@ test("policy: template preview, confirmed write with the previewed version, snap
 test("policy: a policy that changed after the preview is not overwritten", async () => {
   const page = await open();
   await page.getByTestId("mesh-tab-policy").click();
+  await expect(page.getByTestId("mesh-policy-text")).toBeVisible();
   await page.getByTestId("mesh-template-preview").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/xmesh:managed/);
+  await page.getByTestId("mesh-draft-preview").click();
   await expect(page.getByTestId("mesh-policy-plan")).toBeVisible();
   await patch({ version: 7 });
   await page.getByTestId("mesh-plan-apply").click();
   await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("mesh-error")).toContainText("预览之后策略又被改动过");
+  await expect(page.getByTestId("mesh-error")).toContainText("云端策略版本已变化");
   await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
   expect(await fake("version")).toBe(7);
 });
@@ -243,6 +253,8 @@ test("policy: a file-mode control plane shows the whole new policy to install by
   await expect(page.getByTestId("mesh-policy-readonly")).toBeVisible();
   await page.getByTestId("mesh-owner").fill("alice@");
   await page.getByTestId("mesh-template-preview").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/alice@/);
+  await page.getByTestId("mesh-draft-preview").click();
   await expect(page.getByTestId("mesh-plan-manual")).toBeVisible();
   await expect(page.getByTestId("mesh-plan-after")).toHaveValue(/alice@/);
   await expect(page.getByTestId("mesh-plan-apply")).toBeDisabled();
@@ -263,7 +275,7 @@ test("matrix: both layers are shown and mismatches can be isolated", async () =>
   await expect(page.getByTestId("mesh-cell-stray-laptop")).toBeVisible();
 });
 
-test("derp: probe, preview, a failing relay is rolled back, a good one stays", async () => {
+test("derp: probe, add to shared draft, preview and apply the complete policy", async () => {
   const page = await open();
   await page.getByTestId("mesh-tab-derp").click();
   await expect(page.getByTestId("mesh-derp-preview")).toBeDisabled();
@@ -286,24 +298,26 @@ test("derp: probe, preview, a failing relay is rolled back, a good one stays", a
   await expect(page.getByTestId("mesh-probe-bad.example.com")).toContainText("失败");
   await expect(page.getByTestId("mesh-derp-official")).toContainText("nyc");
 
-  await page.getByTestId("mesh-derp-preview").click();
-  await expect(page.getByTestId("mesh-derp-plan")).toBeVisible();
-  await page.getByTestId("mesh-derp-apply").click();
-  await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("mesh-derp-rolledback")).toBeVisible();
-  await expect(page.getByTestId("mesh-derp-apply")).toHaveCount(0);
-  expect(await fake("version")).toBe(1);
-
   await fill("derp.example.com");
-  await page.getByTestId("mesh-derp-preview").click();
-  await page.getByTestId("mesh-derp-apply").click();
-  await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("mesh-derp-applied")).toBeVisible();
+  await page.getByTestId("mesh-derp-probe").click();
   await expect(page.getByTestId("mesh-probe-derp.example.com")).toContainText("通过");
+  await page.getByTestId("mesh-derp-preview").click();
+  await expect(page.getByTestId("mesh-cloud-region-900")).toContainText("derp.example.com");
+  expect(await fake("version")).toBe(1);
+  expect(await fake("policyText")).not.toContain("derpMap");
+  await page.getByTestId("mesh-derp-open-policy").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/derp.example.com/);
+  await page.getByTestId("mesh-draft-preview").click();
+  await expect(page.getByTestId("mesh-diff")).toContainText("derp.example.com");
+  await page.getByTestId("mesh-plan-apply").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("mesh-snapshot-snap-1")).toBeVisible();
   expect(await fake("version")).toBe(2);
-  const apply = (await fake("calls")).filter((c) => c[2] === "apply").at(-1)!;
-  expect(apply).toContain("--region=code=lab,name=Lab,host=derp.example.com");
+  const apply = (await fake("calls")).find((c) => c[2] === "publish" && c.includes("--apply"))!;
   expect(apply).toContain("--expect-version=v1");
+  expect(await fake("policyText")).toContain("derp.example.com");
+  await page.getByTestId("mesh-tab-derp").click();
+  await expect(page.getByTestId("mesh-cloud-region-900")).toContainText("derp.example.com");
 });
 
 test("derp: Headscale gets a generated file and snippet instead of an API write", async () => {

@@ -109,6 +109,10 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string, credentialF
       ];
     case "policy.show":
       return ["mesh", "policy", "--json", ...cred, "--show"];
+    case "policy.document":
+      return ["mesh", "policy", "document", "--json"];
+    case "policy.publish":
+      return ["mesh", "policy", "publish", "--json", ...cred, `--expect-version=${req.expectVersion}`, ...apply(req.apply)];
     case "policy.snapshots":
       return ["mesh", "policy", "--json", ...cred, "--snapshots"];
     case "policy.template":
@@ -195,7 +199,7 @@ export function meshError(run: MeshRun): ActionError {
   const text = firstLines(run.stderr) || `xmesh mesh exited with code ${run.code}`;
   if (run.missing) return { code: "unavailable", reason: "binary_missing", message: text };
   if (text.includes("没有保存的凭据")) return { code: "no_credential", message: text };
-  if (text.includes("预览时的策略版本")) return { code: "conflict", reason: "stale_version", message: text };
+  if (text.includes("预览时的策略版本") || text.includes("meshadmin: policy changed since it was read")) return { code: "conflict", reason: "stale_version", message: text };
   // A read-only Tailscale OAuth credential is refused by the control plane with
   // a 403 that names the scope. That is a different problem from "not logged in".
   if (text.includes("insufficient_scope") || text.includes("HTTP 403")) return { code: "insufficient_scope", message: text };
@@ -242,7 +246,11 @@ export class MeshService {
         fs.writeFileSync(file, req.target.token, { flag: "wx", mode: 0o600 });
         req = { ...req, target: { url: req.target.url, tokenFile: file } };
       }
-      result = await this.run(buildMeshArgs(req, this.nodeConfig(), this.credentialFile()), req.op === "login" ? req.secret : undefined);
+      let input: string | undefined;
+      if (req.op === "login") input = req.secret;
+      if (req.op === "policy.document") input = JSON.stringify({ ...req.edit, ...(req.edit.regions !== undefined && { regions: req.edit.regions.map((r) => ({ id: r.id ?? 0, code: r.code, name: r.name, hostname: r.host, ipv4: r.ipv4, ipv6: r.ipv6, derp_port: r.derpPort, stun_port: r.stunPort, cert_name: r.certName })) }) });
+      if (req.op === "policy.publish") input = JSON.stringify({ text: req.text });
+      result = await this.run(buildMeshArgs(req, this.nodeConfig(), this.credentialFile()), input);
     } catch {
       return { ok: false, error: { code: "unavailable", message: "无法完成控制面操作，请检查凭据文件和内核程序后重试" } };
     } finally {
@@ -258,6 +266,7 @@ export class MeshService {
       return { ok: false, error: meshError(result) };
     }
     if (json === undefined) return { ok: false, error: { code: "mesh_failed", message: "xmesh mesh returned output that is not JSON" } };
-    return { ok: true, data: normalizeResult(req.op, json) };
+    try { return { ok: true, data: normalizeResult(req.op, json) }; }
+    catch { return { ok: false, error: { code: "mesh_failed", message: "xmesh 返回了无效的策略文档" } }; }
   }
 }

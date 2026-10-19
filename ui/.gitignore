@@ -4,3 +4,4 @@ test-results/
 playwright-report/
 release/
 build/kernel/
+build/policy-test/

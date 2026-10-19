@@ -2,11 +2,12 @@ import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
-import { Badge, Banner, Dialog, Empty, PageHead, ResourceView } from "../components";
+import { Badge, Banner, Confirm, Dialog, Empty, PageHead, ResourceView } from "../components";
 import { useResource } from "../hooks";
 import { useT } from "../i18n";
 import { formatTime } from "../lib/format";
 import { parseTagText } from "../lib/mesh";
+import { usePolicyDraft, type PolicyDraft } from "../lib/policy-draft";
 import type { ActionError } from "../../shared/ipc";
 import type { MeshDeviceReport, MeshStatus, MeshTagPlan } from "../../shared/mesh";
 import type { Key } from "../messages";
@@ -33,6 +34,11 @@ export interface MeshTabProps {
   reloadStatus(): void;
 }
 
+export interface MeshPolicyProps extends MeshTabProps {
+  draft: PolicyDraft;
+  showPolicy(): void;
+}
+
 /**
  * The tailnet as seen by the control plane (Tailscale or Headscale), reached
  * through `xmesh mesh --json`. It works with or without a running kernel.
@@ -40,6 +46,7 @@ export interface MeshTabProps {
 export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const [tab, setTab] = useState<TabId>(ctx.focus?.meshTab ?? "devices");
+  const [credentialRevision, setCredentialRevision] = useState(0);
   useEffect(() => { if (ctx.focus?.meshTab) setTab(ctx.focus.meshTab); }, [ctx.focus?.meshTab]);
   const { resource, reload } = useResource(() => getApi().mesh({ op: "status" }), [ctx.snapshot.selectedInstance]);
   // After saving a credential, ask for status once more: the answer says whether
@@ -59,7 +66,7 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
       <MeshLogin
         ctx={ctx}
         open={resource.state === "error" && (resource.error.code === "no_credential" || resource.error.code === "insufficient_scope")}
-        onSaved={reload}
+        onSaved={() => { setCredentialRevision((v) => v + 1); reload(); }}
         verify={verify}
       />
       {resource.state === "error" && resource.stale === undefined ? (
@@ -101,9 +108,8 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
               <div role="tabpanel" data-testid={`mesh-panel-${tab}`}>
                 {tab === "devices" && <MeshDevices ctx={ctx} status={status} reloadStatus={reload} />}
                 {tab === "onboard" && <MeshOnboard ctx={ctx} status={status} reloadStatus={reload} />}
-                {tab === "policy" && <MeshPolicy ctx={ctx} status={status} reloadStatus={reload} />}
                 {tab === "matrix" && <MeshMatrix ctx={ctx} status={status} reloadStatus={reload} />}
-                {tab === "derp" && <MeshDerp ctx={ctx} status={status} reloadStatus={reload} />}
+                <PolicyWorkspace key={credentialRevision} ctx={ctx} status={status} reloadStatus={reload} tab={tab} showPolicy={() => setTab("policy")} />
               </div>
             </>
           )}
@@ -111,6 +117,31 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
       )}
     </div>
   );
+}
+
+function PolicyWorkspace(props: MeshTabProps & { tab: TabId; showPolicy(): void }): JSX.Element {
+  const { ctx, status, tab } = props;
+  const draft = usePolicyDraft(`${ctx.snapshot.selectedInstance ?? ""}:${status.provider}:${status.credential?.file ?? "keychain"}`);
+  const t = useT();
+  const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => { if (tab === "derp" && draft.document && draft.document.text !== draft.text) void draft.edit({}); }, [tab]);
+  return <div hidden={tab !== "policy" && tab !== "derp"}>
+    <section class="card" data-testid="mesh-policy-workspace">
+      <p>{t("mesh.draft.intro")}</p>
+      <div class="row">
+        <Badge kind={draft.dirty ? "warn" : "info"}>{t(draft.dirty ? "mesh.draft.dirty" : "mesh.draft.synced")}</Badge>
+        <button type="button" class="btn" disabled={draft.busy} onClick={() => draft.dirty ? setRefreshing(true) : void draft.load()} data-testid="mesh-policy-cloud-refresh">{t("mesh.draft.refresh")}</button>
+        {tab === "derp" && <button type="button" class="btn primary" onClick={props.showPolicy} data-testid="mesh-derp-open-policy">{t("mesh.draft.review")}</button>}
+      </div>
+      {draft.busy && <p role="status">{t("common.loading")}</p>}
+      {draft.error && <MeshError error={draft.error} toast={ctx.toast} />}
+    </section>
+    {draft.base && draft.document && <>
+      <div hidden={tab !== "policy"}><MeshPolicy {...props} draft={draft} /></div>
+      <div hidden={tab !== "derp"}><MeshDerp {...props} draft={draft} /></div>
+    </>}
+    {refreshing && <Confirm title={t("mesh.draft.refresh")} body={<p>{t("mesh.draft.discard")}</p>} confirmLabel={t("mesh.draft.refresh")} onCancel={() => setRefreshing(false)} onConfirm={() => { setRefreshing(false); void draft.load(); }} />}
+  </div>;
 }
 
 function MeshDevices({ ctx, status, reloadStatus }: MeshTabProps): JSX.Element {
