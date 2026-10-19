@@ -245,10 +245,12 @@ pub fn displays() -> Vec<Display> {
     out
 }
 pub fn screen_permission() -> bool {
-    interactive() && !locked()
+    // Capture permission survives a locked input desktop. Availability is
+    // checked separately so callers can ask the user to unlock their session.
+    interactive()
 }
 pub fn input_permission() -> bool {
-    screen_permission()
+    interactive() && !locked()
 }
 pub fn interactive() -> bool {
     let mut session = 0;
