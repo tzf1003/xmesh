@@ -91,6 +91,10 @@ test("abrupt backend death terminates its test processes and marks the retained 
     assert.equal(result.status, "interrupted");
     assert.equal(result.outcome_unknown, true);
     assert.ok(result.evidence_incomplete);
+    assert.ok(
+      !fs.existsSync(path.join(path.dirname(resultPath), "script.mjs")),
+      "interrupted script source was retained",
+    );
     for (const process of owned) {
       const deadline = Date.now() + 10000;
       while (

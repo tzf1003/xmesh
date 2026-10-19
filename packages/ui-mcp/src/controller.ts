@@ -103,6 +103,7 @@ function recoverUnfinished(config: Config): void {
         .readdirSync(runs, { withFileTypes: true })
         .filter((e) => e.isDirectory())) {
         const file = path.join(runs, run.name, "result.json");
+        fs.rmSync(path.join(runs, run.name, "script.mjs"), { force: true });
         try {
           const result = JSON.parse(fs.readFileSync(file, "utf8"));
           if (!result.ended_at)
@@ -697,6 +698,11 @@ export class Controller {
         run.result.evidence_incomplete = true;
       }
       run.result.ended_at = new Date().toISOString();
+      try {
+        fs.rmSync(path.join(run.evidence.dir, "script.mjs"), { force: true });
+      } catch {
+        run.result.evidence_incomplete = true;
+      }
       if (run.stopState) {
         try {
           await this.stop(run.session);

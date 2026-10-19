@@ -39,6 +39,11 @@ async function close(): Promise<void> {
         .filter((e) => e.isDirectory())) {
         const file = path.join(runs, entry.name, "result.json");
         try {
+          fs.rmSync(path.join(runs, entry.name, "script.mjs"), { force: true });
+        } catch (error) {
+          cleanupError ??= failure(error);
+        }
+        try {
           const result = JSON.parse(fs.readFileSync(file, "utf8"));
           if (!result.ended_at) {
             result.status = "interrupted";
