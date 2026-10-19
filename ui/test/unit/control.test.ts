@@ -66,7 +66,7 @@ test("status validates fields the shell and renderer consume", () => {
   const mutations: Array<(raw: Record<string, any>) => void> = [
     (raw) => { delete raw.network; },
     (raw) => { raw.network = null; },
-    (raw) => { raw.network.mode = "unknown"; },
+    (raw) => { raw.network.mode = 7; },
     (raw) => { raw.network.tags = [null]; },
     (raw) => { raw.control.boot_id = 5; },
     (raw) => { raw.control.capabilities = [null]; },
@@ -156,4 +156,17 @@ test("icon priority (RUL-18): offline > mismatch > draining > restart > degraded
   assert.equal(deriveIcon(c({ ci: { bindings: [fixture<CiBinding>("CiBinding.busy")] } })), "ok");
   // The contract's own degraded fixture follows the same order.
   assert.equal(deriveIcon({ kind: "connected", status: statusFixture("degraded-draining"), peers: [] }), "draining");
+});
+
+test("minor-version status additions retain recognized roles and unknown enum strings",()=>{
+ const raw=statusFixture() as unknown as Record<string,unknown>;
+ raw.roles=["agent","gateway","future-role"];
+ raw.os="freebsd";raw.lifecycle="future-lifecycle";
+ (raw.network as Record<string,unknown>).mode="future-network";
+ (raw.drain as Record<string,unknown>).mode="future-drain";
+ const status=parseStatus(raw);
+ assert.equal(status.roles.includes("agent"),true);
+ assert.equal(status.roles.includes("gateway"),true);
+ assert.equal(status.roles.join(","),"agent,gateway,future-role");
+ assert.equal(status.os as string,"freebsd");
 });

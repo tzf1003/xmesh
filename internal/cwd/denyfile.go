@@ -23,6 +23,7 @@ var denyFiles = struct {
 const inactiveDenyFileLimit = 64
 
 type denyState struct {
+	readMu     sync.Mutex
 	good       []string
 	goodDigest [32]byte
 	loaded     bool
@@ -90,15 +91,32 @@ func trimDenyFilesLocked() {
 // returned instead; only a file that has never loaded is an error, so the boundary is never
 // opened by a file that cannot be read.
 func loadDenyFile(path string) ([]string, error) {
+	return loadDenyFileWith(path, os.ReadFile)
+}
+
+func loadDenyFileWith(path string, read func(string) ([]byte, error)) ([]string, error) {
 	denyFiles.Lock()
-	defer denyFiles.Unlock()
-	defer trimDenyFilesLocked()
-	raw, readErr := os.ReadFile(path)
+	st := denyStateLocked(path)
+	st.refs++
+	denyFiles.Unlock()
+	// Reads of one path stay ordered; a slow path never holds the shared cache lock.
+	st.readMu.Lock()
+	defer st.readMu.Unlock()
+	raw, readErr := read(path)
 	var digest [32]byte
+	var entries []string
+	var parseErr error
 	if readErr == nil {
 		digest = sha256.Sum256(raw)
+		denyFiles.Lock()
+		unchanged := st.loaded && digest == st.goodDigest
+		denyFiles.Unlock()
+		if !unchanged {
+			entries, parseErr = parseDenyList(raw)
+		}
 	}
-	st := denyStateLocked(path)
+	denyFiles.Lock()
+	defer func() { st.refs--; trimDenyFilesLocked(); denyFiles.Unlock() }()
 	if readErr == nil && st.loaded && digest == st.goodDigest {
 		st.failing = false
 		return st.good, nil
@@ -106,8 +124,8 @@ func loadDenyFile(path string) ([]string, error) {
 	var failure error
 	if readErr != nil {
 		failure = fmt.Errorf("读取禁止目录文件: %w", readErr)
-	} else if entries, err := parseDenyList(raw); err != nil {
-		failure = err
+	} else if parseErr != nil {
+		failure = parseErr
 	} else {
 		st.good, st.goodDigest, st.loaded, st.failing = entries, digest, true, false
 		return entries, nil

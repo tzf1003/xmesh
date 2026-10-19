@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestDenyFileCacheRetainsActiveFallbackAndFailureTotal(t *testing.T) {
@@ -195,4 +196,31 @@ func TestDenyFileNeverLoadedIsAnError(t *testing.T) {
 	if DenyFailing(file) {
 		t.Fatal("report did not clear")
 	}
+}
+
+func Test_StalledDenyReadDoesNotBlockPolicyRetention(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stalled.yaml")
+	replacement := filepath.Join(t.TempDir(), "replacement.yaml")
+	entered, release := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = loadDenyFileWith(path, func(string) ([]byte, error) { close(entered); <-release; return []byte("[]"), nil })
+	}()
+	<-entered
+	retained := make(chan struct{})
+	go func() {
+		keep := RetainDenyFile(replacement)
+		keep()
+		close(retained)
+	}()
+	select {
+	case <-retained:
+	case <-time.After(time.Second):
+		close(release)
+		<-done
+		t.Fatal("stalled read held the global policy cache")
+	}
+	close(release)
+	<-done
 }

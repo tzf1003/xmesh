@@ -112,18 +112,18 @@ export function parseStatus(raw: unknown): StatusResponse {
     !fields(raw.control, ["api_version", "kernel_version", "boot_id"]) ||
     (raw.control.capabilities !== undefined && !strings(raw.control.capabilities)) ||
     !fields(raw.network, ["node_id"]) ||
-    !["local", "lan", "tailnet"].includes(raw.network.mode as string) ||
+    typeof raw.network.mode !== "string" ||
     !strings(raw.network.tags) ||
     typeof raw.drain.draining !== "boolean" ||
-    ![null, "keep", "kill"].includes(raw.drain.mode as null | string) ||
+    (raw.drain.mode !== null && typeof raw.drain.mode !== "string") ||
     (raw.drain.since !== null && typeof raw.drain.since !== "string") ||
     !fields(raw.paths, ["config_file", "state_dir"]) ||
     ![raw.paths.log_dir, raw.paths.audit_dir].every((p) => p === null || typeof p === "string") ||
     !counts(raw.limits, ["exec_shared", "exec_exclusive", "exec_shared_in_use", "exec_exclusive_in_use", "pty_max_sessions", "pty_max_per_caller", "pty_in_use", "pty_active", "pty_closed", "pty_closed_retain_max"]) ||
     !counts(raw.peers, ["total", "online"]) ||
     !fields(raw, ["hostname", "home", "arch", "started_at"]) ||
-    !["windows", "darwin", "linux"].includes(raw.os as string) ||
-    !["starting", "running", "stopping"].includes(raw.lifecycle as string) ||
+    typeof raw.os !== "string" ||
+    typeof raw.lifecycle !== "string" ||
     !["/", "\\"].includes(raw.path_sep as string) ||
     typeof raw.restart_required !== "boolean" ||
     typeof raw.authkey_readable !== "boolean" ||
@@ -134,8 +134,7 @@ export function parseStatus(raw: unknown): StatusResponse {
     !Array.isArray(raw.backends) ||
     !raw.backends.every((v) => isRecord(v) && fields(v, ["name", "policy", "state"]) && typeof v.favorite === "boolean" && (v.env_names === undefined || strings(v.env_names))) ||
     !Array.isArray(raw.warnings) ||
-    !strings(raw.roles) ||
-    !raw.roles.every((role) => ["agent", "gateway", "ingress"].includes(role))
+    !strings(raw.roles)
   ) {
     throw new ControlRequestError("internal", "unexpected status response");
   }
