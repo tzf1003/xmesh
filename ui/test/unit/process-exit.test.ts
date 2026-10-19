@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { stopNativeTestProcess, waitForNativeExit } from "../e2e/process-exit";
 
-test("native exit is observed while a descendant still holds the output pipe", async () => {
+test("native exit is observed while a descendant still holds the output pipe", { skip: process.platform === "win32" ? "Windows parent-exit policy can terminate the descendant; POSIX pipe inheritance case" : false }, async () => {
   const code = `const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setTimeout(()=>{},10000)'],{stdio:['ignore','inherit','inherit']}); process.stdout.write(String(child.pid),()=>process.exit(0));`;
   const parent = spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "pipe"] });
   let helper: number | undefined;
@@ -17,8 +17,7 @@ test("native exit is observed while a descendant still holds the output pipe", a
     assert.equal(parent.exitCode, 0);
     assert.ok(Number.isInteger(helper) && helper > 0);
     assert.doesNotThrow(() => process.kill(helper!, 0), "the descendant remains alive after native parent exit");
-    // Windows closes its process pipe independently; POSIX retains the inherited handle.
-    if (process.platform !== "win32") assert.equal(closed, false, "the inherited pipe must not determine native shutdown");
+    assert.equal(closed, false, "the inherited pipe must not determine native shutdown");
     await waitForNativeExit(parent, 1);
   } finally {
     if (helper && Number.isInteger(helper)) {

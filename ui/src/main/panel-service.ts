@@ -101,6 +101,7 @@ export class PanelService {
       const c = this.controller.requireCapable(capability);
       return { ok: true, data: (await run(c)) as T };
     } catch (e) {
+      if (process.env.XMESH_UI_TEST === "1" && process.env.XMESH_UI_BACKGROUND_TEST === "1") console.error("test-control-error", JSON.stringify(toError(e)));
       return { ok: false, error: toError(e) };
     }
   }

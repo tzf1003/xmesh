@@ -30,6 +30,8 @@ export interface BackendValue {
   policy: BackendPolicy;
   idle_timeout?: string;
   favorite?: boolean;
+  shutdown_timeout?: string;
+  process_cleanup?: "tree";
 }
 
 /** One row of the MCP table, read from the parsed config. Values the kernel holds that the UI does not know are shown as text. */
@@ -42,6 +44,8 @@ export interface BackendRow {
   policy: string;
   idleTimeout: string;
   favorite: boolean;
+  shutdownTimeout?: string;
+  processCleanup?: "tree";
 }
 
 /** A field the user got wrong. `code` is a stable identifier, such as `url.host`; the page maps it to text. */
@@ -80,6 +84,8 @@ export function backendRows(parsed: unknown): BackendRow[] {
     policy: typeof b.policy === "string" ? b.policy : "",
     idleTimeout: typeof b.idle_timeout === "string" ? b.idle_timeout : "",
     favorite: b.favorite === true,
+    ...(typeof b.shutdown_timeout === "string" && { shutdownTimeout: b.shutdown_timeout }),
+    ...(b.process_cleanup === "tree" && { processCleanup: "tree" as const }),
   }));
 }
 
@@ -263,6 +269,8 @@ export interface BackendForm {
   newTag: string;
   /** Kept from the stored entry: the form does not show it, but saving must not drop it. */
   favorite: boolean;
+  shutdownTimeout?: string;
+  processCleanup?: "tree";
   /** The environment variables of an stdio backend; ignored for http. */
   env: EnvRow[];
 }
@@ -314,6 +322,10 @@ export function checkBackendForm(form: BackendForm, existingNames: readonly stri
   if (form.cwd.trim() !== "") value.cwd = form.cwd.trim();
   if (idle !== "") value.idle_timeout = idle;
   if (form.favorite) value.favorite = true;
+  if (form.transport === "stdio") {
+    if (form.shutdownTimeout) value.shutdown_timeout = form.shutdownTimeout;
+    if (form.processCleanup) value.process_cleanup = form.processCleanup;
+  }
   return { ok: true, name, value, tags, env: form.transport === "stdio" ? envChangeOf(form.env) : undefined };
 }
 

@@ -9,6 +9,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -162,6 +163,44 @@ class SiteTests(unittest.TestCase):
             with self.assertRaises(ValueError):build_site(ROOT,directory/'site','v9.9.9','tzf1003/xmesh','https://example.org',manifest)
 
 class BootstrapTests(unittest.TestCase):
+    def test_mac_staged_kernel_is_verified_before_replacing_existing_application(self):
+        if platform.system() != 'Darwin': self.skipTest('macOS JXA is required')
+        for version in (None, 'v9.9.9', 'v1.2.3-beta.2'):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as temp:
+                directory=Path(temp);fixture(directory)
+                source=directory/'source/xmesh.app';kernel=source/'Contents/Resources/bin/xmesh'
+                kernel.parent.mkdir(parents=True)
+                if version:
+                    kernel.write_text('#!/bin/sh\nprintf "xmesh '+version+'\\n"\n',encoding='utf-8');kernel.chmod(0o755)
+                install=directory/'Applications with spaces';existing=install/'xmesh.app';existing.mkdir(parents=True)
+                (existing/'original.txt').write_text('existing application',encoding='utf-8')
+                commands=directory/'commands';commands.mkdir()
+                scripts={
+                    'spctl':'#!/bin/sh\nexit 0\n',
+                    'hdiutil':f'#!{sys.executable}\nimport os,sys,shutil\nfrom pathlib import Path\nif sys.argv[1]=="attach":\n dest=Path(sys.argv[sys.argv.index("-mountpoint")+1])/"xmesh.app"\n shutil.copytree(os.environ["XMESH_TEST_SOURCE_APP"],dest)\nelif sys.argv[1]=="detach":\n shutil.rmtree(Path(sys.argv[2])/"xmesh.app")\n',
+                    'ditto':f'#!{sys.executable}\nimport sys,shutil\nshutil.copytree(sys.argv[1],sys.argv[2])\n',
+                }
+                for name,content in scripts.items():
+                    command=commands/name;command.write_text(content,encoding='utf-8');command.chmod(0o755)
+                env=dict(os.environ,PATH=str(commands)+os.pathsep+os.environ['PATH'],XMESH_TEST_SOURCE_APP=str(source))
+                result=subprocess.run(['bash',str(ROOT/'scripts/install.sh'),'--offline',str(directory),'--cache',str(directory/'cache'),'--install-dir',str(install),'--arch','arm64','--allow-unsigned','--no-launch','--json'],capture_output=True,text=True,env=env)
+                events=[json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
+                self.assertTrue(events,result.stdout+result.stderr)
+                backups=list(install.glob('xmesh.previous.*.app'))
+                if version=='v1.2.3-beta.2':
+                    self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+                    self.assertEqual(events[-1]['phase'],'complete')
+                    self.assertEqual(len(backups),1)
+                    self.assertEqual((backups[0]/'original.txt').read_text(encoding='utf-8'),'existing application')
+                    actual=subprocess.run([str(existing/'Contents/Resources/bin/xmesh'),'version'],capture_output=True,text=True,check=True).stdout.strip()
+                    self.assertEqual(actual,'xmesh v1.2.3-beta.2')
+                else:
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertEqual(events[-1]['phase'],'verify')
+                    self.assertEqual((existing/'original.txt').read_text(encoding='utf-8'),'existing application')
+                    self.assertEqual(backups,[])
+                self.assertEqual(list(install.glob('.xmesh-install.*')),[])
+
     def invoke(self,directory,osname,*args):
         env=dict(os.environ)
         if osname=='darwin':
