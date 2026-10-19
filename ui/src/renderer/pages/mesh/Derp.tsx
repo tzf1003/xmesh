@@ -71,11 +71,11 @@ export function MeshDerp({ ctx, status, draft }: MeshPolicyProps): JSX.Element {
 
   const bad = !parsed.ok ? parsed : undefined;
   return (
-    <div data-testid="mesh-derp">
+    <div class="section-stack" data-testid="mesh-derp">
       <section class="card">
         <h2>{t("mesh.derp.title")}</h2>
         <p class="hint">{t(viaPolicy ? "mesh.draft.derpHint" : "mesh.derp.intro")}</p>
-        {viaPolicy && <section data-testid="mesh-derp-current">
+        {viaPolicy && <section class="section-stack" data-testid="mesh-derp-current">
           <h3>{t("mesh.draft.relays")}</h3>
           {draft.document?.regions.length === 0 && <p>{t("mesh.draft.noRelays")}</p>}
           {draft.document?.regions.map((r) => <div class="card" key={r.id} data-testid={`mesh-cloud-region-${r.id}`}>

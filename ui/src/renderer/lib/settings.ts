@@ -131,6 +131,11 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
     if (!f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey_file";
   }
   if (!f.roles.includes("ingress")) return undefined;
+  return checkIngressSettings(f);
+}
+
+/** Fields needed to enable ingress, shared by the form and the global role switch. */
+export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
   // The kernel refuses ingress outside tailnet mode, since OAuth and Funnel need the control plane.
   if (f.mode === "lan") return "tailnet";
   const issuer = f.issuer.trim();

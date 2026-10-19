@@ -85,7 +85,7 @@ function CiPage({ ctx }: { ctx: PageContext }): JSX.Element {
               {overview.bindings.length === 0 ? (
                 <Empty>{t("ci.empty")}</Empty>
               ) : (
-                <div class="stack" data-testid="ci-bindings">
+                <div class="section-stack" data-testid="ci-bindings">
                   {overview.bindings.map((b) => (
                     <BindingCard key={b.id} ctx={ctx} overview={overview} binding={b} reload={reload} />
                   ))}

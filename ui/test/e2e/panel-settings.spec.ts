@@ -53,7 +53,7 @@ test("ingress: the disabled page's button opens settings with the ingress role p
   await page.getByTestId("ingress-to-settings").click();
 
   await expect(page.getByTestId("page-settings")).toBeVisible();
-  await expect(page.getByTestId("settings-role-ingress")).toBeChecked();
+  await expect(page.getByTestId("settings-role-summary")).toContainText("ingress");
   await expect(page.getByTestId("settings-ingress")).toBeVisible();
   // Nothing is saved by the jump; the lan mode shows why ingress is not ready yet.
   await expect(page.getByTestId("settings-needs-tailnet")).toBeVisible();
