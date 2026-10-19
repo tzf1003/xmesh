@@ -134,10 +134,25 @@ impl Runtime {
             "ready"
         };
         let input = self.input_ready.load(Ordering::Acquire) && platform::input_permission();
+        let mut capabilities = if state == "ready" && input {
+            vec!["screenshot", "pointer", "keyboard", "text"]
+        } else if state == "ready" {
+            vec!["screenshot"]
+        } else {
+            vec![]
+        };
+        #[cfg(target_os = "linux")]
+        if input && state == "ready" {
+            if let Some(backend) = platform::input_backend() {
+                capabilities.push(backend);
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = &mut capabilities;
         json!({"protocol_version":1,"available":state=="ready","state":state,
             "reason":if state=="permission_required"{"screen_permission"}else if state=="ready"&&!input{"input_permission_required"}else{state},
             "desktop_id":"desktop","desktop_epoch":self.epoch,"layout_version":platform::layout(&displays),
-            "capabilities":if state=="ready"&&input{vec!["screenshot","pointer","keyboard","text"]}else if state=="ready"{vec!["screenshot"]}else{vec![]},"displays":displays,
+            "capabilities":capabilities,"displays":displays,
 			"user_input_monitor":platform::input_monitor_available(),"user_input_serial":platform::user_input_serial()})
     }
     fn live(&self, token: u64, start: Instant) -> bool {

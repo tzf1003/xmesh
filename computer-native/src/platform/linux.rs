@@ -16,6 +16,13 @@ use x11rb::{
 fn wayland() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
+pub fn input_backend() -> Option<&'static str> {
+    if wayland() {
+        wayland_backend::input_backend()
+    } else {
+        Some("input:xtest")
+    }
+}
 
 pub fn start_input_monitor() {
     if wayland() {

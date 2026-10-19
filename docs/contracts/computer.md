@@ -66,3 +66,5 @@ Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道�
 本机显式执行 `xmesh computer host --authorize` 请求系统权限。普通远程请求遇到未授权状态直接失败。权限初始化和自动启动仍按三端验收清单逐项验证。
 
 `xmesh computer emergency-stop` 通过用户 Host 的受保护本机 IPC 紧急停止画面和输入，关闭当前原生执行器并拒绝后续创建。此操作独立于管理内核，暂停标记写入用户 Host 状态目录，Host 重启后继续生效。只有本机 `xmesh computer resume` 或面板恢复操作清除此状态；恢复后的执行器生成新 epoch，旧会话失效。UI 紧急快捷键同时请求内核暂停与直接 Host 停止。普通“暂停 Agent”仅暂停控制，紧急停止同时终止观察。
+
+Wayland 在同一 RemoteDesktop / ScreenCast grant 上优先请求 EIS。输入仅使用 compositor 已 resumed 的设备；画面流的 mapping_id 必须匹配 EIS region，多屏缺少映射时拒绝选择。单屏可在唯一 region 上映射逻辑坐标。每次键、按钮、滚轮或移动均提交独立 EI frame，时间使用 CLOCK_MONOTONIC；设备暂停 / 移除立即取消其可用性。控制链通过 ei_text keysym 支持组合键和 Unicode，compositor 缺少这组能力时关闭该 EIS 会话，再以新 Portal 会话使用 Notify 兼容路径；同一会话内不混用 EIS 与 Notify。info.capabilities 可报告 input:eis、input:portal 或 input:xtest，表示实际选择的 Linux 输入路径。Portal 初始化失败或超时后显式关闭已创建的会话。

@@ -114,3 +114,7 @@ MCP 工具发现补全 Agent 所需动作枚举、键名、输入图片坐标、
 第十二轮：整合提交 `d65f9f2` 的三端原生运行 39217784355 全部通过，包括 Windows 原生输入、本机介入、SYSTEM 到用户桌面、安装用户 Host 生命周期。其后新增的持久紧急停止继续由最新提交复测。六平台原生归档工作流增加 PR 构建和架构 / 版本 / 可执行权限 / macOS 应用身份校验；本机 macOS arm64 打包后的 ad-hoc 签名结构与版本校验通过，完整六架构产物待 CI。
 
 Headscale 桌面验收新增 --force-derp 模式：仅在一次性测试子进程设置 tsnet 的禁 UDP / 回环 HTTP DERP 调试开关，复用真实 Gateway 和 OAuth 截图 / 有限控制验收，并从源节点控制通道读回 connection=derp 及中继区域后才报告通过。该模式验证加密中继路径，外部 NAT、防火墙和真实中继故障仍需要多主机验收；运行结果待最新 CI。
+
+第十三轮：提交 `c885a78` 的原生运行 39219816495 三端通过，Linux 同时完成直连和禁 UDP 的 DERP 路径；DERP 对等 Gateway 与 OAuth 入口分别连续交付两张 1280×800 图片（每张 41265 字节），控制 / 去重 / 查询 / 续租 / 关闭通过，源节点中继状态读回通过。相同提交另一运行 39219824619 的 Linux 首次点击未到达隔离窗口，其余中文、组合键、拖动、滚动已观察到；测试启动补充焦点和双帧绘制就绪等待，复测待 CI。
+
+Wayland EIS 输入适配接入同一 Portal grant，支持 resumed 设备、mapping_id 区域绑定、缩放转换、离散滚轮 / Unicode keysym 的逐帧提交、设备暂停和退出释放。缺少必需能力时关闭 EIS 会话，再创建 Notify 兼容会话；初始化超时关闭已创建的 Portal session。Linux arm64 容器实际编译，Rust 六项测试及 clippy -D warnings 通过；协议测试在 Unix socket 两端运行 EIS 握手与服务端事件解析，覆盖授权区域、鼠标、字符、逐帧提交和 compositor pause。该证据覆盖协议与编译，GNOME / KDE compositor 的实际输入效果仍待真机验收。macOS clippy 通过，相关三个 Go 包 101 项竞态测试通过。

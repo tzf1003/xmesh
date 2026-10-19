@@ -18,7 +18,10 @@ try {
     const timer = setTimeout(() => reject(new Error("native fixture did not start")), 10000);
     app.process().stdout.on("data", (chunk) => { output += chunk; for (const line of output.split("\n")) { try { const v = JSON.parse(line); if (v.endpoint) { clearTimeout(timer); resolve(v.endpoint); return; } } catch {} } });
   });
-  await (await app.firstWindow()).bringToFront();
+  const window = await app.firstWindow();
+  await window.bringToFront();
+  await window.waitForFunction(() => document.hasFocus());
+  await window.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const command = process.argv.slice(2);
   const [program, ...commandArgs] = command.length ? command : ["go", "test", "./internal/desktopbroker", "-run", "TestNative(InputFixture|UserIntervention)", "-v", "-count=1", "-timeout=90s"];
   const exit = await new Promise((resolve) => {

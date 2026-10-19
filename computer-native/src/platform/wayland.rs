@@ -1,6 +1,8 @@
 //! A single user-authorized RemoteDesktop session supplies both input and
 //! ScreenCast streams. Coordinates and stream IDs never come from separate grants.
 use super::Display;
+#[path = "eis.rs"]
+mod eis;
 use ashpd::desktop::{
     remote_desktop::{Axis as PortalAxis, DeviceType, KeyState, RemoteDesktop},
     screencast::Screencast,
@@ -27,6 +29,7 @@ use std::{
 
 struct Stream {
     node: u32,
+    mapping_id: Option<String>,
     display: Display,
 }
 
@@ -34,6 +37,7 @@ type Pixels = (i32, i32, Vec<u8>);
 
 struct Shared {
     active: AtomicBool,
+    input_backend: &'static str,
     streams: Vec<Stream>,
     commands: tokio::sync::mpsc::Sender<Command>,
 }
@@ -54,6 +58,148 @@ struct Command {
 
 static PORTAL: OnceLock<Arc<Shared>> = OnceLock::new();
 
+async fn run_portal(
+    authorize: bool,
+    path: PathBuf,
+    mut restore: Option<String>,
+    ready: mpsc::SyncSender<Result<Arc<Shared>, &'static str>>,
+) {
+    let result = async {
+        let remote = RemoteDesktop::new().await.map_err(|_| "portal_unavailable")?;
+        let screencast = Screencast::new().await.map_err(|_| "portal_unavailable")?;
+        let mut pending_session = None;
+        let initialized = async {
+            let mut prefer_eis = true;
+            loop {
+                let session = Arc::new(remote.create_session().await.map_err(|_| "portal_session")?);
+                pending_session = Some(Arc::clone(&session));
+                let selection = async {
+                    remote.select_devices(&session, DeviceType::Keyboard | DeviceType::Pointer, restore.as_deref(), PersistMode::ExplicitlyRevoked)
+                        .await.map_err(|_| "portal_select_devices")?.response().map_err(|_| "portal_permission")?;
+                    select_monitor_sources(&screencast, &session).await?;
+                    let response = remote.start(&session, None).await.map_err(|_| "portal_start")?.response().map_err(|_| "portal_permission")?;
+                    if !response.devices().contains(DeviceType::Keyboard) || !response.devices().contains(DeviceType::Pointer) { return Err("portal_devices_missing"); }
+                    let mut streams = Vec::new();
+                    for stream in response.streams().ok_or("portal_streams_missing")? {
+                        let (width,height) = stream.size().ok_or("portal_logical_size_missing")?;
+                        if width < 1 || height < 1 || width > 16384 || height > 16384 { return Err("portal_logical_size_invalid"); }
+                        let (x,y) = stream.position().unwrap_or((0,0));
+                        streams.push(Stream { node: stream.pipe_wire_node_id(), mapping_id: stream.mapping_id().map(str::to_owned),
+                            display: Display { id: stream.pipe_wire_node_id().to_string(), name: stream.id().unwrap_or("Shared display").to_owned(), x,y,width,height,scale:1.0,rotation:0 } });
+                    }
+                    if streams.is_empty() || streams.len() > 32 { return Err("portal_streams_missing"); }
+                    // A consumed restore token must be replaced before any compatibility retry.
+                    restore = response.restore_token().map(str::to_owned);
+                    if let Some(token) = &restore { save_token(&path,token)?; }
+                    Ok(streams)
+                }.await;
+                let streams = match selection { Ok(v) => v, Err(error) => { let _ = session.close().await; return Err(error); } };
+                let mut input = None;
+                if prefer_eis {
+                    if let Ok(fd) = remote.connect_to_eis(&session).await {
+                        match eis::Eis::new(fd,&streams).await {
+                            Ok(eis) => input = Some(eis),
+                            Err(_) => {
+                                // ConnectToEIS commits this session to EI input. Legacy
+                                // Notify calls therefore require a new Portal session.
+                                let _ = session.close().await;
+                                prefer_eis = false;
+                                if !authorize && restore.is_none() { return Err("portal_authorization_required"); }
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if screencast.open_pipe_wire_remote(&session).await.is_err() {
+                    let _ = session.close().await;
+                    return Err("portal_pipewire");
+                }
+                return Ok((session,streams,input));
+            }
+        };
+        let limit = if authorize { Duration::from_secs(120) } else { Duration::from_secs(5) };
+        let initialized = tokio::time::timeout(limit,initialized).await;
+        let (session,streams,mut eis) = match initialized {
+            Ok(Ok(value)) => value,
+            failed => {
+                if let Some(session)=pending_session {let _=session.close().await;}
+                return Err(match failed {Ok(Err(reason))=>reason,_=>"portal_authorization_required"});
+            }
+        };
+        let (commands,mut requests) = tokio::sync::mpsc::channel::<Command>(32);
+        let shared = Arc::new(Shared { active:AtomicBool::new(true), input_backend:if eis.is_some(){"input:eis"}else{"input:portal"}, streams, commands });
+        let mut closed = match session.receive_closed().await {
+            Ok(closed)=>closed,
+            Err(_)=>{let _=session.close().await;return Err("portal_session_closed");}
+        };
+        if ready.send(Ok(Arc::clone(&shared))).is_err() { let _=session.close().await; return Ok(()); }
+        let mut keys = HashSet::new();
+        let mut buttons = HashSet::new();
+        loop {
+            tokio::select! {
+                _ = closed.next() => break,
+                result = async { match eis.as_mut() { Some(input) => input.next().await, None => std::future::pending().await } } => {
+                    if result.is_err() { break; }
+                }
+                command = requests.recv() => {
+                    let Some(command) = command else { break; };
+                    if matches!(command.event,Event::Close) { let _=command.result.send(Ok(())); break; }
+                    let operation = async {
+                        match command.event {
+                            Event::Move(id,x,y) => {
+                                let stream = shared.streams.iter().find(|s|s.display.id==id).ok_or("display_not_found")?;
+                                let d=&stream.display; let x=x-d.x;let y=y-d.y;
+                                if x<0 || y<0 || x>=d.width || y>=d.height { return Err("invalid_coordinates"); }
+                                if let Some(input)=&eis { input.move_pointer(stream,shared.streams.len(),x,y)?; }
+                                else { remote.notify_pointer_motion_absolute(&session,stream.node,f64::from(x),f64::from(y)).await.map_err(|_| "input_failed")?; }
+                            }
+                            Event::Button(button,pressed) => {
+                                if pressed { buttons.insert(button); }
+                                if let Some(input)=&eis { input.button(button,pressed)?; }
+                                else { remote.notify_pointer_button(&session,button,if pressed {KeyState::Pressed}else{KeyState::Released}).await.map_err(|_| "input_failed")?; }
+                                if !pressed { buttons.remove(&button); }
+                            }
+                            Event::Key(key,pressed) => {
+                                if pressed { keys.insert(key); }
+                                if let Some(input)=&eis { input.key(key,pressed)?; }
+                                else { remote.notify_keyboard_keysym(&session,key as i32,if pressed {KeyState::Pressed}else{KeyState::Released}).await.map_err(|_| "input_failed")?; }
+                                if !pressed { keys.remove(&key); }
+                            }
+                            Event::Scroll(axis,steps) => {
+                                if let Some(input)=&eis { input.scroll(axis,steps)?; }
+                                else { remote.notify_pointer_axis_discrete(&session,if axis==1{PortalAxis::Horizontal}else{PortalAxis::Vertical},steps).await.map_err(|_| "input_failed")?; }
+                            }
+                            Event::OpenRemote(reply) => {
+                                let result=screencast.open_pipe_wire_remote(&session).await.map_err(|_| "portal_pipewire");
+                                let failed=result.is_err();let _=reply.send(result);if failed{return Err("portal_pipewire");}
+                            }
+                            Event::Close => {}
+                        }
+                        Ok(())
+                    };
+                    let result=tokio::time::timeout(Duration::from_millis(500),operation).await.unwrap_or(Err("input_timeout"));
+                    let failed=result.is_err();let _=command.result.send(result);if failed {break;}
+                }
+            }
+        }
+        shared.active.store(false,Ordering::Release);
+        for key in keys {
+            if let Some(input)=&eis {let _=input.key(key,false);}
+            else {let _=tokio::time::timeout(Duration::from_millis(100),remote.notify_keyboard_keysym(&session,key as i32,KeyState::Released)).await;}
+        }
+        for button in buttons {
+            if let Some(input)=&eis {let _=input.button(button,false);}
+            else {let _=tokio::time::timeout(Duration::from_millis(100),remote.notify_pointer_button(&session,button,KeyState::Released)).await;}
+        }
+        drop(eis);
+        let _=session.close().await;
+        Ok(())
+    }.await;
+    if let Err(error) = result {
+        let _ = ready.send(Err(error));
+    }
+}
+
 async fn select_monitor_sources(
     screencast: &Screencast<'_>,
     session: &ashpd::desktop::Session<'_, RemoteDesktop<'_>>,
@@ -67,7 +213,12 @@ async fn select_monitor_sources(
         .as_str()
         .trim_start_matches(':')
         .replace('.', "_");
-    let token = format!("xmesh_sources_{}", std::process::id());
+    static REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let token = format!(
+        "xmesh_sources_{}_{}",
+        std::process::id(),
+        REQUEST.fetch_add(1, Ordering::Relaxed)
+    );
     let path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
     let request = zbus::Proxy::new(
         connection,
@@ -109,6 +260,12 @@ pub fn available() -> bool {
     PORTAL
         .get()
         .is_some_and(|s| s.active.load(Ordering::Acquire))
+}
+pub fn input_backend() -> Option<&'static str> {
+    PORTAL
+        .get()
+        .filter(|_| available())
+        .map(|s| s.input_backend)
 }
 pub fn displays() -> Vec<Display> {
     PORTAL
@@ -195,66 +352,13 @@ impl PortalInput {
                 let _ = tx.send(Err("portal_runtime"));
                 return;
             };
-            runtime.block_on(async move{
-                let remote=match RemoteDesktop::new().await{Ok(v)=>v,Err(_)=>{let _=tx.send(Err("portal_unavailable"));return;}};
-                let screencast=match Screencast::new().await{Ok(v)=>v,Err(_)=>{let _=tx.send(Err("portal_unavailable"));return;}};
-                let session=match remote.create_session().await{Ok(v)=>v,Err(_)=>{let _=tx.send(Err("portal_session"));return;}};
-                let initialized=async{
-                    remote.select_devices(&session,DeviceType::Keyboard|DeviceType::Pointer,restore.as_deref(),PersistMode::ExplicitlyRevoked).await.map_err(|_|"portal_select_devices")?.response().map_err(|_|"portal_permission")?;
-                    select_monitor_sources(&screencast,&session).await?;
-                    let response=remote.start(&session,None).await.map_err(|_|"portal_start")?.response().map_err(|_|"portal_permission")?;
-                    if !response.devices().contains(DeviceType::Keyboard)||!response.devices().contains(DeviceType::Pointer){return Err("portal_devices_missing");}
-                    let mut streams=Vec::new();
-                    for stream in response.streams().ok_or("portal_streams_missing")?{
-                        let(width,height)=stream.size().ok_or("portal_logical_size_missing")?;
-                        if width<1||height<1||width>16384||height>16384{return Err("portal_logical_size_invalid");}
-                        let(x,y)=stream.position().unwrap_or((0,0));
-                        streams.push(Stream{node:stream.pipe_wire_node_id(),display:Display{id:stream.pipe_wire_node_id().to_string(),name:stream.id().unwrap_or("Shared display").to_owned(),x,y,width,height,scale:1.0,rotation:0}});
-                    }
-                    if streams.is_empty()||streams.len()>32{return Err("portal_streams_missing");}
-                    let _probe=screencast.open_pipe_wire_remote(&session).await.map_err(|_|"portal_pipewire")?;
-                    if let Some(token)=response.restore_token(){save_token(&path,token)?;}
-                    Ok(streams)
-                };
-                let limit=if authorize{Duration::from_secs(120)}else{Duration::from_secs(3)};
-                let streams=match tokio::time::timeout(limit,initialized).await{Ok(Ok(v))=>v,Ok(Err(e))=>{let _=session.close().await;let _=tx.send(Err(e));return;},Err(_)=>{let _=session.close().await;let _=tx.send(Err("portal_authorization_required"));return;}};
-                let(commands,mut requests)=tokio::sync::mpsc::channel::<Command>(32);
-                let shared=Arc::new(Shared{active:AtomicBool::new(true),streams,commands});
-                if tx.send(Ok(Arc::clone(&shared))).is_err(){let _=session.close().await;return;}
-                let mut closed=match session.receive_closed().await{Ok(v)=>v,Err(_)=>{shared.active.store(false,Ordering::Release);let _=session.close().await;return;}};
-                let mut keys=HashSet::new();let mut buttons=HashSet::new();
-                loop{
-                    tokio::select!{
-                        _ = closed.next()=>break,
-                        command=requests.recv()=>{
-                            let Some(command)=command else{break;};
-                            if matches!(command.event,Event::Close){let _=command.result.send(Ok(()));break;}
-                            let operation=async{
-                                match command.event{
-                                    Event::Move(id,x,y)=>{let stream=shared.streams.iter().find(|s|s.display.id==id).ok_or("display_not_found")?;let d=&stream.display;let x=x-d.x;let y=y-d.y;if x<0||y<0||x>=d.width||y>=d.height{return Err("invalid_coordinates");}remote.notify_pointer_motion_absolute(&session,stream.node,f64::from(x),f64::from(y)).await.map_err(|_|"input_failed")?;}
-                                    Event::Button(button,pressed)=>{if pressed{buttons.insert(button);}remote.notify_pointer_button(&session,button,if pressed{KeyState::Pressed}else{KeyState::Released}).await.map_err(|_|"input_failed")?;if !pressed{buttons.remove(&button);}}
-                                    Event::Key(key,pressed)=>{if pressed{keys.insert(key);}remote.notify_keyboard_keysym(&session,key as i32,if pressed{KeyState::Pressed}else{KeyState::Released}).await.map_err(|_|"input_failed")?;if !pressed{keys.remove(&key);}}
-                                    Event::Scroll(axis,steps)=>remote.notify_pointer_axis_discrete(&session,if axis==1{PortalAxis::Horizontal}else{PortalAxis::Vertical},steps).await.map_err(|_|"input_failed")?,
-                                    Event::OpenRemote(reply)=>{let result=screencast.open_pipe_wire_remote(&session).await.map_err(|_|"portal_pipewire");let failed=result.is_err();let _=reply.send(result);if failed{return Err("portal_pipewire");}}
-                                    Event::Close=>{}
-                                };Ok(())
-                            };
-                            let result=tokio::time::timeout(Duration::from_millis(500),operation).await.unwrap_or(Err("input_timeout"));
-                            let failed=result.is_err();let _=command.result.send(result);if failed{break;}
-                        }
-                    }
-                }
-                shared.active.store(false,Ordering::Release);
-                for key in keys{let _=tokio::time::timeout(Duration::from_millis(100),remote.notify_keyboard_keysym(&session,key as i32,KeyState::Released)).await;}
-                for button in buttons{let _=tokio::time::timeout(Duration::from_millis(100),remote.notify_pointer_button(&session,button,KeyState::Released)).await;}
-                let _=session.close().await;
-            });
+            runtime.block_on(run_portal(authorize, path, restore, tx));
         });
         let shared = rx
             .recv_timeout(if authorize {
                 Duration::from_secs(125)
             } else {
-                Duration::from_secs(5)
+                Duration::from_secs(7)
             })
             .ok()?
             .ok()?;
