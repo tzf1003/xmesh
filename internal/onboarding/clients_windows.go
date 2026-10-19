@@ -18,6 +18,19 @@ func clientSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 	return windows.SecurityDescriptorFromString("D:P(A;;FA;;;" + user.User.Sid.String() + ")(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
+func openClientFile(path string) (*os.File, error) {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	// Status readers keep their current snapshot while the writer replaces it.
+	h, err := windows.CreateFile(name, windows.GENERIC_READ, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 func createPrivateClientFile(path string) (*os.File, error) {
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -65,17 +78,39 @@ func verifyPrivateClientFile(path string) error {
 	return nil
 }
 
+// The POSIX replacement flag keeps a live target available to new readers while
+// existing handles retain the old bytes. MoveFileEx can leave it delete-pending.
+type clientRenameInfo struct {
+	Flags         uint32
+	RootDirectory windows.Handle
+	NameLength    uint32
+	Name          [1]uint16
+}
+
 func renameClientFile(source, destination string) error {
 	from, err := windows.UTF16PtrFromString(source)
 	if err != nil {
 		return err
 	}
-	to, err := windows.UTF16PtrFromString(destination)
+	h, err := windows.CreateFile(from, windows.DELETE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return err
 	}
-	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	defer windows.CloseHandle(h)
+	to, err := windows.UTF16FromString(destination)
+	if err != nil {
+		return err
+	}
+	var header clientRenameInfo
+	offset := unsafe.Offsetof(header.Name)
+	buffer := make([]byte, int(offset)+2*len(to))
+	info := (*clientRenameInfo)(unsafe.Pointer(&buffer[0]))
+	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
+	info.NameLength = uint32(2 * (len(to) - 1))
+	copy(unsafe.Slice((*uint16)(unsafe.Pointer(&buffer[offset])), len(to)), to)
+	return windows.SetFileInformationByHandle(h, windows.FileRenameInfoEx, &buffer[0], uint32(len(buffer)))
 }
 
-// MoveFileEx with WRITE_THROUGH completes the platform durability operation.
+// Contents are flushed before publishing the replacement; directories cannot
+// be flushed through Go's os.File on Windows.
 func syncClientDir(string) error { return nil }
