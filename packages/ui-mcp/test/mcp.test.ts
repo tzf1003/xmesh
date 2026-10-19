@@ -31,8 +31,16 @@ test("stdio MCP lists tools without launching a browser and closes on EOF", asyn
     ],
     stderr: "pipe",
   });
+  let diagnostics = "";
+  transport.stderr?.on("data", (chunk) => {
+    diagnostics += chunk.toString();
+  });
   try {
-    await client.connect(transport);
+    try {
+      await client.connect(transport);
+    } catch (error) {
+      throw new Error(`${String(error)}: ${diagnostics}`);
+    }
     const tools = await client.listTools();
     assert.ok(tools.tools.find((t) => t.name === "run"));
     assert.ok(!tools.tools.find((t) => t.name === "script"));

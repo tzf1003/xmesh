@@ -29,6 +29,10 @@ var denyJobList bool
 // aliases) are created suspended without it and assigned to the Job before
 // their primary thread is resumed.
 func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
+	return startCommandWithWindow(c, false)
+}
+
+func startCommandWithWindow(c *exec.Cmd, hideWindow bool) (wait func() error, finish func(), err error) {
 	if c.Err != nil {
 		return nil, nil, c.Err
 	}
@@ -158,6 +162,9 @@ func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
 			StdInput: handles[0], StdOutput: handles[1], StdErr: handles[2],
 		}, ProcThreadAttributeList: attributes.List()}
 		flags := uint32(windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
+		if hideWindow {
+			flags |= windows.CREATE_NO_WINDOW
+		}
 		err = windows.CreateProcess(application, command, nil, nil, true, flags, &block[0], directory, &startup.StartupInfo, &process)
 		return process, err
 	}

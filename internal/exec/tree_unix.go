@@ -4,6 +4,7 @@ package exec
 
 import (
 	"fmt"
+	"os/exec"
 	"sync"
 	"syscall"
 	"time"
@@ -13,6 +14,8 @@ type treeIdentity struct {
 	pid, parent, group int
 	birth              string
 }
+
+func startTreeCommand(cmd *exec.Cmd) (func() error, func(), error) { return startCommand(cmd) }
 
 func watchTree(root int) (func() error, error) {
 	initial, err := treeSnapshot()

@@ -17,7 +17,7 @@ type ProcessTree struct {
 }
 
 func StartProcessTree(cmd *exec.Cmd) (*ProcessTree, error) {
-	wait, finish, err := startCommand(cmd)
+	wait, finish, err := startTreeCommand(cmd)
 	if err != nil {
 		return nil, err
 	}

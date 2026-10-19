@@ -20,6 +20,7 @@ export async function terminateProcesses(
       if (process.platform === "win32")
         await exec("taskkill.exe", ["/PID", String(p.pid), "/T", "/F"], {
           timeout: 3000,
+          windowsHide: true,
         });
       else process.kill(p.group ? -p.pid : p.pid, "SIGKILL");
     } catch (error) {

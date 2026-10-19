@@ -11,28 +11,39 @@ interface Owner {
   nonce: string;
   ticket: number;
 }
+let selfIdentity: string | undefined;
 export function processIdentity(pid: number): string {
+  if (pid === process.pid && selfIdentity) return selfIdentity;
   try {
-    return process.platform === "win32"
-      ? execFileSync(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
-          ],
-          {
+    process.kill(pid, 0);
+  } catch {
+    return "";
+  }
+  try {
+    const identity =
+      process.platform === "win32"
+        ? execFileSync(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
+            ],
+            {
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "ignore"],
+              timeout: 10000,
+              windowsHide: true,
+            },
+          ).trim()
+        : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
             encoding: "utf8",
             stdio: ["ignore", "pipe", "ignore"],
             timeout: 3000,
-          },
-        ).trim()
-      : execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-          timeout: 3000,
-        }).trim();
+          }).trim();
+    if (pid === process.pid) selfIdentity = identity;
+    return identity;
   } catch {
     return "";
   }

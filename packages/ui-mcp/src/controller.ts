@@ -100,6 +100,7 @@ export class Controller {
         execArgv: [],
         stdio: ["ignore", "ignore", "ignore", "ipc"],
         detached: process.platform !== "win32",
+        windowsHide: true,
       },
     );
     this.guardian.unref();
@@ -258,6 +259,7 @@ export class Controller {
           stdio: ["ignore", "pipe", "pipe", "ipc"],
           env: { ...process.env },
           detached: process.platform !== "win32",
+          windowsHide: true,
         },
       );
       const s: Session = {
