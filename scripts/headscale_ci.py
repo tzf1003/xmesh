@@ -13,9 +13,10 @@ The sequence follows docs/validation/2026-10-15-headscale.md, on one host:
      hs-b). The ingress is a separate node because a tag:ingress node may only reach Agents with
      an OAuth client identity (identity.FromPeer), so it cannot take part in the plain peer check.
 
-Only the direct path is covered: all nodes share the host, so they find each other directly even though
-the embedded DERP server exists (it is there so that netchecks succeed and magicsock does not keep rebinding).
-Proving the DERP fallback (CON-NET-05) still needs the multi-host run in the validation notes.
+The default run uses same-host direct paths. --force-derp disables UDP in the
+throwaway clients, routes via the loopback embedded DERP and checks reported
+peer connection state. Multi-host NAT and external relay outages remain part
+of the real-environment validation notes.
 """
 
 # conformance: CON-ARCH-08
@@ -100,15 +101,21 @@ def main():
     parser.add_argument("--skip-go-test", action="store_true")
     parser.add_argument("--ingress", action="store_true", help="also run the OAuth protocol check through an ingress on hs-a")
     parser.add_argument("--computer-helper", type=pathlib.Path, help="also verify native desktop images and finite control through peer and OAuth routes")
+    parser.add_argument("--force-derp", action="store_true", help="disable UDP and verify desktop calls through the local embedded DERP")
     options = parser.parse_args()
     headscale, binary = options.headscale.resolve(), options.binary.resolve()
     control = f"http://127.0.0.1:{CONTROL_PORT}"
     processes, logs = [], []
+    child_env = dict(os.environ)
+    if options.force_derp:
+        # Test-only debug knobs in the pinned tsnet SDK. HTTP DERP remains on
+        # loopback; peer payloads still traverse the encrypted WireGuard layer.
+        child_env.update(TS_DEBUG_ALWAYS_USE_DERP="true", TS_DEBUG_USE_DERP_HTTP="true")
 
     def spawn(command, name):
         log = open(work / f"{name}.log", "w+")
         logs.append(log)
-        process = subprocess.Popen([str(part) for part in command], stdout=log, stderr=log)
+        process = subprocess.Popen([str(part) for part in command], stdout=log, stderr=log, env=child_env)
         processes.append(process)
         return process, log
 
@@ -223,7 +230,7 @@ def main():
                 cfg["agent"].update({"default_cwd": str(probe_dir / "workspace"),
                                      "cwd_policy": {"allow": [str(probe_dir / "workspace")]}})
                 (probe_dir / "config.json").write_text(json.dumps(cfg))
-                env = dict(os.environ, XMESH_TEST_TAILNET_CONFIG=str(probe_dir / "config.json"),
+                env = dict(child_env, XMESH_TEST_TAILNET_CONFIG=str(probe_dir / "config.json"),
                            XMESH_TEST_TAILNET_STATE=str(probe_dir / "state"), XMESH_TEST_TAILNET_PEER="hs-b",
                            XMESH_TEST_TAILNET_VERBOSE="1")
                 for attempt in (1, 2):
@@ -248,8 +255,17 @@ def main():
                         desktop_checks.append({"route": "oauth-ingress", **verify_computer(SimpleNamespace(request=session.rpc), "hs-b")})
                     finally:
                         session.close()
+            if options.force_derp:
+                deadline = time.monotonic() + 10
+                while True:
+                    peers = json.loads(sh(binary, "control", "peers", "--state-dir", work / "hs-a" / "state"))["peers"]
+                    target = next((peer for peer in peers if peer["name"] == "hs-b"), {})
+                    if target.get("connection") == "derp" and target.get("derp_region"):
+                        break
+                    assert time.monotonic() < deadline, {"expected": "derp", "peer_state": target}
+                    time.sleep(.1)
             print(json.dumps({"result": "PASS", "peer_checks": results, "tailnet_probe": probe is not None,
-                              "oauth": oauth, "path": "direct",
+                              "oauth": oauth, "path": "derp" if options.force_derp else "direct",
                               **({"computer": desktop_checks} if desktop_checks else {}),
                               "checks": ["join", "peer-tools-both-ways"] + (["tailnet-connectivity"] if probe else [])
                               + (["oauth-protocol"] if oauth else [])}))
