@@ -6,7 +6,10 @@ import (
 )
 
 // ProcessTree is an opt-in lifetime boundary for stdio backends. It reuses the
-// native suspended/Job launch on Windows and tracks detached descendants on Unix.
+// native suspended/Job launch on Windows. On Unix it tracks the root process
+// group and descendants observed while their parent identities are still alive.
+// Unix backends must keep descendants in that group until observed; a child that
+// creates a new session and is reparented between scans is outside this boundary.
 // Call Wait once and Close after the root exits or must be forcibly terminated.
 type ProcessTree struct {
 	wait    func() error

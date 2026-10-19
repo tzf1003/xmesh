@@ -11,11 +11,13 @@ import {
   type BrowserServer,
   type Page,
   type Locator,
+  type Request,
   type FrameLocator,
   type ElectronApplication,
 } from "@playwright/test";
 import type { WorkerInit, Step, Target } from "./types.js";
 import { privateDir, inside } from "./config.js";
+import { navigationGuard } from "./navigation.js";
 import { requireValue, UIError } from "./errors.js";
 
 type Emit = (event: Record<string, unknown>) => void;
@@ -27,8 +29,17 @@ export class Driver {
   page!: Page;
   pages = new Map<string, Page>();
   versions: Record<string, string> = { node: process.version };
-  private responses: Array<{ url: string; status: number }> = [];
+  private responses: Array<{
+    page: Page;
+    url: string;
+    status: number;
+    sequence: number;
+  }> = [];
+  private requestSequence = 0;
+  private responseCursor = 0;
+  private requests = new WeakMap<Request, number>();
   private seenPages = new Set<Page>();
+  private closeNavigationGuard?: () => void;
   private initCleanup?: () => Promise<void>;
   constructor(
     readonly init: WorkerInit,
@@ -44,31 +55,29 @@ export class Driver {
       this.browserServer = await chromium.launchServer({
         executablePath: e.executable,
         headless: true,
-        args: e.args,
+        args: [
+          ...(e.args ?? []),
+          "--remote-debugging-port=0",
+          "--remote-debugging-address=127.0.0.1",
+        ],
       });
       this.emit({
         kind: "process",
         pid: this.browserServer.process().pid,
         group: process.platform !== "win32",
       });
+      this.closeNavigationGuard = await navigationGuard(
+        this.browserServer,
+        e.allowed_origins ?? [],
+        (origin) => this.emit({ kind: "navigation_denied", origin }),
+      );
       this.browser = await chromium.connect(this.browserServer.wsEndpoint());
       this.context = await this.browser.newContext({
         storageState: this.init.account?.storage_state,
         acceptDownloads: true,
+        serviceWorkers: "block",
       });
       this.versions.browser = this.browser.version();
-      await this.context.route("**/*", async (route) => {
-        const req = route.request();
-        if (req.isNavigationRequest()) {
-          const url = new URL(req.url());
-          if (!e.allowed_origins?.includes(url.origin)) {
-            this.emit({ kind: "navigation_denied", origin: url.origin });
-            await route.abort("blockedbyclient");
-            return;
-          }
-        }
-        await route.continue();
-      });
     } else {
       this.electronApp = await _electron.launch({
         executablePath: e.executable,
@@ -102,6 +111,14 @@ export class Driver {
     this.context.setDefaultNavigationTimeout(
       this.init.config.limits.step_timeout_ms,
     );
+    this.context.on("request", (request) => {
+      const sequence = ++this.requestSequence;
+      const previous = request.redirectedFrom();
+      this.requests.set(
+        request,
+        previous ? (this.requests.get(previous) ?? 0) : sequence,
+      );
+    });
     this.context.on("page", (p) => this.register(p));
     for (const p of this.context.pages()) this.register(p);
     if (e.init_module) {
@@ -145,8 +162,9 @@ export class Driver {
         "Electron test build must acknowledge background mode and keep all windows hidden and unfocused",
       );
     }
-    if (e.driver === "web")
+    if (e.driver === "web") {
       await this.page.goto(e.url!, { waitUntil: "domcontentloaded" });
+    }
     return {
       versions: this.versions,
       pages: this.listPages(),
@@ -171,7 +189,12 @@ export class Driver {
       const url = new URL(r.url());
       url.search = "";
       url.hash = "";
-      this.responses.push({ url: r.url(), status: r.status() });
+      this.responses.push({
+        page,
+        url: r.url(),
+        status: r.status(),
+        sequence: this.requests.get(r.request()) ?? 0,
+      });
       if (this.responses.length > 100) this.responses.shift();
       this.emit({ kind: "response", url: url.href, status: r.status() });
     });
@@ -236,6 +259,7 @@ export class Driver {
   }
   beginRun(): void {
     this.responses = [];
+    this.responseCursor = this.requestSequence;
   }
   async assertBackground(): Promise<void> {
     if (!this.electronApp) return;
@@ -259,6 +283,21 @@ export class Driver {
     await this.assertBackground();
     const timeout = s.timeout_ms ?? this.init.config.limits.step_timeout_ms;
     const target = s.target ? this.locator(s.target) : undefined;
+    if (
+      [
+        "navigate",
+        "click",
+        "fill",
+        "press",
+        "check",
+        "select",
+        "hover",
+        "scroll",
+        "upload",
+        "download",
+      ].includes(s.action)
+    )
+      this.responseCursor = this.requestSequence;
     const click = () => target!.click({ timeout });
     switch (s.action) {
       case "navigate":
@@ -349,11 +388,21 @@ export class Driver {
       }
       case "response": {
         const url = new URL(s.value!, this.init.environment.url).href;
-        const cached = [...this.responses].reverse().find((r) => r.url === url);
+        const cursor = this.responseCursor;
+        const cached = [...this.responses]
+          .reverse()
+          .find(
+            (r) => r.page === this.page && r.url === url && r.sequence > cursor,
+          );
         const status =
           cached?.status ??
           (
-            await this.page.waitForResponse((r) => r.url() === url, { timeout })
+            await this.page.waitForResponse(
+              (r) =>
+                r.url() === url &&
+                (this.requests.get(r.request()) ?? 0) > cursor,
+              { timeout },
+            )
           ).status();
         requireValue(
           status === s.status,
@@ -370,6 +419,7 @@ export class Driver {
             dir,
             s.name ?? "screenshot.png",
             target,
+            timeout,
           ),
         };
     }
@@ -378,13 +428,13 @@ export class Driver {
     dir: string,
     name: string,
     target?: Locator,
+    timeout = this.init.config.limits.step_timeout_ms,
   ): Promise<{ file: string; name: string; mime: string }> {
     const file = path.join(dir, `screenshot-${randomUUID()}.png`);
     const mask = [
       this.page.locator('input[type="password"]'),
       ...(this.init.environment.mask ?? []).map((s) => this.page.locator(s)),
     ];
-    const timeout = this.init.config.limits.step_timeout_ms;
     if (this.electronApp) {
       await this.assertBackground();
       if (target) await target.scrollIntoViewIfNeeded({ timeout });
@@ -483,6 +533,7 @@ export class Driver {
         await this.browserServer?.close();
       }
     } finally {
+      this.closeNavigationGuard?.();
       await this.initCleanup?.();
     }
   }

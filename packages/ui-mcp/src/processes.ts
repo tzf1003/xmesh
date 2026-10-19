@@ -33,5 +33,14 @@ export async function terminateProcesses(
           "owned browser process could not be terminated",
         );
     }
+    const deadline = Date.now() + 3000;
+    while (processIdentity(p.pid) === p.birth) {
+      if (Date.now() >= deadline)
+        throw new UIError(
+          "cleanup_pending",
+          "owned browser process termination has not been confirmed",
+        );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   }
 }

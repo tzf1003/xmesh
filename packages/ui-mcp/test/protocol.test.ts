@@ -312,3 +312,60 @@ test("backend startup marks unfinished journals from a previous process identity
     cleanup(c);
   }
 });
+
+test("a contender paused before publication cannot join an existing lock holder", async () => {
+  const c = config();
+  const children: ReturnType<typeof spawn>[] = [];
+  const wait = async (name: string) => {
+    const end = Date.now() + 20000;
+    while (!fs.existsSync(path.join(c.state_dir, name))) {
+      if (Date.now() > end) throw new Error(`barrier timed out: ${name}`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  const release = (name: string) =>
+    fs.writeFileSync(path.join(c.state_dir, name), "");
+  try {
+    for (const actor of ["a", "b"])
+      children.push(
+        spawn(
+          process.execPath,
+          [
+            fileURLToPath(
+              new URL("./lock-schedule-worker.js", import.meta.url),
+            ),
+            c.state_dir,
+            actor,
+          ],
+          { stdio: "ignore", windowsHide: true },
+        ),
+      );
+    await Promise.all([wait("a.paused"), wait("b.paused")]);
+    release("a.publish");
+    await wait("a.granted");
+    release("b.publish");
+    await wait("b.rejected");
+    assert.equal(fs.existsSync(path.join(c.state_dir, "b.granted")), false);
+    release("a.release");
+    await Promise.all(
+      children.map(
+        (child) =>
+          new Promise<void>((resolve, reject) => {
+            if (child.exitCode !== null) {
+              child.exitCode === 0
+                ? resolve()
+                : reject(new Error("worker failed"));
+              return;
+            }
+            child.once("exit", (code) =>
+              code === 0 ? resolve() : reject(new Error("worker failed")),
+            );
+            child.once("error", reject);
+          }),
+      ),
+    );
+  } finally {
+    for (const child of children) if (child.exitCode === null) child.kill();
+    cleanup(c);
+  }
+});

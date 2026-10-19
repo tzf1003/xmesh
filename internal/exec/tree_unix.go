@@ -17,6 +17,9 @@ type treeIdentity struct {
 
 func startTreeCommand(cmd *exec.Cmd) (func() error, func(), error) { return startCommand(cmd) }
 
+// watchTree samples process ancestry; it is not a containment mechanism.
+// Cooperative Unix backends must retain their process group or register detached
+// helpers with their own supervisor before allowing their parent to exit.
 func watchTree(root int) (func() error, error) {
 	initial, err := treeSnapshot()
 	if err != nil {

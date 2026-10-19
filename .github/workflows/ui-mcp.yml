@@ -1,9 +1,37 @@
 name: UI test MCP
 on:
   pull_request:
-    paths: ["packages/ui-mcp/**", "internal/backend/**", "internal/exec/**", "internal/config/**", "internal/role/gateway/ui_mcp_integration_test.go", "ui/src/main/window.ts", "ui/src/main/main.ts", ".github/workflows/ui-mcp.yml"]
+    paths:
+      [
+        "packages/ui-mcp/**",
+        "internal/backend/**",
+        "internal/exec/**",
+        "internal/config/**",
+        "internal/role/gateway/ui_mcp_integration_test.go",
+        "ui/src/**",
+        "ui/scripts/**",
+        "ui/package*.json",
+        "ui/electron.vite.config.*",
+        "go.mod",
+        "go.sum",
+        ".github/workflows/ui-mcp.yml",
+      ]
   push:
-    paths: ["packages/ui-mcp/**", "internal/backend/**", "internal/exec/**", "internal/config/**", "internal/role/gateway/ui_mcp_integration_test.go", "ui/src/main/window.ts", "ui/src/main/main.ts", ".github/workflows/ui-mcp.yml"]
+    paths:
+      [
+        "packages/ui-mcp/**",
+        "internal/backend/**",
+        "internal/exec/**",
+        "internal/config/**",
+        "internal/role/gateway/ui_mcp_integration_test.go",
+        "ui/src/**",
+        "ui/scripts/**",
+        "ui/package*.json",
+        "ui/electron.vite.config.*",
+        "go.mod",
+        "go.sum",
+        ".github/workflows/ui-mcp.yml",
+      ]
   workflow_dispatch:
 concurrency:
   group: ui-test-mcp-${{ github.head_ref || github.ref_name }}

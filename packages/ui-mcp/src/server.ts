@@ -234,11 +234,14 @@ export async function serve(config: Config): Promise<void> {
       await controller.close();
       await server.close();
       process.exitCode = 0;
+      clearTimeout(timer);
     } catch (error) {
       process.stderr.write(`${failure(error).code}\n`);
       process.exitCode = 1;
-    } finally {
-      clearTimeout(timer);
+      // Keep the deadline armed while cleanup is pending. Controller retains
+      // its retry timer; a subsequent shutdown signal can retry explicitly.
+      closing = false;
+      timer.ref();
     }
   };
   process.stdin.once("end", () => void close());

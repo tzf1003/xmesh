@@ -136,6 +136,7 @@ export class Controller {
   private locks: Locks;
   private timer: NodeJS.Timeout;
   private closed = false;
+  private closing?: Promise<void>;
   private guardian: ChildProcess;
   private guardianReady: Promise<void>;
   constructor(readonly config: Config) {
@@ -214,7 +215,10 @@ export class Controller {
     });
     this.timer = setInterval(() => {
       for (const s of this.sessions.values())
-        if (!s.active && Date.now() - s.lastUse > config.limits.session_idle_ms)
+        if (
+          s.closed ||
+          (!s.active && Date.now() - s.lastUse > config.limits.session_idle_ms)
+        )
           void this.closeSession(s.id).catch(() => {});
     }, 1000);
     this.timer.unref();
@@ -449,12 +453,23 @@ export class Controller {
     for (const p of s.pending.values())
       p.reject(new UIError("application_exited", "test worker exited"));
     s.pending.clear();
+    void this.cleanupSession(s).catch(() => {});
+  }
+  private cleanupSession(s: Session): Promise<void> {
+    if (s.exitCleanup) return s.exitCleanup;
     s.exitCleanup = terminateProcesses(s.processes).then(() => {
       // Resource locks remain held until the test processes have been terminated.
-      for (const release of s.releases.splice(0)) release();
+      while (s.releases.length) {
+        s.releases[0]!();
+        s.releases.shift();
+      }
       this.sessions.delete(s.id);
     });
-    void s.exitCleanup.catch(() => {});
+    s.exitCleanup = s.exitCleanup.catch((error) => {
+      s.exitCleanup = undefined;
+      throw error;
+    });
+    return s.exitCleanup;
   }
   private message(s: Session, raw: unknown): void {
     const m = raw as any;
@@ -705,7 +720,7 @@ export class Controller {
     this.record(run, { kind: "run_started", time: new Date().toISOString() });
     run.timeout = setTimeout(() => {
       run.stopState = "timed_out";
-      void this.stop(run.session);
+      void this.stop(run.session).catch(() => {});
     }, timeout);
     run.quotaTimer = setInterval(() => {
       if (
@@ -735,7 +750,7 @@ export class Controller {
       clearTimeout(run.timeout);
       clearInterval(run.quotaTimer);
       run.result.status = run.stopState ?? run.result.status;
-      if (run.stopState) {
+      if (run.stopState || run.result.status === "interrupted") {
         run.result.outcome_unknown =
           run.result.steps.some((s) => s.status === "started") ||
           run.result.mode === "script";
@@ -825,13 +840,13 @@ export class Controller {
     if (s.closing) return s.closing;
     s.closing = (async () => {
       if (s.closed) {
-        await s.exitCleanup;
+        await this.cleanupSession(s);
         return;
       }
       const exited = new Promise<void>((resolve) =>
         s.child.once("exit", () => resolve()),
       );
-      s.child.disconnect();
+      if (s.child.connected) s.child.disconnect();
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([
         exited,
@@ -853,10 +868,14 @@ export class Controller {
         "cleanup_pending",
         "worker termination has not been confirmed",
       );
-      await s.exitCleanup;
+      await this.cleanupSession(s);
       fs.rmSync(s.dir, { recursive: true, force: true });
     })();
-    return s.closing;
+    try {
+      await s.closing;
+    } finally {
+      s.closing = undefined;
+    }
   }
   async closeSession(id: string): Promise<{ closed: boolean }> {
     const s = this.sessions.get(id);
@@ -870,13 +889,22 @@ export class Controller {
     return { closed: true };
   }
   async close(): Promise<void> {
-    if (this.closed) return;
+    if (this.closing) return this.closing;
     this.closed = true;
-    clearInterval(this.timer);
+    this.closing = this.shutdown();
+    try {
+      await this.closing;
+    } catch (error) {
+      this.closing = undefined;
+      throw error;
+    }
+  }
+  private async shutdown(): Promise<void> {
     await Promise.all(
       [...this.sessions.keys()].map((id) => this.closeSession(id)),
     );
     this.locks.close();
+    clearInterval(this.timer);
     atomicJSON(
       path.join(
         this.config.state_dir,
