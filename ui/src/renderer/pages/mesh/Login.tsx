@@ -66,6 +66,9 @@ export function MeshLogin({
       setBusy(false);
       return setErr(r.error);
     }
+    // The CLI has already verified and replaced the credential file. Retire
+    // the old draft even if the additional status read fails transiently.
+    onSaved();
     // Say whether it actually works, not just that it was stored.
     let bad: ActionError | undefined;
     try { bad = verify === undefined ? undefined : await verify(); }
@@ -73,7 +76,6 @@ export function MeshLogin({
     setBusy(false);
     if (bad !== undefined) return setErr(bad);
     ctx.toast(t("mesh.login.saved"));
-    onSaved();
   };
 
   return (
