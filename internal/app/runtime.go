@@ -88,6 +88,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			return e
 		}
 		defer func() { runErr = errors.Join(runErr, network.Close()) }()
+		devices.SetAudit(log)
 		self, e = network.Self(ctx)
 		if e != nil {
 			return e
@@ -326,8 +327,8 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		return readings(registry.all()), true
 	}
 	var pairing control.PairingAdmin
-	if lan, ok := network.(*mesh.LAN); ok {
-		pairing = lan
+	if devices != nil {
+		pairing = devicePairing{node: devices}
 	}
 	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)
 	defer stopCI()

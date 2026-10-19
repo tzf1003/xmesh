@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-backends:1",
+  "$id": "urn:xmesh:schema:control-backends:2",
   "title": "ControlBackends",
   "description": "CTR-CTL-14。stdio 后端的环境变量（API Key 之类）。值只能写入，之后任何接口都读不回：响应和 status 只给变量名。内核把值存在状态目录里的 0600 文件，不进配置文件、日志、事件和审计记录。",
   "$defs": {
@@ -50,7 +50,7 @@
       ],
       "properties": {
         "name": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName"
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
         },
         "names": {
           "type": "array",

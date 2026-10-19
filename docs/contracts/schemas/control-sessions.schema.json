@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-sessions:1",
+  "$id": "urn:xmesh:schema:control-sessions:2",
   "title": "ControlSessions",
-  "description": "CTR-CTL-05。GET /v1/sessions 的只读视图。只有元数据：没有终端缓冲、命令行参数、stdin、环境变量。",
+  "description": "CTR-CTL-05。GET /v2/sessions 的只读视图。只有元数据：没有终端缓冲、命令行参数、stdin、环境变量。",
   "$defs": {
     "PtySession": {
       "type": "object",
@@ -20,7 +20,7 @@
         "cols": { "type": "integer", "minimum": 1, "maximum": 512 },
         "rows": { "type": "integer", "minimum": 1, "maximum": 512 },
         "cwd": { "type": "string", "description": "启动时的 resolved_path。" },
-        "created_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+        "created_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
       }
     },
     "ExecRun": {
@@ -35,7 +35,7 @@
         "cmd": { "type": "string", "minLength": 1, "description": "可执行文件基名，不含参数，与 CTR-AUD-01 的 args_digest.cmd 一致。" },
         "mode": { "enum": ["shared", "exclusive"] },
         "state": { "enum": ["queued", "running"] },
-        "started_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
       }
     },
     "BackendLease": {
@@ -47,7 +47,7 @@
         "resource": { "type": "string", "pattern": "^backend:[A-Za-z0-9-]{1,63}$" },
         "owner": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}/[A-Za-z0-9._:-]{1,128}$" },
         "token": { "type": "integer", "minimum": 1, "description": "fencing 序号，不是密钥，CTR-LEASE-01。" },
-        "expires_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+        "expires_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
       }
     },
     "Session": {

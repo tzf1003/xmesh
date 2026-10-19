@@ -122,7 +122,13 @@ async function start(): Promise<void> {
         ? macApplier(process.execPath)
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
-  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw, ...(kernelBundled && { version: app.getVersion() }) });
+  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw,
+    ...(!TEST_MODE && kernelBundled && {prepare: async (node: string): Promise<void> => {
+      if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node)) throw new Error("Invalid node name");
+      const dir = roots.map((root) => path.join(root, node)).find((dir) => fs.existsSync(path.join(dir, "xmesh.yaml")));
+      if (dir) await runXmeshSetup(["migrate", "--config", path.join(dir, "xmesh.yaml"), "--state-dir", dir]);
+    }}),
+    ...(kernelBundled && { version: app.getVersion() }) });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
     packaged: app.isPackaged || TEST_MODE,

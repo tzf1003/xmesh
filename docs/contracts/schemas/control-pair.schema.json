@@ -1,72 +1,130 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-pair:1",
+  "$id": "urn:xmesh:schema:control-pair:2",
   "title": "ControlPair",
-  "description": "CTR-CTL-08。LAN 配对。只在 mesh.mode 为 lan 时可用，否则 unsupported_mode。配对文档只含公开证书。1.5 起增加连接密码（口令只写不读）与内网发现，配对文档保留为高级用法。",
+  "description": "CTR-CTL-08。设备统一配对和信任管理。LAN、Tailnet 共用 xmesh 公钥信任。",
   "$defs": {
     "PairFingerprint": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "证书 SHA-256，小写十六进制，无分隔符。"
+      "description": "设备 SPKI 公钥的 SHA-256，与 device_id 的摘要一致。"
     },
     "PairDocument": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "fingerprint", "certificate_pem", "tags"],
+      "required": [
+        "version",
+        "device_id",
+        "public_key",
+        "name",
+        "fingerprint",
+        "tags"
+      ],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
-        "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
-        "certificate_pem": { "type": "string", "pattern": "^-----BEGIN CERTIFICATE-----" },
+        "name": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/PairFingerprint"
+        },
         "tags": {
           "type": "array",
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" }
+          "items": {
+            "$ref": "urn:xmesh:schema:control-common:2#/$defs/Tag"
+          }
+        },
+        "version": {
+          "const": 2
+        },
+        "device_id": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DeviceId"
+        },
+        "public_key": {
+          "type": "string",
+          "contentEncoding": "base64",
+          "minLength": 1
         }
       }
     },
     "PairExportResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pair"],
+      "required": [
+        "pair"
+      ],
       "properties": {
-        "pair": { "$ref": "#/$defs/PairDocument" }
+        "pair": {
+          "$ref": "#/$defs/PairDocument"
+        }
       }
     },
     "PairImportRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pair", "fingerprint"],
+      "required": [
+        "pair",
+        "fingerprint"
+      ],
       "properties": {
-        "pair": { "$ref": "#/$defs/PairDocument" },
+        "pair": {
+          "$ref": "#/$defs/PairDocument"
+        },
         "fingerprint": {
           "type": "string",
           "pattern": "^([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}$",
-          "description": "用户在另一台设备上独立核对过的指纹。必须由 UI 用户确认后提交，内核比较它与 pair.fingerprint（忽略冒号与大小写），不一致返回 fingerprint_mismatch。"
+          "description": "用户独立核对的设备公钥指纹。与设备 ID、公钥和文档内指纹同时验证。"
         },
         "tags": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["tag:peer", "tag:device", "tag:ingress"] },
-          "default": ["tag:peer", "tag:device"]
+          "items": {
+            "enum": [
+              "tag:peer",
+              "tag:device",
+              "tag:ingress"
+            ]
+          },
+          "default": [
+            "tag:peer",
+            "tag:device"
+          ]
         }
       }
     },
     "PairImportResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "fingerprint", "tags", "restart_required"],
+      "required": [
+        "name",
+        "fingerprint",
+        "tags",
+        "restart_required"
+      ],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
-        "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
-        "tags": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" } },
-        "restart_required": { "type": "boolean", "description": "与 xmesh pair 一致，重启节点后信任才生效时为 true。" }
+        "name": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/PairFingerprint"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:xmesh:schema:control-common:2#/$defs/Tag"
+          }
+        },
+        "restart_required": {
+          "const": false,
+          "description": "共享信任服务即时生效。"
+        }
       }
     },
     "PairAddress": {
       "type": "string",
       "minLength": 1,
       "maxLength": 260,
-      "description": "主机或 主机:端口。省略端口时使用 7433。IPv6 地址放在方括号中。"
+      "description": "HTTPS 设备端点；手动输入主机或主机:端口时由内核补全为 https://host:7433。"
     },
     "PairPassword": {
       "type": "string",
@@ -78,24 +136,54 @@
     "PairPasswordRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["password"],
+      "required": [
+        "password"
+      ],
       "properties": {
-        "password": { "$ref": "#/$defs/PairPassword" }
+        "password": {
+          "$ref": "#/$defs/PairPassword"
+        }
       }
     },
     "PairPasswordState": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["set", "updated_at", "failed_attempts", "locked_until"],
+      "required": [
+        "set",
+        "updated_at",
+        "failed_attempts",
+        "locked_until"
+      ],
       "properties": {
-        "set": { "type": "boolean", "description": "未设置时为 false，此时对端无法通过密码配对本机。" },
+        "set": {
+          "type": "boolean",
+          "description": "未设置时为 false，此时对端无法通过密码配对本机。"
+        },
         "updated_at": {
-          "anyOf": [{ "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }, { "type": "null" }],
+          "anyOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "最近一次设置或修改的时间，未设置时为 null。"
         },
-        "failed_attempts": { "type": "integer", "minimum": 0, "description": "对端连续失败次数。成功配对后清零。" },
+        "failed_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "对端连续失败次数。成功配对后清零。"
+        },
         "locked_until": {
-          "anyOf": [{ "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }, { "type": "null" }],
+          "anyOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "限流锁定截止时间，未锁定时为 null。从不包含口令或派生值。"
         }
       }
@@ -103,26 +191,50 @@
     "PairDiscoveredDevice": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "fingerprint", "address", "seen_at"],
+      "required": [
+        "name",
+        "fingerprint",
+        "address",
+        "seen_at",
+        "device_id",
+        "path"
+      ],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
-        "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
-        "address": {
-          "type": "string",
-          "pattern": "^(\\[[^\\]\\s]+\\]|[^\\s\\[\\]:]+):[0-9]{1,5}$",
-          "description": "内网中发现的地址，主机:端口。"
+        "name": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
         },
-        "seen_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" }
+        "fingerprint": {
+          "$ref": "#/$defs/PairFingerprint"
+        },
+        "address": {
+          "$ref": "#/$defs/PairAddress"
+        },
+        "seen_at": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+        },
+        "device_id": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DeviceId"
+        },
+        "path": {
+          "enum": [
+            "lan",
+            "tailnet"
+          ]
+        }
       }
     },
     "PairDiscoveredResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["devices"],
+      "required": [
+        "devices"
+      ],
       "properties": {
         "devices": {
           "type": "array",
-          "items": { "$ref": "#/$defs/PairDiscoveredDevice" },
+          "items": {
+            "$ref": "#/$defs/PairDiscoveredDevice"
+          },
           "description": "尚未配对、且宣告了 pairing=1 的设备。已配对的设备不出现在这里。"
         }
       }
@@ -130,29 +242,77 @@
     "PairConnectRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["password"],
-      "if": { "required": ["address"] },
+      "required": [
+        "password"
+      ],
+      "if": {
+        "required": [
+          "address"
+        ]
+      },
       "then": {},
-      "else": { "required": ["fingerprint"] },
+      "else": {
+        "required": [
+          "fingerprint"
+        ]
+      },
       "description": "address 与 fingerprint 至少给一个。",
       "properties": {
-        "address": { "$ref": "#/$defs/PairAddress" },
+        "address": {
+          "$ref": "#/$defs/PairAddress"
+        },
         "fingerprint": {
           "$ref": "#/$defs/PairFingerprint",
-          "description": "期望对端的证书指纹。给出时，对端证书不符则在确认前停止，返回 invalid_args（字段 fingerprint，原因 fingerprint_mismatch）。只给指纹时地址取自发现列表。"
+          "description": "期望设备公钥指纹；只给指纹时从发现列表选择对应设备。"
         },
-        "password": { "$ref": "#/$defs/PairPassword" }
+        "password": {
+          "$ref": "#/$defs/PairPassword"
+        },
+        "path": {
+          "enum": [
+            "lan",
+            "tailnet"
+          ],
+          "default": "lan"
+        }
       }
     },
     "PairConnectResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "fingerprint", "address", "tags"],
+      "required": [
+        "name",
+        "fingerprint",
+        "address",
+        "tags",
+        "device_id",
+        "path"
+      ],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
-        "fingerprint": { "$ref": "#/$defs/PairFingerprint" },
-        "address": { "$ref": "#/$defs/PairAddress" },
-        "tags": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" } }
+        "name": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/PairFingerprint"
+        },
+        "address": {
+          "$ref": "#/$defs/PairAddress"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:xmesh:schema:control-common:2#/$defs/Tag"
+          }
+        },
+        "device_id": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DeviceId"
+        },
+        "path": {
+          "enum": [
+            "lan",
+            "tailnet"
+          ]
+        }
       }
     }
   }

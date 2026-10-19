@@ -36,6 +36,10 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			p.mu.Unlock()
 			return ErrUnavailable
 		}
+		if m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+			p.mu.Unlock()
+			return ErrIdentityConflict
+		}
 		trusted, ok := m.opts.Trust.Find(p.id)
 		if !ok && value.Type != "ack" && value.Type != "close" && value.Type != "closed" {
 			p.mu.Unlock()

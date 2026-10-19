@@ -21,9 +21,10 @@ const LinkPath = "/mesh/v2/link"
 const Subprotocol = "xmesh-link-v2"
 
 var (
-	ErrUnavailable   = errors.New("设备连接不可用")
-	ErrRestarted     = errors.New("设备已重启，原会话已结束")
-	ErrResumeExpired = errors.New("设备会话恢复窗口已到期")
+	ErrUnavailable      = errors.New("设备连接不可用")
+	ErrRestarted        = errors.New("设备已重启，原会话已结束")
+	ErrResumeExpired    = errors.New("设备会话恢复窗口已到期")
+	ErrIdentityConflict = errors.New("设备身份对应多个运行实例，请检查设备状态目录")
 )
 
 type Options struct {
@@ -38,6 +39,8 @@ type Options struct {
 	RecoveryWindow time.Duration
 	Heartbeat      time.Duration
 	PingTimeout    time.Duration
+	// OnActivity runs under the device lock to retain transition order. It must not reenter Manager.
+	OnActivity func(Activity)
 }
 
 type frame struct {
@@ -96,6 +99,8 @@ type peerLink struct {
 	disconnected time.Time
 	attempting   bool
 	closed       bool
+	conflicted   bool
+	revoked      bool
 	failures     map[string]pathFailure
 	workers      sync.WaitGroup
 }
@@ -167,6 +172,9 @@ func (m *Manager) Activity(id string) Activity {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.conflicted {
+		return Activity{DeviceID: id, State: "identity_conflict"}
+	}
 	if p.active != nil && p.active.committed {
 		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: "online"}
 	}
@@ -233,6 +241,9 @@ func (p *peerLink) signalLocked() {
 
 // Open creates a separate MCP logical session for this upstream and target device.
 func (m *Manager) Open(ctx context.Context, id, oauthClient string) (*Transport, error) {
+	if m.opts.Directory.IdentityConflict(id, time.Now()) {
+		return nil, ErrIdentityConflict
+	}
 	p, err := m.peer(id)
 	if err != nil {
 		return nil, err
@@ -295,6 +306,10 @@ func (m *Manager) reauthorize() {
 	for _, p := range peers {
 		trusted, ok := m.opts.Trust.Find(p.id)
 		p.mu.Lock()
+		if !ok && !p.revoked {
+			m.activity(Activity{DeviceID: p.id, State: "revoked", Epoch: p.epoch})
+		}
+		p.revoked = !ok
 		for _, l := range p.sessions {
 			if !ok || trusted.Generation != l.trustGeneration {
 				closeLogical(l, device.ErrUntrusted)
@@ -379,6 +394,25 @@ func (m *Manager) runPeer(p *peerLink) {
 			p.mu.Unlock()
 			return
 		}
+		if m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+			if !p.conflicted {
+				p.conflicted = true
+				m.activity(Activity{DeviceID: p.id, State: "identity_conflict", Epoch: p.epoch})
+			}
+			for _, l := range p.sessions {
+				closeLogical(l, ErrIdentityConflict)
+			}
+			for _, l := range p.pending {
+				closeLogical(l, ErrIdentityConflict)
+			}
+			if p.active != nil {
+				p.active.cancel()
+				_ = p.active.conn.CloseNow()
+			}
+			p.mu.Unlock()
+			continue
+		}
+		p.conflicted = false
 		wanted := false
 		for key, l := range p.pending {
 			if l.err != nil {
@@ -395,7 +429,7 @@ func (m *Manager) runPeer(p *peerLink) {
 				delete(p.opens, l.openID)
 			}
 		}
-		if p.active == nil && wanted && !p.attempting {
+		if p.active == nil && wanted {
 			if p.disconnected.IsZero() {
 				p.disconnected = time.Now()
 			}
@@ -406,7 +440,8 @@ func (m *Manager) runPeer(p *peerLink) {
 				for _, l := range p.pending {
 					closeLogical(l, ErrResumeExpired)
 				}
-			} else {
+				m.activity(Activity{DeviceID: p.id, State: "offline", Epoch: p.epoch})
+			} else if !p.attempting {
 				p.attempting = true
 				p.workers.Go(func() { m.connect(p); p.mu.Lock(); p.attempting = false; p.mu.Unlock() })
 			}
@@ -416,20 +451,43 @@ func (m *Manager) runPeer(p *peerLink) {
 }
 
 func (m *Manager) connect(p *peerLink) {
-	paths := m.candidates(p.id)
-	for _, kind := range []device.PathKind{device.LAN, device.Tailnet} {
-		budget := 5 * time.Second
-		if kind == device.LAN {
-			budget = 2 * time.Second
+	if m.preferLAN(m.ctx, p) {
+		return
+	}
+	m.connectPaths(m.ctx, p, m.candidates(p.id), device.Tailnet, 5*time.Second)
+}
+
+// Give authenticated LAN discovery the same bounded opportunity for local opens
+// and incoming Tailnet candidates. An existing carrier always wins arbitration.
+func (m *Manager) preferLAN(ctx context.Context, p *peerLink) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		p.mu.Lock()
+		active := p.active != nil || p.closed
+		p.mu.Unlock()
+		if active {
+			return true
 		}
-		if m.connectPaths(p, paths, kind, budget) {
-			return
+		if _, enabled := m.opts.Directory.Provider(device.LAN); !enabled {
+			return false
+		}
+		paths := m.candidates(p.id)
+		if slices.ContainsFunc(paths, func(path device.Path) bool { return path.Kind == device.LAN }) {
+			return m.connectPaths(ctx, p, paths, device.LAN, 2*time.Second)
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
 		}
 	}
 }
 
-func (m *Manager) connectPaths(p *peerLink, paths []device.Path, kind device.PathKind, budget time.Duration) bool {
-	kindContext, stop := context.WithTimeout(m.ctx, budget)
+func (m *Manager) connectPaths(ctx context.Context, p *peerLink, paths []device.Path, kind device.PathKind, budget time.Duration) bool {
+	kindContext, stop := context.WithTimeout(ctx, budget)
 	defer stop()
 	for _, path := range paths {
 		if path.Kind != kind {
@@ -542,9 +600,15 @@ func (m *Manager) Handler(kind device.PathKind) http.Handler {
 }
 
 func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Conn, path device.Path, outgoing bool) error {
+	if m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+		return ErrIdentityConflict
+	}
 	generation, enabled := m.opts.Directory.Provider(path.Kind)
 	if !enabled || generation != path.ProviderGeneration {
 		return device.ErrStalePath
+	}
+	if !outgoing && path.Kind == device.Tailnet && m.preferLAN(ctx, p) {
+		return ErrUnavailable
 	}
 	if outgoing {
 		conn.SetReadLimit((MaxFrameBytes * 4 / 3) + 4096)
@@ -633,9 +697,25 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 
 func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot string) error {
 	p.mu.Lock()
+	if !p.disconnected.IsZero() && time.Since(p.disconnected) >= m.opts.RecoveryWindow {
+		for _, l := range p.sessions {
+			closeLogical(l, ErrResumeExpired)
+		}
+		for _, l := range p.pending {
+			closeLogical(l, ErrResumeExpired)
+		}
+		c.cancel()
+		_ = c.conn.CloseNow()
+		if p.active == c {
+			p.active = nil
+			p.signalLocked()
+		}
+		p.mu.Unlock()
+		return ErrResumeExpired
+	}
 	generation, enabled := m.opts.Directory.Provider(c.path.Kind)
 	_, trusted := m.opts.Trust.Find(p.id)
-	if p.closed || p.active != c || m.ctx.Err() != nil || !enabled || generation != c.path.ProviderGeneration || !trusted {
+	if p.closed || p.active != c || m.ctx.Err() != nil || !enabled || generation != c.path.ProviderGeneration || !trusted || m.opts.Directory.IdentityConflict(p.id, time.Now()) {
 		c.cancel()
 		_ = c.conn.CloseNow()
 		if p.active == c {
@@ -658,6 +738,7 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 	p.control = nil
 	p.disconnected = time.Time{}
 	p.signalLocked()
+	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: "online"})
 	p.workers.Go(func() { m.serveCarrier(ctx, p, c) })
 	p.mu.Unlock()
 	return nil
@@ -671,6 +752,11 @@ func (m *Manager) serveCarrier(ctx context.Context, p *peerLink, c *carrier) {
 		if p.active == c {
 			p.active = nil
 			p.disconnected = time.Now()
+			state := "reconnecting"
+			if p.closed || m.ctx.Err() != nil {
+				state = "offline"
+			}
+			m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: state})
 			p.signalLocked()
 		}
 		p.mu.Unlock()
@@ -690,6 +776,12 @@ func (m *Manager) serveCarrier(ctx context.Context, p *peerLink, c *carrier) {
 		<-errCh
 	}
 	<-errCh
+}
+
+func (m *Manager) activity(activity Activity) {
+	if m.opts.OnActivity != nil {
+		m.opts.OnActivity(activity)
+	}
 }
 
 // Close ends logical sessions and joins the workers; replacing a carrier never calls it.

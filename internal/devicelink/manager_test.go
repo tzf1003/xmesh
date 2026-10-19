@@ -26,6 +26,7 @@ type testNode struct {
 	calls        atomic.Int32
 	started      chan struct{}
 	release      chan struct{}
+	dialGate     <-chan struct{}
 }
 
 func newTestNode(t *testing.T, name string) *testNode {
@@ -49,6 +50,13 @@ func newTestNode(t *testing.T, name string) *testNode {
 	manager, err := NewManager(t.Context(), Options{
 		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, Heartbeat: 100 * time.Millisecond, PingTimeout: 100 * time.Millisecond,
 		Dial: func(ctx context.Context, target string, path device.Path) (*websocket.Conn, error) {
+			if path.Kind == device.Tailnet && n.dialGate != nil {
+				select {
+				case <-n.dialGate:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
 			client := &http.Client{Transport: &http.Transport{TLSClientConfig: trust.TLS(id, target, false)}}
 			conn, _, err := websocket.Dial(ctx, strings.Replace(path.Address, "https://", "wss://", 1)+LinkPath, &websocket.DialOptions{HTTPClient: client, Subprotocols: []string{Subprotocol}})
 			return conn, err
@@ -251,5 +259,98 @@ func TestManagerExpiresLogicalSessionsAfterBothPathsFail(t *testing.T) {
 	}
 	if got := a.manager.Activity(b.id.ID); got.State != "offline" {
 		t.Fatal("expired session still reconnecting", got)
+	}
+}
+
+func TestManagerWaitsForLANDiscoveryBeforeCommittingTailnet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	for _, nodes := range [][2]*testNode{{a, b}, {b, a}} {
+		local, remote := nodes[0], nodes[1]
+		if err := local.directory.Lost(remote.id.ID, device.LAN, remote.lan.URL, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		transport, err := a.manager.Open(ctx, b.id.ID, "")
+		if transport != nil {
+			defer transport.Session.Close()
+		}
+		done <- err
+	}()
+	time.Sleep(150 * time.Millisecond)
+	if got := a.manager.Activity(b.id.ID); got.State == "online" {
+		t.Fatal("Tailnet committed before LAN discovery budget", got)
+	}
+	for _, nodes := range [][2]*testNode{{a, b}, {b, a}} {
+		local, remote := nodes[0], nodes[1]
+		trusted, _ := local.trust.Find(remote.id.ID)
+		now := time.Now()
+		if err := local.directory.Observe(remote.id.Certificate.Leaf, trusted.Generation, device.Path{Kind: device.LAN, Address: remote.lan.URL, BootID: remote.manager.BootID(), ProviderGeneration: 1, VerifiedAt: now, ExpiresAt: now.Add(time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+}
+
+func TestManagerIdentityConflictEndsActiveSessionAndRejectsNewOpen(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	trusted, _ := a.trust.Find(b.id.ID)
+	now := time.Now()
+	if err := a.directory.Observe(b.id.Certificate.Leaf, trusted.Generation, device.Path{Kind: device.Tailnet, Address: b.tailnet.URL, BootID: "cloned-process", ProviderGeneration: 1, VerifiedAt: now, ExpiresAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.manager.Open(ctx, b.id.ID, ""); !errors.Is(err, ErrIdentityConflict) {
+		t.Fatal("conflicted identity accepted", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- client.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("conflicted identity kept its active session")
+	}
+}
+
+func TestManagerRecoveryDeadlineFencesPendingDial(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	gate := make(chan struct{})
+	for _, n := range []*testNode{a, b} {
+		n.dialGate = gate
+		n.manager.opts.RecoveryWindow = 150 * time.Millisecond
+	}
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	for _, n := range []*testNode{a, b} {
+		if err := n.directory.SetProvider(device.LAN, 2, false); err != nil {
+			t.Fatal(err)
+		}
+		n.manager.DisablePath(device.LAN)
+	}
+	done := make(chan error, 1)
+	go func() { done <- client.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending dial extended the recovery deadline")
+	}
+	close(gate)
+	time.Sleep(250 * time.Millisecond)
+	if got := a.manager.Activity(b.id.ID); got.State == "online" {
+		t.Fatal("late dial committed after recovery expired", got)
 	}
 }

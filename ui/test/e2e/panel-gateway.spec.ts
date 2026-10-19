@@ -41,7 +41,7 @@ async function clipboard(): Promise<string[]> {
 }
 
 function putBodies(): unknown[] {
-  return h.kernel.requests.filter((r) => r.method === "PUT" && r.path === "/v1/gateway").map((r) => r.body);
+  return h.kernel.requests.filter((r) => r.method === "PUT" && r.path === "/v2/gateway").map((r) => r.body);
 }
 
 async function rotate(page: Page): Promise<void> {
@@ -130,7 +130,7 @@ test("rotating asks first; cancel sends nothing, confirm rotates and neither tok
   expect(h.kernel.requests.some((r) => r.method === "POST" && r.path.endsWith("/rotate"))).toBe(false);
 
   await rotate(page);
-  await expect.poll(() => h.kernel.requests.filter((r) => r.method === "POST" && r.path === "/v1/pats/default/rotate").length).toBe(1);
+  await expect.poll(() => h.kernel.requests.filter((r) => r.method === "POST" && r.path === "/v2/pats/default/rotate").length).toBe(1);
   const after = h.kernel.panel.tokenOf(GATEWAY_PAT)!;
   expect(after).not.toBe(before);
   await expect(page.getByTestId("toast").first()).toContainText("令牌已轮换");

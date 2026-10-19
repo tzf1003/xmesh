@@ -159,7 +159,7 @@ test("drain and resume call the kernel and update the snapshot from its answer",
   c.start();
   await until(c, connectedWith(() => true), "connected");
   await c.drain();
-  assert.deepEqual(k.requests.find((r) => r.path === "/v1/drain")?.body, { mode: "keep" });
+  assert.deepEqual(k.requests.find((r) => r.path === "/v2/drain")?.body, { mode: "keep" });
   await until(c, connectedWith((x) => x.status.drain.draining), "draining");
   await c.resume();
   await until(c, connectedWith((x) => !x.status.drain.draining), "resumed");
@@ -176,7 +176,7 @@ test("a kernel error envelope surfaces as a ControlRequestError with its code", 
   const c = controller();
   c.start();
   await until(c, connectedWith(() => true), "connected");
-  k.failNext("/v1/drain", 409, "conflict", "already draining");
+  k.failNext("/v2/drain", 409, "conflict", "already draining");
   await assert.rejects(
     () => c.drain(),
     (e: Error & { code?: string; httpStatus?: number }) =>
@@ -186,13 +186,13 @@ test("a kernel error envelope surfaces as a ControlRequestError with its code", 
 
 test("an incompatible X-Xmesh-Control-Version header is reported as a mismatch, and recovers", async () => {
   const k = await kernel({ kernelVersion: "9.9.9" });
-  k.writeManifest(root, "n1"); // control.json still says 1.0
-  k.setControlVersion("2.0"); // but the running kernel answers 2.0
+  k.writeManifest(root, "n1"); // control.json still says 2.0
+  k.setControlVersion("3.0"); // but the running kernel answers 3.0
   const c = controller();
   c.start();
   const s = await until(c, (x) => x.connection.kind === "mismatch", "mismatch");
-  assert.deepEqual(s.connection, { kind: "mismatch", kernelVersion: "9.9.9", apiVersion: "2.0" });
-  k.setControlVersion("1.0");
+  assert.deepEqual(s.connection, { kind: "mismatch", kernelVersion: "9.9.9", apiVersion: "3.0" });
+  k.setControlVersion("2.0");
   await until(c, connectedWith(() => true), "connected again");
 });
 
@@ -209,7 +209,7 @@ test("losing the stream triggers a reconnect that resumes from Last-Event-ID", a
   const deadline = Date.now() + 3000;
   while (k.connectedStreams === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
   assert.equal(k.connectedStreams, 1);
-  const reopen = k.requests.filter((r) => r.path === "/v1/events").at(-1);
+  const reopen = k.requests.filter((r) => r.path === "/v2/events").at(-1);
   assert.ok(reopen?.lastEventId, "second subscription must send Last-Event-ID");
 
   k.setWarnings([]);
@@ -283,12 +283,12 @@ test("setDisplay goes through the injected setter, is reflected in the snapshot 
 });
 
 test("a manifest with an unsupported api_version is a mismatch without talking to the kernel", async () => {
-  const k = await kernel({ controlVersion: "2.0", kernelVersion: "9.9.9" });
+  const k = await kernel({ controlVersion: "3.0", kernelVersion: "9.9.9" });
   k.writeManifest(root, "n1");
   const c = controller();
   c.start();
   const s = await until(c, (x) => x.connection.kind === "mismatch", "mismatch");
-  assert.deepEqual(s.connection, { kind: "mismatch", kernelVersion: "9.9.9", apiVersion: "2.0" });
+  assert.deepEqual(s.connection, { kind: "mismatch", kernelVersion: "9.9.9", apiVersion: "3.0" });
   assert.equal(k.requests.length, 0);
 });
 
@@ -307,7 +307,7 @@ test("a kernel restart is announced by reset: the controller re-reads and shows 
   k.restartBoot();
   k.setStatus({ warnings: [] });
   await until(c, connectedWith((x) => x.status.control.boot_id !== oldBoot && x.status.warnings.length === 0), "new boot");
-  const reopen = k.requests.filter((r) => r.path === "/v1/events").at(-1);
+  const reopen = k.requests.filter((r) => r.path === "/v2/events").at(-1);
   assert.ok(reopen?.lastEventId?.startsWith(`${oldBoot}.`), "resumed with the old boot's event id");
 });
 
@@ -324,7 +324,7 @@ test("a rewritten manifest with a new boot id starts a fresh client with no stal
   k.writeManifest(root, "n1");
   k.setStatus({ restart_required: false });
   await until(c, connectedWith((x) => !x.status.restart_required), "after restart");
-  const reopen = k.requests.filter((r) => r.path === "/v1/events").at(-1);
+  const reopen = k.requests.filter((r) => r.path === "/v2/events").at(-1);
   assert.equal(reopen?.lastEventId, undefined);
 });
 
@@ -366,7 +366,7 @@ test("nudge drops a live event stream and the controller resubscribes at once", 
   const c = controller();
   c.start();
   await ready(c, k);
-  const eventRequests = (): number => k.requests.filter((r) => r.path === "/v1/events").length;
+  const eventRequests = (): number => k.requests.filter((r) => r.path === "/v2/events").length;
   const opened = eventRequests();
   c.nudge();
   const deadline = Date.now() + 3000;

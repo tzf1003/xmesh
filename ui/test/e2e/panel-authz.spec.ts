@@ -1,6 +1,6 @@
 // The tool authorization page against the fake kernel: MCP servers, the built-in
 // tool switches and the tag grants, through the real Electron app with main-process
-// IPC in between. Each action is one PATCH /v1/config carrying the etag it was read at.
+// IPC in between. Each action is one PATCH /v2/config carrying the etag it was read at.
 
 import { type Page, expect, test } from "@playwright/test";
 import type { Capability } from "../../src/shared/control";
@@ -123,7 +123,7 @@ test("import: the preview lists what will be written; a public URL is refused an
   expect(h.kernel.panel.envValues("github")).toEqual({ GITHUB_TOKEN: secret });
   // The value travels in one request, the PATCH to the env route; no config request carries it.
   const carrying = h.kernel.requests.filter((r) => JSON.stringify(r.body).includes(secret));
-  expect(carrying.map((r) => `${r.method} ${r.path}`)).toEqual(["PATCH /v1/backends/github/env"]);
+  expect(carrying.map((r) => `${r.method} ${r.path}`)).toEqual(["PATCH /v2/backends/github/env"]);
   await expect(page.getByTestId("backend-env-github")).toContainText("GITHUB_TOKEN");
   await expect(page.getByTestId("backend-github")).not.toContainText(secret);
 });
@@ -153,7 +153,7 @@ test("env form: values are written to the kernel's private store before the conf
   expect(doc().agent?.backends?.["git-tools"]).toEqual({ transport: "stdio", command: ["git", "mcp-server"], policy: "shared" });
   expect(h.kernel.panel.content).not.toContain(secret);
   const order = h.kernel.requests.filter((r) => r.method === "PATCH").map((r) => r.path);
-  expect(order).toEqual(["/v1/backends/git-tools/env", "/v1/config"]);
+  expect(order).toEqual(["/v2/backends/git-tools/env", "/v2/config"]);
   await expect(page.getByTestId("backend-env-git-tools")).toContainText("API_KEY, REGION");
   await expect(page.getByTestId("backend-git-tools")).not.toContainText(secret);
 
@@ -168,7 +168,7 @@ test("env form: values are written to the kernel's private store before the conf
   const before = h.kernel.requests.length;
   await page.getByTestId("mcp-save").click();
   await expect(page.getByTestId("mcp-dialog")).toHaveCount(0);
-  expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v1/backends"))).toBe(false);
+  expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v2/backends"))).toBe(false);
   expect(h.kernel.panel.envValues("git-tools")).toEqual({ API_KEY: secret, REGION: "eu" });
 
   // Replace one, remove the other, add a third.
@@ -225,7 +225,7 @@ test("env form: a refused config save takes back the variables written for a new
   h.kernel.panel.setContent(JSON.stringify({ ...SEED, agent: { ...SEED.agent, disabled_tools: ["exec.run"] } }, null, 2));
   await page.getByTestId("mcp-save").click();
 
-  await expect.poll(() => h.kernel.requests.some((r) => r.method === "DELETE" && r.path === "/v1/backends/git-tools/env")).toBe(true);
+  await expect.poll(() => h.kernel.requests.some((r) => r.method === "DELETE" && r.path === "/v2/backends/git-tools/env")).toBe(true);
   expect(h.kernel.panel.envValues("git-tools")).toEqual({});
   expect(doc().agent?.backends?.["git-tools"]).toBeUndefined();
 });

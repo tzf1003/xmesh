@@ -19,7 +19,7 @@ import {
 const ETAG = `sha256-${"a".repeat(64)}`;
 const FP = "ab".repeat(32);
 const PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
-const pair = { name: "peer-1", fingerprint: FP, certificate_pem: PEM, tags: ["tag:peer"] };
+const pair = { name: "peer-1", version: 2 as const, device_id: `dev-${FP}`, fingerprint: FP, public_key: "MCowBQYDK2VwAyEAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", tags: ["tag:peer"] };
 
 test("drain mode is keep or kill", () => {
   assert.equal(parseDrainMode("keep"), "keep");
@@ -138,11 +138,11 @@ test("pair import requires the typed fingerprint and a well-formed document", ()
     { ...ok, tags: ["tag:admin"] },
     { ...ok, tags: ["tag:peer", "tag:peer"] },
     { ...ok, extra: 1 },
-    { pair: { ...pair, certificate_pem: "nope" }, fingerprint: FP },
+    { pair: { ...pair, public_key: "nope" }, fingerprint: FP },
     { pair: { ...pair, name: "bad name" }, fingerprint: FP },
     { pair: { ...pair, tags: ["peer"] }, fingerprint: FP },
     { pair: { ...pair, extra: 1 }, fingerprint: FP },
-    { pair: { ...pair, certificate_pem: PEM + "x".repeat(16 * 1024) }, fingerprint: FP },
+    { pair: { ...pair, public_key: "x".repeat(16 * 1024) }, fingerprint: FP },
   ]) {
     assert.equal(parsePairImport(bad), undefined, JSON.stringify(bad).slice(0, 80));
   }

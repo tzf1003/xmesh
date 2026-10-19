@@ -3,6 +3,7 @@ package connectivity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -69,6 +70,9 @@ func TestUnifiedPairingConnectsToRealAgentAndKeepsCallerOnReconnect(t *testing.T
 	}
 	if _, err := a.PairWith(ctx, device.LAN, server.URL, "correct horse battery", b.identity.ID); err != nil {
 		t.Fatal(err)
+	}
+	if candidates := a.Candidates(); len(candidates) != 1 || candidates[0].DeviceID != b.identity.ID || candidates[0].Address != server.URL {
+		t.Fatal("manual pairing address not retained", candidates)
 	}
 	peers, err := a.Peers(ctx)
 	if err != nil || len(peers) != 1 || peers[0].ID != b.identity.ID {
@@ -146,4 +150,47 @@ func TestRuntimeLockRejectsConcurrentService(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = other.Close()
+}
+
+func TestProviderRetirementFencesLateDiscoveryBeforeRetry(t *testing.T) {
+	n, _ := node(t, "local")
+	remote, _ := node(t, "remote")
+	if err := n.trust.Grant(t.Context(), remote.identity.Document("remote"), []string{"tag:peer"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	p := &provider{generation: 1, ready: true}
+	n.providers[device.LAN] = p
+	n.retireProvider(device.LAN, p)
+	if generation, enabled := n.directory.Provider(device.LAN); generation != 2 || enabled || p.ready {
+		t.Fatal("provider remained enabled while awaiting retry", generation, enabled, p.ready)
+	}
+	trusted, _ := n.trust.Find(remote.identity.ID)
+	now := time.Now()
+	path := device.Path{Kind: device.LAN, Address: "https://192.168.1.1:7433", BootID: "remote-boot", ProviderGeneration: 1, VerifiedAt: now, ExpiresAt: now.Add(time.Minute)}
+	if err := n.directory.Observe(remote.identity.Certificate.Leaf, trusted.Generation, path); !errors.Is(err, device.ErrStalePath) {
+		t.Fatal("late probe survived provider retirement", err)
+	}
+	n.retireProvider(device.LAN, p)
+	if p.generation != 2 {
+		t.Fatal("retirement repeated", p.generation)
+	}
+}
+
+func TestProbeSchedulingSeparatesDevicesAfterAddressReuse(t *testing.T) {
+	n, _ := node(t, "local")
+	n.cancel()
+	n.workers.Wait()
+	a := Candidate{DeviceID: "device-a", Kind: device.LAN, Address: "https://192.168.1.2:7433"}
+	b := a
+	b.DeviceID = "device-b"
+	n.mu.Lock()
+	n.probing[probeKey(a)] = true
+	n.mu.Unlock()
+	n.enqueueProbe(b)
+	n.mu.Lock()
+	queued := n.probing[probeKey(b)]
+	n.mu.Unlock()
+	if !queued {
+		t.Fatal("old device's probe suppressed the current occupant")
+	}
 }

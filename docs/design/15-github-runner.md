@@ -30,7 +30,7 @@ flowchart LR
     page["CI 运行器页<br/>账号 / 绑定 / 状态 / 日志"]
   end
   subgraph kernel["xmesh 内核（服务，开机自启）"]
-    ctl["Control API /v1/ci/*"]
+    ctl["Control API /v2/ci/*"]
     sup["internal/ci 监督器<br/>每个实例一个 goroutine"]
     gh["GitHub REST 客户端<br/>签发注册/移除令牌、查状态"]
     kc["钥匙串<br/>GitHub 凭据"]
@@ -53,7 +53,7 @@ flowchart LR
 
 新增内容一览：
 
-- 内核：`internal/ci`（监督器、运行器安装与注册、GitHub 客户端），配置节 `ci`，Control API `/v1/ci/*`，事件类型 `ci`。
+- 内核：`internal/ci`（监督器、运行器安装与注册、GitHub 客户端），配置节 `ci`，Control API `/v2/ci/*`，事件类型 `ci`。
 - CLI：`xmesh ci list|status|bind|unbind|start|stop --json`，与 Control API 同一份逻辑，便于无界面的 Linux 机器。
 - UI：侧栏新增「CI 运行器」页。
 - 契约：`docs/contracts/control.md` 新增 CTR-CTL-1x，`schemas/control-ci.schema.json`，`config.schema.json` 新增 `ci` 节。版本号取实现时 master 上的下一个空号（目前是 1.3，届时可能已被热加载、配对等线递增）。
@@ -107,7 +107,7 @@ installing → registering → starting → idle ⇄ busy
 | 内核停止 / 升级 | 运行器在独立进程组（Windows 放进 Job 对象，内核退出时一并结束，避免孤儿）。正常停止或升级前先「排空 CI」：停止所有 idle 实例，等 busy 实例跑完（面板显示「等待 2 个 CI 任务完成」，可点「强制停止」）。超时默认 30 分钟 |
 | 内核启动 | 检查上次留下的运行器进程（PID 文件加启动时间比对），残留的结束掉再按配置重新拉起 |
 | 配置热加载 | 只对变化的绑定动作：新增→安装注册启动；删除→排空后解绑；并发数变化→增减实例；暂停→排空后停止。其他绑定不受影响 |
-| 节点 drain | 节点排空（`/v1/drain`）时 CI 一并排空；`/v1/resume` 恢复。也可以单独暂停 / 恢复某个绑定 |
+| 节点 drain | 节点排空（`/v2/drain`）时 CI 一并排空；`/v2/resume` 恢复。也可以单独暂停 / 恢复某个绑定 |
 | 运行器日志 | 运行器自己的 `_diag/` 目录保留，面板提供「打开日志目录」；内核另存每个实例最近 200 行 stdout 的环形缓冲用于诊断，只含运行器状态行，不含任务输出（运行器 stdout 本身不打印任务日志） |
 
 ## 5. 运行器包管理
@@ -134,7 +134,7 @@ installing → registering → starting → idle ⇄ busy
 配置段与路由以 [CTR-CFG-01](../contracts/config.md#ctr-cfg-01) 和 [CTR-CTL-15](../contracts/control.md#ctr-ctl-15) 为准，这里只说设计取舍：
 
 - `xmesh.yaml` 的 `ci` 段只放非密钥信息：账号（id、主机、登录名）与绑定（仓库、账号、并发数、标签、暂停、目录、来源）。GitHub 令牌在状态目录的 `ci-accounts/` 私有文件里，配置、响应、状态、事件、审计都只见掩码。没有用系统钥匙串：内核常常作为服务或开机项运行，那时用户的钥匙串不可用，网关 PAT 也是同样的做法。
-- 绑定与账号的修改走与 `PUT /v1/gateway` 相同的配置编辑路径（校验、原子写入、`config` 事件），内核通过配置订阅得到新一代配置，只动变化的绑定。
+- 绑定与账号的修改走与 `PUT /v2/gateway` 相同的配置编辑路径（校验、原子写入、`config` 事件），内核通过配置订阅得到新一代配置，只动变化的绑定。
 - 运行状态不另开事件类型：`StatusResponse.ci` 随状态采样变化，UI 从 `status` 事件得到更新，托盘也读同一份。
 - 错误沿用已有的错误码，细分原因放在 `reason`（`public_repo_requires_confirm`、`github_rejected`、`account_in_use` 等），不新增顶层错误码。
 

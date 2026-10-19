@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-drain:1",
+  "$id": "urn:xmesh:schema:control-drain:2",
   "title": "ControlDrain",
-  "description": "CTR-CTL-06。POST /v1/drain 与 POST /v1/resume。drain 状态只在内存，内核重启后复位。",
+  "description": "CTR-CTL-06。POST /v2/drain 与 POST /v2/resume。drain 状态只在内存，内核重启后复位。",
   "$defs": {
     "DrainState": {
       "type": "object",
@@ -12,14 +12,14 @@
         "draining": { "type": "boolean" },
         "mode": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/DrainMode" },
+            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/DrainMode" },
             { "type": "null" }
           ],
           "description": "draining 为 false 时是 null。"
         },
         "since": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+            { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
             { "type": "null" }
           ],
           "description": "进入当前 drain 的时间。keep 升级为 kill 时不重置。draining 为 false 时是 null。"
@@ -38,7 +38,7 @@
       "additionalProperties": false,
       "properties": {
         "mode": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/DrainMode",
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DrainMode",
           "default": "keep"
         }
       }

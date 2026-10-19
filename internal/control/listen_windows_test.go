@@ -13,7 +13,7 @@ import (
 	"time"
 	"unsafe"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"golang.org/x/sys/windows"
 )
 
@@ -115,7 +115,7 @@ func Test_ControlPipeNameIsExclusive(t *testing.T) {
 func Test_ControlEndpointFileIsReadableByAllowedSIDs(t *testing.T) {
 	const reader = "S-1-5-21-1-2-3-1001"
 	dir := t.TempDir()
-	e := v1.ControlEndpointFile{APIVersion: v1.APIVersion, Node: "n", Transport: v1.TransportPipe, Endpoint: `\\.\pipe\x`}
+	e := v2.ControlEndpointFile{APIVersion: v2.APIVersion, Node: "n", Transport: v2.TransportPipe, Endpoint: `\\.\pipe\x`}
 	for i := 0; i < 2; i++ {
 		if err := WriteEndpoint(dir, e, reader); err != nil {
 			t.Fatal(err)

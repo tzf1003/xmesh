@@ -20,8 +20,8 @@ test("apiMajor and compatibility", () => {
   assert.equal(apiMajor("v1.4.2"), 1);
   assert.ok(Number.isNaN(apiMajor("")));
   assert.ok(Number.isNaN(apiMajor("x1")));
-  assert.equal(isSupportedApiVersion("1.9"), true);
-  assert.equal(isSupportedApiVersion("2.0"), false);
+  assert.equal(isSupportedApiVersion("1.9"), false);
+  assert.equal(isSupportedApiVersion("2.0"), true);
   assert.equal(isSupportedApiVersion(""), false);
 });
 
@@ -29,7 +29,7 @@ test("the contract's control.json fixtures parse", () => {
   for (const name of ["ControlEndpointFile.unix", "ControlEndpointFile.pipe"]) {
     const m = parseManifest(fixture(name));
     assert.ok(m, name);
-    assert.equal(m.api_version, "1.0");
+    assert.equal(m.api_version, "2.0");
   }
 });
 

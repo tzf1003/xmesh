@@ -2,15 +2,19 @@
   "devices": [
     {
       "name": "win-lan",
-      "fingerprint": "3f2a9c4e1b7d8a60f5e2c9b1d4a7e8f03c6b5a29d1e4f7a8b0c3d6e9f2a5b8c1",
+      "fingerprint": "9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
       "address": "192.168.31.15:7433",
-      "seen_at": "2026-10-17T14:56:01.000Z"
+      "seen_at": "2026-10-17T14:56:01.000Z",
+      "device_id": "dev-9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
+      "path": "lan"
     },
     {
       "name": "mac-lan",
       "fingerprint": "9b1e4c7a2d5f8e3b6a9c0d4f7e1b8a5c2d6f9e3b7a0c4d8e1f5a9b2c6d0e3f7a",
       "address": "[fe80::1%en0]:7433",
-      "seen_at": "2026-10-17T14:56:03.000Z"
+      "seen_at": "2026-10-17T14:56:03.000Z",
+      "device_id": "dev-9b1e4c7a2d5f8e3b6a9c0d4f7e1b8a5c2d6f9e3b7a0c4d8e1f5a9b2c6d0e3f7a",
+      "path": "lan"
     }
   ]
 }

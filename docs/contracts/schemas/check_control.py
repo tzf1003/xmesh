@@ -129,7 +129,7 @@ def 拆引用(引用: str) -> tuple[str, str]:
 def 检查路由(注册表: Registry, 索引: dict[str, tuple[str, dict]], 已覆盖: set[str]) -> int:
     失败 = 0
     路由数据 = 读取(路由文件)
-    错误 = list(定义校验器(注册表, "urn:xmesh:schema:control-routes:1", "ControlRoutesFile").iter_errors(路由数据))
+    错误 = list(定义校验器(注册表, "urn:xmesh:schema:control-routes:2", "ControlRoutesFile").iter_errors(路由数据))
     for 项 in 错误:
         失败 += 1
         print(f"路由表不合格 /{'/'.join(str(p) for p in 项.path)}: {项.message[:200]}")

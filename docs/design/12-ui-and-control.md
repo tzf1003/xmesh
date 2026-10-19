@@ -78,26 +78,26 @@ flowchart LR
 - 削弱安全的变更（`allow_dangerous`、放宽 `cwd_policy`、放宽 `authz`）由 UI 弹确认对话框。这是 UI 侧的体验保护，不是内核的授权边界，写入文档时必须讲清，不得让用户误以为内核会拦截。
 - UI 不得变成工具调用的审批通道。[CON-ARCH-05](../constraints/architecture.md#con-arch-05) 仍然成立：冲突、策略拒绝、配额拒绝在同一次调用里返回结构化错误，UI 只展示，不放行。
 
-### API 范围（v1）
+### API 范围（v2）
 
 契约已落在 [CTR-CTL-01 至 12](../contracts/control.md)，下表是设计时的草案；与契约不一致处以契约为准（例如事件流多了 `hello` 与 `reset`，`status.warnings` 是结构化数组，另有能力协商）。
 
-路径前缀 `/v1`，请求与响应是 JSON，错误沿用 [CTR-ERR-01](../contracts/errors.md#ctr-err-01) 的信封。变更使用 `ETag` / `If-Match` 防并发覆盖。
+路径前缀 `/v2`，请求与响应是 JSON，错误沿用 [CTR-ERR-01](../contracts/errors.md#ctr-err-01) 的信封。变更使用 `ETag` / `If-Match` 防并发覆盖。
 
 | 端点 | 作用 | 内核侧状态 |
 | --- | --- | --- |
-| `GET /v1/status` | 节点、角色、网络身份、健康、`restart_required`、`warnings`、配额占用。字段是 `sys.info` 的超集 | 大部分已有，需汇总 |
-| `GET /v1/events` | SSE 事件流，支持 `Last-Event-ID` 续传，环形缓存 1024 条 | 新增 |
-| `GET /v1/peers` | 设备、在线状态、tag、直连或 DERP | 新增（数据来自 mesh） |
-| `GET /v1/sessions` | PTY、进行中 exec、后端租约，只读 | 新增只读视图 |
-| `POST /v1/drain`、`POST /v1/resume` | 排空（keep / kill）与恢复 | drain 已有；resume 新增 |
-| `GET/PUT /v1/config` | 读取当前生效配置；写入前经 `config.Parse` 校验，临时文件加重命名原子写，返回 diff 与 `restart_required` | 新增。保留 YAML 注释，使用 yaml.Node 往返 |
-| `GET/PUT/DELETE /v1/pair/password`、`GET /v1/pair/discovered`、`POST /v1/pair/connect` | LAN 连接密码配对与内网发现（1.2）；口令只写不读，见 [14](../design/14-password-pairing.md) | 新增，底层是 `internal/mesh` 的 SPAKE2 配对 |
-| `GET /v1/ci`、`/v1/ci/accounts`、`/v1/ci/bindings`、`POST /v1/ci/import/inspect` | GitHub Actions 运行器托管（1.8）；GitHub 令牌只写不读，见 [15](../design/15-github-runner.md) | 新增，底层是 `internal/ci` |
-| `POST /v1/pair/export`、`POST /v1/pair/import` | LAN 配对文档（高级用法）；导入必须带 UI 用户确认过的指纹 | 逻辑已有（`xmesh pair`），抽成库 |
-| `GET/POST/DELETE /v1/pats` | 列出、创建、轮转、撤销本机 Gateway PAT。令牌正文只在创建响应里出现一次，并直接写入 `0600` 文件，之后不可读回 | 新增 |
-| `GET/DELETE /v1/ingress/clients` | 查看已注册 OAuth 客户端，撤销；口令轮转只写不读 | 新增 |
-| `GET /v1/audit` | 按时间与过滤条件读审计元数据 | 新增只读视图，沿用 [CTR-AUD-01](../contracts/audit.md) 字段，禁止正文 |
+| `GET /v2/status` | 节点、角色、网络身份、健康、`restart_required`、`warnings`、配额占用。字段是 `sys.info` 的超集 | 大部分已有，需汇总 |
+| `GET /v2/events` | SSE 事件流，支持 `Last-Event-ID` 续传，环形缓存 1024 条 | 新增 |
+| `GET /v2/peers` | 设备、在线状态、tag、直连或 DERP | 新增（数据来自 mesh） |
+| `GET /v2/sessions` | PTY、进行中 exec、后端租约，只读 | 新增只读视图 |
+| `POST /v2/drain`、`POST /v2/resume` | 排空（keep / kill）与恢复 | drain 已有；resume 新增 |
+| `GET/PUT /v2/config` | 读取当前生效配置；写入前经 `config.Parse` 校验，临时文件加重命名原子写，返回 diff 与 `restart_required` | 新增。保留 YAML 注释，使用 yaml.Node 往返 |
+| `GET/PUT/DELETE /v2/pair/password`、`GET /v2/pair/discovered`、`POST /v2/pair/connect` | LAN / Tailnet 统一连接密码配对与发现；口令只写不读，见 [14](../design/14-password-pairing.md) | 新增，底层是 `internal/device` 的 SPAKE2 配对 |
+| `GET /v2/ci`、`/v2/ci/accounts`、`/v2/ci/bindings`、`POST /v2/ci/import/inspect` | GitHub Actions 运行器托管（1.8）；GitHub 令牌只写不读，见 [15](../design/15-github-runner.md) | 新增，底层是 `internal/ci` |
+| `POST /v2/pair/export`、`POST /v2/pair/import` | 版本 2 设备公钥文档（高级用法）；导入必须带 UI 用户确认过的指纹 | 逻辑已有（`xmesh pair`），抽成库 |
+| `GET/POST/DELETE /v2/pats` | 列出、创建、轮转、撤销本机 Gateway PAT。令牌正文只在创建响应里出现一次，并直接写入 `0600` 文件，之后不可读回 | 新增 |
+| `GET/DELETE /v2/ingress/clients` | 查看已注册 OAuth 客户端，撤销；口令轮转只写不读 | 新增 |
+| `GET /v2/audit` | 按时间与过滤条件读审计元数据 | 新增只读视图，沿用 [CTR-AUD-01](../contracts/audit.md) 字段，禁止正文 |
 
 事件类型：`status`、`peer`、`call`（工具名、设备、状态、耗时，不含参数与输出）、`session`、`warning`、`config`、`lifecycle`。
 
@@ -110,7 +110,7 @@ flowchart LR
 ### 契约与解耦的工程保证
 
 - 契约落在 `docs/contracts/control.md` 和 `schemas/control-*.schema.json`，正反例夹具接入现有 `check_examples.py`。
-- 内核新增 `internal/control`，Go 类型放在公开包 `api/control/v1`，供内核与 CLI 使用。
+- 内核新增 `internal/control`，Go 类型放在公开包 `api/control/v2`，供内核与 CLI 使用。
 - UI 是 Electron 加 TypeScript 项目（`ui/package.json`），不 import 任何 Go 包，与内核之间只有 JSON Schema 这一份契约。UI 的类型由 `schemas/control-*.schema.json` 生成，CI 重新生成后 `git diff --exit-code`，生成物与契约不一致即失败。
 - 提供 `ui/testserver`：按夹具回放的假内核，在 Unix 域套接字或命名管道上监听，走与真实内核相同的传输。UI 开发与 CI 不依赖真实内核，也能覆盖「内核离线」「版本不兼容」「事件断流重连」。
 
@@ -162,14 +162,14 @@ Electron 实施约束（写入 U0 的裁定，由 U3 与 U4 的验收覆盖）�
 - 打包时启用 Electron Fuses（关闭 `RunAsNode` 等）与 ASAR 完整性校验。依赖锁定版本，保持最小依赖面，并持续跟进 Electron 的安全补丁版本，因为只有最近几个大版本会收到修补。
 - UI 进程以用户身份持有控制通道，被攻破等于获得节点控制权，上述约束是它的主要防线，不是可选项。
 
-配置是否生效：任何页面保存后，面板顶部同一处（所有页面共用的“应用状态条”）给出内核的结论，页面自己不判断。三种结论：已应用（保存已在运行的内核里生效）；需要重启内核（这次改动里有仍需重启的设置，条里写出是哪些，并在原地给「重启内核」按钮，确认后重启）；没能应用（设置已保存，但运行中的内核没能采用，条里写内核给的原因，内核仍按原来的方式运行）。页面只把保存返回的结果交给壳层。需要重启与没能应用以 `GET /v1/status` 的 `restart_required` 和 `policy_reload_failed` 告警为准，所以手改文件、导入配对证书这类不经过面板保存的变更，也会在每个页面顶部出现同样的条，直到内核重启或重新读取成功；“已应用”只对应刚做的那次保存，换页或再改表单就收起。
+配置是否生效：任何页面保存后，面板顶部同一处（所有页面共用的“应用状态条”）给出内核的结论，页面自己不判断。三种结论：已应用（保存已在运行的内核里生效）；需要重启内核（这次改动里有仍需重启的设置，条里写出是哪些，并在原地给「重启内核」按钮，确认后重启）；没能应用（设置已保存，但运行中的内核没能采用，条里写内核给的原因，内核仍按原来的方式运行）。页面只把保存返回的结果交给壳层。需要重启与没能应用以 `GET /v2/status` 的 `restart_required` 和 `policy_reload_failed` 告警为准，所以手改配置文件这类不经过面板保存的变更，也会在每个页面顶部出现同样的条，直到内核重启或重新读取成功；“已应用”只对应刚做的那次保存，换页或再改表单就收起。
 
 页面：
 
 | 页面 | 内容 |
 | --- | --- |
 | 概览 | 状态、角色、配额、最近调用的元数据 |
-| 设备 | 对端、tag、直连或 DERP、在线状态；LAN 配对：设置连接密码、查看内网发现的设备并用密码连接；配对文档折叠在高级用法里（显示指纹，用户确认后才导入） |
+| 设备 | 对端、tag、直连或 DERP、在线状态；设备配对：设置连接密码、查看 LAN 与 Tailnet 发现的设备并选择路径连接；配对文档折叠在高级用法里（显示指纹，用户确认后才导入） |
 | 会话 | PTY、exec、后端租约；终端 owner；一键关闭孤儿终端 |
 | 授权 | `authz`、tag 与工具授权的只读视图和编辑；PAT 创建与撤销 |
 | 入口 | OAuth issuer、已注册客户端、撤销、口令轮转；公网入口状态 |
@@ -209,7 +209,7 @@ Linux 托盘不在本期范围。控制通道和 CLI 对 Linux 同样可用，�
 
 | 阶段 | 交付 | 依赖 |
 | --- | --- | --- |
-| U0 契约先行 | `docs/contracts/control.md`、模式与夹具、新增约束与裁定（见下）、`api/control/v1` 类型 | 无 |
+| U0 契约先行 | `docs/contracts/control.md`、模式与夹具、新增约束与裁定（见下）、`api/control/v2` 类型 | 无 |
 | U1 内核只读通道 | `internal/control`：监听、身份校验、`status` / `events` / `peers` / `sessions` / `audit`；`xmesh status --control`；服务子命令 `uninstall` / `start` / `stop` / `restart` 与 `--json` | U0 |
 | U2 内核写操作 | drain / resume、`config` 读写、配对库化、PAT、入口客户端与口令；审计 `actor=control` | U1 的骨架 |
 | U3 Electron 壳 | 主进程：实例发现、Control API 客户端、状态机、托盘与菜单模型、受限 IPC、通知；`ui/testserver`；从 schemas 生成类型；先在假内核上跑通，`ui.yml` 在 Windows 与 macOS runner 上跑 Playwright | U0，可与 U1 并行 |
@@ -222,7 +222,7 @@ Linux 托盘不在本期范围。控制通道和 CLI 对 Linux 同样可用，�
 
 | 子任务 | 范围 | 独占文件 | 共享文件 |
 | --- | --- | --- | --- |
-| C0 契约 | U0 | `docs/contracts/control.md`、`docs/contracts/schemas/control-*`、`api/control/v1/` | `docs/conformance.md`、`docs/constraints/*` 只追加 |
+| C0 契约 | U0 | `docs/contracts/control.md`、`docs/contracts/schemas/control-*`、`api/control/v2/` | `docs/conformance.md`、`docs/constraints/*` 只追加 |
 | K1 内核通道 | U1，之后 U2 | `internal/control/**`、`cmd/xmesh/control.go`、`cmd/xmesh/service_cmd.go` | `internal/app/runtime.go`（只追加装配）、`cmd/xmesh/main.go`（只加子命令分支） |
 | S1 Electron 壳 | U3 | `ui/package.json`、`ui/src/main/**`、`ui/src/preload/**`、`ui/src/shared/**`、`ui/testserver/**`、`.github/workflows/ui.yml` | 无，UI 作业放在独立工作流，不改 `go.yml` |
 | S2 Windows | U5 的 Windows 部分 | `ui/platform/windows/**`（管道、自启、安装包配置） | 无 |

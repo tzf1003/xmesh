@@ -17,17 +17,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/device"
 )
 
 type Options struct {
 	Host    Host
 	Store   *config.Store
 	Version string
-	// StateDir receives control.json; AuditDir is read by GET /v1/audit.
+	// StateDir receives control.json; AuditDir is read by GET /v2/audit.
 	StateDir, AuditDir string
 	Listen             ListenOptions
 	// Audit receives control_call records for non-GET requests.
@@ -46,7 +47,9 @@ type Options struct {
 	// runs, for a node whose ingress comes and goes with the configuration.
 	IngressNow func() IngressAdmin
 	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
-	Pairing PairingAdmin
+	Pairing        PairingAdmin
+	DeviceIdentity *device.Identity
+	DeviceTrust    *device.TrustStore
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
 	// nil on a node that has none.
 	Applier Applier
@@ -64,19 +67,19 @@ type Options struct {
 type Applier interface {
 	// Settle waits until every generation adopted so far has been applied and returns what could
 	// not be. With retry it first tries again what failed last time.
-	Settle(ctx context.Context, retry bool) []v1.ApplyError
+	Settle(ctx context.Context, retry bool) []v2.ApplyError
 }
 
 func (o Options) heartbeat() time.Duration {
 	if o.Heartbeat > 0 {
 		return o.Heartbeat
 	}
-	return v1.HeartbeatSeconds * time.Second
+	return v2.HeartbeatSeconds * time.Second
 }
 
 // call is what a handler reports back for the audit record of its request.
 type call struct {
-	route v1.Route
+	route v2.Route
 	// keys are the top-level keys of the request body; size its length in bytes.
 	keys []string
 	size int
@@ -87,11 +90,11 @@ type handler func(w http.ResponseWriter, r *http.Request, c *call)
 type Server struct {
 	o        Options
 	bound    Bound
-	endpoint v1.ControlEndpointFile
+	endpoint v2.ControlEndpointFile
 	srv      *http.Server
 	bus      *Bus
-	started  v1.Time
-	caps     []v1.Capability
+	started  v2.Time
+	caps     []v2.Capability
 	routes   []route
 	handlers map[string]handler
 	stop     chan struct{}
@@ -104,16 +107,16 @@ type Server struct {
 	// so the node needs a restart although no configuration changed.
 	pairPending atomic.Bool
 
-	configMu   sync.Mutex // serialises PUT /v1/config and guards the fields below
+	configMu   sync.Mutex // serialises PUT /v2/config and guards the fields below
 	digest     string
 	lastParsed map[string]any
 	failures   uint64
 
 	drainMu sync.Mutex
-	drain   v1.DrainState
+	drain   v2.DrainState
 
 	peerMu sync.Mutex
-	peers  []v1.Peer
+	peers  []v2.Peer
 }
 
 // Start opens the channel, writes control.json and begins serving. A node
@@ -127,10 +130,10 @@ func Start(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{o: o, bound: bound, bus: NewBus(), started: v1.Now(), stop: make(chan struct{})}
+	s := &Server{o: o, bound: bound, bus: NewBus(), started: v2.Now(), stop: make(chan struct{})}
 	s.lifecycle.Store("starting")
 	s.caps = capabilities(o)
-	s.routes = compileRoutes(v1.Routes())
+	s.routes = compileRoutes(v2.Routes())
 	s.handlers = s.table()
 	s.digest = s.fileDigest()
 	if path := o.Store.Path(); path != "" {
@@ -139,8 +142,8 @@ func Start(o Options) (*Server, error) {
 		}
 	}
 	_, s.failures = o.Store.State()
-	s.endpoint = v1.ControlEndpointFile{
-		APIVersion: v1.APIVersion, KernelVersion: o.Version, Node: o.Listen.Node, PID: os.Getpid(), BootID: s.bus.BootID(),
+	s.endpoint = v2.ControlEndpointFile{
+		APIVersion: v2.APIVersion, KernelVersion: o.Version, Node: o.Listen.Node, PID: os.Getpid(), BootID: s.bus.BootID(),
 		Transport: bound.Transport, Endpoint: bound.Address, StartedAt: s.started, Capabilities: s.caps,
 	}
 	s.srv = &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
@@ -166,19 +169,19 @@ func Start(o Options) (*Server, error) {
 }
 
 // capabilities lists what this kernel implements. Routes of the others answer not_implemented.
-func capabilities(o Options) []v1.Capability {
-	caps := []v1.Capability{v1.CapStatus, v1.CapEvents, v1.CapPeers, v1.CapSessions, v1.CapDrain}
+func capabilities(o Options) []v2.Capability {
+	caps := []v2.Capability{v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain}
 	if o.Store.Path() != "" {
-		caps = append(caps, v1.CapConfigRead, v1.CapConfigWrite, v1.CapPats, v1.CapGateway)
+		caps = append(caps, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPats, v2.CapGateway)
 	}
-	caps = append(caps, v1.CapPair, v1.CapIngress, v1.CapAudit)
+	caps = append(caps, v2.CapPair, v2.CapIngress, v2.CapAudit)
 	if o.CI != nil && o.Store.Path() != "" {
-		caps = append(caps, v1.CapCI)
+		caps = append(caps, v2.CapCI)
 	}
 	return caps
 }
 
-func (s *Server) hasCapability(c v1.Capability) bool {
+func (s *Server) hasCapability(c v2.Capability) bool {
 	for _, have := range s.caps {
 		if have == c {
 			return true
@@ -231,7 +234,7 @@ func (s *Server) Observe(record map[string]any) {
 		return
 	}
 	text := func(key string) string { v, _ := record[key].(string); return v }
-	data := v1.CallEventData{Tool: text("tool"), Device: text("device"), Caller: text("caller"), Status: text("status")}
+	data := v2.CallEventData{Tool: text("tool"), Device: text("device"), Caller: text("caller"), Status: text("status")}
 	if client := text("oauth_client"); client != "" {
 		data.OAuthClient = &client
 	}
@@ -249,20 +252,20 @@ func (s *Server) Observe(record map[string]any) {
 	if data.Tool == "" || data.Device == "" || data.Caller == "" || (data.Status != "ok" && data.Status != "error") {
 		return
 	}
-	_ = s.bus.Publish(v1.EventCall, data)
+	_ = s.bus.Publish(v2.EventCall, data)
 }
 
 func (s *Server) lifecycleEvent(change string) {
-	_ = s.bus.Publish(v1.EventLifecycle, v1.LifecycleEventData{Change: change, Drain: s.currentDrain()})
+	_ = s.bus.Publish(v2.EventLifecycle, v2.LifecycleEventData{Change: change, Drain: s.currentDrain()})
 }
 
 // route is one row of the route table with its path split for matching.
 type route struct {
-	v1.Route
+	v2.Route
 	parts []string
 }
 
-func compileRoutes(table []v1.Route) []route {
+func compileRoutes(table []v2.Route) []route {
 	out := make([]route, len(table))
 	for i, r := range table {
 		out[i] = route{Route: r, parts: strings.Split(strings.Trim(r.Path, "/"), "/")}
@@ -312,6 +315,7 @@ func (s *Server) table() map[string]handler {
 		"control.pair.password.delete":   s.deletePairPassword,
 		"control.pair.discovered":        s.listPairDiscovered,
 		"control.pair.connect":           s.connectPair,
+		"control.pair.trust.delete":      s.deleteDeviceTrust,
 		"control.pats.list":              s.listPats,
 		"control.pats.create":            s.createPat,
 		"control.pats.rotate":            s.rotatePat,
@@ -340,7 +344,7 @@ func (s *Server) table() map[string]handler {
 type recorder struct {
 	http.ResponseWriter
 	status int
-	code   v1.ErrorCode
+	code   v2.ErrorCode
 }
 
 func (r *recorder) WriteHeader(status int) {
@@ -363,7 +367,7 @@ func (r *recorder) Flush() {
 func (r *recorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 // failWith writes e and lets the recorder see its code.
-func failWith(w http.ResponseWriter, e *v1.Error) {
+func failWith(w http.ResponseWriter, e *v2.Error) {
 	if rec, ok := w.(*recorder); ok {
 		rec.code = e.Code
 	}
@@ -373,19 +377,19 @@ func failWith(w http.ResponseWriter, e *v1.Error) {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	rec := &recorder{ResponseWriter: w}
 	w = rec
-	w.Header().Set(v1.HeaderVersion, v1.APIVersion)
+	w.Header().Set(v2.HeaderVersion, v2.APIVersion)
 	w.Header().Set("Cache-Control", "no-store")
 	// A listener that outlives a stuck shutdown can still hand over connections. Once the server
 	// is stopping, none of them gets new work.
 	select {
 	case <-s.stop:
-		failWith(w, newError(v1.ErrUnavailable, "内核正在停止,不再接受请求"))
+		failWith(w, newError(v2.ErrUnavailable, "内核正在停止,不再接受请求"))
 		return
 	default:
 	}
 	// Browsers cannot reach a socket or pipe; a request that looks like one is wrong.
 	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
-		failWith(w, newError(v1.ErrForbidden, "控制通道不接受来自网页的请求"))
+		failWith(w, newError(v2.ErrForbidden, "控制通道不接受来自网页的请求"))
 		return
 	}
 	var matched *route
@@ -396,20 +400,20 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if matched == nil {
-		failWith(w, newError(v1.ErrNotFound, "没有这个控制接口"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个控制接口"))
 		return
 	}
 	h := s.handlers[matched.ID]
 	if h == nil || !s.hasCapability(matched.Capability) {
-		failWith(w, newError(v1.ErrNotImplemented, "此内核尚未实现该控制接口"))
+		failWith(w, newError(v2.ErrNotImplemented, "此内核尚未实现该控制接口"))
 		if matched.Method != "GET" {
 			s.auditCall(&call{route: matched.Route}, rec, time.Now())
 		}
 		return
 	}
-	limit := int64(v1.MaxRequestBytes)
+	limit := int64(v2.MaxRequestBytes)
 	if matched.ID == "control.config.put" || matched.ID == "control.config.patch" {
-		limit = v1.MaxConfigBytes
+		limit = v2.MaxConfigBytes
 	}
 	c := &call{route: matched.Route}
 	started := time.Now()
@@ -419,7 +423,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var tooLarge *http.MaxBytesError
 			if errors.As(err, &tooLarge) {
-				failWith(w, newError(v1.ErrPayloadTooLarge, "请求体过大"))
+				failWith(w, newError(v2.ErrPayloadTooLarge, "请求体过大"))
 			} else {
 				failWith(w, argError("body", "无法读取请求体"))
 			}
@@ -451,7 +455,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 // decode reads the JSON request body into v, refusing unknown fields. An empty body leaves v alone
 // unless required.
-func decode(r *http.Request, v any, required bool) *v1.Error {
+func decode(r *http.Request, v any, required bool) *v2.Error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return argError("body", "无法读取请求体")
@@ -492,7 +496,7 @@ func (s *Server) auditCall(c *call, rec *recorder, started time.Time) {
 		status = "error"
 		code = string(rec.code)
 		if rec.code == "" {
-			code = string(v1.ErrInternal)
+			code = string(v2.ErrInternal)
 		}
 	}
 	keys := c.keys

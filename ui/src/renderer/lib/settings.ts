@@ -10,7 +10,7 @@ import { DEFAULT_CONTROL_URL, NODE_NAME, isAbsolutePath, isHttpsUrl } from "../.
 export const ROLES = ["agent", "gateway", "ingress"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const MODES = ["lan", "tailnet"] as const;
+export const MODES = ["lan", "tailnet", "coexist", "offline"] as const;
 export type Mode = (typeof MODES)[number];
 
 export const LISTEN_MODES = ["tunnel", "public:443", "funnel"] as const;
@@ -78,6 +78,9 @@ export function formFromConfig(parsed: unknown): SettingsForm {
   const cfg = record(parsed);
   const node = record(cfg.node);
   const mesh = record(cfg.mesh);
+  const lan = record(mesh.lan);
+  const tailnet = cfg.schema_version === 2 ? record(mesh.tailnet) : mesh;
+  const mode: Mode = cfg.schema_version === 2 ? (lan.enabled !== false ? (tailnet.enabled === true ? "coexist" : "lan") : (tailnet.enabled === true ? "tailnet" : "offline")) : (mesh.mode === "tailnet" ? "tailnet" : "lan");
   const agent = record(cfg.agent);
   const policy = record(agent.cwd_policy);
   const ingress = record(cfg.ingress);
@@ -85,10 +88,10 @@ export function formFromConfig(parsed: unknown): SettingsForm {
   const roles = Array.isArray(node.roles) ? node.roles : [];
   return {
     nodeName: text(node.name),
-    mode: mesh.mode === "tailnet" ? "tailnet" : "lan",
-    controlUrl: text(mesh.control_url) || DEFAULT_CONTROL_URL,
-    authkeyFile: text(mesh.authkey_file),
-    browserLogin: mesh.auth_method === "browser",
+    mode,
+    controlUrl: text(tailnet.control_url) || DEFAULT_CONTROL_URL,
+    authkeyFile: text(tailnet.authkey_file),
+    browserLogin: tailnet.auth_method === "browser",
     roles: ROLES.filter((r) => roles.includes(r)),
     listen: LISTEN_MODES.find((m) => m === ingress.listen) ?? "tunnel",
     issuer: text(oauth.issuer),
@@ -126,13 +129,12 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
   if (!isAbsolutePath(f.defaultCwd.trim())) return "default_cwd";
   if (f.allowDirs.some((d) => !isAbsolutePath(d.trim()))) return "allow_dirs";
   if (f.roles.length === 0) return "roles";
-  if (f.mode === "tailnet") {
+  if (f.mode === "tailnet" || f.mode === "coexist") {
     if (!isHttpsUrl(f.controlUrl.trim())) return "control_url";
     if (!f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey_file";
   }
   if (!f.roles.includes("ingress")) return undefined;
-  // The kernel refuses ingress outside tailnet mode, since OAuth and Funnel need the control plane.
-  if (f.mode === "lan") return "tailnet";
+  if (f.listen === "funnel" && f.mode !== "tailnet" && f.mode !== "coexist") return "tailnet";
   const issuer = f.issuer.trim();
   if (!ISSUER.test(issuer) || !isHttpsUrl(issuer)) return "issuer";
   if (f.listen !== "public:443") return undefined;
@@ -152,15 +154,18 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   if (doc.errors.length > 0) return undefined;
   doc.setIn(["node", "name"], f.nodeName.trim());
   doc.setIn(["node", "roles"], flowList(doc, f.roles));
-  doc.setIn(["mesh", "mode"], f.mode);
-  if (f.mode === "tailnet") {
-    doc.setIn(["mesh", "control_url"], f.controlUrl.trim());
+  doc.setIn(["schema_version"], 2);
+  for (const key of ["mode", "control_url", "authkey_file", "auth_method", "ephemeral"]) doc.deleteIn(["mesh", key]);
+  doc.setIn(["mesh", "lan", "enabled"], f.mode === "lan" || f.mode === "coexist");
+  doc.setIn(["mesh", "tailnet", "enabled"], f.mode === "tailnet" || f.mode === "coexist");
+  if (f.mode === "tailnet" || f.mode === "coexist") {
+    doc.setIn(["mesh", "tailnet", "control_url"], f.controlUrl.trim());
     if (f.browserLogin) {
-      doc.setIn(["mesh", "auth_method"], "browser");
-      doc.deleteIn(["mesh", "authkey_file"]);
+      doc.setIn(["mesh", "tailnet", "auth_method"], "browser");
+      doc.deleteIn(["mesh", "tailnet", "authkey_file"]);
     } else {
-      doc.deleteIn(["mesh", "auth_method"]);
-      doc.setIn(["mesh", "authkey_file"], f.authkeyFile.trim());
+      doc.deleteIn(["mesh", "tailnet", "auth_method"]);
+      doc.setIn(["mesh", "tailnet", "authkey_file"], f.authkeyFile.trim());
     }
   }
   if (f.roles.includes("gateway") && doc.getIn(["gateway", "listen"]) === undefined) {

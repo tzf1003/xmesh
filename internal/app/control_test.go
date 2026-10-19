@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
-	"github.com/tzf1003/xmesh/api/control/v1/schemacheck"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/api/control/v2/schemacheck"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -65,7 +65,7 @@ func startNode(t *testing.T) *node {
 	for {
 		if ep, err := control.ReadEndpoint(n.stateDir); err == nil {
 			n.control = control.NewClient(ep)
-			if r, err := n.control.Do(ctx, "GET", "/v1/status", nil, nil); err == nil && r.Status == 200 {
+			if r, err := n.control.Do(ctx, "GET", "/v2/status", nil, nil); err == nil && r.Status == 200 {
 				return n
 			}
 		}
@@ -90,10 +90,10 @@ func (n *node) get(path, def string, out any) {
 		n.t.Fatal(err)
 	}
 }
-func (n *node) status() v1.StatusResponse {
+func (n *node) status() v2.StatusResponse {
 	n.t.Helper()
-	var st v1.StatusResponse
-	n.get("/v1/status", "StatusResponse", &st)
+	var st v2.StatusResponse
+	n.get("/v2/status", "StatusResponse", &st)
 	return st
 }
 func (n *node) post(path string, body any) {
@@ -144,12 +144,12 @@ func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ep.Transport != v1.TransportUnix && ep.Transport != v1.TransportPipe || strings.Contains(ep.Address(), "127.0.0.1") || strings.Contains(ep.Address(), "http") {
+	if ep.Transport != v2.TransportUnix && ep.Transport != v2.TransportPipe || strings.Contains(ep.Address(), "127.0.0.1") || strings.Contains(ep.Address(), "http") {
 		t.Fatalf("endpoint is not a socket or pipe: %+v", ep)
 	}
 	// Neither the Agent's nor the Gateway's TCP listener serves the control API.
 	for _, address := range []string{n.agent, n.gateway} {
-		for _, path := range []string{"/v1/status", "/v1/config", "/v1/events", "/v1/drain", "/control/drain"} {
+		for _, path := range []string{"/v2/status", "/v2/config", "/v2/events", "/v2/drain", "/control/drain"} {
 			res, err := http.Get("http://" + address + path)
 			if err != nil {
 				t.Fatal(err)
@@ -179,7 +179,7 @@ func Test_CONARCH09_ControlChannelIsLocalOnly(t *testing.T) {
 func Test_ControlStatusFromRunningNode(t *testing.T) {
 	n := startNode(t)
 	st := n.status()
-	if st.Hostname != "app-ctl-node" || st.Control.KernelVersion != Version || st.Control.APIVersion != v1.APIVersion || st.Drain.Draining || st.Lifecycle != "running" {
+	if st.Hostname != "app-ctl-node" || st.Control.KernelVersion != Version || st.Control.APIVersion != v2.APIVersion || st.Drain.Draining || st.Lifecycle != "running" {
 		t.Fatalf("%+v", st)
 	}
 	if len(st.Roles) != 2 || st.Limits.PTYMaxSessions == 0 || st.Network.Mode != "local" || st.Paths.StateDir != n.stateDir || st.Paths.ConfigFile == "" {
@@ -188,13 +188,13 @@ func Test_ControlStatusFromRunningNode(t *testing.T) {
 	if st.Gateway == nil || st.Gateway.Listen != n.gateway || st.Gateway.URL != "http://"+n.gateway+"/mcp" || st.Gateway.Auth != "pat" || len(st.Gateway.Addresses) != 1 || st.Ingress != nil {
 		t.Fatalf("gateway info: %+v ingress %+v", st.Gateway, st.Ingress)
 	}
-	var peers v1.PeersResponse
-	n.get("/v1/peers", "PeersResponse", &peers)
+	var peers v2.PeersResponse
+	n.get("/v2/peers", "PeersResponse", &peers)
 	if len(peers.Peers) != 1 || !peers.Peers[0].Self || peers.Peers[0].Name != "app-ctl-node" || peers.Peers[0].Connection != "local" {
 		t.Fatalf("%+v", peers)
 	}
-	var cfg v1.ConfigResponse
-	n.get("/v1/config", "ConfigResponse", &cfg)
+	var cfg v2.ConfigResponse
+	n.get("/v2/config", "ConfigResponse", &cfg)
 	if !cfg.Valid || cfg.EffectiveETag != cfg.ETag {
 		t.Fatalf("%+v", cfg)
 	}
@@ -208,15 +208,15 @@ func Test_ControlDrainResumeEndToEnd(t *testing.T) {
 	if _, isErr := call(t, direct, "exec.run", map[string]any{"cmd": "go", "args": []string{"version"}}); isErr {
 		t.Fatal("exec before drain failed")
 	}
-	n.post("/v1/drain", map[string]string{"mode": "keep"})
-	if st := n.status(); !st.Drain.Draining || *st.Drain.Mode != v1.DrainKeep {
+	n.post("/v2/drain", map[string]string{"mode": "keep"})
+	if st := n.status(); !st.Drain.Draining || *st.Drain.Mode != v2.DrainKeep {
 		t.Fatalf("%+v", st.Drain)
 	}
 	out, isErr := call(t, direct, "pty.open", map[string]any{"cols": 80, "rows": 24})
 	if !isErr || out["error"] != "policy_denied" || out["rule"] != "mesh.draining" {
 		t.Fatalf("drained node accepted work: %v", out)
 	}
-	n.post("/v1/resume", nil)
+	n.post("/v2/resume", nil)
 	if st := n.status(); st.Drain.Draining {
 		t.Fatalf("%+v", st.Drain)
 	}
@@ -229,8 +229,8 @@ func Test_ControlDrainResumeEndToEnd(t *testing.T) {
 	if isErr || len(list["sessions"].([]any)) != 1 {
 		t.Fatalf("gateway after resume: %v", list)
 	}
-	var sessions v1.SessionsResponse
-	n.get("/v1/sessions", "SessionsResponse", &sessions)
+	var sessions v2.SessionsResponse
+	n.get("/v2/sessions", "SessionsResponse", &sessions)
 	if len(sessions.PTY) != 1 || sessions.PTY[0].ID != opened["session_id"] || sessions.PTY[0].State != "active" || sessions.PTY[0].CreatedAt.IsZero() {
 		t.Fatalf("sessions: %+v", sessions)
 	}
@@ -241,7 +241,7 @@ func Test_ControlEventsAndAuditFromRunningNode(t *testing.T) {
 	n := startNode(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	res, err := n.control.Stream(ctx, "/v1/events", nil)
+	res, err := n.control.Stream(ctx, "/v2/events", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,8 +289,8 @@ func Test_ControlEventsAndAuditFromRunningNode(t *testing.T) {
 			t.Fatal("no call event")
 		}
 	}
-	var got v1.AuditResponse
-	n.get("/v1/audit?tool=exec.run", "AuditResponse", &got)
+	var got v2.AuditResponse
+	n.get("/v2/audit?tool=exec.run", "AuditResponse", &got)
 	if !got.Enabled || len(got.Events) == 0 {
 		t.Fatalf("audit view: %+v", got)
 	}
@@ -325,8 +325,8 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		var sessions v1.SessionsResponse
-		n.get("/v1/sessions", "SessionsResponse", &sessions)
+		var sessions v2.SessionsResponse
+		n.get("/v2/sessions", "SessionsResponse", &sessions)
 		if len(sessions.Exec) == 1 {
 			run := sessions.Exec[0]
 			raw, _ := json.Marshal(sessions)
@@ -343,8 +343,8 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("exec.run: %v", err)
 	}
-	var after v1.SessionsResponse
-	n.get("/v1/sessions", "SessionsResponse", &after)
+	var after v2.SessionsResponse
+	n.get("/v2/sessions", "SessionsResponse", &after)
 	if len(after.Exec) != 0 {
 		t.Fatalf("%+v", after.Exec)
 	}
@@ -363,7 +363,7 @@ func Test_CONARCH10_UIExitDoesNotAffectKernel(t *testing.T) {
 	// a UI subscribes to the event stream and is then killed without a goodbye
 	for i := 0; i < 3; i++ {
 		ctx, kill := context.WithCancel(context.Background())
-		res, err := n.control.Stream(ctx, "/v1/events", nil)
+		res, err := n.control.Stream(ctx, "/v2/events", nil)
 		if err != nil || res.StatusCode != 200 {
 			t.Fatalf("subscribe: %v", err)
 		}
@@ -375,8 +375,8 @@ func Test_CONARCH10_UIExitDoesNotAffectKernel(t *testing.T) {
 		res.Body.Close()
 	}
 	time.Sleep(200 * time.Millisecond)
-	var sessions v1.SessionsResponse
-	n.get("/v1/sessions", "SessionsResponse", &sessions)
+	var sessions v2.SessionsResponse
+	n.get("/v2/sessions", "SessionsResponse", &sessions)
 	if len(sessions.PTY) != 1 || sessions.PTY[0].ID != id {
 		t.Fatalf("terminal lost: %+v", sessions.PTY)
 	}
@@ -429,23 +429,23 @@ func Test_ControlPatsReachTheGateway(t *testing.T) {
 	if status("") != 401 || status(strings.TrimSpace(string(defaultToken))) == 401 {
 		t.Fatal("the gateway serves a request without a token, or refuses the default token")
 	}
-	var made v1.PatSecret
-	call("POST", "/v1/pats", v1.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, "PatSecret", &made)
+	var made v2.PatSecret
+	call("POST", "/v2/pats", v2.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, "PatSecret", &made)
 	authorized := status(made.Token)
 	if status("") != 401 || authorized == 401 {
 		t.Fatalf("without token=%d with token=%d", status(""), authorized)
 	}
-	var rotated v1.PatSecret
-	call("POST", "/v1/pats/ci/rotate", nil, "PatSecret", &rotated)
+	var rotated v2.PatSecret
+	call("POST", "/v2/pats/ci/rotate", nil, "PatSecret", &rotated)
 	if status(made.Token) != 401 || status(rotated.Token) != authorized {
 		t.Fatal("rotation did not switch the credential")
 	}
-	call("DELETE", "/v1/pats/ci", nil, "", nil)
+	call("DELETE", "/v2/pats/ci", nil, "", nil)
 	if status(rotated.Token) != 401 || status(strings.TrimSpace(string(defaultToken))) == 401 {
 		t.Fatal("deleting one PAT changed the others")
 	}
-	var export v1.PairExportResponse
-	call("POST", "/v1/pair/export", nil, "PairExportResponse", &export)
+	var export v2.PairExportResponse
+	call("POST", "/v2/pair/export", nil, "PairExportResponse", &export)
 	if export.Pair.Name != "app-ctl-node" || export.Pair.Fingerprint == "" {
 		t.Fatalf("%+v", export)
 	}

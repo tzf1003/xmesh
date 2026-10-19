@@ -15,8 +15,8 @@ def main():
     parser.add_argument("--gateway", default="127.0.0.1:8080")
     parser.add_argument("--device", required=True)
     parser.add_argument("--expected-os", required=True, choices=["darwin", "linux", "windows"])
-    parser.add_argument("--expected-mode", default="tailnet", choices=["tailnet", "lan"],
-                        help="network.mode the peer reports; lan for peers paired with `xmesh pair`")
+    parser.add_argument("--expected-mode", default="tailnet", choices=["tailnet", "lan", "coexist"],
+                        help="network.mode reported by the peer")
     parser.add_argument("--token-file", required=True, type=pathlib.Path,
                         help="the Gateway's default token file, <state-dir>/pats/default.token")
     options = parser.parse_args()

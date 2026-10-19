@@ -200,19 +200,36 @@ func (d *Directory) Snapshot(now time.Time) ([]Device, uint64) {
 			continue
 		}
 		device := Device{DeviceID: id, Name: trust.Document.Name, Alias: trust.Alias, Tags: slices.Clone(trust.Tags), Paths: []Path{}}
-		boots := map[string]bool{}
 		for _, path := range d.paths[id] {
 			path.Reachable = path.Reachable && now.Before(path.ExpiresAt)
-			if path.Reachable {
-				boots[path.BootID] = true
-			}
 			device.Paths = append(device.Paths, path)
 		}
-		device.IdentityConflict = len(boots) > 1
+		device.IdentityConflict = identityConflict(d.paths[id], now)
 		slices.SortFunc(device.Paths, comparePath)
 		result = append(result, device)
 	}
 	return result, d.revision
+}
+
+// IdentityConflict fences links while authenticated paths claim different live processes.
+func (d *Directory) IdentityConflict(id string, now time.Time) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return identityConflict(d.paths[id], now)
+}
+
+func identityConflict(paths map[pathKey]Path, now time.Time) bool {
+	boot := ""
+	for _, path := range paths {
+		if !path.Reachable || !now.Before(path.ExpiresAt) {
+			continue
+		}
+		if boot != "" && boot != path.BootID {
+			return true
+		}
+		boot = path.BootID
+	}
+	return false
 }
 
 func comparePath(a, b Path) int {

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 // events streams Server-Sent Events (CTR-CTL-04). A first connection gets hello with the current
@@ -14,7 +14,7 @@ import (
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		fail(w, newError(v1.ErrInternal, "连接不支持流式响应"))
+		fail(w, newError(v2.ErrInternal, "连接不支持流式响应"))
 		return
 	}
 	since := r.Header.Get("Last-Event-ID")
@@ -24,11 +24,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	join := s.bus.Subscribe(since)
 	defer join.Sub.Close()
 	h := w.Header()
-	h.Set("Content-Type", v1.ContentTypeSSE)
+	h.Set("Content-Type", v2.ContentTypeSSE)
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(200)
-	send := func(e v1.Event) bool {
+	send := func(e v2.Event) bool {
 		raw, err := e.SSE()
 		if err != nil {
 			return false
@@ -36,12 +36,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		_, err = w.Write(raw)
 		return err == nil
 	}
-	hello, _ := v1.NewEvent("", 0, v1.Now(), v1.EventHello, v1.HelloData{BootID: s.bus.BootID(), Head: join.Head, HeartbeatS: v1.HeartbeatSeconds})
+	hello, _ := v2.NewEvent("", 0, v2.Now(), v2.EventHello, v2.HelloData{BootID: s.bus.BootID(), Head: join.Head, HeartbeatS: v2.HeartbeatSeconds})
 	if !send(hello) {
 		return
 	}
 	if join.Reset != nil {
-		reset, _ := v1.NewEvent("", 0, v1.Now(), v1.EventReset, join.Reset)
+		reset, _ := v2.NewEvent("", 0, v2.Now(), v2.EventReset, join.Reset)
 		if !send(reset) {
 			return
 		}
@@ -67,7 +67,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-tick.C:
-			if _, err := fmt.Fprint(w, v1.Heartbeat); err != nil {
+			if _, err := fmt.Fprint(w, v2.Heartbeat); err != nil {
 				return
 			}
 			flusher.Flush()

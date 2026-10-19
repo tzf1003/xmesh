@@ -55,11 +55,12 @@ func (d Document) Validate() error {
 
 // Trust grants application roles to one public key, on every network path.
 type Trust struct {
-	Document   Document `json:"identity"`
-	Alias      string   `json:"alias"`
-	Tags       []string `json:"tags"`
-	Generation uint64   `json:"generation"`
-	Revoked    bool     `json:"revoked"`
+	Document   Document   `json:"identity"`
+	Alias      string     `json:"alias"`
+	Tags       []string   `json:"tags"`
+	Generation uint64     `json:"generation"`
+	Revoked    bool       `json:"revoked"`
+	Hints      []PathHint `json:"path_hints,omitempty"`
 }
 
 type trustFile struct {
@@ -117,6 +118,14 @@ func (s *TrustStore) read() (trustFile, error) {
 		if err := validateTags(trust.Tags); err != nil {
 			return state, err
 		}
+		if len(trust.Hints) > 8 {
+			return state, fmt.Errorf("设备连接提示过多")
+		}
+		for _, hint := range trust.Hints {
+			if err := hint.Validate(); err != nil {
+				return state, err
+			}
+		}
 		aliases[trust.Alias] = true
 	}
 	return state, nil
@@ -132,6 +141,7 @@ func validateTags(tags []string) error {
 }
 
 func cloneTrust(t Trust) Trust {
+	t.Hints = slices.Clone(t.Hints)
 	t.Document.PublicKey = slices.Clone(t.Document.PublicKey)
 	t.Tags = slices.Clone(t.Tags)
 	return t
@@ -280,7 +290,11 @@ func (s *TrustStore) Grant(ctx context.Context, doc Document, tags []string, exp
 				alias = doc.Name[:min(len(doc.Name), 62-n)] + "-" + doc.DeviceID[4:4+n]
 			}
 		}
-		state.Peers[doc.DeviceID] = Trust{Document: doc, Alias: alias, Tags: tags, Generation: previous.Generation + 1}
+		var hints []PathHint
+		if !previous.Revoked {
+			hints = slices.Clone(previous.Hints)
+		}
+		state.Peers[doc.DeviceID] = Trust{Document: doc, Alias: alias, Tags: tags, Generation: previous.Generation + 1, Hints: hints}
 		return nil
 	})
 }

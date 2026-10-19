@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-error:1",
+  "$id": "urn:xmesh:schema:control-error:2",
   "title": "ControlErrorFile",
   "description": "CTR-CTL-02。控制通道的失败响应体。信封与 CTR-ERR-01 相同（error、message、retry_after_ms），错误码是控制通道自己的集合，HTTP 状态按 x-http-status 对应。",
   "x-http-status": {
@@ -67,7 +67,7 @@
         "field": { "type": "string", "minLength": 1, "description": "invalid_args 指出出错的字段。" },
         "reason": { "type": "string", "minLength": 1, "description": "同一错误码下的细分原因，蛇形命名。" },
         "current_etag": {
-          "$ref": "urn:xmesh:schema:control-common:1#/$defs/Etag",
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Etag",
           "description": "precondition_failed 返回磁盘上当前的 ETag，客户端重新读取后合并。"
         },
         "diagnostics": {

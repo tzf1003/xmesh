@@ -88,7 +88,7 @@ test("startup verification reads the version from the actual control socket", as
       version: "0.1.0-beta.4", run: async () => ({ code: 0, stdout: "", stderr: "" }), timeoutMs: 1000,
     });
     await k.start("mac");
-    assert.ok(server.requests.some((r) => r.path === "/v1/status"));
+    assert.ok(server.requests.some((r) => r.path === "/v2/status"));
   } finally {
     await server.stop();
   }
@@ -136,9 +136,22 @@ test("refresh replaces a kernel whose previous control protocol is incompatible"
     });
     await k.refresh("mac");
     assert.deepEqual(calls, ["stop", "start"]);
-    assert.ok(next.requests.some((r) => r.path === "/v1/status"));
+    assert.ok(next.requests.some((r) => r.path === "/v2/status"));
   } finally {
     await old.stop();
     await next.stop();
   }
+});
+
+
+test("a stopped node migrates before startup and a failed migration prevents starting it", async () => {
+  const calls: string[] = [];
+  const k = kernelServices({discover: () => [instance], gone: () => false,
+    prepare: async (node) => { calls.push(`migrate:${node}`); },
+    run: async (command,node) => {calls.push(`${command}:${node}`);return {code:0,stdout:"",stderr:""};},
+    status: async () => ({control:{kernel_version:"2.0.0"}}), version:"2.0.0",timeoutMs:20,pollMs:1});
+  await k.start("mac");assert.deepEqual(calls,["migrate:mac","start:mac"]);
+  calls.length=0;
+  const failed=kernelServices({discover:()=>[],prepare:async()=>{throw new Error("migration failed");},run:async()=>{calls.push("start");return {code:0,stdout:"",stderr:""};}});
+  await assert.rejects(failed.start("mac"),/migration failed/);assert.deepEqual(calls,[]);
 });

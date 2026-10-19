@@ -1,21 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-status:1",
+  "$id": "urn:xmesh:schema:control-status:2",
   "title": "ControlStatus",
-  "description": "CTR-CTL-03。GET /v1/status，以及 status 事件的 data。字段包含 CTR-SYS-01 的全部字段，只有 warnings 换成结构化数组。",
+  "description": "CTR-CTL-03。GET /v2/status，以及 status 事件的 data。字段包含 CTR-SYS-01 的全部字段，只有 warnings 换成结构化数组。",
   "$defs": {
     "ControlInfo": {
       "type": "object",
       "additionalProperties": false,
       "required": ["api_version", "kernel_version", "boot_id", "capabilities"],
       "properties": {
-        "api_version": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/ApiVersion" },
+        "api_version": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/ApiVersion" },
         "kernel_version": { "type": "string", "minLength": 1 },
-        "boot_id": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/BootId" },
+        "boot_id": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/BootId" },
         "capabilities": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Capability" }
+          "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Capability" }
         }
       }
     },
@@ -24,11 +24,11 @@
       "additionalProperties": false,
       "required": ["mode", "node_id", "tags"],
       "properties": {
-        "mode": { "enum": ["tailnet", "lan", "local"] },
+        "mode": { "enum": ["local", "lan", "tailnet", "coexist", "offline"] },
         "node_id": { "type": "string", "minLength": 1 },
         "tags": {
           "type": "array",
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" }
+          "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Tag" }
         }
       }
     },
@@ -55,7 +55,7 @@
         "env_names": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-backends:1#/$defs/EnvName" },
+          "items": { "$ref": "urn:xmesh:schema:control-backends:2#/$defs/EnvName" },
           "description": "stdio 后端已设置的环境变量名，按字母序。从不包含值。没有变量时省略。"
         }
       }
@@ -179,18 +179,18 @@
       "properties": {
         "control": { "$ref": "#/$defs/ControlInfo" },
         "lifecycle": { "enum": ["starting", "running", "stopping"] },
-        "started_at": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
         "pid": { "type": "integer", "minimum": 1 },
-        "drain": { "$ref": "urn:xmesh:schema:control-drain:1#/$defs/DrainState" },
+        "drain": { "$ref": "urn:xmesh:schema:control-drain:2#/$defs/DrainState" },
         "os": { "enum": ["windows", "darwin", "linux"] },
         "arch": { "type": "string", "minLength": 1 },
-        "hostname": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName", "description": "配置的 node.name，与 sys.info 一致。" },
+        "hostname": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName", "description": "配置的 node.name，与 sys.info 一致。" },
         "home": { "type": "string" },
         "roles": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Role" }
+          "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Role" }
         },
         "network": { "$ref": "#/$defs/NetworkIdentity" },
         "restart_required": { "type": "boolean" },
@@ -198,7 +198,7 @@
         "authkey_readable": { "type": "boolean" },
         "warnings": {
           "type": "array",
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Warning" },
+          "items": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Warning" },
           "description": "与 sys.info 的唯一差别：元素是带稳定 code 的对象，不是字符串。"
         },
         "path_sep": { "enum": ["\\", "/"] },
@@ -210,7 +210,7 @@
         "gateway": { "$ref": "#/$defs/GatewayInfo", "description": "roles 含 gateway 时存在。" },
         "ingress": { "$ref": "#/$defs/IngressInfo", "description": "roles 含 ingress 时存在。" },
         "peers": { "$ref": "#/$defs/PeerSummary" },
-        "ci": { "$ref": "urn:xmesh:schema:control-ci:1#/$defs/CiSummary", "description": "有 GitHub Actions 运行器绑定时存在（API 1.8 起）。" }
+        "ci": { "$ref": "urn:xmesh:schema:control-ci:2#/$defs/CiSummary", "description": "有 GitHub Actions 运行器绑定时存在（API 1.8 起）。" }
       }
     }
   }

@@ -28,10 +28,12 @@ const pairTTL = time.Minute
 const pairLimit = 16
 
 var (
-	ErrPairDisabled = errors.New("设备尚未设置连接密码")
-	ErrPairPassword = errors.New("连接密码长度须为 10 到 128 个字符，首尾不能有空白")
-	ErrPairLimited  = errors.New("配对尝试过多，请稍后重试")
-	ErrPairProof    = errors.New("连接密码或对端设备身份无效")
+	ErrPairDisabled     = errors.New("设备尚未设置连接密码")
+	ErrPairPassword     = errors.New("连接密码长度须为 10 到 128 个字符，首尾不能有空白")
+	ErrPairLimited      = errors.New("配对尝试过多，请稍后重试")
+	ErrPairProof        = errors.New("连接密码或对端设备身份无效")
+	ErrIdentityMismatch = errors.New("对端设备公钥指纹与所选设备不一致")
+	ErrPairUnsupported  = errors.New("对端设备协议版本不兼容，请更新并重新配对")
 )
 
 type passwordRecord struct {
@@ -411,7 +413,7 @@ func (p *Pairing) PairWith(ctx context.Context, client *http.Client, base, passw
 		return Document{}, err
 	}
 	if challenge.Version != Version || challenge.KDF != "argon2id-v1" || len(challenge.Salt) != spake2.SaltSize {
-		return Document{}, ErrPairProof
+		return Document{}, ErrPairUnsupported
 	}
 	secret, err := spake2.NewSecret(spake2.Derive(password, challenge.Salt))
 	if err != nil {
@@ -425,8 +427,11 @@ func (p *Pairing) PairWith(ctx context.Context, client *http.Client, base, passw
 	if err := pairPOST(ctx, client, base+PairPath+"exchange", PairRequest{Identity: p.document, X: x}, &reply, &tlsIdentity); err != nil {
 		return Document{}, err
 	}
-	if reply.Identity.Validate() != nil || reply.Identity.DeviceID != tlsIdentity || reply.Identity.DeviceID == p.identity.ID || (expected != "" && expected != reply.Identity.DeviceID) {
+	if reply.Identity.Validate() != nil || reply.Identity.DeviceID != tlsIdentity || reply.Identity.DeviceID == p.identity.ID {
 		return Document{}, ErrPairProof
+	}
+	if expected != "" && expected != reply.Identity.DeviceID {
+		return Document{}, ErrIdentityMismatch
 	}
 	confirm, err := initiator.Finish(reply.Y, pairTranscript(reply.Identity), reply.Confirm)
 	if err != nil {
@@ -481,6 +486,16 @@ func pairPOST(ctx context.Context, client *http.Client, url string, in, out any,
 		return ErrPairProof
 	}
 	if response.StatusCode != 200 {
+		var body struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &body)
+		if body.Error == "pair_disabled" {
+			return ErrPairDisabled
+		}
+		if response.StatusCode == 404 || response.StatusCode == 426 {
+			return ErrPairUnsupported
+		}
 		switch response.StatusCode {
 		case 429:
 			return ErrPairLimited

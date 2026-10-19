@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -130,20 +130,20 @@ func (r *rig) dump() string {
 	return strings.Join(parts, "; ")
 }
 
-func (r *rig) instance(id string, index int) v1.CiInstance {
+func (r *rig) instance(id string, index int) v2.CiInstance {
 	b, ok := r.m.Binding(id)
 	if !ok {
-		return v1.CiInstance{}
+		return v2.CiInstance{}
 	}
 	for _, in := range b.Instances {
 		if in.Index == index {
 			return in
 		}
 	}
-	return v1.CiInstance{}
+	return v2.CiInstance{}
 }
 
-func (r *rig) state(id string, index int) v1.CiInstanceState { return r.instance(id, index).State }
+func (r *rig) state(id string, index int) v2.CiInstanceState { return r.instance(id, index).State }
 
 func (r *rig) dirOf(id string, index int) string {
 	return filepath.Join(r.root, "ci", id, fmt.Sprint(index))
@@ -168,7 +168,7 @@ func Test_CTRCTL15_BindingInstallsRegistersAndRuns(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("xmesh", "REGTOKEN123")
 	r.apply(tokenBinding("xmesh", "tzf1003/xmesh", 1))
-	r.wait("idle", func() bool { return r.state("xmesh", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("xmesh", 1) == v2.CiIdle })
 
 	dir := r.dirOf("xmesh", 1)
 	args := r.read(filepath.Join(dir, "config-args"))
@@ -197,13 +197,13 @@ func Test_CTRCTL15_ConcurrencyAddsAndRemovesInstances(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 2))
-	r.wait("two idle", func() bool { return r.state("a", 1) == v1.CiIdle && r.state("a", 2) == v1.CiIdle })
+	r.wait("two idle", func() bool { return r.state("a", 1) == v2.CiIdle && r.state("a", 2) == v2.CiIdle })
 	if r.src.fetches != 1 {
 		t.Errorf("the package was fetched %d times for two instances", r.src.fetches)
 	}
 	r.apply(tokenBinding("a", "o/a", 1))
 	r.wait("second instance gone", func() bool { b, _ := r.m.Binding("a"); return len(b.Instances) == 1 && !r.exists(r.dirOf("a", 2)) })
-	if r.state("a", 1) != v1.CiIdle {
+	if r.state("a", 1) != v2.CiIdle {
 		t.Errorf("the remaining instance was disturbed: %s", r.dump())
 	}
 }
@@ -212,11 +212,11 @@ func Test_CTRCTL15_JobStatesAndSleepInhibition(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 
 	r.write(filepath.Join(dir, "startjob"), "")
-	r.wait("busy", func() bool { return r.state("a", 1) == v1.CiBusy })
+	r.wait("busy", func() bool { return r.state("a", 1) == v2.CiBusy })
 	if job := r.instance("a", 1).Job; job == nil || job.Name != "build" {
 		t.Errorf("job = %+v", job)
 	}
@@ -224,9 +224,9 @@ func Test_CTRCTL15_JobStatesAndSleepInhibition(t *testing.T) {
 		t.Errorf("the machine was not kept awake while a job ran (%d)", r.awake.Load())
 	}
 	r.write(filepath.Join(dir, "finishjob"), "")
-	r.wait("idle again", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle again", func() bool { return r.state("a", 1) == v2.CiIdle })
 	in := r.instance("a", 1)
-	if in.LastResult == nil || in.LastResult.Name != "build" || in.LastResult.Result != v1.CiSucceeded || in.Job != nil {
+	if in.LastResult == nil || in.LastResult.Name != "build" || in.LastResult.Result != v2.CiSucceeded || in.Job != nil {
 		t.Errorf("after the job: %+v", in)
 	}
 	r.wait("sleep allowed again", func() bool { return r.awake.Load() == 0 })
@@ -236,7 +236,7 @@ func Test_CTRCTL15_CrashedRunnerIsRestarted(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 	r.write(filepath.Join(dir, "mode"), "crash")
 	// Kill the idle listener so the crash script is what starts next.
@@ -244,23 +244,23 @@ func Test_CTRCTL15_CrashedRunnerIsRestarted(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.wait("crash loop counted", func() bool { return r.instance("a", 1).Restarts >= 2 })
-	if p := r.instance("a", 1).Problem; p != nil && p.Code != v1.CiProblemUnclassified {
+	if p := r.instance("a", 1).Problem; p != nil && p.Code != v2.CiProblemUnclassified {
 		t.Errorf("problem = %+v", p)
 	}
 	r.write(filepath.Join(dir, "mode"), "idle")
-	r.wait("idle after recovery", func() bool { return r.state("a", 1) == v1.CiIdle && r.instance("a", 1).Problem == nil })
+	r.wait("idle after recovery", func() bool { return r.state("a", 1) == v2.CiIdle && r.instance("a", 1).Problem == nil })
 }
 
 func Test_CTRCTL15_SelfUpdateExitRestartsAtOnce(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 	r.write(filepath.Join(dir, "mode"), "updating")
 	_ = r.m.Restart("a")
 	r.wait("restarted after the update exit", func() bool {
-		return strings.Count(r.read(filepath.Join(dir, "runs")), "runs") >= 3 && r.state("a", 1) == v1.CiIdle
+		return strings.Count(r.read(filepath.Join(dir, "runs")), "runs") >= 3 && r.state("a", 1) == v2.CiIdle
 	})
 	if p := r.instance("a", 1).Problem; p != nil {
 		t.Errorf("an update exit is not a problem: %+v", p)
@@ -271,38 +271,38 @@ func Test_CTRCTL15_SessionConflictNeedsTheUser(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 	r.write(filepath.Join(dir, "mode"), "conflict")
 	_ = r.m.Restart("a")
-	r.wait("broken", func() bool { return r.state("a", 1) == v1.CiBroken })
-	if p := r.instance("a", 1).Problem; p == nil || p.Code != v1.CiProblemSessionConflict {
+	r.wait("broken", func() bool { return r.state("a", 1) == v2.CiBroken })
+	if p := r.instance("a", 1).Problem; p == nil || p.Code != v2.CiProblemSessionConflict {
 		t.Fatalf("problem = %+v", p)
 	}
 	r.write(filepath.Join(dir, "mode"), "idle")
 	if err := r.m.Restart("a"); err != nil {
 		t.Fatal(err)
 	}
-	r.wait("idle after restart", func() bool { return r.state("a", 1) == v1.CiIdle && r.instance("a", 1).Problem == nil })
+	r.wait("idle after restart", func() bool { return r.state("a", 1) == v2.CiIdle && r.instance("a", 1).Problem == nil })
 }
 
 func Test_CTRCTL15_RemovedRunnerIsRegisteredAgain(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "FIRST")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 	r.write(filepath.Join(dir, "mode"), "removed")
 	_ = r.m.Restart("a")
-	r.wait("broken", func() bool { return r.state("a", 1) == v1.CiBroken })
-	if p := r.instance("a", 1).Problem; p == nil || p.Code != v1.CiProblemRunnerRemoved {
+	r.wait("broken", func() bool { return r.state("a", 1) == v2.CiBroken })
+	if p := r.instance("a", 1).Problem; p == nil || p.Code != v2.CiProblemRunnerRemoved {
 		t.Fatalf("problem = %+v", p)
 	}
 	r.write(filepath.Join(dir, "mode"), "idle")
 	if err := r.Repair("a", "SECOND"); err != nil {
 		t.Fatal(err)
 	}
-	r.wait("idle after repair", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle after repair", func() bool { return r.state("a", 1) == v2.CiIdle })
 	if !strings.Contains(r.read(filepath.Join(dir, "config-env")), "SECOND") {
 		t.Errorf("repair did not register with the new token: %q", r.read(filepath.Join(dir, "config-env")))
 	}
@@ -314,9 +314,9 @@ func Test_CTRCTL15_RegistrationFailureNamesTheCauseWithoutTheToken(t *testing.T)
 	r := newRig(t)
 	r.m.HoldToken("a", "bad")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("broken", func() bool { return r.state("a", 1) == v1.CiBroken })
+	r.wait("broken", func() bool { return r.state("a", 1) == v2.CiBroken })
 	p := r.instance("a", 1).Problem
-	if p == nil || p.Code != v1.CiProblemRegistrationFailed || !strings.Contains(p.Message, "无效或已过期") {
+	if p == nil || p.Code != v2.CiProblemRegistrationFailed || !strings.Contains(p.Message, "无效或已过期") {
 		t.Fatalf("problem = %+v", p)
 	}
 	if strings.Contains(p.Message, "bad") {
@@ -326,14 +326,14 @@ func Test_CTRCTL15_RegistrationFailureNamesTheCauseWithoutTheToken(t *testing.T)
 	if err := r.m.Repair("a", "good"); err != nil {
 		t.Fatal(err)
 	}
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 }
 
 func Test_CTRCTL15_NoTokenMeansNoRegistration(t *testing.T) {
 	r := newRig(t)
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("broken", func() bool { return r.state("a", 1) == v1.CiBroken })
-	if p := r.instance("a", 1).Problem; p == nil || p.Code != v1.CiProblemRegistrationFailed || !strings.Contains(p.Message, "注册令牌") {
+	r.wait("broken", func() bool { return r.state("a", 1) == v2.CiBroken })
+	if p := r.instance("a", 1).Problem; p == nil || p.Code != v2.CiProblemRegistrationFailed || !strings.Contains(p.Message, "注册令牌") {
 		t.Fatalf("problem = %+v", p)
 	}
 }
@@ -342,45 +342,45 @@ func Test_CTRCTL15_PauseAndDrainStopIdleRunnersAndWaitForJobs(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 2))
-	r.wait("two idle", func() bool { return r.state("a", 1) == v1.CiIdle && r.state("a", 2) == v1.CiIdle })
+	r.wait("two idle", func() bool { return r.state("a", 1) == v2.CiIdle && r.state("a", 2) == v2.CiIdle })
 	r.write(filepath.Join(r.dirOf("a", 1), "startjob"), "")
-	r.wait("first busy", func() bool { return r.state("a", 1) == v1.CiBusy })
+	r.wait("first busy", func() bool { return r.state("a", 1) == v2.CiBusy })
 
 	r.m.SetDraining(true)
-	r.wait("idle one stopped", func() bool { return r.state("a", 2) == v1.CiStopped })
+	r.wait("idle one stopped", func() bool { return r.state("a", 2) == v2.CiStopped })
 	time.Sleep(200 * time.Millisecond)
-	if r.state("a", 1) != v1.CiBusy {
+	if r.state("a", 1) != v2.CiBusy {
 		t.Fatalf("a running job must not be cut by a drain: %s", r.dump())
 	}
 	if s := r.m.Summary(); s == nil || !s.Draining {
 		t.Errorf("summary = %+v", s)
 	}
 	r.write(filepath.Join(r.dirOf("a", 1), "finishjob"), "")
-	r.wait("busy one stopped after its job", func() bool { return r.state("a", 1) == v1.CiStopped })
-	if got := r.instance("a", 1).LastResult; got == nil || got.Result != v1.CiSucceeded {
+	r.wait("busy one stopped after its job", func() bool { return r.state("a", 1) == v2.CiStopped })
+	if got := r.instance("a", 1).LastResult; got == nil || got.Result != v2.CiSucceeded {
 		t.Errorf("the job's result was lost: %+v", got)
 	}
 
 	r.m.SetDraining(false)
-	r.wait("both back", func() bool { return r.state("a", 1) == v1.CiIdle && r.state("a", 2) == v1.CiIdle })
+	r.wait("both back", func() bool { return r.state("a", 1) == v2.CiIdle && r.state("a", 2) == v2.CiIdle })
 
 	spec := tokenBinding("a", "o/a", 2)
 	spec.Paused = true
 	r.apply(spec)
-	r.wait("paused", func() bool { return r.state("a", 1) == v1.CiStopped && r.state("a", 2) == v1.CiStopped })
+	r.wait("paused", func() bool { return r.state("a", 1) == v2.CiStopped && r.state("a", 2) == v2.CiStopped })
 	spec.Paused = false
 	r.apply(spec)
-	r.wait("resumed", func() bool { return r.state("a", 1) == v1.CiIdle && r.state("a", 2) == v1.CiIdle })
+	r.wait("resumed", func() bool { return r.state("a", 1) == v2.CiIdle && r.state("a", 2) == v2.CiIdle })
 }
 
 func Test_CTRCTL15_RemovingABindingWaitsForItsJobThenDeletesIt(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 	r.write(filepath.Join(dir, "startjob"), "")
-	r.wait("busy", func() bool { return r.state("a", 1) == v1.CiBusy })
+	r.wait("busy", func() bool { return r.state("a", 1) == v2.CiBusy })
 
 	r.apply()
 	b, ok := r.m.Binding("a")
@@ -388,7 +388,7 @@ func Test_CTRCTL15_RemovingABindingWaitsForItsJobThenDeletesIt(t *testing.T) {
 		t.Fatalf("a binding that left the configuration must show as removing: %+v %v", b, ok)
 	}
 	time.Sleep(200 * time.Millisecond)
-	if r.state("a", 1) != v1.CiBusy {
+	if r.state("a", 1) != v2.CiBusy {
 		t.Fatalf("the job was cut: %s", r.dump())
 	}
 	r.write(filepath.Join(dir, "finishjob"), "")
@@ -402,9 +402,9 @@ func Test_CTRCTL15_ForcedRemovalDoesNotWait(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	r.write(filepath.Join(r.dirOf("a", 1), "startjob"), "")
-	r.wait("busy", func() bool { return r.state("a", 1) == v1.CiBusy })
+	r.wait("busy", func() bool { return r.state("a", 1) == v2.CiBusy })
 	r.m.ForgetForce("a")
 	r.apply()
 	r.wait("binding gone without waiting", func() bool { return r.m.Gone("a") })
@@ -434,7 +434,7 @@ func Test_CTRCTL15_ImportedRunnerIsRunInPlaceAndKept(t *testing.T) {
 
 	spec := config.CIBinding{ID: "legacy", Scope: "repo", Target: "tzf1003/legacy", Source: "import", Concurrency: 1, Dir: dir}
 	r.apply(spec)
-	r.wait("idle", func() bool { return r.state("legacy", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("legacy", 1) == v2.CiIdle })
 	if r.instance("legacy", 1).Name != "my-mac" {
 		t.Errorf("an imported runner keeps its own name: %+v", r.instance("legacy", 1))
 	}
@@ -471,9 +471,9 @@ func Test_CTRCTL15_ShutdownWaitsForJobsThenEndsThem(t *testing.T) {
 	r := newRig(t)
 	r.m.HoldToken("a", "TOK")
 	r.apply(tokenBinding("a", "o/a", 1))
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	r.write(filepath.Join(r.dirOf("a", 1), "startjob"), "")
-	r.wait("busy", func() bool { return r.state("a", 1) == v1.CiBusy })
+	r.wait("busy", func() bool { return r.state("a", 1) == v2.CiBusy })
 
 	done := make(chan struct{})
 	go func() { r.m.Shutdown(300 * time.Millisecond); close(done) }()
@@ -492,12 +492,12 @@ func Test_CTRCTL15_ChangedLabelsRegisterAgain(t *testing.T) {
 	r.m.HoldToken("a", "TOK")
 	spec := tokenBinding("a", "o/a", 1)
 	r.apply(spec)
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	dir := r.dirOf("a", 1)
 	spec.Labels = []string{"gpu"}
 	r.apply(spec)
 	r.wait("registered with the new labels", func() bool {
-		return strings.Contains(r.read(filepath.Join(dir, "config-args")), "xmesh,xmesh-node,gpu") && r.state("a", 1) == v1.CiIdle
+		return strings.Contains(r.read(filepath.Join(dir, "config-args")), "xmesh,xmesh-node,gpu") && r.state("a", 1) == v2.CiIdle
 	})
 }
 
@@ -514,7 +514,7 @@ func Test_CTRCTL15_AccountBindingGetsItsTokenFromGitHubAndDeregistersOnUnbind(t 
 	r.m.o.RemoveToken = func(_ context.Context, b config.CIBinding) (string, error) { return "REMOVE-" + b.Account, nil }
 	spec := config.CIBinding{ID: "a", Scope: "repo", Target: "o/a", Source: "account", Account: "me", Concurrency: 1}
 	r.apply(spec)
-	r.wait("idle", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("a", 1) == v2.CiIdle })
 	env, err := os.ReadFile(filepath.Join(r.dirOf("a", 1), "config-env"))
 	if err != nil || !strings.Contains(string(env), "REG-me") {
 		t.Fatalf("registered with %q (%v)", env, err)
@@ -526,7 +526,7 @@ func Test_CTRCTL15_AccountBindingGetsItsTokenFromGitHubAndDeregistersOnUnbind(t 
 	if err = r.m.Restart("a"); err != nil {
 		t.Fatal(err)
 	}
-	r.wait("idle again", func() bool { return r.state("a", 1) == v1.CiIdle })
+	r.wait("idle again", func() bool { return r.state("a", 1) == v2.CiIdle })
 	if asked.Load() != 1 {
 		t.Fatalf("token asked %d times after restart", asked.Load())
 	}
@@ -553,7 +553,7 @@ func Test_CTRCTL15_ImportedRunnerIsNotDeregisteredOnUnbind(t *testing.T) {
 		_ = os.Chmod(filepath.Join(dir, f), 0o755)
 	}
 	r.apply(config.CIBinding{ID: "old", Scope: "repo", Target: "o/a", Source: "import", Account: "me", Dir: dir, Concurrency: 1})
-	r.wait("idle", func() bool { return r.state("old", 1) == v1.CiIdle })
+	r.wait("idle", func() bool { return r.state("old", 1) == v2.CiIdle })
 	r.apply()
 	r.wait("binding gone", func() bool { return r.m.Gone("old") })
 	if _, err := os.Stat(removed); err == nil {

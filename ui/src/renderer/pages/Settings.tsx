@@ -32,7 +32,7 @@ import type { ConfigChange, ConfigResponse } from "../../shared/control";
 import type { Key } from "../messages";
 
 const ROLE_HINT: Record<Role, Key> = { agent: "wizard.agentHint", gateway: "wizard.gatewayHint", ingress: "settings.ingressHint" };
-const MODE_LABEL: Record<Mode, Key> = { lan: "mode.lan", tailnet: "mode.tailnet" };
+const MODE_LABEL: Record<Mode, Key> = { lan: "mode.lan", tailnet: "mode.tailnet", coexist: "mode.coexist", offline: "mode.offline" };
 const LISTEN_LABEL: Record<ListenMode, Key> = { tunnel: "settings.listen.tunnel", "public:443": "settings.listen.public443", funnel: "settings.listen.funnel" };
 const TLS_LABEL: Record<TLSMode, Key> = { autocert: "settings.tls.autocert", file: "settings.tls.file" };
 const PROBLEM: Record<SettingsProblem, Key> = {
@@ -269,12 +269,12 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                   <label class="check" key={m}>
                     <input type="radio" name="settings-mode" checked={form.mode === m} onChange={() => update({ mode: m })} data-testid={`settings-mode-${m}`} />
                     <span>
-                      <strong>{t(MODE_LABEL[m])}</strong> <span class="hint">{t(m === "lan" ? "wizard.lanHint" : "wizard.tailnetHint")}</span>
+                      <strong>{t(MODE_LABEL[m])}</strong> <span class="hint">{t(m === "coexist" ? "device.preferLan" : m === "lan" ? "wizard.lanHint" : m === "tailnet" ? "wizard.tailnetHint" : "mode.offline")}</span>
                     </span>
                   </label>
                 ))}
               </fieldset>
-              {form.mode === "tailnet" && (
+              {(form.mode === "tailnet" || form.mode === "coexist") && (
                 <>
                   <Field label={t("wizard.controlUrl")} hint={t("wizard.controlUrlHint")}>
                     <input
@@ -325,7 +325,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                 <section class="roles-ingress" data-testid="settings-ingress">
                   <h3>{t("settings.ingressTitle")}</h3>
                   <p class="hint">{t("settings.ingressSub")}</p>
-                  {form.mode === "lan" && (
+                  {form.listen === "funnel" && form.mode !== "tailnet" && form.mode !== "coexist" && (
                     <Banner kind="warn" testid="settings-needs-tailnet">
                       {t("settings.needsTailnet")}
                     </Banner>

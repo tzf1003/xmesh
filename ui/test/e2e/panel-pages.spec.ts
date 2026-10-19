@@ -68,11 +68,11 @@ test("overview: pause from the page, kill needs a confirmation, resume", async (
   await page.getByTestId("drain-kill").click();
   await expect(page.getByTestId("confirm")).toBeVisible();
   await page.getByTestId("confirm-cancel").click();
-  expect(h.kernel.requests.some((r) => r.path === "/v1/drain")).toBe(false);
+  expect(h.kernel.requests.some((r) => r.path === "/v2/drain")).toBe(false);
 
   await page.getByTestId("drain-kill").click();
   await page.getByTestId("confirm-ok").click();
-  await expect.poll(() => h.kernel.requests.find((r) => r.path === "/v1/drain")?.body).toEqual({ mode: "kill" });
+  await expect.poll(() => h.kernel.requests.find((r) => r.path === "/v2/drain")?.body).toEqual({ mode: "kill" });
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");
   await expect(page.getByTestId("draining")).toBeVisible();
 
@@ -104,7 +104,7 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   await page.getByTestId("pair-export").click();
   await expect(page.getByTestId("pair-my-fingerprint")).toContainText(h.kernel.panel.localPair.fingerprint.slice(0, 2));
 
-  const doc = { pair: { name: "peer-2", fingerprint: FP, certificate_pem: PEM, tags: ["tag:peer"] } };
+  const doc = { pair: { name: "peer-2", version: 2 as const, device_id: `dev-${FP}`, fingerprint: FP, public_key: "MCowBQYDK2VwAyEAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", tags: ["tag:peer"] } };
   await page.getByTestId("pair-paste").fill(JSON.stringify(doc));
   await expect(page.getByTestId("pair-peer-name")).toHaveText("peer-2");
   await expect(page.getByTestId("pair-import")).toBeDisabled();
@@ -118,15 +118,14 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   await page.getByTestId("pair-import").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("pair-done")).toBeVisible();
-  // A pairing certificate is read at start, so the bar asks for the restart in place.
-  await expect(page.getByTestId("apply-restart-needed")).toBeVisible();
-  await expect(page.getByTestId("apply-restart")).toBeEnabled();
+  // The shared trust store applies the import immediately.
+  await expect(page.getByTestId("apply-restart-needed")).toHaveCount(0);
   expect(h.kernel.panel.imported.map((i) => i.name)).toEqual(["peer-2"]);
 });
 
-test("devices: pairing says it is lan-only on a tailnet node", async () => {
+test("devices: pairing is available on a tailnet node", async () => {
   const page = await open({}, "devices");
-  await expect(page.getByTestId("pair-export")).toHaveCount(0);
+  await expect(page.getByTestId("pair-manual")).toBeVisible();
 });
 
 test("sessions: the busy fixture shows ptys and executions", async () => {
@@ -163,7 +162,7 @@ test("authz: create a PAT, see its secret once, rotate and delete it", async () 
   await page.getByTestId("pat-ci").getByRole("button").nth(1).click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("pat-ci")).toHaveCount(0);
-  expect(h.kernel.requests.some((r) => r.method === "DELETE" && r.path === "/v1/pats/ci")).toBe(true);
+  expect(h.kernel.requests.some((r) => r.method === "DELETE" && r.path === "/v2/pats/ci")).toBe(true);
 });
 
 test("ingress: revoke a client and rotate the password", async () => {
@@ -263,7 +262,7 @@ test("pages for capabilities the kernel lacks say so and send no request", async
   const page = await open({ kernel: { capabilities: ["status", "events", "peers", "sessions", "drain"] } });
   await page.getByTestId("nav-audit").click();
   await expect(page.getByTestId("not-supported")).toBeVisible();
-  expect(h.kernel.requests.some((r) => r.path.startsWith("/v1/audit"))).toBe(false);
+  expect(h.kernel.requests.some((r) => r.path.startsWith("/v2/audit"))).toBe(false);
 });
 
 test("wizard: with no kernel the first page is the wizard; it writes a 0600 config and runs install then start", async () => {
@@ -351,7 +350,7 @@ test("panel IPC refuses malformed data operations", async () => {
     ].map((r) => r.error?.code);
   });
   expect(codes).toEqual(Array(8).fill("invalid_args"));
-  expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v1/pats") || r.path.startsWith("/v1/audit"))).toBe(false);
+  expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v2/pats") || r.path.startsWith("/v2/audit"))).toBe(false);
 });
 
 test("wizard: a pasted tailnet key lands in a 0600 file and never in the config", async () => {

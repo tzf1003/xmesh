@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"sync"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
-// Bus keeps the last v1.EventRingSize events of this boot and fans new ones out.
+// Bus keeps the last v2.EventRingSize events of this boot and fans new ones out.
 //
 // Every payload is decoded back into the typed struct of its event type with unknown fields
 // refused, so a field outside the contract (stdout, arguments, file content...) cannot reach the
@@ -19,7 +19,7 @@ type Bus struct {
 	mu       sync.Mutex
 	boot     string
 	seq      uint64
-	ring     []v1.Event
+	ring     []v2.Event
 	subs     map[*Subscription]struct{}
 	rejected uint64
 	closed   bool
@@ -28,7 +28,7 @@ type Bus struct {
 // Subscription receives events published after it was created. C is closed when the subscriber
 // fell behind or the bus closed; the client reconnects with Last-Event-ID and replays or resets.
 type Subscription struct {
-	C      chan v1.Event
+	C      chan v2.Event
 	bus    *Bus
 	closed bool
 }
@@ -43,7 +43,7 @@ func NewBus() *Bus {
 func (b *Bus) BootID() string { return b.boot }
 
 // Publish validates and stores an event. It never blocks on subscribers.
-func (b *Bus) Publish(typ v1.EventType, data any) error {
+func (b *Bus) Publish(typ v2.EventType, data any) error {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -53,8 +53,8 @@ func (b *Bus) Publish(typ v1.EventType, data any) error {
 	if b.closed {
 		return nil
 	}
-	e := v1.Event{Time: v1.Now(), Type: typ, Data: raw}
-	if _, err = e.Payload(); err != nil || typ == v1.EventHello || typ == v1.EventReset {
+	e := v2.Event{Time: v2.Now(), Type: typ, Data: raw}
+	if _, err = e.Payload(); err != nil || typ == v2.EventHello || typ == v2.EventReset {
 		b.rejected++
 		if err == nil {
 			err = fmt.Errorf("事件 %s 不进入事件流缓存", typ)
@@ -62,10 +62,10 @@ func (b *Bus) Publish(typ v1.EventType, data any) error {
 		return err
 	}
 	b.seq++
-	e.Seq, e.ID = b.seq, v1.FormatEventID(b.boot, b.seq)
+	e.Seq, e.ID = b.seq, v2.FormatEventID(b.boot, b.seq)
 	b.ring = append(b.ring, e)
-	if len(b.ring) > v1.EventRingSize {
-		b.ring = append(b.ring[:0], b.ring[len(b.ring)-v1.EventRingSize:]...)
+	if len(b.ring) > v2.EventRingSize {
+		b.ring = append(b.ring[:0], b.ring[len(b.ring)-v2.EventRingSize:]...)
 	}
 	for s := range b.subs {
 		select {
@@ -94,7 +94,7 @@ func (b *Bus) headLocked() *string {
 	if b.seq == 0 {
 		return nil
 	}
-	head := v1.FormatEventID(b.boot, b.seq)
+	head := v2.FormatEventID(b.boot, b.seq)
 	return &head
 }
 
@@ -111,8 +111,8 @@ func (b *Bus) dropLocked(s *Subscription) {
 // repeated.
 type Join struct {
 	Head   *string
-	Reset  *v1.ResetData
-	Replay []v1.Event
+	Reset  *v2.ResetData
+	Replay []v2.Event
 	Sub    *Subscription
 }
 
@@ -120,7 +120,7 @@ type Join struct {
 func (b *Bus) Subscribe(since string) Join {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	j := Join{Head: b.headLocked(), Sub: &Subscription{C: make(chan v1.Event, 256), bus: b}}
+	j := Join{Head: b.headLocked(), Sub: &Subscription{C: make(chan v2.Event, 256), bus: b}}
 	if b.closed {
 		j.Sub.closed = true
 		close(j.Sub.C)
@@ -130,12 +130,12 @@ func (b *Bus) Subscribe(since string) Join {
 	if since == "" {
 		return j
 	}
-	boot, seq, err := v1.ParseEventID(since)
+	boot, seq, err := v2.ParseEventID(since)
 	switch {
 	case err != nil || boot != b.boot || seq > b.seq:
-		j.Reset = &v1.ResetData{Reason: "boot_changed", Head: j.Head}
+		j.Reset = &v2.ResetData{Reason: "boot_changed", Head: j.Head}
 	case len(b.ring) > 0 && seq+1 < b.ring[0].Seq, len(b.ring) == 0 && seq < b.seq:
-		j.Reset = &v1.ResetData{Reason: "gap", Head: j.Head}
+		j.Reset = &v2.ResetData{Reason: "gap", Head: j.Head}
 	default:
 		for _, e := range b.ring {
 			if e.Seq > seq {

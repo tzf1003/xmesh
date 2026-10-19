@@ -18,7 +18,7 @@ for (const f of fs.readdirSync(schemaDir()).filter((n) => n.endsWith(".schema.js
 }
 
 function validate(schemaId: string, def: string, value: unknown): void {
-  const v = ajv.getSchema(`urn:xmesh:schema:${schemaId}:1#/$defs/${def}`);
+  const v = ajv.getSchema(`urn:xmesh:schema:${schemaId}:2#/$defs/${def}`);
   assert.ok(v, `schema ${schemaId}#${def}`);
   assert.ok(v(value), `${def} invalid: ${ajv.errorsText(v.errors)}\n${JSON.stringify(value).slice(0, 300)}`);
 }
@@ -55,7 +55,7 @@ function collectStream(endpoint: string, lastEventId?: string, ms = 150): Promis
     const parser = new SseParser();
     const got: { id?: string; event: string; data: string }[] = [];
     const req = http.request(
-      { socketPath: endpoint, path: "/v1/events", headers: lastEventId ? { "Last-Event-ID": lastEventId } : {} },
+      { socketPath: endpoint, path: "/v2/events", headers: lastEventId ? { "Last-Event-ID": lastEventId } : {} },
       (res) => {
         res.setEncoding("utf8");
         res.on("data", (c: string) => got.push(...parser.push(c)));
@@ -81,48 +81,48 @@ after(async () => {
 });
 
 test("the copied TypeScript types are the contract's generated file", () => {
-  const upstream = fs.readFileSync(path.join(repoRoot(), "api", "control", "v1", "ts", "control.ts"), "utf8");
+  const upstream = fs.readFileSync(path.join(repoRoot(), "api", "control", "v2", "ts", "control.ts"), "utf8");
   const copy = fs.readFileSync(path.join(repoRoot(), "ui", "src", "shared", "generated", "control.ts"), "utf8");
   assert.ok(copy.endsWith(upstream), "run `npm run sync-types` in ui/");
 });
 
 test("the UI speaks the contract's API version", () => {
-  assert.equal(CONTROL_API_VERSION, "1.8");
+  assert.equal(CONTROL_API_VERSION, "2.0");
 });
 
 test("status, peers, sessions and control.json from the fake validate against the schemas", async () => {
-  const status = await call(k.endpoint, "GET", "/v1/status");
+  const status = await call(k.endpoint, "GET", "/v2/status");
   assert.equal(status.status, 200);
-  assert.equal(status.headers["x-xmesh-control-version"], "1.8");
+  assert.equal(status.headers["x-xmesh-control-version"], "2.0");
   validate("control-status", "StatusResponse", status.body);
-  validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v1/peers")).body);
-  validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v1/sessions")).body);
+  validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v2/peers")).body);
+  validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v2/sessions")).body);
   validate("control-endpoint", "ControlEndpointFile", k.manifest());
 });
 
 test("drain follows RUL-16 and every answer validates", async () => {
-  const keep = await call(k.endpoint, "POST", "/v1/drain", { mode: "keep" });
+  const keep = await call(k.endpoint, "POST", "/v2/drain", { mode: "keep" });
   validate("control-drain", "DrainResponse", keep.body);
-  const again = await call(k.endpoint, "POST", "/v1/drain", {});
+  const again = await call(k.endpoint, "POST", "/v2/drain", {});
   assert.deepEqual((again.body as { drain: unknown }).drain, (keep.body as { drain: unknown }).drain, "repeat keep is a no-op");
-  const kill = await call(k.endpoint, "POST", "/v1/drain", { mode: "kill" });
+  const kill = await call(k.endpoint, "POST", "/v2/drain", { mode: "kill" });
   assert.equal((kill.body as { drain: { mode: string; since: string } }).drain.mode, "kill");
   assert.equal((kill.body as { drain: { since: string } }).drain.since, (keep.body as { drain: { since: string } }).drain.since, "since is kept on upgrade");
-  const down = await call(k.endpoint, "POST", "/v1/drain", { mode: "keep" });
+  const down = await call(k.endpoint, "POST", "/v2/drain", { mode: "keep" });
   assert.equal(down.status, 409);
   validate("control-error", "ControlError", down.body);
   assert.equal((down.body as { reason: string }).reason, "drain_downgrade");
-  const resumed = await call(k.endpoint, "POST", "/v1/resume");
+  const resumed = await call(k.endpoint, "POST", "/v2/resume");
   validate("control-drain", "DrainResponse", resumed.body);
   assert.equal((resumed.body as { drain: { draining: boolean } }).drain.draining, false);
-  assert.equal((await call(k.endpoint, "POST", "/v1/resume")).status, 200, "resume when not draining is a no-op");
+  assert.equal((await call(k.endpoint, "POST", "/v2/resume")).status, 200, "resume when not draining is a no-op");
 });
 
 test("errors are ControlError with the contract's HTTP status", async () => {
   for (const [method, url, body, headers, want] of [
-    ["POST", "/v1/drain", { mode: "nope" }, {}, 400],
-    ["POST", "/v1/drain", { bogus: 1 }, {}, 400],
-    ["GET", "/v1/status", undefined, { Origin: "http://evil.example" }, 403],
+    ["POST", "/v2/drain", { mode: "nope" }, {}, 400],
+    ["POST", "/v2/drain", { bogus: 1 }, {}, 400],
+    ["GET", "/v2/status", undefined, { Origin: "http://evil.example" }, 403],
     ["GET", "/v1/nothing", undefined, {}, 404],
   ] as const) {
     const r = await call(k.endpoint, method, url, body, headers);
@@ -134,11 +134,11 @@ test("errors are ControlError with the contract's HTTP status", async () => {
 test("a capability the kernel does not advertise answers 501 not_implemented", async () => {
   const partial = await FakeKernel.start({ capabilities: ["status"] });
   try {
-    const r = await call(partial.endpoint, "GET", "/v1/peers");
+    const r = await call(partial.endpoint, "GET", "/v2/peers");
     assert.equal(r.status, 501);
     assert.equal((r.body as { error: string }).error, "not_implemented");
     validate("control-error", "ControlError", r.body);
-    assert.equal((await call(partial.endpoint, "GET", "/v1/status")).status, 200);
+    assert.equal((await call(partial.endpoint, "GET", "/v2/status")).status, 200);
   } finally {
     await partial.stop();
   }
@@ -186,7 +186,7 @@ test("a Last-Event-ID from another boot or from before the retained history gets
 test("a ping comment keeps an idle stream alive", async () => {
   const raw = await new Promise<string>((resolve) => {
     let text = "";
-    const req = http.request({ socketPath: k.endpoint, path: "/v1/events" }, (res) => {
+    const req = http.request({ socketPath: k.endpoint, path: "/v2/events" }, (res) => {
       res.setEncoding("utf8");
       res.on("data", (c: string) => (text += c));
       setTimeout(() => {
@@ -202,44 +202,44 @@ test("a ping comment keeps an idle stream alive", async () => {
 
 test("routes the UI calls exist in the contract route table with the capability the UI checks", () => {
   const find = (m: string, p: string) => CONTROL_ROUTES.find((r) => r.method === m && r.path === p);
-  assert.equal(find("GET", "/v1/status")?.capability, "status");
-  assert.equal(find("GET", "/v1/peers")?.capability, "peers");
-  assert.equal(find("GET", "/v1/events")?.capability, "events");
-  assert.equal(find("POST", "/v1/drain")?.capability, "drain");
-  assert.equal(find("POST", "/v1/resume")?.capability, "drain");
-  assert.equal(find("POST", "/v1/resume")?.body, null, "resume takes no body");
-  assert.equal(find("PUT", "/v1/gateway")?.capability, "gateway");
-  assert.equal(find("PUT", "/v1/gateway")?.body, "GatewayUpdateRequest");
-  assert.equal(find("PUT", "/v1/gateway")?.response, "GatewayUpdateResponse");
+  assert.equal(find("GET", "/v2/status")?.capability, "status");
+  assert.equal(find("GET", "/v2/peers")?.capability, "peers");
+  assert.equal(find("GET", "/v2/events")?.capability, "events");
+  assert.equal(find("POST", "/v2/drain")?.capability, "drain");
+  assert.equal(find("POST", "/v2/resume")?.capability, "drain");
+  assert.equal(find("POST", "/v2/resume")?.body, null, "resume takes no body");
+  assert.equal(find("PUT", "/v2/gateway")?.capability, "gateway");
+  assert.equal(find("PUT", "/v2/gateway")?.body, "GatewayUpdateRequest");
+  assert.equal(find("PUT", "/v2/gateway")?.response, "GatewayUpdateResponse");
   for (const t of ["hello", "reset", "status", "peer", "call", "session", "warning", "config", "lifecycle"]) {
     assert.ok((CONTROL_EVENT_TYPES as readonly string[]).includes(t), t);
   }
 });
 
-test("PUT /v1/gateway: the reach replacement validates, applies a listen change without a restart, and the status follows", async () => {
+test("PUT /v2/gateway: the reach replacement validates, applies a listen change without a restart, and the status follows", async () => {
   const gw = await FakeKernel.start({ pingMs: 50, capabilities: ["status", "events", "peers", "sessions", "drain", "pats", "gateway"] });
   try {
-    const ok = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
+    const ok = await call(gw.endpoint, "PUT", "/v2/gateway", { listen: ":8080", access: ["localhost", "lan", "10.0.0.0/8"], hosts: ["xmesh.home.example"] });
     assert.equal(ok.status, 200);
     validate("control-gateway", "GatewayUpdateResponse", ok.body);
     assert.equal((ok.body as { restart_required: boolean }).restart_required, false, "access and hosts apply at once");
     assert.deepEqual((ok.body as { apply_errors: unknown[] }).apply_errors, []);
-    const status = await call(gw.endpoint, "GET", "/v1/status");
+    const status = await call(gw.endpoint, "GET", "/v2/status");
     validate("control-status", "StatusResponse", status.body);
     const info = (status.body as { gateway: { access: string[]; hosts: string[]; addresses: { kind: string; url: string }[] } }).gateway;
     assert.deepEqual(info.access, ["localhost", "lan", "10.0.0.0/8"]);
     assert.deepEqual(info.hosts, ["xmesh.home.example"]);
     assert.ok(info.addresses.some((a) => a.kind === "host" && a.url === "http://xmesh.home.example:8080/mcp"));
 
-    const loopback = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
+    const loopback = await call(gw.endpoint, "PUT", "/v2/gateway", { listen: "127.0.0.1:8080", access: ["localhost"], hosts: [] });
     validate("control-gateway", "GatewayUpdateResponse", loopback.body);
     assert.equal((loopback.body as { restart_required: boolean }).restart_required, false, "a listen change applies at once");
 
-    const bad = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["192.168.1.999"], hosts: [] });
+    const bad = await call(gw.endpoint, "PUT", "/v2/gateway", { listen: ":8080", access: ["192.168.1.999"], hosts: [] });
     assert.equal(bad.status, 422);
     validate("control-error", "ControlError", bad.body);
     assert.equal((bad.body as { error: string }).error, "config_invalid");
-    const hostIp = await call(gw.endpoint, "PUT", "/v1/gateway", { listen: ":8080", access: ["localhost"], hosts: ["192.168.1.5"] });
+    const hostIp = await call(gw.endpoint, "PUT", "/v2/gateway", { listen: ":8080", access: ["localhost"], hosts: ["192.168.1.5"] });
     assert.equal(hostIp.status, 422, "an IP address is not a host name");
   } finally {
     await gw.stop();

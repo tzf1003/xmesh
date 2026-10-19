@@ -166,7 +166,7 @@ func TestPairingRejectsWrongExpectedDevice(t *testing.T) {
 	url := servePairing(t, b)
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: a.BootstrapTLS()}}
 	defer client.CloseIdleConnections()
-	if _, err := a.PairWith(t.Context(), client, url, password, identity(t).ID); !errors.Is(err, ErrPairProof) {
+	if _, err := a.PairWith(t.Context(), client, url, password, identity(t).ID); !errors.Is(err, ErrIdentityMismatch) {
 		t.Fatal(err)
 	}
 	if len(a.trust.Snapshot()) != 0 || len(b.trust.Snapshot()) != 0 {

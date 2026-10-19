@@ -17,10 +17,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
 	"github.com/tzf1003/xmesh/internal/devicelink"
@@ -75,6 +77,7 @@ type Node struct {
 	lock           *os.File
 	probes         chan Candidate
 	probing        map[string]bool
+	auditLog       atomic.Pointer[audit.Logger]
 }
 
 func Open(ctx context.Context, c *config.Config, stateDir string) (*Node, error) {
@@ -118,7 +121,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
 	n.directory = device.NewDirectory(ctx, trust, id.ID)
-	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
+	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
 		n.mu.Lock()
 		accept := n.accept
 		n.mu.Unlock()
@@ -155,6 +158,30 @@ func (n *Node) Pairing() *device.Pairing     { return n.pairing }
 func (n *Node) Directory() *device.Directory { return n.directory }
 func (n *Node) Links() *devicelink.Manager   { return n.links }
 
+type ProviderStatus struct {
+	Kind           device.PathKind
+	Enabled, Ready bool
+	Error          string
+}
+
+func (n *Node) ProviderStatuses() []ProviderStatus {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	result := []ProviderStatus{}
+	for _, kind := range []device.PathKind{device.LAN, device.Tailnet} {
+		enabled := n.cfg.LANEnabled()
+		if kind == device.Tailnet {
+			enabled = n.cfg.TailnetEnabled()
+		}
+		status := ProviderStatus{Kind: kind, Enabled: enabled}
+		if p := n.providers[kind]; p != nil {
+			status.Ready, status.Error = p.ready, p.err
+		}
+		result = append(result, status)
+	}
+	return result
+}
+
 func (n *Node) Self(context.Context) (identity.Principal, error) {
 	return identity.Principal{Node: n.identity.ID, Tags: []string{"tag:peer"}}, nil
 }
@@ -182,6 +209,10 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 			if path.Reachable {
 				online = true
 			}
+		}
+		if d.IdentityConflict {
+			online = false
+			a.State = "identity_conflict"
 		}
 		peers = append(peers, mesh.Peer{ID: d.DeviceID, Name: d.Alias, Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name})
 	}
@@ -234,12 +265,26 @@ func (n *Node) Candidates() []Candidate {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	result := []Candidate{}
+	seen := map[string]bool{}
+	for _, trusted := range n.trust.Snapshot() {
+		for _, hint := range trusted.Hints {
+			generation, enabled := n.directory.Provider(hint.Kind)
+			if !enabled {
+				continue
+			}
+			key := string(hint.Kind) + "|" + hint.Address
+			seen[key] = true
+			result = append(result, Candidate{Name: trusted.Document.Name, DeviceID: trusted.Document.DeviceID, Kind: hint.Kind, Address: hint.Address, Generation: generation})
+		}
+	}
 	for key, c := range n.candidates {
 		if time.Now().After(c.ExpiresAt) {
 			delete(n.candidates, key)
 			continue
 		}
-		result = append(result, c)
+		if !seen[key] {
+			result = append(result, c)
+		}
 	}
 	slices.SortFunc(result, func(a, b Candidate) int {
 		return strings.Compare(a.DeviceID+string(a.Kind)+a.Address, b.DeviceID+string(b.Kind)+b.Address)
@@ -306,6 +351,13 @@ func (n *Node) PairWith(ctx context.Context, kind device.PathKind, address, pass
 	defer client.CloseIdleConnections()
 	doc, err := n.pairing.PairWith(ctx, client, strings.TrimSuffix(address, "/"), password, expected)
 	if err != nil {
+		return device.Document{}, err
+	}
+	trusted, ok := n.trust.Find(doc.DeviceID)
+	if !ok {
+		return device.Document{}, device.ErrUntrusted
+	}
+	if err := n.trust.RememberPath(ctx, doc.DeviceID, trusted.Generation, device.PathHint{Kind: kind, Address: strings.TrimSuffix(address, "/")}); err != nil {
 		return device.Document{}, err
 	}
 	generation, enabled := n.directory.Provider(kind)
@@ -480,6 +532,7 @@ func (n *Node) runProvider(ctx context.Context, kind device.PathKind, p *provide
 		} else {
 			err = n.runTailnet(ctx, p)
 		}
+		n.retireProvider(kind, p)
 		n.mu.Lock()
 		p.ready = false
 		if err != nil {
@@ -502,6 +555,20 @@ func (n *Node) runProvider(ctx context.Context, kind device.PathKind, p *provide
 	}
 }
 
+// Retire the generation before closing listeners: upgraded WebSockets are detached
+// from http.Server, and their in-flight handshakes must not commit after shutdown.
+func (n *Node) retireProvider(kind device.PathKind, p *provider) {
+	n.mu.Lock()
+	generation, enabled := n.directory.Provider(kind)
+	if enabled && generation == p.generation {
+		p.generation++
+		_ = n.directory.SetProvider(kind, p.generation, false)
+	}
+	p.ready = false
+	n.mu.Unlock()
+	n.links.DisablePath(kind)
+}
+
 func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, listener net.Listener, discovery func(context.Context)) error {
 	server := &http.Server{Handler: n.Handler(kind), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	listener = tls.NewListener(listener, n.pairing.ServerTLS())
@@ -520,15 +587,16 @@ func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, lis
 		err = ctx.Err()
 	case err = <-done:
 	}
+	n.retireProvider(kind, p)
 	cancel()
 	_ = server.Close()
 	_ = listener.Close()
 	<-discoveryDone
-	n.links.DisablePath(kind)
 	return err
 }
 
 func (n *Node) runLAN(ctx context.Context, p *provider) error {
+	generation := p.generation
 	iface, ip, err := mesh.SelectLANInterface(p.cfg.LAN.Interface)
 	if err != nil {
 		return err
@@ -567,10 +635,10 @@ func (n *Node) runLAN(ctx context.Context, p *provider) error {
 			}
 		}
 	}()
-	return n.serve(child, device.LAN, p, listener, func(ctx context.Context) { n.browseLAN(ctx, p, iface, ip) })
+	return n.serve(child, device.LAN, p, listener, func(ctx context.Context) { n.browseLAN(ctx, p, generation, iface, ip) })
 }
 
-func (n *Node) browseLAN(ctx context.Context, p *provider, iface net.Interface, ip net.IP) {
+func (n *Node) browseLAN(ctx context.Context, p *provider, generation uint64, iface net.Interface, ip net.IP) {
 	for ctx.Err() == nil {
 		round, cancel := context.WithTimeout(ctx, 10*time.Second)
 		var entries <-chan *mdns.Entry
@@ -601,7 +669,7 @@ func (n *Node) browseLAN(ctx context.Context, p *provider, iface net.Interface, 
 						continue
 					}
 					now := time.Now()
-					c := Candidate{Name: values["name"], DeviceID: id, Kind: device.LAN, Address: "https://" + net.JoinHostPort(addr.String(), fmt.Sprint(entry.Port)), SeenAt: now, ExpiresAt: now.Add(30 * time.Second), Generation: p.generation}
+					c := Candidate{Name: values["name"], DeviceID: id, Kind: device.LAN, Address: "https://" + net.JoinHostPort(addr.String(), fmt.Sprint(entry.Port)), SeenAt: now, ExpiresAt: now.Add(30 * time.Second), Generation: generation}
 					n.recordCandidate(ctx, c)
 				}
 			}
@@ -609,7 +677,7 @@ func (n *Node) browseLAN(ctx context.Context, p *provider, iface net.Interface, 
 	next:
 		// Explicitly paired addresses remain candidates when multicast discovery is disabled.
 		for _, c := range n.Candidates() {
-			if c.Kind == device.LAN && c.Generation == p.generation {
+			if c.Kind == device.LAN && c.Generation == generation {
 				n.probe(ctx, c)
 			}
 		}
@@ -626,7 +694,7 @@ func (n *Node) recordCandidate(ctx context.Context, c Candidate) {
 }
 
 func (n *Node) enqueueProbe(c Candidate) {
-	key := string(c.Kind) + "|" + c.Address
+	key := probeKey(c)
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.closed || n.probing[key] {
@@ -638,6 +706,8 @@ func (n *Node) enqueueProbe(c Candidate) {
 	default:
 	}
 }
+
+func probeKey(c Candidate) string { return c.DeviceID + "|" + string(c.Kind) + "|" + c.Address }
 
 func (n *Node) probeWorker() {
 	for {
@@ -651,13 +721,14 @@ func (n *Node) probeWorker() {
 				n.probe(n.ctx, c)
 			}
 			n.mu.Lock()
-			delete(n.probing, string(c.Kind)+"|"+c.Address)
+			delete(n.probing, probeKey(c))
 			n.mu.Unlock()
 		}
 	}
 }
 
 func (n *Node) runTailnet(ctx context.Context, p *provider) error {
+	generation := p.generation
 	cfg := p.cfg.Tailnet
 	server := &tsnet.Server{Dir: filepath.Join(n.stateDir, "network", "tsnet"), Hostname: n.name, ControlURL: cfg.ControlURL, Ephemeral: cfg.Ephemeral, Logf: func(string, ...any) {}, UserLogf: func(string, ...any) {}}
 	if cfg.Ephemeral {
@@ -675,6 +746,15 @@ func (n *Node) runTailnet(ctx context.Context, p *provider) error {
 		return err
 	}
 	defer server.Close()
+	if cfg.Ephemeral {
+		defer func() {
+			logout, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if lc, err := server.LocalClient(); err == nil {
+				_ = lc.Logout(logout)
+			}
+		}()
+	}
 	n.mu.Lock()
 	p.ts = server
 	n.mu.Unlock()
@@ -697,7 +777,7 @@ func (n *Node) runTailnet(ctx context.Context, p *provider) error {
 						}
 						for _, ip := range peer.TailscaleIPs {
 							// Identity is learned over TLS, never inferred from the Tailnet node ID or name.
-							n.enqueueProbe(Candidate{Kind: device.Tailnet, Generation: p.generation, Address: "https://" + net.JoinHostPort(ip.String(), "7433")})
+							n.enqueueProbe(Candidate{Kind: device.Tailnet, Generation: generation, Address: "https://" + net.JoinHostPort(ip.String(), "7433")})
 						}
 					}
 				}
