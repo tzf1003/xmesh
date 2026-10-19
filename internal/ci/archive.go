@@ -108,7 +108,12 @@ func extractTarGz(archive string, root *os.Root, links *[]string) error {
 		case tar.TypeLink:
 			var from string
 			if from, err = inside(".", h.Linkname); err == nil {
-				err = root.Link(from, target)
+				if err = checkLinkParents(root, target); err == nil {
+					err = root.Link(from, target)
+					if err == nil {
+						*links = append(*links, target)
+					}
+				}
 			}
 		default:
 			// Devices, fifos and the like have no place in a runner package.
@@ -130,10 +135,27 @@ func makeSymlink(root *os.Root, target, link string) error {
 	if err := root.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
+	if err := checkLinkParents(root, target); err != nil {
+		return err
+	}
 	if err := root.Remove(target); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return root.Symlink(link, target)
+}
+
+// Keep tracked link names attached to their actual parent directories through final validation.
+func checkLinkParents(root *os.Root, target string) error {
+	for parent := filepath.Dir(target); parent != "."; parent = filepath.Dir(parent) {
+		st, err := root.Lstat(parent)
+		if err != nil {
+			return err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("压缩包里的链接父目录是符号链接: %q", parent)
+		}
+	}
+	return nil
 }
 
 func extractZip(archive string, root *os.Root) error {

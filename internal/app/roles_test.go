@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -358,7 +359,10 @@ type partialGatewayNetwork struct {
 	mesh.Network
 	address     string
 	unavailable atomic.Bool
+	multiPath   bool
 }
+
+func (n *partialGatewayNetwork) MultiPath() bool { return n.multiPath }
 
 func (n *partialGatewayNetwork) ListenPort(int) (net.Listener, error) {
 	if n.unavailable.Load() {
@@ -368,22 +372,28 @@ func (n *partialGatewayNetwork) ListenPort(int) (net.Listener, error) {
 }
 
 func Test_GatewayRolePreservesPartialAvailabilityOnFailedRetry(t *testing.T) {
-	for _, failedEndpoint := range []string{"os", "tailnet"} {
-		t.Run(failedEndpoint, func(t *testing.T) {
+	for _, scenario := range []struct {
+		failedEndpoint, mode string
+		multiPath            bool
+	}{
+		{"os", "tailnet", false}, {"tailnet", "tailnet", false},
+		{"os", "", true}, {"tailnet", "", true},
+	} {
+		t.Run(fmt.Sprintf("%s-%s-%t", scenario.failedEndpoint, scenario.mode, scenario.multiPath), func(t *testing.T) {
 			osAddress, tailnetAddress := address(t), address(t)
 			_, port, _ := net.SplitHostPort(osAddress)
 			listen := "0.0.0.0:" + port
 			cfg := parseConfig(t, []string{"gateway"}, listen)
-			network := &partialGatewayNetwork{address: tailnetAddress}
+			network := &partialGatewayNetwork{address: tailnetAddress, multiPath: scenario.multiPath}
 			deps := gatewayDepsFor(t, cfg)
-			deps.mode, deps.network = "tailnet", network
+			deps.mode, deps.network = scenario.mode, network
 			role, err := startGatewayRole(deps, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(role.stop)
 			idx, surviving := 0, tailnetAddress
-			if failedEndpoint == "tailnet" {
+			if scenario.failedEndpoint == "tailnet" {
 				idx, surviving = 1, osAddress
 				network.unavailable.Store(true)
 			}
@@ -397,7 +407,7 @@ func Test_GatewayRolePreservesPartialAvailabilityOnFailedRetry(t *testing.T) {
 				return role.failed && len(role.bound) == 1
 			})
 			var blocker net.Listener
-			if failedEndpoint == "os" {
+			if scenario.failedEndpoint == "os" {
 				blocker, err = net.Listen("tcp", listen)
 				if err != nil {
 					t.Fatal(err)

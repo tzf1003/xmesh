@@ -165,7 +165,7 @@ func waitKernelExit(e control.Endpoint, limit time.Duration) error {
 func waitKernelStart(dir string, old control.Endpoint, started time.Time, limit time.Duration) error {
 	deadline := time.Now().Add(limit)
 	for {
-		if e, err := control.ReadEndpoint(dir); err == nil && e.StartedAt.After(old.StartedAt.Time) && !e.StartedAt.Before(started.Add(-2*time.Second)) {
+		if e, err := control.ReadEndpoint(dir); err == nil && e.StartedAt.After(old.StartedAt.Time) && !e.StartedAt.Before(started.Truncate(time.Millisecond)) {
 			ctx, cancel := context.WithDeadline(context.Background(), deadline)
 			r, err := control.NewClient(e).Do(ctx, "GET", "/v2/status", nil, nil)
 			cancel()

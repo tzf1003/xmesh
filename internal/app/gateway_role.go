@@ -151,11 +151,7 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 		return nil, err
 	}
 	out := []net.Listener{listener}
-	multiPath := false
-	if network, ok := r.deps.network.(interface{ MultiPath() bool }); ok {
-		multiPath = network.MultiPath()
-	}
-	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && (r.deps.mode == "tailnet" || multiPath) && !gatewayLoopbackOnly(listen) {
+	if tn, ok := r.tailnetListener(listen); ok {
 		tailnet, err := tn.ListenPort(gatewayPort(listen))
 		if err != nil {
 			_ = listener.Close()
@@ -166,6 +162,15 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 	return out, nil
 }
 
+func (r *gatewayRole) tailnetListener(listen string) (tailnetGatewayListener, bool) {
+	multiPath := false
+	if network, ok := r.deps.network.(interface{ MultiPath() bool }); ok {
+		multiPath = network.MultiPath()
+	}
+	tn, ok := r.deps.network.(tailnetGatewayListener)
+	return tn, ok && (r.deps.mode == "tailnet" || multiPath) && !gatewayLoopbackOnly(listen)
+}
+
 // restore binds each endpoint independently so a failed endpoint cannot discard a healthy one.
 func (r *gatewayRole) restore(listen string) ([]net.Listener, error) {
 	var bound []net.Listener
@@ -173,7 +178,7 @@ func (r *gatewayRole) restore(listen string) ([]net.Listener, error) {
 	if err == nil {
 		bound = append(bound, listener)
 	}
-	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && r.deps.mode == "tailnet" && !gatewayLoopbackOnly(listen) {
+	if tn, ok := r.tailnetListener(listen); ok {
 		tailnet, tailnetErr := tn.ListenPort(gatewayPort(listen))
 		if tailnetErr == nil {
 			bound = append(bound, tailnet)

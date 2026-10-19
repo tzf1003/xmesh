@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,35 @@ import (
 	"github.com/tzf1003/xmesh/internal/control"
 	"golang.org/x/sys/windows"
 )
+
+func Test_KernelStartRejectsEndpointBeforeRestart(t *testing.T) {
+	dir := t.TempDir()
+	l, bound, err := control.Listen(control.ListenOptions{StateDir: dir, Node: "restart-freshness-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})}
+	go func() { _ = server.Serve(l) }()
+	defer server.Close()
+	started := time.Now()
+	endpoint := v2.ControlEndpointFile{APIVersion: v2.APIVersion, PID: os.Getpid(), Transport: bound.Transport, Endpoint: bound.Address, StartedAt: v2.At(started.Add(-time.Second))}
+	if err := control.WriteEndpoint(dir, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitKernelStart(dir, control.Endpoint{}, started, 20*time.Millisecond); err == nil {
+		t.Fatal("reachable endpoint from before the restart was accepted")
+	}
+	endpoint.StartedAt = v2.At(started)
+	if err := control.WriteEndpoint(dir, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitKernelStart(dir, control.Endpoint{}, started, time.Second); err != nil {
+		t.Fatal("fresh endpoint at serialized millisecond precision was rejected", err)
+	}
+}
 
 func Test_TaskStateDirectory(t *testing.T) {
 	for _, tc := range []struct{ name, args, cwd, want string }{

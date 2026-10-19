@@ -356,3 +356,60 @@ func Test_ExtractPreservesExistingJobWorkspaceLinks(t *testing.T) {
 		t.Fatalf("workspace link changed: %q %v", target, err)
 	}
 }
+
+func Test_ExtractValidatesHardlinkedSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support hard links to symlink inodes")
+	}
+	for _, tc := range []struct {
+		name, cloned string
+		safe         bool
+	}{
+		{"relocated escape", "clone", false},
+		{"same parent", "sub/clone", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			archive := filepath.Join(t.TempDir(), "hardlinks.tar.gz")
+			f, err := os.Create(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gz := gzip.NewWriter(f)
+			tw := tar.NewWriter(gz)
+			for _, h := range []*tar.Header{
+				{Name: "sub", Typeflag: tar.TypeDir, Mode: 0755},
+				{Name: "file", Typeflag: tar.TypeReg, Mode: 0644},
+				{Name: "sub/link", Typeflag: tar.TypeSymlink, Linkname: "../file", Mode: 0755},
+				{Name: tc.cloned, Typeflag: tar.TypeLink, Linkname: "sub/link", Mode: 0755},
+				{Name: "sub/link", Typeflag: tar.TypeReg, Mode: 0644},
+			} {
+				if err := tw.WriteHeader(h); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := gz.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatal(err)
+			}
+			dst := t.TempDir()
+			err = Extract(archive, dst)
+			if !tc.safe {
+				if err == nil {
+					t.Fatal("hardlink clone escaped final validation")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.ReadFile(filepath.Join(dst, tc.cloned)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
