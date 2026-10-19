@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -17,11 +18,27 @@ import accept_collect  # noqa: E402
 import accept_net  # noqa: E402
 import accept_pty_budget  # noqa: E402
 import accept_windows_l2  # noqa: E402
+import smoke_local  # noqa: E402
 
 
 def generate(*args):
     done = subprocess.run([sys.executable, str(HERE / "accept_config.py"), *args], capture_output=True, text=True)
     return done.returncode, done.stdout, done.stderr
+
+
+class GatewayTokenDiscovery(unittest.TestCase):
+    def test_uses_configured_path_after_interrupted_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = pathlib.Path(tmp)
+            (state / "pats").mkdir()
+            (state / "pats" / "default.token").write_text("orphaned-token")
+            actual = state / "pats" / "default-recovered.token"
+            actual.write_text("active-token")
+            response = json.dumps({"pats": [{"name": "default", "token_file": str(actual)}]}).encode()
+            with mock.patch.object(smoke_local.subprocess, "check_output", return_value=response) as cli:
+                self.assertEqual(smoke_local.wait_for_default_token("xmesh", state), "active-token")
+                self.assertIn("pats", cli.call_args.args[0])
+                self.assertIn(str(state), cli.call_args.args[0])
 
 
 class AcceptConfig(unittest.TestCase):
