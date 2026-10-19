@@ -106,6 +106,7 @@ type HostStatus struct {
 	PID       int    `json:"pid"`
 	Version   string `json:"version"`
 	NativePID int    `json:"native_pid"`
+	Suspended bool   `json:"suspended"`
 }
 
 func (c *Client) HostStatus(ctx context.Context) (HostStatus, error) {
@@ -166,6 +167,10 @@ func (c *Client) Release(ctx context.Context, r Execution) error {
 
 // Authorize is a local setup operation and is never registered as an MCP tool.
 func (c *Client) Authorize(ctx context.Context) error { return c.call(ctx, "authorize", nil, nil) }
+func (c *Client) EmergencyStop(ctx context.Context) error {
+	return c.call(ctx, "emergency-stop", nil, nil)
+}
+func (c *Client) ResumeHost(ctx context.Context) error { return c.call(ctx, "resume", nil, nil) }
 func (c *Client) Close() error {
 	c.closeOnce.Do(func() {
 		c.once.Do(func() { close(c.done) })

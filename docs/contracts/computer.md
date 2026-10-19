@@ -64,3 +64,5 @@ Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道�
 桌面 UI 更新在替换安装包之前停止运行中的 Host，并确认 Host 与已知原生子进程均退出。更新记录保存是否需要恢复 Host；新应用先恢复 Host 并核对版本，再启动节点。安装交接失败时恢复已停止的 Host；恢复失败记为更新验收失败。未运行的 Host 保持停止。
 
 本机显式执行 `xmesh computer host --authorize` 请求系统权限。普通远程请求遇到未授权状态直接失败。权限初始化和自动启动仍按三端验收清单逐项验证。
+
+`xmesh computer emergency-stop` 通过用户 Host 的受保护本机 IPC 紧急停止画面和输入，关闭当前原生执行器并拒绝后续创建。此操作独立于管理内核，暂停标记写入用户 Host 状态目录，Host 重启后继续生效。只有本机 `xmesh computer resume` 或面板恢复操作清除此状态；恢复后的执行器生成新 epoch，旧会话失效。UI 紧急快捷键同时请求内核暂停与直接 Host 停止。普通“暂停 Agent”仅暂停控制，紧急停止同时终止观察。

@@ -29,7 +29,7 @@ import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
-import { computerHostServices, runComputerHost } from "./computer-host";
+import { computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
@@ -247,7 +247,7 @@ async function start(): Promise<void> {
       await runBrowserLogin(config, state, controlUrl, (url) => platform.openExternal(url));
     },
   );
-  const panelService = new PanelService(controller, TEST_MODE ? async () => { calls.push({ op: "computer-setup" }); } : undefined);
+  const panelService = new PanelService(controller, TEST_MODE ? async () => { calls.push({ op: "computer-setup" }); } : undefined, TEST_MODE ? async () => { calls.push({ op: "computer-resume-host" }); } : undefined);
   const playground = new PlaygroundService(controller, {
     copy: (text) => clipboard.writeText(text),
     save: async (text) => {
@@ -290,6 +290,7 @@ async function start(): Promise<void> {
   });
   if (!TEST_MODE) globalShortcut.register("CommandOrControl+Alt+Shift+Escape", () => {
     void panelService.computer({ op: "pause", paused: true });
+    void emergencyStopComputerHost().catch((error: unknown) => notifyError(error instanceof Error ? error.message : String(error)));
   });
   updater.on("change", (state) => controller.setUpdate(state));
 

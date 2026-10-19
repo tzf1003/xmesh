@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,18 +31,19 @@ type Options struct {
 }
 
 type Broker struct {
-	mu       sync.Mutex
-	options  Options
-	provider computer.Provider
-	owner    string
-	last     time.Time
-	server   *http.Server
-	listener net.Listener
-	Endpoint string
-	stop     chan struct{}
-	done     chan struct{}
-	closed   bool
-	once     sync.Once
+	mu        sync.Mutex
+	options   Options
+	provider  computer.Provider
+	owner     string
+	last      time.Time
+	server    *http.Server
+	listener  net.Listener
+	Endpoint  string
+	stop      chan struct{}
+	done      chan struct{}
+	closed    bool
+	suspended bool
+	once      sync.Once
 }
 
 func Start(o Options) (*Broker, error) {
@@ -59,6 +61,16 @@ func Start(o Options) (*Broker, error) {
 		return nil, err
 	}
 	b := &Broker{options: o, listener: l, Endpoint: bound.Address, stop: make(chan struct{}), done: make(chan struct{})}
+	if marker, err := os.Lstat(filepath.Join(o.StateDir, "suspended")); err == nil {
+		if !marker.Mode().IsRegular() {
+			_ = l.Close()
+			return nil, fmt.Errorf("desktop suspension marker is invalid")
+		}
+		b.suspended = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		_ = l.Close()
+		return nil, err
+	}
 	if o.Authorize {
 		p, e := computer.StartAuthorizedProcess(o.HelperPath)
 		if e != nil {
@@ -84,7 +96,7 @@ func (b *Broker) watch() {
 		case now := <-t.C:
 			b.mu.Lock()
 			var p computer.Provider
-			if b.provider != nil && b.owner != "" && now.Sub(b.last) > 6*time.Second {
+			if b.owner != "" && now.Sub(b.last) > 6*time.Second {
 				p = b.provider
 				b.provider = nil
 				b.owner = ""
@@ -104,6 +116,9 @@ func (b *Broker) get(owner string) (computer.Provider, error) {
 	defer b.mu.Unlock()
 	if b.closed {
 		return nil, toolerr.New("desktop_unavailable", "桌面服务已退出")
+	}
+	if b.suspended {
+		return nil, toolerr.New("policy_denied", "本机已紧急停止桌面共享", "reason", "host_suspended")
 	}
 	if b.owner != "" && b.owner != owner {
 		return nil, toolerr.New("resource_busy", "此桌面已绑定另一节点", "reason", "desktop_bound")
@@ -168,11 +183,48 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 	if method == "status" {
 		state := computer.HostStatus{Running: true, PID: os.Getpid(), Version: b.options.Version}
 		b.mu.Lock()
+		state.Suspended = b.suspended
 		if process, ok := b.provider.(interface{ PID() int }); ok {
 			state.NativePID = process.PID()
 		}
 		b.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(state)
+		return
+	}
+	if method == "emergency-stop" || method == "resume" {
+		b.mu.Lock()
+		if b.closed {
+			b.mu.Unlock()
+			fail(toolerr.New("desktop_unavailable", "桌面服务已退出"))
+			return
+		}
+		var persist error
+		if method == "emergency-stop" {
+			persist = os.WriteFile(filepath.Join(b.options.StateDir, "suspended"), []byte("local emergency stop\n"), 0600)
+			b.suspended = true
+		} else {
+			persist = os.Remove(filepath.Join(b.options.StateDir, "suspended"))
+			if errors.Is(persist, os.ErrNotExist) {
+				persist = nil
+			}
+			if persist == nil {
+				b.suspended = false
+			}
+		}
+		var old computer.Provider
+		if b.suspended {
+			old = b.provider
+			b.provider = nil
+		}
+		b.mu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+		if persist != nil {
+			fail(toolerr.New("internal", "无法保存本机桌面共享状态", "op", "computer.suspend"))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"suspended": method == "emergency-stop"})
 		return
 	}
 	if method == "authorize" {

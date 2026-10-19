@@ -53,7 +53,7 @@ import {
 import { DENY_FILE_NAME } from "../shared/setup";
 import type { ControlClient } from "./client";
 import type { ShellController } from "./controller";
-import { setupComputerHost } from "./computer-host";
+import { resumeComputerHost, setupComputerHost } from "./computer-host";
 
 export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain" | "snapshot">;
 
@@ -96,7 +96,7 @@ function toError(e: unknown): ActionError {
 }
 
 export class PanelService {
-  constructor(private readonly controller: CapabilityClient, private readonly setupDesktop: () => Promise<void> = setupComputerHost) {}
+  constructor(private readonly controller: CapabilityClient, private readonly setupDesktop: () => Promise<void> = setupComputerHost, private readonly resumeDesktop: () => Promise<void> = resumeComputerHost) {}
 
   private async data<T>(capability: Parameters<CapabilityClient["requireCapable"]>[0], run: (c: ControlClient) => Promise<unknown>): Promise<DataResult<T>> {
     try {
@@ -356,7 +356,10 @@ export class PanelService {
       switch (request.op) {
         case "get": return client.call("GET", "/v1/computer");
         case "setup": await this.setupDesktop(); return client.call("GET", "/v1/computer");
-        case "pause": return client.call("POST", "/v1/computer/pause", { body: { paused: request.paused } });
+        case "pause": {
+          if (!request.paused) await this.resumeDesktop();
+          return client.call("POST", "/v1/computer/pause", { body: { paused: request.paused } });
+        }
         case "revoke": return client.call("POST", "/v1/computer/revoke", { body: { session_id: request.session_id } });
       }
     });

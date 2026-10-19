@@ -1,6 +1,10 @@
 package computer
 
-import "context"
+import (
+	"context"
+	"errors"
+	"github.com/tzf1003/xmesh/internal/toolerr"
+)
 
 // SetAuthorization installs the owning Agent's current tag/configuration check.
 // It is re-evaluated immediately before each queued input operation.
@@ -31,6 +35,10 @@ func (m *Manager) LocalState(ctx context.Context) LocalState {
 		if err != nil {
 			v.Info.State = "desktop_unavailable"
 			v.Info.Reason = errorCode(err)
+			var typed *toolerr.Error
+			if errors.As(err, &typed) && typed.Fields["reason"] == "host_suspended" {
+				v.Info.Reason = "host_suspended"
+			}
 		} else {
 			v.Info = info
 		}
@@ -40,6 +48,9 @@ func (m *Manager) LocalState(ctx context.Context) LocalState {
 	m.mu.Lock()
 	v.Enabled = m.settings.Enabled
 	v.Paused = m.paused
+	if v.Info.Reason == "host_suspended" {
+		v.Paused = true
+	}
 	v.PauseOnUserInput = m.settings.PauseOnUserInput
 	m.expireLocked()
 	for _, s := range m.sessions {

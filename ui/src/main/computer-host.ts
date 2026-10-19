@@ -7,6 +7,16 @@ import type { StopResult } from "./update/updater";
 export interface ComputerHostStatus { running: boolean; pid: number; version: string; native_pid?: number }
 export type ComputerHostCommand = "status" | "start" | "stop";
 
+/** Emergency stop reaches the user Host independently of kernel health. */
+export function emergencyStopComputerHost(binary: string = xmeshBinary()): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(binary, ["computer", "emergency-stop"], { timeout: 6000, windowsHide: true, maxBuffer: 64 * 1024 }, (error) => {
+      if (error) reject(new Error("本机桌面共享紧急停止失败"));
+      else resolve();
+    });
+  });
+}
+
 /** Lifecycle commands use a fixed program and argument list, never renderer data. */
 export function runComputerHost(command: ComputerHostCommand, binary: string = xmeshBinary()): Promise<ComputerHostStatus | void> {
   return new Promise((resolve, reject) => {
@@ -20,6 +30,15 @@ export function runComputerHost(command: ComputerHostCommand, binary: string = x
         } else if (result.ok === true) resolve();
         else throw new Error(result.error?.message ?? "桌面服务操作失败");
       } catch (e) { reject(e); }
+    });
+  });
+}
+
+export function resumeComputerHost(binary: string = xmeshBinary()): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(binary, ["computer", "resume"], { timeout: 6000, windowsHide: true, maxBuffer: 64 * 1024 }, (error) => {
+      if (error) reject(new Error("本机桌面共享恢复失败"));
+      else resolve();
     });
   });
 }

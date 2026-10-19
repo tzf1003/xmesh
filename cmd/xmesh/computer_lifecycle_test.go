@@ -114,9 +114,30 @@ func TestComputerInstalledHostLifecycle(t *testing.T) {
 	if err != nil || next.Epoch == "" || next.Epoch == before.Epoch {
 		t.Fatal("restart reused desktop epoch", next, err)
 	}
+	local := computer.NewClient(computer.EndpointForState(root))
+	defer local.Close()
+	if err := local.EmergencyStop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Info(ctx); err == nil {
+		t.Fatal("emergency stopped desktop remained reachable")
+	}
+	if err := run("restart"); err != nil {
+		t.Fatal(err)
+	}
+	wait(true)
+	if status, err := local.HostStatus(ctx); err != nil || !status.Suspended {
+		t.Fatal("restarting service resumed an emergency stopped desktop", status, err)
+	}
+	if err := local.ResumeHost(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Info(ctx); err != nil {
+		t.Fatal("explicit local resume", err)
+	}
 	if err := run("stop"); err != nil {
 		t.Fatal(err)
 	}
 	wait(false)
-	t.Log("installed user host started, supervised a native child, restarted with a new desktop epoch, and stopped")
+	t.Log("installed user host supervised native input, restarted with a new epoch, preserved emergency suspension until local resume, and stopped")
 }

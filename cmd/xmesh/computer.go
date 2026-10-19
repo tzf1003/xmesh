@@ -22,7 +22,7 @@ func computerCommand(args []string) error {
 		}
 	}
 	if len(args) == 0 || args[0] == "help" {
-		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup|install|start|stop|restart|uninstall [--json]\n      xmesh computer status|info|authorize [--endpoint 本机套接字或管道]")
+		fmt.Println("用法: xmesh computer host [--state-dir 目录] [--helper 执行器绝对路径] [--authorize]\n      xmesh computer setup|install|start|stop|restart|uninstall [--json]\n      xmesh computer status|info|authorize|emergency-stop|resume [--endpoint 本机套接字或管道]")
 		return nil
 	}
 	f := flag.NewFlagSet("computer "+args[0], flag.ContinueOnError)
@@ -40,6 +40,21 @@ func computerCommand(args []string) error {
 		*endpoint = computer.EndpointForState(*state)
 	}
 	switch args[0] {
+	case "emergency-stop", "resume":
+		c := computer.NewClient(*endpoint)
+		defer c.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var err error
+		if args[0] == "emergency-stop" {
+			err = c.EmergencyStop(ctx)
+		} else {
+			err = c.ResumeHost(ctx)
+		}
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]bool{"suspended": args[0] == "emergency-stop"})
 	case "host":
 		path := *helper
 		if path == "" {

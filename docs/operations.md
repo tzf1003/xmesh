@@ -553,3 +553,5 @@ CLI 对应步骤：`xmesh computer setup` 安装并启动当前用户的桌面�
 Windows SYSTEM 内核需要显式配置 `agent.computer.endpoint` 指向登录用户 SID 的 `\\.\pipe\xmesh-<SID>-computer` 管道，桌面 host 由该用户的登录任务启动。Linux 服务绑定 `graphical-session.target`；Wayland 还需要 RemoteDesktop 与 ScreenCast Portal、PipeWire，以及支持对应接口的桌面后端。Linux 二进制运行时依赖 libdbus、libxkbcommon 和 libpipewire。
 
 本机接管可在面板暂停 Agent，或执行 `xmesh control computer --action pause --node <节点名>`；`--action resume` 恢复，Agent 随后重新获取控制会话。紧急快捷键在面板应用运行期间有效。各平台实测进度见 [Computer 方案](design/19-computer.md)，工具参数见 [契约](contracts/computer.md)。
+
+内核不可用时，执行 `xmesh computer emergency-stop` 直接停止用户桌面 Host 的画面和输入共享；自定义用户目录使用 `--state-dir <目录>`。停止状态保留到 Host 重启之后。执行 `xmesh computer resume` 清除本机停止状态，再按需恢复节点控制；面板的恢复操作会依次恢复本机 Host 和内核。新的远程会话须重新截图和获取租约。
