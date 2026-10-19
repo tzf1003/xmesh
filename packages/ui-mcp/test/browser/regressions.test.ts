@@ -377,6 +377,16 @@ test("navigation policy allows subresources and denies off-origin documents", as
       "outside",
     );
     const allowedHits = hits;
+    // Image requests, such as a popup's favicon, are permitted subresources.
+    // Wait for completion before testing the document-navigation boundary.
+    await driver.page.evaluate((address) => new Promise<void>((resolve) => {
+      const image = new Image();
+      image.onload = image.onerror = () => resolve();
+      image.src = address + "/fixture-icon";
+      document.body.append(image);
+    }), outsideUrl);
+    assert.ok(outsideRequests.some(request => request.includes("/fixture-icon image")), JSON.stringify(outsideRequests));
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const forbidden = await driver.context.newPage();
     await assert.rejects(forbidden.goto(outsideUrl), /ERR_BLOCKED_BY_CLIENT/);
     await forbidden.close();

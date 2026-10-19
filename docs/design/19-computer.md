@@ -230,3 +230,11 @@ PR 合成提交的 Go 运行 39240797123 在 Ubuntu 的 Test_Gate2_TwoMCPClients
 macOS 已持有输入的释放路径允许原目标窗口消失，继续要求进程启动身份一致；正常投递仍校验窗口归属、位置及用户介入。纯 Swift 与 Rust 回归覆盖窗口消失及进程身份变化。Computer / Agent / Host 三包竞态检查通过，新增观察撤权与取消回归连续五次通过，Rust 十一项测试及 clippy、固定上游源码与 Swift 配方检查通过。
 
 最新发布构建经真实 MCP 在遮挡 AppKit 和 Electron 专用窗口分别完成七项输入、实际状态断言、去重 / 查询、续租和关闭，AppKit 另验证错误窗口按键投递被拒绝；独立指针、前台应用与 AX 窗口 / 控件身份监测均通过，两轮各记录零个硬件活动事件。原生 AppKit 拖动中撤销租约后返回 unknown，并实际收到按钮释放。验收临时文件现遵循 TMPDIR，本轮复用了外接盘目录。当前签名 0.0.8 产物的来源仍为 247350c，早于本轮修复；最终提交 CI 结果及正式产品升级后的业务恢复继续按各自证据记录。
+
+第三十一轮：新增真实发行版 Electron 升级脚本 accept-computer-electron-upgrade-macos.mjs。使用 Developer ID 签名、公证和装订的 0.0.8 / 0.0.9 包，在私有应用目录完成真实 DMG 替换；新 Electron 入口自身读取 pending.json，恢复已安装的临时业务节点与 Computer Host。核对应用 / 内核 / Host / native 的新 PID、内核与 Host 版本及新 desktop_epoch；升级前后实际 Gateway MCP sys.info 调用均成功，安装后签名 / 装订与全部测试资源清理通过。独立指针、前台应用及 AX 窗口 / 控件身份监测通过，记录零个硬件活动事件。
+
+此验收从产品 Updater 模块触发，应用入口与升级后恢复为真实发行代码；使用 background open 包装器传递隔离 user-data 与节点发现路径，尚未从菜单点击触发完整升级。服务升级前后均报告 permission_required，该轮不证明授权延续；已授权服务的延续仍由第二十二轮单独覆盖。0.0.9 产物对应 db9de5b 的运行时代码，应用与 DMG 公证均 Accepted；本机 Gatekeeper 仍报告 security disabled override。DiskImages 在外接 sparsebundle 内挂载返回权限被拒绝，验收改用 /tmp 挂载点，包与主要数据保留外接盘。
+
+db9de5b 的 macOS UI MCP 导航测试在 popup 重定向的请求计数断言失败，其他平台结果单列。新增测试请求类型诊断；本机 Chrome 与 CI 同版 Chromium 156.0.8078.4 各连续二十轮通过。原失败作业已请求重跑，原因尚未确认，最终门禁继续等待对应结果。
+
+合并核对时复用本地 master 的 7f83e06 导航夹具修复：允许的 fetch / image 子资源与被阻止的文档导航分别计数，未分类请求仍计入拒绝断言。新增显式图片请求，验证它实际到达服务端且不影响后续文档 / popup / iframe 拒绝检查；修复后的 CI 同版 Chromium 连续二十轮通过。升级脚本依据节点 manifest 的 Control API 主版本选择 Computer 路由，正式包升级和业务 MCP 复测通过。db9de5b 的第二次 CI 尝试被后续提交取代而取消，不能作为重跑通过。
