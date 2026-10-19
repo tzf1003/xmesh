@@ -405,6 +405,7 @@ export class Controller {
       child.stderr?.on("data", stdout);
       child.on("error", () => this.exited(s));
       child.on("exit", () => this.exited(s));
+      let openTimer: NodeJS.Timeout | undefined;
       try {
         const opened = await Promise.race([
           this.rpc(s, "open", {
@@ -414,17 +415,19 @@ export class Controller {
             config: this.config,
           }),
           new Promise<never>((_, reject) => {
-            const timer = setTimeout(
+            // Electron launch, fixture initialization and first-window readiness
+            // have separate deadlines. The whole workflow needs their budget.
+            openTimer = setTimeout(
               () =>
                 reject(
                   new UIError(
                     "preflight_failed",
-                    "application launch exceeded 30 seconds",
+                    "application initialization exceeded 90 seconds",
                   ),
                 ),
-              30000,
+              90000,
             );
-            timer.unref();
+            openTimer.unref();
           }),
         ]);
         s.versions = opened.versions;
@@ -441,6 +444,8 @@ export class Controller {
       } catch (error) {
         await this.stop(s);
         throw error;
+      } finally {
+        clearTimeout(openTimer);
       }
     } catch (error) {
       if (!assigned) for (const release of releases) release();
