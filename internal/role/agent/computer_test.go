@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -117,5 +118,30 @@ func TestComputerObserverTagCannotReserveControl(t *testing.T) {
 	}
 	if out := tool(t, c, "computer.open", map[string]any{"mode": "observe"}); out.IsError {
 		t.Fatal(out)
+	}
+}
+
+func TestComputerSchemasExposeSupportedActionsAndCoordinateRequirements(t *testing.T) {
+	specs := computerSpecs()
+	for _, example := range []struct {
+		tool, args string
+		valid      bool
+	}{
+		{"computer.open", `{"mode":"control","ttl_seconds":30}`, true},
+		{"computer.open", `{"mode":"operator"}`, false},
+		{"computer.open", `{"mode":"observe","ttl_seconds":601}`, false},
+		{"computer.observe", `{"session_id":"s","desktop_epoch":"e","max_width":8193}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"click","x":20,"y":30}]}`, true},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"click"}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"drag","x":20,"y":30}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"key","keys":[]}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"shell"}]}`, false},
+	} {
+		if err := specs[example.tool].validate(json.RawMessage(example.args)); (err == nil) != example.valid {
+			t.Fatal("computer contract validation", example.tool, example.args, err)
+		}
+	}
+	if description := specs["computer.act"].desc; !strings.Contains(description, "image pixel") || !strings.Contains(description, "unknown") {
+		t.Fatal("Agent action guidance omits observation or uncertainty semantics", description)
 	}
 }

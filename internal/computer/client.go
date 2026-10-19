@@ -111,6 +111,12 @@ type HostStatus struct {
 func (c *Client) HostStatus(ctx context.Context) (HostStatus, error) {
 	var status HostStatus
 	err := c.request(ctx, "status", nil, &status)
+	if errors.Is(err, io.EOF) && ctx.Err() == nil {
+		// A stop can close a reused pipe connection before its next HTTP response.
+		// Probe once on a fresh connection; only an absent OS endpoint means stopped.
+		c.transport.CloseIdleConnections()
+		err = c.request(ctx, "status", nil, &status)
+	}
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
 		return HostStatus{}, nil
 	}

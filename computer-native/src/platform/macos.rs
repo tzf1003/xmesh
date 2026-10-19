@@ -31,15 +31,15 @@ extern "C" {
     fn CGEventCreate(source: *const c_void) -> *mut c_void;
     fn CGEventGetLocation(event: *const c_void) -> Point;
     fn CGEventSetLocation(event: *mut c_void, point: Point);
-    fn CGEventCreateScrollWheelEvent(
+    fn CGEventCreateScrollWheelEvent2(
         source: *const c_void,
         units: u32,
         count: u32,
         wheel1: i32,
-        ...
+        wheel2: i32,
+        wheel3: i32,
     ) -> *mut c_void;
     fn CGEventPost(tap: u32, event: *const c_void);
-    fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
     fn CGEventGetIntegerValueField(event: *const c_void, field: u32) -> i64;
     fn CGEventTapCreate(
         tap: u32,
@@ -123,12 +123,11 @@ pub fn scroll(length: i32, axis: enigo::Axis) -> Result<(), &'static str> {
         } else {
             (0, length)
         };
-        let event = CGEventCreateScrollWheelEvent(std::ptr::null(), 1, 2, dy, dx, 0i32);
+        let event = CGEventCreateScrollWheelEvent2(std::ptr::null(), 1, 2, dy, dx, 0);
         if event.is_null() {
             return Err("input_failed");
         }
         CGEventSetLocation(event, location);
-        CGEventSetIntegerValueField(event, 42, super::INPUT_MARKER as i64);
         CGEventPost(0, event);
         CFRelease(event);
     }

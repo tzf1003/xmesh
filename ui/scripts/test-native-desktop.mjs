@@ -19,8 +19,10 @@ try {
     app.process().stdout.on("data", (chunk) => { output += chunk; for (const line of output.split("\n")) { try { const v = JSON.parse(line); if (v.endpoint) { clearTimeout(timer); resolve(v.endpoint); return; } } catch {} } });
   });
   await (await app.firstWindow()).bringToFront();
+  const command = process.argv.slice(2);
+  const [program, ...commandArgs] = command.length ? command : ["go", "test", "./internal/desktopbroker", "-run", "TestNative(InputFixture|UserIntervention)", "-v", "-count=1", "-timeout=90s"];
   const exit = await new Promise((resolve) => {
-    const child = spawn("go", ["test", "./internal/desktopbroker", "-run", "TestNative(InputFixture|UserIntervention)", "-v", "-count=1", "-timeout=90s"], { cwd: root, stdio: "inherit", env: { ...process.env, XMESH_TEST_COMPUTER_FIXTURE: endpoint, XMESH_TEST_COMPUTER_FIXTURE_TOKEN: token } });
+    const child = spawn(program, commandArgs, { cwd: root, stdio: "inherit", env: { ...process.env, XMESH_TEST_COMPUTER_FIXTURE: endpoint, XMESH_TEST_COMPUTER_FIXTURE_TOKEN: token } });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
   });

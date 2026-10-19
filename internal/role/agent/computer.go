@@ -101,7 +101,7 @@ func computerResult(out any, f *computer.Frame) *mcp.CallToolResult {
 func computerSpecs() map[string]spec {
 	str := func() map[string]any { return map[string]any{"type": "string"} }
 	integer := func() map[string]any { return map[string]any{"type": "integer"} }
-	region := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"x", "y", "width", "height"}, "properties": map[string]any{"x": integer(), "y": integer(), "width": integer(), "height": integer()}}
+	region := map[string]any{"type": "object", "description": "Crop relative to the selected display in the display's system coordinate units. Returned input coordinates are image pixels.", "additionalProperties": false, "required": []string{"x", "y", "width", "height"}, "properties": map[string]any{"x": map[string]any{"type": "integer", "minimum": 0}, "y": map[string]any{"type": "integer", "minimum": 0}, "width": map[string]any{"type": "integer", "minimum": 1}, "height": map[string]any{"type": "integer", "minimum": 1}}}
 	actionProps := map[string]any{}
 	for _, k := range strings.Fields("type button text") {
 		actionProps[k] = str()
@@ -109,17 +109,32 @@ func computerSpecs() map[string]spec {
 	for _, k := range strings.Fields("x y to_x to_y clicks delta_x delta_y duration_ms") {
 		actionProps[k] = integer()
 	}
-	actionProps["keys"] = map[string]any{"type": "array", "maxItems": 8, "items": str()}
-	action := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": actionProps}
+	actionProps["type"] = map[string]any{"type": "string", "enum": []string{"move", "click", "drag", "scroll", "key", "text", "wait"}}
+	for _, k := range strings.Fields("x y to_x to_y") {
+		actionProps[k] = map[string]any{"type": "integer", "minimum": 0, "description": "Pixel coordinate in the image returned by frame_id. The target converts cropping, scaling and display origin."}
+	}
+	actionProps["button"] = map[string]any{"type": "string", "enum": []string{"left", "middle", "right"}, "default": "left"}
+	actionProps["clicks"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 3, "description": "Click count; omitted or zero means one click."}
+	actionProps["duration_ms"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 2000, "description": "Finite drag or wait duration. Explicit durations in a batch total at most 4000 ms."}
+	for _, k := range []string{"delta_x", "delta_y"} {
+		actionProps[k] = map[string]any{"type": "integer", "minimum": -10000, "maximum": 10000, "description": "Discrete wheel steps; positive means right or down. The pointer moves to x,y before scrolling."}
+	}
+	actionProps["text"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 65536, "description": "Unicode text, limited to 64 KiB UTF-8. Uses native text input; clipboard permission is separate."}
+	actionProps["keys"] = map[string]any{"type": "array", "minItems": 1, "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 32}, "description": "One finite chord, pressed in order and released in reverse. Supports single characters, Control, Alt, Shift, Meta/Command/Win, Enter, Tab, Escape, Backspace, Delete, Space, arrows, Home, End, PageUp, PageDown and F1-F12."}
+	when := func(types []string, fields ...string) map[string]any {
+		return map[string]any{"if": map[string]any{"properties": map[string]any{"type": map[string]any{"enum": types}}}, "then": map[string]any{"required": fields}}
+	}
+	action := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": actionProps,
+		"allOf": []any{when([]string{"move", "click", "drag", "scroll"}, "x", "y"), when([]string{"drag"}, "to_x", "to_y"), when([]string{"key"}, "keys"), when([]string{"text"}, "text"), when([]string{"wait"}, "duration_ms")}}
 	definitions := map[string][3]string{
-		"computer.info":          {"查询用户桌面和系统权限", "", ""},
-		"computer.open":          {"打开观察或排他控制会话", "mode", "desktop_id mode ttl_seconds"},
-		"computer.observe":       {"获取桌面截图与图片像素坐标信息", "session_id desktop_epoch", "session_id desktop_epoch lease_token display_id max_width region"},
-		"computer.act":           {"执行有限桌面动作，超时后查询 action_status", "session_id desktop_epoch lease_token action_id actions", "session_id desktop_epoch lease_token action_id frame_id actions observe_after"},
-		"computer.action_status": {"查询桌面动作的执行状态", "session_id desktop_epoch action_id", "session_id desktop_epoch lease_token action_id"},
-		"computer.renew":         {"续期所属桌面会话", "session_id desktop_epoch", "session_id desktop_epoch lease_token ttl_seconds"},
-		"computer.close":         {"关闭所属桌面会话并释放输入", "session_id desktop_epoch", "session_id desktop_epoch lease_token"},
-		"computer.sessions":      {"列出所属桌面会话", "", ""},
+		"computer.info":          {"Inspect desktop availability, system permissions, desktop_epoch, displays and supported screenshot/input capabilities. Missing system permission requires local setup.", "", ""},
+		"computer.open":          {"Open an observation or exclusive control session. One controller owns the whole desktop, including all displays. Keep session_id, desktop_epoch and the control lease_token; renew before expiry and close when finished.", "mode", "desktop_id mode ttl_seconds"},
+		"computer.observe":       {"Capture the current desktop as native MCP image content plus frame metadata. Select a display if needed. Pointer actions must use the returned image pixel coordinates and frame_id. Observe again after UI changes.", "session_id desktop_epoch", "session_id desktop_epoch lease_token display_id max_width region"},
+		"computer.act":           {"Submit 1-8 finite mouse, keyboard, text or wait actions, with a five-second queue/execution budget. Pointer actions require a fresh frame_id and image pixel coordinates. Reuse action_id only for the identical request. After a lost response query action_status; unknown means observe before deciding what to do. executed means input was submitted: verify the business result in a new observation.", "session_id desktop_epoch lease_token action_id actions", "session_id desktop_epoch lease_token action_id frame_id actions observe_after"},
+		"computer.action_status": {"Query an accepted action_id after a lost response. States: accepted, executed, failed, unknown. executed counts the completed action prefix. For unknown, observe current application state before choosing another action.", "session_id desktop_epoch action_id", "session_id desktop_epoch lease_token action_id"},
+		"computer.renew":         {"Renew your own desktop session before expires_at. Control sessions also require the current lease_token. Expired sessions require opening a new session and observing again.", "session_id desktop_epoch", "session_id desktop_epoch lease_token ttl_seconds"},
+		"computer.close":         {"Close your desktop session and release its control authority and held input. Control sessions require the lease_token. Use this when the task finishes or you yield to a human.", "session_id desktop_epoch", "session_id desktop_epoch lease_token"},
+		"computer.sessions":      {"List only the current caller's live desktop sessions and expiry times.", "", ""},
 	}
 	out := map[string]spec{}
 	for name, d := range definitions {
@@ -131,6 +146,21 @@ func computerSpecs() map[string]spec {
 			if _, ok := props[k]; ok {
 				props[k] = integer()
 			}
+		}
+		if _, ok := props["ttl_seconds"]; ok {
+			props["ttl_seconds"] = map[string]any{"type": "integer", "minimum": 10, "maximum": 600, "description": "Lease duration in seconds; omitted uses the configured default (120 seconds initially)."}
+		}
+		if _, ok := props["max_width"]; ok {
+			props["max_width"] = map[string]any{"type": "integer", "minimum": 0, "maximum": 8192, "description": "Maximum image width. Omitted or zero uses 1600; 1280 reduces network and model image cost."}
+		}
+		if _, ok := props["mode"]; ok {
+			props["mode"] = map[string]any{"type": "string", "enum": []string{"observe", "control"}}
+		}
+		if _, ok := props["frame_id"]; ok {
+			props["frame_id"] = map[string]any{"type": "string", "description": "A screenshot from this session, at most 60 seconds old. Layout or desktop changes invalidate it earlier."}
+		}
+		if _, ok := props["action_id"]; ok {
+			props["action_id"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "description": "Caller-generated unique action identifier. The same ID is bound to the complete original request."}
 		}
 		if _, ok := props["observe_after"]; ok {
 			props["observe_after"] = map[string]any{"type": "boolean"}

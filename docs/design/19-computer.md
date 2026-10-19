@@ -100,3 +100,9 @@ Windows 原生输入改用带 VIRTUALDESK 的 SendInput 物理坐标，支持负
 本机 macOS 通过真实 Gateway PAT → Agent → Host → 原生执行器链路运行该脚本，连续收到两张 1280×831 截图（626290 / 626341 字节），有限控制、动作去重 / 查询、续租及关闭通过。默认 Gateway PAT 的 scope 未包含桌面权限时调用被拒绝；验收使用显式授予 computer:control scope 的独立 PAT。该记录证明本机完整 MCP 链路，跨 tailnet 与 OAuth 桌面链路仍待 CI。
 
 原生执行器补充活跃用户会话检查：Windows 查询 WTS Active，macOS 同时检查登录完成和当前控制台会话，Linux logind 返回 inactive 时阻断输入。macOS 发布构建经真实 broker 返回 1280×831 截图通过，单次 350ms（含 -race 的 Go 验收链路），本次不是性能分位数证据。控制会话创建与策略热更新并发读取现统一在管理锁内，新增竞态回归连续三次通过。Headscale 桌面作业首轮因配置显式 PAT 后不再生成默认 PAT 而失败；夹具改为分别使用显式对等工具 PAT 与桌面 PAT，待复测。
+
+第十轮：本机 macOS 在附加自定义 user-data 的滚轮事件上复现投递失败；使用非变参 CGEventCreateScrollWheelEvent2 并保留系统提供的事件源信息后，连续三轮隔离窗口完整输入与本机介入撤销均通过。本机输入暂停的监测范围为点击和按键，滚轮不在该监测集合内。Windows CI 安装服务重启遇到已关闭管道连接的 EOF；Host 状态查询改为一次新连接复核，仅 OS 端点确实不存在才返回停止，持续 EOF 保持失败；两项回归及相关三个包 82 项竞态测试通过。
+
+Headscale 桌面作业第二轮可通过身份和 scope 校验，但裸 Xvfb 桌面输入初始化未就绪。验收现使用保持运行的隔离 Electron 窗口提供图形会话，等待 CI 复测。原生后端在启动时初始化输入失败后每秒进行无提示重试；Wayland 仍由显式本机授权恢复。macOS / Windows 安装服务生命周期与后续网络步骤以最新提交 CI 为准。
+
+MCP 工具发现补全 Agent 所需动作枚举、键名、输入图片坐标、必填字段、租期和预算，以及响应不确定时先查询 / 观察的恢复说明；新增 schema 正反例回归，运行时边界继续由目标管理器校验。

@@ -496,11 +496,28 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         .input_ready
         .store(input.is_some(), Ordering::Release);
     let mut previous_token = 0;
+    let mut last_input_attempt = Instant::now();
     let mut cache: HashMap<String, (Value, Value)> = HashMap::new();
     loop {
         let (id, q) = match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(job) => job,
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Native desktop permissions and display connections can become
+                // ready after process startup. Retry without opening prompts;
+                // Wayland grants are renewed through explicit local setup.
+                let retry_native =
+                    !cfg!(target_os = "linux") || std::env::var_os("WAYLAND_DISPLAY").is_none();
+                if input.is_none()
+                    && retry_native
+                    && last_input_attempt.elapsed() >= Duration::from_secs(1)
+                {
+                    last_input_attempt = Instant::now();
+                    input = Input::new(false);
+                    if input.is_some() {
+                        platform::start_input_monitor();
+                        runtime.input_ready.store(true, Ordering::Release);
+                    }
+                }
                 if previous_token <= runtime.revoked.load(Ordering::Acquire) {
                     cache.clear();
                 }
