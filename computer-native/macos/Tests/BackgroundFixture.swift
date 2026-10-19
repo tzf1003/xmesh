@@ -26,6 +26,7 @@ final class BackgroundFixture:NSObject,NSApplicationDelegate{
     var timer:Timer?
     var occluder:NSWindow?
     var pointerEvents:[[String:Any]]=[]
+    var keyEvents:[[String:Any]]=[]
     var monitor:Any?
     init(_ directory:URL){self.directory=directory}
     func applicationWillFinishLaunching(_ notification:Notification){NSApp.setActivationPolicy(.regular)}
@@ -74,7 +75,11 @@ final class BackgroundFixture:NSObject,NSApplicationDelegate{
         }
         window.resignKey()
         NSApp.deactivate()
-        monitor=NSEvent.addLocalMonitorForEvents(matching:[.leftMouseDown,.leftMouseDragged,.leftMouseUp,.scrollWheel]){[weak self]event in
+        monitor=NSEvent.addLocalMonitorForEvents(matching:[.leftMouseDown,.leftMouseDragged,.leftMouseUp,.scrollWheel,.keyDown,.keyUp,.flagsChanged]){[weak self]event in
+            if [.keyDown,.keyUp,.flagsChanged].contains(event.type){
+                self?.keyEvents.append(["type":event.type.rawValue,"flags":event.modifierFlags.rawValue,"key_window":event.window?.isKeyWindow ?? false])
+                return event
+            }
             self?.pointerEvents.append(["type":event.type.rawValue,"x":event.locationInWindow.x,"y":event.locationInWindow.y,"window":event.windowNumber])
             if (self?.pointerEvents.count ?? 0)>100{self?.pointerEvents.removeFirst()}
             return event
@@ -96,6 +101,7 @@ final class BackgroundFixture:NSObject,NSApplicationDelegate{
             "clicks":count,"value":text.string,"drag_complete":drag.completed,"scroll_y":scroll.contentView.bounds.origin.y,
             "button":point(button),"text":point(text),"drag":point(drag,-100),"drag_to":point(drag,100),"scroll":point(scroll),"pointer_events":pointerEvents,
             "frontmost_pid":NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0,"drag_events":drag.events,
+            "key_events":keyEvents,"selection_location":text.selectedRange().location,"selection_length":text.selectedRange().length,
             "is_active":NSApp.isActive,"is_key":window.isKeyWindow,"text_focused":window.firstResponder===text,"occluded":occluder != nil]
         if let data=try? JSONSerialization.data(withJSONObject:state,options:.sortedKeys){try? data.write(to:directory.appendingPathComponent("state.json"),options:.atomic)}
     }

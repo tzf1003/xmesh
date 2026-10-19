@@ -13,7 +13,7 @@ import Foundation
         let timer=Timer.scheduledTimer(withTimeInterval:0.015,repeats:true){_ in
             guard let front=workspace.frontmostApplication,!front.isTerminated,
                   let point=CGEvent(source:nil)?.location else{return}
-            let value:[String:Any]=["pid":front.processIdentifier,"x":point.x,"y":point.y]
+            let value:[String:Any]=["pid":front.processIdentifier,"x":point.x,"y":point.y,"app_name":front.executableURL?.lastPathComponent ?? ""]
             if let data=try? JSONSerialization.data(withJSONObject:value){try? data.write(to:file,options:.atomic)}
         }
         withExtendedLifetime(timer){CFRunLoopRun()}

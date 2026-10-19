@@ -75,7 +75,7 @@ def pointer_and_focus():
     assert observation_file is not None, "desktop observer unavailable"
     assert time.time() - observation_file.stat().st_mtime < .5, "desktop observer stale"
     value = json.loads(observation_file.read_text())
-    return value["x"], value["y"], value["pid"]
+    return value["x"], value["y"], value["pid"],value.get("app_name","")
 
 
 def stop_process(child):
@@ -97,13 +97,15 @@ def main():
     parser.add_argument("--fixture",choices=["appkit","electron"],default="appkit")
     parser.add_argument("--occluded",action="store_true",help="Cover the AppKit target with another window of the same fixture")
     parser.add_argument("--cancel-drag",action="store_true",help="Verify native cancellation during an AppKit drag and button release")
+    parser.add_argument("--pause-on-user-input",action="store_true",help="Enable the kernel's target-scoped user-intervention policy")
     options = parser.parse_args()
     assert os.environ.get("XMESH_TEST_ALLOW_BACKGROUND_INPUT") == "1", "obtain desktop-user approval and set XMESH_TEST_ALLOW_BACKGROUND_INPUT=1"
     assert options.helper.is_absolute() and options.helper.is_file()
     assert not options.occluded or options.fixture=="appkit","occlusion fixture requires AppKit"
     assert not options.cancel_drag or (options.fixture=="appkit" and not options.binary),"native cancellation fixture requires AppKit without --binary"
+    assert not options.pause_on_user_input or options.binary,"user-intervention policy requires --binary"
     steps=options.steps.split(',')
-    assert steps and all(step in ('click','sky_click','text','key','drag','scroll') for step in steps)
+    assert steps and all(step in ('click','sky_click','text','append','key','native_key','drag','scroll') for step in steps)
     root = pathlib.Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="xmesh-background-accept-", dir="/tmp") as temporary, ExitStack() as cleanup:
         directory = pathlib.Path(temporary)
@@ -166,7 +168,7 @@ def main():
                           "mesh": {"mode": "lan", "lan": {"mdns": True}},
                           "gateway": {"listen": gateway, "pats": {"accept": {"token_file": str(token_file), "scopes": ["devices:read", "computer:control:background-accept"]}}},
                           "agent": {"default_cwd": str(directory), "cwd_policy": {"allow": [str(directory)]},
-                                    "policy": {"isolation": "L1"}, "computer": {"enabled": True, "endpoint": endpoint},
+                                    "policy": {"isolation": "L1"}, "computer": {"enabled": True, "endpoint": endpoint,"pause_on_user_input":options.pause_on_user_input},
                                     "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}}}}
                 config_file = directory / "xmesh.json"
                 config_file.write_text(json.dumps(config))
@@ -187,7 +189,7 @@ def main():
 
             def tool(name, args):
                 result = mcp.request("tools/call", {"name": "local/computer." + name, "arguments": args})
-                assert not result.get("isError"), result.get("structuredContent")
+                assert not result.get("isError"), {"error":result.get("structuredContent"),"interference":interference,"fixture_state":json.loads(state_file.read_text())}
                 return result
 
             def call(method, params):
@@ -219,7 +221,7 @@ def main():
             info = call("info", {})
             assert info.get("state")=="ready",{"desktop_not_ready":info.get("state"),"reason":info.get("reason")}
             deadline=time.monotonic()+5
-            while "background:keyboard" not in info.get("capabilities",[]):
+            while "background:keyboard" not in info.get("capabilities",[]) or (options.pause_on_user_input and not info.get("user_input_monitor")):
                 assert time.monotonic()<deadline,"native background input not ready"
                 time.sleep(.05);info=call("info",{})
             def fixture_target(info):
@@ -259,7 +261,7 @@ def main():
                             if current[2]!=fixture.pid and own==0 and (not pointer_changed or hardware_motion) and (not foreground_changed or hardware_focus):
                                 baseline=current
                                 continue
-                            interference.append({"pointer_changed":pointer_changed,"foreground_changed":foreground_changed,"foreground_before_pid":baseline[2],"foreground_after_pid":current[2],"fixture_pid":fixture.pid,"fixture_activated":current[2]==fixture.pid,"executor_activated":current[2]==native_pid,"hardware_motion_events":hardware_motion,"executor_motion_events":own,"hardware_focus_events":hardware_focus})
+                            interference.append({"pointer_changed":pointer_changed,"foreground_changed":foreground_changed,"foreground_before_pid":baseline[2],"foreground_after_pid":current[2],"foreground_before_app":baseline[3],"foreground_after_app":current[3],"fixture_pid":fixture.pid,"fixture_activated":current[2]==fixture.pid,"executor_activated":current[2]==native_pid,"hardware_motion_events":hardware_motion,"executor_motion_events":own,"hardware_focus_events":hardware_focus})
                             helper.kill()
                             return
                     except Exception:
@@ -279,8 +281,12 @@ def main():
             assert frame["target_id"] == target["id"] and len(base64.b64decode(frame.pop("image"))) > 100
             baseline = pointer_and_focus()
             assert baseline[2] not in (fixture.pid,native_pid), {"phase":"capture","test_process_became_foreground":True,"fixture":baseline[2]==fixture.pid}
-            print(json.dumps({"background_fixture_pid":fixture.pid,"native_executor_pid":native_pid,"baseline_foreground_pid":baseline[2]}),flush=True)
+            print(json.dumps({"background_fixture_pid":fixture.pid,"native_executor_pid":native_pid,"baseline_foreground_pid":baseline[2],"baseline_foreground_app":baseline[3]}),flush=True)
             mouse_trace.start()
+            # The listener must be live before the baseline: user movement
+            # during listener setup cannot have provenance in its event list.
+            baseline=pointer_and_focus()
+            assert baseline[2] not in (fixture.pid,native_pid),"test process became foreground before input"
             watch = threading.Thread(target=monitor, daemon=True); watch.start()
             state = json.loads(state_file.read_text())
             assert state.get("occluded",False)==options.occluded
@@ -291,10 +297,10 @@ def main():
             def act(name, actions):
                 result = call("execute", {"desktop_epoch": info["desktop_epoch"], "lease_token": "1", "action_id": name, "interaction": "background", "target_id": target["id"], "frame": frame, "actions": actions})
                 results.append({"action": name, "state": result["state"], "error": result.get("error")})
-                assert result["state"] == "executed", results[-1]
+                assert result["state"] == "executed", {"result":results[-1],"interference":interference,"fixture_state":json.loads(state_file.read_text())}
                 def expected():
                     observed=json.loads(state_file.read_text())
-                    return {"click":observed["clicks"]==1,"sky_click":observed["clicks"]==2,"text":observed["value"]=="Xmesh 中文后台","key":observed["value"]=="验证完成","drag":observed["drag_complete"],"scroll":observed["scroll_y"]!=state["scroll_y"]}[name]
+                    return {"click":observed["clicks"]==1,"sky_click":observed["clicks"]==2,"text":observed["value"]=="Xmesh 中文后台","append":observed["value"]=="Xmesh 中文后台 追加","key":observed["value"]=="验证完成","native_key":observed["value"]=="","drag":observed["drag_complete"],"scroll":observed["scroll_y"]!=state["scroll_y"]}[name]
                 deadline=time.monotonic()+1
                 while not expected() and not interference and time.monotonic()<deadline:time.sleep(.03)
                 assert not interference,{"action":name,"interference":interference,"completed":results[:-1]}
@@ -303,7 +309,9 @@ def main():
             if "click" in steps:act("click", [{"type": "click", **point("button")}])
             if "sky_click" in steps:act("sky_click",[{"type":"click","clicks":2,**point("button")}])
             if "text" in steps:act("text", [{"type": "click", **point("text")}, {"type": "text", "text": "Xmesh 中文后台"}])
+            if "append" in steps:act("append",[{"type":"text","text":" 追加"}])
             if "key" in steps:act("key", [{"type": "key", "keys": ["Meta", "a"]}, {"type": "text", "text": "验证完成"}])
+            if "native_key" in steps:act("native_key",[{"type":"key","keys":["Meta","Backspace"]}])
             destination = point("drag_to")
             if "drag" in steps:act("drag", [{"type": "drag", **point("drag"), "to_x": destination["x"], "to_y": destination["y"], "duration_ms": 300}])
             if "scroll" in steps:act("scroll", [{"type": "scroll", **point("scroll"), "delta_y": 3}])
@@ -342,7 +350,7 @@ def main():
                 assert not interference and pointer_and_focus()==baseline
                 print(json.dumps({"background_step":"cancel-drag","result":"PASS","state":cancelled[execute_id]["state"],"button_released":True}),flush=True)
             call("release", {"desktop_epoch": info["desktop_epoch"], "lease_token": "1"})
-            print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation"]}, ensure_ascii=False))
+            print(json.dumps({"result": "PASS", "fixture": options.fixture,"occluded":options.occluded,"pause_on_user_input":options.pause_on_user_input, "transport": "mcp-gateway-agent-host" if mcp else "native-stdio", "actions": results,"user_activity_events":sum(pid==0 and marker==0 for _,_,pid,marker in mouse_trace.events), "checks": ["single-window-capture",*steps,*( ["cancel-drag-button-release"] if options.cancel_drag else []), "no-unexplained-system-pointer-movement", "no-target-foreground-activation"]}, ensure_ascii=False))
         finally:
             stopped.set()
             mouse_trace.stop()

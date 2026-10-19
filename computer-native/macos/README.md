@@ -14,7 +14,9 @@ dispatch and shortcut parsing come from iFurySt/open-computer-use under MIT.
 Its transitive Cua and yabai notices are preserved. Pointer gesture delivery in
 `Sources/XmeshBridge.swift` adapts computer-use-mcp's MIT implementation. The
 Accessibility hit-testing, ancestor action selection and text/selection helpers in
-`Sources/AccessibilityClick.swift` also adapt computer-use-mcp. A single semantic
+`Sources/AccessibilityClick.swift` also adapt computer-use-mcp. Its scoped
+geometry search adapts Open Computer Use snapshot traversal and click-priority
+selection, with finite node/depth/time budgets. A single semantic
 mutation is selected before dispatch; an AX mutation error never retries a click
 through another delivery route. The selected upstream snapshots were inspected
 as source; their README claims are
@@ -46,18 +48,28 @@ click; unsupported forms fail before synthetic input. AppKit and Electron dispos
 with replacement, drag and scroll through the actual MCP Gateway / Agent / Host
 chain on the development Mac. Each step asserted actual control state while an
 independent read-only observer monitored the system pointer and foreground app.
-These results cover the tested host and fixtures. Occlusion, cancellation during
-native dispatch, same-app multiple windows and cross-version private-API behavior
-require their own acceptance evidence. The latest main-loop/worker integration
-passed Host lifecycle checks; its final input reprise awaits an unlocked desktop.
+The final worker/main-loop integration also passed a fully covered AppKit
+window in a two-window application through MCP. Native drag cancellation after
+movement began returned unknown and delivered the button release. The final
+Electron MCP run completed during 98 hardware user-activity events with the
+interference checks passing. These results cover the tested host and fixtures;
+other applications and cross-version private-API behavior require their own
+acceptance evidence. An extended AppKit test currently exposes a raw
+Command+Backspace delivery gap despite an executed response. AX select-all and
+text replacement pass, and the Electron raw chord passes. AppKit raw-key
+compatibility remains an open acceptance item.
 
 `scripts/test_computer_background.py` checks snapshot hashes, builds and runs
 pure recipe/admission tests. It does not open apps, take screenshots or post
 native input. Real desktop acceptance requires the desktop user's approval.
 
 The AX value-splice route requires a valid exposed UTF-16 selection, rejects
-surrogate-pair splits and caps the replacement value at one million UTF-16 units.
+surrogate-pair splits and caps the replacement value at 1,048,576 UTF-16 units.
 It rechecks window ownership and focused-element identity before mutation.
+A populated field uses AX point-to-range mapping to preserve coordinate-caret
+semantics. AX metadata reads have a 100ms process-local default timeout; selected semantic
+mutations receive a bounded one-second timeout for their callbacks. Setting a
+timeout on the application object alone does not bound returned child objects.
 
 Opt-in acceptance uses a disposable AppKit or Electron fixture:
 
@@ -75,6 +87,10 @@ verifies native MCP images plus action deduplication/status/renewal/close, and
 removes its private profiles, tokens, processes and temporary files. It saves
 neither desktop images nor user input text. `--cancel-drag` with AppKit and without `--binary` additionally verifies native
 lease cancellation after a drag has begun and observes its button release.
+Use `--pause-on-user-input` with `--binary` to exercise the kernel intervention
+policy. `--steps click,text,append,key,native_key,drag,scroll` additionally checks
+consecutive insertion and an actual key chord; the AppKit native-key acceptance
+item above is still open.
 Run desktop acceptance sequentially
 because the native executor holds a per-user desktop lock. A locked desktop
 is reported as unavailable for input.

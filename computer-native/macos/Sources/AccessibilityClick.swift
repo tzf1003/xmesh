@@ -32,21 +32,73 @@ private func ownedByWindow(_ element:AXUIElement,pid:pid_t,window:CGWindowID)->B
     return SkyLightSPI.shared.windowID(for:windowElement)==window
 }
 
+// Frame extraction adapts computer-use-mcp Core/AX.swift. Window-scoped
+// containment/priority selection adapts open-computer-use's bestElement and
+// AccessibilitySnapshot traversal at the pinned revision in upstream.json.
+// Limits and ownership checks bind that selection to the xmesh target.
+private func frame(_ element:AXUIElement)->CGRect?{
+    guard let position=attribute(element,kAXPositionAttribute),CFGetTypeID(position)==AXValueGetTypeID(),
+          let size=attribute(element,kAXSizeAttribute),CFGetTypeID(size)==AXValueGetTypeID() else{return nil}
+    var p=CGPoint.zero,s=CGSize.zero
+    guard AXValueGetValue(unsafeBitCast(position,to:AXValue.self),.cgPoint,&p),
+          AXValueGetValue(unsafeBitCast(size,to:AXValue.self),.cgSize,&s),
+          [p.x,p.y,s.width,s.height].allSatisfy(\.isFinite),s.width>0,s.height>0 else{return nil}
+    return CGRect(origin:p,size:s)
+}
+
+private func children(_ element:AXUIElement,_ name:String,limit:Int)->[AXUIElement]{
+    var values:CFArray?
+    guard AXUIElementCopyAttributeValues(element,name as CFString,0,limit,&values) == .success else{return []}
+    return (values as? [AXUIElement]) ?? []
+}
+
+private func targetElement(_ app:AXUIElement,pid:pid_t,window:CGWindowID,point:CGPoint,action:String)throws->AXUIElement?{
+    var hit:AXUIElement?
+    if AXUIElementCopyElementAtPosition(app,Float(point.x),Float(point.y),&hit) == .success,
+       let hit,ownedByWindow(hit,pid:pid,window:window){return hit}
+    guard let root=children(app,kAXWindowsAttribute,limit:128).first(where:{SkyLightSPI.shared.windowID(for:$0)==window}) else{return nil}
+    var pending:[(AXUIElement,Int)]=[(root,0)]
+    var seen:[AXUIElement]=[]
+    var best:(AXUIElement,Int,CGFloat)?
+    let deadline=ProcessInfo.processInfo.systemUptime+0.5
+    while let (element,depth)=pending.popLast(){
+        try requireUsableComputerUseSession()
+        guard ProcessInfo.processInfo.systemUptime<deadline,seen.count<512 else{return nil}
+        if seen.contains(where:{CFEqual($0,element)}){continue}
+        seen.append(element)
+        guard ownedByWindow(element,pid:pid,window:window) else{continue}
+        if let rect=frame(element){
+            guard rect.contains(point) else{continue}
+            let role=attribute(element,kAXRoleAttribute) as? String
+            let priority=actionNames(element).contains(action) ? 0 : ([kAXTextFieldRole as String,kAXTextAreaRole as String].contains(role ?? "") ? 1 : 2)
+            let area=rect.width*rect.height
+            if best==nil || priority<best!.1 || (priority==best!.1 && area<best!.2){best=(element,priority,area)}
+        }
+        guard depth<16 else{continue}
+        for name in [kAXChildrenAttribute,"AXContents","AXVisibleChildren"]{
+            pending.append(contentsOf:children(element,name,limit:64).map{($0,depth+1)})
+            guard pending.count<=512 else{return nil}
+        }
+    }
+    return best?.0
+}
+
 /// Returns false only when no semantic route was selected before dispatch.
 /// True means AX accepted the mutation; the caller still observes business state.
 func xmeshAccessibilityClick(pid:pid_t,window:CGWindowID,point:CGPoint,button:String,count:Int)throws->Bool{
     guard count==1,button=="left" || button=="right" else{return false}
     let app=AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(app,0.25)
-    var hit:AXUIElement?
-    guard AXUIElementCopyElementAtPosition(app,Float(point.x),Float(point.y),&hit) == .success,
-          var current=hit else{return false}
     let action=button=="left" ? kAXPressAction as String : "AXShowMenu"
+    guard var current=try targetElement(app,pid:pid,window:window,point:point,action:action) else{return false}
     for _ in 0...5{
         try requireUsableComputerUseSession()
         guard ownedByWindow(current,pid:pid,window:window) else{return false}
         if actionNames(current).contains(action){
             try requireUsableComputerUseSession()
+            // A control can finish its callback after the metadata read budget.
+            // Keep mutation bounded without timing it out as an AX tree read.
+            AXUIElementSetMessagingTimeout(current,1.0)
             let result=AXUIElementPerformAction(current,action as CFString)
             guard result == .success else{throw ComputerUseError.message("accessibility_action_failed")}
             return true
@@ -77,6 +129,7 @@ func xmeshAccessibilityClick(pid:pid_t,window:CGWindowID,point:CGPoint,button:St
             var settable=DarwinBoolean(false)
             if AXUIElementIsAttributeSettable(current,kAXFocusedAttribute as CFString,&settable) == .success,settable.boolValue{
                 try requireUsableComputerUseSession()
+                AXUIElementSetMessagingTimeout(current,1.0)
                 guard AXUIElementSetAttributeValue(current,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success else{throw ComputerUseError.message("accessibility_focus_failed")}
                 guard let focused=elementAttribute(app,kAXFocusedUIElementAttribute),CFEqual(focused,current) else{throw ComputerUseError.message("accessibility_focus_unverified")}
                 if let caret{
@@ -122,18 +175,31 @@ func xmeshAccessibilityText(pid:pid_t,window:CGWindowID,text:String)throws->Bool
     }
     let name:String
     let replacement:String
+    var caret:AXValue?
     if settable(kAXSelectedTextAttribute){name=kAXSelectedTextAttribute;replacement=text}
-    else if settable(kAXValueAttribute),let value=attribute(element,kAXValueAttribute) as? String,
+    else if settable(kAXValueAttribute),settable(kAXSelectedTextRangeAttribute),let value=attribute(element,kAXValueAttribute) as? String,
             let selection=attribute(element,kAXSelectedTextRangeAttribute),CFGetTypeID(selection)==AXValueGetTypeID(){
         var range=CFRange(location:0,length:0)
         guard AXValueGetValue(unsafeBitCast(selection,to:AXValue.self),.cfRange,&range) else{throw ComputerUseError.stateUnavailable("selection_invalid")}
         name=kAXValueAttribute
         replacement=try xmeshSpliceText(value,selection:range,text:text)
+        var insertion=CFRange(location:range.location+text.utf16.count,length:0)
+        caret=AXValueCreate(.cfRange,&insertion)
+        guard caret != nil else{throw ComputerUseError.message("selection_value")}
     }else{return false}
     try requireUsableComputerUseSession()
     guard ownedByWindow(element,pid:pid,window:window),
           let focused=elementAttribute(app,kAXFocusedUIElementAttribute),CFEqual(focused,element) else{throw ComputerUseError.stateUnavailable("focus_changed")}
+    AXUIElementSetMessagingTimeout(element,1.0)
     guard AXUIElementSetAttributeValue(element,name as CFString,replacement as CFString) == .success else{throw ComputerUseError.message("accessibility_text_failed")}
+    if let caret{
+        // TextTools also restores the caret after its value-splice route.
+        // Once replacement begins, failure never selects another input route.
+        try requireUsableComputerUseSession()
+        guard ownedByWindow(element,pid:pid,window:window),
+              let focused=elementAttribute(app,kAXFocusedUIElementAttribute),CFEqual(focused,element),
+              AXUIElementSetAttributeValue(element,kAXSelectedTextRangeAttribute as CFString,caret) == .success else{throw ComputerUseError.message("accessibility_caret_failed")}
+    }
     return true
 }
 
@@ -150,6 +216,7 @@ func xmeshAccessibilitySelectAll(pid:pid_t,window:CGWindowID,keys:[String])throw
     var range=CFRange(location:0,length:(text as NSString).length)
     guard let value=AXValueCreate(.cfRange,&range) else{throw ComputerUseError.message("selection_value")}
     try requireUsableComputerUseSession()
+    AXUIElementSetMessagingTimeout(element,1.0)
     guard AXUIElementSetAttributeValue(element,kAXSelectedTextRangeAttribute as CFString,value) == .success else{throw ComputerUseError.message("selection_failed")}
     return true
 }

@@ -41,7 +41,7 @@ enum InputTiming {
     static let focusRecordSettle = 0.010
     static let typeChunkDelay = 0.008
     static let pressKeySettle = 0.010
-    static func milliseconds(_ name: String, default value: Double) -> TimeInterval { value / 1000 }
+    static func milliseconds(_ name: String, default value: Double) -> TimeInterval {value/1000}
 }
 
 struct Action: Decodable {
@@ -81,6 +81,9 @@ public func xmeshBackgroundInitialize(){
     // The native executor has no windows. Initialize AppKit on its main thread
     // with activation prohibited before capture or input libraries register it.
     NSApplication.shared.setActivationPolicy(.prohibited)
+    // This sets only this executor's default AX timeout. An application AX
+    // object's timeout does not apply to the child objects returned by AX.
+    AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(),0.1)
 }
 
 @_cdecl("xmesh_background_run_loop")

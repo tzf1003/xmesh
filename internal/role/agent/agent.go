@@ -450,6 +450,11 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 					return Result(nil, toolerr.New("unauthenticated", "租约需要已建立的 MCP 会话")), nil
 				}
 				out, e = a.Backends.Control(ctx, caller.ID, name, raw)
+				if e == nil && name == "backend.acquire" {
+					// A ready lease must expose the restarted backend's tool catalog
+					// before its caller can send the next tools/call request.
+					a.refreshBackends()
+				}
 			}
 			return Result(out, e), nil
 		})
