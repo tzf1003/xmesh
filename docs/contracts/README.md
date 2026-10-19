@@ -25,6 +25,7 @@
 | [CTR-FS-05](fs.md#ctr-fs-05) | fs | `fs.grep` |
 | [CTR-FS-06](fs.md#ctr-fs-06) | fs | `fs.list` / `fs.stat` / `fs.sha256` |
 | [CTR-FS-07](fs.md#ctr-fs-07) | fs | `fs.mkdir` / `fs.move` / `fs.delete` |
+| [CTR-FS-08](fs.md#ctr-fs-08) | fs | `fs.download` / `fs.upload` |
 | [CTR-BE-01](backend-lease.md#ctr-be-01) | 后端 | 透传与 token 剥离 |
 | [CTR-BE-02](backend-lease.md#ctr-be-02) | 后端 | acquire / renew / release |
 | [CTR-LEASE-01](backend-lease.md#ctr-lease-01) | 租约 | 内存表与过期 |

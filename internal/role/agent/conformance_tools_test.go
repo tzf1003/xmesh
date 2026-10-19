@@ -31,6 +31,8 @@ var contractTools = map[string]struct{ required, params []string }{
 	"pty.transfer":    {[]string{"session_id", "to_caller"}, []string{"session_id", "to_caller"}},
 	"pty.close":       {[]string{"session_id"}, []string{"session_id"}},
 	"pty.list":        {nil, nil},
+	"fs.download":     {[]string{"path"}, []string{"path"}},
+	"fs.upload":       {[]string{"path", "data", "sha256"}, []string{"path", "data", "sha256", "force"}},
 	"fs.read":         {[]string{"path"}, []string{"path", "offset", "limit"}},
 	"fs.write":        {[]string{"path", "content"}, []string{"path", "content", "expected_sha256"}},
 	"fs.edit":         {[]string{"path", "old_string", "new_string"}, []string{"path", "old_string", "new_string", "replace_all", "expected_sha256"}},
@@ -53,7 +55,7 @@ func sorted(in []string) []string {
 	return out
 }
 
-// The Agent offers exactly the contract's 25 tools (sys, exec, pty, fs and the
+// The Agent offers exactly the contract's 27 tools (sys, exec, pty, fs and the
 // three built-in lease tools), no tool for creating or enumerating worktrees
 // or workspaces, and each tool's parameters follow the contract. sys.info's
 // workspaces are the configured aliases, not a scan of the disk.
@@ -111,7 +113,7 @@ func Test_CONARCH06_NoWorktreeTools_SurfaceMatchesContract(t *testing.T) {
 			t.Errorf("contract tool %s is not offered", name)
 		}
 	}
-	if len(list.Tools) != len(contractTools) || len(list.Tools) != 25 {
+	if len(list.Tools) != len(contractTools) || len(list.Tools) != 27 {
 		t.Errorf("%d tools offered, contract has %d", len(list.Tools), len(contractTools))
 	}
 	// Calling an invented management tool is a protocol error, never a success.

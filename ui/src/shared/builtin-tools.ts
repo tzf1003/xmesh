@@ -13,6 +13,8 @@ export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   { name: "backend.renew", zh: "续期后端租约", en: "Renew a backend lease" },
   { name: "backend.release", zh: "释放后端租约", en: "Release a backend lease" },
   { name: "sys.info", zh: "查询设备信息与配额", en: "Query device info and quotas" },
+  { name: "fs.download", zh: "下载文件", en: "Download a file" },
+  { name: "fs.upload", zh: "上传文件", en: "Upload a file" },
   { name: "fs.read", zh: "读取文件", en: "Read a file" },
   { name: "fs.write", zh: "原子覆盖文件", en: "Atomically overwrite a file" },
   { name: "fs.edit", zh: "精确替换文件文本", en: "Replace exact text in a file" },

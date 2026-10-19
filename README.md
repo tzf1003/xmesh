@@ -38,6 +38,12 @@ go test -race ./...
 
 客户端使用有会话的 Streamable HTTP MCP。`--local` 是显式开发模式；当前实现进度和外部验收状态见 [实现记录](docs/implementation-status.md)。
 
+## 文件互传
+
+通过 MCP 调用 `<设备名>/fs.download` 下载文件原始字节，返回 `encoding: "base64"`、`data`、`sha256`、`bytes`。调用 `<设备名>/fs.upload` 上传到目标路径，参数为 `path`、Base64 编码的 `data` 和原始字节的 `sha256`。本机 Gateway 的设备前缀为 `local/`。
+
+上传目标已存在时返回 `conflict`，显式传入 `force: true` 才覆盖。上传先校验 SHA-256，再通过同目录临时文件原子落盘；校验失败保留原文件。单个文件最大 10 MiB，两种工具均接受 `cwd`，路径受节点的 allow/deny 策略约束，父目录须已存在。完整参数和示例见 [文件互传契约](docs/contracts/fs.md#ctr-fs-08)。
+
 ## 命令
 
 同一个 `xmesh` 二进制提供以下子命令，参数运行 `xmesh help` 查看：

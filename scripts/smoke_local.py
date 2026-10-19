@@ -2,6 +2,8 @@
 """Exercise a built xmesh Agent and Gateway on loopback using MCP over HTTP."""
 
 import argparse
+import base64
+import hashlib
 import http.client
 import json
 import pathlib
@@ -183,6 +185,20 @@ def main():
                 assert any(tool["name"] == "local/exec.run" for tool in tools)
                 client.call("local/fs.write", {"path": "roundtrip", "content": "SMOKE_PRIVATE_BODY"})
                 assert "SMOKE_PRIVATE_BODY" in client.call("local/fs.read", {"path": "roundtrip"})["content"]
+                payload = bytes(range(256)) + b"\xef\xbb\xbfhello\r\n"
+                encoded = base64.b64encode(payload).decode()
+                upload = {"path": "transfer.bin", "data": encoded, "sha256": hashlib.sha256(payload).hexdigest()}
+                saved = client.call("local/fs.upload", upload)
+                assert saved["sha256"] == upload["sha256"] and saved["bytes"] == len(payload)
+                downloaded = client.call("local/fs.download", {"path": upload["path"]})
+                assert base64.b64decode(downloaded["data"]) == payload
+                assert downloaded["sha256"] == saved["sha256"]
+                conflict = client.request("tools/call", {"name": "local/fs.upload", "arguments": upload})
+                assert conflict.get("isError") and conflict["structuredContent"]["error"] == "conflict"
+                changed = b"replacement\x00\xff"
+                client.call("local/fs.upload", {"path": upload["path"], "data": base64.b64encode(changed).decode(),
+                    "sha256": hashlib.sha256(changed).hexdigest(), "force": True})
+                assert (workspace / upload["path"]).read_bytes() == changed
                 script = 'printf SMOKE_EXEC_MARKER'
                 if options.isolation == "L2":
                     home_check = 'test "$HOME" = "$PWD"' if sys.platform == "darwin" else 'test "$HOME" = /tmp'

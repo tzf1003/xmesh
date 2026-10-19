@@ -1,4 +1,4 @@
-// Package fs implements CTR-FS-01..07. Paths always pass through cwd.Resolver.
+// Package fs implements CTR-FS-01..08. Paths always pass through cwd.Resolver.
 package fs
 
 import (
@@ -33,6 +33,9 @@ type Args struct {
 	From           string `json:"from"`
 	To             string `json:"to"`
 	Content        string `json:"content"`
+	Data           string `json:"data"`
+	SHA256         string `json:"sha256"`
+	Force          bool   `json:"force"`
 	Old            string `json:"old_string"`
 	New            string `json:"new_string"`
 	Expected       string `json:"expected_sha256"`
@@ -75,7 +78,7 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 	}
 	mode := cwd.Existing
 	switch name {
-	case "fs.write", "fs.stat", "fs.mkdir":
+	case "fs.write", "fs.upload", "fs.stat", "fs.mkdir":
 		mode = cwd.Create
 		if a.Parents && name == "fs.mkdir" {
 			mode = cwd.Parents
@@ -99,6 +102,12 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 	}
 	path := p.Path
 	switch name {
+	case "fs.download":
+		return download(ctx, path)
+	case "fs.upload":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return upload(ctx, path, a)
 	case "fs.read":
 		if a.Offset < 1 || a.Limit < 1 || a.Limit > 5000 {
 			return nil, toolerr.Args("offset/limit")
@@ -386,6 +395,13 @@ func conflict(path string, b []byte) *toolerr.Error {
 	return toolerr.New("conflict", "目标已存在或内容发生变化", "path", path, "current_sha256", Hash(b), "mtime", mtime)
 }
 func atomicWrite(path string, b []byte, expected string) error {
+	return atomicStore(context.Background(), path, b, expected, false)
+}
+
+func atomicStore(ctx context.Context, path string, b []byte, expected string, createOnly bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f, e := os.CreateTemp(filepath.Dir(path), ".xmesh-write-*")
 	if e != nil {
 		return toolerr.Internal("fs.write", e)
@@ -417,6 +433,18 @@ func atomicWrite(path string, b []byte, expected string) error {
 		if Hash(current) != expected {
 			return conflict(path, current)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if createOnly {
+		if e = atomicCreate(tmp, path); e != nil {
+			if _, statErr := os.Lstat(path); os.IsExist(e) || statErr == nil {
+				return uploadConflict(path)
+			}
+			return toolerr.Internal("fs.create", e)
+		}
+		return nil
 	}
 	if e = atomicReplace(tmp, path); e != nil {
 		return toolerr.Internal("fs.rename", e)

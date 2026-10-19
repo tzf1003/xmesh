@@ -134,3 +134,37 @@
 - 目录且 `recursive` 为 true：路径必须通过 cwd 策略。成功返回 `removed` 计数。中途失败时错误里带 `removed` 已删除数量，调用方不得假设原子。目录递归删除做不到与文件写一样的原子性，契约明确这一点。
 
 符号链接：删除链接本身，不删除目标。
+
+## CTR-FS-08
+
+### fs.download
+
+参数：`path`（必须）、`cwd`（可选）。下载普通文件的原始字节，支持二进制、图片、UTF-16、BOM 和混合换行；成功结果：`resolved_path`、`encoding: "base64"`、`data`（标准 Base64）、`sha256`（原始字节哈希）、`bytes`（原始字节数）。空文件返回空的 `data` 和空内容的 SHA-256。
+
+使用同一打开句柄读取并复核哈希、大小和修改时间；发现源文件在读取期间变化时返回 `conflict`，带 `path`、`op: "fs.download"`。原子替换源路径时，打开的句柄仍返回完整的原文件。外部程序持续原地写入时，调用方应先协调停止写入，以取得稳定版本。接收端应解码 `data` 并比对 `sha256`、`bytes` 后再安装文件。
+
+### fs.upload
+
+| 参数 | 要求 |
+| --- | --- |
+| `path` | 必须，目标文件路径，父目录须已存在 |
+| `cwd` | 可选，相对路径的起点 |
+| `data` | 必须，文件原始字节的标准 Base64，空文件使用空字符串 |
+| `sha256` | 必须，原始字节的小写十六进制 SHA-256 |
+| `force` | 可选布尔值，默认 `false`。为 `true` 时允许覆盖已有普通文件 |
+
+- 先解码并校验哈希；Base64 无效、哈希格式错误或不匹配返回 `invalid_args`，`field` 指向 `data` 或 `sha256`，目标保持原样。
+- 目标已存在（即使内容相同）且 `force` 为 false：`conflict`，带 `path`、`op: "fs.upload"`。最终发布也原子检查目标不存在，并发创建只允许一个成功。
+- `force: true` 先在同目录写临时文件、保留目标权限（新文件为 `0600`），`fsync` 并关闭，再原子替换。并发读者看到旧文件或新文件的完整内容。目录及其他特殊文件不允许覆盖。
+- 取消发生在最终发布之前时清理临时文件；失败不留下部分目标。成功结果：`resolved_path`、`sha256`、`bytes`。
+- 路径通过统一 Resolver，符号链接按解析后的目标路径处理，allow/deny 仍生效。父目录不存在返回 `invalid_cwd` / `parent_missing`。
+
+两种工具的原始文件上限均为 **10 MiB**，使 Base64 上传及 MCP 信封可容纳在 16 MiB HTTP 请求上限内。超限返回 `too_large`（`path`、`size`、`limit`；编码长度预检时 `size` 是解码大小上界）。上传使用 `fs:write:<设备名>` scope，下载使用 `fs:read:<设备名>`；节点授权与 `disabled_tools` 同样适用。审计只记录摘要。
+
+Gateway 调用示例（原始文件内容为 `hello`）：
+
+```json
+{"name":"local/fs.upload","arguments":{"path":"artifact.bin","data":"aGVsbG8=","sha256":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}}
+{"name":"local/fs.download","arguments":{"path":"artifact.bin"}}
+{"name":"local/fs.upload","arguments":{"path":"artifact.bin","data":"aGVsbG8=","sha256":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824","force":true}}
+```
