@@ -19,14 +19,28 @@ const flag = (name: string) => {
 try {
   if (command === "install-browser") {
     const cache = flag("cache");
-    const cli = createRequire(import.meta.url).resolve("playwright/cli");
-    const result = spawnSync(process.execPath, [cli, "install", "chromium"], {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        ...(cache ? { PLAYWRIGHT_BROWSERS_PATH: path.resolve(cache) } : {}),
+    const cli = path.join(
+      path.dirname(
+        createRequire(import.meta.url).resolve("playwright/package.json"),
+      ),
+      "cli.js",
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "install",
+        "chromium",
+        ...(args.includes("--dry-run") ? ["--dry-run"] : []),
+      ],
+      {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          ...(cache ? { PLAYWRIGHT_BROWSERS_PATH: path.resolve(cache) } : {}),
+        },
       },
-    });
+    );
     process.exitCode = result.status ?? 1;
   } else if (["serve", "doctor", "inspect", "gc"].includes(command ?? "")) {
     requireValue(flag("config"), "invalid_args", "--config FILE is required");

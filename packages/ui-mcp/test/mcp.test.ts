@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { config } from "./helpers.js";
+import { spawnSync } from "node:child_process";
 
 test("stdio MCP lists tools without launching a browser and closes on EOF", async () => {
   const c = config(),
@@ -54,4 +55,18 @@ test("stdio MCP lists tools without launching a browser and closes on EOF", asyn
     await client.close();
     fs.rmSync(c.state_dir, { recursive: true, force: true });
   }
+});
+
+test("browser installation command resolves the packaged CLI in dry-run mode", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("../src/cli.js", import.meta.url)),
+      "install-browser",
+      "--dry-run",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /chromium|Chrome|download/i);
 });

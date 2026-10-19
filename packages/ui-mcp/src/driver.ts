@@ -129,8 +129,12 @@ export class Driver {
         supported: !!(
           globalThis as unknown as { __xmeshUiBackgroundTest?: boolean }
         ).__xmeshUiBackgroundTest,
-        visible: BrowserWindow.getAllWindows().some((w) => w.isVisible()),
-        focused: BrowserWindow.getAllWindows().some((w) => w.isFocused()),
+        visible: BrowserWindow.getAllWindows().some(
+          (w: { isVisible(): boolean }) => w.isVisible(),
+        ),
+        focused: BrowserWindow.getAllWindows().some(
+          (w: { isFocused(): boolean }) => w.isFocused(),
+        ),
       }));
       requireValue(
         state.supported && !state.visible && !state.focused,
@@ -233,13 +237,17 @@ export class Driver {
   async assertBackground(): Promise<void> {
     if (!this.electronApp) return;
     const windows = await this.electronApp.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows().map((w) => ({
-        visible: w.isVisible(),
-        focused: w.isFocused(),
-      })),
+      BrowserWindow.getAllWindows().map(
+        (w: { isVisible(): boolean; isFocused(): boolean }) => ({
+          visible: w.isVisible(),
+          focused: w.isFocused(),
+        }),
+      ),
     );
     requireValue(
-      windows.every((w) => !w.visible && !w.focused),
+      windows.every(
+        (w: { visible: boolean; focused: boolean }) => !w.visible && !w.focused,
+      ),
       "background_required",
       "test window became visible or focused",
     );
