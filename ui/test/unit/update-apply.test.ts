@@ -101,7 +101,7 @@ function windowsRig(script = WINDOWS_SCRIPT) {
   // Node stands in for both executables: the installer receives /S and --updated; the app receives neither.
   fs.writeFileSync(stub, `
 const fs = require('node:fs');
-const installer = process.argv.includes('/S');
+const installer = process.argv.includes('--updated');
 fs.appendFileSync(process.env.XMESH_TEST_LOG, JSON.stringify({ installer, args: process.argv.slice(1) }) + '\\n');
 process.exit(installer ? Number(process.env.XMESH_TEST_INSTALL_EXIT || 0) : 0);
 `);
@@ -144,7 +144,9 @@ test("Windows helper installs after the old process exits, preserving paths and 
     await exited;
     assert.equal((await finished)[0], 0);
     await waitForApp(r);
-    assert.deepEqual(r.calls(), [{ installer: true, args: ["/S", "--updated"] }, { installer: false, args: [] }]);
+    // Node treats /S as its script filename and resolves it to a drive-rooted path on Windows.
+    const silentArg = process.platform === "win32" ? path.resolve("/S") : "/S";
+    assert.deepEqual(r.calls(), [{ installer: true, args: [silentArg, "--updated"] }, { installer: false, args: [] }]);
     assert.equal(fs.existsSync(r.result), false);
   } finally {
     oldApp.kill();
