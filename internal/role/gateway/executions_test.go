@@ -102,6 +102,35 @@ func TestGatewayAsyncExecutionUsesAcceptingTransport(t *testing.T) {
 	if !found {
 		t.Fatal("task completion correlation missing")
 	}
+
+	// Closing the caller's actual MCP session cancels its monitoring lifecycle.
+	complete.Store(false)
+	disconnected := connect(t, server.URL+"/mcp")
+	if out := call(t, disconnected, "local/ui.run", map[string]any{"protocol_version": 1}); out.IsError {
+		t.Fatal(out)
+	}
+	active, _ = logger.Executions()
+	if len(active) != 1 {
+		t.Fatalf("disconnected fixture was not tracked: %+v", active)
+	}
+	retiredID := active[0].ID
+	if err := disconnected.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "closed MCP session releases tracking", 4*time.Second, func() bool { active, _ := logger.Executions(); return len(active) == 0 })
+	found = false
+	files, _ = filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	for _, file := range files {
+		raw, _ := os.ReadFile(file)
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			var event map[string]any
+			_ = json.Unmarshal([]byte(line), &event)
+			found = found || event["event"] == "task_untracked" && event["execution_id"] == retiredID && event["task_status"] == "unknown" && event["error"] == "monitor_closed"
+		}
+	}
+	if !found {
+		t.Fatal("closed MCP session tracking outcome missing")
+	}
 }
 
 func TestGatewayAndAgentExecutionHistoryLayers(t *testing.T) {

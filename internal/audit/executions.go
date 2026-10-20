@@ -163,7 +163,7 @@ func (x *Execution) FinishCall(args json.RawMessage, result any, isError bool) {
 		x.log.executionMu.Lock()
 		if x.log.executionsClosed {
 			x.log.executionMu.Unlock()
-			x.markUnknown()
+			x.stopTracking("monitor_closed")
 			return
 		}
 		x.log.executionWorkers.Add(1)
@@ -215,7 +215,7 @@ func (x *Execution) markUnknown() {
 	x.mu.Unlock()
 }
 
-// stopTracking retires a monitor whose caller can no longer read the result.
+// stopTracking retires a monitor whose lifecycle or result permission has ended.
 // Its audit event describes the tracking outcome while the task outcome stays
 // unknown. Retiring the live entry makes its admission slot reusable.
 func (x *Execution) stopTracking(reason string) {
@@ -243,10 +243,10 @@ func (x *Execution) monitor() {
 	for {
 		select {
 		case <-x.ctx.Done():
-			x.markUnknown()
+			x.stopTracking("monitor_closed")
 			return
 		case <-x.log.stop:
-			x.markUnknown()
+			x.stopTracking("monitor_closed")
 			return
 		case <-ticker.C:
 		}

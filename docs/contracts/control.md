@@ -178,7 +178,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 控制接口 2.1 增加可选的 `executions` 与 `execution_limits`。每个接收层在配额与权限检查前分配执行编号，展示调用方、客户端、设备、工具、`layer`（`agent` 或 `gateway`）、开始/更新时间和 `queued`、`running`、`async`、`unknown` 状态。同一次转发在 Gateway 与目标 Agent 各有一条记录。已完成调用通过审计事件的 `execution_id`、`started_at`、`layer` 关联，历史由 `/v2/audit` 分页读取。
 
-异步任务在调用方断连或失去结果读取权限后停止监控，从实时执行列表移除，并写入关联的 `task_untracked` 审计事件。该事件保留 `task_status=unknown`，任务的实际完成状态仍未确认。
+异步任务在调用方断连、失去结果读取权限或监控生命周期结束后停止监控，从实时执行列表移除，并写入关联的 `task_untracked` 审计事件。该事件保留 `task_status=unknown`，任务的实际完成状态仍未确认。
 
 UI MCP `protocol_version: 1` 的 `.run`、`.script` 返回已知状态与 `run_id` 时保持任务记录，使用接受任务的同一连接和调用方读取 `.result`。`accepted`、`running` 持续跟踪；`passed`、`failed`、`cancelled`、`timed_out`、`interrupted` 是已知终态，最终结果声明 `outcome_unknown` 时保持 `unknown`。读取失败也保留 `unknown` 并继续尝试；接收角色关闭会停止轮询。快照仅保留这些元数据。实时跟踪上限为 256 条，已在跟踪的调用持续保留；超过上限的工具仍执行并写审计，`rejected_total` 累计表示快照覆盖缺口。界面读取会话页期间应定期刷新快照。
 

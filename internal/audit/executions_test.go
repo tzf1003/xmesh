@@ -197,7 +197,7 @@ func TestExecutionAuthorizationLossStopsWorkerAndReleasesCapacity(t *testing.T) 
 func TestExecutionPollingStopsWithLifecycleAndLogger(t *testing.T) {
 	for _, shutdown := range []string{"receiver", "logger"} {
 		t.Run(shutdown, func(t *testing.T) {
-			l, _ := executionLogger(t)
+			l, dir := executionLogger(t)
 			lifecycle, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			x := l.BeginExecution(lifecycle, "node/session", "", "target", "ui.run", "agent")
@@ -225,7 +225,11 @@ func TestExecutionPollingStopsWithLifecycleAndLogger(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("shutdown did not cancel in-flight poll")
 			}
-			awaitExecution(t, func() bool { active, _ := l.Executions(); return len(active) == 1 && active[0].State == "unknown" })
+			awaitExecution(t, func() bool { active, _ := l.Executions(); return len(active) == 0 })
+			rows := records(t, dir)
+			if len(rows) != 1 || rows[0]["event"] != "task_untracked" || rows[0]["task_status"] != "unknown" || rows[0]["error"] != "monitor_closed" || rows[0]["execution_id"] != x.row.ID {
+				t.Fatal("closed monitor outcome missing from history", rows)
+			}
 		})
 	}
 }

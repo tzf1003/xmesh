@@ -46,7 +46,7 @@ MCP 接收层为每次调用写入执行编号、开始时间与层级，`pty.re
 | `duration_ms` | 整数 |
 | `output_sha256` | 成功时对结构化结果做规范 JSON 后的 SHA-256。失败时对错误对象哈希 |
 | `execution_id`、`started_at`、`layer` | 可选，接收层的执行编号、开始时间及 `agent` 或 `gateway`，与 `/v2/sessions.executions` 关联 |
-| `run_id`、`task_status` | 可选，UI MCP 异步任务的运行编号及已知状态，逐调用记录表示工具响应，`task_complete` 表示结果轮询确认的终态；`task_untracked` 表示调用方断连或失去结果读取权限后停止监控，`task_status=unknown`、`error=authorization_lost`，任务实际结果仍未确认，实时跟踪容量已释放 |
+| `run_id`、`task_status` | 可选，UI MCP 异步任务的运行编号及已知状态，逐调用记录表示工具响应，`task_complete` 表示结果轮询确认的终态；`task_untracked` 表示调用方断连、失去结果读取权限或监控生命周期结束后停止监控，`task_status=unknown`、`error=authorization_lost` 或 `monitor_closed`，任务实际结果仍未确认，实时跟踪容量已释放 |
 
 异步任务 `accepted` 响应与任务终态分别写入历史。结果轮询使用接受任务的同一调用方与连接；读取失败或结果声明 `outcome_unknown` 时，实时状态保持 `unknown`，直到后续确认结果。任务完成事件仅携带标识、状态、来源和耗时，结果正文不进入该事件。
 
