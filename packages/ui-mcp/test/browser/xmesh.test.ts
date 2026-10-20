@@ -124,6 +124,22 @@ for (const mode of ["mock", "real"] as const)
             },
             { id: "capture", action: "screenshot" },
             {
+              id: "agent-menu",
+              action: "click",
+              target: { testId: "role-agent" },
+            },
+            {
+              id: "agent-settings",
+              action: "click",
+              target: { testId: "role-menu-settings" },
+            },
+            {
+              id: "module-ready",
+              action: "assert",
+              target: { testId: "module-settings-dialog" },
+              expect: { visible: true },
+            },
+            {
               id: "edit-allow",
               action: "click",
               target: { testId: "settings-allow-remove-0" },
