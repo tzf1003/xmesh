@@ -101,6 +101,12 @@ export function runKernelCli(args: readonly string[], bin: string = xmeshBinary(
 
 export interface KernelServiceInfo { config_file: string; state_dir: string; oauth_password_file: string; local_only: boolean; system: boolean }
 
+export function sameKernelPath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  const paths = platform === "win32" ? path.win32 : path;
+  const normalize = (value: string): string => platform === "win32" ? paths.resolve(value).toLowerCase() : paths.resolve(value);
+  return normalize(a) === normalize(b);
+}
+
 export async function kernelServiceInfo(paths: { configFile: string; serviceNode?: string },
   run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<KernelServiceInfo | undefined> {
   const selector = paths.serviceNode ? ["--name", `xmesh-${paths.serviceNode}`] : ["--config", paths.configFile];
@@ -124,8 +130,8 @@ export async function kernelServiceOptions(paths: { configFile: string; stateDir
   run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<string[]> {
   const info = await kernelServiceInfo(paths, run);
   if (!info) return [];
-  if (info.system || path.resolve(info.config_file) !== path.resolve(paths.configFile) ||
-    (info.state_dir !== "" && path.resolve(info.state_dir) !== path.resolve(paths.stateDir))) throw new CliError("service-info", "原服务的配置、状态目录或权限不匹配");
+  if (info.system || !sameKernelPath(info.config_file, paths.configFile) ||
+    (info.state_dir !== "" && !sameKernelPath(info.state_dir, paths.stateDir))) throw new CliError("service-info", "原服务的配置、状态目录或权限不匹配");
   return [...(info.local_only ? ["--local-only"] : []), ...(info.oauth_password_file ? ["--oauth-password-file", info.oauth_password_file] : [])];
 }
 

@@ -10,7 +10,7 @@ import (
 
 type migrationPaths struct {
 	config, state, password string
-	localOnly               bool
+	localOnly, system       bool
 }
 
 var installedMigrationPaths = readInstalledMigrationPaths

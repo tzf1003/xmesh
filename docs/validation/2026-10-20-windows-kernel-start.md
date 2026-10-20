@@ -30,7 +30,7 @@ The production-kernel acceptance test installs a disposable login task, rejects 
 Also verified:
 
 - `go test ./cmd/xmesh`, including old control-protocol compatibility and deterministic GBK task-XML decoding. Native startup acceptance now invokes the production CLI in a hidden window, matching Electron.
-- Desktop TypeScript typecheck/build and 79 related unit tests (actions, lifecycle, service options, preload, packaging and kernel updates).
+- Desktop TypeScript typecheck/build and 81 related unit tests (actions, lifecycle, service options, preload, packaging and kernel updates).
 - Nine real Electron end-to-end tests covering all six controls, confirmation/cancellation, offline installation/startup, visible failures and existing update flows.
 - A disposable native Windows node exercised all six operations through the production `KernelLifecycle` backend and CLI, including repeated installation after uninstall, an aliased state directory, rename/restart/stop/start/reinstall, a custom OAuth password file and retention of the configuration. Its task and temporary state were removed afterwards.
 - Visual checks at 1100×1000 and 480×900: controls wrap without clipping, the reinstall confirmation is readable, and no page errors or relevant console warnings were observed. Browser plugin was unavailable; the repository's Playwright/Electron harness was used.

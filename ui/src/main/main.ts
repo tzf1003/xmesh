@@ -17,8 +17,8 @@ import { TransferService } from "./transfers";
 import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { bundledXmesh, CliError, cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
-import { discoverKernelTargets, KernelLifecycle, type KernelTarget } from "./kernel-lifecycle";
+import { bundledXmesh, CliError, cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshRaw, runXmeshSetup, sameKernelPath } from "./cli";
+import { discoverKernelTargets, KernelLifecycle, recoverKernelPaths, type KernelTarget } from "./kernel-lifecycle";
 import { kernelConfigNode, kernelInstallOptions } from "./kernel-install-options";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
@@ -222,27 +222,19 @@ async function start(): Promise<void> {
   const kernelLifecycle = new KernelLifecycle({
     targets: () => discoverKernelTargets(roots, (id) => kernelConfigs.paths(id), undefined, kernelConfigs.nodes()),
     resolve: async (target) => {
-      if (target.running && target.instance) {
-        try {
+      const serviceNode = serviceIdentity(target);
+      return recoverKernelPaths(target, serviceNode, async () => {
+        if (target.instance) {
           await kernelConfigs.capture(target.id, target.instance);
           return kernelConfigs.paths(target.id)!;
-        } catch (error) {
-          // A registered service remains addressable when control is unavailable.
-          const serviceNode = serviceIdentity(target);
-          const info = await kernelServiceInfo({ ...target, serviceNode });
-          if (info) {
-            const paths = { configFile: info.config_file, stateDir: info.state_dir || target.stateDir };
-            kernelConfigs.register(target.id, paths, serviceNode);
-            return { ...paths, serviceNode };
-          }
-          if (!fs.existsSync(target.configFile)) throw error;
         }
-      }
-      return { ...target, serviceNode: serviceIdentity(target) };
+        throw new Error("控制通道不可用");
+      }, () => kernelServiceInfo({ ...target, serviceNode }),
+      (paths) => kernelConfigs.register(target.id, paths, serviceNode));
     },
     managed: process.platform === "win32" ? async (target) => {
       const info = await kernelServiceInfo({ ...target, serviceNode: serviceIdentity(target) });
-      return info ? !info.system : target.managed;
+      return info ? !info.system && (!info.state_dir || sameKernelPath(info.state_dir, target.stateDir)) : target.managed;
     } : undefined,
     installOptions: kernelInstallOptions,
     serviceOptions: kernelServiceOptions,

@@ -11,6 +11,25 @@ import { sameVersion } from "../shared/version";
 export interface KernelPaths { configFile: string; stateDir: string; serviceNode?: string }
 export interface KernelTarget extends KernelNode, KernelPaths { instance?: Instance }
 
+/** Registration metadata remains useful after a crash leaves a stale manifest. */
+export async function recoverKernelPaths(target: KernelTarget, serviceNode: string,
+  capture: () => Promise<KernelPaths>,
+  inspect: () => Promise<{ config_file: string; state_dir: string } | undefined>,
+  remember: (paths: KernelPaths) => void): Promise<KernelPaths> {
+  if (!target.instance) return { ...target, serviceNode };
+  if (target.running) {
+    try { return await capture(); } catch { /* fall back to registration */ }
+  }
+  const info = await inspect();
+  if (info) {
+    const paths = { configFile: info.config_file, stateDir: info.state_dir || target.stateDir, serviceNode };
+    remember(paths);
+    return paths;
+  }
+  if (!fs.existsSync(target.configFile)) throw new Error("无法恢复原服务的配置路径");
+  return { ...target, serviceNode };
+}
+
 /** Only discovered local nodes are addressable; the renderer never supplies paths. */
 export function discoverKernelTargets(roots: string[], saved: (id: string) => KernelPaths | undefined,
   protectedRoots: readonly string[] = protectedStateRoots(), savedIds: readonly string[] = []): KernelTarget[] {

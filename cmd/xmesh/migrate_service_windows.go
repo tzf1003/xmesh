@@ -52,5 +52,7 @@ func readInstalledMigrationPaths(name string) (migrationPaths, error) {
 	if err != nil {
 		return migrationPaths{}, err
 	}
-	return migrationPathsFromArgs(args)
+	paths, err := migrationPathsFromArgs(args)
+	paths.system = true
+	return paths, err
 }

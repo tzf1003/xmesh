@@ -27,10 +27,6 @@ func serviceInfo(args []string) error {
 	if err := migrationServiceName(*name); err != nil {
 		return err
 	}
-	system, err := installedSystemService(*name)
-	if err != nil {
-		return err
-	}
 	paths, err := installedMigrationPaths(*name)
 	if err != nil {
 		if os.IsNotExist(err) || serviceMissing(err) {
@@ -41,6 +37,6 @@ func serviceInfo(args []string) error {
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"config_file": paths.config, "state_dir": paths.state,
 		"oauth_password_file": paths.password, "local_only": paths.localOnly,
-		"system": system,
+		"system": paths.system,
 	})
 }

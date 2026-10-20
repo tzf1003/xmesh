@@ -3,7 +3,7 @@ import { test } from "node:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { discoverKernelTargets, KernelLifecycle, type KernelTarget } from "../../src/main/kernel-lifecycle";
+import { discoverKernelTargets, KernelLifecycle, recoverKernelPaths, type KernelTarget } from "../../src/main/kernel-lifecycle";
 import { parseKernelRequest } from "../../src/shared/kernel";
 
 function fixture(options: { running?: boolean; managed?: boolean; fail?: string; survive?: boolean; version?: string } = {}) {
@@ -215,5 +215,19 @@ test("actual registration scope overrides the state-root hint and unknown scope 
     assert.ok(list.ok && list.data.nodes[0]?.managed === (scope === "user"));
     assert.equal((await service.request({ op: "install", node: target.id })).ok, scope === "user");
     assert.equal(commands > 0, scope === "user");
+  }
+});
+
+test("stale and unresponsive custom-config instances recover and retain their registered paths", async () => {
+  for (const running of [false, true]) {
+    const { target } = fixture({ running });
+    let captured = false;
+    const actual = { configFile: path.resolve("external/real.yaml"), stateDir: target.stateDir, serviceNode: "original" };
+    let remembered: unknown;
+    const paths = await recoverKernelPaths(target, "original", async () => { captured = true; throw new Error("control unavailable"); },
+      async () => ({ config_file: actual.configFile, state_dir: actual.stateDir }), value => { remembered = value; });
+    assert.deepEqual(paths, actual);
+    assert.deepEqual(remembered, actual);
+    assert.equal(captured, running, "a stale process does not need a control request");
   }
 });

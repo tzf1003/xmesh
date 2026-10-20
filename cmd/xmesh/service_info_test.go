@@ -33,6 +33,16 @@ func TestServiceInfoRetainsInstallOptions(t *testing.T) {
 	if err := json.Unmarshal([]byte(envelope.Messages[0]), &info); err != nil || info.Password != password || !info.LocalOnly {
 		t.Fatal(info, err)
 	}
+	for _, system := range []bool{false, true} {
+		installedMigrationPaths = func(string) (migrationPaths, error) { return migrationPaths{config: root, system: system}, nil }
+		out, err = captureStdout(func() error { return serviceInfo([]string{"--name", "xmesh-original"}) })
+		var scope struct {
+			System bool `json:"system"`
+		}
+		if err != nil || json.Unmarshal([]byte(out), &scope) != nil || scope.System != system {
+			t.Fatal("scope must come from the inspected registration", out, err)
+		}
+	}
 	installedMigrationPaths = func(string) (migrationPaths, error) { return migrationPaths{}, os.ErrNotExist }
 	out, err = captureStdout(func() error { return run([]string{"service-info", "--name", "xmesh-original", "--json"}) })
 	if err == nil {
