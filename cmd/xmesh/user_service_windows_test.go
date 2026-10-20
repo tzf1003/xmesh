@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +13,71 @@ import (
 	"unsafe"
 
 	"github.com/kardianos/service"
+	"github.com/tzf1003/xmesh/internal/control"
 	"golang.org/x/sys/windows"
 )
+
+// Exercise the production CLI, not just a task that runs a test helper: legacy
+// configurations must fail startup, and migrated kernels must answer control.
+func Test_WindowsUserKernelStart(t *testing.T) {
+	if os.Getenv("XMESH_TEST_WINDOWS_USER_SERVICE") != "1" {
+		t.Skip("set XMESH_TEST_WINDOWS_USER_SERVICE=1 in an interactive Windows session")
+	}
+	binary := os.Getenv("XMESH_TEST_WINDOWS_BINARY")
+	if !filepath.IsAbs(binary) {
+		t.Skip("XMESH_TEST_WINDOWS_BINARY must name the built xmesh executable")
+	}
+	root := t.TempDir()
+	node := fmt.Sprintf("start-validation-%d", time.Now().UnixNano())
+	configFile := filepath.Join(root, "config.json")
+	stateDir := filepath.Join(root, "state")
+	if err := os.WriteFile(configFile, serviceFixture(t, node, root), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := install([]string{"--config", configFile, "--state-dir", stateDir, "--executable", binary, "--autostart=false"}); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--name", serviceName(node)}
+	t.Cleanup(func() {
+		// Stop removes control.json before Task Scheduler releases the process.
+		// Retain its identity before stopping so TempDir cleanup cannot race it.
+		ep, endpointErr := control.ReadEndpoint(stateDir)
+		_ = serviceCommand("stop", args)
+		if endpointErr == nil {
+			if err := waitKernelExit(ep, kernelExitLimit); err != nil {
+				t.Error(err)
+			}
+		}
+		if err := serviceCommand("uninstall", args); err != nil {
+			t.Error(err)
+		}
+		// Task Scheduler can briefly retain the action's working directory
+		// after the kernel exits and the task has been deleted.
+		for deadline := time.Now().Add(10 * time.Second); ; {
+			err := os.RemoveAll(root)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) || time.Now().After(deadline) {
+				t.Error("task working directory cleanup", err)
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	if err := serviceCommand("start", args); err == nil {
+		t.Fatal("Task Scheduler accepted a legacy config, but the kernel never started")
+	}
+	if err := migrate([]string{"--config", configFile, "--state-dir", stateDir}); err != nil {
+		t.Fatal(err)
+	}
+	if err := serviceCommand("start", args); err != nil {
+		t.Fatal("migrated kernel failed startup acceptance", err)
+	}
+	if err := serviceCommand("start", args); err != nil {
+		t.Fatal("starting an already running kernel must remain idempotent", err)
+	}
+}
 
 type taskRuntimeProof struct {
 	SID           string

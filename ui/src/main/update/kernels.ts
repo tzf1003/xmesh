@@ -47,7 +47,7 @@ export function kernelServices(env: KernelServices): { stop(node: string): Promi
       const deadline = Date.now() + timeout;
       let version = "";
       do {
-        const instance = env.discover().find((i) => i.id === node);
+        const instance = env.discover().find((i) => i.id === node || i.manifest.node === node);
         if (instance) {
           try {
             version = (await status(instance)).control.kernel_version;

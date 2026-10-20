@@ -210,7 +210,7 @@ async function start(): Promise<void> {
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
-    : electronPlatform(showPanel, notifyError);
+    : electronPlatform(showPanel, notifyError, kernelBundled ? (node) => updateKernels.start(node) : undefined);
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
   const computerTargets = new ComputerEmergencyTargets();
   controller.on("change", snapshot => computerTargets.observe(snapshot));

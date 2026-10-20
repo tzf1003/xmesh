@@ -58,7 +58,21 @@ func userTaskAction(action string, c *service.Config) error {
 	case "uninstall":
 		return run("/Delete", "/TN", name, "/F")
 	case "start":
-		return run("/Run", "/TN", name)
+		// Computer hosts have their own readiness protocol in computerService.
+		if c.Name == computerServiceName {
+			return run("/Run", "/TN", name)
+		}
+		dir, err := taskStateDir(taskDocumentText(document), c.Name)
+		if err != nil {
+			return err
+		}
+		if err := run("/Run", "/TN", name); err != nil {
+			return err
+		}
+		// /Run only acknowledges scheduling. A kernel can exit immediately (for
+		// example with an unmigrated config), so require a responding control
+		// channel. An already running task may keep its existing endpoint.
+		return waitKernelStart(dir, control.Endpoint{}, time.Time{}, kernelStartLimit)
 	case "stop":
 		return run("/End", "/TN", name)
 	case "restart":
