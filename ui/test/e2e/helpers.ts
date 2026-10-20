@@ -104,10 +104,14 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
     calls: () => hook("calls"),
     notices: () => hook("notices"),
     openPanel: async () => {
-      await app.evaluate(() =>
-        (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
-      );
-      const page = await app.waitForEvent("window");
+      // Subscribe before showing the panel: its window can arrive before the
+      // main-process evaluation returns, especially on Windows.
+      const [page] = await Promise.all([
+        app.waitForEvent("window"),
+        app.evaluate(() =>
+          (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
+        ),
+      ]);
       await page.waitForLoadState("domcontentloaded");
       return page;
     },

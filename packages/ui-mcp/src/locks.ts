@@ -131,7 +131,21 @@ export class Locks {
       fs.writeFileSync(temporary, JSON.stringify({ ...this.owner, ticket }), {
         mode: 0o600,
       });
-      fs.renameSync(temporary, claim);
+      // Windows can briefly deny replacement while a contender reads this
+      // claim. Keep the choosing ticket visible throughout bounded retries.
+      const deadline = Date.now() + 1000;
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      for (;;) {
+        try {
+          fs.renameSync(temporary, claim);
+          break;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (!["EPERM", "EACCES", "EBUSY"].includes(code ?? "") || Date.now() >= deadline)
+            throw error;
+          Atomics.wait(pause, 0, 0, 10);
+        }
+      }
       const blocked = read().some(
         (o) =>
           !o.ticket ||
@@ -145,6 +159,7 @@ export class Locks {
       this.held.add(claim);
       return () => this.release(claim);
     } catch (error) {
+      fs.rmSync(`${claim}.tmp`, { force: true });
       fs.rmSync(claim, { force: true });
       throw error;
     }
