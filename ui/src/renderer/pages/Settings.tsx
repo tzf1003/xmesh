@@ -21,6 +21,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   useEffect(() => { if (ctx.focus?.settingsTab) setTab(ctx.focus.settingsTab); }, [ctx.focus?.settingsTab]);
   const prefs = { ...DEFAULT_APP_PREFERENCES, ...ctx.snapshot.settings.preferences, locale: ctx.snapshot.settings.locale };
   const display = ctx.snapshot.settings.display;
+  useEffect(() => { setFont(display.uiFont); setCode(display.codeFont); }, [display.uiFont, display.codeFont]);
   const run = async (p: ReturnType<ReturnType<typeof getApi>["setLoginItem"]>): Promise<void> => { const r = await p; if (!r.ok) ctx.toast(r.error.message, true); };
   const setDisplay = (patch: Partial<typeof display>): void => { void run(getApi().setDisplay({ ...display, ...patch })); };
   const setPrefs = (patch: Partial<typeof prefs>): void => { void run(getApi().setAppPreferences({ ...prefs, ...patch })); };

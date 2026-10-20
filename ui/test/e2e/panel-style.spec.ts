@@ -3,7 +3,7 @@
 import { expect, test } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type Harness, launch } from "./helpers";
+import { type Harness, launch, navigate } from "./helpers";
 
 let h: Harness;
 test.afterEach(async () => {
@@ -38,6 +38,7 @@ test("the display dialog sets text size and typefaces, and saves them to the use
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
 
+  await navigate(page, "settings");
   await page.getByTestId("open-display").click();
   await page.getByTestId("zoom-125").click();
   await expect.poll(() => zoomFactor(h)).toBe(1.25);
@@ -55,10 +56,17 @@ test("the display dialog sets text size and typefaces, and saves them to the use
 
   const saved = JSON.parse(fs.readFileSync(path.join(h.userData, "display.json"), "utf8"));
   expect(saved).toEqual({ zoom: 1.25, uiFont: "Inter", codeFont: "Cascadia Mono" });
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("settings-ui-font")).toHaveValue("Inter");
+  await expect(page.getByTestId("settings-code-font")).toHaveValue("Cascadia Mono");
+  await page.getByTestId("open-display").click();
 
   await page.getByTestId("display-reset").click();
   await expect.poll(() => zoomFactor(h)).toBe(1);
   await expect.poll(vars).toEqual({ ui: "", mono: "" });
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("settings-ui-font")).toHaveValue("");
+  await expect(page.getByTestId("settings-code-font")).toHaveValue("");
 });
 
 test("Ctrl+plus, Ctrl+minus and Ctrl+0 step the text size from the keyboard", async () => {
