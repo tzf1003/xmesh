@@ -45,6 +45,7 @@ export interface UpdaterEnv {
   store: UpdateStore;
   /** Node names of the kernels running now. */
   runningNodes(): string[];
+  kernelBusy?(): boolean;
   /** Stops the service and observes the old process exit. `absent`: the node already exited. Throws when it cannot stop. */
   stopNode(node: string): Promise<StopResult>;
   startNode(node: string): Promise<void>;
@@ -181,6 +182,7 @@ export class Updater extends EventEmitter<UpdaterEvents> {
       return { ok: false, error: { code: "busy", message: "no update is ready to install" } };
     }
     if (this.st.blocked !== "") return { ok: false, error: { code: "blocked", message: `updates are not possible here (${this.st.blocked})` } };
+    if (this.env.kernelBusy?.()) return { ok: false, error: { code: "busy", message: "a kernel operation is in progress" } };
 
     const ctl = new AbortController();
     this.abort = ctl;

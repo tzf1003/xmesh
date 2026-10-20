@@ -19,6 +19,7 @@ export interface Platform {
   showPanel(): void;
   quit(): void;
   runCli(command: CliCommand, node?: string): Promise<unknown>;
+  manageKernel?(command: CliCommand, node: string): Promise<unknown>;
   notifyError(message: string): void;
   /** Native chooser; resolves to the chosen absolute path or undefined on cancel. */
   pickPath(kind: PickKind): Promise<string | undefined>;
@@ -219,7 +220,8 @@ export class Actions {
 
   private async runCli(command: CliCommand, node?: string): Promise<ActionResult> {
     try {
-      await this.platform.runCli(command,node ? this.controller.nodeName?.(node) || node : node);
+      if (node && this.platform.manageKernel) await this.platform.manageKernel(command, node);
+      else await this.platform.runCli(command, node ? this.controller.nodeName?.(node) || node : node);
       return ok;
     } catch (e) {
       this.platform.notifyError(this.t("dialog.cliFailed", { command: `xmesh ${command}` }));

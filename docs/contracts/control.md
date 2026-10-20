@@ -328,9 +328,9 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 | 产物 | 位置 | 如何保持一致 |
 | --- | --- | --- |
-| 夹具 | `schemas/examples/control/<定义名>.<变体>.json` 与 `invalid/` | [`check_control.py`](schemas/check_control.py)（由 `check_examples.py` 调用，接入 `contracts.yml`）：正例通过同名定义，反例失败；路由表里出现的每个请求与响应定义至少有一个正例 |
+| 夹具 | `schemas/examples/control/<定义名>.<变体>.json` 与 `invalid/` | [`check_control.py`](schemas/check_control.py)（由 `check_examples.py` 调用，接入 `go.yml` 的 `contracts` 作业）：正例通过同名定义，反例失败；路由表里出现的每个请求与响应定义至少有一个正例 |
 | Go 类型 | `api/control/v2`；校验辅助 `api/control/v2/schemacheck` | 测试把每个正例解码进 Go 类型（拒绝未知字段）再编码，结果必须与原文件语义相同；Go 常量必须覆盖模式里的枚举，错误码的 HTTP 状态必须与 `x-http-status` 相同 |
-| TypeScript 类型 | `api/control/v2/ts/control.ts` | `scripts/gen-control-ts` 从模式生成，含类型、`CONTROL_ROUTES`、`ControlRouteTypes`（路由编号到请求/响应类型）、`CONTROL_ERROR_STATUS`。`contracts.yml` 重新生成后要求工作区无变化，并过 `tsc --strict` |
+| TypeScript 类型 | `api/control/v2/ts/control.ts` | `scripts/gen-control-ts` 从模式生成，含类型、`CONTROL_ROUTES`、`ControlRouteTypes`（路由编号到请求/响应类型）、`CONTROL_ERROR_STATUS`。`go.yml` 的 `contracts` 作业 重新生成后要求工作区无变化，并过 `tsc --strict` |
 
 改契约的顺序：先改本文与模式，再改夹具，跑 `python3 docs/contracts/schemas/check_examples.py`、`go test ./api/...`、`node scripts/gen-control-ts/generate.mjs`，把生成物一并提交。加路由时必须同时：在路由表加一行、选一个已有或新增的能力、为请求与响应各补正例、在内核的路由注册测试里断言它出现。
 

@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-type migrationPaths struct{ config, state string }
+type migrationPaths struct {
+	config, state, password string
+	localOnly, system       bool
+}
 
 var installedMigrationPaths = readInstalledMigrationPaths
 
@@ -34,7 +37,11 @@ func migrationPathsFromArgs(args []string) (migrationPaths, error) {
 	}
 	for i := 2; i < len(args); i++ {
 		flag, value, inline := strings.Cut(args[i], "=")
-		if flag != "--config" && flag != "--state-dir" {
+		if flag == "--local-only" {
+			paths.localOnly = !inline || value == "true"
+			continue
+		}
+		if flag != "--config" && flag != "--state-dir" && flag != "--oauth-password-file" {
 			continue
 		}
 		if !inline {
@@ -49,11 +56,13 @@ func migrationPathsFromArgs(args []string) (migrationPaths, error) {
 		}
 		if flag == "--config" {
 			paths.config = value
-		} else {
+		} else if flag == "--state-dir" {
 			paths.state = value
+		} else {
+			paths.password = value
 		}
 	}
-	if !filepath.IsAbs(paths.config) || paths.state != "" && !filepath.IsAbs(paths.state) {
+	if !filepath.IsAbs(paths.config) || paths.state != "" && !filepath.IsAbs(paths.state) || paths.password != "" && !filepath.IsAbs(paths.password) {
 		return migrationPaths{}, fmt.Errorf("服务配置路径必须为绝对路径")
 	}
 	return paths, nil

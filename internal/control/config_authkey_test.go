@@ -98,6 +98,27 @@ func TestConfigAuthkeyRejectsInvalidInputAndStorage(t *testing.T) {
 	}
 }
 
+func TestConfigAuthkeyRefusesExistingHardlink(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "authkeys", "authkey-test")
+	if err := privdir.Ensure(filepath.Dir(file)); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "existing-secret")
+	if err := os.WriteFile(target, []byte("existing-secret-value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, file); err != nil {
+		t.Fatal("create hardlink fixture:", err)
+	}
+	if err := createConfigAuthkey(file, "tskey-auth-replacement"); err == nil {
+		t.Fatal("existing hardlink accepted")
+	}
+	if raw, err := os.ReadFile(target); err != nil || string(raw) != "existing-secret-value" {
+		t.Fatal("hardlink target changed", err)
+	}
+}
+
 func TestConfigAuthkeyRemovesCredentialOnInternalCommitFailure(t *testing.T) {
 	f := newFixture(t)
 	req, file := authkeyRequest(f)

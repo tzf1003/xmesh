@@ -1,0 +1,178 @@
+name: Windows diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Diagnostic suite
+        type: choice
+        default: joint
+        options: [joint, race, flakes, all]
+permissions:
+  contents: read
+concurrency:
+  group: windows-diagnostics-${{ github.ref }}-${{ inputs.suite }}
+  cancel-in-progress: true
+jobs:
+  joint:
+    if: inputs.suite == 'joint' || inputs.suite == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Runner environment
+        shell: pwsh
+        run: |
+          go version
+          $os = Get-CimInstance Win32_OperatingSystem
+          "{0} build {1}" -f $os.Caption, $os.BuildNumber
+          "Physical memory free/total (MB): {0}/{1}" -f [int]($os.FreePhysicalMemory/1024), [int]($os.TotalVisibleMemorySize/1024)
+      - name: Build the xmesh binary the serve tests launch
+        run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
+      - name: Three rounds of managed runner, serve acceptance and counterexamples
+        shell: pwsh
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
+        run: |
+          $failed = @()
+          foreach ($round in 1..3) {
+            Write-Output "::group::round $round, managed runner exec and ConPTY"
+            go test -race ./internal/winbox -run Test_WindowsManagedRunner -v -count=1 -timeout=600s
+            if ($LASTEXITCODE -ne 0) { $failed += "round $round managed runner" }
+            Write-Output "::endgroup::"
+            Write-Output "::group::round $round, serve with the AppContainer runner on"
+            go test -race ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s
+            if ($LASTEXITCODE -ne 0) { $failed += "round $round serve" }
+            Write-Output "::endgroup::"
+            Write-Output "::group::round $round, workspace counterexamples and external writers"
+            go test -race ./internal/winbox -run WindowsAppContainer -v -count=1 -timeout=900s
+            if ($LASTEXITCODE -ne 0) { $failed += "round $round counterexamples" }
+            Write-Output "::endgroup::"
+          }
+          if ($failed.Count -ne 0) {
+            Write-Output "::error::failed: $($failed -join '; ')"
+            exit 1
+          }
+
+  stress:
+    if: inputs.suite == 'race' || inputs.suite == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Runner environment
+        shell: pwsh
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED GOFLAGS
+          $os = Get-CimInstance Win32_OperatingSystem
+          "{0} build {1}" -f $os.Caption, $os.BuildNumber
+          "Physical memory free/total (MB): {0}/{1}" -f [int]($os.FreePhysicalMemory/1024), [int]($os.TotalVisibleMemorySize/1024)
+          "Virtual memory free/total (MB): {0}/{1}" -f [int]($os.FreeVirtualMemory/1024), [int]($os.TotalVirtualMemorySize/1024)
+          Get-CimInstance Win32_PageFileUsage | ForEach-Object { "Page file {0}: allocated {1} MB, peak {2} MB" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+      - name: Race exit status control and trivial launch stress
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          XMESH_TEST_WINDOWS_RACE_STRESS: "300"
+        run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerRaceDiagnosticsControl|Test_WindowsAppContainerRaceHelperLaunchStress' -v -count=1 -timeout=1500s
+      - name: Deletion recovery repetition
+        if: ${{ !cancelled() }}
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerWorkspaceDeletionRecovery' -v -count=25 -timeout=1500s
+  runner:
+    if: inputs.suite == 'race' || inputs.suite == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Managed runner exec and ConPTY acceptance
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+        run: go test -race ./internal/winbox -run 'Test_WindowsManagedRunner' -v -count=1 -timeout=900s
+
+  hunt:
+    if: inputs.suite == 'flakes' || inputs.suite == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Repeat the flaky tests
+        shell: pwsh
+        env:
+          XMESH_TEST_WINDOWS_SANDBOX: "1"
+          SHARD: ${{ matrix.shard }}
+        run: |
+          $failed = 0
+          $runs = @(
+            @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 80 },
+            @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 40 },
+            @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 },
+            @{ Name = 'TerminalInterrupt'; Pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$'; Count = 40 }
+          )
+          # Each shard repeats one test, so the four run in parallel instead of four times over.
+          $runs = @($runs[([int]$env:SHARD - 1)])
+          foreach ($run in $runs) {
+            $out = "hunt-$($run.Name).txt"
+            $pattern = $run.Pattern
+            $count = $run.Count
+            $started = Get-Date
+            go test -race ./internal/winbox -run $pattern -count $count -timeout 2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
+            if ($LASTEXITCODE -ne 0) { $failed = 1 }
+            "{0}: {1:n0}s for {2} iterations, go test exit {3}" -f $run.Name, ((Get-Date) - $started).TotalSeconds, $count, $LASTEXITCODE
+          }
+          "==== failures ===="
+          foreach ($run in $runs) {
+            "---- $($run.Name)"
+            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|sandbox helper image|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
+          }
+          if ($failed -ne 0) { exit 1 }
+
+  pipe-close:
+    if: inputs.suite == 'flakes' || inputs.suite == 'all'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Bare go-winio listener (report only)
+        shell: pwsh
+        env:
+          XMESH_TEST_PIPE_CLOSE_RAW: "1"
+          XMESH_TEST_PIPE_CLOSE_ROUNDS: "3000"
+        run: |
+          go test -race ./internal/control -run '^Test_ControlPipeListenerCloseAfterClientDrops$' -count 1 -v -timeout 1200s 2>&1 | Select-String -Pattern 'bare go-winio|--- (PASS|FAIL)|^(ok|FAIL)\s|_test.go:' | ForEach-Object { $_.Line }
+      - name: Guarded listener
+        shell: pwsh
+        env:
+          XMESH_TEST_PIPE_CLOSE_ROUNDS: "3000"
+        run: go test -race ./internal/control -run '^Test_ControlPipeListenerCloseAfterClientDrops$|^Test_CONSEC12_LivePipeDACL$' -count 3 -timeout 1200s
+

@@ -24,7 +24,7 @@ The persistent CLI is inside the installed application: macOS `xmesh.app/Content
 
 Every downloadable file is listed in `SHA256SUMS.txt`. Match the package hash with the corresponding release record. The signed desktop packages contain the platform CLI; stable Windows/macOS distribution uses these native bundles. Linux CLI archives include the scripts and [real-environment runbook](https://github.com/tzf1003/xmesh/blob/__TAG__/docs/validation/real-environment-runbook.md).
 
-The release commit must pass the Go, contract fixture, Headscale interop and Onboarding gates, including native user-service acceptance when the runner has a supported user session, before artifacts are built. Native installer launch and upgrade acceptance must also be run on target devices; passing build checks alone does not establish those outcomes.
+The release tag must pass the full CI run on the same commit before artifacts are built. This covers Go, contracts, Headscale, Onboarding, UI and the native desktop executor, including native user-service acceptance when the runner has a supported user session. Native installer launch and upgrade acceptance must also be run on target devices; passing build checks alone does not establish those outcomes.
 
 ## Operational limits
 

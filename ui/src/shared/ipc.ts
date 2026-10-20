@@ -1,4 +1,5 @@
 import type { OnboardingRequest, OnboardingResultFor } from "./onboarding";
+import type { KernelRequest, KernelResult } from "./kernel";
 // The renderer receives fixed operations with validated arguments. Tool calls go
 // through the selected local Gateway and its policies; local transfer paths are
 // issued by native dialogs and represented by opaque tickets.
@@ -40,6 +41,7 @@ import { isAuthKey } from "./setup";
 
 /** `ipcMain.handle` channels. The preload script hard-codes the same strings; a unit test checks they agree. */
 export const CHANNELS = {
+  kernel: "xmesh:kernel",
   getSnapshot: "xmesh:get-snapshot",
   drain: "xmesh:drain",
   restartKernel: "xmesh:restart-kernel",
@@ -280,6 +282,7 @@ export interface SetupPreview {
 
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
+  kernel(request: KernelRequest): Promise<DataResult<KernelResult>>;
   playground: PlaygroundApi;
   transfers(request: TransferRequest): Promise<DataResult<TransferReply>>;
   getSnapshot(): Promise<Snapshot>;
@@ -362,6 +365,7 @@ export interface PanelApi {
 }
 
 export const PANEL_API_METHODS = [
+  "kernel",
   "playground",
   "transfers",
   "getSnapshot",
