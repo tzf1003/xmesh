@@ -32,5 +32,6 @@ Also verified:
 - Nine real Electron end-to-end tests covering all six controls, confirmation/cancellation, offline installation/startup, visible failures and existing update flows.
 - A disposable native Windows node exercised all six operations through the production `KernelLifecycle` backend and CLI, including repeated installation after uninstall, an aliased state directory and retention of the configuration. Its task and temporary state were removed afterwards.
 - Visual checks at 1100×1000 and 480×900: controls wrap without clipping, the reinstall confirmation is readable, and no page errors or relevant console warnings were observed. Browser plugin was unavailable; the repository's Playwright/Electron harness was used.
+- Packaged-app CI caught an unbundled YAML import in the main process. The config parser now ships as a bundled module; a regression test copies it outside the source tree and parses both YAML and JSON without runtime dependencies. The local Windows release package also passed the production fuse/content checks and fake-kernel startup smoke test.
 
 The full local desktop unit suite had one environment-dependent failure: creating a file symlink in `gateway-token.test` requires a Windows privilege unavailable in this session. The test was retained; all final CI jobs must pass before merge.

@@ -19,7 +19,7 @@ import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
 import { bundledXmesh, CliError, cliCommandText, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
 import { discoverKernelTargets, KernelLifecycle } from "./kernel-lifecycle";
-import { parse as parseYaml } from "yaml";
+import { kernelInstallOptions } from "./kernel-install-options";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -232,10 +232,7 @@ async function start(): Promise<void> {
       }
       return target;
     },
-    installOptions: ({ configFile }) => {
-      const config = parseYaml(fs.readFileSync(configFile, "utf8")) as { mesh?: { lan?: { enabled?: boolean }; tailnet?: { enabled?: boolean } } };
-      return config?.mesh?.lan?.enabled === false && config.mesh.tailnet?.enabled !== true ? ["--local-only"] : [];
-    },
+    installOptions: kernelInstallOptions,
     run: runKernelCli,
     changed: () => controller.nudge(),
     ...(kernelBundled && { version: app.getVersion() }),
