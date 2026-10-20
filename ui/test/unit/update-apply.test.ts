@@ -1,21 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { ApplyError, MAC_SCRIPT, type Spawned, WINDOWS_SCRIPT, macApplier, macBundle, windowsApplier } from "../../src/main/update/apply";
+import { ApplyError, MAC_SCRIPT, type Spawned, WINDOWS_LAUNCH, WINDOWS_SCRIPT, macApplier, macBundle, windowsApplier } from "../../src/main/update/apply";
 
 const handOver = (dir: string) => ({ installer: path.join(dir, "i.dmg"), execPath: "/Applications/xmesh.app/Contents/MacOS/xmesh", pid: 4242, dir, resultFile: path.join(dir, "result.txt") });
 /** A child process that reports it started on the next tick. */
-const child = (): Spawned => ({
-  once(ev, fn) {
-    if (ev === "spawn") setImmediate(() => fn(new Error("unused")));
-    return this;
-  },
-  unref() {},
-});
+const child = (): Spawned => {
+  const emitter = Object.assign(new EventEmitter(), { unref() {}, kill: () => true });
+  setImmediate(() => emitter.emit("spawn"));
+  return emitter;
+};
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-apply-"));
 
 test("macBundle finds the .app a MacOS executable lives in", () => {
@@ -64,9 +62,14 @@ test("macOS hands /bin/sh the script and four plain arguments", async () => {
 
 test("Windows starts a hidden PowerShell helper and passes every path through the environment", async () => {
   const dir = tmpDir();
-  const seen: { cmd: string; args: string[]; opts: { env?: Record<string, string>; windowsHide?: boolean; windowsVerbatimArguments?: boolean } }[] = [];
+  const seen: { cmd: string; args: string[]; opts: { env?: Record<string, string>; windowsHide?: boolean; windowsVerbatimArguments?: boolean; detached?: boolean } }[] = [];
+  let becameReady = false;
   const a = windowsApplier((cmd, args, opts) => {
     seen.push({ cmd, args, opts: opts as never });
+    setTimeout(() => {
+      becameReady = true;
+      fs.writeFileSync(opts.env!.XMESH_UPD_READY!, "ready");
+    }, 100);
     return child();
   });
   assert.equal(a.blocked(), "");
@@ -74,7 +77,10 @@ test("Windows starts a hidden PowerShell helper and passes every path through th
   await a.start(h);
   const s = seen[0]!;
   assert.equal(s.cmd, "powershell.exe");
-  assert.deepEqual(s.args, ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", path.join(dir, "apply-update.ps1")]);
+  assert.deepEqual(s.args, ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", WINDOWS_LAUNCH]);
+  assert.equal(s.opts.detached, false);
+  assert.equal(becameReady, true, "creating the launcher alone is not a hand-over");
+  assert.equal(fs.readFileSync(s.opts.env!.XMESH_UPD_READY!, "utf8"), "install");
   assert.equal(s.opts.windowsHide, true);
   assert.equal(s.opts.windowsVerbatimArguments, undefined);
   assert.equal(s.opts.env!.XMESH_UPD_PID, "4242");
@@ -82,6 +88,25 @@ test("Windows starts a hidden PowerShell helper and passes every path through th
   assert.equal(s.opts.env!.XMESH_UPD_APP, h.execPath);
   assert.equal(s.opts.env!.XMESH_UPD_RESULT, h.resultFile);
   assert.equal(fs.readFileSync(path.join(dir, "apply-update.ps1"), "utf8"), WINDOWS_SCRIPT);
+});
+
+test("Windows rejects a launcher failure before allowing the app to quit", async () => {
+  const dir = tmpDir();
+  const a = windowsApplier(() => {
+    const emitter = Object.assign(new EventEmitter(), { unref() {}, kill: () => true });
+    setImmediate(() => { emitter.emit("spawn"); emitter.emit("exit", 1); });
+    return emitter;
+  });
+  await assert.rejects(a.start(handOver(dir)), (e: ApplyError) => e.code === "spawn_failed" && /launcher exited/.test(e.message));
+});
+
+test("Windows rejects a launcher that never hands over to the helper", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const a = windowsApplier(() => child());
+  const outcome = assert.rejects(a.start(handOver(tmpDir())), (e: ApplyError) => e.code === "spawn_failed" && /did not become ready/.test(e.message));
+  await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(15_000);
+  await outcome;
 });
 
 // Execute the same helper on Windows PowerShell in CI and on PowerShell Core where available.
@@ -129,6 +154,33 @@ async function waitForApp(r: ReturnType<typeof windowsRig>): Promise<void> {
 test("Windows helper waits on the process with a 60-second deadline", () => {
   assert.ok(/^[\x20-\x7e\r\n]*$/.test(WINDOWS_SCRIPT));
   assert.match(WINDOWS_SCRIPT, /WaitForExit\(60000\)/);
+});
+
+test("Windows production hand-over survives the launching app exiting", { skip: process.platform !== "win32" || ps.status !== 0 }, async () => {
+  const r = windowsRig();
+  const module = path.resolve(__dirname, "../../src/main/update/apply.js");
+  const h = { installer: process.execPath, execPath: process.execPath, dir: path.dirname(r.file), resultFile: r.result };
+  const { NODE_OPTIONS: nodeOptions, ...env } = r.env;
+  const code = `
+    process.env.NODE_OPTIONS = process.env.XMESH_TEST_NODE_OPTIONS;
+    require(${JSON.stringify(module)}).windowsApplier().start({ ...${JSON.stringify(h)}, pid: process.pid })
+      .then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+  `;
+  const out = spawnSync(process.execPath, ["-e", code], { env: { ...env, XMESH_TEST_NODE_OPTIONS: nodeOptions }, timeout: 20_000, encoding: "utf8" });
+  assert.equal(out.status, 0, out.stderr);
+  await waitForApp(r);
+  assert.deepEqual(r.calls().map(c => c.installer), [true, false]);
+  assert.equal(fs.existsSync(r.result), false);
+});
+
+test("Windows helper cannot install after a hand-over was abandoned", needsPowerShell, () => {
+  const r = windowsRig();
+  const ready = path.join(path.dirname(r.file), "abandoned.ready");
+  const gone = spawnSync(process.execPath, ["-e", ""]).pid!;
+  const out = spawnSync(powershell, r.args, { env: { ...r.env, XMESH_UPD_PID: String(gone), XMESH_UPD_READY: ready }, timeout: 10_000, encoding: "utf8" });
+  assert.equal(out.status, 1, out.stderr);
+  assert.deepEqual(r.calls(), []);
+  assert.equal(fs.readFileSync(r.result, "utf8"), "the app did not authorize installation");
 });
 
 test("Windows helper installs after the old process exits, preserving paths and upgrade arguments", needsPowerShell, async () => {
