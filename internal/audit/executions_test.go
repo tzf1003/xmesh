@@ -145,6 +145,55 @@ func TestExecutionPollFailureRetainsUnknownAndRecovers(t *testing.T) {
 	awaitExecution(t, func() bool { active, _ := l.Executions(); return len(active) == 0 })
 }
 
+func TestExecutionAuthorizationLossStopsWorkerAndReleasesCapacity(t *testing.T) {
+	l, dir := executionLogger(t)
+	for i := 0; i < maxExecutions-1; i++ {
+		l.BeginExecution(context.Background(), "other/session", "", "target", "fs.read", "agent")
+	}
+	x := l.BeginExecution(context.Background(), "gone/session", "client", "target", "ui.run", "agent")
+	ctx := x.Context(context.Background())
+	var authorized atomic.Bool
+	authorized.Store(true)
+	var polls atomic.Int32
+	SetResultPollAuthorization(ctx, authorized.Load)
+	SetResultPoll(ctx, func(context.Context, string) (any, error) {
+		polls.Add(1)
+		return nil, errors.New("unexpected poll after caller authorization was lost")
+	})
+	args := json.RawMessage(`{"protocol_version":1}`)
+	accepted := map[string]any{"run_id": "r_disconnected", "status": "accepted"}
+	// Lose the caller before the first monitoring tick.
+	authorized.Store(false)
+	x.FinishCall(args, accepted, false)
+	if err := l.RecordExecution(x, "", "", "gone/session", "client", "target", "ui.run", args, accepted, false, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan struct{})
+	go func() { l.executionWorkers.Wait(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("unauthorized monitor did not exit")
+	}
+	if polls.Load() != 0 {
+		t.Fatal("result was read after authorization was lost")
+	}
+	l.BeginExecution(context.Background(), "new/session", "", "target", "fs.read", "agent")
+	active, limits := l.Executions()
+	if len(active) != maxExecutions || limits.RejectedTotal != 0 {
+		t.Fatalf("disconnected task retained its admission slot: %+v", limits)
+	}
+	for _, row := range active {
+		if row.ID == x.row.ID {
+			t.Fatal("retired task remained in the live list")
+		}
+	}
+	rows := records(t, dir)
+	if len(rows) != 2 || rows[0]["task_status"] != "accepted" || rows[1]["event"] != "task_untracked" || rows[1]["task_status"] != "unknown" || rows[1]["error"] != "authorization_lost" || rows[1]["execution_id"] != rows[0]["execution_id"] {
+		t.Fatal("unknown task tracking outcome missing from history", rows)
+	}
+}
+
 func TestExecutionPollingStopsWithLifecycleAndLogger(t *testing.T) {
 	for _, shutdown := range []string{"receiver", "logger"} {
 		t.Run(shutdown, func(t *testing.T) {

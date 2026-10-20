@@ -791,6 +791,7 @@ export function parsePairImport(v: unknown): PairImportArgs | undefined {
 const AUDIT_EVENTS = [
   "tool_call",
   "task_complete",
+  "task_untracked",
   "pty_open",
   "pty_close",
   "pty_transfer",

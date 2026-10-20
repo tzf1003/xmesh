@@ -72,7 +72,8 @@ func SetResultPoll(ctx context.Context, poll ResultPoll) {
 }
 
 // SetResultPollAuthorization rechecks the owning Agent's current caller and
-// tool grants before reading a background result.
+// tool grants before reading a background result. Losing authorization ends
+// this monitor; a disconnected session cannot acquire its old identity again.
 func SetResultPollAuthorization(ctx context.Context, allowed func() bool) {
 	if x, ok := ctx.Value(executionContextKey{}).(*Execution); ok {
 		x.mu.Lock()
@@ -214,6 +215,27 @@ func (x *Execution) markUnknown() {
 	x.mu.Unlock()
 }
 
+// stopTracking retires a monitor whose caller can no longer read the result.
+// Its audit event describes the tracking outcome while the task outcome stays
+// unknown. Retiring the live entry makes its admission slot reusable.
+func (x *Execution) stopTracking(reason string) {
+	x.mu.Lock()
+	x.closed = true
+	x.row.State, x.row.TaskStatus, x.row.UpdatedAt = "unknown", "unknown", v2.Now()
+	row := x.row
+	x.mu.Unlock()
+	_ = x.log.Write(taskRecord(row, "task_untracked", "error", reason))
+	x.remove()
+}
+
+func taskRecord(row v2.ToolExecution, event, status string, code any) map[string]any {
+	record := map[string]any{"time": time.Now().UTC().Format(time.RFC3339Nano), "event": event, "caller": row.Caller, "device": row.Device, "tool": row.Tool, "status": status, "error": code, "duration_ms": max(int64(0), time.Since(row.StartedAt.Time).Milliseconds()), "execution_id": row.ID, "started_at": row.StartedAt, "layer": row.Layer, "run_id": row.RunID, "task_status": row.TaskStatus}
+	if row.OAuthClient != "" {
+		record["oauth_client"] = row.OAuthClient
+	}
+	return record
+}
+
 func (x *Execution) monitor() {
 	defer x.log.executionWorkers.Done()
 	ticker := time.NewTicker(time.Second)
@@ -229,8 +251,8 @@ func (x *Execution) monitor() {
 		case <-ticker.C:
 		}
 		if x.pollAllowed != nil && !x.pollAllowed() {
-			x.markUnknown()
-			continue
+			x.stopTracking("authorization_lost")
+			return
 		}
 		ctx, cancel := context.WithTimeout(x.ctx, 3*time.Second)
 		// Logger shutdown cancels an in-flight poll as well as the next tick.
@@ -257,11 +279,7 @@ func (x *Execution) monitor() {
 			if meta.Status != "passed" {
 				status, code = "error", meta.Status
 			}
-			record := map[string]any{"time": time.Now().UTC().Format(time.RFC3339Nano), "event": "task_complete", "caller": row.Caller, "device": row.Device, "tool": row.Tool, "status": status, "error": code, "duration_ms": max(int64(0), time.Since(row.StartedAt.Time).Milliseconds()), "execution_id": row.ID, "started_at": row.StartedAt, "layer": row.Layer, "run_id": row.RunID, "task_status": meta.Status}
-			if row.OAuthClient != "" {
-				record["oauth_client"] = row.OAuthClient
-			}
-			if err := x.log.Write(record); err != nil {
+			if err := x.log.Write(taskRecord(row, "task_complete", status, code)); err != nil {
 				x.markUnknown()
 				continue
 			}

@@ -252,6 +252,7 @@ export interface AuditEvent {
   event:
     | "tool_call"
     | "task_complete"
+    | "task_untracked"
     | "pty_open"
     | "pty_close"
     | "pty_transfer"

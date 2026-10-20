@@ -3,7 +3,7 @@ export type ExecutionStatus = "queued" | "running" | "async" | "unknown" | "succ
 export type ExecutionCategory = "command" | "file" | "terminal" | "desktop" | "ui" | "backend" | "system";
 export interface ExecutionRow { id:string; tool:string; category:ExecutionCategory; device:string; caller:string; client:string; status:ExecutionStatus; time?:string; duration?:number; layer?:string; target?:string; execution?:ToolExecution; audit?:AuditEvent; fields?:[string,string][] }
 export function executionCategory(tool:string, event?:string):ExecutionCategory {
- if (event && !["tool_call","tool_task","task_complete","authz_deny"].includes(event) && !event.startsWith("pty_")) return "system";
+ if (event && !["tool_call","tool_task","task_complete","task_untracked","authz_deny"].includes(event) && !event.startsWith("pty_")) return "system";
  const local=tool.slice(tool.lastIndexOf("/")+1);
  if(local.startsWith("exec."))return "command";if(local.startsWith("fs."))return "file";if(local.startsWith("pty."))return "terminal";if(local.startsWith("computer."))return "desktop";if(local.startsWith("ui."))return "ui";return "backend";
 }
