@@ -133,14 +133,45 @@ test("update endpoint discovery failures preserve running Hosts and retained tar
   assert.equal(unreadable.endpoint(), "/retained.sock");
 });
 
-test("default Host discovery replaces a previous target and ignores exited kernels", async (t) => {
+test("a live kernel can replace a retained custom endpoint with the default Host", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-computer-update-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "target.json");
   fs.writeFileSync(file, JSON.stringify({ endpoint: "/previous.sock" }));
-  const target = new ComputerUpdateTarget(file, { discover: () => [{ manifest: { pid: 10 } } as Instance], gone: () => true,
-    readEndpoint: async () => { throw new Error("stale kernel must not be read"); } });
+  const target = new ComputerUpdateTarget(file, { discover: () => [{ manifest: { pid: 10 } } as Instance], gone: () => false,
+    readEndpoint: async () => undefined });
   await target.capture(); assert.equal(target.endpoint(), undefined);
   fs.writeFileSync(file, "{}");
   assert.throws(() => target.endpoint(), /无效/);
+});
+
+test("an update retains and restores a custom Host after every kernel exits", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-computer-update-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const discover of [() => [], () => [{ manifest: { pid: 10 } } as Instance]]) {
+    const file = path.join(dir, "target.json"), endpoint = "/retained-custom.sock";
+    fs.writeFileSync(file, JSON.stringify({ endpoint }));
+    const target = new ComputerUpdateTarget(file, { discover, gone: () => true,
+      readEndpoint: async () => { throw new Error("exited kernel must not be read"); } });
+    let running = true;
+    const service = computerHostServices({ version: "0.2.0", beforeStop: () => target.capture(),
+      gone: () => !running, run: async command => {
+        assert.equal(target.endpoint(), endpoint);
+        if (command === "stop") running = false;
+        return { running, pid: running ? 20 : 0, version: "0.1.0" };
+      } });
+    assert.equal(await service.stop(), "stopped");
+    const restored = new ComputerUpdateTarget(file, { discover: () => [] });
+    await computerHostServices({ version: "0.2.0", run: async command => {
+      assert.equal(restored.endpoint(), endpoint);
+      if (command === "start") running = true;
+      return { running, pid: 30, version: "0.2.0" };
+    } }).start();
+    assert.equal(running, true);
+  }
+  const missing = path.join(dir, "missing.json");
+  const target = new ComputerUpdateTarget(missing, { discover: () => [] });
+  await target.capture();
+  assert.equal(target.endpoint(), undefined);
+  assert.equal(fs.existsSync(missing), false);
 });

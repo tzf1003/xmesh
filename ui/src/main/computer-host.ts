@@ -123,13 +123,18 @@ export class ComputerUpdateTarget {
 
   async capture(): Promise<void> {
     const endpoints = new Set<string>();
+    let liveKernels = 0;
     for (const instance of this.env.discover()) {
       if ((this.env.gone ?? kernelGone)(instance.manifest.pid)) continue;
+      liveKernels++;
       const endpoint = await (this.env.readEndpoint?.(instance) ??
         new ControlClient({ endpoint: instance.manifest.endpoint }).getUpgradeComputerEndpoint());
       if (endpoint !== undefined) endpoints.add(endpoint);
     }
     if (endpoints.size > 1) throw new Error("运行中的内核使用不同桌面服务端点，请分别完成服务交接后更新");
+    // The independently installed Host can outlive every kernel. Retain its
+    // last verified endpoint until a live kernel supplies a replacement.
+    if (liveKernels === 0) return;
     const endpoint = endpoints.values().next().value ?? null;
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     fs.writeFileSync(this.file + ".tmp", JSON.stringify({ endpoint }), { mode: 0o600 });
