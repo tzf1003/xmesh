@@ -130,13 +130,16 @@ jobs:
       - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
+          DRAFT_TAG: ${{ vars.XMESH_RELEASE_DRAFT_TAG }}
         run: |
           sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/release.md > notes.md
           flags=(--latest)
           if [ "${{ needs.verify.outputs.channel }}" = testing ]; then flags=(--prerelease --latest=false); fi
+          if [ "$DRAFT_TAG" = "$GITHUB_REF_NAME" ]; then flags+=(--draft); fi
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}" --generate-notes \
             --title "$GITHUB_REF_NAME" --notes-file notes.md
   install-site:
+    if: vars.XMESH_RELEASE_DRAFT_TAG != github.ref_name
     needs: release
     permissions:
       contents: read
