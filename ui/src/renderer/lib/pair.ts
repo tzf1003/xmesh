@@ -54,6 +54,7 @@ export interface PairFailure {
  * generic error text handles. A wrong password and a man in the middle are worded the same way.
  */
 export function pairFailure(e: ActionError): PairFailure | undefined {
+  if (e.code === "unavailable") return { key: "pair.err.unavailable" };
   if (e.code === "pair_rejected") {
     switch (e.reason) {
       case "wrong_password":

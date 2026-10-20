@@ -200,6 +200,7 @@ test("the renderer bundle contains no dynamic code, raw HTML sinks or network AP
 });
 
 test("pairing failures are worded by reason; a rate limit says how long to wait", () => {
+  assert.deepEqual(pairFailure({ code: "unavailable", message: "设备配对服务尚未就绪" }), { key: "pair.err.unavailable" });
   assert.deepEqual(pairFailure({ code: "pair_rejected", message: "x", reason: "wrong_password" }), { key: "pair.err.wrongPassword" });
   assert.deepEqual(pairFailure({ code: "pair_rejected", message: "x", reason: "unreachable" }), { key: "pair.err.unreachable" });
   assert.equal(pairFailure({ code: "pair_rejected", message: "x", reason: "something_new" }), undefined);

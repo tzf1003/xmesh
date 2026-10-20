@@ -54,9 +54,21 @@ export function Devices({ ctx }: { ctx: PageContext }): JSX.Element | null {
       </section>
       {ctx.can("pair") ? (
         <>
-          <PairPassword ctx={ctx} />
-          <PairDiscovery ctx={ctx} />
-          <PairManual ctx={ctx} />
+          {c.status.network.mode === "local" ? (
+            <section class="card" data-testid="pair-local-mode">
+              <h2>{t("pair.localTitle")}</h2>
+              <p class="hint">{t("pair.localHint")}</p>
+              <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="pair-local-setup">
+                {t("pair.localSetup")}
+              </button>
+            </section>
+          ) : (
+            <>
+              <PairPassword ctx={ctx} />
+              <PairDiscovery ctx={ctx} />
+              <PairManual ctx={ctx} />
+            </>
+          )}
           <PairDocuments ctx={ctx} />
         </>
       ) : (
