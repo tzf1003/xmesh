@@ -47,6 +47,7 @@ const lan: SettingsForm = {
   nodeName: "dev-1",
   mode: "lan",
   controlUrl: DEFAULT_CONTROL_URL,
+  authkey: "",
   authkeyFile: "",
   browserLogin: false,
   roles: ["agent", "gateway"],
@@ -90,6 +91,7 @@ test("the form reads what the first run set, the ingress and the working directo
     nodeName: "dev-1",
     mode: "tailnet",
     controlUrl: "https://c.example",
+    authkey: "",
     authkeyFile: "/k",
     browserLogin: false,
     roles: ["agent", "ingress"],
@@ -117,6 +119,28 @@ test("isChanged compares the form with what the file says", () => {
   assert.equal(isChanged(lan, { ...lan, allowDirs: [] }), true);
 });
 
+test("settings accept a pasted admission key and keep it out of generated config", () => {
+  for (const authkey of ["tskey-auth-settings-test", "hskey-settings-test"]) {
+    const form = { ...lan, mode: "tailnet" as const, authkey: ` ${authkey} ` };
+    assert.equal(checkSettingsForm(form), undefined);
+    assert.equal(isChanged(lan, form), true);
+    const content = applySettingsForm(LAN_CONFIG, form)!;
+    assert.equal(content.includes(authkey), false);
+    assert.equal(parse(content).mesh.tailnet.enabled, true);
+    assert.equal(checkSettingsForm({ ...form, mode: "coexist" }), undefined);
+  }
+  for (const authkey of ["short", "tskey auth spaces", "tskey-auth-one\nsecond", "x".repeat(4097)]) {
+    assert.equal(checkSettingsForm({ ...tailnetIngress, authkey }), "authkey");
+  }
+  assert.equal(checkSettingsForm({ ...lan, mode: "tailnet" }), "authkey");
+  assert.equal(checkSettingsForm({ ...tailnetIngress, authkey: " " }), undefined);
+
+  const browserForm = { ...tailnetIngress, browserLogin: true, authkeyFile: "", authkey: "tskey-auth-new-login" };
+  const content = applySettingsForm(LAN_CONFIG, browserForm)!;
+  assert.equal(parse(content).mesh.tailnet.auth_method, undefined);
+  assert.equal(content.includes(browserForm.authkey), false);
+});
+
 test("the check names the first thing the kernel would refuse, without asking it", () => {
   assert.equal(checkSettingsForm({ ...lan, nodeName: "bad name" }), "node_name");
   assert.equal(checkSettingsForm({ ...lan, roles: [] }), "roles");
@@ -126,7 +150,7 @@ test("the check names the first thing the kernel would refuse, without asking it
   assert.equal(checkSettingsForm({ ...tailnetIngress, mode: "lan", listen: "funnel" }), "tailnet");
   assert.equal(checkSettingsForm({ ...lan, controlUrl: "http://c.example" }), undefined, "the control URL is only checked in tailnet mode");
   assert.equal(checkSettingsForm({ ...tailnetIngress, controlUrl: "http://c.example" }), "control_url");
-  assert.equal(checkSettingsForm({ ...tailnetIngress, authkeyFile: "authkey" }), "authkey_file");
+  assert.equal(checkSettingsForm({ ...tailnetIngress, authkeyFile: "authkey" }), "authkey");
   assert.equal(checkSettingsForm({ ...tailnetIngress, issuer: "" }), "issuer");
   assert.equal(checkSettingsForm({ ...tailnetIngress, issuer: "http://xmesh.example.com" }), "issuer");
   assert.equal(checkSettingsForm({ ...tailnetIngress, issuer: "https://xmesh.example.com/oauth" }), "issuer");

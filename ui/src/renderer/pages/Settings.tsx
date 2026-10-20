@@ -37,7 +37,7 @@ const PROBLEM: Record<SettingsProblem, Key> = {
   roles: "settings.problem.roles",
   tailnet: "settings.problem.tailnet",
   control_url: "settings.problem.control_url",
-  authkey_file: "settings.problem.authkey_file",
+  authkey: "settings.problem.authkey",
   issuer: "settings.problem.issuer",
   domain: "settings.problem.domain",
   cert_files: "settings.problem.cert_files",
@@ -50,6 +50,7 @@ const PROBLEM: Record<SettingsProblem, Key> = {
 interface Review {
   changes: ConfigChange[];
   content: string;
+  authkey?: string;
 }
 
 export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange?(dirty: boolean): void }): JSX.Element {
@@ -138,21 +139,22 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
   const changed = loaded !== undefined && form !== undefined && isChanged(formFromConfig(loaded.parsed), form);
   const content = loaded && form && problem === undefined ? applySettingsForm(loaded.content, form) : undefined;
   const ingressOn = form?.roles.includes("ingress") ?? false;
+  const authkey = form && (form.mode === "tailnet" || form.mode === "coexist") ? form.authkey.trim() : "";
 
   const prepare = async (): Promise<void> => {
     if (!loaded || content === undefined) return;
     setBusy(true);
-    const r = await getApi().putConfig({ content, etag: loaded.etag, dryRun: true });
+    const r = await getApi().putConfig({ content, etag: loaded.etag, dryRun: true, ...(authkey && { authkey }) });
     setBusy(false);
     if (!r.ok) return setErr(r.error);
     setErr(undefined);
-    setReview({ changes: r.data.diff, content });
+    setReview({ changes: r.data.diff, content: r.data.content ?? content, ...(authkey && { authkey }) });
   };
 
   const save = async (): Promise<void> => {
     if (!loaded || !review) return;
     setBusy(true);
-    const r = await getApi().putConfig({ content: review.content, etag: loaded.etag, dryRun: false });
+    const r = await getApi().putConfig({ content: review.content, etag: loaded.etag, dryRun: false, ...(review.authkey && { authkey: review.authkey }) });
     setBusy(false);
     setReview(undefined);
     if (!r.ok) return setErr(r.error);
@@ -199,7 +201,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
     await loadDeny();
   };
 
-  const pick = async (kind: "workspace" | "authkeyFile"): Promise<string | undefined> => {
+  const pick = async (kind: "workspace"): Promise<string | undefined> => {
     const r = await getApi().pickPath(kind);
     return r.ok ? (r.data.path ?? undefined) : undefined;
   };
@@ -285,20 +287,19 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                       data-testid="settings-control-url"
                     />
                   </Field>
-                  {form.browserLogin ? <Banner>{t("settings.browserLogin")}</Banner> : <Field label={t("settings.authkey")} hint={t("settings.authkeyHint")}>
-                    <div class="row">
-                      <input
-                        type="text"
-                        value={form.authkeyFile}
-                        onInput={(e) => update({ authkeyFile: (e.currentTarget as HTMLInputElement).value })}
-                        aria-invalid={problem === "authkey_file"}
-                        data-testid="settings-authkey"
-                      />
-                      <button type="button" class="btn" onClick={() => void pick("authkeyFile").then((p) => p && update({ authkeyFile: p }))}>
-                        {t("wizard.choose")}
-                      </button>
-                    </div>
-                  </Field>}
+                  {form.browserLogin && !authkey && <Banner>{t("settings.browserLogin")}</Banner>}
+                  <Field label={t("settings.authkey")} hint={t("settings.authkeyHint")}>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      spellcheck={false}
+                      value={form.authkey}
+                      placeholder={t(form.authkeyFile || form.browserLogin ? "settings.authkeySaved" : "wizard.authkeyPlaceholder")}
+                      onInput={(e) => update({ authkey: (e.currentTarget as HTMLInputElement).value })}
+                      aria-invalid={problem === "authkey"}
+                      data-testid="settings-authkey"
+                    />
+                  </Field>
                 </>
               )}
             </section>
@@ -527,6 +528,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
           onConfirm={() => void save()}
           body={
             <div data-testid="settings-diff">
+              {review.authkey && <Banner testid="settings-authkey-change">{t("settings.authkeyChanged")}</Banner>}
               {weak.length > 0 && (
                 <Banner kind="danger" testid="settings-weakens">
                   <p>{t("config.weakens")}</p>
