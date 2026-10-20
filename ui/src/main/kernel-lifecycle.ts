@@ -25,7 +25,7 @@ export function discoverKernelTargets(roots: string[], saved: (id: string) => Ke
     const stateDir = path.resolve(root, id);
     const paths = recorded ?? { stateDir, configFile: path.join(stateDir, "xmesh.yaml") };
     return [{ id, name: instance?.manifest.node || id, running: !!instance && !kernelGone(instance.manifest.pid, instance.manifest.started_at),
-      managed: !protectedRoots.includes(root), ...paths, instance }];
+      managed: !instance?.protected && !protectedRoots.includes(root), ...paths, instance }];
   });
 }
 

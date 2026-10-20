@@ -137,3 +137,18 @@ test("saved custom configurations remain manageable after their control manifest
   assert.equal(targets[0]?.configFile, paths.configFile);
   assert.equal(targets[0]?.running, false);
 });
+
+test("a broken user manifest cannot make a discovered system node manageable", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-protected-target-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const roots = [path.join(root, "user"), path.join(root, "system")];
+  for (const base of roots) fs.mkdirSync(path.join(base, "office"), { recursive: true });
+  fs.writeFileSync(path.join(roots[0]!, "office/control.json"), "{broken");
+  fs.writeFileSync(path.join(roots[1]!, "office/control.json"), JSON.stringify({
+    api_version: "2.0", kernel_version: "1.0.0", node: "office", pid: 0, boot_id: "ab",
+    transport: "unix", endpoint: "/tmp/system.sock", started_at: "2026-10-20T00:00:00Z", capabilities: [],
+  }));
+  const targets = discoverKernelTargets(roots, () => undefined, [roots[1]!]);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0]?.managed, false);
+});
