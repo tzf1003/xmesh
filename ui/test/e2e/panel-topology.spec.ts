@@ -61,6 +61,76 @@ test("topology renders real routes, selects details and filters without moving p
   expect(errors).toEqual([]);
 });
 
+test("soft echoes stay centered behind the graph and follow reduced-motion preferences", async () => {
+  const page = await open();
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  await page.emulateMedia({ reducedMotion: "no-preference", colorScheme: "dark" });
+  const background = page.locator(".graph-background");
+  const echo = page.locator(".graph-echo");
+  const wave = page.locator(".graph-wave").first();
+  await expect(background).toBeVisible();
+  const local = await page.locator(".graph-node.self").boundingBox();
+  const light = await echo.boundingBox();
+  expect(Math.abs(light!.width - light!.height)).toBeLessThan(1);
+  expect(Math.abs(light!.x + light!.width / 2 - local!.x - local!.width / 2)).toBeLessThan(1);
+  expect(Math.abs(light!.y + light!.height / 2 - local!.y - local!.height / 2)).toBeLessThan(1);
+  const before = await wave.evaluate((el) => getComputedStyle(el).transform);
+  await expect.poll(() => wave.evaluate((el) => getComputedStyle(el).transform)).not.toBe(before);
+  await page.locator('[data-node="mac-dev-01"]').click();
+  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("mac-dev-01");
+  await page.getByTestId("topology-canvas").click({ position: { x: 8, y: 8 } });
+  await expect(page.locator(".graph-node.self")).toHaveAttribute("aria-pressed", "true");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(background).toBeHidden();
+  await expect(page.locator(".graph-ring").first()).toBeVisible();
+  await expect(wave).toHaveCSS("animation-name", "none");
+});
+
+test("new and reconnected peers receive one arrival echo per online transition", async () => {
+  const page = await open();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(page.locator(".graph-node.arriving")).toHaveCount(0);
+  const joined = { ...peersFixture()[1]!, name: "new-device", node_id: "new-device", device_id: "new-device" };
+  let peers = [...peersFixture(), joined];
+  h.kernel.setPeers(peers);
+  h.kernel.emit("peer", { change: "added", peer: joined });
+  const node = page.locator('[data-node="new-device"]');
+  await expect(node).toHaveClass(/arriving/);
+  expect(await node.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("graph-arrival");
+  await expect(node).not.toHaveClass(/arriving/);
+  const requests = h.kernel.requests.filter((r) => r.path === "/v2/peers").length;
+  h.kernel.emit("peer", { change: "updated", peer: joined });
+  await expect.poll(() => h.kernel.requests.filter((r) => r.path === "/v2/peers").length).toBeGreaterThan(requests);
+  await expect(node).not.toHaveClass(/arriving/);
+  await page.getByTestId("topology-tag").selectOption("tag:ingress");
+  await expect(node).toHaveCount(0);
+  await page.getByTestId("topology-tag").selectOption("");
+  await node.click();
+  await expect(node).not.toHaveClass(/arriving/);
+
+  peers = peers.map((p) => p.name === joined.name ? { ...p, online: false } : p);
+  h.kernel.setPeers(peers);
+  h.kernel.emit("peer", { change: "updated", peer: { ...joined, online: false } });
+  await expect(node).toHaveClass(/offline/);
+  peers = peers.map((p) => p.name === joined.name ? joined : p);
+  h.kernel.setPeers(peers);
+  h.kernel.emit("peer", { change: "updated", peer: joined });
+  await expect(node).toHaveClass(/arriving/);
+  await expect(node).not.toHaveClass(/arriving/);
+  await navigate(page, "sessions");
+  await navigate(page, "overview");
+  await expect(node).toBeVisible();
+  await expect(page.locator(".graph-node.arriving")).toHaveCount(0);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const recovered = { ...peersFixture()[3]!, online: true };
+  h.kernel.setPeers(peers.map((p) => p.name === recovered.name ? recovered : p));
+  h.kernel.emit("peer", { change: "updated", peer: recovered });
+  const recoveredNode = page.locator(`[data-node="${recovered.node_id}"]`);
+  await expect(recoveredNode).toHaveClass(/arriving/);
+  expect(await recoveredNode.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("none");
+});
+
 test("recent calls identify observed callers and the inspector filters by device", async () => {
   const page = await open();
   h.kernel.emit("call", { tool: "exec.run", device: "mac-dev-01", caller: "test-cli", oauth_client: null, status: "ok", error: null, duration_ms: 120 });

@@ -10,6 +10,28 @@ import { useT, errorText } from "../i18n";
 import { ago, formatDuration } from "../lib/format";
 import { assignSlots, CENTER, curve, linkKind, PEER_SLOTS, peerKey, recentCallers, topologyPeers, type Point } from "../lib/topology";
 
+/** Track online transitions per instance after the initial peer snapshot. */
+function usePeerArrivals(instance: string, peers: Peer[] | undefined): Set<string> {
+  const previous = useRef<{ instance: string; online: Set<string> }>();
+  const [arrivals, setArrivals] = useState(new Set<string>());
+  useEffect(() => {
+    const online = new Set(peers?.filter((p) => !p.self && p.online).map(peerKey));
+    if (!peers || previous.current?.instance !== instance) {
+      setArrivals(new Set());
+    } else {
+      const joined = [...online].filter((id) => !previous.current!.online.has(id));
+      if (joined.length) setArrivals((current) => new Set([...current, ...joined]));
+    }
+    previous.current = peers ? { instance, online } : undefined;
+  }, [instance, peers]);
+  useEffect(() => {
+    if (!arrivals.size) return;
+    const timer = setTimeout(() => setArrivals(new Set()), 850);
+    return () => clearTimeout(timer);
+  }, [arrivals]);
+  return arrivals;
+}
+
 /** HTML controls over an SVG edge layer keep the graph keyboard accessible. */
 function Node({ id, point, selected, kind, title, sub, children, onSelect, onHover }: {
   id: string; point: Point; selected: boolean; kind: string; title: string; sub: string;
@@ -32,6 +54,7 @@ function Node({ id, point, selected, kind, title, sub, children, onSelect, onHov
 export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventData[] }): JSX.Element | null {
   const t = useT();
   const c = ctx.snapshot.connection;
+  const arrivals = usePeerArrivals(ctx.snapshot.selectedInstance, c.kind === "connected" && ctx.can("peers") ? c.peers : undefined);
   const [selected, setSelected] = useState<string | undefined>();
   const [selectedCaller, setSelectedCaller] = useState<string | undefined>();
   const [hover, setHover] = useState<string | undefined>();
@@ -87,12 +110,13 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
           <div class="topology-legend"><span class="legend-direct">{t("conn.direct")}</span><span class="legend-derp">{t("topology.relay")}</span><span class="legend-offline">{t("devices.offline")}</span></div>
           {!ctx.can("peers") && <NotSupported what={t("nav.devices")}/>}
           <div class={`graph-stage ${relays.length > 4 ? "graph-dense" : ""}`} data-testid="topology-canvas" onClick={(e) => { if (e.target === e.currentTarget) select(selfId); }}>
+            <div class={`graph-background ${online > 0 ? "has-peers" : ""}`} aria-hidden="true">
+              <div class="graph-ambient"/>
+              <div class="graph-echo"><i class="graph-wave"/><i class="graph-wave"/></div>
+            </div>
             <svg class="graph-edges" viewBox="0 0 800 560" preserveAspectRatio="none" aria-hidden="true">
               <defs><marker id="call-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z"/></marker></defs>
               <ellipse class="graph-ring" cx="400" cy="295" rx="130" ry="135"/><ellipse class="graph-ring" cx="400" cy="295" rx="275" ry="235"/>
-              <g class="graph-probe" transform={`translate(${CENTER.x} ${CENTER.y})`}>
-                {[0, 1, 2, 3].map((wave) => <ellipse key={wave} class="graph-ripple" cx="0" cy="0" rx="360" ry="250"/>)}
-              </g>
               {plotted.map((p) => {
                 const id = peerKey(p), point = PEER_SLOTS[slots.get(id)!]!, kind = linkKind(p);
                 const relay = kind === "derp" ? relayPoint(p.derp_region ?? "?") : undefined;
@@ -104,7 +128,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
             </svg>
             {callers.map((caller, i) => <Node key={caller} id={`caller:${caller}`} point={{ x: (i + 1) * 800 / (callers.length + 1), y: 66 }} kind="caller" title={caller} sub={t("topology.observedCaller")} selected={selectedCaller === caller} onSelect={() => selectCaller(caller)} onHover={setHover}/>)}
             <Node id={selfId} point={CENTER} selected={picked.self} kind={`self state-${deriveIcon(c)}`} title={status.hostname} sub={status.roles.join(" + ")} onSelect={() => select(selfId)} onHover={setHover}><span class="node-role">{t("devices.self")}</span></Node>
-            {plotted.map((p) => <Node key={peerKey(p)} id={peerKey(p)} point={PEER_SLOTS[slots.get(peerKey(p))!]!} selected={peerKey(picked) === peerKey(p)} kind={linkKind(p)} title={p.name} sub={connectionText(p, t)} onSelect={() => select(peerKey(p))} onHover={setHover}>
+            {plotted.map((p) => <Node key={peerKey(p)} id={peerKey(p)} point={PEER_SLOTS[slots.get(peerKey(p))!]!} selected={peerKey(picked) === peerKey(p)} kind={`${linkKind(p)}${p.online && arrivals.has(peerKey(p)) ? " arriving" : ""}`} title={p.name} sub={connectionText(p, t)} onSelect={() => select(peerKey(p))} onHover={setHover}>
               {p.info?.error ? <span class="node-role issue" title={p.info.error}>{t("devices.infoFailed")}</span> : undefined}
             </Node>)}
             {relays.map((region) => <Relay key={region} point={relayPoint(region)} region={region} onClick={() => ctx.go("mesh", { meshTab: "derp" })}/>)}
