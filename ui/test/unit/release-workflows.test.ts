@@ -4,13 +4,31 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 
-test("native release evidence runs for ordinary master commits and every release tag", () => {
+test("every release tag runs the full CI entrypoint and its native suite", () => {
   const workflow = (name: string) => parse(fs.readFileSync(path.resolve(__dirname, "../../../../.github/workflows", name), "utf8"));
-  const native = workflow("computer.yml").on.push;
+  const ci = workflow("go.yml");
+  const native = workflow("computer.yml");
   const release = workflow("release.yml").on.push;
-  assert.ok(native.branches.includes("master"));
-  assert.equal(native.paths, undefined);
-  assert.equal(native["paths-ignore"], undefined);
-  assert.equal(native["tags-ignore"], undefined);
-  for (const tag of release.tags) assert.ok(native.tags.includes(tag), `Native evidence missing for ${tag}`);
+  assert.deepEqual(ci.on.push.branches, ["master"]);
+  assert.equal(ci.on.push.paths, undefined);
+  assert.equal(ci.on.push["paths-ignore"], undefined);
+  assert.equal(ci.on.push["tags-ignore"], undefined);
+  for (const tag of release.tags) assert.ok(ci.on.push.tags.includes(tag), `Full CI missing for ${tag}`);
+  assert.ok(Object.hasOwn(native.on, "workflow_call"));
+  assert.equal(ci.jobs.computer.uses, "./.github/workflows/computer.yml");
+  assert.ok(ci.jobs.ci.needs.includes("computer"));
+  assert.equal(ci.jobs.ci.if, "${{ !cancelled() }}");
+});
+
+test("component workflows share the CI trigger and diagnostics are opt-in", () => {
+  const workflow = (name: string) => parse(fs.readFileSync(path.resolve(__dirname, "../../../../.github/workflows", name), "utf8"));
+  for (const name of ["ui.yml", "ui-mcp.yml", "headscale.yml", "computer.yml"]) {
+    assert.deepEqual(Object.keys(workflow(name).on), ["workflow_call"]);
+  }
+  assert.deepEqual(Object.keys(workflow("windows-diagnostics.yml").on), ["workflow_dispatch"]);
+  const packaging = workflow("computer-release.yml");
+  assert.ok(Object.hasOwn(packaging.on, "workflow_call"));
+  assert.ok(Object.hasOwn(packaging.on, "workflow_dispatch"));
+  assert.equal(packaging.on.pull_request, undefined);
+  assert.equal(workflow("pages.yml").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
 });

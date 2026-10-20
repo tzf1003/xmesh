@@ -22,7 +22,7 @@ permissions:
   id-token: write
 concurrency:
   group: install-pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
     permissions:

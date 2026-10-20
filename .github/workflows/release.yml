@@ -7,10 +7,10 @@ on:
 permissions:
   contents: write
 jobs:
-  # 同一提交上的 Go、契约、Headscale 和 Onboarding 工作流均须成功（含原生平台作业），
-  # 另外在这里重跑 vet、竞态测试和符合性矩阵检查。标签推送得太早时，最多等 30 分钟让它们跑完。
+  # 等待同一标签和提交上的完整 CI（含原生平台、UI、互联与扩展检查）。
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 65
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
     permissions:
@@ -29,17 +29,10 @@ jobs:
         run: |
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then echo 'channel=testing' >> "$GITHUB_OUTPUT"; else echo 'channel=stable' >> "$GITHUB_OUTPUT"; fi
       - run: python3 -m unittest discover -s scripts -p 'test_install_distribution.py'
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: go vet ./...
-      - run: go test -race ./... -timeout=300s
-      - run: python3 scripts/conformance_check.py
-      - name: 同一提交上的 CI 全绿
+      - name: 同一发布标签上的完整 CI 全绿
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/release_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+        run: python3 scripts/release_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --tag "$GITHUB_REF_NAME" --wait 3600
   computer:
     needs: verify
     uses: ./.github/workflows/computer-release.yml
