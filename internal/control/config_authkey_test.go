@@ -71,14 +71,8 @@ func TestConfigAuthkeyPreviewAndCommit(t *testing.T) {
 
 func TestConfigAuthkeyRelativeStateDirectory(t *testing.T) {
 	f := newFixture(t, func(o *Options) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			t.Fatal(err)
-		}
-		o.StateDir, err = filepath.Rel(cwd, o.StateDir)
-		if err != nil {
-			t.Fatal(err)
-		}
+		t.Chdir(filepath.Dir(o.StateDir))
+		o.StateDir = filepath.Base(o.StateDir)
 	})
 	if !filepath.IsAbs(f.server.snapshot().Paths.StateDir) {
 		t.Fatal("control status must publish an absolute credential root")
