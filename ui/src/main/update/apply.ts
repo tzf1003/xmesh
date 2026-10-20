@@ -54,7 +54,15 @@ export type SpawnFn = (command: string, args: string[], options: SpawnOptions) =
  */
 export const WINDOWS_SCRIPT = `
 $ErrorActionPreference = 'Stop'
+function Test-UpdateAuthorized {
+  if (-not $env:XMESH_UPD_READY) { return $true }
+  try { return [IO.File]::ReadAllText($env:XMESH_UPD_READY) -eq 'install' }
+  catch { return $false }
+}
 function Fail-Update([string]$Reason, [switch]$Restart) {
+  # A rejected hand-over may leave this independent helper alive. It must not
+  # overwrite a later attempt's result or restart the app without acknowledgement.
+  if (-not (Test-UpdateAuthorized)) { exit 1 }
   [IO.File]::WriteAllText($env:XMESH_UPD_RESULT, $Reason)
   if ($Restart -and [IO.File]::Exists($env:XMESH_UPD_APP)) {
     Start-Process -FilePath $env:XMESH_UPD_APP

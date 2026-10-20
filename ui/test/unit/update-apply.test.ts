@@ -180,7 +180,37 @@ test("Windows helper cannot install after a hand-over was abandoned", needsPower
   const out = spawnSync(powershell, r.args, { env: { ...r.env, XMESH_UPD_PID: String(gone), XMESH_UPD_READY: ready }, timeout: 10_000, encoding: "utf8" });
   assert.equal(out.status, 1, out.stderr);
   assert.deepEqual(r.calls(), []);
-  assert.equal(fs.readFileSync(r.result, "utf8"), "the app did not authorize installation");
+  assert.equal(fs.existsSync(r.result), false, "an unacknowledged helper cannot publish a result");
+});
+
+test("Windows abandoned helpers cannot overwrite a later attempt's result", needsPowerShell, async (t) => {
+  for (const timeout of [false, true]) {
+    await t.test(timeout ? "old app wait times out" : "old app exits during a retry", async () => {
+      const r = windowsRig(timeout ? WINDOWS_SCRIPT.replace("WaitForExit(60000)", "WaitForExit(1500)") : WINDOWS_SCRIPT);
+      const ready = path.join(path.dirname(r.file), "abandoned.ready");
+      const oldApp = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+      const helper = spawn(powershell, r.args, { env: { ...r.env, XMESH_UPD_PID: String(oldApp.pid), XMESH_UPD_READY: ready }, timeout: 10_000 });
+      const finished = once(helper, "exit");
+      try {
+        const deadline = Date.now() + 5000;
+        while (!fs.existsSync(ready) || fs.readFileSync(ready, "utf8") !== "ready") {
+          assert.ok(Date.now() < deadline, "the independent helper becomes ready");
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        // Rejection removes this attempt's acknowledgement. A retry owns result.txt now.
+        fs.rmSync(ready);
+        const retryResult = "installer exit code 2 from the current attempt";
+        fs.writeFileSync(r.result, retryResult);
+        if (!timeout) oldApp.stdin!.end();
+        assert.equal((await finished)[0], 1);
+        assert.equal(fs.readFileSync(r.result, "utf8"), retryResult);
+        assert.deepEqual(r.calls(), [], "the abandoned helper neither installs nor restarts");
+      } finally {
+        oldApp.kill();
+        helper.kill();
+      }
+    });
+  }
 });
 
 test("Windows helper installs after the old process exits, preserving paths and upgrade arguments", needsPowerShell, async () => {
