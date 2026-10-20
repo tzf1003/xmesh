@@ -3,6 +3,7 @@ import { Menu, type MenuItemConstructorOptions, Tray, nativeImage } from "electr
 import type { Translate } from "../shared/i18n";
 import { type Snapshot, type TrayIcon, deriveIcon } from "../shared/state";
 import { type Action, type MenuItemSpec, buildMenu, statusLabelKey } from "./menu";
+import type { Rect } from "./tray-position";
 
 const ASSETS = path.join(__dirname, "..", "..", "..", "assets", "tray");
 
@@ -31,15 +32,24 @@ export class TrayView {
   private lastSpec: MenuItemSpec[] = [];
   private lastIcon: TrayIcon = "offline";
   private lastTooltip = "";
+  private lastActivation = 0;
+  private nativeFallback = process.env.XMESH_TRAY_UI === "native" || (process.platform === "linux" && process.env.XDG_SESSION_TYPE === "wayland");
 
   constructor(
     private readonly t: Translate,
     private readonly run: (a: Action) => void,
-    onClick: () => void,
+    onClick: (bounds: Rect, more: boolean) => void,
   ) {
     this.tray = new Tray(nativeImage.createFromPath(trayIconPath("offline")));
-    // Windows: click opens the panel, right-click the menu. macOS: click shows the menu.
-    if (process.platform !== "darwin") this.tray.on("click", onClick);
+    if (process.platform === "darwin") this.tray.setIgnoreDoubleClickEvents(true);
+    this.tray.on("click", (_event, bounds) => {
+      if (this.nativeFallback) return;
+      const now = Date.now();
+      if (process.platform === "win32" && now - this.lastActivation < 250) return;
+      this.lastActivation = now;
+      onClick(bounds ?? this.tray.getBounds(), false);
+    });
+    this.tray.on("right-click", (_event, bounds) => { if (!this.nativeFallback) onClick(bounds ?? this.tray.getBounds(), true); });
   }
 
   update(snap: Snapshot): void {
@@ -54,7 +64,7 @@ export class TrayView {
     this.lastTooltip = tooltip;
     this.tray.setImage(nativeImage.createFromPath(trayIconPath(icon)));
     this.tray.setToolTip(tooltip);
-    this.tray.setContextMenu(Menu.buildFromTemplate(toTemplate(spec, this.run)));
+    if (this.nativeFallback) this.tray.setContextMenu(Menu.buildFromTemplate(toTemplate(spec, this.run)));
   }
 
   /** For the end-to-end tests: what the tray currently shows. */
@@ -64,5 +74,11 @@ export class TrayView {
 
   destroy(): void {
     this.tray.destroy();
+  }
+
+  useNativeFallback(): void {
+    this.nativeFallback = true;
+    this.tray.setContextMenu(Menu.buildFromTemplate(toTemplate(this.lastSpec, this.run)));
+    this.tray.popUpContextMenu();
   }
 }

@@ -33,3 +33,14 @@ await build({
 for (const f of ["index.html", "styles.css"]) fs.copyFileSync(path.join(src, f), path.join(out, f));
 
 fs.copyFileSync(path.join(root, "node_modules/@xterm/xterm/css/xterm.css"), path.join(out, "xterm.css"));
+
+const tray = path.join(out, "tray");
+fs.mkdirSync(tray, { recursive: true });
+await build({
+  entryPoints: [path.join(src, "tray", "main.tsx")], outfile: path.join(tray, "app.js"),
+  bundle: true, format: "iife", platform: "browser", target: "chrome120", jsx: "automatic", jsxImportSource: "preact",
+  minify: process.env.XMESH_UI_MINIFY === "1", sourcemap: false, legalComments: "none", logLevel: "warning",
+  define: { "process.env.NODE_ENV": '"production"' },
+});
+for (const file of ["index.html", "styles.css"]) fs.copyFileSync(path.join(src, "tray", file), path.join(tray, file));
+fs.copyFileSync(path.join(root, "build", "icon.png"), path.join(tray, "icon.png"));

@@ -357,3 +357,97 @@ test("managed lifecycle actions retain an aliased directory ID even without a ma
   assert.deepEqual(seen, ["restart:alias", "stop:alias", "start:offline-alias"]);
   assert.ok(!log.some((entry) => entry.startsWith("cli:")));
 });
+
+test("native tray restart asks once, includes current task impact and honors cancellation", async () => {
+  for (const answer of [false, true]) {
+    const { controller } = fakeController({ ...connected(), selectedInstance: "n1" });
+    const { platform, log } = fakePlatform(answer);
+    let detail = "";
+    platform.confirm = async opts => { detail = opts.detail; log.push("confirm"); return answer; };
+    const result = await new Actions(controller, platform, t, OK_CREDENTIALS).dispatchFromTray({ type: "restart-kernel" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(log, answer ? ["confirm", "cli:restart"] : ["confirm"]);
+    assert.match(detail, /win-dev-01/);
+    assert.match(detail, /终端会话/);
+    assert.match(detail, /执行任务/);
+    assert.match(detail, /CI/);
+  }
+});
+
+test("native tray restart refuses instance and boot changes while confirmation is open", async () => {
+  for (const change of ["instance", "boot"] as const) {
+    const { controller } = fakeController({ ...connected(), selectedInstance: "n1" });
+    const { platform, log } = fakePlatform();
+    platform.confirm = async () => {
+      const before = controller.snapshot;
+      const c = before.connection;
+      assert.equal(c.kind, "connected");
+      if (c.kind !== "connected") return true;
+      (controller as unknown as { snapshot: Snapshot }).snapshot = change === "instance"
+        ? { ...before, selectedInstance: "n2" }
+        : { ...before, connection: { ...c, status: { ...c.status, control: { ...c.status.control, boot_id: "new-boot" } } } };
+      return true;
+    };
+    const result = await new Actions(controller, platform, t, OK_CREDENTIALS).dispatchFromTray({ type: "restart-kernel" });
+    assert.equal(result.ok, false);
+    assert.equal(!result.ok && result.error.code, "conflict");
+    assert.deepEqual(log, []);
+  }
+});
+
+test("connection copy rechecks current primary, secondary and gateway availability after reading credentials", async () => {
+  const secondary = { kind: "lan" as const, host: "192.168.1.20", url: "http://192.168.1.20:8080/mcp" };
+  for (const kind of ["gatewayUrl", "claudeCodeCommand", "codexConfig"] as const) {
+    for (const change of ["primary", "secondary", "disabled"] as const) {
+      const gateway = gatewayWith([secondary]);
+      const { controller } = fakeController({ ...connected({ gateway }), selectedInstance: "n1" });
+      const { platform, log } = fakePlatform();
+      const selectedUrl = change === "secondary" ? secondary.url : gateway.url;
+      const credentials = { read: async () => {
+        const before = controller.snapshot;
+        if (before.connection.kind !== "connected") throw new Error("not connected");
+        const changed = change === "primary" ? gatewayWith([secondary], "http://127.0.0.1:9090/mcp") : change === "secondary" ? gatewayWith() : undefined;
+        (controller as unknown as { snapshot: Snapshot }).snapshot = { ...before, connection: { ...before.connection, status: { ...before.connection.status, gateway: changed } } };
+        return TOKEN;
+      } };
+      const result = await new Actions(controller, platform, t, credentials).copyGateway(kind, selectedUrl);
+      assert.equal(!result.ok && result.error.code, "conflict", `${kind}/${change}`);
+      assert.deepEqual(log, []);
+    }
+  }
+});
+
+test("connection copy permits token rotation and addresses that remain reachable in another representation", async () => {
+  const secondary = { kind: "lan" as const, host: "192.168.1.20", url: "http://192.168.1.20:8080/mcp" };
+  const { controller } = fakeController(connected({ gateway: gatewayWith([secondary]) }));
+  const { platform, log } = fakePlatform();
+  const rotatedToken = "rotated-0123456789abcdefABCDEF";
+  const credentials = { read: async () => {
+    const before = controller.snapshot;
+    if (before.connection.kind !== "connected") throw new Error("not connected");
+    (controller as unknown as { snapshot: Snapshot }).snapshot = { ...before, connection: { ...before.connection, status: { ...before.connection.status, gateway: gatewayWith([], secondary.url) } } };
+    return rotatedToken;
+  } };
+  const result = await new Actions(controller, platform, t, credentials).copyGateway("claudeCodeCommand", secondary.url);
+  assert.equal(result.ok, true);
+  assert.equal(log.length, 1);
+  assert.ok(log[0]?.includes(secondary.url));
+  assert.ok(log[0]?.includes(rotatedToken));
+});
+
+test("native unresponsive restart confirms unknown task impact and rejects a replaced manifest", async () => {
+  for (const answer of [false, true]) {
+    const { controller } = fakeController({ ...EMPTY_SNAPSHOT, unresponsiveNodes: ["n1"] });
+    const { platform, log } = fakePlatform(answer);
+    await new Actions(controller, platform, t, OK_CREDENTIALS).dispatchFromTray({ type: "restart-unresponsive", node: "n1" });
+    assert.deepEqual(log, answer ? ["confirm", "cli:restart"] : ["confirm"]);
+  }
+  const { controller } = fakeController({ ...EMPTY_SNAPSHOT, unresponsiveNodes: ["n1"] });
+  let boot = "first";
+  Object.assign(controller, { nodeBootId: () => boot });
+  const { platform, log } = fakePlatform();
+  platform.confirm = async () => { boot = "replacement"; return true; };
+  const result = await new Actions(controller, platform, t, OK_CREDENTIALS).dispatchFromTray({ type: "restart-unresponsive", node: "n1" });
+  assert.equal(!result.ok && result.error.code, "conflict");
+  assert.deepEqual(log, []);
+});

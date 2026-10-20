@@ -49,6 +49,46 @@ export class Actions {
     private readonly credentials: GatewayCredentialSource,
   ) {}
 
+  /** Native tray actions require their own confirmation; panel callers already confirm in the renderer. */
+  dispatchFromTray(a: Action): Promise<ActionResult> {
+    if (a.type === "restart-kernel") return this.confirmRestartKernel();
+    if (a.type === "restart-unresponsive") return this.confirmUnresponsiveRestart(a.node);
+    return this.dispatch(a);
+  }
+
+  private async confirmUnresponsiveRestart(node: string): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
+    const bootId = this.controller.nodeBootId?.(node);
+    if (selected.connection.kind !== "offline" || !selected.unresponsiveNodes.includes(node)) return fail("conflict", "The node state changed; refresh and try again.");
+    const yes = await this.platform.confirm({ title: this.t("dialog.restartKernel.title"),
+      detail: this.t("dialog.restartKernel.unresponsive", { name: node }),
+      confirmLabel: this.t("menu.restartKernel"), cancelLabel: this.t("dialog.cancel") });
+    return yes ? this.confirmedUnresponsiveRestart(node, selected.selectedInstance, bootId) : ok;
+  }
+
+  confirmedUnresponsiveRestart(node: string, instance: string, bootId: string | undefined): Promise<ActionResult> {
+    const current = this.controller.snapshot;
+    if (current.selectedInstance !== instance || current.connection.kind !== "offline" || !current.unresponsiveNodes.includes(node) || this.controller.nodeBootId?.(node) !== bootId) {
+      return Promise.resolve(fail("conflict", "The node state changed; refresh and try again."));
+    }
+    return this.runCli("restart", node);
+  }
+
+  private async confirmRestartKernel(): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
+    if (selected.connection.kind !== "connected") return fail("unavailable", "Kernel is not connected.");
+    const status = selected.connection.status;
+    const bootId = status.control.boot_id;
+    const yes = await this.platform.confirm({
+      title: this.t("dialog.restartKernel.title"),
+      detail: this.t("dialog.restartKernel.detail", { name: status.hostname, pty: status.limits.pty_in_use,
+        exec: status.limits.exec_shared_in_use + status.limits.exec_exclusive_in_use, ci: ciCounts(status.ci?.bindings).busy }),
+      confirmLabel: this.t("menu.restartKernel"),
+      cancelLabel: this.t("dialog.cancel"),
+    });
+    return yes ? this.confirmedLifecycle("restart-kernel", selected.selectedInstance, bootId) : ok;
+  }
+
   dispatch(a: Action): Promise<ActionResult> {
     switch (a.type) {
       case "open-panel":
@@ -134,6 +174,7 @@ export class Actions {
    * reports right now, so the page cannot make the clipboard carry anything else.
    */
   async copyGateway(kind: GatewayCopyKind, url: string): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
     const gateway = this.gatewayStatus();
     if (gateway === undefined) return fail("unavailable", "no gateway address");
     const known = gateway.url === url || gateway.addresses.some((a) => a.url === url);
@@ -143,6 +184,14 @@ export class Actions {
       token = await this.credentials.read();
     } catch (e) {
       return fail("token_unavailable", e instanceof Error ? e.message : String(e));
+    }
+    const current = this.controller.snapshot;
+    if (selected.selectedInstance !== current.selectedInstance || selected.connection.kind !== "connected" || current.connection.kind !== "connected" || selected.connection.status.control.boot_id !== current.connection.status.control.boot_id) {
+      return fail("conflict", "The selected kernel changed; copy the connection again.");
+    }
+    const currentGateway = current.connection.status.gateway;
+    if (!currentGateway || !(currentGateway.url === url || currentGateway.addresses.some(a => a.url === url))) {
+      return fail("conflict", "The gateway address changed; copy the connection again.");
     }
     const text = clipboardText(kind, url, token);
     if (text === undefined) return fail("token_unavailable", "token is not usable");
@@ -177,6 +226,8 @@ export class Actions {
   }
 
   async stopKernel(): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
+    const bootId = selected.connection.kind === "connected" ? selected.connection.status.control.boot_id : null;
     const c = this.controller.snapshot.connection;
     const busy = c.kind === "connected" ? ciCounts(c.status.ci?.bindings).busy : 0;
     const yes = await this.platform.confirm({
@@ -185,7 +236,16 @@ export class Actions {
       confirmLabel: this.t("dialog.stopKernel.confirm"),
       cancelLabel: this.t("dialog.cancel"),
     });
-    return yes ? this.runCli("stop", this.selectedNode()) : ok;
+    return yes ? this.confirmedLifecycle("stop-kernel", selected.selectedInstance, bootId) : ok;
+  }
+
+  /** Called after the tray's one-time confirmation or the native fallback confirmation. */
+  confirmedLifecycle(type: "stop-kernel" | "restart-kernel", instance: string, bootId: string | null): Promise<ActionResult> {
+    const snap = this.controller.snapshot;
+    if (snap.selectedInstance !== instance || snap.connection.kind !== "connected" || snap.connection.status.control.boot_id !== bootId) {
+      return Promise.resolve(fail("conflict", "The selected kernel changed; refresh and try again."));
+    }
+    return this.runCli(type === "stop-kernel" ? "stop" : "restart", instance || undefined);
   }
 
   /** Starts the service of a node whose config exists but whose kernel is not running. */

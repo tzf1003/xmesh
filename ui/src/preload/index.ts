@@ -14,6 +14,13 @@ const invoke = (channel: string, ...args: unknown[]): Promise<never> =>
   ipcRenderer.invoke(channel, ...args) as Promise<never>;
 
 const api: PanelApi = {
+  navigationReady: dirty => invoke("xmesh:panel-ready", dirty),
+  onNavigate: listener => {
+    if (typeof listener !== "function") throw new TypeError("listener must be a function");
+    const handler = (_event: unknown, target: import("../shared/tray").PanelTarget): void => listener(target);
+    ipcRenderer.on("xmesh:panel-navigation", handler);
+    return () => { ipcRenderer.removeListener("xmesh:panel-navigation", handler); };
+  },
   kernel: (request) => invoke("xmesh:kernel", request),
   transfers: (request) => invoke("xmesh:transfers", request),
   playground: (request) => invoke("xmesh:playground", request),

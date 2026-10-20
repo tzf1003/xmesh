@@ -23,7 +23,8 @@ interface Session {
 export function Terminal({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const instance = ctx.snapshot.selectedInstance;
-  const [device, setDevice] = useState("local");
+  const [device, setDevice] = useState(ctx.focus?.device ?? "local");
+  useEffect(() => { if (ctx.focus?.device) setDevice(ctx.focus.device); }, [ctx.focus?.device]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [caller, setCaller] = useState("");
   const [selected, setSelected] = useState("");

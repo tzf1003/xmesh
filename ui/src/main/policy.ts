@@ -113,6 +113,18 @@ export function resolvePanelFile(root: string, raw: string): string | undefined 
   return file;
 }
 
+/** Separate resource root for the tray; panel origin and IPC rules remain independent. */
+export function resolveUiFile(root: string, raw: string): string | undefined {
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "app:" && url.hostname === "tray" && !url.username && !url.password && !url.port) {
+      url.hostname = PANEL_HOST;
+      return resolvePanelFile(path.join(root, "tray"), url.href);
+    }
+  } catch { return undefined; }
+  return resolvePanelFile(root, raw);
+}
+
 /** Headers added to every panel response. */
 export function panelHeaders(contentType: string): Record<string, string> {
   return {

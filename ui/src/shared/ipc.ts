@@ -43,6 +43,7 @@ import { isAuthKey } from "./setup";
 export const CHANNELS = {
   kernel: "xmesh:kernel",
   getSnapshot: "xmesh:get-snapshot",
+  navigationReady: "xmesh:panel-ready",
   drain: "xmesh:drain",
   restartKernel: "xmesh:restart-kernel",
   readDenyFile: "xmesh:read-deny-file",
@@ -282,6 +283,8 @@ export interface SetupPreview {
 
 /** What `window.xmesh` looks like in the renderer. Method names are the whitelist. */
 export interface PanelApi {
+  navigationReady(dirty: boolean): Promise<ActionResult>;
+  onNavigate(listener: (target: import("./tray").PanelTarget) => void): () => void;
   kernel(request: KernelRequest): Promise<DataResult<KernelResult>>;
   playground: PlaygroundApi;
   transfers(request: TransferRequest): Promise<DataResult<TransferReply>>;
@@ -365,6 +368,8 @@ export interface PanelApi {
 }
 
 export const PANEL_API_METHODS = [
+  "navigationReady",
+  "onNavigate",
   "kernel",
   "playground",
   "transfers",

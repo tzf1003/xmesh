@@ -5,10 +5,12 @@ import type { JSX } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
 import { hasCapability } from "../shared/control";
-import { deriveIcon, type Snapshot, type TrayIcon } from "../shared/state";
+import { deriveIcon, EMPTY_SNAPSHOT, type Snapshot, type TrayIcon } from "../shared/state";
 import { getApi } from "./api";
 import { ApplyBar } from "./apply-bar";
-import { Badge, Banner, Toasts, useToasts } from "./components";
+import { Badge, Banner, Confirm, Toasts, useToasts } from "./components";
+import type { PanelTarget } from "../shared/tray";
+import { peerKey } from "./lib/topology";
 import { DisplayDialog, applyDisplay } from "./display";
 import { useSnapshot } from "./hooks";
 import { I18nContext, makeT, useT, type T } from "./i18n";
@@ -40,6 +42,7 @@ export type PageId = "features" | "computer" | "runtime" | "terminal" | "transfe
 
 /** Where a link into a page lands: a section or a role's setup, without changing configuration. */
 export interface PageFocus {
+  device?: string;
   section?: Section;
   role?: Role;
   peer?: string;
@@ -100,6 +103,8 @@ export function App(): JSX.Element {
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
   const [configDirty, setConfigDirty] = useState(false);
   const [configRevision, setConfigRevision] = useState(0);
+  const [pendingNavigation, setPendingNavigation] = useState<PanelTarget>();
+  const externalNavigation = useRef<(target: PanelTarget) => void>(() => {});
   const { toasts, push } = useToasts();
   // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
   const [fresh, setFresh] = useState<SaveOutcome | undefined>(undefined);
@@ -132,6 +137,16 @@ export function App(): JSX.Element {
   // With no node configured at all, the first thing worth showing is the setup wizard.
   const current: PageId =
     page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 && snapshot.stoppedNodes.length === 0 ? "setup" : "overview");
+  const applyNavigation = (target: PanelTarget): void => {
+    if (target.instance !== snapshot.selectedInstance) return;
+    const c = snapshot.connection;
+    const peer = c.kind === "connected" ? c.peers.find(p => p.name === target.peer) : undefined;
+    navigate(target.page, { ...(peer && { peer: peerKey(peer) }), ...(target.device && { device: target.device }) });
+    setPendingNavigation(undefined);
+  };
+  externalNavigation.current = target => { if (configDirty) setPendingNavigation(target); else applyNavigation(target); };
+  useEffect(() => getApi().onNavigate(target => externalNavigation.current(target)), []);
+  useEffect(() => { if (snapshot !== EMPTY_SNAPSHOT) void getApi().navigationReady(configDirty); }, [configDirty, snapshot !== EMPTY_SNAPSHOT]);
   const [meshVisited, setMeshVisited] = useState(false);
   useEffect(() => { if (current === "mesh") setMeshVisited(true); }, [current]);
 
@@ -152,6 +167,7 @@ export function App(): JSX.Element {
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
+        {pendingNavigation && <Confirm title={snapshot.settings.locale === "zh" ? "离开当前页面？" : "Leave this page?"} body={snapshot.settings.locale === "zh" ? "当前页面有未保存的修改。继续将放弃这些修改。" : "This page has unsaved changes. Continuing will discard them."} confirmLabel={snapshot.settings.locale === "zh" ? "放弃并继续" : "Discard and continue"} onCancel={() => setPendingNavigation(undefined)} onConfirm={() => applyNavigation(pendingNavigation)}/>}
         <TopBar ctx={ctx} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} />
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
