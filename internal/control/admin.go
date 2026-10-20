@@ -283,7 +283,11 @@ func (s *Server) editConfigLocked(w http.ResponseWriter, old []byte, edits []Edi
 		failWith(w, e)
 		return false
 	}
-	if _, _, err = s.storeConfigLocked(next, diffConfigs(parsedOf(old), parsedOf(next))); err != nil {
+	if _, _, err = s.storeConfigLocked(old, next, diffConfigs(parsedOf(old), parsedOf(next))); err != nil {
+		if errors.Is(err, errConfigChanged) {
+			failWith(w, newError(v2.ErrConflict, "配置已变化，请重新读取后重试"))
+			return false
+		}
 		failWith(w, newError(v2.ErrInternal, "写入配置文件失败"))
 		return false
 	}

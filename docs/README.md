@@ -51,8 +51,8 @@
 | [13 tailnet 管理与 DERP 提供商路径](design/13-mesh-admin-and-derp.md) | UI 端管理 tag、权限、第三方 DERP；国内 DERP 提供商的研究与风险 |
 | [14 设备连接密码与发现](design/14-password-pairing.md) | LAN / Tailnet 统一 SPAKE2 配对、设备公钥信任与发现 |
 | [15 GitHub Actions 运行器托管](design/15-github-runner.md) | 内核监督官方运行器：面板绑定仓库、多项目、保活、导入已有运行器；CTR-CTL-15 |
-| [19 Computer 三端远程桌面](design/19-computer.md) | Agent 桌面观察与输入、租约、三端执行器和验收进度（实现中） |
 | [17 快速安装与首次配置](design/17-quick-setup.md) | 统一安装入口、agent 协议、首次向导、恢复与连接验收 |
+| [19 Computer 三端远程桌面](design/19-computer.md) | Agent 桌面观察与输入、租约、三端执行器和验收进度（实现中） |
 | [术语表](glossary.md) | 角色、身份、资源名词 |
 
 ### 约束

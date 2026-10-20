@@ -165,7 +165,7 @@ jobs:
           [ "$TARGET_OS" = darwin ] && output="ui/build/kernel/xmesh-computer.app"
           python3 scripts/package_computer.py --binary "computer-native/target/$target/release/xmesh-computer$ext" --output "$output" --platform "$TARGET_OS" --version "$TAG"
 
-      # Stable packaging fails before build when required credentials are absent.
+      # Stable packaging requires signing credentials.
       - name: 启用签名
         id: sign
         run: |

@@ -231,13 +231,13 @@ export function registerIpc({ onboarding, transfers, playground, controller, act
     return v === undefined ? bad("audit query") : service.queryAudit(v);
   });
   handle(CHANNELS.getRecentCalls, (): CallEventData[] => service.recentCalls());
-  handle(CHANNELS.computer, (request: unknown) => {
-    const parsed = parseComputerRequest(request);
-    return parsed === undefined ? bad("computer request") : service.computer(parsed);
-  });
   handle(CHANNELS.onboarding, (request: unknown) => {
     const parsed = parseOnboarding(request);
     return parsed && onboarding ? onboarding(parsed) : bad("setup request");
+  });
+  handle(CHANNELS.computer, (request: unknown) => {
+    const parsed = parseComputerRequest(request);
+    return parsed === undefined ? bad("computer request") : service.computer(parsed);
   });
   handle(CHANNELS.previewSetup, (params: unknown) => previewSetup(params));
   handle(CHANNELS.runSetup, (params: unknown) => setup(params));

@@ -33,7 +33,7 @@ func (s *Store) detailDiagnostics(ctx context.Context, nodes []NodeInfo) []Diagn
 			}
 			out = append(out, Diagnostic{ID: n.Name + "/credential/" + name, Status: status, Message: message, NextAction: next})
 		}
-		if cfg.Mesh.TailnetEnabled() && cfg.Mesh.Tailnet.AuthMethod != "browser" {
+		if cfg.Mesh.Tailnet.Enabled && cfg.Mesh.Tailnet.AuthMethod != "browser" {
 			if raw, e := os.ReadFile(cfg.Mesh.Tailnet.AuthkeyFile); e != nil || len(raw) > 4096 || strings.TrimSpace(string(raw)) == "" {
 				out = append(out, Diagnostic{ID: n.Name + "/network-key", Status: "error", Message: "入网密钥文件不可用", NextAction: "检查私有密钥文件，或使用浏览器重新授权"})
 			}

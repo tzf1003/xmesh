@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { createOnboardingService, onboardingArgs, runOnboarding } from "../../src/main/onboarding";
-import { onboardingDiagnostics, validIngressPassword, parseOnboarding, parseOnboardingInput, redactOnboarding, verificationPrompt, type OnboardingInput, type OnboardingJob } from "../../src/shared/onboarding";
+import { onboardingDiagnostics, validIngressPassword, parseOnboarding, parseOnboardingInput, redactOnboarding, redactOnboardingResponse, setupNeedsAttention, verificationPrompt, type OnboardingInput, type OnboardingJob } from "../../src/shared/onboarding";
 import { quickZh, quickEn } from "../../src/renderer/onboarding-copy";
 
 const input: OnboardingInput = { schema_version: 1, purpose: "local", node_name: "my-node", workspace: "/work", permission: "development", clients: ["codex"], autostart: true, network: { mode: "lan" } };
@@ -10,6 +13,8 @@ test("setup input validates purpose, paths, clients and network at the IPC bound
   assert.deepEqual(parseOnboardingInput(input), input);
   for (const patch of [{ node_name: "../x" }, { workspace: "relative" }, { workspace: "/work\nnext" }, { clients: ["codex", "codex"] }, { clients: ["other"] }, { purpose: "cloud" }, { network: { mode: "tailnet", auth_method: "key" } }, { network: { mode: "lan", auth_method: "browser", shell: true } }, { schema_version: 2 }]) assert.equal(parseOnboardingInput({ ...input, ...patch }), undefined);
   assert.ok(parseOnboardingInput({ ...input, clients: [] }));
+  assert.ok(parseOnboardingInput({ ...input, purpose: "multi-device", network: { mode: "coexist", auth_method: "browser" } }));
+  assert.equal(parseOnboardingInput({ ...input, network: { mode: "coexist", auth_method: "browser" } }), undefined);
   assert.equal(parseOnboardingInput({ ...input, network: { mode: "lan", auth_method: "browser" } }), undefined);
 });
 test("setup operations accept fixed fields and bounded durable IDs", () => {
@@ -61,6 +66,39 @@ test("diagnostics preserve job IDs and redact browser challenge URLs", () => {
   const parsed = JSON.parse(onboardingDiagnostics({ job: { ...job, auth_url: "https://login.tailscale.com/a/private" } }));
   assert.equal(parsed.job.id, job.id);
   assert.equal(parsed.job.auth_url, "[redacted]");
+});
+
+test("structured responses and copied challenges preserve credential-shaped paths", async () => {
+  for (const path of ["/work/token=project/tskey-project", "/work/password=文档/hskey-project", "C:\\work space\\secret=project"]) {
+    const original = { ...job, verification_path: path };
+    const response = redactOnboardingResponse({ data: original, token: "actual-secret", nested: { password: "private" } });
+    assert.equal(response.data.verification_path, path);
+    assert.equal(response.token, "[redacted]");
+    assert.equal(response.nested.password, "[redacted]");
+    let copied = "";
+    const service = createOnboardingService("/root", async () => undefined, async () => ({ ok: true, data: response.data }), (text) => { copied = text; });
+    await service({ op: "status", job: job.id, copy_prompt: true });
+    assert.equal(copied, verificationPrompt(original));
+  }
+});
+
+test("cancelled tasks do not require setup reminders", () => {
+  assert.equal(setupNeedsAttention({ ...job, status: "cancelled" }), false);
+  assert.equal(setupNeedsAttention({ ...job, status: "failed" }), true);
+  assert.equal(setupNeedsAttention({ ...job, status: "succeeded", readiness: { ...job.readiness, client_verified: true } }), false);
+  assert.ok(parseOnboarding({ op: "cancel", job: job.id }));
+});
+
+test("CLI response parsing retains exact verification paths", { skip: process.platform === "win32" }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "response-"));
+  try {
+    const binary = path.join(root, "xmesh-fixture");
+    const original = { ...job, verification_path: "/work/token=文档/tskey-project/password=notes" };
+    fs.writeFileSync(binary, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(JSON.stringify({ ok: true, data: original }))});\n`, { mode: 0o700 });
+    const result = await runOnboarding({ op: "status", job: job.id }, root, binary);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.deepEqual(result.data, original);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 test("missing setup binary returns a bounded actionable result", async () => {
   const result = await runOnboarding({ op: "inspect" }, "/root", "/missing-xmesh-binary");

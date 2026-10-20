@@ -1,6 +1,7 @@
 import { useLocale } from "./i18n";
 export const quickZh = {
   ingressPassword: "入口登录密码", ingressPasswordHint: "设置 12–256 个字符的密码，在云端客户端的 OAuth 登录页面使用。密码会写入受保护的本地文件。", confirmPassword: "确认密码", savePassword: "保存入口密码",
+  cancel: "取消设置", cancelled: "设置已取消", cancelTitle: "取消此设置？", cancelHint: "将恢复本次配置和客户端改动，并恢复原服务。外部登录身份与备份会保留。",
   replaceClient: "我确认替换上面列出的 xmesh 连接，并保留原配置备份。",
   featureUnconfigured: "待配置", featureConfiguring: "配置中", featureAttention: "需要处理",
   pairDevice: "添加或配对设备",
@@ -12,6 +13,7 @@ export const quickZh = {
 } as const;
 export const quickEn: Record<keyof typeof quickZh, string> = {
   ingressPassword: "Entry point login password", ingressPasswordHint: "Use 12–256 characters. Enter this password on the OAuth sign-in page in your cloud client. It is stored in a protected local file.", confirmPassword: "Confirm password", savePassword: "Save entry point password",
+  cancel: "Cancel setup", cancelled: "Setup cancelled", cancelTitle: "Cancel this setup?", cancelHint: "Restore this setup’s configuration, client changes and previous service. External sign-in identity and backups are retained.",
   replaceClient: "Replace the xmesh connections listed above and keep the original configuration backups.",
   featureUnconfigured: "Set up", featureConfiguring: "Configuring", featureAttention: "Needs attention",
   pairDevice: "Add or pair a device",

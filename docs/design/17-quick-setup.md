@@ -8,7 +8,7 @@
 
 本机用途使用 `serve --local-only`：内部 Agent 通过内存传输供 Gateway 调用，不开放 Agent HTTP 监听，Gateway 绑定回环地址并要求 PAT。配置保留 LAN 模式数据结构但关闭 mDNS；现有 `serve --local` 开发模式继续保留自己的语义。LAN 的 `mdns: false` 表示关闭公告与发现。
 
-跨设备用途选择 LAN、Tailnet 或共存，并通过 xmesh 设备公钥配对建立信任。云端用途使用官方 Tailscale 与 Funnel；临时打开同一 tsnet 身份完成浏览器授权，并检查 Funnel 能力和设备域名后关闭，随后常驻服务复用身份。首次授权可能需要控制面管理员批准、允许 Funnel 及 HTTPS；应用权限由 xmesh 设备信任授予。
+跨设备用途选择配对或 tailnet。云端用途使用官方 Tailscale 与 Funnel；临时打开同一 tsnet 身份完成浏览器授权，并检查设备标签、Funnel 能力和设备域名后关闭，随后常驻服务复用身份。首次授权可能需要控制面管理员批准、授予 `tag:device`/`tag:ingress`、允许 Funnel 及 HTTPS。
 
 ## 状态与恢复
 

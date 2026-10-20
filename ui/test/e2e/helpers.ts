@@ -114,6 +114,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
         ),
       ]);
       await page.waitForLoadState("domcontentloaded");
+      await expect(page.getByTestId("nav-overview")).toBeVisible();
       return page;
     },
     close: () => {

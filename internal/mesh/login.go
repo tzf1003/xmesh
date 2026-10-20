@@ -52,10 +52,14 @@ func LoginTailnet(ctx context.Context, c *config.Config, stateDir string, progre
 	if err := privdir.Ensure(stateDir); err != nil {
 		return err
 	}
+	tags := runtimeTailnetTags(c)
+	if c.SchemaVersion == 2 {
+		tags = nil
+	}
 	server := &tsnet.Server{
 		Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name,
-		ControlURL: meshConfig.ControlURL,
-		UserLogf:   func(string, ...any) {}, Logf: func(string, ...any) {},
+		ControlURL: meshConfig.ControlURL, AdvertiseTags: tags,
+		UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {},
 	}
 	lc, err := server.LocalClient()
 	if err != nil {

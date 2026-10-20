@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"tailscale.com/ipn/store/mem"
@@ -59,9 +60,7 @@ func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf fu
 		}
 	}
 	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AuthKey: strings.TrimSpace(string(key)), UserLogf: redactedLog, Logf: redactedLog}
-	if c.Mesh.AuthMethod == "browser" {
-		server.AdvertiseTags = []string{"tag:device"}
-	}
+	server.AdvertiseTags = runtimeTailnetTags(c)
 	if c.Mesh.Ephemeral {
 		server.Ephemeral = true
 		server.Store = new(mem.Store)
@@ -78,6 +77,24 @@ func openTailnet(ctx context.Context, c *config.Config, stateDir string, logf fu
 		}
 	}
 	return &Tailnet{server: server, ephemeral: c.Mesh.Ephemeral}, nil
+}
+
+// Setup and subsequent service starts advertise the same role requirements.
+func tailnetRoleTags(ingress bool) []string {
+	tags := []string{"tag:device"}
+	if ingress {
+		tags = append(tags, "tag:ingress")
+	}
+	return tags
+}
+
+func runtimeTailnetTags(c *config.Config) []string {
+	// Temporary administrative connections retain the roles carried by their
+	// auth key; they must not become device or public-ingress identities.
+	if c.Mesh.Ephemeral && c.Mesh.AuthMethod != "browser" {
+		return nil
+	}
+	return tailnetRoleTags(slices.Contains(c.Node.Roles, "ingress"))
 }
 func (t *Tailnet) Listen(ctx context.Context) (net.Listener, error) {
 	return t.server.Listen("tcp", ":"+strconv.Itoa(AgentPort))

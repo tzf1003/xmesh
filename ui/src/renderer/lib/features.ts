@@ -5,7 +5,7 @@ export type FeatureId = "devices" | "ingress" | "clients" | "ci" | "permissions"
 export function selectedSetupJob(snapshot: Snapshot, jobs: readonly OnboardingJob[]): OnboardingJob | undefined {
   const name = snapshot.connection.kind === "connected" ? snapshot.connection.status.hostname : snapshot.selectedInstance;
   if (!name) return;
-  return jobs.filter((job) => job.node_name === name).slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+  return jobs.filter((job) => job.node_name === name && job.status !== "cancelled").slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
 }
 export function deriveFeatureStates(snapshot: Snapshot, jobs: readonly OnboardingJob[]): Record<FeatureId, FeatureState> {
   const result: Record<FeatureId, FeatureState> = { devices: "unconfigured", ingress: "unconfigured", clients: "unconfigured", ci: "unconfigured", permissions: "unconfigured", mesh: "unconfigured" };
@@ -29,13 +29,13 @@ export function deriveFeatureStates(snapshot: Snapshot, jobs: readonly Onboardin
   result.devices = usablePeers.length ? "ready" : peers.some((peer) => !peer.online || !!peer.info?.error) ? "attention" : peers.length ? "configuring" : "unconfigured";
   if (warnings(["peer_offline", "firewall_blocked"])) result.devices = "attention";
   const cloudPending = job?.purpose === "cloud" && !job.readiness.client_verified;
-  result.ingress = !s.roles.includes("ingress") ? "unconfigured" : warnings(["tailnet_not_ready", "authkey_unreadable", "firewall_blocked"]) ? "attention" : s.ingress?.issuer && !cloudPending ? "ready" : "configuring";
-  result.clients = s.backends.some((backend) => backend.state === "crashed") ? "attention" : s.backends.some((backend) => backend.state === "running") || job?.readiness.client_verified ? "ready" : s.backends.length ? "configuring" : "unconfigured";
+  result.ingress = !s.roles.includes("ingress") ? "unconfigured" : s.network.mode !== "tailnet" || warnings(["tailnet_not_ready", "authkey_unreadable", "firewall_blocked"]) ? "attention" : s.ingress?.issuer && !cloudPending ? "ready" : "configuring";
+  result.clients = job?.readiness.client_verified ? "ready" : job ? "configuring" : "unconfigured";
   const bindings = s.ci?.bindings ?? [];
   const instances = bindings.flatMap((binding) => binding.instances);
   result.ci = !bindings.length ? "unconfigured" : bindings.some((binding) => binding.paused) || instances.some((instance) => instance.state === "broken" || instance.state === "backoff" || instance.state === "stopped" || !!instance.problem) ? "attention" : !bindings.some((binding) => binding.removing) && instances.length > 0 && instances.every((instance) => ["idle", "busy"].includes(instance.state)) ? "ready" : "configuring";
   result.permissions = warnings(["policy_reload_failed", "sandbox_unavailable"]) || s.policy_reload_failures > 0 ? "attention" : "ready";
-  result.mesh = (s.network.mode !== "tailnet" && s.network.mode !== "coexist") ? "unconfigured" : warnings(["tailnet_not_ready", "authkey_unreadable", "firewall_blocked"]) ? "attention" : "ready";
+  result.mesh = s.network.mode !== "tailnet" ? "unconfigured" : warnings(["tailnet_not_ready", "authkey_unreadable", "firewall_blocked"]) ? "attention" : "ready";
   if (active) {
     if (!job.readiness.service_ready) for (const id of Object.keys(result) as FeatureId[]) { if (jobFeature(id) && result[id] !== "attention") result[id] = "configuring"; }
     if (!job.readiness.client_verified && result.clients === "unconfigured") result.clients = "configuring";

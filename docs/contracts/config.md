@@ -20,6 +20,7 @@
 | `mesh.tailnet.ephemeral = true` | Tailnet 网络身份存于内存，每次进程启动重新入网。xmesh 设备公钥仍独立持久化 |
 | `mesh.lan.enabled = true` | 开启局域网路径；`mdns` 缺省 true。可指定物理网卡；网卡暂不可用时该路径独立重试，其他路径与本机管理继续运行。两个 enabled 都为 true 即共存；网络开关热应用 |
 | `ingress.listen = funnel` | `mesh.tailnet.control_url` 必须是官方 Tailscale 控制面：`https://controlplane.tailscale.com` 或 `https://login.tailscale.com`（端口只能是 443，不含用户信息）。其他主机，包括 Headscale 和形似官方域名的后缀，一律拒绝启动。issuer 必须是 `ts.net` 源。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
+| 本机首次配置 | 关闭 LAN 与 Tailnet 路径，以 `--local-only` 开放需认证的回环 Gateway；设备 Agent 仅供该 Gateway 内部调用 |
 | `ingress.listen = public:443` | 必须有 `domain` 和 `tls`，且 `ingress.oauth.issuer` 的主机等于 `domain`。`tls: file` 时还必须有 `cert_file` 与 `key_file`。`tls: autocert` 只在这种监听下使用 |
 | `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供 |
 | `ingress.oauth.dynamic_client_scopes` | 可选 scope 数组，语法与 `clients.*.scopes` 相同。动态注册客户端的 scope 上限，缺省 `["devices:read"]`，空数组表示只能完成 OAuth，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |

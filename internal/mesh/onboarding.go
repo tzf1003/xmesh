@@ -5,40 +5,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/config"
-	"github.com/tzf1003/xmesh/internal/filelock"
 	"github.com/tzf1003/xmesh/internal/privdir"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
 )
 
 // PrepareOnboarding opens the future service identity, authorises it, and checks
-// the Funnel capability before the service can acquire that state.
+// the tags and Funnel capability before the service can acquire that state.
 // Diagnostic logs stay local to tsnet; callers receive only login progress.
 func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, ingress bool, progress func(LoginProgress) error) (string, error) {
 	if e := privdir.Ensure(stateDir); e != nil {
 		return "", e
 	}
-	cfg := c.Mesh
+	network := c.Mesh
+	tags := tailnetRoleTags(ingress)
 	if c.SchemaVersion == 2 {
-		if !c.Mesh.Tailnet.Enabled {
-			return "", fmt.Errorf("请先启用 Tailnet 连接路径")
+		network.ControlURL = c.Mesh.Tailnet.ControlURL
+		network.AuthMethod = c.Mesh.Tailnet.AuthMethod
+		network.AuthkeyFile = c.Mesh.Tailnet.AuthkeyFile
+		tags = nil
+		if ingress {
+			tags = []string{"tag:ingress"}
 		}
-		cfg.ControlURL, cfg.AuthMethod, cfg.AuthkeyFile = c.Mesh.Tailnet.ControlURL, c.Mesh.Tailnet.AuthMethod, c.Mesh.Tailnet.AuthkeyFile
-		lockCtx, stop := context.WithTimeout(ctx, 250*time.Millisecond)
-		lock, err := filelock.Acquire(lockCtx, filepath.Join(filepath.Dir(stateDir), "device-runtime.lock"))
-		stop()
-		if err != nil {
-			return "", fmt.Errorf("节点正在使用网络状态，请先停止节点再登录")
-		}
-		defer lock.Close()
 	}
-	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: cfg.ControlURL, UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
-	if cfg.AuthMethod != "browser" {
-		key, e := os.ReadFile(cfg.AuthkeyFile)
+	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: network.ControlURL, AdvertiseTags: tags, UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
+	if network.AuthMethod != "browser" {
+		key, e := os.ReadFile(network.AuthkeyFile)
 		if e != nil {
 			return "", fmt.Errorf("无法读取入网密钥文件")
 		}
@@ -66,7 +63,7 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 			next = LoginProgress{State: "needs_approval"}
 		}
 		if st.BackendState == "Running" && st.Self != nil && len(st.TailscaleIPs) > 0 {
-			if err := onboardingPrerequisites(st, ingress); err != nil {
+			if err := onboardingPrerequisitesForVersion(st, ingress, c.SchemaVersion != 2); err != nil {
 				return "", err
 			}
 			if e = progress(LoginProgress{State: "ready"}); e != nil {
@@ -89,11 +86,18 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 }
 
 func onboardingPrerequisites(st *ipnstate.Status, ingress bool) error {
-	if st.Self == nil {
-		return fmt.Errorf("Tailnet 尚未就绪")
+	return onboardingPrerequisitesForVersion(st, ingress, true)
+}
+
+func onboardingPrerequisitesForVersion(st *ipnstate.Status, ingress, requireDeviceTag bool) error {
+	if e := requireBrowserRole(st); requireDeviceTag && e != nil {
+		return e
 	}
 	if !ingress {
 		return nil
+	}
+	if !slices.Contains(st.Self.Tags.AsSlice(), "tag:ingress") {
+		return fmt.Errorf("请在控制面为此设备授予 tag:ingress 后重试")
 	}
 	if !st.Self.HasCap("funnel") {
 		return fmt.Errorf("请在控制面策略中为此设备启用 Funnel，并开启 HTTPS 后重试")

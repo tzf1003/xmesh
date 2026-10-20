@@ -68,6 +68,11 @@ func atomicWrite(path string, b []byte) error { return setupAtomicWrite(path, b,
 // atomicWriteCAS performs the final expected-bytes check while the temporary
 // file is ready, preventing compensation from overwriting a later edit.
 func atomicWriteCAS(path, expected string, b []byte) error {
+	lock, err := lockClientPath(path)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	return setupAtomicWrite(path, b, &expected)
 }
 

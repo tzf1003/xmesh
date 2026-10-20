@@ -40,6 +40,7 @@ interface Session {
   >;
   active?: string;
   closed: boolean;
+  initializing: boolean;
   closing?: Promise<void>;
   processes: OwnedProcess[];
   exitCleanup?: Promise<void>;
@@ -217,7 +218,7 @@ export class Controller {
       for (const s of this.sessions.values())
         if (
           s.closed ||
-          (!s.active && Date.now() - s.lastUse > config.limits.session_idle_ms)
+          (!s.initializing && !s.active && Date.now() - s.lastUse > config.limits.session_idle_ms)
         )
           void this.closeSession(s.id).catch(() => {});
     }, 1000);
@@ -384,6 +385,7 @@ export class Controller {
         releases,
         pending: new Map(),
         closed: false,
+        initializing: true,
         processes: child.pid
           ? [ownProcess(child.pid, process.platform !== "win32")]
           : [],
@@ -431,6 +433,8 @@ export class Controller {
           }),
         ]);
         s.versions = opened.versions;
+        s.initializing = false;
+        s.lastUse = Date.now();
         return {
           protocol_version: 1,
           instance_id: this.instance_id,

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import type { DataResult } from "../shared/ipc";
-import { onboardingDiagnostics, verificationPrompt, redactOnboarding, type OnboardingRequest, type OnboardingJob, type OnboardingPlan, type OnboardingInput, type OnboardingInspect } from "../shared/onboarding";
+import { onboardingDiagnostics, verificationPrompt, redactOnboardingResponse, type OnboardingRequest, type OnboardingJob, type OnboardingPlan, type OnboardingInput, type OnboardingInspect } from "../shared/onboarding";
 import { isLoginUrl } from "./browser-login";
 import { xmeshBinary } from "./cli";
 
@@ -20,7 +20,7 @@ export function runOnboarding(request: OnboardingRequest, root: string, bin = xm
       try {
         const result = JSON.parse(stdout) as DataResult<unknown>;
         if (!result || typeof result !== "object" || typeof result.ok !== "boolean" || result.ok && !("data" in result) || !result.ok && (!result.error || typeof result.error.message !== "string")) throw new Error("invalid response");
-        resolve(JSON.parse(redactOnboarding(JSON.stringify(result))) as DataResult<unknown>);
+        resolve(redactOnboardingResponse(result));
       } catch {
         resolve({ ok: false, error: { code: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" ? "binary_missing" : "setup_failed", message: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" ? "找不到 xmesh 内核，请安装或更新应用。" : "无法读取设置任务状态。请重试或运行诊断。", next_action: "检查内核版本与状态目录后重试。" } });
       }
@@ -43,7 +43,7 @@ export function createOnboardingService(root: string, open: (url: string) => Pro
       if (request.op === "doctor" && request.copy) copy(onboardingDiagnostics(result.data));
       if (request.op === "status" && request.copy_prompt) {
         const prompt = verificationPrompt(result.data as OnboardingJob);
-        if (prompt) copy(redactOnboarding(prompt));
+        if (prompt) copy(prompt);
       }
     }
     return result;
@@ -62,7 +62,7 @@ export function fakeOnboarding(root: string, state: { cliFails: boolean; setupWa
     if (request.op === "doctor") return { ok: true, data: { ready: true, message: "Kernel and setup storage are available" } };
     if (request.op === "plan") {
       const input: OnboardingInput = request.input;
-      const plan: OnboardingPlan = { schema_version: 1, id: `plan-${++sequence}`, input, config_path: `${root}/${input.node_name}/xmesh.yaml`, config: JSON.stringify({ schema_version: 2, node: { name: input.node_name, roles: ["agent", "gateway"] }, mesh: { lan: { enabled: input.network.mode !== "tailnet", mdns: input.purpose !== "local" }, tailnet: { enabled: input.network.mode !== "lan", control_url: input.network.control_url, auth_method: input.network.auth_method, authkey_file: input.network.authkey_file } }, agent: { default_cwd: input.workspace, cwd_policy: { allow: [input.workspace] } } }, null, 2), before_hash: "", endpoint: "http://127.0.0.1:8080/mcp", summary: ["创建节点配置与工作目录策略", "安装并启动用户服务", "验证 MCP 工具调用"], client_changes: input.clients.map((id) => ({ id, path: id === "codex" ? "/home/me/.codex/config.toml" : "/home/me/.claude.json", before_hash: "", exists: true, conflict: state.setupConflict === true, summary: "添加 xmesh MCP 配置并备份原文件" })), steps: [], created_at: now() };
+      const plan: OnboardingPlan = { schema_version: 1, id: `plan-${++sequence}`, input, config_path: `${root}/${input.node_name}/xmesh.yaml`, config: `node:\n  name: ${input.node_name}\nmesh:\n  mode: ${input.network.mode}\nagent:\n  default_cwd: ${input.workspace}\n`, before_hash: "", endpoint: "http://127.0.0.1:8080/mcp", summary: ["创建节点配置与工作目录策略", "安装并启动用户服务", "验证 MCP 工具调用"], client_changes: input.clients.map((id) => ({ id, path: id === "codex" ? "/home/me/.codex/config.toml" : "/home/me/.claude.json", before_hash: "", exists: true, conflict: state.setupConflict === true, summary: "添加 xmesh MCP 配置并备份原文件" })), steps: [], created_at: now() };
       plans.set(plan.id, plan); return { ok: true, data: plan };
     }
     if (request.op === "apply") {
@@ -71,6 +71,8 @@ export function fakeOnboarding(root: string, state: { cliFails: boolean; setupWa
       jobs.set(job.id, job); return { ok: true, data: job };
     }
     const job = jobs.get(request.job); if (!job) return { ok: false, error: { code: "not_found", message: "Job not found" } };
+    if (request.op === "cancel") { job.status = "cancelled"; job.auth_url = ""; job.readiness = { installed: false, service_ready: false, client_verified: false }; return { ok: true, data: job }; }
+    if (job.status === "cancelled") return { ok: true, data: job };
     const plan = plans.get(job.plan_id)!;
     if (request.op === "set_password") job.ingress_password_set = true;
     if (state.cliFails) { job.status = "failed"; job.next_action = "重试安装用户服务。"; job.steps = [{ id: "install", status: "failed", message: "服务安装失败", code: "install_failed", next_action: "检查服务权限后重试。" }]; }

@@ -46,3 +46,7 @@ XMESH_TEST_ONBOARDING_BINARY=/absolute/private-test-directory/xmesh go test ./cm
 Windows 在登录用户的交互会话执行，以 PowerShell 设置同名环境变量。CI 的清理步骤再次核对测试服务的可执行文件路径，仅清理本次运行创建的注册。
 
 仓库完整 Python 脚本套件在本地 Python 3.14/macOS 环境中还有已有的临时路径 `/var` 别名断言和 PTY 并发测试连接重置失败；安装分发和发布门禁专项已独立通过。
+
+### Staging a testing release for local Mac signing
+
+For a beta/rc release, set the repository Actions variable `XMESH_RELEASE_DRAFT_TAG` to the exact release tag before pushing that tag. The release workflow builds and verifies its artifacts and creates a draft release; installation-site deployment waits for publication. Download the draft assets, replace Mac packages with the signed/notarized artifacts from the same source commit, regenerate the manifest, offline bundles and checksums, then publish the reviewed draft and dispatch `pages.yml`. Remove the variable after publication. Tags that do not match retain automatic publication. Stable releases continue to require CI signing credentials on every native platform; this testing-release staging route does not replace that requirement.
