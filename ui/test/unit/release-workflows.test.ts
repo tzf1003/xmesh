@@ -29,4 +29,5 @@ test("component workflows share the CI trigger and diagnostics are opt-in", () =
   assert.ok(Object.hasOwn(packaging.on, "workflow_call"));
   assert.ok(Object.hasOwn(packaging.on, "workflow_dispatch"));
   assert.equal(packaging.on.pull_request, undefined);
+  assert.equal(workflow("pages.yml").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
 });

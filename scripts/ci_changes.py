@@ -86,6 +86,7 @@ def select(paths, full=False):
                    "scripts/oauth_client.py"):
             selected["headscale"] = True
         if matches("ui/*", "api/control/*", "docs/contracts/schemas/control-*",
+                   "docs/contracts/schemas/config.schema.json",
                    "docs/contracts/schemas/onboarding.schema.json", "scripts/gen-onboarding-types.py"):
             selected["ui"] = True
         if matches("packages/ui-mcp/*", "ui/src/main/*", "ui/src/preload/*", "ui/src/shared/*",
