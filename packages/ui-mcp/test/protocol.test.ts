@@ -201,6 +201,60 @@ test("resource locks exclude another holder and release idempotently", () => {
   }
 });
 
+test("resource locks retry transient claim replacement while contenders remain excluded", (t) => {
+  const c = config();
+  const a = new Locks(path.join(c.state_dir, "locks"));
+  const b = new Locks(path.join(c.state_dir, "locks"));
+  const rename = fs.renameSync;
+  let denied = 0;
+  t.mock.method(fs, "renameSync", (source: fs.PathLike, target: fs.PathLike) => {
+    if (fs.existsSync(target) && denied < 3) {
+      denied++;
+      assert.equal(b.acquire("account"), undefined);
+      throw Object.assign(new Error("claim is being read"), { code: "EPERM" });
+    }
+    return rename(source, target);
+  });
+  try {
+    const release = a.acquire("account");
+    assert.ok(release);
+    assert.equal(denied, 3);
+    assert.equal(b.acquire("account"), undefined);
+    release();
+    assert.ok(b.acquire("account"));
+  } finally {
+    t.mock.restoreAll();
+    a.close();
+    b.close();
+    cleanup(c);
+  }
+});
+
+test("resource locks bound persistent replacement failures and clean up their claims", (t) => {
+  const c = config();
+  const locks = new Locks(path.join(c.state_dir, "locks"));
+  const rename = fs.renameSync;
+  const start = Date.now();
+  t.mock.method(fs, "renameSync", (source: fs.PathLike, target: fs.PathLike) => {
+    if (fs.existsSync(target))
+      throw Object.assign(new Error("claim remains busy"), { code: "EPERM" });
+    return rename(source, target);
+  });
+  try {
+    assert.throws(() => locks.acquire("account"), { code: "EPERM" });
+    assert.ok(Date.now() - start < 5000);
+    const directories = fs.readdirSync(path.join(c.state_dir, "locks"));
+    assert.equal(directories.length, 1);
+    assert.deepEqual(fs.readdirSync(path.join(c.state_dir, "locks", directories[0]!)), []);
+    t.mock.restoreAll();
+    assert.ok(locks.acquire("account"));
+  } finally {
+    t.mock.restoreAll();
+    locks.close();
+    cleanup(c);
+  }
+});
+
 test("resource locks serialize concurrent backend processes", async () => {
   const c = config();
   fs.writeFileSync(path.join(c.state_dir, "count"), "0");
