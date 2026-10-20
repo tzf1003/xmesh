@@ -53,6 +53,16 @@ test("config save: strict keys, a real etag, a boolean dry-run and the 1 MiB byt
   assert.equal(parseConfigSave([]), undefined);
 });
 
+test("config save validates and trims the write-only admission key", () => {
+  const request = { content: "node: {}\n", etag: ETAG, dryRun: true };
+  for (const authkey of ["tskey-auth-settings-test", "hskey-settings-test"]) {
+    assert.deepEqual(parseConfigSave({ ...request, authkey: ` ${authkey}\n` }), { ...request, authkey });
+  }
+  for (const authkey of ["", "short", "key with spaces", "tskey-auth-one\ntwo", "x".repeat(4097), 42, null]) {
+    assert.equal(parseConfigSave({ ...request, authkey }), undefined);
+  }
+});
+
 test("PAT creation needs a node-style name and 1..64 distinct valid scopes", () => {
   assert.deepEqual(parsePatCreate({ name: "ci", scopes: ["devices:read"] }), { name: "ci", scopes: ["devices:read"] });
   for (const bad of [

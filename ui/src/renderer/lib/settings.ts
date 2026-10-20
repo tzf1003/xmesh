@@ -5,7 +5,7 @@
 // the page can explain before the dry run.
 
 import { Document, parseDocument, type YAMLSeq } from "yaml";
-import { DEFAULT_CONTROL_URL, NODE_NAME, isAbsolutePath, isHttpsUrl } from "../../shared/setup";
+import { DEFAULT_CONTROL_URL, NODE_NAME, isAbsolutePath, isAuthKey, isHttpsUrl } from "../../shared/setup";
 
 export const ROLES = ["agent", "gateway", "ingress"] as const;
 export type Role = (typeof ROLES)[number];
@@ -27,6 +27,8 @@ export interface SettingsForm {
   nodeName: string;
   mode: Mode;
   controlUrl: string;
+  /** A replacement key, held only until the settings are saved. */
+  authkey: string;
   authkeyFile: string;
   browserLogin: boolean;
   roles: Role[];
@@ -48,7 +50,7 @@ export type SettingsProblem =
   | "roles"
   | "tailnet"
   | "control_url"
-  | "authkey_file"
+  | "authkey"
   | "issuer"
   | "domain"
   | "cert_files"
@@ -90,6 +92,7 @@ export function formFromConfig(parsed: unknown): SettingsForm {
     nodeName: text(node.name),
     mode,
     controlUrl: text(tailnet.control_url) || DEFAULT_CONTROL_URL,
+    authkey: "",
     authkeyFile: text(tailnet.authkey_file),
     browserLogin: tailnet.auth_method === "browser",
     roles: ROLES.filter((r) => roles.includes(r)),
@@ -131,7 +134,7 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
   if (f.roles.length === 0) return "roles";
   if (f.mode === "tailnet" || f.mode === "coexist") {
     if (!isHttpsUrl(f.controlUrl.trim())) return "control_url";
-    if (!f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey_file";
+    if (f.authkey.trim() ? !isAuthKey(f.authkey.trim()) : !f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey";
   }
   if (!f.roles.includes("ingress")) return undefined;
   return checkIngressSettings(f);
@@ -169,7 +172,7 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   doc.setIn(["mesh", "tailnet", "enabled"], f.mode === "tailnet" || f.mode === "coexist");
   if (f.mode === "tailnet" || f.mode === "coexist") {
     doc.setIn(["mesh", "tailnet", "control_url"], f.controlUrl.trim());
-    if (f.browserLogin) {
+    if (f.browserLogin && !f.authkey.trim()) {
       doc.setIn(["mesh", "tailnet", "auth_method"], "browser");
       doc.deleteIn(["mesh", "tailnet", "authkey_file"]);
     } else {
