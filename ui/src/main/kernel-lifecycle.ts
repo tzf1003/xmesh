@@ -4,6 +4,7 @@ import { ControlClient } from "./client";
 import { discoverConfigured, discoverInstances, kernelGone, protectedStateRoots, type Instance } from "./discovery";
 import type { CliRun } from "./cli";
 import type { DataResult } from "../shared/ipc";
+import { parseInstanceId } from "../shared/ipc";
 import { parseKernelRequest, type KernelNode, type KernelResult } from "../shared/kernel";
 import { sameVersion } from "../shared/version";
 
@@ -15,8 +16,15 @@ export function discoverKernelTargets(roots: string[], saved: (id: string) => Ke
   protectedRoots: readonly string[] = protectedStateRoots(), savedIds: readonly string[] = []): KernelTarget[] {
   const instances = discoverInstances(roots, protectedRoots);
   const ids = new Set([...discoverConfigured(roots), ...instances.map((i) => i.id), ...savedIds]);
+  for (const root of roots) {
+    try {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        if (entry.isDirectory() && parseInstanceId(entry.name) && fs.existsSync(path.join(root, entry.name, "xmesh.yaml"))) ids.add(entry.name);
+      }
+    } catch { /* unreadable roots have no manageable nodes */ }
+  }
   return [...ids].sort().flatMap((id): KernelTarget[] => {
-    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(id)) return [];
+    if (parseInstanceId(id) === undefined) return [];
     const instance = instances.find((i) => i.id === id);
     const recorded = saved(id);
     const root = roots.find((r) => fs.existsSync(path.join(r, id, instance ? "control.json" : "xmesh.yaml"))) ??
@@ -37,6 +45,7 @@ interface Environment {
   installOptions?(paths: KernelPaths): string[];
   serviceOptions?(paths: KernelPaths): Promise<string[]>;
   installed?(node: string, paths: KernelPaths): Promise<string>;
+  managed?(target: KernelTarget): Promise<boolean>;
   changed(): void;
   version?: string;
   gone?: typeof kernelGone;
@@ -64,15 +73,23 @@ export class KernelLifecycle {
   private readonly pending = new Set<string>();
   constructor(private readonly env: Environment) {}
 
-  private nodes(): KernelNode[] {
-    return this.env.targets().map(({ id, name, running, managed }) => ({ id, name, running, managed }));
+  private async nodes(): Promise<KernelNode[]> {
+    return Promise.all(this.env.targets().map(async (target) => {
+      const { id, name, running } = target;
+      return { id, name, running, managed: await this.managed(target) };
+    }));
+  }
+
+  private async managed(target: KernelTarget): Promise<boolean> {
+    try { return await this.env.managed?.(target) ?? target.managed; }
+    catch { return false; }
   }
 
   async request(raw: unknown): Promise<DataResult<KernelResult>> {
     const req = parseKernelRequest(raw);
     if (!req) return { ok: false, error: { code: "invalid_args", message: "无效的内核操作" } };
     if (req.op === "list") {
-      try { return { ok: true, data: { nodes: this.nodes() } }; }
+      try { return { ok: true, data: { nodes: await this.nodes() } }; }
       catch (e) { return { ok: false, error: { code: "internal", message: e instanceof Error ? e.message : String(e) } }; }
     }
     if (this.pending.has(req.node)) return { ok: false, error: { code: "busy", message: "该节点正在执行内核操作，请稍候" } };
@@ -80,7 +97,7 @@ export class KernelLifecycle {
     try {
       const target = this.env.targets().find((n) => n.id === req.node);
       if (!target) throw new KernelFailure("not_found", "未找到该本机节点，请先使用开始使用向导创建配置");
-      if (!target.managed) throw new KernelFailure("forbidden", "系统级内核需要由管理员管理");
+      if (!await this.managed(target)) throw new KernelFailure("forbidden", "系统级内核或无法确认服务权限的节点需要由管理员管理");
       const paths = await this.env.resolve(target);
       paths.serviceNode ??= target.running ? target.instance?.manifest.node : undefined;
       let retainedOptions: string[] = [];
@@ -98,6 +115,7 @@ export class KernelLifecycle {
       const stop = async (): Promise<void> => {
         const wasRunning = target.running;
         const previous = target.instance;
+        if (!wasRunning) return;
         await command("stop", !wasRunning);
         if (previous && wasRunning) {
           await this.wait(() => (this.env.gone ?? kernelGone)(previous.manifest.pid, previous.manifest.started_at), "旧内核进程尚未退出，操作已停止");
@@ -128,8 +146,8 @@ export class KernelLifecycle {
         case "reinstall":
           retainedOptions = await this.env.serviceOptions?.(paths) ?? [];
           await stop();
-          await command("uninstall", true);
           await command("migrate");
+          await command("uninstall", true);
           await command("install");
           await start();
           break;
@@ -138,7 +156,7 @@ export class KernelLifecycle {
         case "restart": await stop(); await start(); break;
       }
       this.env.changed();
-      return { ok: true, data: { nodes: this.nodes() } };
+      return { ok: true, data: { nodes: await this.nodes() } };
     } catch (e) {
       this.env.changed();
       return { ok: false, error: { code: e instanceof KernelFailure ? e.code : "internal", message: e instanceof Error ? e.message : String(e) } };

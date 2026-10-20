@@ -29,15 +29,20 @@ func readInstalledMigrationPaths(name string) (migrationPaths, error) {
 		}
 		return migrationPathsFromArgs(append([]string{command}, args...))
 	}
-	manager, err := mgr.Connect()
+	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return migrationPaths{}, err
 	}
-	defer manager.Disconnect()
-	service, err := manager.OpenService(name)
+	defer windows.CloseServiceHandle(manager)
+	serviceName, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return migrationPaths{}, err
 	}
+	handle, err := windows.OpenService(manager, serviceName, windows.SERVICE_QUERY_CONFIG)
+	if err != nil {
+		return migrationPaths{}, err
+	}
+	service := &mgr.Service{Name: name, Handle: handle}
 	defer service.Close()
 	cfg, err := service.Config()
 	if err != nil {

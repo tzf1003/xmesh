@@ -99,22 +99,33 @@ export function runKernelCli(args: readonly string[], bin: string = xmeshBinary(
   });
 }
 
-/** Retain non-configuration service arguments before a registration is removed. */
-export async function kernelServiceOptions(paths: { configFile: string; stateDir: string; serviceNode?: string },
-  run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<string[]> {
+export interface KernelServiceInfo { config_file: string; state_dir: string; oauth_password_file: string; local_only: boolean; system: boolean }
+
+export async function kernelServiceInfo(paths: { configFile: string; serviceNode?: string },
+  run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<KernelServiceInfo | undefined> {
   const selector = paths.serviceNode ? ["--name", `xmesh-${paths.serviceNode}`] : ["--config", paths.configFile];
   const result = await run(["service-info", ...selector, "--json"]);
   let envelope: { error?: { reason?: string }; messages?: string[] };
   try { envelope = JSON.parse(result.stdout); } catch { throw new CliError("service-info", result.stderr || "无法读取原服务参数"); }
   if (result.code !== 0) {
-    if (envelope.error?.reason === "not_installed") return [];
+    if (envelope.error?.reason === "not_installed") return undefined;
     throw new CliError("service-info", result.stderr || result.stdout);
   }
-  const info = JSON.parse(envelope.messages?.[0] ?? "null") as { config_file?: unknown; state_dir?: unknown; oauth_password_file?: unknown; local_only?: unknown } | null;
-  if (typeof info?.config_file !== "string" || path.resolve(info.config_file) !== path.resolve(paths.configFile) ||
-    typeof info.state_dir !== "string" || (info.state_dir !== "" && path.resolve(info.state_dir) !== path.resolve(paths.stateDir)) ||
+  const info = JSON.parse(envelope.messages?.[0] ?? "null") as Partial<KernelServiceInfo> | null;
+  if (typeof info?.config_file !== "string" || !path.isAbsolute(info.config_file) ||
+    typeof info.state_dir !== "string" || (info.state_dir !== "" && !path.isAbsolute(info.state_dir)) ||
     typeof info.oauth_password_file !== "string" || (info.oauth_password_file !== "" && !path.isAbsolute(info.oauth_password_file)) ||
-    typeof info.local_only !== "boolean") throw new CliError("service-info", "原服务的配置、状态目录或安装参数不匹配");
+    typeof info.local_only !== "boolean" || typeof info.system !== "boolean") throw new CliError("service-info", "原服务的配置、状态目录或安装参数无效");
+  return info as KernelServiceInfo;
+}
+
+/** Retain non-configuration service arguments before a registration is removed. */
+export async function kernelServiceOptions(paths: { configFile: string; stateDir: string; serviceNode?: string },
+  run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<string[]> {
+  const info = await kernelServiceInfo(paths, run);
+  if (!info) return [];
+  if (info.system || path.resolve(info.config_file) !== path.resolve(paths.configFile) ||
+    (info.state_dir !== "" && path.resolve(info.state_dir) !== path.resolve(paths.stateDir))) throw new CliError("service-info", "原服务的配置、状态目录或权限不匹配");
   return [...(info.local_only ? ["--local-only"] : []), ...(info.oauth_password_file ? ["--oauth-password-file", info.oauth_password_file] : [])];
 }
 

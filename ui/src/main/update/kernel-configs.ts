@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { ControlClient } from "../client";
 import type { Instance } from "../discovery";
 import type { SetupCliArgs } from "../cli";
+import { parseInstanceId } from "../../shared/ipc";
 
 interface ConfigPaths { configFile: string; stateDir: string; serviceNode?: string }
 function valid(value: unknown): value is ConfigPaths {
@@ -23,12 +24,12 @@ export class KernelConfigs {
   nodes(): string[] { return Object.keys(this.read()); }
 
   register(node: string, paths: ConfigPaths, serviceNode: string): void {
-    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node) || !valid({ ...paths, serviceNode })) throw new Error("无效的内核服务记录");
+    if (parseInstanceId(node) === undefined || !valid({ ...paths, serviceNode })) throw new Error("无效的内核服务记录");
     this.save({ ...this.read(), [node]: { configFile: paths.configFile, stateDir: paths.stateDir, serviceNode } });
   }
 
   async capture(node: string, instance: Instance): Promise<void> {
-    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node)) throw new Error("Invalid node name");
+    if (parseInstanceId(node) === undefined) throw new Error("Invalid instance ID");
     const paths = await this.readPaths(instance);
     if (!valid(paths)) throw new Error("内核配置和状态目录必须使用绝对路径");
     const saved = this.read();
@@ -47,7 +48,7 @@ export class KernelConfigs {
   }
 
   async prepare(node: string): Promise<void> {
-    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node)) throw new Error("Invalid node name");
+    if (parseInstanceId(node) === undefined) throw new Error("Invalid instance ID");
     const paths = this.read()[node];
     await this.run(paths
       ? ["migrate", "--config", paths.configFile, "--state-dir", paths.stateDir]

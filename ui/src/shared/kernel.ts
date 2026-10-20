@@ -9,6 +9,7 @@ export function parseKernelRequest(raw: unknown): KernelRequest | undefined {
   const v = raw as Record<string, unknown>;
   if (v.op === "list" && Object.keys(v).length === 1) return { op: "list" };
   if (!KERNEL_OPERATIONS.includes(v.op as KernelOperation) || typeof v.node !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(v.node) || Object.keys(v).some((k) => k !== "op" && k !== "node")) return undefined;
+    parseInstanceId(v.node) === undefined || Object.keys(v).some((k) => k !== "op" && k !== "node")) return undefined;
   return { op: v.op as KernelOperation, node: v.node };
 }
+import { parseInstanceId } from "./ipc";

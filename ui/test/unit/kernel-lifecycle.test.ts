@@ -55,7 +55,7 @@ test("installation migrates the selected node, registers explicit state and does
 test("reinstall stops before unregistering, reuses custom paths and starts the replacement", async () => {
   const { service, calls, target } = fixture({ running: true });
   assert.equal((await service.request({ op: "reinstall", node: target.id })).ok, true);
-  assert.deepEqual(calls.map((c) => c[0]), ["stop", "uninstall", "migrate", "install", "migrate", "start"]);
+  assert.deepEqual(calls.map((c) => c[0]), ["stop", "migrate", "uninstall", "install", "migrate", "start"]);
   for (const args of calls) assert.equal(args[2], target.configFile);
   assert.equal(target.running, true);
 });
@@ -107,7 +107,7 @@ test("a missing service can be reinstalled, but access-denied failures are retai
           : { code: 0, stdout: "", stderr: "" };
       }, status: async () => ({ control: { kernel_version: "1.0.0" } }), timeoutMs: 8, pollMs: 1 });
     assert.equal((await service.request({ op: "reinstall", node: "state-dir" })).ok, !denied);
-    if (denied) assert.deepEqual(calls, ["stop"]);
+    if (denied) assert.deepEqual(calls, ["migrate", "uninstall"]);
     else assert.ok(calls.includes("install"));
   }
 });
@@ -179,4 +179,41 @@ test("a broken user manifest cannot make a discovered system node manageable", (
   const targets = discoverKernelTargets(roots, () => undefined, [roots[1]!]);
   assert.equal(targets.length, 1);
   assert.equal(targets[0]?.managed, false);
+});
+
+test("stopped nodes uninstall and reinstall without invoking stop", async () => {
+  for (const op of ["uninstall", "reinstall"] as const) {
+    const { service, calls } = fixture({ fail: "stop" });
+    assert.equal((await service.request({ op, node: "state-dir" })).ok, true);
+    assert.ok(!calls.some(args => args[0] === "stop"));
+  }
+});
+
+test("failed migration preserves the stopped service registration", async () => {
+  const { service, calls } = fixture({ running: true, fail: "migrate" });
+  assert.equal((await service.request({ op: "reinstall", node: "state-dir" })).ok, false);
+  assert.deepEqual(calls.map(args => args[0]), ["stop", "migrate"]);
+});
+
+test("custom instance IDs with underscores and dots remain manageable after shutdown", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-instance-id-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "office_1.test"));
+  fs.writeFileSync(path.join(root, "office_1.test/xmesh.yaml"), "node: { name: office }");
+  assert.deepEqual(parseKernelRequest({ op: "start", node: "office_1.test" }), { op: "start", node: "office_1.test" });
+  assert.equal(discoverKernelTargets([root], () => undefined, [])[0]?.id, "office_1.test");
+});
+
+test("actual registration scope overrides the state-root hint and unknown scope prevents changes", async () => {
+  for (const scope of ["system", "user", "unknown"] as const) {
+    const { target } = fixture({ managed: scope === "system" });
+    let commands = 0;
+    const service = new KernelLifecycle({ targets: () => [target], resolve: async () => target,
+      managed: async () => { if (scope === "unknown") throw new Error("denied"); return scope === "user"; },
+      run: async () => { commands++; return { code: 0, stdout: "", stderr: "" }; }, changed: () => undefined });
+    const list = await service.request({ op: "list" });
+    assert.ok(list.ok && list.data.nodes[0]?.managed === (scope === "user"));
+    assert.equal((await service.request({ op: "install", node: target.id })).ok, scope === "user");
+    assert.equal(commands > 0, scope === "user");
+  }
 });

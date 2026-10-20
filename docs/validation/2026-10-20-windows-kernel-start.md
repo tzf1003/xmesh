@@ -14,6 +14,7 @@ Changes:
 - Startup verification also recognizes a manifest's node name when it differs from the state directory name.
 - Background CLI invocations decode redirected Task Scheduler XML using the Windows OEM code page when it is neither UTF-8 nor UTF-16. On Chinese Windows, the non-ASCII task description otherwise prevented parsing before startup. UTF-8/UTF-16 paths remain supported.
 - A saved service identity is retained across configuration renames, shutdowns and desktop restarts; explicit reinstall updates that identity. Startup acceptance prefers an exact state-directory ID before considering a manifest-name alias. Before reinstall removes a registration, the read-only `service-info` command captures its custom OAuth password-file path and local-only flag, so the replacement retains those options without reading credential contents.
+- Stopped services skip redundant stop requests. Reinstall migrates before unregistering, preserving the registration if migration fails. Custom instance IDs may include dots/underscores. Unresponsive custom-config nodes recover their paths from registration metadata. Windows management checks the actual SCM registration with query-only permissions, independently of the state root; inaccessible scope fails closed.
 
 Validation on Windows in the interactive user session:
 
@@ -29,7 +30,7 @@ The production-kernel acceptance test installs a disposable login task, rejects 
 Also verified:
 
 - `go test ./cmd/xmesh`, including old control-protocol compatibility and deterministic GBK task-XML decoding. Native startup acceptance now invokes the production CLI in a hidden window, matching Electron.
-- Desktop TypeScript typecheck/build and 74 related unit tests (actions, lifecycle, service options, preload, packaging and kernel updates).
+- Desktop TypeScript typecheck/build and 79 related unit tests (actions, lifecycle, service options, preload, packaging and kernel updates).
 - Nine real Electron end-to-end tests covering all six controls, confirmation/cancellation, offline installation/startup, visible failures and existing update flows.
 - A disposable native Windows node exercised all six operations through the production `KernelLifecycle` backend and CLI, including repeated installation after uninstall, an aliased state directory, rename/restart/stop/start/reinstall, a custom OAuth password file and retention of the configuration. Its task and temporary state were removed afterwards.
 - Visual checks at 1100×1000 and 480×900: controls wrap without clipping, the reinstall confirmation is readable, and no page errors or relevant console warnings were observed. Browser plugin was unavailable; the repository's Playwright/Electron harness was used.

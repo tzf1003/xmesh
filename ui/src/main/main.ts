@@ -17,8 +17,8 @@ import { TransferService } from "./transfers";
 import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { bundledXmesh, CliError, cliCommandText, kernelServiceOptions, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
-import { discoverKernelTargets, KernelLifecycle } from "./kernel-lifecycle";
+import { bundledXmesh, CliError, cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
+import { discoverKernelTargets, KernelLifecycle, type KernelTarget } from "./kernel-lifecycle";
 import { kernelConfigNode, kernelInstallOptions } from "./kernel-install-options";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
@@ -218,6 +218,7 @@ async function start(): Promise<void> {
       if (!result.ok) throw new CliError(op, result.error.message);
     } : undefined);
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
+  const serviceIdentity = (target: KernelTarget): string => target.serviceNode ?? target.instance?.manifest.node ?? kernelConfigNode(target);
   const kernelLifecycle = new KernelLifecycle({
     targets: () => discoverKernelTargets(roots, (id) => kernelConfigs.paths(id), undefined, kernelConfigs.nodes()),
     resolve: async (target) => {
@@ -226,13 +227,23 @@ async function start(): Promise<void> {
           await kernelConfigs.capture(target.id, target.instance);
           return kernelConfigs.paths(target.id)!;
         } catch (error) {
+          // A registered service remains addressable when control is unavailable.
+          const serviceNode = serviceIdentity(target);
+          const info = await kernelServiceInfo({ ...target, serviceNode });
+          if (info) {
+            const paths = { configFile: info.config_file, stateDir: info.state_dir || target.stateDir };
+            kernelConfigs.register(target.id, paths, serviceNode);
+            return { ...paths, serviceNode };
+          }
           if (!fs.existsSync(target.configFile)) throw error;
-          // An unresponsive kernel can still be stopped through its known
-          // registration. Keep saved/custom paths when control is unavailable.
         }
       }
-      return target;
+      return { ...target, serviceNode: serviceIdentity(target) };
     },
+    managed: process.platform === "win32" ? async (target) => {
+      const info = await kernelServiceInfo({ ...target, serviceNode: serviceIdentity(target) });
+      return info ? !info.system : target.managed;
+    } : undefined,
     installOptions: kernelInstallOptions,
     serviceOptions: kernelServiceOptions,
     installed: async (id, paths) => {
