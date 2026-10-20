@@ -18,6 +18,9 @@ export class KernelConfigs {
     private readonly readPaths = (instance: Instance): Promise<ConfigPaths> =>
       new ControlClient({ endpoint: instance.manifest.endpoint }).getUpgradePaths()) {}
 
+  paths(node: string): ConfigPaths | undefined { return this.read()[node]; }
+  nodes(): string[] { return Object.keys(this.read()); }
+
   async capture(node: string, instance: Instance): Promise<void> {
     if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node)) throw new Error("Invalid node name");
     const paths = await this.readPaths(instance);

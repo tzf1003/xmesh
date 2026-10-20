@@ -183,7 +183,9 @@ func waitKernelStart(dir string, old control.Endpoint, started time.Time, limit 
 			ctx, cancel := context.WithDeadline(context.Background(), deadline)
 			r, err := control.NewClient(e).Do(ctx, "GET", "/v2/status", nil, nil)
 			cancel()
-			if err == nil && r.Error() == nil {
+			// A prior control protocol still proves the registered kernel is
+			// alive. Desktop version acceptance remains a separate check.
+			if err == nil && r.Error() == nil || errors.Is(err, control.ErrVersionMismatch) {
 				return nil
 			}
 		}

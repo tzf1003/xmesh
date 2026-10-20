@@ -90,3 +90,24 @@ func Test_KernelStartRequiresReachableEndpoint(t *testing.T) {
 		t.Fatal(parsed, err)
 	}
 }
+
+func Test_KernelStartAcceptsResponsiveOlderControl(t *testing.T) {
+	dir := t.TempDir()
+	l, bound, err := control.Listen(control.ListenOptions{StateDir: dir, Node: "start-older-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(v2.HeaderVersion, "1.7")
+		w.WriteHeader(http.StatusNotFound)
+	})}
+	go func() { _ = server.Serve(l) }()
+	defer server.Close()
+	endpoint := v2.ControlEndpointFile{PID: os.Getpid(), Transport: bound.Transport, Endpoint: bound.Address, StartedAt: v2.At(time.Now())}
+	if err := control.WriteEndpoint(dir, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitKernelStart(dir, control.Endpoint{}, time.Time{}, time.Second); err != nil {
+		t.Fatal("a responsive older kernel must satisfy idempotent CLI start", err)
+	}
+}

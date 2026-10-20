@@ -17,7 +17,9 @@ import { TransferService } from "./transfers";
 import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { bundledXmesh, cliCommandText, runXmeshRaw, runXmeshSetup } from "./cli";
+import { bundledXmesh, CliError, cliCommandText, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
+import { discoverKernelTargets, KernelLifecycle } from "./kernel-lifecycle";
+import { parse as parseYaml } from "yaml";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -186,7 +188,7 @@ async function start(): Promise<void> {
   const controller = new ShellController({
     getUpdate: () => updater.state,
     discover: () => discoverInstances(roots),
-    configured: () => discoverConfigured(roots),
+    configured: () => [...new Set([...discoverConfigured(roots), ...kernelConfigs.nodes()])],
     cliCommand: cliCommandText(),
     locale,
     getLoginItem: () => autostart.get().enabled,
@@ -210,8 +212,34 @@ async function start(): Promise<void> {
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
-    : electronPlatform(showPanel, notifyError, kernelBundled ? (node) => updateKernels.start(node) : undefined);
+    : electronPlatform(showPanel, notifyError, kernelBundled ? async (op, node) => {
+      const result = await kernelLifecycle.request({ op, node });
+      if (!result.ok) throw new CliError(op, result.error.message);
+    } : undefined);
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
+  const kernelLifecycle = new KernelLifecycle({
+    targets: () => discoverKernelTargets(roots, (id) => kernelConfigs.paths(id), undefined, kernelConfigs.nodes()),
+    resolve: async (target) => {
+      if (target.running && target.instance) {
+        try {
+          await kernelConfigs.capture(target.id, target.instance);
+          return kernelConfigs.paths(target.id)!;
+        } catch (error) {
+          if (!fs.existsSync(target.configFile)) throw error;
+          // An unresponsive kernel can still be stopped through its known
+          // registration. Keep saved/custom paths when control is unavailable.
+        }
+      }
+      return target;
+    },
+    installOptions: ({ configFile }) => {
+      const config = parseYaml(fs.readFileSync(configFile, "utf8")) as { mesh?: { lan?: { enabled?: boolean }; tailnet?: { enabled?: boolean } } };
+      return config?.mesh?.lan?.enabled === false && config.mesh.tailnet?.enabled !== true ? ["--local-only"] : [];
+    },
+    run: runKernelCli,
+    changed: () => controller.nudge(),
+    ...(kernelBundled && { version: app.getVersion() }),
+  });
   const computerTargets = new ComputerEmergencyTargets();
   controller.on("change", snapshot => computerTargets.observe(snapshot));
 
@@ -298,6 +326,17 @@ async function start(): Promise<void> {
     if (key !== playgroundKey) { playgroundKey = key; transfers.reset(); void playground.close(); }
   });
   registerIpc({
+    kernel: async (request) => {
+      if (!TEST_MODE) return kernelLifecycle.request(request);
+      const nodes = [...new Set([...controller.snapshot.instances.map((i) => i.id), ...controller.snapshot.stoppedNodes])]
+        .map((id) => ({ id, name: controller.nodeName(id), running: !controller.snapshot.stoppedNodes.includes(id), managed: true }));
+      if (request.op !== "list") {
+        if (!nodes.some((n) => n.id === request.node)) return { ok: false, error: { code: "not_found", message: "Unknown local node" } };
+        calls.push({ op: "kernel", arg: request });
+        if (answers.cliFails) return { ok: false, error: { code: "cli_failed", message: "simulated kernel failure" } };
+      }
+      return { ok: true, data: { nodes } };
+    },
     onboarding: createOnboardingService(roots[0]!, (url) => platform.openExternal(url), TEST_MODE ? fakeOnboarding(roots[0]!, answers, calls) : undefined, (text) => clipboard.writeText(text)),
     playground,
     transfers,

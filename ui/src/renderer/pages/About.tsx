@@ -7,6 +7,7 @@ import { errorText, useLocale, useT, type T } from "../i18n";
 import { formatBytes, formatTime } from "../lib/format";
 import type { UpdateError, UpdateState } from "../../shared/update";
 import { sameVersion } from "../../shared/version";
+import { KernelManager } from "./KernelManager";
 
 /** The sentence for an update failure: the panel's own wording per code, with the detail the main process gave. */
 export function updateErrorText(t: T, e: UpdateError): string {
@@ -83,6 +84,8 @@ export function About({ ctx }: { ctx: PageContext }): JSX.Element {
           </p>
         )}
       </section>
+
+      <KernelManager ctx={ctx} />
 
       <section class="card" data-testid="update-card">
         <h2>{t("nav.about")}</h2>
