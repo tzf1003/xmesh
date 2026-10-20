@@ -6,12 +6,34 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
+
+func TestTextActionsEnforceUTF8ByteBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		valid      bool
+	}{
+		{"ASCII boundary", strings.Repeat("a", 65536), true},
+		{"ASCII overflow", strings.Repeat("a", 65537), false},
+		{"CJK boundary", strings.Repeat("中", 21845) + "a", true},
+		{"CJK overflow", strings.Repeat("中", 21845) + "aa", false},
+		{"CJK under code point limit", strings.Repeat("中", 30000), false},
+		{"emoji boundary", strings.Repeat("😀", 16384), true},
+		{"emoji overflow", strings.Repeat("😀", 16384) + "a", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validActions([]Action{{Type: "text", Text: tc.text}}); (err == nil) != tc.valid {
+				t.Fatalf("UTF-8 byte budget: bytes=%d valid=%v err=%v", len(tc.text), tc.valid, err)
+			}
+		})
+	}
+}
 
 type fakeDesktop struct {
 	mu         sync.Mutex

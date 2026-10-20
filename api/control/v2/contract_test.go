@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/api/control/v2/schemacheck"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
@@ -222,6 +223,24 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := map[string]bool{}
+	compiler := jsonschema.NewCompiler()
+	files, err := filepath.Glob(filepath.Join(schemaDir, "*.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(raw, &document); err != nil {
+			t.Fatal(err)
+		}
+		if err := compiler.AddResource(document["$id"].(string), document); err != nil {
+			t.Fatal(err)
+		}
+	}
 	capabilities := map[v2.Capability]bool{}
 	for _, r := range v2.Routes() {
 		if ids[r.ID] {
@@ -234,6 +253,9 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 				continue
 			}
 			def := (*ref)[strings.LastIndex(*ref, "/")+1:]
+			if _, err := compiler.Compile(*ref); err != nil {
+				t.Errorf("route %s cannot resolve %s: %v", r.ID, *ref, err)
+			}
 			if _, ok := typeFor[def]; !ok {
 				t.Errorf("route %s names %s, which has no Go type", r.ID, def)
 			}
