@@ -107,6 +107,14 @@ test("removeStaleControl deletes a leftover file, refuses a live kernel and a na
     assert.equal(removeStaleControl(root, "stale", gone), true);
     assert.ok(!fs.existsSync(path.join(stale, "control.json")));
     assert.equal(fs.readFileSync(path.join(stale, "xmesh.yaml"), "utf8"), "user config");
+    const reused = put("reused", process.pid);
+    const identities: Array<[number, string | undefined]> = [];
+    assert.equal(removeStaleControl(root, "reused", (pid, startedAt) => {
+      identities.push([pid, startedAt]);
+      return kernelGone(pid, startedAt, () => Date.parse("2026-10-18T09:27:19.610Z"));
+    }), true);
+    assert.deepEqual(identities, Array(2).fill([process.pid, "2026-10-17T09:27:19.610Z"]));
+    assert.equal(fs.existsSync(path.join(reused, "control.json")), false);
     put("restarting", 21);
     assert.equal(removeStaleControl(root, "restarting", () => { put("restarting", 22); return true; }), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, "restarting", "control.json"), "utf8")).pid, 22);

@@ -200,11 +200,7 @@ func (s *Server) watchConfigFile() {
 	if now == "" || now == s.digest {
 		return
 	}
-	raw, err := os.ReadFile(s.o.Store.Path())
-	if err != nil {
-		return
-	}
-	s.adoptFileLocked(context.Background(), raw, v2.ActorFile, false)
+	_, _ = s.adoptFileLocked(context.Background(), v2.ActorFile, false)
 }
 
 // reloadConfig re-reads the configuration file now. The UI calls it after it has written
@@ -212,30 +208,36 @@ func (s *Server) watchConfigFile() {
 func (s *Server) reloadConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
-	raw, err := os.ReadFile(s.o.Store.Path())
+	out, err := s.adoptFileLocked(r.Context(), v2.ActorControl, true)
 	if err != nil {
 		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
-	writeJSON(w, 200, s.adoptFileLocked(r.Context(), raw, v2.ActorControl, true))
+	writeJSON(w, 200, out)
 }
 
-// adoptFileLocked re-reads the store from raw, the file's current content, and announces
+// adoptFileLocked reads and adopts one store snapshot and announces
 // what changed on the event stream. A valid new content becomes the generation in effect
 // (restart-only sections keep their running values); invalid content keeps the last good
 // one and is reported as load_error. Roles that start, stop or move with the new generation are
 // given a short while to do so, and what still failed is reported as apply_errors; retry tries again
 // what failed last time. The caller holds configMu.
-func (s *Server) adoptFileLocked(ctx context.Context, raw []byte, actor v2.Actor, retry bool) v2.ConfigReloadResponse {
+func (s *Server) adoptFileLocked(ctx context.Context, actor v2.Actor, retry bool) (v2.ConfigReloadResponse, error) {
+	snapshot := s.o.Store.RefreshSnapshot()
+	if snapshot.ReadError != nil {
+		s.failures = snapshot.Failures
+		return v2.ConfigReloadResponse{}, snapshot.ReadError
+	}
+	raw := snapshot.Raw
 	changed := sum(raw) != s.digest
 	s.digest = sum(raw)
-	adopted := s.o.Store.Refresh()
-	_, failures := s.o.Store.State()
+	adopted := snapshot.Adopted
+	failures := snapshot.Failures
 	failed := failures > s.failures
 	s.failures = failures
-	pending := s.o.Store.RestartPending()
+	pending := snapshot.RestartPaths
 	etag := etagOf(raw)
-	out := v2.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + s.o.Store.Digest(), ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending, ApplyErrors: []v2.ApplyError{}}
+	out := v2.ConfigReloadResponse{Applied: adopted, ETag: etag, EffectiveETag: "sha256-" + snapshot.EffectiveDigest, ChangedPaths: []string{}, RestartRequired: len(pending) > 0, RestartPaths: pending, ApplyErrors: []v2.ApplyError{}}
 	if s.o.Applier != nil {
 		settle, cancel := context.WithTimeout(ctx, applySettleTimeout)
 		if errs := s.o.Applier.Settle(settle, retry); errs != nil {
@@ -251,7 +253,7 @@ func (s *Server) adoptFileLocked(ctx context.Context, raw []byte, actor v2.Actor
 	// Content that failed before is not counted again, but it is still a failed reload.
 	invalid := out.LoadError != nil
 	if !changed && !failed {
-		return out
+		return out, nil
 	}
 	data := v2.ConfigEventData{Change: "reloaded", Actor: actor, ETag: &etag, RestartRequired: out.RestartRequired, ChangedPaths: []string{}}
 	if invalid || failed {
@@ -264,7 +266,7 @@ func (s *Server) adoptFileLocked(ctx context.Context, raw []byte, actor v2.Actor
 		data.ChangedPaths = out.ChangedPaths
 	}
 	_ = s.bus.Publish(v2.EventConfig, data)
-	return out
+	return out, nil
 }
 
 // parsedOf is the YAML document as the JSON data model, or nil if it does not parse.

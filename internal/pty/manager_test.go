@@ -261,3 +261,40 @@ func Test_ClientPTYBudgetAcrossSessions(t *testing.T) {
 		})
 	}
 }
+
+func Test_ReadPreservesSplitUTF8(t *testing.T) {
+	s := &Session{capacity: 64, changed: make(chan struct{})}
+	s.touch()
+	raw := []byte("中")
+	s.append(raw[:2])
+	first, err := s.read(context.Background(), 0, 64, 0)
+	if err != nil || first["data"] != "" || first["next_cursor"] != uint64(0) {
+		t.Fatalf("partial advanced: %v %v", first, err)
+	}
+	s.append(raw[2:])
+	second, err := s.read(context.Background(), 0, 1, 0)
+	if err != nil || second["data"] != "中" || second["next_cursor"] != uint64(3) {
+		t.Fatalf("rune split: %v %v", second, err)
+	}
+	s.append([]byte{0xe4})
+	s.mu.Lock()
+	s.eof = true
+	s.mu.Unlock()
+	end, err := s.read(context.Background(), 3, 64, 0)
+	if err != nil || end["data"] != "�" || end["eof"] != true {
+		t.Fatalf("invalid EOF: %v %v", end, err)
+	}
+}
+
+func Test_ReadWaitsForAnIncompleteRune(t *testing.T) {
+	s := &Session{capacity: 64, changed: make(chan struct{})}
+	s.touch()
+	raw := []byte("中")
+	s.append(raw[:2])
+	go func() { time.Sleep(15 * time.Millisecond); s.append(raw[2:]) }()
+	started := time.Now()
+	out, err := s.read(context.Background(), 0, 64, time.Second)
+	if err != nil || out["data"] != "中" || time.Since(started) < 10*time.Millisecond {
+		t.Fatalf("incomplete long poll: %v %v", out, err)
+	}
+}

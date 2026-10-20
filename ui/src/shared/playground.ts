@@ -53,10 +53,9 @@ export function parsePlayground(v: unknown): PlaygroundRequest | undefined {
   return v as PlaygroundRequest;
 }
 
-/** Keep reusable history in memory, with sensitive values removed recursively. */
-export function historyArgs(value: unknown, key = ""): unknown {
-  if (/env|stdin|data|password|secret|token|authorization|cookie|api.?key|content|credential/i.test(key)) return "[redacted]";
+/** History keeps the argument shape; tool values may carry secrets under any key. */
+export function historyArgs(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((x) => historyArgs(x));
-  if (plain(value)) return Object.fromEntries(Object.entries(value).map(([k, x]) => [k, historyArgs(x, k)]));
-  return value;
+  if (plain(value)) return Object.fromEntries(Object.entries(value).map(([k, x]) => [k, historyArgs(x)]));
+  return "[redacted]";
 }

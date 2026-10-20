@@ -14,8 +14,12 @@ import (
 // follows its changes. The returned function stops it, waiting for running jobs up to
 // ci.stop_timeout.
 func startCI(store *config.Store, stateDir, node string) (mgr *ci.Manager, accounts *ci.Service, stop func()) {
+	platform, supported := ci.Platform()
+	if !supported {
+		return nil, nil, func() {}
+	}
 	var cache *ci.Cache
-	if platform, ok := ci.Platform(); ok {
+	if supported {
 		cache = &ci.Cache{Dir: filepath.Join(stateDir, "ci-cache"), Source: ci.GitHubSource{}, Platform: platform}
 	}
 	accounts = &ci.Service{Store: ci.Accounts{Dir: filepath.Join(stateDir, "ci-accounts")}}

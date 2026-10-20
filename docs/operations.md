@@ -117,7 +117,7 @@ bin/xmesh status --endpoint http://127.0.0.1:8080/mcp --tool devices.list --json
 两端运行后，可在各自 Gateway 验证对端：
 
 ```bash
-python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux --token-file <state-dir>/pats/default.token
+python3 scripts/smoke_peer.py --gateway 127.0.0.1:8080 --device linux-dev --expected-os linux --token-file <PAT的token_file路径>
 ```
 
 脚本检查发现、身份、文件、exec 和 PTY，最后关闭会话并清理测试文件。配置 PAT 的 Gateway 应使用具备对应 scope 的 MCP 客户端执行同等调用；此脚本面向默认本机访问。
@@ -146,14 +146,14 @@ python3 scripts/smoke_sandbox.py --binary /opt/xmesh \
   --peer mac-dev:darwin --peer linux-dev:linux \
   --peer-password-file mac-dev=/run/secrets/mac-device-password \
   --peer-password-file linux-dev=/run/secrets/linux-device-password \
-  --observer-gateway 127.0.0.1:8080 --observer-token-file /path/to/observer-state/pats/default.token
+  --observer-gateway 127.0.0.1:8080 --observer-token-file <observer的token_file路径>
 ```
 
-`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 的默认令牌文件）。每个对端先设置连接密码，并通过 `--peer-password-file 名称=文件` 提供私有口令文件，用于首次建立双向 xmesh 信任。观察节点也须列在配对对端中。脚本启动两个生命周期，验证 Tailnet 临时入网、持久设备 ID 保持、远端文件/exec/PTY、网络凭据状态不落盘和临时工作目录清理；入网 key 与配对口令均通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
+`--observer-gateway` 可选，指向当前环境能访问的现有回环 Gateway，用于反向工具调用和退出离线观察；须同时给出 `--observer-token-file`（该 Gateway 通过 xmesh control pats list 返回的实际 token_file）。每个对端先设置连接密码，并通过 `--peer-password-file 名称=文件` 提供私有口令文件，用于首次建立双向 xmesh 信任。观察节点也须列在配对对端中。脚本启动两个生命周期，验证 Tailnet 临时入网、持久设备 ID 保持、远端文件/exec/PTY、网络凭据状态不落盘和临时工作目录清理；入网 key 与配对口令均通过文件路径引用。需要沙箱允许出站访问控制面和 DERP；测试环境中的设备授权应允许临时节点调用所选工具。各云产品的出站限制须在对应环境验收。
 
 ## 本机 Gateway PAT
 
-Gateway 每个请求都要令牌，包括本机。节点有 `gateway` 角色而配置里没有任何 PAT 时，内核启动时自动创建名为 `default` 的令牌，文件在状态目录的 `pats/default.token`。升级、更新与重装不会改动已有令牌，只有在面板里轮换（或 `xmesh control pats rotate`）才会替换。删除最后一个 PAT 会被拒绝。
+Gateway 每个请求都要令牌，包括本机。节点有 `gateway` 角色而配置里没有任何 PAT 时，内核启动时自动创建名为 `default` 的令牌，文件通常在状态目录的 `pats/default.token`；恢复残留文件时使用随机后缀。请通过 `xmesh control pats list --state-dir <状态目录>` 的 `token_file` 字段取得实际路径。升级、更新与重装不会改动已有令牌，只有在面板里轮换（或 `xmesh control pats rotate`）才会替换。删除最后一个 PAT 会被拒绝。
 
 谁能连接由 `gateway.access` 决定（`localhost`、`lan`、`tailnet`，或 IP、CIDR），域名由 `gateway.hosts` 列出；`gateway.listen` 为 `:8080` 绑全部网卡，为 `127.0.0.1:8080` 只绑本机。下面的例子演示额外配置一个只读令牌：
 

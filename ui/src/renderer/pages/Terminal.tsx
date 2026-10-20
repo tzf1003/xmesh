@@ -407,7 +407,7 @@ function TerminalScreen({
         timeoutMs: 40_000,
       });
       if (!r.ok) throw new Error(r.error.message);
-      const body = r.data.result.structuredContent ?? {};
+      const body = r.data.result.structuredContent ?? JSON.parse(r.data.result.content.filter((c)=>c.type==="text").map((c)=>c.text??"").join("")) as Record<string,unknown>;
       if (r.data.result.isError) throw new Error(JSON.stringify(body));
       return body;
     };
@@ -418,7 +418,16 @@ function TerminalScreen({
       input = "";
       writeChain = writeChain
         .then(async () => {
-          if (!stopped && canWrite.current) await invoke("pty.write", { data });
+          let chunk="",bytes=0;
+          for(const character of data) {
+            const n=new TextEncoder().encode(character).length;
+            if(bytes+n>60_000) {
+              if(stopped || !canWrite.current) return;
+              await invoke("pty.write",{data:chunk});chunk="";bytes=0;
+            }
+            chunk+=character;bytes+=n;
+          }
+          if(chunk && !stopped && canWrite.current) await invoke("pty.write",{data:chunk});
         })
         .catch((e) => {
           if (!stopped) callbacks.current.onError(String(e));
@@ -426,12 +435,9 @@ function TerminalScreen({
     };
     const keyboard = term.onData((data) => {
       if (!canWrite.current) return;
-      if (new TextEncoder().encode(input + data).length > 60000) {
-        callbacks.current.onError("Terminal input exceeds 60 KiB");
-        return;
-      }
       input += data;
-      if (!writeTimer) writeTimer = setTimeout(flush, 24);
+      if(input.length>60000) {clearTimeout(writeTimer);flush();}
+      else if (!writeTimer) writeTimer = setTimeout(flush, 24);
     });
     const observer = new ResizeObserver(() => {
       clearTimeout(resizeTimer);

@@ -1,12 +1,71 @@
 package agent
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/tzf1003/xmesh/internal/cwd"
 )
+
+func Test_DenyFileRetentionFollowsAgentConfiguration(t *testing.T) {
+	path, store := configuration(t)
+	root := filepath.Dir(path)
+	files := []string{filepath.Join(root, "first.yaml"), filepath.Join(root, "second.yaml")}
+	for _, file := range files {
+		writeDenyList(t, file, root)
+	}
+	setFile := func(file string) {
+		rewriteConfigFile(t, path, func(agent map[string]any) {
+			agent["cwd_policy"] = map[string]any{"allow": []string{}, "deny_file": file}
+		})
+		store.Get()
+	}
+	churn := func(prefix string) {
+		for i := 0; i < 80; i++ {
+			cwd.RetainDenyFile(filepath.Join(root, fmt.Sprintf("%s-%d.yaml", prefix, i)))()
+		}
+	}
+	load := func(file string) error {
+		_, err := cwd.New(root, nil, cwd.Policy{DenyFile: file})
+		return err
+	}
+	setFile(files[0])
+	a, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Close)
+	if err := os.Remove(files[0]); err != nil {
+		t.Fatal(err)
+	}
+	churn("first")
+	if err := load(files[0]); err != nil {
+		t.Fatalf("current deny file fallback was evicted: %v", err)
+	}
+	setFile(files[1])
+	if err := load(files[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(files[1]); err != nil {
+		t.Fatal(err)
+	}
+	churn("second")
+	if err := load(files[0]); err == nil {
+		t.Fatal("previous configuration still retained its fallback")
+	}
+	if err := load(files[1]); err != nil {
+		t.Fatalf("new deny file fallback was evicted: %v", err)
+	}
+	a.Close()
+	churn("closed")
+	if err := load(files[1]); err == nil {
+		t.Fatal("closed agent still retained its fallback")
+	}
+}
 
 func writeDenyList(t *testing.T, file string, entries ...string) {
 	t.Helper()

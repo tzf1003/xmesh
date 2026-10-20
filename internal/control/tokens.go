@@ -2,7 +2,6 @@ package control
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/privdir"
@@ -36,9 +35,9 @@ func EnsureDefaultPAT(store *config.Store, stateDir string) (bool, error) {
 	if err = privdir.Ensure(stateDir); err == nil {
 		err = privdir.Ensure(patDirOf(stateDir))
 	}
-	file := filepath.Join(patDirOf(stateDir), DefaultPATName+".token")
+	var file string
 	if err == nil {
-		err = writeAtomic(file, []byte(token+"\n"))
+		file, err = writeAvailablePatFile(patDirOf(stateDir), DefaultPATName, token)
 	}
 	if err != nil {
 		return false, err
@@ -53,6 +52,7 @@ func EnsureDefaultPAT(store *config.Store, stateDir string) (bool, error) {
 	}
 	if err != nil {
 		_ = os.Remove(file)
+		_ = os.Remove(file + ".owner")
 		return false, err
 	}
 	store.Get()

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -136,7 +137,7 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 			return err
 		}
 		doc, _ := json.MarshalIndent(res.Pair, "", "  ")
-		if err = os.WriteFile(*out, doc, 0600); err != nil {
+		if err = writePairExport(*out, doc); err != nil {
 			return err
 		}
 		return showDone(r, nil, map[string]string{"name": res.Pair.Name, "fingerprint": res.Pair.Fingerprint, "file": *out})
@@ -378,6 +379,9 @@ func controlIngress(ctx context.Context, flags *flag.FlagSet, target targetFlags
 		if err := flags.Parse(rest); err != nil {
 			return err
 		}
+		if flags.NArg() > 0 {
+			return fmt.Errorf("%s", usage)
+		}
 		c, err := target.client()
 		if err != nil {
 			return err
@@ -422,3 +426,20 @@ func controlIngress(ctx context.Context, flags *flag.FlagSet, target targetFlags
 
 // controlStdin is where `ingress password` reads from when no file is given.
 var controlStdin io.Reader = os.Stdin
+
+// Write a private inode before publishing it, including when replacing an existing export.
+func writePairExport(name string, body []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(name), ".xmesh-pair-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(body); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), name)
+}

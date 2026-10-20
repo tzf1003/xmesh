@@ -187,16 +187,8 @@ func (s *TrustStore) TLS(cert Certificate, expected string, server bool) *tls.Co
 		if len(cs.PeerCertificates) != 1 {
 			return fmt.Errorf("需要已配对的节点证书")
 		}
-		peer := cs.PeerCertificates[0]
-		fp := fingerprint(peer)
-		trusted, ok := s.Find(fp)
-		if !ok || (expected != "" && fp != expected) {
-			return fmt.Errorf("对端尚未配对")
-		}
-		if trusted.Name != peer.Subject.CommonName || time.Now().Before(peer.NotBefore) || time.Now().After(peer.NotAfter) {
-			return fmt.Errorf("对端证书无效或过期")
-		}
-		return peer.CheckSignature(peer.SignatureAlgorithm, peer.RawTBSCertificate, peer.Signature)
+		_, err := s.verifyPeer(cs.PeerCertificates[0], expected)
+		return err
 	}
 	return cfg
 }
@@ -212,4 +204,20 @@ func CertificateFingerprint(certificatePEM string) (string, error) {
 		return "", e
 	}
 	return fingerprint(cert), nil
+}
+
+// verifyPeer enforces the pinned identity on both the strict TLS and pairing-ALPN paths.
+func (s *TrustStore) verifyPeer(peer *x509.Certificate, expected string) (Trusted, error) {
+	fp := fingerprint(peer)
+	trusted, ok := s.Find(fp)
+	if !ok || (expected != "" && fp != expected) {
+		return Trusted{}, fmt.Errorf("对端尚未配对")
+	}
+	if trusted.Name != peer.Subject.CommonName || time.Now().Before(peer.NotBefore) || time.Now().After(peer.NotAfter) {
+		return Trusted{}, fmt.Errorf("对端证书无效或过期")
+	}
+	if err := peer.CheckSignature(peer.SignatureAlgorithm, peer.RawTBSCertificate, peer.Signature); err != nil {
+		return Trusted{}, err
+	}
+	return trusted, nil
 }

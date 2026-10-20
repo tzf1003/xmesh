@@ -366,7 +366,8 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
                 ))}
               </div>
             </>
-          ) : ctx.snapshot.stoppedNodes.length > 0 ? (
+          ) : null}
+          {ctx.snapshot.stoppedNodes.length > 0 ? (
             <>
               <p>{t("offline.startBody")}</p>
               <div class="row">
@@ -377,14 +378,14 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
                 ))}
               </div>
             </>
-          ) : (
+          ) : !unresponsive ? (
             <>
               {staleNodes.length === 0 && <p>{t("offline.body")}</p>}
               <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
                 {t("offline.setup")}
               </button>
             </>
-          )}
+          ) : null}
         </Banner>
       ) : (
         <Banner kind="danger" testid="mismatch">

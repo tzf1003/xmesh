@@ -31,6 +31,20 @@ test("a peer seen for the first time does not notify", () => {
   assert.deepEqual(texts(snap({}, peersFixture()), snap({}, more)), []);
 });
 
+test("peer transitions belong to the same selected instance and kernel boot", () => {
+  const before = snap();
+  before.selectedInstance = "first";
+  const off = peersFixture().map((p) => p.name === "cloud-vm" ? { ...p, online: false } : p);
+  const other = snap({}, off);
+  other.selectedInstance = "second";
+  assert.deepEqual(diffNotices(before, other), []);
+  other.selectedInstance = "first";
+  assert.equal(diffNotices(before, other).length, 1);
+  if (other.connection.kind !== "connected") throw new Error("connected fixture required");
+  other.connection.status.control = { ...other.connection.status.control, boot_id: "another-boot" };
+  assert.deepEqual(diffNotices(before, other), []);
+});
+
 test("degrading warnings notify once, with no warning text; info warnings stay silent", () => {
   const w = { warnings: [warningOf("policy_reload_failed", "error", "cannot read /home/u/secret.yaml")] };
   const out = diffNotices(snap(), snap(w));

@@ -579,6 +579,9 @@ func (c *Config) validateCI() error {
 		if b.Source == "import" && b.Dir == "" {
 			return fail(p + "/dir: source 为 import 时必须指定目录")
 		}
+		if b.Source == "import" && b.Concurrency != 1 {
+			return fail(p + "/concurrency: 接管的运行器只有一个实例")
+		}
 		if b.Dir != "" && !absAnyOS(b.Dir) {
 			return fail(p + "/dir")
 		}

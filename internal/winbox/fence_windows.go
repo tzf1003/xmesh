@@ -196,6 +196,10 @@ func fingerprintDescriptor(handle windows.Handle, tolerateForeign bool, own []by
 	if err != nil {
 		return nil, err
 	}
+	return fingerprintSecurityDescriptor(sd, tolerateForeign, own)
+}
+
+func fingerprintSecurityDescriptor(sd *windows.SECURITY_DESCRIPTOR, tolerateForeign bool, own []byte) ([]byte, error) {
 	control, _, err := sd.Control()
 	if err != nil {
 		return nil, err

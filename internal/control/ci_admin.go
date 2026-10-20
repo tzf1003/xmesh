@@ -259,6 +259,14 @@ func (s *Server) deleteCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 			return
 		}
 	}
+	if s.o.CI != nil {
+		for _, b := range s.o.CI.Overview().Bindings {
+			if b.Account == id {
+				failWith(w, reasoned(newError(v2.ErrConflict, "运行器仍在停止或注销，请等待清理完成"), "account_in_use"))
+				return
+			}
+		}
+	}
 	edit := Edit{Path: "/ci/accounts", Value: list}
 	if len(list) == 0 {
 		edit = Edit{Path: "/ci/accounts", Delete: true}
@@ -415,6 +423,10 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	}
 	if req.Concurrency < 0 || req.Concurrency > 16 {
 		failWith(w, argError("concurrency", "并发数在 1 到 16 之间"))
+		return
+	}
+	if req.ImportDir != "" && req.Concurrency > 1 {
+		failWith(w, reasoned(argError("concurrency", "接管的运行器只有一个实例"), "import_single_instance"))
 		return
 	}
 	if e := validateCiLabels(req.Labels); e != nil {

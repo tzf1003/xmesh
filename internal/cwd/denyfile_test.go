@@ -1,11 +1,59 @@
 package cwd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
+
+func TestDenyFileCacheRetainsActiveFallbackAndFailureTotal(t *testing.T) {
+	root := t.TempDir()
+	secret := mustDir(t, filepath.Join(root, "secret"))
+	file := filepath.Join(root, "active.yaml")
+	writeDeny(t, file, secret)
+	release := RetainDenyFile(file)
+	defer release()
+	if !refused(t, Policy{DenyFile: file}, root, secret) {
+		t.Fatal("active deny list was not loaded")
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	before := DenyFailures()
+	for i := 0; i < inactiveDenyFileLimit+10; i++ {
+		_, _ = loadDenyFile(filepath.Join(root, fmt.Sprintf("inactive-%d.yaml", i)))
+	}
+	if !refused(t, Policy{DenyFile: file}, root, secret) {
+		t.Fatal("active fallback was evicted")
+	}
+	if got := DenyFailures() - before; got != inactiveDenyFileLimit+11 {
+		t.Fatalf("failure total after eviction = %d", got)
+	}
+	denyFiles.Lock()
+	inactive := 0
+	for _, st := range denyFiles.byPath {
+		if st.refs == 0 {
+			inactive++
+		}
+	}
+	denyFiles.Unlock()
+	if inactive > inactiveDenyFileLimit {
+		t.Fatalf("cached %d inactive paths", inactive)
+	}
+	release()
+	for i := 0; i < inactiveDenyFileLimit+1; i++ {
+		_, _ = loadDenyFile(filepath.Join(root, fmt.Sprintf("next-%d.yaml", i)))
+	}
+	denyFiles.Lock()
+	_, retained := denyFiles.byPath[file]
+	denyFiles.Unlock()
+	if retained {
+		t.Fatal("released path remained after newer paths filled the cache")
+	}
+}
 
 func writeDeny(t *testing.T, file string, entries ...string) {
 	t.Helper()
@@ -148,4 +196,31 @@ func TestDenyFileNeverLoadedIsAnError(t *testing.T) {
 	if DenyFailing(file) {
 		t.Fatal("report did not clear")
 	}
+}
+
+func Test_StalledDenyReadDoesNotBlockPolicyRetention(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stalled.yaml")
+	replacement := filepath.Join(t.TempDir(), "replacement.yaml")
+	entered, release := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = loadDenyFileWith(path, func(string) ([]byte, error) { close(entered); <-release; return []byte("[]"), nil })
+	}()
+	<-entered
+	retained := make(chan struct{})
+	go func() {
+		keep := RetainDenyFile(replacement)
+		keep()
+		close(retained)
+	}()
+	select {
+	case <-retained:
+	case <-time.After(time.Second):
+		close(release)
+		<-done
+		t.Fatal("stalled read held the global policy cache")
+	}
+	close(release)
+	<-done
 }

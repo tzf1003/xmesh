@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
@@ -201,7 +202,10 @@ func Test_ControlPats(t *testing.T) {
 // A token file the operator pointed at from the configuration is rotated in place but never deleted.
 func Test_ControlPatsKeepForeignTokenFile(t *testing.T) {
 	f := newFixtureConfig(t, gatewayConfig)
-	foreign := filepath.Join(f.dir, "own.token")
+	foreign := filepath.Join(f.server.patDir(), "own.token")
+	if err := os.MkdirAll(filepath.Dir(foreign), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(foreign, []byte(strings.Repeat("a", 40)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +234,54 @@ type fakeIngress struct {
 	clients  map[string]bool
 	password string
 	failWith error
+}
+
+func Test_ControlPatsReportAbsoluteTokenPath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workingDir, err = filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenFile := filepath.Join(workingDir, "operator.token")
+	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("a", 40)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(workingDir, tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An inherited PWD may name a different directory than the process actually uses.
+	t.Setenv("PWD", t.TempDir())
+	f := newFixtureConfig(t, gatewayConfig+"  pats:\n    operator:\n      token_file: "+relative+"\n      scopes: [\"devices:read\"]\n")
+	var listed v2.PatList
+	decodeAs(t, f.ok("GET", "/v2/pats", nil, "PatList"), &listed)
+	if len(listed.Pats) != 1 || !filepath.IsAbs(listed.Pats[0].TokenFile) || listed.Pats[0].ModifiedAt == nil {
+		t.Fatalf("unexpected token path or modification time: %+v", listed.Pats)
+	}
+	wantFile, err := os.Stat(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualFile, err := os.Stat(listed.Pats[0].TokenFile)
+	if err != nil || !os.SameFile(wantFile, actualFile) {
+		t.Fatalf("reported token path identifies another file: %q (%v)", listed.Pats[0].TokenFile, err)
+	}
+	if got := f.store.Get().Gateway.PATs["operator"].TokenFile; got != relative {
+		t.Fatalf("configuration token path changed: %q", got)
+	}
+	got := patInfo("missing", config.PAT{TokenFile: "missing.token"}).TokenFile
+	wantParent, err := os.Stat(workingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualParent, err := os.Stat(filepath.Dir(got))
+	if !filepath.IsAbs(got) || filepath.Base(got) != "missing.token" || err != nil || !os.SameFile(wantParent, actualParent) {
+		t.Fatalf("missing token path = %q", got)
+	}
 }
 
 func (g *fakeIngress) Issuer() string { return "https://x.example.com" }
@@ -310,4 +362,90 @@ func otherFingerprint(fp string) string {
 		return "1" + fp[1:]
 	}
 	return "0" + fp[1:]
+}
+
+func Test_ControlPatsRejectPointerNames(t *testing.T) {
+	f := newFixtureConfig(t, gatewayConfig)
+	for _, name := range []string{"~1", "~0", "bad.name"} {
+		apiError(t, f.do("POST", "/v2/pats/"+name+"/rotate", nil, nil), v2.ErrInvalidArgs)
+		apiError(t, f.do("DELETE", "/v2/pats/"+name, nil, nil), v2.ErrInvalidArgs)
+	}
+}
+
+func Test_ControlPatCreationPreservesUnconfiguredCredential(t *testing.T) {
+	f := newFixtureConfig(t, gatewayConfig)
+	if err := os.MkdirAll(f.server.patDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(f.server.patDir(), "ci.token")
+	if err := os.WriteFile(file, []byte("operator-owned"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := f.do("POST", "/v2/pats", v2.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil)
+	if r.Status != 201 {
+		t.Fatal(r.Status)
+	}
+	var secret v2.PatSecret
+	decodeAs(t, r, &secret)
+	if secret.Pat.TokenFile == file {
+		t.Fatal("operator file reused")
+	}
+	if body, err := os.ReadFile(file); err != nil || string(body) != "operator-owned" {
+		t.Fatalf("%q %v", body, err)
+	}
+}
+
+func Test_ControlDefaultPatHasOwnershipReceipt(t *testing.T) {
+	f := newFixtureConfig(t, gatewayTokenConfig(""))
+	created, err := EnsureDefaultPAT(f.store, f.server.o.StateDir)
+	if err != nil || !created {
+		t.Fatalf("create default: %v %v", created, err)
+	}
+	file := filepath.Join(f.server.patDir(), "default.token")
+	if raw, err := os.ReadFile(file + ".owner"); err != nil || string(raw) != "default\n" {
+		t.Fatalf("receipt %q %v", raw, err)
+	}
+	if r := f.do("POST", "/v2/pats", v2.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+		t.Fatalf("create spare: %d", r.Status)
+	}
+	if r := f.do("DELETE", "/v2/pats/default", nil, nil); r.Status != 204 {
+		t.Fatalf("%d %s", r.Status, r.Body)
+	}
+	for _, name := range []string{file, file + ".owner"} {
+		if _, err := os.Stat(name); !os.IsNotExist(err) {
+			t.Fatalf("managed default remained: %s %v", name, err)
+		}
+	}
+}
+
+func Test_ControlPatRecreationRecoversFailedCleanup(t *testing.T) {
+	f := newFixtureConfig(t, gatewayConfig)
+	for _, name := range []string{"ci", "spare"} {
+		if r := f.do("POST", "/v2/pats", v2.PatCreateRequest{Name: name, Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+			t.Fatal(r.Status)
+		}
+	}
+	file := filepath.Join(f.server.patDir(), "ci.token")
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(file, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(file, "busy"), []byte("retain"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	apiError(t, f.do("DELETE", "/v2/pats/ci", nil, nil), v2.ErrInternal)
+	if _, ok := f.store.Get().Gateway.PATs["ci"]; ok {
+		t.Fatal("failed cleanup did not revoke PAT")
+	}
+	r := f.do("POST", "/v2/pats", v2.PatCreateRequest{Name: "ci", Scopes: []string{"devices:read"}}, nil)
+	if r.Status != 201 {
+		t.Fatal("recreation blocked", r.Status)
+	}
+	var secret v2.PatSecret
+	decodeAs(t, r, &secret)
+	if secret.Pat.TokenFile == file {
+		t.Fatal("retained file reused")
+	}
 }

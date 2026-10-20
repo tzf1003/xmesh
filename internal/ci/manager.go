@@ -51,16 +51,17 @@ type Manager struct {
 
 	pkgMu sync.Mutex // one package download at a time
 
-	mu       sync.Mutex
-	bindings map[string]*binding
-	tokens   map[string]heldToken // registration tokens by binding id, memory only
-	draining bool
-	busy     int
-	release  func()
-	closed   bool
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu           sync.Mutex
+	bindings     map[string]*binding
+	tokens       map[string]heldToken // registration tokens by binding id, memory only
+	draining     bool
+	busy         int
+	preventSleep bool
+	release      func()
+	closed       bool
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 type heldToken struct {
@@ -156,6 +157,8 @@ func (m *Manager) Apply(c config.CI) {
 	if m.closed {
 		return
 	}
+	m.preventSleep = c.PreventSleepWhileBusy
+	m.updateSleepLocked()
 	seen := map[string]bool{}
 	for _, spec := range c.Bindings {
 		seen[spec.ID] = true
@@ -189,9 +192,10 @@ func (m *Manager) Apply(c config.CI) {
 		}
 		for idx, in := range b.instances {
 			if idx > want {
-				in.shutdown(false)
-				delete(b.instances, idx)
-				m.cleanupAfter(b, in, false)
+				if stopping, _, _ := in.flags(); !stopping {
+					in.shutdown(false)
+					m.cleanupAfter(b, in, false)
+				}
 			}
 		}
 	}
@@ -211,16 +215,25 @@ func (m *Manager) Apply(c config.CI) {
 func (m *Manager) removeLocked(id string, b *binding) {
 	b.removing = true
 	instances := make([]*instance, 0, len(b.instances))
+	var cleanups []<-chan struct{}
 	for _, in := range b.instances {
 		in.setSpec(config.CIBinding{ID: b.spec.ID, Paused: true, Source: b.spec.Source, Target: b.spec.Target})
 		in.shutdown(b.force)
-		instances = append(instances, in)
+		if in.cleanupDone != nil {
+			cleanups = append(cleanups, in.cleanupDone)
+		} else {
+			instances = append(instances, in)
+		}
 	}
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 		for _, in := range instances {
 			<-in.finished
+		}
+		// Scale-down owns these instances through deregistration and directory removal.
+		for _, done := range cleanups {
+			<-done
 		}
 		m.deregister(b.spec, instances...)
 		if m.managedDir(b.spec) {
@@ -241,12 +254,31 @@ func (m *Manager) cleanupAfter(b *binding, in *instance, _ bool) {
 		return
 	}
 	dir := in.dir
+	spec := b.spec
+	in.cleanupDone = make(chan struct{})
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
+		defer close(in.cleanupDone)
 		<-in.finished
-		m.deregister(b.spec, in)
+		m.deregister(spec, in)
 		_ = os.RemoveAll(dir)
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if b.instances[in.idx] != in {
+			return
+		}
+		delete(b.instances, in.idx)
+		want := b.spec.Concurrency
+		if want < 1 {
+			want = 1
+		}
+		if !m.closed && !b.removing && in.idx <= want {
+			replacement := m.newInstance(b, in.idx)
+			b.instances[in.idx] = replacement
+			m.wg.Add(1)
+			go func() { defer m.wg.Done(); replacement.run() }()
+		}
 	}()
 }
 
@@ -385,14 +417,15 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 func (m *Manager) busyChanged(delta int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.busy += delta
-	if m.busy < 0 {
-		m.busy = 0
-	}
-	if m.busy > 0 && m.release == nil && m.o.Inhibit != nil {
+	m.busy = max(0, m.busy+delta)
+	m.updateSleepLocked()
+}
+
+func (m *Manager) updateSleepLocked() {
+	if m.busy > 0 && m.preventSleep && m.release == nil && m.o.Inhibit != nil {
 		m.release = m.o.Inhibit()
 	}
-	if m.busy == 0 && m.release != nil {
+	if (m.busy == 0 || !m.preventSleep) && m.release != nil {
 		m.release()
 		m.release = nil
 	}

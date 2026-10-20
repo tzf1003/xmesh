@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -325,5 +326,32 @@ func Test_CLIControlPairPassword(t *testing.T) {
 
 	if got := runObject(t, state, "pair", "password", "clear"); got["cleared"] != true || admin.set {
 		t.Fatalf("clear: %v", got)
+	}
+}
+
+func Test_PairExportReplacesWithPrivateFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "pair.json")
+	if err := os.WriteFile(file, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePairExport(file, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && st.Mode().Perm() != 0600 {
+		t.Fatalf("mode %o", st.Mode().Perm())
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != "new" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func Test_ControlIngressClientsRejectsPositionalArguments(t *testing.T) {
+	_, err := output(t, func() error { return controlCommand([]string{"ingress", "clients", "unexpected"}) })
+	if err == nil {
+		t.Fatal("extra positional argument accepted")
 	}
 }
