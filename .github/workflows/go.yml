@@ -1,7 +1,101 @@
-name: Go 实现
-on: [push, pull_request]
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+  schedule:
+    - cron: '23 19 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      headscale: ${{ steps.plan.outputs.headscale }}
+      ui: ${{ steps.plan.outputs.ui }}
+      ui_mcp: ${{ steps.plan.outputs.ui_mcp }}
+      computer: ${{ steps.plan.outputs.computer }}
+      extended: ${{ steps.plan.outputs.extended }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select suites from changed paths
+        id: plan
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/ci_changes.py
+
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 取出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装校验依赖
+        run: python3 -m pip install -r docs/contracts/schemas/requirements.txt
+
+      - name: 校验正例、反例和文档链接
+        run: python3 docs/contracts/schemas/check_examples.py
+
+      - name: 符合性矩阵每条编号都有测试
+        run: python3 scripts/conformance_check.py
+
+      - name: 脚本自测
+        run: python3 scripts/test_scripts.py
+
+      - name: CI routing regression
+        run: python3 -m unittest discover -s scripts -p 'test_ci_changes.py'
+
+      - name: Check onboarding transport types
+        run: python3 scripts/gen-onboarding-types.py --check
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scripts/gen-control-ts/package-lock.json
+
+      - name: 安装生成器依赖
+        run: npm ci --prefix scripts/gen-control-ts
+
+      - name: 重新生成 TypeScript 类型
+        run: node scripts/gen-control-ts/generate.mjs
+
+      - name: 生成物必须与提交一致
+        run: |
+          if [ -n "$(git status --porcelain -- api/control/v2/ts)" ]; then
+            git status --porcelain -- api/control/v2/ts
+            git diff -- api/control/v2/ts | head -80
+            echo "api/control/v2/ts 与 JSON Schema 不一致，请运行 node scripts/gen-control-ts/generate.mjs 后提交" >&2
+            exit 1
+          fi
+
+      - name: 生成物通过 strict 类型检查
+        run: npm run typecheck --prefix scripts/gen-control-ts
+
   test:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -13,49 +107,99 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: |
-            go.sum
-            .github/workflows/go.yml
+          cache-dependency-path: go.sum
       - run: go test -race ./... -timeout=120s
-        if: ${{ !cancelled() }}
       - run: go vet ./...
-        if: ${{ !cancelled() }}
       - name: 1 GiB file transfer roundtrip
-        if: ${{ !cancelled() }}
+        if: needs.changes.outputs.extended == 'true'
         env:
           XMESH_TEST_LARGE_TRANSFER: "1"
         run: go test ./internal/fs -run '^Test_LargeFileTransfer$' -count=1 -timeout=300s
-      - run: go build ./cmd/xmesh
-        if: ${{ !cancelled() }}
       - name: Cross-compile every release target
-        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        if: needs.changes.outputs.extended == 'true' && runner.os == 'Linux'
         env:
           XMESH_TEST_CROSSBUILD: "1"
         run: go test ./cmd/xmesh -run 'Test_CONARCH02' -v -count=1 -timeout=900s
       - uses: actions/setup-python@v5
-        if: ${{ !cancelled() }}
         with:
           python-version: "3.12"
       - name: Build smoke test binary
-        if: ${{ !cancelled() }}
         shell: bash
         run: |
           ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
           go build -o "$RUNNER_TEMP/xmesh-smoke$ext" ./cmd/xmesh
           echo "SMOKE_BIN=$RUNNER_TEMP/xmesh-smoke$ext" >> "$GITHUB_ENV"
+          echo "XMESH_TEST_ONBOARDING_BINARY=$RUNNER_TEMP/xmesh-smoke$ext" >> "$GITHUB_ENV"
       - name: Smoke test, local Agent and Gateway (L1)
-        if: ${{ !cancelled() }}
         shell: bash
         run: python scripts/smoke_local.py --binary "$SMOKE_BIN"
       - name: Smoke test, Gateway personal access token
-        if: ${{ !cancelled() }}
         shell: bash
         run: python scripts/smoke_local.py --pat --binary "$SMOKE_BIN"
       - name: Smoke test, gate 2 exclusive backend lease and external kill
-        if: ${{ !cancelled() }}
         shell: bash
         run: python scripts/smoke_backend.py --binary "$SMOKE_BIN"
+      - name: Check native user-session context (Windows)
+        if: runner.os == 'Windows'
+        id: windows-session
+        shell: pwsh
+        run: |
+          $session = (Get-Process -Id $PID).SessionId
+          Write-Output "Runner Windows session: $session"
+          if ($session -eq 0) {
+            'supported=false' >> $env:GITHUB_OUTPUT
+            '::notice::Native onboarding acceptance skipped: Windows current-user scheduled tasks require an interactive logon session; this runner is in session 0.' | Write-Output
+            '### Native onboarding: Windows' >> $env:GITHUB_STEP_SUMMARY
+            'Skipped: runner session 0 cannot exercise the interactive current-user logon task. Unit/schema coverage still runs. Run this workflow on a runner launched in an interactive user session to accept the task runtime.' >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            'supported=true' >> $env:GITHUB_OUTPUT
+          }
+      - name: macOS LaunchAgent install, MCP verification and cleanup
+        if: runner.os == 'macOS'
+        run: go test -race ./cmd/xmesh -run '^TestOnboardingNativeService$' -count=1 -v -timeout=180s
+      - name: Windows current-user task install, MCP verification and cleanup
+        if: runner.os == 'Windows' && steps.windows-session.outputs.supported == 'true'
+        run: go test -race ./cmd/xmesh -run '^TestOnboardingNativeService$' -count=1 -v -timeout=180s
+      - name: Verify macOS service cleanup
+        if: always() && runner.os == 'macOS' && env.XMESH_TEST_ONBOARDING_BINARY != ''
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import os, pathlib, plistlib, subprocess
+          binary = pathlib.Path(os.environ['XMESH_TEST_ONBOARDING_BINARY']).resolve()
+          agents = pathlib.Path.home() / 'Library' / 'LaunchAgents'
+          for path in agents.glob('xmesh-qs-test-*.plist'):
+              registration = plistlib.loads(path.read_bytes())
+              args = registration.get('ProgramArguments', [])
+              if not args or pathlib.Path(args[0]).resolve() != binary:
+                  continue
+              label = registration.get('Label', '')
+              if not label.startswith('xmesh-qs-test-'):
+                  raise SystemExit('Unexpected acceptance service label')
+              subprocess.run([str(binary), 'stop', '--name', label], check=False, timeout=20)
+              subprocess.run([str(binary), 'uninstall', '--name', label], check=True, timeout=20)
+              if path.exists():
+                  raise SystemExit('Acceptance LaunchAgent registration remains')
+          PYCODE
+      - name: Verify Windows service cleanup
+        if: always() && runner.os == 'Windows' && env.XMESH_TEST_ONBOARDING_BINARY != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = [IO.Path]::GetFullPath($env:XMESH_TEST_ONBOARDING_BINARY)
+          $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -like 'xmesh-qs-test-*' })
+          foreach ($task in $tasks) {
+            $owned = @($task.Actions | Where-Object { $_.Execute -and [IO.Path]::GetFullPath($_.Execute).Equals($binary, [StringComparison]::OrdinalIgnoreCase) })
+            if (!$owned.Count) { continue }
+            Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -InputObject $task -Confirm:$false
+            if (Get-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue) { throw 'Acceptance scheduled task registration remains.' }
+          }
+
   windows-native:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    timeout-minutes: 45
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,22 +207,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: |
-            go.sum
-            .github/workflows/go.yml
+          cache-dependency-path: go.sum
       - name: Windows native process, terminal, and file regression
         env:
           XMESH_TEST_WINDOWS_EXEC: "1"
           XMESH_TEST_WINDOWS_PTY: "1"
         run: go test -race ./internal/exec ./internal/pty ./internal/fs ./internal/winjob ./internal/toolerr -run Windows -v -timeout=180s
       - name: Windows gateway file visibility regression
-        run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=50 -v -timeout=120s
+        run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=${{ needs.changes.outputs.extended == 'true' && 50 || 3 }} -v -timeout=120s
       - name: Windows ingress PTY budget and cross-process admission
         env:
           XMESH_TEST_WINDOWS_PTY: "1"
         run: go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s
       - name: Build Windows service acceptance binary
-        if: ${{ !cancelled() }}
         run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
       - name: Windows SCM install, runtime, and cleanup
         env:
@@ -86,7 +227,6 @@ jobs:
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
         run: go test -race ./cmd/xmesh -run WindowsSystemService -v -timeout=180s
       - name: Windows current-user scheduled task runtime
-        if: ${{ !cancelled() }}
         run: |
           $session = (Get-Process -Id $PID).SessionId
           Write-Output "Runner Windows session: $session"
@@ -97,32 +237,31 @@ jobs:
           $env:XMESH_TEST_WINDOWS_USER_SERVICE = '1'
           go test -race ./cmd/xmesh -run WindowsUserTaskRuntime -v -timeout=90s
       - name: Windows private state directory ACL
-        if: ${{ !cancelled() }}
         run: go test -race ./internal/privdir -run Windows -v -count=1 -timeout=120s
       - name: Windows AppContainer isolation primitive
-        if: ${{ !cancelled() }}
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
         run: go test -race ./internal/winbox -run WindowsAppContainer -v -timeout=300s
       - name: Windows managed runner exec and ConPTY acceptance
-        if: ${{ !cancelled() }}
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
         run: go test -race ./internal/winbox -run Test_WindowsManagedRunner -v -count=1 -timeout=600s
       - name: Windows L2 production serve acceptance
-        if: ${{ !cancelled() }}
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
         run: go test -race ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s
       - name: Windows L2 admission cost measurement
-        if: ${{ !cancelled() }}
+        if: needs.changes.outputs.extended == 'true'
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_ADMISSION_COST: "1"
         run: go test ./internal/winbox -run Test_WindowsAdmissionCost -v -count=1 -timeout=1500s
   l2-unix:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    timeout-minutes: 15
     # L2 sandbox tests that need a real bubblewrap or sandbox-exec: they refuse
     # connections to the kernel control socket, outside reads and the network, and
     # keep a foreground job controllable. They are skipped without XMESH_TEST_L2.
@@ -137,9 +276,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: |
-            go.sum
-            .github/workflows/go.yml
+          cache-dependency-path: go.sum
       - name: Install bubblewrap and allow its user namespaces
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
@@ -151,3 +288,49 @@ jobs:
         env:
           XMESH_TEST_L2: "1"
         run: go test -race ./internal/policy ./internal/pty ./internal/exec -run L2 -v -count=1 -timeout=600s
+
+  headscale:
+    needs: changes
+    if: needs.changes.outputs.headscale == 'true'
+    uses: ./.github/workflows/headscale.yml
+
+  ui:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    uses: ./.github/workflows/ui.yml
+
+  ui-mcp:
+    needs: changes
+    if: needs.changes.outputs.ui_mcp == 'true'
+    uses: ./.github/workflows/ui-mcp.yml
+
+  computer:
+    needs: changes
+    if: needs.changes.outputs.computer == 'true'
+    uses: ./.github/workflows/computer.yml
+
+  ci:
+    name: CI result
+    if: always()
+    needs: [changes, contracts, test, windows-native, l2-unix, headscale, ui, ui-mcp, computer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every selected suite to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          needs = json.loads(os.environ['RESULTS'])
+          for name, job in needs.items():
+              print(f"{name}: {job['result']}")
+          assert needs['changes']['result'] == 'success', 'CI selection failed'
+          assert needs['contracts']['result'] == 'success', 'Contract validation failed'
+          suites = {'test': 'go', 'windows-native': 'go', 'l2-unix': 'go',
+                    'headscale': 'headscale', 'ui': 'ui', 'ui-mcp': 'ui_mcp', 'computer': 'computer'}
+          selected = needs['changes']['outputs']
+          for job, suite in suites.items():
+              expected = 'success' if selected[suite] == 'true' else 'skipped'
+              assert needs[job]['result'] == expected, f"{job}: expected {expected}"
+          PYCODE

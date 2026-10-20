@@ -81,8 +81,9 @@ class ConformanceCheck(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
 
-def run(path, status, conclusion=None):
-    return {"path": path, "status": status, "conclusion": conclusion}
+def run(path, status, conclusion=None, event="push", tag="v1.2.3"):
+    return {"path": path, "status": status, "conclusion": conclusion,
+            "event": event, "head_branch": tag}
 
 
 class ReleaseGate(unittest.TestCase):
@@ -90,29 +91,36 @@ class ReleaseGate(unittest.TestCase):
 
     def test_all_green(self):
         runs = [run(p, "completed", "success") for p in self.ALL]
-        self.assertEqual(release_gate.judge(runs)[0], "ok")
+        self.assertEqual(release_gate.judge(runs, tag="v1.2.3")[0], "ok")
 
     def test_one_success_among_reruns_is_enough(self):
         runs = [run(p, "completed", "success") for p in self.ALL] + [run(self.ALL[0], "completed", "failure")]
-        self.assertEqual(release_gate.judge(runs)[0], "ok")
+        self.assertEqual(release_gate.judge(runs, tag="v1.2.3")[0], "ok")
 
     def test_waits_for_missing_and_running(self):
-        runs = [run(self.ALL[0], "completed", "success"), run(self.ALL[1], "in_progress")]
-        verdict, reasons = release_gate.judge(runs)
-        self.assertEqual(verdict, "wait")
-        self.assertEqual(len(reasons), len(self.ALL) - 1)
+        for runs in [[], [run(self.ALL[0], "in_progress")]]:
+            verdict, reasons = release_gate.judge(runs, tag="v1.2.3")
+            self.assertEqual(verdict, "wait")
+            self.assertTrue(reasons)
 
     def test_failure_is_final(self):
-        runs = [run(self.ALL[0], "completed", "failure"), run(self.ALL[1], "queued")]
-        self.assertEqual(release_gate.judge(runs)[0], "fail")
+        for conclusion in ["failure", "cancelled", "timed_out", "skipped"]:
+            runs = [run(self.ALL[0], "completed", conclusion)]
+            self.assertEqual(release_gate.judge(runs, tag="v1.2.3")[0], "fail")
+
+    def test_scoped_runs_cannot_authorize_release(self):
+        for event, tag in [("push", "master"), ("pull_request", "feature"),
+                           ("workflow_dispatch", "v1.2.3"), ("push", "v1.2.2")]:
+            runs = [run(p, "completed", "success", event, tag) for p in self.ALL]
+            self.assertEqual(release_gate.judge(runs, tag="v1.2.3")[0], "wait")
 
     def test_main_polls_then_gives_up(self):
         calls = []
         fetches = iter([[run(self.ALL[0], "in_progress")], [run(p, "completed", "success") for p in self.ALL]])
-        code = release_gate.main(["--repo", "r", "--sha", "s", "--interval", "1"],
+        code = release_gate.main(["--repo", "r", "--sha", "s", "--tag", "v1.2.3", "--interval", "1"],
                                  fetch=lambda repo, sha: next(fetches), sleep=calls.append)
         self.assertEqual((code, calls), (0, [1]))
-        code = release_gate.main(["--repo", "r", "--sha", "s", "--wait", "2", "--interval", "1"],
+        code = release_gate.main(["--repo", "r", "--sha", "s", "--tag", "v1.2.3", "--wait", "2", "--interval", "1"],
                                  fetch=lambda repo, sha: [], sleep=calls.append)
         self.assertEqual(code, 1)
 

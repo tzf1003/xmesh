@@ -1,41 +1,6 @@
 name: UI test MCP
 on:
-  pull_request:
-    paths:
-      [
-        "packages/ui-mcp/**",
-        "internal/backend/**",
-        "internal/exec/**",
-        "internal/config/**",
-        "internal/role/gateway/ui_mcp_integration_test.go",
-        "ui/src/**",
-        "ui/scripts/**",
-        "ui/package*.json",
-        "ui/electron.vite.config.*",
-        "go.mod",
-        "go.sum",
-        ".github/workflows/ui-mcp.yml",
-      ]
-  push:
-    paths:
-      [
-        "packages/ui-mcp/**",
-        "internal/backend/**",
-        "internal/exec/**",
-        "internal/config/**",
-        "internal/role/gateway/ui_mcp_integration_test.go",
-        "ui/src/**",
-        "ui/scripts/**",
-        "ui/package*.json",
-        "ui/electron.vite.config.*",
-        "go.mod",
-        "go.sum",
-        ".github/workflows/ui-mcp.yml",
-      ]
-  workflow_dispatch:
-concurrency:
-  group: ui-test-mcp-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  workflow_call:
 jobs:
   verify:
     timeout-minutes: 30
@@ -84,8 +49,6 @@ jobs:
             ~/Library/Caches/ms-playwright
             ~/AppData/Local/ms-playwright
           key: ui-mcp-browser-${{ runner.os }}-${{ hashFiles('packages/ui-mcp/package-lock.json') }}
-      - name: Kernel and backend lifecycle regression
-        run: go test ./internal/config ./internal/backend ./internal/exec
       - name: Build test kernel and resolve Electron
         shell: bash
         run: |
