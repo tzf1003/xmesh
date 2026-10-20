@@ -13,6 +13,14 @@ func Envelope(err error) *toolerr.Error {
 	if _, ok := out.Fields["reason"]; !ok {
 		out.Fields["reason"] = "unavailable"
 	}
+	if e.Code == "policy_denied" {
+		if _, ok := out.Fields["rule"]; !ok {
+			out.Fields["rule"] = "computer.host_policy"
+			if out.Fields["reason"] == "host_suspended" {
+				out.Fields["rule"] = "computer.host_suspended"
+			}
+		}
+	}
 	if e.Code == "resource_busy" {
 		if out.Fields["reason"] == "unavailable" {
 			out.Fields["reason"] = "capacity"
