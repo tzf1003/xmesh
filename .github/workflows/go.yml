@@ -308,7 +308,7 @@ jobs:
 
   ci:
     name: CI result
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [contracts, test, windows-native, l2-unix, headscale, ui, ui-mcp, computer]
     runs-on: ubuntu-latest
     timeout-minutes: 5

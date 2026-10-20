@@ -17,6 +17,7 @@ test("every release tag runs the full CI entrypoint and its native suite", () =>
   assert.ok(Object.hasOwn(native.on, "workflow_call"));
   assert.equal(ci.jobs.computer.uses, "./.github/workflows/computer.yml");
   assert.ok(ci.jobs.ci.needs.includes("computer"));
+  assert.equal(ci.jobs.ci.if, "${{ !cancelled() }}");
 });
 
 test("component workflows share the CI trigger and diagnostics are opt-in", () => {
