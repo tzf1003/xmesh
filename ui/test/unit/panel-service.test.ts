@@ -274,6 +274,19 @@ test("admission key persistence belongs to the kernel and commit errors reach th
   assert.equal(fs.existsSync(path.join(node, "authkeys")), false);
 });
 
+test("config requests enforce the encoded body limit before sending a preview", async () => {
+  const { k, service, request } = await admissionSetup();
+  const count = k.requests.filter(r => r.path === "/v2/config" && r.method === "PUT").length;
+  const oversized = await service.putConfig({ ...request, content: `${request.content}\n#${"a".repeat(1046000)}`, authkey: "x".repeat(4096) });
+  assert.ok(!oversized.ok);
+  assert.equal(oversized.error.code, "payload_too_large");
+  assert.match(oversized.error.message, /1 MiB/);
+  assert.equal(k.requests.filter(r => r.path === "/v2/config" && r.method === "PUT").length, count);
+  const escaped = await service.putConfig({ ...request, authkey: undefined, content: "\n".repeat(600000) });
+  assert.ok(!escaped.ok);
+  assert.equal(escaped.error.code, "payload_too_large");
+});
+
 test("PAT create, rotate and delete use fixed routes and the secret comes from the kernel", async () => {
   const { k, service } = await setup();
   const made = await service.createPat({ name: "ci", scopes: ["devices:read"] });

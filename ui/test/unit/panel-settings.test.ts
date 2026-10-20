@@ -117,6 +117,7 @@ test("isChanged compares the form with what the file says", () => {
   assert.equal(isChanged(lan, { ...lan, roles: ["agent", "gateway"] }), false);
   assert.equal(isChanged(lan, tailnetIngress), true);
   assert.equal(isChanged(lan, { ...lan, allowDirs: [] }), true);
+  assert.equal(isChanged(tailnetIngress, { ...tailnetIngress, authkey: "  \n" }), false);
 });
 
 test("settings accept a pasted admission key and keep it out of generated config", () => {

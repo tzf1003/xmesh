@@ -333,6 +333,10 @@ for (const mode of ["tailnet", "coexist"] as const) {
       await expect(input).toHaveValue("");
       await expect(input).toHaveAttribute("placeholder", /已配置授权/);
 
+      await input.fill("  ");
+      await expect(page.getByTestId("settings-review")).toBeDisabled();
+      await input.fill("");
+
       const saved = parse(h.kernel.panel.content);
       expect(saved.mesh.lan.enabled).toBe(mode === "coexist");
       expect(saved.mesh.tailnet.enabled).toBe(true);
@@ -406,7 +410,7 @@ test("settings: preview locks the visible key and successful saving clears it be
     await expect(input).toHaveValue("tskey-auth-preview-visible");
     release();
     await expect(page.getByTestId("settings-authkey-change")).toBeVisible();
-    release = h.kernel.holdNextResponse("/v2/config/reload");
+    release = h.kernel.holdNextResponse("/v2/config/reload", "POST");
     await page.getByTestId("confirm-ok").click();
     await expect(input).toHaveValue("");
     await expect(page.getByTestId("settings-diff")).toHaveCount(0);

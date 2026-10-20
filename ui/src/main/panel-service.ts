@@ -33,6 +33,7 @@ import type {
   SessionsResponse,
 } from "../shared/control";
 import {
+  CONFIG_MAX_BYTES,
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
@@ -140,8 +141,13 @@ export class PanelService {
 
   putConfig(req: ConfigSaveRequest): Promise<DataResult<ConfigSaveResponse>> {
     return this.data("config.write", async (c) => {
-      const put = (content: string, dryRun: boolean, authkey?: string): Promise<unknown> =>
-        c.call("PUT", "/v2/config", { body: { content, dry_run: dryRun, ...(authkey !== undefined && { authkey }) }, ifMatch: req.etag });
+      const put = (content: string, dryRun: boolean, authkey?: string): Promise<unknown> => {
+        const body = { content, dry_run: dryRun, ...(authkey !== undefined && { authkey }) };
+        if (Buffer.byteLength(JSON.stringify(body)) > CONFIG_MAX_BYTES) {
+          throw new ControlRequestError("payload_too_large", "配置正文与 auth key 编码后超过 1 MiB，请缩小配置后重试");
+        }
+        return c.call("PUT", "/v2/config", { body, ifMatch: req.etag });
+      };
       if (req.authkey === undefined) return put(req.content, req.dryRun);
       const authkey = req.authkey.trim();
       if (!isAuthKey(authkey)) throw new ControlRequestError("invalid_args", "请输入有效的 auth key");

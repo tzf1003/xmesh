@@ -98,9 +98,9 @@ export class FakeKernel {
   private readonly responseGates = new Map<string, Promise<void>>();
 
   /** Hold one response until the test releases it, exercising outstanding UI saves. */
-  holdNextResponse(route: string): () => void {
+  holdNextResponse(route: string, method = "PUT"): () => void {
     let release!: () => void;
-    this.responseGates.set(route, new Promise<void>(resolve => { release = resolve; }));
+    this.responseGates.set(`${method} ${route}`, new Promise<void>(resolve => { release = resolve; }));
     return release;
   }
 
@@ -326,8 +326,9 @@ export class FakeKernel {
       if (req.headers.origin !== undefined) {
         return this.error(res, 403, "forbidden", "带 Origin 的请求被拒绝");
       }
-      const gate = this.responseGates.get(url);
-      this.responseGates.delete(url);
+      const gateKey = `${rec.method} ${url}`;
+      const gate = this.responseGates.get(gateKey);
+      this.responseGates.delete(gateKey);
       if (gate) void gate.then(() => this.route(rec.method, url, body, lastEventId, res, ifMatch));
       else this.route(rec.method, url, body, lastEventId, res, ifMatch);
     });
