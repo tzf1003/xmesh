@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,7 +13,11 @@ import (
 )
 
 func TestComputerEndpointStatusUsesStartupAuthority(t *testing.T) {
-	for _, endpoint := range []string{"", "/tmp/custom-computer.sock"} {
+	custom := "/tmp/custom-computer.sock"
+	if runtime.GOOS == "windows" {
+		custom = `\\.\pipe\xmesh-S-1-5-21-1-2-3-1001-computer`
+	}
+	for _, endpoint := range []string{"", custom} {
 		t.Run(endpoint, func(t *testing.T) {
 			text := testConfig
 			if endpoint != "" {
