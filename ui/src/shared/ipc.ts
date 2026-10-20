@@ -164,7 +164,7 @@ export interface ConfigSaveRequest {
   etag: string;
   /** Validate and diff only; nothing is written. */
   dryRun: boolean;
-  /** Write-only Tailnet admission key; the main process manages its storage. */
+  /** Write-only Tailnet admission key; the kernel manages its private storage. */
   authkey?: string;
 }
 

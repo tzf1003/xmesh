@@ -204,6 +204,8 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 请求 `ConfigPutRequest`，必须带 `If-Match`。`dry_run: true` 只校验并计算 diff，不写文件，供 UI 保存前展示。
 
+可选的 `authkey` 是 8–4096 字节可打印 ASCII 的 Tailnet 入网密钥，仅用于写入。客户端在 `content` 的 `mesh.tailnet.authkey_file` 中指定内核状态目录下 `authkeys/authkey-UUID` 的新路径。内核先验证配置与 ETag，再以私有目录策略保存密钥并提交配置；提交被拒绝时删除新密钥文件。`dry_run` 不创建目录或文件。密钥不进入响应、配置原文、差异或审计值。Windows 由服务身份创建具有受保护 DACL 的目录，桌面用户通过控制通道提交。
+
 内核的处理顺序：
 
 1. 检查体积与 `If-Match`（对磁盘上当前文件字节算 ETag，在写锁内比较）。

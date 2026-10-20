@@ -924,6 +924,10 @@ export interface ConfigPutRequest {
    * 只校验并计算 diff，不写文件。
    */
   dry_run?: boolean;
+  /**
+   * 仅写入的 Tailnet auth key，由内核保存在私有状态目录的 authkeys 子目录；content 中的 mesh.tailnet.authkey_file 须指向该目录中的新 authkey-UUID 文件。dry_run 不创建文件。
+   */
+  authkey?: string;
 }
 export interface ConfigPutResponse {
   /**

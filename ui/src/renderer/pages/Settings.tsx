@@ -77,7 +77,6 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
   // Reads can overlap (a save re-reads what an earlier read is still fetching); only the latest may write the page.
   const loadSeq = useRef(0);
   const denySeq = useRef(0);
-  const consumedFocus = useRef<PageContext["focus"]>();
 
   const load = async (): Promise<void> => {
     const seq = ++loadSeq.current;
@@ -86,11 +85,8 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
     if (!r.ok) return setErr(r.error);
     setErr(undefined);
     setLoaded(r.data);
-    const current = formFromConfig(r.data.parsed);
-    // A link to the ingress role opens with it on in the form; nothing is saved until the user does.
-    const focusIngress=ctx.focus?.role === "ingress" && consumedFocus.current!==ctx.focus;
-    consumedFocus.current=ctx.focus;
-    setForm(focusIngress ? { ...current, roles: toggleRole(current.roles, "ingress", true) } : current);
+    // Navigation may reveal ingress setup, but must never change the configured roles.
+    setForm(formFromConfig(r.data.parsed));
     setReview(undefined);
   };
 
@@ -140,6 +136,17 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
   const content = loaded && form && problem === undefined ? applySettingsForm(loaded.content, form) : undefined;
   const ingressOn = form?.roles.includes("ingress") ?? false;
   const authkey = form && (form.mode === "tailnet" || form.mode === "coexist") ? form.authkey.trim() : "";
+  const savedRoles = loaded ? formFromConfig(loaded.parsed).roles : [];
+  const selectIngress = (enabled: boolean): void => {
+    if (!form || !loaded) return;
+    const saved = formFromConfig(loaded.parsed);
+    update({
+      roles: toggleRole(form.roles, "ingress", enabled),
+      // Discard only ingress setup when its explicit opt-in is withdrawn.
+      ...(!enabled ? { listen: saved.listen, issuer: saved.issuer, domain: saved.domain,
+        tls: saved.tls, certFile: saved.certFile, keyFile: saved.keyFile } : {}),
+    });
+  };
 
   const prepare = async (): Promise<void> => {
     if (!loaded || content === undefined) return;
@@ -158,6 +165,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
     setBusy(false);
     setReview(undefined);
     if (!r.ok) return setErr(r.error);
+    setForm((f) => f ? { ...f, authkey: "" } : f);
     ctx.applied(await applySaved(r.data.restart_required));
     ctx.toast(t("config.saved"));
     await load();
@@ -253,7 +261,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
           }}
         >
           {!writable && <Banner kind="warn" testid="settings-readonly">{t("config.readOnly")}</Banner>}
-          <fieldset disabled={!writable} class="settings-fields section-stack">
+          <fieldset disabled={!writable || busy} class="settings-fields section-stack">
             <section class="card" id="settings-node" data-testid="settings-node">
               <h2>{t("settings.nodeTitle")}</h2>
               <Field label={t("settings.nodeName")} hint={t("wizard.nodeNameHint")}>
@@ -308,12 +316,22 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
               <h2>{t("settings.rolesTitle")}</h2>
               <p class="hint">{t("roles.topbarHint")}</p>
               <div class="row" data-testid="settings-role-summary">
-                {form.roles.map((role) => <Badge key={role} kind="info">{role}</Badge>)}
+                {savedRoles.map((role) => <Badge key={role} kind="info">{role}</Badge>)}
               </div>
-              {ingressOn && (
+              {(ingressOn || ctx.focus?.role === "ingress") && (
                 <section class="roles-ingress" data-testid="settings-ingress">
                   <h3>{t("settings.ingressTitle")}</h3>
                   <p class="hint">{t("settings.ingressSub")}</p>
+                  {!savedRoles.includes("ingress") && <>
+                    <Banner kind={ingressOn ? "warn" : ""} testid={ingressOn ? "settings-ingress-pending" : "settings-ingress-disabled"}>
+                      {t(ingressOn ? "settings.ingressPending" : "settings.ingressDisabled")}
+                    </Banner>
+                    <label class="check">
+                      <input type="checkbox" checked={ingressOn} onChange={(e) => selectIngress(e.currentTarget.checked)} data-testid="settings-ingress-enable" />
+                      <span>{t("settings.ingressEnableOnSave")}</span>
+                    </label>
+                  </>}
+                  {ingressOn && <>
                   {form.listen === "funnel" && form.mode !== "tailnet" && form.mode !== "coexist" && (
                     <Banner kind="warn" testid="settings-needs-tailnet">
                       {t("settings.needsTailnet")}
@@ -382,6 +400,7 @@ export function Settings({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChan
                       )}
                     </>
                   )}
+                  </>}
                 </section>
               )}
             </section>
