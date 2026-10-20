@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -160,35 +158,4 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 		}
 	}
 	return e
-}
-
-// A rollback may restore a pre-upgrade kernel. Read only its advertised status
-// endpoint; configuration operations continue to require the current API major.
-func setupServiceResponding(ctx context.Context, ep control.Endpoint) error {
-	major := strings.Split(ep.APIVersion, ".")[0]
-	if major != "1" && major != "2" {
-		return errors.New("unsupported saved control API")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	res, err := control.NewClient(ep).Stream(ctx, "/v"+major+"/status", nil)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != 200 || strings.Split(res.Header.Get("X-Xmesh-Control-Version"), ".")[0] != major {
-		return errors.New("saved service status unavailable")
-	}
-	var status struct {
-		Node struct {
-			Name string `json:"name"`
-		} `json:"node"`
-	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&status); err != nil {
-		return err
-	}
-	if status.Node.Name != ep.Node {
-		return fmt.Errorf("saved service identity differs")
-	}
-	return nil
 }

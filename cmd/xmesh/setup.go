@@ -127,7 +127,12 @@ func setupCommandIO(args []string, in io.Reader, out io.Writer) error {
 		}
 		result, e = s.SetIngressPassword(ctx, *job, value.Password)
 	case "cancel":
-		result, e = s.Cancel(*job)
+		var j *onboarding.Job
+		j, e = s.Cancel(*job)
+		if e == nil && j.Status == "pending" {
+			e = launchSetupWorker(s.Root, j.ID)
+		}
+		result = j
 	default:
 		e = &onboarding.Error{Code: "invalid_args", Message: "未知配置操作"}
 	}

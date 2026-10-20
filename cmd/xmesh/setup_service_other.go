@@ -31,8 +31,12 @@ func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.S
 		return snap, e
 	}
 	snap.Installed = true
-	if !strings.Contains(string(snap.Definition), p.ConfigPath) {
+	if !setupUnitConfigMatches(snap.Definition, p.ConfigPath) {
 		return snap, &onboarding.Error{Code: "service_conflict", Message: "同名服务使用另一个配置，请选择新的设备名", Field: "node_name"}
+	}
+	manager, err := exec.CommandContext(ctx, "systemctl", "--user", "show", "--property=FragmentPath,DropInPaths,NeedDaemonReload", serviceName(p.Input.NodeName)).Output()
+	if err != nil || !setupUnitManagerMatches(manager, snap.Path) {
+		return snap, &onboarding.Error{Code: "service_conflict", Message: "服务包含覆盖配置或待加载改动，请检查用户服务后重试", Field: "node_name"}
 	}
 	snap.Running = exec.CommandContext(ctx, "systemctl", "--user", "is-active", "--quiet", serviceName(p.Input.NodeName)).Run() == nil
 	enabled, err := exec.CommandContext(ctx, "systemctl", "--user", "is-enabled", serviceName(p.Input.NodeName)).Output()

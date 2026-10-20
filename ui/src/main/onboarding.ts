@@ -71,7 +71,8 @@ export function fakeOnboarding(root: string, state: { cliFails: boolean; setupWa
       jobs.set(job.id, job); return { ok: true, data: job };
     }
     const job = jobs.get(request.job); if (!job) return { ok: false, error: { code: "not_found", message: "Job not found" } };
-    if (request.op === "cancel") { job.status = "cancelled"; job.auth_url = ""; return { ok: true, data: job }; }
+    if (request.op === "cancel") { job.status = "cancelled"; job.auth_url = ""; job.readiness = { installed: false, service_ready: false, client_verified: false }; return { ok: true, data: job }; }
+    if (job.status === "cancelled") return { ok: true, data: job };
     const plan = plans.get(job.plan_id)!;
     if (request.op === "set_password") job.ingress_password_set = true;
     if (state.cliFails) { job.status = "failed"; job.next_action = "重试安装用户服务。"; job.steps = [{ id: "install", status: "failed", message: "服务安装失败", code: "install_failed", next_action: "检查服务权限后重试。" }]; }

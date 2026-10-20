@@ -1,9 +1,11 @@
 package onboarding
 
 import (
+	"bytes"
 	"context"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -154,5 +156,194 @@ func TestResumeFailedTaskPublishesPending(t *testing.T) {
 	queued, launch, err := s.QueueResume(j.ID)
 	if err != nil || !launch || queued.Status != "pending" {
 		t.Fatalf("resume not pollable: %+v launch=%v error=%v", queued, launch, err)
+	}
+}
+
+func TestIdleCancellationRollsBackCompletedSetup(t *testing.T) {
+	for _, baseline := range []string{"new", "existing-running", "existing-stopped", "no-snapshot"} {
+		t.Run(baseline, func(t *testing.T) {
+			s, in, h, _ := setupFixture(t)
+			in.Clients = []string{"codex"}
+			clientHome := filepath.Join(t.TempDir(), "client")
+			t.Setenv("CODEX_HOME", clientHome)
+			clientPath := filepath.Join(clientHome, "config.toml")
+			originalClient := []byte("model='existing'\n")
+			putClientConfig(t, clientPath, string(originalClient))
+			first, err := s.Plan(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var original []byte
+			existing := baseline == "existing-running" || baseline == "existing-stopped"
+			if existing {
+				original = []byte(first.Config + "# original\n")
+				putClientConfig(t, first.ConfigPath, string(original))
+			}
+			p, err := s.Plan(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			installed, running := existing, baseline == "existing-running"
+			before := ServiceSnapshot{Installed: installed, Running: running}
+			h.Installed = func(*Plan) (bool, error) { return installed, nil }
+			h.Install = func(context.Context, *Plan) error { installed = true; return nil }
+			h.Start = func(context.Context, *Plan) error { running = true; return nil }
+			h.Stop = func(context.Context, *Plan) error { running = false; return nil }
+			h.Configure = func(context.Context, *Plan) error { return nil }
+			h.Health = func(context.Context, *Plan) error { return nil }
+			h.Remove = func(ctx context.Context, _ *Plan) error {
+				if ctx.Err() != nil {
+					t.Fatal(ctx.Err())
+				}
+				installed = false
+				running = false
+				return nil
+			}
+			if baseline != "no-snapshot" {
+				h.Snapshot = func(context.Context, *Plan) (ServiceSnapshot, error) {
+					return ServiceSnapshot{Installed: installed, Running: running}, nil
+				}
+				h.Restore = func(ctx context.Context, _ *Plan, snapshot ServiceSnapshot) error {
+					if ctx.Err() != nil {
+						t.Fatal(ctx.Err())
+					}
+					installed = snapshot.Installed
+					running = snapshot.Running
+					return nil
+				}
+			}
+			j, err := s.CreateJob(p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.Run(t.Context(), j.ID, h); err != nil {
+				t.Fatal(err)
+			}
+			j, _ = s.LoadJob(j.ID)
+			if j.Status != "waiting_user" || !j.Readiness.ServiceReady || len(j.Receipts) != 1 {
+				t.Fatalf("setup did not reach idle verification: %+v", j)
+			}
+			pending, err := s.Cancel(j.ID)
+			if err != nil || pending.Status != "pending" {
+				t.Fatalf("cleanup not queued: %+v %v", pending, err)
+			}
+			if err = s.Run(t.Context(), j.ID, h); err != nil {
+				t.Fatal(err)
+			}
+			j, _ = s.LoadJob(j.ID)
+			if j.Status != "cancelled" || j.Readiness.ServiceReady || len(j.Receipts) != 0 || installed != before.Installed || running != before.Running {
+				t.Fatalf("baseline not restored: %+v installed=%v running=%v", j, installed, running)
+			}
+			got, err := os.ReadFile(p.ConfigPath)
+			if existing {
+				if err != nil || !bytes.Equal(got, original) {
+					t.Fatal("existing config not restored", err)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatal("new config retained", err)
+			}
+			got, err = os.ReadFile(clientPath)
+			if err != nil || !bytes.Equal(got, originalClient) {
+				t.Fatal("client credentials not restored", err)
+			}
+			if _, err = s.Cancel(j.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCompletedSetupCannotBeCancelled(t *testing.T) {
+	s, in, h, _ := setupFixture(t)
+	h.Evidence = func(context.Context, *Plan, *Job) (bool, error) { return true, nil }
+	p, err := s.Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.CreateJob(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Run(t.Context(), j.ID, h); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Cancel(j.ID); err == nil {
+		t.Fatal("completed setup cancelled")
+	}
+	if s.cancelRequested(j.ID) {
+		t.Fatal("completed setup received cancellation marker")
+	}
+}
+
+func TestCancellationReconcilesInterruptedConfigCommit(t *testing.T) {
+	for _, written := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before-rename", true: "after-rename"}[written], func(t *testing.T) {
+			s, in, h, _ := setupFixture(t)
+			p, err := s.Plan(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			j, err := s.CreateJob(p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if written {
+				if err = s.writeConfig(p, j); err != nil {
+					t.Fatal(err)
+				}
+				j.ConfigHash = ""
+			}
+			j.PendingConfigHash = digest([]byte(p.Config))
+			if err = s.SaveJob(j); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.Cancel(j.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err = s.Run(t.Context(), j.ID, h); err != nil {
+				t.Fatal(err)
+			}
+			j, _ = s.LoadJob(j.ID)
+			if j.Status != "cancelled" || j.ConfigHash != "" || j.PendingConfigHash != "" {
+				t.Fatalf("interrupted write not restored: %+v", j)
+			}
+			if _, err = os.Stat(p.ConfigPath); !os.IsNotExist(err) {
+				t.Fatal("new config retained", err)
+			}
+		})
+	}
+}
+
+func TestCancellationRetainsClientRollbackFailure(t *testing.T) {
+	s, in, h, _ := setupFixture(t)
+	in.Clients = []string{"codex"}
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	client := filepath.Join(dir, "config.toml")
+	putClientConfig(t, client, "model='before'\n")
+	p, err := s.Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.CreateJob(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Run(t.Context(), j.ID, h); err != nil {
+		t.Fatal(err)
+	}
+	putClientConfig(t, client, "model='concurrent'\n")
+	if _, err = s.Cancel(j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Run(t.Context(), j.ID, h); err != nil {
+		t.Fatal(err)
+	}
+	j, _ = s.LoadJob(j.ID)
+	if j.Status != "failed" || len(j.Receipts) != 1 {
+		t.Fatalf("client conflict lost: %+v", j)
+	}
+	if string(readClientConfig(t, client)) != "model='concurrent'\n" {
+		t.Fatal("concurrent client edit overwritten")
 	}
 }

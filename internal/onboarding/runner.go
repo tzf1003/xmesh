@@ -75,12 +75,12 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 	if j.Status == "cancelled" {
 		return nil
 	}
-	if s.cancelRequested(id) {
-		return s.finishCancellation(j)
-	}
 	p, e := s.LoadPlan(j.PlanID)
 	if e != nil {
 		return e
+	}
+	if s.cancelRequested(id) {
+		return s.cancelRun(ctx, p, j, h)
 	}
 	if e = s.reconcileConfig(p, j); e != nil {
 		markStaleJob(j)
@@ -651,11 +651,17 @@ func (s *Store) Verify(ctx context.Context, id string, h Host) (*Job, error) {
 	return j, nil
 }
 
-// Cancel retains external identity state and completed backups for an explicit retry.
+// Cancel requests durable rollback. Idle jobs with changes are queued for the platform worker.
 func (s *Store) Cancel(id string) (*Job, error) {
 	j, e := s.LoadJob(id)
 	if e != nil {
 		return nil, e
+	}
+	if j.Status == "cancelled" {
+		return j, nil
+	}
+	if j.Status == "succeeded" {
+		return nil, problem("invalid_args", "已完成的任务请通过功能中心管理", "job")
 	}
 	request, e := s.transaction("cancellations", id)
 	if e != nil {
@@ -669,6 +675,8 @@ func (s *Store) Cancel(id string) (*Job, error) {
 		var issue *Error
 		if errors.As(e, &issue) && issue.Code == "busy" {
 			j.NextAction = "正在取消配置任务，身份和备份将保留"
+			j.Readiness.ServiceReady = false
+			j.Readiness.ClientVerified = false
 			return j, nil
 		}
 		return nil, e
@@ -678,10 +686,23 @@ func (s *Store) Cancel(id string) (*Job, error) {
 	if e != nil {
 		return nil, e
 	}
-	if e = s.finishCancellation(j); e != nil {
+	if hasSetupChanges(j) {
+		j.Status = "pending"
+		j.NextAction = "正在取消并恢复本次配置变更"
+		j.Readiness.ServiceReady = false
+		j.Readiness.ClientVerified = false
+		e = s.SaveJob(j)
+	} else {
+		e = s.finishCancellation(j)
+	}
+	if e != nil {
 		return nil, e
 	}
 	return j, nil
+}
+
+func hasSetupChanges(j *Job) bool {
+	return len(j.Receipts) != 0 || j.ConfigHash != "" || j.PendingConfigHash != "" || j.PendingRestore || j.ServiceOwned || j.ServiceStopped || j.ServiceRestorePending
 }
 
 func (s *Store) cancelRequested(id string) bool {
@@ -698,32 +719,57 @@ func (s *Store) finishCancellation(j *Job) error {
 	j.AuthURL = ""
 	j.NextAction = "配置已取消；登录身份和备份已保留，可在网络控制面撤销设备"
 	j.Readiness.ClientVerified = false
+	j.Readiness.ServiceReady = false
 	return s.SaveJob(j)
 }
 
 func (s *Store) cancelRun(ctx context.Context, p *Plan, j *Job, h Host) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	j.Status = "running"
 	j.AuthURL = ""
 	j.NextAction = "正在取消并恢复本次配置变更"
+	j.Readiness.ServiceReady = false
+	j.Readiness.ClientVerified = false
 	if err := s.SaveJob(j); err != nil {
 		return err
 	}
-	var recoveryErr error
+	reconcileErr := s.reconcileConfig(p, j)
+	recoveryErr := reconcileErr
 	remaining := []ClientReceipt{}
 	for i := len(j.Receipts) - 1; i >= 0; i-- {
 		if err := RollbackClient(j.Receipts[i]); err != nil {
-			recoveryErr = err
+			recoveryErr = errors.Join(recoveryErr, err)
 			remaining = append(remaining, j.Receipts[i])
 		}
 	}
 	j.Receipts = remaining
-	if j.ServiceSnapshot != nil && h.Restore != nil && (j.ServiceStopped || j.ServiceOwned || j.ConfigHash != "" || j.PendingConfigHash != "") {
+	if reconcileErr == nil && j.ServiceSnapshot != nil && (j.ServiceStopped || j.ServiceOwned || j.ConfigHash != "" || j.PendingConfigHash != "" || j.ServiceRestorePending || j.PendingRestore) {
 		j.ServiceRestorePending = true
 		if err := s.SaveJob(j); err != nil {
 			return err
 		}
 		if err := s.restoreService(ctx, p, j, h); err != nil {
-			recoveryErr = err
+			recoveryErr = errors.Join(recoveryErr, err)
+		}
+	} else if reconcileErr == nil && j.ServiceSnapshot == nil {
+		var removeErr error
+		if j.ServiceOwned {
+			if h.Installed == nil || h.Remove == nil {
+				removeErr = errors.New("installed service recovery is unavailable")
+			} else if have, err := h.Installed(p); err != nil {
+				removeErr = err
+			} else if have {
+				removeErr = h.Remove(ctx, p)
+			}
+			if removeErr == nil {
+				j.ServiceOwned = false
+				j.Readiness.Installed = false
+			}
+		}
+		recoveryErr = errors.Join(recoveryErr, removeErr)
+		if removeErr == nil {
+			recoveryErr = errors.Join(recoveryErr, s.restoreConfig(p, j))
 		}
 	}
 	if recoveryErr != nil {

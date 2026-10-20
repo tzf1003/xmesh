@@ -208,13 +208,11 @@ func TestExistingConfigPreservesBackendsAndCredentials(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	h.Evidence = func(context.Context, *Plan, *Job) (bool, error) { return true, nil }
 	if e = s.Run(context.Background(), j.ID, h); e != nil {
 		t.Fatal(e)
 	}
 	j, _ = s.LoadJob(j.ID)
-	if _, e = s.Cancel(j.ID); e != nil {
-		t.Fatal(e)
-	}
 	raw, e := os.ReadFile(p.ConfigPath)
 	if e != nil {
 		t.Fatal(e)

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/onboarding"
 )
 
@@ -140,6 +141,13 @@ func TestOnboardingNativeService(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	ep, e := control.ReadEndpoint(filepath.Dir(p.ConfigPath))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = setupServiceResponding(context.Background(), ep); e != nil {
+		t.Fatal("owner-only service status rejected", e)
+	}
 	originalService, e := snapshotSetupService(context.Background(), &p)
 	if e != nil || !originalService.Running {
 		t.Fatal("cannot snapshot baseline service", e)
@@ -218,4 +226,62 @@ func TestOnboardingNativeService(t *testing.T) {
 	if runtime.GOOS == "darwin" && !bytes.Equal(originalService.Definition, serviceAfter.Definition) {
 		t.Fatal("native registration settings not restored")
 	}
+	// Cancelling after an idle client-verification wait uses the same detached
+	// recovery worker as cancellation during browser authorization.
+	input, _ = json.Marshal(onboarding.Input{SchemaVersion: 1, Purpose: "local", NodeName: name, Workspace: workspace, Permission: "development", Clients: []string{}, Autostart: &yes, Network: onboarding.NetworkInput{Mode: "lan"}})
+	var cancelPlan onboarding.Plan
+	if e = json.Unmarshal(invoke(input, "setup", "plan", "--input", "-", "--root", root, "--json"), &cancelPlan); e != nil {
+		t.Fatal(e)
+	}
+	var cancelled onboarding.Job
+	if e = json.Unmarshal(invoke(nil, "setup", "apply", "--plan", cancelPlan.ID, "--root", root, "--json"), &cancelled); e != nil {
+		t.Fatal(e)
+	}
+	deadline = time.Now().Add(40 * time.Second)
+	for time.Now().Before(deadline) {
+		if e = json.Unmarshal(invoke(nil, "setup", "status", "--job", cancelled.ID, "--root", root, "--json"), &cancelled); e != nil {
+			t.Fatal(e)
+		}
+		if cancelled.Status == "waiting_user" && cancelled.Readiness.ServiceReady {
+			break
+		}
+		if cancelled.Status == "failed" {
+			t.Fatalf("pre-cancel setup failed: %+v", cancelled)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !cancelled.Readiness.ServiceReady {
+		t.Fatal("setup did not reach idle cancellation point")
+	}
+	if e = json.Unmarshal(invoke(nil, "setup", "cancel", "--job", cancelled.ID, "--root", root, "--json"), &cancelled); e != nil {
+		t.Fatal(e)
+	}
+	deadline = time.Now().Add(40 * time.Second)
+	for time.Now().Before(deadline) {
+		if e = json.Unmarshal(invoke(nil, "setup", "status", "--job", cancelled.ID, "--root", root, "--json"), &cancelled); e != nil {
+			t.Fatal(e)
+		}
+		if cancelled.Status == "cancelled" || cancelled.Status == "failed" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if cancelled.Status != "cancelled" || cancelled.Readiness.ServiceReady {
+		t.Fatalf("cancellation not settled: %+v", cancelled)
+	}
+	content, e = os.ReadFile(p.ConfigPath)
+	if e != nil || !bytes.Equal(content, originalConfig) {
+		t.Fatal("idle cancellation did not restore baseline configuration", e)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if e = onboarding.Probe(context.Background(), &p); e == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if e != nil {
+		t.Fatal("idle cancellation did not restore baseline service", e)
+	}
+
 }

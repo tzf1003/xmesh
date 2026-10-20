@@ -157,3 +157,21 @@ test("multi-device setup preserves the user's coexist network selection", async 
   const request = calls.at(-1)?.arg as { input: { network: { mode: string } } };
   expect(request.input.network.mode).toBe("coexist");
 });
+
+test("setup cancellation is confirmed, stays terminal and allows a fresh setup", async () => {
+  h = await launch({ publish: false, lang: "en" });
+  const page = await h.openPanel();
+  await basics(page); await review(page); await page.getByTestId("wizard-run").click();
+  await expect(page.getByTestId("setup-client-pending")).toBeVisible();
+  await page.getByTestId("setup-cancel").click();
+  await page.getByTestId("confirm-cancel").click();
+  expect((await h.calls()).filter((entry) => entry.op === "onboarding" && (entry.arg as { op?: string }).op === "cancel")).toHaveLength(0);
+  await page.getByTestId("setup-cancel").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByText("Setup cancelled", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("setup-client-pending")).toHaveCount(0);
+  await expect(page.getByTestId("wizard-finish")).toHaveCount(0);
+  await page.getByTestId("setup-new").click();
+  await expect(page.getByTestId("wizard-purpose")).toBeVisible();
+  await expect(page.getByTestId("setup-existing")).toHaveCount(0);
+});
