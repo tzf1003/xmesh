@@ -168,3 +168,13 @@ test("kernel configuration parser runs outside the source tree without YAML runt
     assert.deepEqual(JSON.parse(output), expected);
   }
 });
+
+test("panel service loads outside the source tree with its bundled runtime dependencies", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-bundled-panel-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.cpSync(path.join(UI, "dist/src"), path.join(root, "src"), { recursive: true });
+  const module = path.join(root, "src/main/panel-service.js");
+  const output = execFileSync(process.execPath, ["-e", "console.log(typeof require(process.argv[1]).PanelService)", module],
+    { encoding: "utf8", env: { ...process.env, NODE_PATH: "" } });
+  assert.equal(output.trim(), "function");
+});

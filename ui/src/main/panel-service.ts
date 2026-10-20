@@ -6,7 +6,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseDocument } from "yaml";
+import { parseDocument } from "./yaml";
 
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
