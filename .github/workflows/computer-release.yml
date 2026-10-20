@@ -1,7 +1,5 @@
 name: Package native desktop executor
 on:
-  pull_request:
-    paths: ['computer-native/**', 'scripts/package_computer.py', '.github/workflows/computer-release.yml']
   workflow_dispatch:
     inputs:
       version:

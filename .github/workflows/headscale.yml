@@ -2,9 +2,7 @@ name: Headscale 互联与 OAuth 协议
 # 临时 HTTPS Headscale 上运行两个已完成公钥配对的新版设备节点，验证双向文件、exec、PTY。
 # 第三个 Ingress 节点验证完整 OAuth 流程；两个独立 Docker 网络空间验证双路径及 DERP 恢复。
 on:
-  push:
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
 env:
   HEADSCALE_VERSION: "0.29.5"
   # linux/amd64 发布资产的 SHA-256，取自 https://github.com/juanfont/headscale/releases/tag/v0.29.5 的 checksums.txt。
@@ -12,16 +10,14 @@ env:
 jobs:
   headscale:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: |
-            go.sum
-            .github/workflows/headscale.yml
+          cache-dependency-path: go.sum
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -38,3 +34,9 @@ jobs:
         run: python3 scripts/coexist_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh"
       - name: DERP 路径及资源恢复
         run: python3 scripts/coexist_ci.py --headscale "$RUNNER_TEMP/headscale" --binary "$RUNNER_TEMP/xmesh" --force-derp
+      - name: meshadmin Headscale integration
+        env:
+          XMESH_TEST_HEADSCALE_BIN: ${{ runner.temp }}/headscale
+        run: |
+          go test -race -count=1 ./meshadmin
+          go test -race -count=1 ./cmd/xmesh -run 'Test_Mesh'

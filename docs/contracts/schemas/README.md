@@ -13,7 +13,7 @@
 
 `examples/invalid/` 里的文件必须校验失败。它们防止模式被放宽到能接受「占用中却没有持有者」、`relay` 模式、Funnel 上再写自定义域名、`pty_limit` 使用字段 `active`，或在审计摘要里写入命令输出。
 
-依赖写在 [`requirements.txt`](requirements.txt)。GitHub Actions 工作流 `.github/workflows/contracts.yml` 在推送和拉取请求上跑同一条命令。
+依赖写在 [`requirements.txt`](requirements.txt)。GitHub Actions 工作流 `.github/workflows/go.yml` 的 `contracts` 作业在 PR 和 master 推送上运行同一条命令。
 
 ```bash
 python3 -m pip install -r docs/contracts/schemas/requirements.txt

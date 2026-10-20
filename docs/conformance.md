@@ -11,20 +11,20 @@
 - 测试函数名以 `Test_<编号去横线>` 开头；`Test_CTRFS02_03_...` 同时声明 CTR-FS-02 与 CTR-FS-03。
 - `_test.go` 里写一行注释 `// conformance: CON-TOOL-04 CON-TOOL-05`（脚本里用 `# conformance: ...`），放在测试函数上方或函数体内。
 
-`python3 scripts/conformance_check.py` 对照本表与测试代码：表里有编号却没有声明、或注释里引用了表里没有的编号，都会失败（契约夹具工作流每次都跑；`--list` 列出每个编号对应的位置）。它只证明“有人声明了”，不证明断言足够，所以声明只能写在真正断言了观察点的测试上。环境变量才开启的测试（如 `XMESH_TEST_TAILNET_*`）同样要声明，并在下面注明由哪条工作流运行。
+`python3 scripts/conformance_check.py` 对照本表与测试代码：表里有编号却没有声明、或注释里引用了表里没有的编号，都会失败（CI 的 contracts 作业每次都跑；`--list` 列出每个编号对应的位置）。它只证明“有人声明了”，不证明断言足够，所以声明只能写在真正断言了观察点的测试上。环境变量才开启的测试（如 `XMESH_TEST_TAILNET_*`）同样要声明，并在下面注明由哪条工作流运行。
 
-自动化与环境覆盖：
+自动化与环境覆盖（触发条件和任务合并见 [CI 运行策略](ci.md)）：
 
 | 内容 | 位置 |
 | --- | --- |
-| CON-ARCH-02：六个发布目标交叉编译 | `Test_CONARCH02_*`，`XMESH_TEST_CROSSBUILD=1`，在 `go.yml` 的 ubuntu 步骤运行；`release.yml` 打包时再构建一次 |
+| CON-ARCH-02：六个发布目标交叉编译 | `Test_CONARCH02_*`，`XMESH_TEST_CROSSBUILD=1`，在 `go.yml` 的 ubuntu 扩展检查中运行（发布标签、手动或每周定时）；`release.yml` 打包时再构建一次 |
 | 门 1、门 2 的进程级冒烟 | `scripts/smoke_local.py`（L1 与 `--pat`）、`scripts/smoke_backend.py`，在 `go.yml` 三个系统的矩阵里运行 |
 | 门 3 的 tailnet 互联（仅直连路径） | `headscale.yml`：一次性 Headscale、两个 tsnet 节点互调、`Test_TailnetPeerConnectivity` |
 | 门 4 的 OAuth 协议路径 | `headscale.yml` 里的 `scripts/oauth_client.py`：动态注册、PKCE、登录、`tools/list`、`exec.run`；证明协议，不证明 claude.ai 的展示 |
-| 发布门禁 | `release.yml` 先跑 vet、竞态测试、矩阵检查，并要求同一提交上 `go.yml`、`contracts.yml`、`headscale.yml` 都已成功 |
+| 发布门禁 | `release.yml` 等待同一提交、同一发布标签触发的完整 `go.yml` CI 成功，包含三平台、契约、UI、Headscale 和桌面执行器验收 |
 | L2 沙箱的真实拒绝 | `go.yml` 的 `l2-unix`（ubuntu 装 bubblewrap 并放开 user namespace，macOS 用 sandbox-exec）：`XMESH_TEST_L2=1 go test -race ./internal/policy ./internal/pty ./internal/exec -run L2`，其中 `Test_L2CannotConnectToControlSocket` 证明沙箱连不上控制套接字 |
-| Windows L2 联合验证 | `windows-l2-joint.yml`：开关打开的 `serve`（`Test_WindowsL2Serve*`，含 `Test_WindowsL2ServeSandboxCannotOpenControlPipe`）、`Test_WindowsManagedRunner*` 与全部 `WindowsAppContainer` 反例连续三轮 |
-| 控制面管理 | `meshadmin.yml`：`go test -race ./meshadmin ./cmd/xmesh`，带校验过的 Headscale 0.29.5 二进制运行集成场景 |
+| Windows L2 联合验证 | `windows-diagnostics.yml` 的 `joint` 手动任务：开关打开的 `serve`（`Test_WindowsL2Serve*`，含 `Test_WindowsL2ServeSandboxCannotOpenControlPipe`）、`Test_WindowsManagedRunner*` 与全部 `WindowsAppContainer` 反例连续三轮 |
+| 控制面管理 | `headscale.yml` 的 meshadmin 集成步骤：`go test -race ./meshadmin ./cmd/xmesh`，带校验过的 Headscale 0.29.5 二进制运行集成场景 |
 
 ## 门 1 · 阶段 1 工具基础
 
@@ -115,7 +115,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 
 ## 控制面管理（meshadmin）
 
-不依赖设备门，随 `meshadmin` 与 `xmesh mesh` 交付。Tailscale 一侧只用夹具（请求形状对照官方客户端），Headscale 一侧用真实 v0.29.5 二进制：本机用 `XMESH_TEST_HEADSCALE_BIN` 指向二进制即可运行，`meshadmin.yml` 在 CI 里下载并校验后运行。DERP 的真实公网探测与官方控制面联调不在自动化里，见 [运行手册](operations.md) 的“tailnet 管理”一节。
+不依赖设备门，随 `meshadmin` 与 `xmesh mesh` 交付。Tailscale 一侧只用夹具（请求形状对照官方客户端），Headscale 一侧用真实 v0.29.5 二进制：本机用 `XMESH_TEST_HEADSCALE_BIN` 指向二进制即可运行，`headscale.yml` 的 meshadmin 集成步骤在 CI 里下载并校验后运行。DERP 的真实公网探测与官方控制面联调不在自动化里，见 [运行手册](operations.md) 的“tailnet 管理”一节。
 
 | 编号 | 观察点 |
 | --- | --- |
@@ -144,7 +144,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 CTR-CTL-11 | 配对（文档、连接密码、发现、连接）、PAT、入口、审计夹具；令牌与 `secret_hash` 泄漏的反例失败；口令出现在响应里的反例失败；`PatSecret` 之外的类型没有令牌字段；审计元素含 stdout 的反例失败 |
 | CTR-CTL-14 | 后端环境变量的请求、响应夹具；`env_names` 夹具；含值的响应与状态被拒绝 |
 | CTR-CTL-15 | 运行器托管的请求、响应夹具；三种绑定方式恰好用一种；掩码以外的令牌、任务输出、未知实例状态被拒绝；配置 `ci` 段的默认值、重复 id 与重复仓库、未知账号、相对目录、配置里出现令牌都被拒绝（`Test_CTRCTL15_CIConfigDefaultsAndValidation`、`Test_CTRCTL15_CIConfigHasNoSecretFields`）；路由：没有监督器时 `not_implemented`、令牌方式绑定到改并发暂停重启重新注册再解绑的全过程且令牌不进配置不进响应、公开仓库需二次确认、三种方式恰好一种与字段校验、接管已有目录的各种拒绝原因（`Test_CTRCTL15_BindingLifecycle` 等）；账号：令牌经 GitHub 验证后只存私有文件、同一登录名换令牌、只列有管理员权限的仓库、账号被绑定占用时不能删（`Test_CTRCTL15_AccountLifecycle`）；监督器：状态机、崩溃重启、会话冲突、运行器被删除、任务中不睡眠、排空、关闭、解绑时向 GitHub 注销而接管的运行器原样保留（`internal/ci`） |
-| CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`contracts.yml`） |
+| CTR-CTL-12 | 路由表通过模式，路由编号与「方法加路径」唯一，每个能力至少一条路由，请求与响应类型都有 Go 类型与正例；TS 生成物与模式一致（`go.yml` 的 contracts 作业） |
 
 内核实现（U1）追加：
 

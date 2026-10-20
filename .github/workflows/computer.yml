@@ -1,19 +1,11 @@
 name: Computer native executor
 on:
-  push:
-    branches: [master, 'codex/**']
-    # The release gate requires native evidence at the exact tag commit,
-    # including commits whose changes are outside the native executor.
-    tags: ['v*.*.*']
-  pull_request:
-    paths: ['computer-native/**', 'internal/computer/**', 'internal/desktopbroker/**', 'cmd/xmesh/**', 'scripts/test_computer_background.py', 'ui/src/main/computer-host.ts', 'ui/src/main/update/**', 'ui/scripts/accept-computer-upgrade-macos.mjs', '.github/workflows/computer.yml']
+  workflow_call:
 permissions:
   contents: read
-concurrency:
-  group: computer-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   native:
+    timeout-minutes: 30
     env:
       # These runners provide disposable desktops for native input acceptance.
       XMESH_TEST_ALLOW_DESKTOP_INPUT: '1'

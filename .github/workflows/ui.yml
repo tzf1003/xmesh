@@ -3,27 +3,15 @@
 name: Electron UI
 
 on:
-  push:
-    paths:
-      - "ui/**"
-      - ".github/workflows/ui.yml"
-      - "api/control/v2/ts/**"
-      - "docs/contracts/control.md"
-      - "docs/contracts/schemas/**"
-  pull_request:
-    paths:
-      - "ui/**"
-      - ".github/workflows/ui.yml"
-      - "api/control/v2/ts/**"
-      - "docs/contracts/control.md"
-      - "docs/contracts/schemas/**"
+  workflow_call:
 
 defaults:
   run:
     working-directory: ui
 
 jobs:
-  unit:
+  verify:
+    timeout-minutes: 30
     # 单元测试里的假内核走 Unix 域套接字（ubuntu、macOS）和命名管道（Windows），与真实传输一致。
     strategy:
       fail-fast: false
@@ -37,13 +25,14 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      - uses: actions/setup-go@v5
+        if: runner.os != 'Linux'
+        with:
+          go-version-file: go.mod
+          cache: true
       - run: npm ci
       # 契约的 TS 生成物（api/control/v2/ts/control.ts）变了而 UI 里的副本没跟上，这里会失败。
       - run: npm run check-types
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python ../scripts/gen-onboarding-types.py --check
       - run: npm run typecheck
       - run: npm test
       - name: Release fuse profile can be applied and verified
@@ -51,30 +40,15 @@ jobs:
         run: |
           node scripts/flip-fuses.mjs --profile release
           node scripts/flip-fuses.mjs --verify --profile release
-
-  e2e:
-    # 托盘与面板的真实 Electron 端到端。Linux 托盘不在本期范围，所以只跑 Windows 与 macOS。
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - run: npm ci
-      # 构建、给 node_modules 里的 Electron 写入 test 档位的 fuses（保留 Playwright 需要的 inspect），再跑 Playwright。
-      - run: npm run test:e2e
+      - name: Electron end-to-end
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          node scripts/build-policy-test-cli.mjs
+          node scripts/flip-fuses.mjs --profile test
+          npx --no-install playwright test
       - name: Upload Playwright report
-        if: ${{ failure() }}
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ui-e2e-${{ matrix.os }}

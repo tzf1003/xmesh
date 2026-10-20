@@ -19,10 +19,11 @@ on:
       - "ui/package.json"
       - "ui/package-lock.json"
       - "ui/electron-builder.config.mjs"
-      - "ui/scripts/**"
+      - "ui/scripts/flip-fuses.mjs"
+      - "ui/scripts/verify-package.mjs"
+      - "ui/scripts/gen*icon*.mjs"
       - "ui/build/**"
       - "ui/src/main/cli.ts"
-      - "computer-native/**"
       - "scripts/package_computer.py"
   workflow_dispatch:
     inputs:
