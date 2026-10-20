@@ -105,16 +105,14 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
     calls: () => hook("calls"),
     notices: () => hook("notices"),
     openPanel: async () => {
-      let page = app.windows()[0];
-      const show = (): Promise<void> => app.evaluate(() =>
-        (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
-      );
-      if (page) await show();
-      else {
-        // First-run setup can already own the panel. Otherwise subscribe before
-        // showing it so a fast native window creation cannot escape the test.
-        [page] = await Promise.all([app.waitForEvent("window"), show()]);
-      }
+      // Subscribe before showing the panel, retaining an existing panel page.
+      const existing = app.windows()[0];
+      const [page] = await Promise.all([
+        existing ? Promise.resolve(existing) : app.waitForEvent("window"),
+        app.evaluate(() =>
+          (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
+        ),
+      ]);
       await page.waitForLoadState("domcontentloaded");
       await expect(page.getByTestId("nav-overview")).toBeVisible();
       return page;
