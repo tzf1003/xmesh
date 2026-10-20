@@ -19,7 +19,7 @@ interface BuilderConfig {
 
 /** The config reads signing and kernel settings from the environment at import time, so each variant gets its own module URL. */
 async function loadConfig(env: Record<string, string | undefined>): Promise<{ default: BuilderConfig; builderFuses: (p: Record<number, boolean>) => Record<string, boolean> }> {
-  const keys = ["XMESH_KERNEL_BIN", "CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
+  const keys = ["XMESH_KERNEL_BIN", "XMESH_COMPUTER_BIN", "CSC_LINK", "CSC_KEY_PASSWORD", "CSC_NAME", "APPLE_KEYCHAIN_PROFILE", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"];
   const saved = keys.map((k) => [k, process.env[k]] as const);
   for (const k of keys) delete process.env[k];
   Object.assign(process.env, Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)));
@@ -87,6 +87,12 @@ test("package config: kernel is bundled per platform when XMESH_KERNEL_BIN is se
   assert.deepEqual(none.default.win.extraResources, []);
 });
 
+test("package config: native executor is bundled with its platform identity", async () => {
+  const { default: cfg } = await loadConfig({ XMESH_COMPUTER_BIN: "/native/helper" });
+  assert.deepEqual(cfg.win.extraResources, [{ from: "/native/helper", to: "bin/xmesh-computer.exe" }]);
+  assert.deepEqual(cfg.mac.extraResources, [{ from: "/native/helper", to: "bin/xmesh-computer.app" }]);
+});
+
 test("package config: macOS signing and notarization are enabled only by secrets, never by default", async () => {
   const unsigned = (await loadConfig({})).default.mac;
   assert.equal(unsigned.identity, null);
@@ -104,6 +110,21 @@ test("package config: macOS signing and notarization are enabled only by secrets
   // whitespace-only secrets (an unset repository secret expands to "") do not count
   const blank = (await loadConfig({ CSC_LINK: " ", CSC_KEY_PASSWORD: "" })).default.mac;
   assert.equal(blank.identity, null);
+});
+
+test("package config: local keychain signing and notarization require explicit selection", async () => {
+  const profileOnly = (await loadConfig({ APPLE_KEYCHAIN_PROFILE: "xmesh-notary" })).default.mac;
+  assert.equal(profileOnly.identity, null);
+  assert.equal(profileOnly.notarize, false);
+  const identityOnly = (await loadConfig({ CSC_NAME: "certificate-sha1" })).default.mac;
+  assert.equal("identity" in identityOnly, false);
+  assert.equal(identityOnly.notarize, false);
+  const ready = (await loadConfig({ CSC_NAME: "certificate-sha1", APPLE_KEYCHAIN_PROFILE: "xmesh-notary" })).default.mac;
+  assert.equal("identity" in ready, false);
+  assert.equal(ready.notarize, true);
+  const blank = (await loadConfig({ CSC_NAME: " ", APPLE_KEYCHAIN_PROFILE: " " })).default.mac;
+  assert.equal(blank.identity, null);
+  assert.equal(blank.notarize, false);
 });
 
 test("xmeshBinary prefers XMESH_BIN, then the bundled kernel, then PATH", () => {

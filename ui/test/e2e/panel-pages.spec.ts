@@ -47,8 +47,7 @@ test("every page renders under the CSP without violations", async () => {
     await navigate(page, id);
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }
-  // Once a node has a config the wizard leaves the navigation; it is checked on its own below.
-  await expect(page.getByTestId("nav-setup")).toHaveCount(0);
+  await expect(page.getByTestId("nav-setup")).toBeVisible();
   expect(await violations()).toEqual([]);
 });
 
@@ -268,71 +267,6 @@ test("pages for capabilities the kernel lacks say so and send no request", async
   expect(h.kernel.requests.some((r) => r.path.startsWith("/v2/audit"))).toBe(false);
 });
 
-test("wizard: with no kernel the first page is the wizard; it writes a 0600 config and runs install then start", async () => {
-  h = await launch({ publish: false, kernel: { capabilities: ALL } });
-  const page = await h.openPanel();
-  await expect(page.getByTestId("page-setup")).toBeVisible();
-
-  await page.getByTestId("wizard-name").fill("bad name");
-  await expect(page.getByTestId("wizard-next")).toBeDisabled();
-  await page.getByTestId("wizard-name").fill("lab-1");
-  await page.getByTestId("wizard-next").click();
-
-  await h.app.evaluate(() => {
-    (globalThis as unknown as { __xmeshUiTest: { answers: { picked?: string } } }).__xmeshUiTest.answers.picked = "/home/me/work";
-  });
-  await page.getByTestId("wizard-pick-workspace").click();
-  await expect(page.getByTestId("wizard-workspace")).toHaveValue("/home/me/work");
-  await page.getByTestId("wizard-next").click();
-
-  await expect(page.getByTestId("wizard-preview")).toContainText('name: "lab-1"');
-  await page.getByTestId("wizard-run").click();
-  await expect(page.getByTestId("wizard-step-write-config")).toBeVisible();
-  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
-
-  const file = path.join(h.root, "lab-1", "xmesh.yaml");
-  const text = fs.readFileSync(file, "utf8");
-  expect(text).toContain('default_cwd: "/home/me/work"');
-  // The default deny list is written beside the config, and the config names it.
-  const denyFile = path.join(h.root, "lab-1", "cwd-deny.yaml");
-  expect(text).toContain(`deny_file: ${JSON.stringify(denyFile)}`);
-  expect(fs.readFileSync(denyFile, "utf8")).toContain('- "~/.ssh"');
-  if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-
-  const calls = (await h.calls()).filter((c) => c.op === "setup-cli");
-  expect(calls.map((c) => (c.arg as string[])[0])).toEqual(["install", "start"]);
-  expect((calls[0]!.arg as string[]).slice(1)).toEqual(["--config", file]);
-});
-
-test("wizard: a failing install is shown and start is not attempted; an existing config is never overwritten", async () => {
-  h = await launch({ publish: false });
-  const page = await h.openPanel();
-  await h.app.evaluate(() => {
-    (globalThis as unknown as { __xmeshUiTest: { answers: { cliFails: boolean } } }).__xmeshUiTest.answers.cliFails = true;
-  });
-  await page.getByTestId("wizard-name").fill("lab-2");
-  await page.getByTestId("wizard-gateway").uncheck();
-  await page.getByTestId("wizard-next").click();
-  await page.getByTestId("wizard-workspace").fill("/home/me/w");
-  await page.getByTestId("wizard-next").click();
-  await page.getByTestId("wizard-run").click();
-  await expect(page.getByTestId("wizard-failed")).toBeVisible();
-  expect((await h.calls()).filter((c) => c.op === "setup-cli").map((c) => (c.arg as string[])[0])).toEqual(["install"]);
-
-  // Same name again: the file exists now.
-  const before = fs.readFileSync(path.join(h.root, "lab-2", "xmesh.yaml"), "utf8");
-  const second = await page.evaluate(() =>
-    (window as unknown as { xmesh: { runSetup(p: unknown): Promise<{ ok: boolean; error?: { code: string } }> } }).xmesh.runSetup({
-      nodeName: "lab-2",
-      mode: "lan",
-      roles: ["gateway"],
-      workspace: "/home/me/w",
-    }),
-  );
-  expect(second.error?.code).toBe("conflict");
-  expect(fs.readFileSync(path.join(h.root, "lab-2", "xmesh.yaml"), "utf8")).toBe(before);
-});
-
 test("panel IPC refuses malformed data operations", async () => {
   const page = await open();
   // The runtime page's gateway card lists the PATs on mount. The rotate button appears once that read has
@@ -355,69 +289,6 @@ test("panel IPC refuses malformed data operations", async () => {
   });
   expect(codes).toEqual(Array(8).fill("invalid_args"));
   expect(h.kernel.requests.slice(before).some((r) => r.path.startsWith("/v2/pats") || r.path.startsWith("/v2/audit"))).toBe(false);
-});
-
-test("wizard: a pasted tailnet key lands in a 0600 file and never in the config", async () => {
-  h = await launch({ publish: false, kernel: { capabilities: ALL } });
-  const page = await h.openPanel();
-  await expect(page.getByTestId("page-setup")).toBeVisible();
-  await page.getByTestId("wizard-name").fill("tn-1");
-  await page.getByTestId("wizard-tailnet").check();
-  await page.getByTestId("wizard-next").click();
-  await page.getByTestId("wizard-workspace").fill("/home/me/work");
-  // Choose direct key input.
-  await expect(page.getByTestId("wizard-authkey-browser")).toBeChecked();
-  await page.getByTestId("wizard-authkey-paste").check();
-  const key = "tskey-auth-E2E-PASTED-KEY";
-  await page.getByTestId("wizard-authkey").fill(key);
-  await page.getByTestId("wizard-next").click();
-
-  await expect(page.getByTestId("wizard-preview")).not.toContainText(key);
-  const keyFile = path.join(h.root, "tn-1", "authkey");
-  await expect(page.getByTestId("wizard-authkey-path")).toContainText(keyFile);
-  await page.getByTestId("wizard-run").click();
-  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
-
-  expect(fs.readFileSync(keyFile, "utf8")).toBe(`${key}\n`);
-  if (process.platform !== "win32") expect(fs.statSync(keyFile).mode & 0o777).toBe(0o600);
-  const config = fs.readFileSync(path.join(h.root, "tn-1", "xmesh.yaml"), "utf8");
-  expect(config).not.toContain(key);
-  expect(config).toContain(`authkey_file: ${JSON.stringify(keyFile)}`);
-  expect(await page.content()).not.toContain(key);
-});
-
-test("wizard: automatic admission asks the CLI for a tagged key", async () => {
-  h = await launch({ publish: false, kernel: { capabilities: ALL } });
-  const page = await h.openPanel();
-  await page.getByTestId("wizard-name").fill("tn-2");
-  await page.getByTestId("wizard-tailnet").check();
-  await page.getByTestId("wizard-next").click();
-  await page.getByTestId("wizard-workspace").fill("/home/me/work");
-  await page.getByTestId("wizard-authkey-auto").check();
-  await page.getByTestId("wizard-next").click();
-  await page.getByTestId("wizard-run").click();
-  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
-  const made = (await h.calls()).find((c) => c.op === "setup-authkey");
-  expect(made?.arg).toEqual({ file: path.join(h.root, "tn-2", "authkey"), tags: ["tag:device"] });
-});
-
-test("wizard: the default browser login completes before installation", async () => {
-  h = await launch({ publish: false, kernel: { capabilities: ALL } });
-  const page = await h.openPanel();
-  await page.getByTestId("wizard-name").fill("browser-node");
-  await page.getByTestId("wizard-tailnet").check();
-  await page.getByTestId("wizard-next").click();
-  await page.getByTestId("wizard-workspace").fill("/home/me/work");
-  await expect(page.getByTestId("wizard-authkey-browser")).toBeChecked();
-  await expect(page.getByTestId("wizard-authkey")).toHaveCount(0);
-  await page.getByTestId("wizard-next").click();
-  await expect(page.getByTestId("wizard-preview")).toContainText("auth_method: browser");
-  await page.getByTestId("wizard-run").click();
-  await expect(page.getByTestId("wizard-step-start")).toBeVisible();
-  const calls = (await h.calls()).filter((c) => c.op.startsWith("setup-"));
-  expect(calls.map((c) => c.op)).toEqual(["setup-browser-login", "setup-cli", "setup-cli"]);
-  const install = calls[1]!.arg as string[];
-  expect(install.slice(-2)).toEqual(["--state-dir", path.join(h.root, "browser-node")]);
 });
 
 test("leftover kernel state: cleanup removes the manifest and keeps the node configuration", async () => {

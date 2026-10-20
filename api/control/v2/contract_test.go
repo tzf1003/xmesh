@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/api/control/v2/schemacheck"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
@@ -20,6 +21,9 @@ const schemaDir = "../../../docs/contracts/schemas"
 // typeFor maps a schema definition name to a fresh Go value of the matching type. A fixture whose
 // definition is missing here fails the test, so a new definition cannot ship without a Go type.
 var typeFor = map[string]func() any{
+	"ComputerState":           func() any { return new(v2.ComputerState) },
+	"ComputerPauseRequest":    func() any { return new(v2.ComputerPauseRequest) },
+	"ComputerRevokeRequest":   func() any { return new(v2.ComputerRevokeRequest) },
 	"ControlEndpointFile":     func() any { return new(v2.ControlEndpointFile) },
 	"StatusResponse":          func() any { return new(v2.StatusResponse) },
 	"DrainRequest":            func() any { return new(v2.DrainRequest) },
@@ -219,6 +223,24 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := map[string]bool{}
+	compiler := jsonschema.NewCompiler()
+	files, err := filepath.Glob(filepath.Join(schemaDir, "*.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(raw, &document); err != nil {
+			t.Fatal(err)
+		}
+		if err := compiler.AddResource(document["$id"].(string), document); err != nil {
+			t.Fatal(err)
+		}
+	}
 	capabilities := map[v2.Capability]bool{}
 	for _, r := range v2.Routes() {
 		if ids[r.ID] {
@@ -231,6 +253,9 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 				continue
 			}
 			def := (*ref)[strings.LastIndex(*ref, "/")+1:]
+			if _, err := compiler.Compile(*ref); err != nil {
+				t.Errorf("route %s cannot resolve %s: %v", r.ID, *ref, err)
+			}
 			if _, ok := typeFor[def]; !ok {
 				t.Errorf("route %s names %s, which has no Go type", r.ID, def)
 			}
@@ -239,7 +264,7 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 			t.Errorf("route %s is a stream and has a response type", r.ID)
 		}
 	}
-	for _, c := range []v2.Capability{v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI} {
+	for _, c := range []v2.Capability{v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer} {
 		if !capabilities[c] {
 			t.Errorf("capability %s has no route", c)
 		}
@@ -291,7 +316,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 		}
 	}
 	check("Capability", enumOf(t, "control-common.schema.json", "$defs", "Capability", "enum"),
-		sorted(v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI))
+		sorted(v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer))
 	check("Severity", enumOf(t, "control-common.schema.json", "$defs", "Severity", "enum"),
 		sorted(v2.SeverityInfo, v2.SeverityWarning, v2.SeverityError))
 	check("WarningCode", enumOf(t, "control-common.schema.json", "$defs", "WarningCode", "enum"),

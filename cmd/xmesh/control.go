@@ -27,6 +27,8 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
 
 子命令:
   status | peers | sessions       读取状态、对端、会话
+  computer [--action get|pause|resume|revoke --session-id ID]
+                                   查看桌面状态、暂停控制、恢复或撤销桌面会话
   events [--last-event-id ID] [--count N] [--timeout 时长]
                                    订阅事件流，每行一个事件（首条为 hello）；
                                    --count 把 hello 也算在内；空闲节点除 hello 外没有事件，
@@ -123,6 +125,29 @@ func controlCommand(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch verb {
+	case "computer":
+		action := flags.String("action", "get", "get、pause、resume 或 revoke")
+		id := flags.String("session-id", "", "撤销的桌面会话 ID")
+		if err := flags.Parse(rest); err != nil {
+			return err
+		}
+		c, err := target.client()
+		if err != nil {
+			return err
+		}
+		switch *action {
+		case "get":
+			return show(c.Do(ctx, "GET", "/v2/computer", nil, nil))
+		case "pause", "resume":
+			return show(c.Do(ctx, "POST", "/v2/computer/pause", v2.ComputerPauseRequest{Paused: *action == "pause"}, nil))
+		case "revoke":
+			if *id == "" {
+				return fmt.Errorf("revoke 需要 --session-id")
+			}
+			return show(c.Do(ctx, "POST", "/v2/computer/revoke", v2.ComputerRevokeRequest{SessionID: *id}, nil))
+		default:
+			return fmt.Errorf("未知桌面操作: %s", *action)
+		}
 	case "help", "--help", "-h":
 		fmt.Println(controlUsage)
 		return nil

@@ -72,16 +72,32 @@ export class ControlClient {
 
   /** Read the upgrade paths before stopping a v1 or v2 service. */
   async getUpgradePaths(): Promise<{ configFile: string; stateDir: string }> {
+    const paths = await this.upgradePaths();
+    if (typeof paths.config_file !== "string" || typeof paths.state_dir !== "string") {
+      throw new Error("无法读取升级所需的内核配置路径");
+    }
+    return { configFile: paths.config_file, stateDir: paths.state_dir };
+  }
+
+  async getUpgradeComputerEndpoint(): Promise<string | undefined> {
+    const paths = await this.upgradePaths();
+    if (paths.computer_endpoint === undefined) return undefined;
+    if (typeof paths.computer_endpoint !== "string" || paths.computer_endpoint === "") {
+      throw new Error("内核返回了无效的桌面服务端点");
+    }
+    return paths.computer_endpoint;
+  }
+
+  private async upgradePaths(): Promise<{ config_file?: unknown; state_dir?: unknown; computer_endpoint?: unknown }> {
     for (const route of ["/v2/status", "/v1/status"]) {
       const reply = await this.request("GET", route);
       if (reply.status === 404) continue;
       const major = headerValue(reply.headers, VERSION_HEADER).split(".")[0];
-      const body = reply.body as { paths?: { config_file?: unknown; state_dir?: unknown } } | null;
-      if (reply.status !== 200 || !["1", "2"].includes(major ?? "") ||
-          typeof body?.paths?.config_file !== "string" || typeof body.paths.state_dir !== "string") {
+      const body = reply.body as { paths?: { config_file?: unknown; state_dir?: unknown; computer_endpoint?: unknown } } | null;
+      if (reply.status !== 200 || !["1", "2"].includes(major ?? "") || !body?.paths || typeof body.paths !== "object" || Array.isArray(body.paths)) {
         throw new Error("无法读取升级所需的内核配置路径");
       }
-      return { configFile: body.paths.config_file, stateDir: body.paths.state_dir };
+      return body.paths;
     }
     throw new Error("内核未提供升级所需的配置路径");
   }

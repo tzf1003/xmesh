@@ -1,0 +1,94 @@
+# Computer 工具与桌面执行器
+
+状态：实现中。交付与真机验收记录见 [三端方案](../design/19-computer.md)。
+
+## 会话
+
+工具由目标 Agent 注册，只有 `agent.computer.enabled: true` 时才出现在目录中。工具名经过 Gateway 后带设备前缀。调用方只能从网络 / MCP 会话身份推导，参数里的身份字段不授予权限。
+
+| 工具 | 必填参数 | 语义 |
+| --- | --- | --- |
+| `computer.info` | 无 | 协议版本、可用状态、桌面代次、显示器、窗口 targets、default_interaction、能力 |
+| `computer.open` | `mode` | observe 或 control；可选 desktop_id、ttl_seconds、interaction、target_id；后台会话须指定 target_id |
+| `computer.observe` | session_id、desktop_epoch | 当前截图，可选 display_id、max_width、region |
+| `computer.act` | session_id、desktop_epoch、lease_token、action_id、actions | 最多八个有限动作，可选 frame_id、observe_after |
+| `computer.action_status` | session_id、desktop_epoch、action_id | 查询当前会话中已接收的动作 |
+| `computer.renew` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；可选 ttl_seconds |
+| `computer.close` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；释放输入 |
+| `computer.sessions` | 无 | 仅调用方拥有的会话 |
+
+租期默认 120 秒，范围 10–600 秒；观察会话也需要续期。会话上限默认 16，配置范围 1–32。每个会话最多缓存四张图和 128 个动作结果，全部会话共享 64 MiB 的截图缓存预算，超过预算按采集时间淘汰旧图。已过期会话立即拒绝；内核断开 caller、禁用 computer 或 kill drain 时撤销其会话。本机暂停只回收控制租约，观察会话保持有效。新的控制会话获得新的 fencing 序号。
+
+## 画面与动作
+
+截图的 `content` 包含文本元数据和原生 MCP 图片块，`structuredContent` 包含同一份元数据，图片字节不会复制到结构化对象中。frame_id 只在所属会话中有效；坐标动作使用 60 秒内的截图。桌面代次或布局改变后，旧画面不能用于输入。
+
+`capture_region` 是相对于显示器左上角的系统桌面坐标，macOS 为逻辑点，Windows / X11 为后端使用的桌面像素。模型提交图片像素坐标；转换公式为 `display_origin + capture_region_origin + image_coordinate × capture_region_size / image_size`，坐标转换在服务端完成。返回图片和显示器本身都已按当前旋转方向排列。
+
+动作类型：move、click、drag、scroll、key、text、wait。点击的 button 为 left / middle / right，clicks 最大 3；拖动最多 2 秒；每批显式等待总预算最多 4 秒，执行和排队使用五秒总预算。按键组合在同一动作中按顺序按下、反向释放。文本使用系统文字输入，正文上限 64 KiB。键盘与文本行为不借用剪贴板授权。
+
+MCP 发现返回的 schema 明确列出 mode、action type 和 button 枚举、租期 / 坐标 / 时间预算，以及不同动作的必填字段；工具描述包含图片坐标、业务结果观察和 unknown 恢复语义。文本的 `maxLength` 按 JSON Schema 规则计 Unicode 码点，仅为上界；`x-max-utf8-bytes: 65536` 标注服务端强制执行的 UTF-8 字节预算。客户端须检查编码后的字节数并拆分超长文本，通用 schema 验证通过后仍须满足该运行时限制。滚轮 delta 为离散步数，正值向右 / 向下。
+
+动作 ID 与请求内容绑定。在有效会话内，相同 ID 和相同参数返回既有结果，相同 ID 配不同参数返回 conflict。请求响应丢失后查询 action_status。executed 表示全部输入动作已提交，业务成功仍须观察确认。failed 表示已知失败，executed 数量指出完整执行的前缀；unknown 表示执行结果不能确定，应重新观察。幂等缓存为内存状态，执行器 / 内核重建后桌面代次变化，旧动作不得重放。
+
+## 授权和错误
+
+OAuth / PAT scope 按设备区分 `computer:observe:<device>` 和 `computer:control:<device>`；control 包含观察。open 的 control 模式还在参数级检查 control scope 和 Agent 的 computer.act tag 授权。剪贴板 scope 单独保留，不授予截图或输入权限。
+
+Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop_unavailable 表示执行器 / 图形会话不可用，desktop_locked 表示锁屏，permission_required 表示本机系统权限缺失。conflict 携带 reason 表达 desktop_epoch、layout_changed、stale_frame、action_id_reused。其余 not_owner、session_not_found、lease_required、resource_busy 沿用共享语义。Computer 的版本冲突使用桌面 reason，文件冲突仍使用文件 hash 和 mtime。
+
+审计记录动作 ID、会话 ID、参数键和字节数。输入正文、图片和其可猜测摘要不写入审计。完整桌面控制具有用户级 GUI 权限；文件路径策略不会自动约束 GUI。Ingress 处理工具结果，是截图数据的信任边界。
+
+前台交互模式操作目标设备的活跃用户桌面，与该设备的本机用户共用系统指针和键盘焦点。调用端访问另一台设备时，输入发生在目标设备。macOS 应用 / 窗口后台交互单独绑定目标，能力及验收状态按下述契约报告。虚拟显示器及用户介入暂停策略本身不等同于后台输入会话。
+
+macOS 执行器现在报告 `default_interaction: background`。控制会话省略 interaction 时按此默认值处理，并要求 `target_id` 来自当前 `info.targets`；观察会话省略 target 时仍采集桌面。`foreground` 需要明确选择，使用共享的系统鼠标与焦点。后台会话固定目标，观察和动作不能重新指定另一窗口。后台能力以 `background:screenshot`、`background:pointer`、`background:keyboard`、`background:text` 报告；私有接口缺失时不报告相关输入能力。
+
+默认后台的设备还要求本机配置 `agent.computer.allow_foreground: true` 才接受显式前台控制。该值默认 false，远程工具参数不能开启；本机撤销该配置会立即回收受其授权的前台会话。后台操作能力缺失时返回错误。
+
+后台拖动与滚动另以 `background:drag` 和 `background:scroll` 声明，和文字、键盘及截图能力分开报告。能力表示后端提供该路由；每个应用与动作形式仍可能返回 `background_action_unsupported`，动作后的实际结果须重新观察。
+
+后台 frame 另有 `target_id`，布局版本属于目标窗口，坐标相对返回窗口图片。执行器校验窗口归属、进程启动身份、窗口布局及会话代次，目标关闭或切换身份后旧会话失效。目标窗口移动 / 缩放后需重新观察。单次左键 / 右键优先选择目标窗口控件的 AXPress / AXShowMenu；未选到语义动作时使用上游左键单击 / 双击配方，其余形式明确返回 `background_action_unsupported`。语义动作一旦尝试，失败不再触发另一路点击。输入已经提交后出错、用户进入目标应用、窗口执行中变化、前台状态变化或取消可能返回 unknown，调用方重新观察。
+
+每个原生动作步骤同时复查录屏权限、辅助功能权限与锁屏状态；任一条件失效时停止继续投递。已经持有的键 / 按钮仍使用进程身份受限的清理路径释放。AX 全选在写入选区前再次确认焦点对象和窗口归属，避免异步界面变化后写到已失去焦点的控件。
+
+后台输入复用固定提交的 MIT Swift 代码，经内部 C ABI 静态链接进 Rust 执行器。原始来源、哈希、集成变更和兼容性验收边界见 [macOS 后端说明](../../computer-native/macos/README.md)。本机 AppKit / Electron 临时窗口已通过真实 MCP 链路的点击、中文输入、全选替换、拖动与滚动，并由独立观察进程监测系统指针和前台应用。最终线程实现同时通过同应用双窗口完全遮挡的 AppKit 目标和 Electron MCP 复测；原生拖拽执行中取消后返回 unknown 并释放按钮。原生 AppKit 在确认当前辅助功能焦点属于绑定窗口后使用直接 PID 键盘投递，Chromium / Electron 使用上游合成 key-window 流程；两类窗口的原生 Meta+Backspace、连续输入及既有操作已通过。AppKit 焦点属于另一窗口时在投递前明确返回不支持。兼容性结论限于该主机和测试窗口，其他应用和系统版本按验收记录逐项确认。
+
+`agent.computer.pause_on_user_input` 默认关闭。启用时，控制会话绑定原生执行器报告的本机输入序号；检测到其他输入来源的点击或按键后，输入执行和下一次状态检查会撤销控制并暂停。执行器的标记用于区别自己产生的事件，同用户进程不属于独立安全边界。`user_input_monitor` 为 false 时，启用该策略的控制申请返回 permission_required；不会默默放行。Wayland compositor 尚未提供全局输入监测时可使用本机接管按钮和暂停快捷键。
+
+将该策略从关闭改为启用会立即回收已有控制租约；调用方重新打开控制会话后绑定当前输入基线。本机状态读取完成桌面状态复核后才列出会话，因此同一次响应反映权限撤销及本机输入暂停。
+
+## 本机执行器通道
+
+`xmesh computer host` 在图形用户会话中运行，使用用户专用 Unix socket 或 Windows 命名管道接入目标内核，并通过匿名继承管道监督 Rust 原生执行器。此 host 不承载 Agent / Gateway / Ingress，也不接入 mesh。Windows SYSTEM 内核通过配置的用户 SID 管道连接图形会话。
+
+Unix 双方检查 peer uid，Windows 管道具有 DACL，客户端核对管道服务器进程 token 的 SID 与管道名中目标 SID 一致。每个用户桌面执行器还有排他文件锁。一条 broker 只绑定一个管理内核；内核以独立标识每两秒心跳，超过六秒没有心跳时关闭执行器并释放绑定。重建后原生执行器重新生成 desktop_epoch。
+
+本机 HTTP 请求仅使用受保护的本机传输，路径为 /v1/info、heartbeat、capture、execute、release、disconnect。原生匿名管道为每行一个 JSON 对象：请求包含 id、method、params，响应包含 id 和 result 或 error。协议版本为 1；请求限 1 MiB，响应限 8 MiB。外部 Agent 只看到 MCP。
+
+原生管道写入和等待均受上下文限制；执行器停止读取导致写入超时后，监督进程终止该执行器，后续调用经新的桌面代次重新建立权限。
+
+`xmesh computer status` 查询本机 Host 的运行状态、PID、版本和原生子进程 PID；该查询不启动执行器、不取得内核绑定。服务不存在时返回 running=false，身份检查与协议错误仍返回失败。`--state-dir` 在 Unix 上选择对应用户端点，Windows 按用户 SID 定位管道。
+
+面板桌面预览经当前 Gateway 调用同一组 MCP computer 工具，按所选设备的观察权限获取图片；每次预览创建十秒观察租约并在获取画面后关闭。手动请求或用户开启的两秒刷新均串行执行；隐藏页面暂停采集，切换节点、设备、显示器、连接代次或离开页面时取消请求并清除画面。预览不写入调用历史或持久存储，保留画面采集时间。截图和输入仍共享目标 Agent 的授权与会话管理。
+
+预览由用户显式选择具有目标设备 observe 或 control scope 的已有 PAT；令牌只由主进程根据内核报告的文件读取，页面只传凭据名称。缺少授权时引导到授权页。默认 Gateway PAT 的权限保持原配置；各凭据分别使用 MCP 会话，预览不会为了切换凭据而终止其他凭据下的调用。
+
+原生采集限制单帧最多 32 Mi 像素；在分配应用侧原始像素缓冲之前检查，覆盖 Windows、macOS、X11 和 PipeWire 路径。当前上限包含 7680×4320 的单显示器画面。
+
+`scripts/accept_computer.py --gateway 127.0.0.1:<端口> --device <目标> --token-file <本机 PAT 文件>` 对已授权的真实目标进行验收：连续两张原生 MCP 图像、有限 wait 控制动作、相同动作 ID 去重、状态查询、续租和关闭。脚本仅输出图片大小及尺寸，不保存截图或令牌；点击、文本、拖动等输入仍由隔离窗口夹具验收。
+
+桌面 UI 更新在替换安装包之前停止运行中的 Host，并确认 Host 与已知原生子进程均退出。更新记录保存是否需要恢复 Host；新应用先恢复 Host 并核对版本，再启动节点。安装交接失败时恢复已停止的 Host；恢复失败记为更新验收失败。未运行的 Host 保持停止。
+
+本机显式执行 `xmesh computer host --authorize` 请求系统权限。普通远程请求遇到未授权状态直接失败。权限初始化和自动启动仍按三端验收清单逐项验证。
+
+macOS TCC 会按启动链中的 responsible host 归属权限；直接在终端 / MCP 客户端启动 helper 的权限结果，不代表 LaunchAgent 服务已经获准。打包服务可能归属外层 `xmesh.app`，应在「隐私与安全性」的辅助功能及屏幕与系统音频录制中授权系统提示的宿主应用。helper 启动注册其应用及外层应用身份；安装路径应持久存在。临时目录里的 bundle 即使调用注册返回成功，也可能无法被系统权限页解析。验收以安装服务的实际 `info` / 截图 / 输入结果为准。
+
+`xmesh computer emergency-stop` 通过用户 Host 的受保护本机 IPC 紧急停止画面和输入，关闭当前原生执行器并拒绝后续创建。此操作独立于管理内核，暂停标记写入用户 Host 状态目录，Host 重启后继续生效。只有本机 `xmesh computer resume` 或面板恢复操作清除此状态；恢复后的执行器生成新 epoch，旧会话失效。UI 紧急快捷键同时请求内核暂停与直接 Host 停止。普通“暂停 Agent”仅暂停控制，紧急停止同时终止观察。
+
+面板紧急停止、恢复及权限初始化使用所选内核在状态中报告的有效 Host 端点。`xmesh computer setup --endpoint <本机端点> --json` 在自定义端点上只对已有 Host 发起本机授权；端点不可用时报告连接失败。套接字路径无法推导服务安装目录，因此不会为其创建另一套默认服务。默认端点仍沿用默认安装 / 启动 / 授权流程；按服务管理的自定义安装继续使用 `--state-dir`。
+
+Wayland 在同一 RemoteDesktop / ScreenCast grant 上优先请求 EIS。输入仅使用 compositor 已 resumed 的设备；画面流的 mapping_id 必须匹配 EIS region，多屏缺少映射时拒绝选择。单屏可在唯一 region 上映射逻辑坐标。每次键、按钮、滚轮或移动均提交独立 EI frame，时间使用 CLOCK_MONOTONIC；设备暂停 / 移除立即取消其可用性。控制链通过 ei_text keysym 支持组合键和 Unicode，compositor 缺少这组能力时关闭该 EIS 会话，再以新 Portal 会话使用 Notify 兼容路径；同一会话内不混用 EIS 与 Notify。info.capabilities 可报告 input:eis、input:portal 或 input:xtest，表示实际选择的 Linux 输入路径。Portal 初始化失败或超时后显式关闭已创建的会话。
+
+隔离 macOS DMG 验收还运行实际更新器的失败交接回滚与成功替换，确认 Host / 原生子进程先退出、失败后重建旧 Host，成功后恢复新版本并产生新 PID / desktop_epoch。应用入口使用无窗口回执夹具；此证据覆盖安装脚本和 Host 生命周期，系统授权延续及正式签名 / 公证另行验收。
+
+`ui/scripts/accept-computer-upgrade-macos.mjs` 可通过 `--signing-identity <证书 SHA-1>` 验证 Developer ID、嵌套代码的指定要求一致性、hardened runtime 与时间戳；`--notary-profile <钥匙串引用>` 还提交应用和 DMG 公证，验证装订和 Gatekeeper，并在真实替换后复查应用票据。凭据由 notarytool 从钥匙串读取。`--require-ready` 等待本机用户为旧 helper 授权后才开始升级，并要求新 helper 仍具有后台截图和输入能力；授权等待超时会清理测试资源，不计为授权延续通过。

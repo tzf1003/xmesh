@@ -9,6 +9,7 @@ import { useT } from "./i18n";
 import { peerKey } from "./lib/topology";
 
 export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; group: "network" | "access" | "runtime" | "advanced" | "settings" }[] = [
+  { id: "features", label: "nav.features", icon: "plus", group: "network" },
   { id: "overview", label: "topology.title", icon: "topology", group: "network" },
   { id: "devices", label: "nav.devices", icon: "device", group: "network" },
   { id: "runtime", label: "topology.operations", icon: "sliders", group: "runtime" },
@@ -16,6 +17,7 @@ export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; grou
   { id: "transfers", label: "ws.files", icon: "code", group: "runtime" },
   { id: "playground", label: "pg.title", icon: "code", group: "runtime" },
   { id: "sessions", label: "nav.sessions", icon: "terminal", group: "network" },
+  { id: "computer", label: "nav.computer", icon: "device", group: "network" },
   { id: "authz", label: "nav.authz", icon: "shield", group: "access" },
   { id: "ingress", label: "nav.ingress", icon: "globe", group: "access" },
   { id: "audit", label: "nav.audit", icon: "activity", group: "runtime" },
@@ -26,7 +28,7 @@ export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; grou
   { id: "settings", label: "nav.settings", icon: "sliders", group: "settings" },
   { id: "setup", label: "nav.setup", icon: "plus", group: "settings" },
 ];
-export const pageAvailable = (id: PageId, connected: boolean): boolean => connected || ["overview", "mesh", "about", "setup"].includes(id);
+export const pageAvailable = (id: PageId, connected: boolean): boolean => connected || ["features", "overview", "mesh", "about", "setup"].includes(id);
 
 export function CommandPalette({ snapshot, onClose, go }: { snapshot: Snapshot; onClose(): void; go(page: PageId, focus?: PageFocus): void }): JSX.Element {
   const t = useT();
@@ -35,7 +37,7 @@ export function CommandPalette({ snapshot, onClose, go }: { snapshot: Snapshot; 
   const results = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
     const c = snapshot.connection;
-    const pages = NAVIGATION.filter((n) => pageAvailable(n.id, c.kind === "connected") && (n.id !== "setup" || snapshot.instances.length === 0)).map((n) => ({ id: n.id, label: t(n.label), icon: n.icon, focus: undefined as PageFocus | undefined }));
+    const pages = NAVIGATION.filter((n) => pageAvailable(n.id, c.kind === "connected")).map((n) => ({ id: n.id, label: t(n.label), icon: n.icon, focus: undefined as PageFocus | undefined }));
     const devices = c.kind === "connected" ? c.peers.map((p) => ({ id: "overview" as const, label: p.name, icon: "device" as const, focus: { peer: peerKey(p) } as PageFocus })) : [];
     return [...devices, ...pages].filter((n) => n.label.toLocaleLowerCase().includes(q));
   }, [query, snapshot.connection, snapshot.instances.length, t]);

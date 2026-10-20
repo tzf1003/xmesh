@@ -9,6 +9,7 @@ import * as path from "node:path";
 
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
+import type { ComputerRequest, ComputerResult } from "../shared/computer";
 import type {
   AuditQuery,
   AuditResponse,
@@ -52,6 +53,7 @@ import {
 import { DENY_FILE_NAME } from "../shared/setup";
 import type { ControlClient } from "./client";
 import type { ShellController } from "./controller";
+import { resumeComputerHost, setupComputerHost } from "./computer-host";
 
 export type CapabilityClient = Pick<ShellController, "requireCapable" | "recentCalls" | "drain" | "snapshot">;
 
@@ -94,7 +96,9 @@ function toError(e: unknown): ActionError {
 }
 
 export class PanelService {
-  constructor(private readonly controller: CapabilityClient) {}
+  constructor(private readonly controller: CapabilityClient,
+    private readonly setupDesktop: (endpoint?: string) => Promise<void> = endpoint => setupComputerHost(undefined, endpoint),
+    private readonly resumeDesktop: (endpoint?: string) => Promise<void> = endpoint => resumeComputerHost(undefined, endpoint)) {}
 
   private async data<T>(capability: Parameters<CapabilityClient["requireCapable"]>[0], run: (c: ControlClient) => Promise<unknown>): Promise<DataResult<T>> {
     try {
@@ -358,6 +362,24 @@ export class PanelService {
       case "import.inspect":
         return run((c) => c.call("POST", "/v2/ci/import/inspect", { body: { dir: r.dir } }));
     }
+  }
+
+  computer(request: ComputerRequest): Promise<DataResult<ComputerResult>> {
+    return this.data("computer", async (client) => {
+      const connection = this.controller.snapshot.connection;
+      const endpoint = connection.kind === "connected" ? connection.status.paths.computer_endpoint : undefined;
+      switch (request.op) {
+        case "get": return client.call("GET", "/v2/computer");
+        case "setup": await this.setupDesktop(endpoint); return client.call("GET", "/v2/computer");
+        case "pause": {
+          // Agent pause is independent of Host availability. A suspended Host
+          // continues enforcing its own local guard if its resume fails.
+          if (!request.paused) await this.resumeDesktop(endpoint).catch(() => undefined);
+          return client.call("POST", "/v2/computer/pause", { body: { paused: request.paused } });
+        }
+        case "revoke": return client.call("POST", "/v2/computer/revoke", { body: { session_id: request.session_id } });
+      }
+    });
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {

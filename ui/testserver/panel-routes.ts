@@ -22,6 +22,7 @@ import type {
   PatList,
   PatSecret,
   SessionsResponse,
+  ComputerState,
 } from "../src/shared/control";
 import type { ConfigReloadResponse } from "../src/shared/ipc";
 import { isAccessEntry, isGatewayHost, isListen, listenPort, listenScope } from "../src/shared/gateway";
@@ -88,6 +89,7 @@ function writeTokenFile(file: string, token: string): void {
 }
 
 export class PanelData {
+  computer: ComputerState = { enabled: true, paused: false, info: { protocol_version: 1, available: true, state: "ready", desktop_id: "desktop", desktop_epoch: "epoch", layout_version: "layout", capabilities: ["screenshot", "pointer", "keyboard", "text"], displays: [{ id: "main", name: "Main display", x: 0, y: 0, width: 1920, height: 1080, scale: 1, rotation: 0 }] }, sessions: [] };
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
@@ -165,6 +167,20 @@ export class PanelData {
   handle(method: string, url: string, body: unknown, ifMatch: string | undefined): RouteResult | undefined {
     const u = new URL(url, "http://x");
     const p = u.pathname;
+    if (p === "/v2/computer" && method === "GET") return ok(this.computer);
+    if (p === "/v2/computer/pause" && method === "POST") {
+      const req = body as { paused?: unknown };
+      if (typeof req?.paused !== "boolean") return err(400, "invalid_args", "paused required", { field: "paused" });
+      this.computer.paused = req.paused;
+      if (req.paused) this.computer.sessions = [];
+      return ok(this.computer);
+    }
+    if (p === "/v2/computer/revoke" && method === "POST") {
+      const req = body as { session_id?: unknown };
+      if (typeof req?.session_id !== "string") return err(400, "invalid_args", "session_id required", { field: "session_id" });
+      this.computer.sessions = this.computer.sessions.filter((s) => s.session_id !== req.session_id);
+      return ok(this.computer);
+    }
     if (method === "GET" && p === "/v2/sessions") return ok(this.sessions);
     if (method === "GET" && p === "/v2/config") return this.getConfig();
     if (method === "PUT" && p === "/v2/config") return this.putConfig(body, ifMatch);

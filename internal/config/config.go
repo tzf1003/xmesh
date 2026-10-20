@@ -18,6 +18,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
+	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"go.yaml.in/yaml/v3"
 )
@@ -32,6 +33,16 @@ type Config struct {
 	Audit         Audit   `json:"audit"`
 	CI            CI      `json:"ci"`
 }
+
+// DefaultControlURL is the default coordination service used by setup clients.
+const DefaultControlURL = "https://controlplane.tailscale.com"
+
+// SupportsFunnel reports whether a coordination URL supports the Funnel path.
+func SupportsFunnel(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && officialControlURL(u)
+}
+
 type Node struct {
 	Name  string   `json:"name"`
 	Roles []string `json:"roles"`
@@ -143,6 +154,7 @@ type Ingress struct {
 	} `json:"oauth"`
 }
 type Agent struct {
+	Computer   computer.Settings        `json:"computer"`
 	DefaultCWD string                   `json:"default_cwd"`
 	Workspaces map[string]cwd.Workspace `json:"workspaces"`
 	CWDPolicy  cwd.Policy               `json:"cwd_policy"`
@@ -403,6 +415,13 @@ func (c *Config) Validate() error {
 			return fail("/mesh/tailnet/control_url")
 		}
 	}
+	cs := c.Agent.Computer.Effective()
+	if cs.MaxSessions < 1 || cs.MaxSessions > 32 || cs.LeaseSeconds < 10 || cs.LeaseSeconds > 600 || cs.MaxImageBytes < 1024 || cs.MaxImageBytes > 4<<20 {
+		return fail("/agent/computer: 会话数、租期或截图大小超出允许范围")
+	}
+	if ep := cs.Endpoint; ep != "" && !absAnyOS(ep) && !strings.HasPrefix(ep, `\\.\pipe\xmesh-`) {
+		return fail("/agent/computer/endpoint: 必须是本机绝对路径或命名管道")
+	}
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
 	}
@@ -460,6 +479,9 @@ func (c *Config) Validate() error {
 		}
 	}
 	for name, b := range c.Agent.Backends {
+		if name == "computer" {
+			return fail("/agent/backends/computer: 保留名称")
+		}
 		if b.ProcessCleanup != "" && b.ProcessCleanup != "tree" {
 			return fail("/agent/backends/" + name + "/process_cleanup")
 		}

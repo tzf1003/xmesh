@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -111,6 +112,12 @@ func serviceCommand(action string, args []string) error {
 				return notInstalled(serviceID)
 			}
 			return e
+		}
+		if runtime.GOOS == "darwin" && (action == "start" || action == "restart") {
+			// A manually started LaunchAgent may have RunAtLoad disabled.
+			if e = exec.Command("launchctl", "start", serviceID).Run(); e != nil {
+				return e
+			}
 		}
 	}
 	fmt.Printf("已%s服务: %s\n", map[string]string{"uninstall": "卸载", "start": "启动", "stop": "停止", "restart": "重启"}[action], serviceID)

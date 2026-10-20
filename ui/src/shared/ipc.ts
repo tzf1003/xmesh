@@ -1,3 +1,4 @@
+import type { OnboardingRequest, OnboardingResultFor } from "./onboarding";
 // The renderer receives fixed operations with validated arguments. Tool calls go
 // through the selected local Gateway and its policies; local transfer paths are
 // issued by native dialogs and represented by opaque tickets.
@@ -30,6 +31,7 @@ import type { DisplayPrefs } from "./display";
 import type { UpdatePrefs } from "./update";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { CiRequest, CiResultFor } from "./ci";
+import type { ComputerRequest, ComputerResult } from "./computer";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { TransferRequest, TransferReply } from "./transfers";
 import type { PlaygroundApi } from "./playground";
@@ -84,11 +86,13 @@ export const CHANNELS = {
   revokeDevice: "xmesh:revoke-device",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
+  onboarding: "xmesh:onboarding",
   previewSetup: "xmesh:preview-setup",
   runSetup: "xmesh:run-setup",
   pickPath: "xmesh:pick-path",
   mesh: "xmesh:mesh",
   ci: "xmesh:ci",
+  computer: "xmesh:computer",
   playground: "xmesh:playground",
   transfers: "xmesh:transfers",
 } as const;
@@ -140,6 +144,7 @@ export type PickKind = (typeof PICK_KINDS)[number];
 export interface ActionError {
   code: string;
   message: string;
+  next_action?: string;
   reason?: string;
   field?: string;
   current_etag?: string;
@@ -336,6 +341,7 @@ export interface PanelApi {
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
+  onboarding<R extends OnboardingRequest>(request: R): Promise<DataResult<OnboardingResultFor<R>>>;
   previewSetup(params: SetupParams): Promise<DataResult<SetupPreview>>;
   runSetup(params: SetupParams): Promise<DataResult<SetupReport>>;
   /** Opens the system file chooser; `path` is null when the user cancels. */
@@ -344,6 +350,7 @@ export interface PanelApi {
   mesh<R extends MeshRequest>(request: R): Promise<DataResult<MeshResultFor<R>>>;
   /** GitHub Actions runner hosting (CTR-CTL-15). Tokens go in the request once and never come back. */
   ci<R extends CiRequest>(request: R): Promise<DataResult<CiResultFor<R>>>;
+  computer(request: ComputerRequest): Promise<DataResult<ComputerResult>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -398,11 +405,13 @@ export const PANEL_API_METHODS = [
   "queryAudit",
   "getRecentCalls",
   "onCalls",
+  "onboarding",
   "previewSetup",
   "runSetup",
   "pickPath",
   "mesh",
   "ci",
+  "computer",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";
@@ -477,7 +486,7 @@ const NODE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const TAG = /^tag:[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const SCOPE_SEG = "(\\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})";
 const SCOPE = new RegExp(
-  `^(devices:read|exec:${SCOPE_SEG}|pty:${SCOPE_SEG}|fs:${SCOPE_SEG}|fs:(read|write):${SCOPE_SEG}|sys:${SCOPE_SEG}|backend:${SCOPE_SEG}:${SCOPE_SEG})$`,
+  `^(devices:read|exec:${SCOPE_SEG}|pty:${SCOPE_SEG}|fs:${SCOPE_SEG}|fs:(read|write):${SCOPE_SEG}|sys:${SCOPE_SEG}|computer:(observe|control|clipboard-read|clipboard-write):${SCOPE_SEG}|backend:${SCOPE_SEG}:${SCOPE_SEG})$`,
 );
 const ETAG = /^sha256-[0-9a-f]{64}$/;
 const FINGERPRINT = /^([0-9A-Fa-f]{2}:?){31}[0-9A-Fa-f]{2}$/;

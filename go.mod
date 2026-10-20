@@ -10,6 +10,7 @@ require (
 	github.com/kardianos/service v1.3.0
 	github.com/miekg/dns v1.1.73
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55

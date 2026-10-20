@@ -56,6 +56,12 @@ type provider struct {
 	ready      bool
 	lanIP      string
 	ts         *tsnet.Server
+	routes     map[string]tailnetRoute
+}
+
+type tailnetRoute struct {
+	direct    bool
+	relay, os string
 }
 
 type Node struct {
@@ -222,6 +228,14 @@ func (n *Node) Transport(ctx context.Context, peer mesh.Peer, oauth string) (mcp
 
 func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 	devices, _ := n.directory.Snapshot(time.Now())
+	n.mu.Lock()
+	routes := map[string]tailnetRoute{}
+	if provider := n.providers[device.Tailnet]; provider != nil {
+		for address, route := range provider.routes {
+			routes[address] = route
+		}
+	}
+	n.mu.Unlock()
 	peers := make([]mesh.Peer, 0, len(devices))
 	aliases, err := routeAliases(devices, n.name)
 	if err != nil {
@@ -239,9 +253,24 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 			online = false
 			a.State = "identity_conflict"
 		}
-		peers = append(peers, mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name})
+		peer := mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name}
+		if a.Path.Kind == device.Tailnet {
+			route := routes[pathHost(a.Path.Address)]
+			peer.Direct, peer.Relay, peer.OS = route.direct, route.relay, route.os
+		}
+		peers = append(peers, peer)
 	}
 	return peers, nil
+}
+
+func pathHost(address string) string {
+	if u, err := url.Parse(address); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		return host
+	}
+	return ""
 }
 
 // routeAliases reserves the local node and the gateway's local tool prefix.
@@ -848,6 +877,17 @@ func (n *Node) runTailnet(ctx context.Context, p *provider) error {
 			if e == nil {
 				status, e := lc.Status(ctx)
 				if e == nil {
+					routes := map[string]tailnetRoute{}
+					for _, peer := range status.Peer {
+						if peer.Online && !peer.Expired {
+							for _, ip := range peer.TailscaleIPs {
+								routes[ip.String()] = tailnetRoute{direct: peer.CurAddr != "", relay: peer.Relay, os: peer.OS}
+							}
+						}
+					}
+					n.mu.Lock()
+					p.routes = routes
+					n.mu.Unlock()
 					for _, peer := range status.Peer {
 						if !peer.Online || peer.Expired {
 							continue

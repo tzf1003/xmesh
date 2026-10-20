@@ -9,6 +9,14 @@ export interface BuiltinTool {
 }
 
 export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
+  { name: "computer.info", zh: "查询桌面与系统权限", en: "Inspect desktop and system permissions" },
+  { name: "computer.open", zh: "打开桌面会话", en: "Open a desktop session" },
+  { name: "computer.observe", zh: "获取桌面截图", en: "Observe the desktop" },
+  { name: "computer.act", zh: "执行桌面输入动作", en: "Execute desktop input actions" },
+  { name: "computer.action_status", zh: "查询桌面动作状态", en: "Query desktop action status" },
+  { name: "computer.renew", zh: "续期桌面会话", en: "Renew a desktop session" },
+  { name: "computer.close", zh: "关闭桌面会话", en: "Close a desktop session" },
+  { name: "computer.sessions", zh: "列出所属桌面会话", en: "List owned desktop sessions" },
   { name: "backend.acquire", zh: "获取后端排他租约", en: "Acquire an exclusive backend lease" },
   { name: "backend.renew", zh: "续期后端租约", en: "Renew a backend lease" },
   { name: "backend.release", zh: "释放后端租约", en: "Release a backend lease" },

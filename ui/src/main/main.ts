@@ -1,5 +1,6 @@
+import { createOnboardingService, fakeOnboarding } from "./onboarding";
 import * as path from "node:path";
-import { clipboard, dialog, Notification, app, net, powerMonitor, shell } from "electron";
+import { clipboard, dialog, Notification, app, globalShortcut, net, powerMonitor, shell } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
@@ -29,6 +30,8 @@ import { freshFakeUpdate, fakeSource } from "./update/fake";
 import { targetFor } from "./update/releases";
 import { UpdateActions } from "./update/service";
 import { kernelServices } from "./update/kernels";
+import { ComputerEmergencyTargets, ComputerUpdateTarget, computerHostServices, emergencyStopComputerHost, runComputerHost } from "./computer-host";
+import { registerComputerShortcut } from "./computer-shortcut";
 import { KernelConfigs } from "./update/kernel-configs";
 import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
@@ -135,6 +138,9 @@ async function start(): Promise<void> {
       prepare: (node: string) => kernelConfigs.prepare(node),
     }),
     ...(kernelBundled && { version: app.getVersion() }) });
+  const updateComputerTarget = new ComputerUpdateTarget(path.join(app.getPath("userData"), "computer-update-target.json"), { discover: () => discoverInstances(roots) });
+  const updateComputer = computerHostServices({ beforeStop: () => updateComputerTarget.capture(),
+    run: (command) => runComputerHost(command, undefined, updateComputerTarget.endpoint()), version: app.getVersion() });
   const updater = new Updater({
     version: TEST_MODE ? "0.1.0-beta.2" : app.getVersion(),
     packaged: app.isPackaged || TEST_MODE,
@@ -170,6 +176,7 @@ async function start(): Promise<void> {
       await updateKernels.start(node);
     },
     refreshNode: (node) => updateKernels.refresh(node),
+    ...(!TEST_MODE && kernelBundled && { stopComputer: () => updateComputer.stop(), startComputer: () => updateComputer.start() }),
     quit: () => (TEST_MODE ? void calls.push({ op: "quit" }) : app.quit()),
     openPath: (p) => shell.openPath(p),
     notify: updateNotice,
@@ -199,12 +206,14 @@ async function start(): Promise<void> {
     ...(BACKGROUND_TEST && { requestTimeoutMs: 30_000 }),
   });
 
-  const answers: { confirm: boolean; cliFails: boolean; picked?: string } = { confirm: true, cliFails: false };
+  const answers: { confirm: boolean; cliFails: boolean; picked?: string; setupWaiting?: boolean; setupConflict?: boolean } = { confirm: true, cliFails: false };
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
     : electronPlatform(showPanel, notifyError);
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
+  const computerTargets = new ComputerEmergencyTargets();
+  controller.on("change", snapshot => computerTargets.observe(snapshot));
 
   const runAction = (a: Action): void => {
     void actions.dispatch(a);
@@ -259,6 +268,7 @@ async function start(): Promise<void> {
       await runBrowserLogin(config, state, controlUrl, (url) => platform.openExternal(url));
     },
   );
+  const panelService = new PanelService(controller, TEST_MODE ? async () => { calls.push({ op: "computer-setup" }); } : undefined, TEST_MODE ? async () => { calls.push({ op: "computer-resume-host" }); } : undefined);
   const playground = new PlaygroundService(controller, {
     copy: (text) => clipboard.writeText(text),
     save: async (text) => {
@@ -288,17 +298,24 @@ async function start(): Promise<void> {
     if (key !== playgroundKey) { playgroundKey = key; transfers.reset(); void playground.close(); }
   });
   registerIpc({
+    onboarding: createOnboardingService(roots[0]!, (url) => platform.openExternal(url), TEST_MODE ? fakeOnboarding(roots[0]!, answers, calls) : undefined, (text) => clipboard.writeText(text)),
     playground,
     transfers,
     controller,
     actions,
-    service: new PanelService(controller),
-    previewSetup: (params) => previewSetup(params, setupHost),
-    setup: (params) => runSetup(params, setupHost),
+    service: panelService,
+    previewSetup: (params) => TEST_MODE ? previewSetup(params, setupHost) : { ok: false, error: { code: "setup_migrated", message: "请使用开始使用向导生成设置计划。" } },
+    setup: async (params) => TEST_MODE ? runSetup(params, setupHost) : { ok: false, error: { code: "setup_migrated", message: "请使用开始使用向导继续设置任务。" } },
     mesh: (request) => meshService.request(request),
     panel: () => (panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined),
     update: new UpdateActions(updater),
   });
+  if (!TEST_MODE) controller.setComputerShortcutAvailable(registerComputerShortcut(globalShortcut, () => {
+    const selected = controller.snapshot;
+    void panelService.computer({ op: "pause", paused: true });
+    void Promise.resolve().then(() => emergencyStopComputerHost(undefined, computerTargets.endpoint(selected)))
+      .catch((error: unknown) => notifyError(error instanceof Error ? error.message : String(error)));
+  }));
   updater.on("change", (state) => controller.setUpdate(state));
 
   let prev: Snapshot = controller.snapshot;
@@ -314,7 +331,7 @@ async function start(): Promise<void> {
     void playground.close();
     void controller.stop();
   });
-  app.on("will-quit", () => tray.destroy());
+  app.on("will-quit", () => { globalShortcut.unregisterAll(); tray.destroy(); });
 
   // After sleep or a lock the event stream is stale; do not wait for the idle timeout to notice.
   powerMonitor.on("resume", () => controller.nudge());
@@ -327,6 +344,10 @@ async function start(): Promise<void> {
 
   controller.start();
   void updater.finishPending().finally(() => updater.start());
+
+  if (discoverConfigured(roots).length === 0 && discoverInstances(roots).length === 0) {
+    showPanel();
+  }
 
   if (TEST_MODE) {
     // Reachable only from Playwright's main-process evaluate; never set in a packaged app.

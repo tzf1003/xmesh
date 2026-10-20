@@ -223,6 +223,9 @@ func updateUserTasksUnder(dir, destination, sid string, command func(...string) 
 func createUserTask(c *service.Config, sid, arguments string, register func(string, string) error) (string, error) {
 	task := userTask{XMLNS: taskNamespace, Version: "1.2", Description: c.Description}
 	task.Trigger.Enabled, task.Trigger.UserID = true, sid
+	if enabled, ok := c.Option["RunAtLoad"].(bool); ok {
+		task.Trigger.Enabled = enabled
+	}
 	task.Principal.ID, task.Principal.UserID = "CurrentUser", sid
 	task.Principal.LogonType, task.Principal.RunLevel = "InteractiveToken", "LeastPrivilege"
 	task.Settings.MultipleInstances = "IgnoreNew"

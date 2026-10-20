@@ -66,6 +66,7 @@ func startControl(d controlDeps) (stop func()) {
 	}
 	options.BackendEnv = d.backendEnv
 	if d.agent != nil {
+		options.Computer = d.agent.Computer
 		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
 	}
 	if d.ci != nil {

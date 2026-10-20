@@ -640,6 +640,56 @@
         "not_found",
         "internal"
       ]
+    },
+    {
+      "id": "control.computer.get",
+      "method": "GET",
+      "path": "/v2/computer",
+      "capability": "computer",
+      "since": "1.9",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-computer:2#/$defs/ComputerState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unavailable"
+      ]
+    },
+    {
+      "id": "control.computer.pause",
+      "method": "POST",
+      "path": "/v2/computer/pause",
+      "capability": "computer",
+      "since": "1.9",
+      "query": null,
+      "body": "urn:xmesh:schema:control-computer:2#/$defs/ComputerPauseRequest",
+      "response": "urn:xmesh:schema:control-computer:2#/$defs/ComputerState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "unavailable"
+      ]
+    },
+    {
+      "id": "control.computer.revoke",
+      "method": "POST",
+      "path": "/v2/computer/revoke",
+      "capability": "computer",
+      "since": "1.9",
+      "query": null,
+      "body": "urn:xmesh:schema:control-computer:2#/$defs/ComputerRevokeRequest",
+      "response": "urn:xmesh:schema:control-computer:2#/$defs/ComputerState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "unavailable"
+      ]
     }
   ]
 }

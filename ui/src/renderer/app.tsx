@@ -1,3 +1,6 @@
+import { Features } from "./pages/Features";
+import { useQuickCopy } from "./onboarding-copy";
+import { setupNeedsAttention } from "../shared/onboarding";
 import type { JSX } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
@@ -16,6 +19,7 @@ import { About, outcomeText } from "./pages/About";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Ci } from "./pages/Ci";
+import { Computer } from "./pages/Computer";
 import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
@@ -32,7 +36,7 @@ import { RoleSwitches } from "./role-switches";
 import { Icon } from "./icons";
 import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
-export type PageId = "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
+export type PageId = "features" | "computer" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
@@ -153,6 +157,7 @@ export function App(): JSX.Element {
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
             <UpdateStrip ctx={ctx} current={current} />
+            <SetupReminder ctx={ctx} current={current} />
             <StaleState ctx={ctx} />
             <ApplyBar
               fresh={connected ? fresh : undefined}
@@ -162,7 +167,7 @@ export function App(): JSX.Element {
               toast={push}
             />
             {(meshVisited || current === "mesh") && <div hidden={current !== "mesh"}><Mesh ctx={ctx} /></div>}
-            {current !== "mesh" && <PageSwitch key={`${snapshot.selectedInstance}:${current === "config" || current === "settings" ? configRevision : 0}`} page={current} ctx={ctx} />}
+            {current !== "mesh" && <PageSwitch key={current === "setup" ? "setup" : `${snapshot.selectedInstance}:${current === "config" || current === "settings" ? configRevision : 0}`} page={current} ctx={ctx} />}
           </main>
         </div>
       </div>
@@ -175,8 +180,6 @@ export function App(): JSX.Element {
 
 function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; connected: boolean; snapshot: Snapshot; onSelect: (p: PageId) => void }): JSX.Element {
   const t = useT();
-  // The wizard is for a node that has no config yet; once one exists, its settings live on the settings page.
-  const configured = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0;
   const [advanced, setAdvanced] = useState(false);
   useEffect(() => { if (NAVIGATION.find((n) => n.id === current)?.group === "advanced") setAdvanced(true); }, [current]);
   const item = (n: (typeof NAVIGATION)[number]): JSX.Element => <button key={n.id} type="button" class="nav-item" title={t(n.label)} data-testid={`nav-${n.id}`} aria-current={current === n.id ? "page" : undefined} disabled={!pageAvailable(n.id, connected)} onClick={() => onSelect(n.id)}><Icon name={n.icon}/><span>{t(n.label)}</span></button>;
@@ -188,7 +191,7 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
         {NAVIGATION.filter((n) => n.group === "advanced").map(item)}
       </details>
       <div class="spacer" />
-      <div class="nav-footer">{NAVIGATION.filter((n) => n.group === "settings" && (n.id !== "setup" || !configured)).map(item)}</div>
+      <div class="nav-footer">{NAVIGATION.filter((n) => n.group === "settings").map(item)}</div>
       {snapshot.instances.length > 1 && (
         <div class="node-switch">
           <label>
@@ -263,6 +266,7 @@ function UpdateStrip({ ctx, current }: { ctx: PageContext; current: PageId }): J
 function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Element {
   const t = useT();
   const c = ctx.snapshot.connection;
+  if (page === "features") return <Features ctx={ctx} />;
   if (page === "setup") return <Wizard ctx={ctx} />;
   // Updating needs no running kernel: it is how a kernel that is too old gets replaced.
   if (page === "about") return <About ctx={ctx} />;
@@ -291,6 +295,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Ingress ctx={ctx} />;
     case "ci":
       return <Ci ctx={ctx} />;
+    case "computer":
+      return <Computer ctx={ctx} />;
     case "settings":
       return <Settings ctx={ctx} onDirtyChange={ctx.setConfigDirty} />;
     case "config":
@@ -399,4 +405,24 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
       )}
     </div>
   );
+}
+
+function SetupReminder({ ctx, current }: { ctx: PageContext; current: PageId }): JSX.Element | null {
+  const copy = useQuickCopy();
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async (): Promise<void> => {
+      try {
+        const r = await getApi().onboarding({ op: "inspect" });
+        if (active && r.ok) setPending(r.data.jobs.some(setupNeedsAttention));
+      } catch { /* Keep the last known task state during a transient read failure. */ }
+      if (active) timer = setTimeout(() => void refresh(), 3000);
+    };
+    void refresh();
+    return () => { active = false; clearTimeout(timer); };
+  }, [current]);
+  if (!pending || current === "setup" || current === "features") return null;
+  return <div class="page strip"><Banner testid="setup-reminder"><div class="row"><span class="grow">{copy.existing}</span><button class="btn small" onClick={() => ctx.go("setup")}>{copy.resume}</button></div></Banner></div>;
 }

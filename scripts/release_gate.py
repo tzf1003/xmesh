@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-REQUIRED = (".github/workflows/go.yml", ".github/workflows/contracts.yml", ".github/workflows/headscale.yml")
+REQUIRED = (".github/workflows/go.yml", ".github/workflows/contracts.yml", ".github/workflows/headscale.yml", ".github/workflows/onboarding.yml", ".github/workflows/computer.yml")
 BAD = {"failure", "timed_out", "startup_failure", "action_required", "stale"}
 
 

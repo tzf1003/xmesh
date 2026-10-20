@@ -11,6 +11,9 @@ app.whenReady().then(async () => {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
+      // This dedicated hidden test app needs a rendering surface without a
+      // mapped X11 window so actionability checks receive animation frames.
+      offscreen: process.platform === "linux",
     },
   });
   await window.loadFile(require("node:path").join(__dirname, "page.html"));

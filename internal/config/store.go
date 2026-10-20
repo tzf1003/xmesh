@@ -20,7 +20,7 @@ import (
 //
 // /node/roles is on the list for the roles that cannot start or stop in process; the roles in
 // HotRoles come and go with the generation and are not part of what needs a restart.
-var RestartPaths = []string{"/node/name", "/node/roles", "/mesh", "/audit", "/agent/policy/windows_appcontainer"}
+var RestartPaths = []string{"/node/name", "/node/roles", "/mesh", "/audit", "/agent/policy/windows_appcontainer", "/agent/computer/endpoint"}
 
 // HotRoles are the node roles that a running process starts and stops itself when node.roles
 // changes, without touching the network or the other roles.
@@ -264,6 +264,7 @@ func (s *Store) load(b []byte, e error) (*Config, bool) {
 	}
 	c.Audit = s.startup.Audit
 	c.Agent.Policy.WindowsAppContainer = s.startup.Agent.Policy.WindowsAppContainer
+	c.Agent.Computer.Endpoint = s.startup.Agent.Computer.Endpoint
 	s.current = c
 	s.seen = digest
 	if len(s.restart) == 0 {

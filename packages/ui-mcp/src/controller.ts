@@ -40,6 +40,7 @@ interface Session {
   >;
   active?: string;
   closed: boolean;
+  initializing: boolean;
   closing?: Promise<void>;
   processes: OwnedProcess[];
   exitCleanup?: Promise<void>;
@@ -217,7 +218,7 @@ export class Controller {
       for (const s of this.sessions.values())
         if (
           s.closed ||
-          (!s.active && Date.now() - s.lastUse > config.limits.session_idle_ms)
+          (!s.initializing && !s.active && Date.now() - s.lastUse > config.limits.session_idle_ms)
         )
           void this.closeSession(s.id).catch(() => {});
     }, 1000);
@@ -384,6 +385,7 @@ export class Controller {
         releases,
         pending: new Map(),
         closed: false,
+        initializing: true,
         processes: child.pid
           ? [ownProcess(child.pid, process.platform !== "win32")]
           : [],
@@ -405,6 +407,7 @@ export class Controller {
       child.stderr?.on("data", stdout);
       child.on("error", () => this.exited(s));
       child.on("exit", () => this.exited(s));
+      let openTimer: NodeJS.Timeout | undefined;
       try {
         const opened = await Promise.race([
           this.rpc(s, "open", {
@@ -414,20 +417,24 @@ export class Controller {
             config: this.config,
           }),
           new Promise<never>((_, reject) => {
-            const timer = setTimeout(
+            // Electron launch, fixture initialization and first-window readiness
+            // have separate deadlines. The whole workflow needs their budget.
+            openTimer = setTimeout(
               () =>
                 reject(
                   new UIError(
                     "preflight_failed",
-                    "application launch exceeded 30 seconds",
+                    "application initialization exceeded 90 seconds",
                   ),
                 ),
-              30000,
+              90000,
             );
-            timer.unref();
+            openTimer.unref();
           }),
         ]);
         s.versions = opened.versions;
+        s.initializing = false;
+        s.lastUse = Date.now();
         return {
           protocol_version: 1,
           instance_id: this.instance_id,
@@ -441,6 +448,8 @@ export class Controller {
       } catch (error) {
         await this.stop(s);
         throw error;
+      } finally {
+        clearTimeout(openTimer);
       }
     } catch (error) {
       if (!assigned) for (const release of releases) release();

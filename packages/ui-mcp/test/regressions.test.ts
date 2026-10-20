@@ -11,6 +11,34 @@ import { Locks } from "../src/locks.js";
 import { ownProcess, terminateProcesses } from "../src/processes.js";
 import { cleanup, config } from "./helpers.js";
 
+test("idle cleanup starts only after initialization completes", async (t) => {
+  const c = config();
+  c.limits.session_idle_ms = 60000;
+  const controller = new Controller(c);
+  const state = controller as any;
+  let now = 70000;
+  t.mock.method(Date, "now", () => now);
+  const closed: string[] = [];
+  t.mock.method(controller, "closeSession", async (id: string) => { closed.push(id); });
+  const session: any = { id: "s_initializing", initializing: true, closed: false, lastUse: 0 };
+  state.sessions.set(session.id, session);
+  try {
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal(closed.length, 0);
+    session.initializing = false;
+    session.lastUse = now;
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.equal(closed.length, 0);
+    now += 60001;
+    await new Promise((r) => setTimeout(r, 1100));
+    assert.ok(closed.includes(session.id));
+  } finally {
+    state.sessions.delete(session.id);
+    await controller.close();
+    cleanup(c);
+  }
+});
+
 test("failed exit cleanup retains locks and a later close retries termination", async (t) => {
   const c = config();
   const controller = new Controller(c);

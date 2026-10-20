@@ -1,4 +1,5 @@
 import { FakeWorkspace } from "./workspace";
+import { FakeComputer } from "./computer";
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -10,6 +11,8 @@ import type { ToolDescriptor } from "../src/shared/playground";
 export class FakePlayground {
   url = "";
   workspace?: FakeWorkspace;
+  desktop?: FakeComputer;
+  enableDesktop(): FakeComputer { this.desktop = new FakeComputer(); this.tools.push(...this.desktop.tools()); return this.desktop; }
   enableWorkspace(): FakeWorkspace { this.workspace = new FakeWorkspace(); this.tools.push(...this.workspace.tools()); return this.workspace; }
   readonly calls: { name: string; args: Record<string, unknown>; origin?: string }[] = [];
   readonly sessions = new Map<string, { transport: StreamableHTTPServerTransport; server: Server }>();
@@ -21,7 +24,7 @@ export class FakePlayground {
     { name: "local/demo.slow", description: "Slow operation", inputSchema: { type: "object" } },
   ];
   private http = http.createServer((req, res) => { void this.handle(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); }); });
-  constructor(private readonly token: () => string | undefined) {}
+  constructor(private readonly token: () => string | string[] | undefined) {}
   async start(): Promise<void> {
     await new Promise<void>((resolve) => this.http.listen(0, "127.0.0.1", resolve));
     this.url = `http://127.0.0.1:${(this.http.address() as { port: number }).port}/mcp`;
@@ -33,7 +36,9 @@ export class FakePlayground {
     await new Promise<void>((resolve) => this.http.close(() => resolve()));
   }
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (req.headers.authorization !== `Bearer ${this.token()}`) { res.writeHead(401).end(); return; }
+    const expected = this.token();
+    const tokens = Array.isArray(expected) ? expected : [expected];
+    if (!tokens.some((token) => token !== undefined && req.headers.authorization === `Bearer ${token}`)) { res.writeHead(401).end(); return; }
     const session = req.headers["mcp-session-id"];
     const existing = typeof session === "string" ? this.sessions.get(session) : undefined;
     if (existing) { await existing.transport.handleRequest(req, res); return; }
@@ -44,6 +49,7 @@ export class FakePlayground {
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       const name = request.params.name, args = request.params.arguments ?? {};
       this.calls.push({ name, args, origin });
+      if (this.desktop && name.startsWith("local/computer.")) return this.desktop.call(name.slice("local/computer.".length), args);
       let body: Record<string, unknown>;
       let isError = false;
       if (name === "tools.search") {

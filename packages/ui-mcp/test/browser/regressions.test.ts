@@ -298,13 +298,63 @@ test("response assertions bind to the latest action and selected page", async ()
   }
 });
 
+test("navigation policy waits for target interception before popup transmission", async () => {
+  const c = config();
+  let hits = 0;
+  const outside = http.createServer((_req, res) => { hits++; res.end("outside"); });
+  await new Promise<void>(resolve => outside.listen(0, "127.0.0.1", resolve));
+  const outsideUrl = `http://127.0.0.1:${(outside.address() as any).port}`;
+  const allowed = http.createServer((req, res) => {
+    if (req.url === "/redirect") res.writeHead(302, { Location: outsideUrl });
+    res.end("allowed");
+  });
+  await new Promise<void>(resolve => allowed.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(allowed.address() as any).port}`;
+  const send = WebSocket.prototype.send;
+  const timers = new Set<NodeJS.Timeout>();
+  WebSocket.prototype.send = function(data) {
+    if (typeof data === "string" && JSON.parse(data).method === "Fetch.enable" && JSON.parse(data).sessionId) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (this.readyState === WebSocket.OPEN) send.call(this, data);
+      }, 200);
+      timers.add(timer);
+    } else send.call(this, data);
+  };
+  const driver = new Driver({ config: c, environment: { driver: "web", url,
+    allowed_origins: [url], executable: executable() }, session_dir: c.state_dir }, () => {});
+  try {
+    await driver.open();
+    for (const address of [outsideUrl, url + "/redirect"]) {
+      const popupEvent = driver.page.waitForEvent("popup");
+      await driver.page.evaluate(address => window.open(address), address);
+      const popup = await popupEvent;
+      await popup.waitForLoadState().catch(() => {});
+      assert.equal(hits, 0, "popup document reached a disallowed origin before interception was ready");
+      await popup.close();
+    }
+  } finally {
+    WebSocket.prototype.send = send;
+    for (const timer of timers) clearTimeout(timer);
+    await driver.close();
+    await new Promise<void>(resolve => outside.close(() => resolve()));
+    await new Promise<void>(resolve => allowed.close(() => resolve())); cleanup(c);
+  }
+});
+
 test("navigation policy allows subresources and denies off-origin documents", async () => {
   let hits = 0,
     frameRedirects = 0,
     posts = 0,
     finalPosts = 0;
+  const outsideRequests: string[] = [];
   const outside = http.createServer((req, res) => {
-    hits++;
+    const destination = req.headers["sec-fetch-dest"];
+    outsideRequests.push(`${req.method} ${req.url} ${destination ?? "unknown"}`);
+    // Subresources (including a popup's favicon) remain permitted. Count only
+    // document navigations when checking the origin restriction.
+    // Unclassified requests also count, so missing metadata fails closed.
+    if (destination !== "empty" && destination !== "image") hits++;
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.end("outside");
   });
@@ -371,6 +421,16 @@ test("navigation policy allows subresources and denies off-origin documents", as
       "outside",
     );
     const allowedHits = hits;
+    // Image requests, such as a popup's favicon, are permitted subresources.
+    // Wait for completion before testing the document-navigation boundary.
+    await driver.page.evaluate((address) => new Promise<void>((resolve) => {
+      const image = new Image();
+      image.onload = image.onerror = () => resolve();
+      image.src = address + "/fixture-icon";
+      document.body.append(image);
+    }), outsideUrl);
+    assert.ok(outsideRequests.some(request => request.includes("/fixture-icon image")), JSON.stringify(outsideRequests));
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const forbidden = await driver.context.newPage();
     await assert.rejects(forbidden.goto(outsideUrl), /ERR_BLOCKED_BY_CLIENT/);
     await forbidden.close();
@@ -380,18 +440,18 @@ test("navigation policy allows subresources and denies off-origin documents", as
       document.body.append(frame);
     }, outsideUrl);
     await new Promise((r) => setTimeout(r, 100));
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const redirect = await driver.context.newPage();
     await assert.rejects(
       redirect.goto(`${url}/redirect`),
       /ERR_BLOCKED_BY_CLIENT/,
     );
     await redirect.close();
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const chain = await driver.context.newPage();
     await assert.rejects(chain.goto(`${url}/chain`), /ERR_BLOCKED_BY_CLIENT/);
     await chain.close();
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     const good = await driver.context.newPage();
     await good.goto(`${url}/good`);
     assert.equal(good.url(), `${url}/`);
@@ -404,7 +464,7 @@ test("navigation policy allows subresources and denies off-origin documents", as
     );
     const popup = await popupEvent;
     await popup.waitForLoadState().catch(() => {});
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     await popup.close();
     const allowedPopupEvent = driver.page.waitForEvent("popup");
     await driver.page.evaluate(
@@ -426,7 +486,7 @@ test("navigation policy allows subresources and denies off-origin documents", as
     );
     await until(() => frameRedirects === 1);
     await new Promise((r) => setTimeout(r, 100));
-    assert.equal(hits, allowedHits);
+    assert.equal(hits, allowedHits, JSON.stringify(outsideRequests));
     await good.evaluate((address) => {
       const form = document.createElement("form");
       form.method = "POST";

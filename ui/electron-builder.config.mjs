@@ -5,23 +5,26 @@
 // Bundled kernel: the Go binary for the same OS/arch is shipped as resources/bin/xmesh[.exe] and the
 // tray finds it there (src/main/cli.ts). ui-package.yml builds it with the same flags as release.yml.
 //
-// Signing is opt-in and only ever driven by environment variables that CI maps from repository secrets:
+// Signing is opt-in through environment variables; CI maps them from repository secrets:
 //   Windows  CSC_LINK + CSC_KEY_PASSWORD            (Authenticode certificate, .pfx / base64)
 //   macOS    CSC_LINK + CSC_KEY_PASSWORD            (Developer ID Application certificate)
 //            APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID   (notarization)
+//   Local Mac CSC_NAME=<certificate SHA-1> + APPLE_KEYCHAIN_PROFILE=<notarytool profile>
 // Without them the build is unsigned and still succeeds.
 
 import { FuseV1Options } from "@electron/fuses";
 import { profiles } from "./scripts/fuses.config.mjs";
 
 const kernel = process.env.XMESH_KERNEL_BIN;
+const computer = process.env.XMESH_COMPUTER_BIN;
 if (!kernel && /electron-builder/.test(process.argv[1] ?? "")) {
   console.warn("XMESH_KERNEL_BIN is not set: the package will not bundle the xmesh kernel and falls back to PATH");
 }
 
 const hasValue = (name) => (process.env[name] ?? "").trim() !== "";
-const macSigning = hasValue("CSC_LINK") && hasValue("CSC_KEY_PASSWORD");
-const macNotarize = macSigning && hasValue("APPLE_ID") && hasValue("APPLE_APP_SPECIFIC_PASSWORD") && hasValue("APPLE_TEAM_ID");
+const macSigning = (hasValue("CSC_LINK") && hasValue("CSC_KEY_PASSWORD")) || hasValue("CSC_NAME");
+const macNotarize = macSigning && (hasValue("APPLE_KEYCHAIN_PROFILE") ||
+  (hasValue("APPLE_ID") && hasValue("APPLE_APP_SPECIFIC_PASSWORD") && hasValue("APPLE_TEAM_ID")));
 
 /** scripts/fuses.config.mjs is the single source of truth; electron-builder wants camelCase names. */
 export function builderFuses(profile) {
@@ -35,6 +38,7 @@ export function builderFuses(profile) {
 }
 
 const bundledKernel = (to) => (kernel ? [{ from: kernel, to }] : []);
+const bundledComputer = (to) => computer ? [{ from: computer, to }] : [];
 
 export default {
   appId: "app.xmesh.ui",
@@ -57,7 +61,7 @@ export default {
 
   win: {
     target: [{ target: "nsis" }],
-    extraResources: bundledKernel("bin/xmesh.exe"),
+    extraResources: [...bundledKernel("bin/xmesh.exe"), ...bundledComputer("bin/xmesh-computer.exe")],
   },
   nsis: {
     // build/installer.nsh replaces the image-name kill of running xmesh.exe with a check limited to this install's folder.
@@ -79,7 +83,7 @@ export default {
     // identity: null keeps electron-builder from picking a keychain identity or failing on a runner without one.
     ...(macSigning ? {} : { identity: null }),
     notarize: macNotarize,
-    extraResources: bundledKernel("bin/xmesh"),
+    extraResources: [...bundledKernel("bin/xmesh"), ...bundledComputer("bin/xmesh-computer.app")],
   },
   dmg: { sign: false },
 };
