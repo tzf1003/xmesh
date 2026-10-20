@@ -103,13 +103,22 @@ npm start             # 另开终端，启动 Electron
 
 控制接口连接失败且状态文件记录的 PID 已退出时，面板和托盘提供「清理残留状态」。清理只移除 `control.json`，保留节点配置；有配置的节点可使用「启动内核」。清理将状态文件原子移入临时目录，重新检查进程和文件内容后删除；若捕获到新内核的文件则恢复，并保留同时发布的更新文件。系统服务状态提示由管理员清理。PID 无法确认或被复用时仍按「内核无响应」处理。
 
+
+## 紧凑托盘面板
+
+点击系统托盘图标打开 400 × 580 DIP 的自定义浮层，右键打开更多操作。面板包括概览、设备、服务、活动四页，支持设备搜索、连接配置复制、暂停 / 恢复、节点切换、登录启动和内核维护。主题跟随系统，字体与缩放复用显示偏好。
+
+主窗口与浮层共用一条内核事件连接。停止 / 重启先显示当前节点和任务影响，确认后再次校验目标；退出界面保留后台内核。连接配置包含访问凭据，令牌由主进程直接写入剪贴板。
+
+实现及兼容说明见 [自定义紧凑托盘面板](../docs/design/20-tray-popover.md)。需要原生菜单时可设置 `XMESH_TRAY_UI=native`；Wayland 默认使用该兼容路径。
+
 ## 安全约束与对应的测试
 
 | 约束 | 实现 | 断言 |
 | --- | --- | --- |
 | `contextIsolation`、`sandbox`、无 `nodeIntegration`、无 webview | `policy.ts` 的 `panelWebPreferences` | `test/unit/security.test.ts`；端到端里渲染进程 `typeof require / process / Buffer` 均为 `undefined` |
 | 预加载只暴露白名单 | `src/preload/index.ts`，名单在 `shared/ipc.ts` 的 `PANEL_API_METHODS` | `test/unit/preload.test.ts` 对着假 `electron` 加载预加载；端到端检查 `window.xmesh` 的键且已冻结 |
-| IPC 只接受面板的顶层页面 | `ipc.ts` 的 `isTrustedSender` | 单元测试覆盖判定；端到端里用同一预加载开第二个窗口调用 `drain()`，被拒绝且内核没收到请求 |
+| IPC 分别认可登记的主窗口和托盘顶层页面 | `ipc.ts` 的 `isTrustedSender`、`tray-ipc.ts` 的独立校验 | 单元测试覆盖判定；端到端里用同一预加载开第二个窗口调用 `drain()`，被拒绝且内核没收到请求 |
 | IPC 参数校验 | `shared/ipc.ts` 的 `parse*` | `test/unit/ipc.test.ts`；端到端传非法参数得到 `invalid_args` |
 | 严格 CSP，只加载打包页面 | `policy.ts` 的 `PANEL_CSP`，`app://panel` 响应头带上 | 单元测试逐指令检查无 `unsafe-*`、无远程源；端到端里内联脚本、`eval`、远程脚本都被拦并触发 `securitypolicyviolation` |
 | 禁止导航与新窗口 | `window.ts` 的 `hardenWebContents`，对所有 `WebContents` 生效 | 端到端：改 `location`、`window.open` 都无效，页面不重载，窗口数仍为 1 |

@@ -6,7 +6,8 @@ import { afterEach, beforeEach, test } from "node:test";
 import { ShellController } from "../../src/main/controller";
 import { discoverConfigured, discoverInstances } from "../../src/main/discovery";
 import type { Snapshot } from "../../src/shared/state";
-import { peerNamed, peersFixture, warningOf } from "../../testserver/fixtures";
+import { eventFixture, peerNamed, peersFixture, warningOf } from "../../testserver/fixtures";
+import type { CallEvent } from "../../src/shared/control";
 import { FakeKernel } from "../../testserver/server";
 
 let root: string;
@@ -394,4 +395,29 @@ test("a reachable incompatible kernel stays a mismatch even when the manifest PI
   const s = await until(c, (s) => s.connection.kind === "mismatch", "reachable incompatible kernel");
   assert.deepEqual(s.staleNodes, []);
   assert.deepEqual(k.requests, []);
+});
+
+test("recent activity retains the event envelope, caps history, and resets for a new kernel boot", async () => {
+  const k = await kernel();
+  k.writeManifest(root, "n1");
+  const c = controller();
+  c.start();
+  await ready(c, k);
+  const waitForActivity = async (length: number): Promise<void> => {
+    const end = Date.now() + 3000;
+    while (c.recentActivity.length !== length && Date.now() < end) await new Promise(r => setTimeout(r, 5));
+    assert.equal(c.recentActivity.length, length);
+  };
+  const data = eventFixture<CallEvent>("call").data;
+  for (let i = 0; i < 105; i++) k.emit("call", data);
+  await waitForActivity(100);
+  assert.equal(c.recentCalls.length, 100);
+  assert.equal(c.recentActivity[0]?.instanceId, "n1");
+  assert.ok(c.recentActivity[0]?.eventId.startsWith(`${k.manifest().boot_id}.`));
+  assert.ok(Number.isFinite(Date.parse(c.recentActivity[0]!.time)));
+  const priorBoot = k.manifest().boot_id;
+  k.restartBoot(); k.writeManifest(root, "n1");
+  await until(c, connectedWith(x => x.status.control.boot_id !== priorBoot), "new boot");
+  assert.deepEqual(c.recentActivity, []);
+  assert.deepEqual(c.recentCalls, []);
 });

@@ -133,6 +133,7 @@ export class Actions {
    * reports right now, so the page cannot make the clipboard carry anything else.
    */
   async copyGateway(kind: GatewayCopyKind, url: string): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
     const gateway = this.gatewayStatus();
     if (gateway === undefined) return fail("unavailable", "no gateway address");
     const known = gateway.url === url || gateway.addresses.some((a) => a.url === url);
@@ -142,6 +143,10 @@ export class Actions {
       token = await this.credentials.read();
     } catch (e) {
       return fail("token_unavailable", e instanceof Error ? e.message : String(e));
+    }
+    const current = this.controller.snapshot;
+    if (selected.selectedInstance !== current.selectedInstance || selected.connection.kind !== "connected" || current.connection.kind !== "connected" || selected.connection.status.control.boot_id !== current.connection.status.control.boot_id) {
+      return fail("conflict", "The selected kernel changed; copy the connection again.");
     }
     const text = clipboardText(kind, url, token);
     if (text === undefined) return fail("token_unavailable", "token is not usable");
@@ -176,6 +181,8 @@ export class Actions {
   }
 
   async stopKernel(): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
+    const bootId = selected.connection.kind === "connected" ? selected.connection.status.control.boot_id : null;
     const c = this.controller.snapshot.connection;
     const busy = c.kind === "connected" ? ciCounts(c.status.ci?.bindings).busy : 0;
     const yes = await this.platform.confirm({
@@ -184,7 +191,16 @@ export class Actions {
       confirmLabel: this.t("dialog.stopKernel.confirm"),
       cancelLabel: this.t("dialog.cancel"),
     });
-    return yes ? this.runCli("stop", this.selectedNode()) : ok;
+    return yes ? this.confirmedLifecycle("stop-kernel", selected.selectedInstance, bootId) : ok;
+  }
+
+  /** Called after the tray's one-time confirmation or the native fallback confirmation. */
+  confirmedLifecycle(type: "stop-kernel" | "restart-kernel", instance: string, bootId: string | null): Promise<ActionResult> {
+    const snap = this.controller.snapshot;
+    if (snap.selectedInstance !== instance || snap.connection.kind !== "connected" || snap.connection.status.control.boot_id !== bootId) {
+      return Promise.resolve(fail("conflict", "The selected kernel changed; refresh and try again."));
+    }
+    return this.runCli(type === "stop-kernel" ? "stop" : "restart", instance || undefined);
   }
 
   /** Starts the service of a node whose config exists but whose kernel is not running. */

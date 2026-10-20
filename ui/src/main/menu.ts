@@ -164,6 +164,7 @@ export function buildMenu(snap: Snapshot, t: Translate): MenuItemSpec[] {
         action: { type: "set-login-item", enabled: !snap.settings.loginItem },
       },
       item("settings.restartKernel", t("menu.restartKernel"), { type: "restart-kernel" }, c.kind === "connected"),
+      item("settings.help", t("menu.help"), { type: "open-external", key: "docs" }),
     ],
   });
 
