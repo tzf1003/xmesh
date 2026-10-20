@@ -14,6 +14,7 @@ export function KernelManager({ ctx }: { ctx: PageContext }): JSX.Element {
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState<{ op: KernelOperation; node: string; name: string }>();
   const selected = nodes.find((n) => n.id === chosen) ?? nodes.find((n) => n.id === ctx.snapshot.selectedInstance) ?? nodes[0];
+  const updating = ctx.snapshot.update.phase === "downloading" || ctx.snapshot.update.phase === "installing";
 
   const refresh = async (): Promise<void> => {
     setBusy("list");
@@ -54,7 +55,7 @@ export function KernelManager({ ctx }: { ctx: PageContext }): JSX.Element {
       {!selected.managed && <Banner kind="warn">{t("kernel.admin")}</Banner>}
       <div class="row" style={{ flexWrap: "wrap" }}>
         {KERNEL_OPERATIONS.map((op) => <button key={op} type="button" class={`btn ${op === "uninstall" ? "danger" : ""}`}
-          data-testid={`kernel-op-${op}`} disabled={!!busy || !selected.managed || ((op === "install" || op === "start") && selected.running) || (op === "stop" && !selected.running)}
+          data-testid={`kernel-op-${op}`} disabled={updating || !!busy || !selected.managed || ((op === "install" || op === "start") && selected.running) || (op === "stop" && !selected.running)}
           onClick={() => op === "install" || op === "start" ? void run(op, selected.id) : setConfirm({ op, node: selected.id, name: selected.name })}>{t(`kernel.${op}`)}</button>)}
       </div>
     </>}

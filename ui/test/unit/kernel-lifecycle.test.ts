@@ -119,11 +119,37 @@ test("a second request cannot race service replacement on the same node", async 
   const service = new KernelLifecycle({ targets: () => [target], resolve: async () => { await blocked; return target; },
     run: async () => ({ code: 0, stdout: "", stderr: "" }), changed: () => undefined });
   const first = service.request({ op: "install", node: target.id });
+  assert.equal(service.busy, true);
   const second = await service.request({ op: "uninstall", node: target.id });
   assert.equal(second.ok, false);
   if (!second.ok) assert.equal(second.error.code, "busy");
   release();
   assert.equal((await first).ok, true);
+  assert.equal(service.busy, false);
+});
+
+test("updates block all mutations while leaving node discovery available", async () => {
+  const { target } = fixture();
+  const service = new KernelLifecycle({ targets: () => [target], blocked: () => true,
+    resolve: async () => { throw new Error("must not resolve during update"); },
+    run: async () => { throw new Error("must not execute during update"); }, changed: () => undefined });
+  for (const op of ["install", "uninstall", "reinstall", "start", "stop", "restart"]) {
+    const result = await service.request({ op, node: target.id });
+    assert.ok(!result.ok && result.error.code === "busy");
+    assert.equal(service.busy, false);
+  }
+  assert.equal((await service.request({ op: "list" })).ok, true);
+});
+
+test("Windows saved custom paths survive case differences after shutdown", { skip: process.platform !== "win32" }, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-case-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const paths = { configFile: path.join(root, "custom.yaml"), stateDir: path.join(root, "office").toUpperCase() };
+  fs.mkdirSync(paths.stateDir);
+  fs.writeFileSync(paths.configFile, "custom configuration");
+  const targets = discoverKernelTargets([root], () => paths, [], ["office"]);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0]?.configFile, paths.configFile);
 });
 
 test("restart targets the original registration after a configuration rename", async () => {

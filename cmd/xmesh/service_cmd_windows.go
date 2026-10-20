@@ -12,6 +12,7 @@ import (
 
 	"github.com/kardianos/service"
 	"github.com/tzf1003/xmesh/internal/app"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"golang.org/x/sys/windows"
 )
@@ -115,7 +116,7 @@ func taskStateDir(document, serviceID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	state := ""
+	state, configFile := "", ""
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -129,18 +130,40 @@ func taskStateDir(document, serviceID string) (string, error) {
 			state = args[i]
 		} else if strings.HasPrefix(arg, "--state-dir=") || strings.HasPrefix(arg, "-state-dir=") {
 			state = strings.SplitN(arg, "=", 2)[1]
+		} else if arg == "--config" || arg == "-config" {
+			i++
+			if i == len(args) {
+				return "", fmt.Errorf("登录任务的 --config 需要文件")
+			}
+			configFile = args[i]
+		} else if strings.HasPrefix(arg, "--config=") || strings.HasPrefix(arg, "-config=") {
+			configFile = strings.SplitN(arg, "=", 2)[1]
 		}
+	}
+	resolve := func(value string) (string, error) {
+		if filepath.IsAbs(value) {
+			return value, nil
+		}
+		if task.Actions.Exec.WorkingDirectory == "" {
+			return "", fmt.Errorf("登录任务的相对路径需要 WorkingDirectory")
+		}
+		return filepath.Join(task.Actions.Exec.WorkingDirectory, value), nil
 	}
 	if state == "" {
+		if configFile != "" {
+			file, err := resolve(configFile)
+			if err != nil {
+				return "", err
+			}
+			cfg, err := config.Load(file)
+			if err != nil {
+				return "", err
+			}
+			return app.StateDir(cfg.Node.Name)
+		}
 		return app.StateDir(strings.TrimPrefix(serviceID, "xmesh-"))
 	}
-	if !filepath.IsAbs(state) {
-		if task.Actions.Exec.WorkingDirectory == "" {
-			return "", fmt.Errorf("登录任务的相对状态目录需要 WorkingDirectory")
-		}
-		state = filepath.Join(task.Actions.Exec.WorkingDirectory, state)
-	}
-	return state, nil
+	return resolve(state)
 }
 
 // waitKernelExit returns once the process that wrote e has exited. control.json outlives a

@@ -9,6 +9,14 @@ import (
 	"testing"
 )
 
+func TestMigrationMissingLaunchAgentIsNotInstalled(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, err := readInstalledMigrationPaths("xmesh-missing")
+	if !os.IsNotExist(err) {
+		t.Fatalf("expected missing registration, got %v", err)
+	}
+}
+
 func TestMigrationReadsActualLaunchAgentPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

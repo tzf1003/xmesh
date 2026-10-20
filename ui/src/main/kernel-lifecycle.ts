@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ControlClient } from "./client";
 import { discoverConfigured, discoverInstances, kernelGone, protectedStateRoots, type Instance } from "./discovery";
-import type { CliRun } from "./cli";
+import { sameKernelPath, type CliRun } from "./cli";
 import type { DataResult } from "../shared/ipc";
 import { parseInstanceId } from "../shared/ipc";
 import { parseKernelRequest, type KernelNode, type KernelResult } from "../shared/kernel";
@@ -47,7 +47,7 @@ export function discoverKernelTargets(roots: string[], saved: (id: string) => Ke
     const instance = instances.find((i) => i.id === id);
     const recorded = saved(id);
     const root = roots.find((r) => fs.existsSync(path.join(r, id, instance ? "control.json" : "xmesh.yaml"))) ??
-      roots.find((r) => recorded && path.resolve(r, id) === path.resolve(recorded.stateDir));
+      roots.find((r) => recorded && sameKernelPath(path.resolve(r, id), recorded.stateDir));
     if (!root) return [];
     const stateDir = path.resolve(root, id);
     const paths = recorded ?? { stateDir, configFile: path.join(stateDir, "xmesh.yaml") };
@@ -65,6 +65,7 @@ interface Environment {
   serviceOptions?(paths: KernelPaths): Promise<string[]>;
   installed?(node: string, paths: KernelPaths): Promise<string>;
   managed?(target: KernelTarget): Promise<boolean>;
+  blocked?(): boolean;
   changed(): void;
   version?: string;
   gone?: typeof kernelGone;
@@ -92,6 +93,8 @@ export class KernelLifecycle {
   private readonly pending = new Set<string>();
   constructor(private readonly env: Environment) {}
 
+  get busy(): boolean { return this.pending.size > 0; }
+
   private async nodes(): Promise<KernelNode[]> {
     return Promise.all(this.env.targets().map(async (target) => {
       const { id, name, running } = target;
@@ -111,6 +114,7 @@ export class KernelLifecycle {
       try { return { ok: true, data: { nodes: await this.nodes() } }; }
       catch (e) { return { ok: false, error: { code: "internal", message: e instanceof Error ? e.message : String(e) } }; }
     }
+    if (this.env.blocked?.()) return { ok: false, error: { code: "busy", message: "应用正在更新，请等待更新完成后再操作内核" } };
     if (this.pending.has(req.node)) return { ok: false, error: { code: "busy", message: "该节点正在执行内核操作，请稍候" } };
     this.pending.add(req.node);
     try {

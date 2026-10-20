@@ -74,6 +74,9 @@ test("updating stops the kernel, hands the verified installer over and quits; ca
   await page.getByTestId("update-install").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("update-installing")).toContainText("0.1.0-beta.3");
+  for (const op of ["install", "uninstall", "reinstall", "start", "stop", "restart"]) {
+    await expect(page.getByTestId(`kernel-op-${op}`)).toBeDisabled();
+  }
   const calls = (await h.calls()).filter((c) => c.op.startsWith("update") || c.op === "quit");
   expect(calls).toEqual([
     { op: "update-stop", arg: "node-a" },

@@ -69,6 +69,25 @@ func Test_TaskStateDirectory(t *testing.T) {
 	}
 }
 
+func Test_TaskStateDirectoryFollowsRenamedConfig(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "custom config.yaml")
+	if err := os.WriteFile(file, []byte(strings.Replace(cliConfig, "cli-node", "renamed-node", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := app.StateDir("renamed-node")
+	for _, args := range []string{
+		windows.ComposeCommandLine([]string{"serve", "--config", file}),
+		windows.ComposeCommandLine([]string{"serve", "--config=custom config.yaml"}),
+	} {
+		document := `<Task><Actions><Exec><Arguments>` + strings.NewReplacer("&", "&amp;", "<", "&lt;").Replace(args) + `</Arguments><WorkingDirectory>` + dir + `</WorkingDirectory></Exec></Actions></Task>`
+		got, err := taskStateDir(document, "xmesh-original-name")
+		if err != nil || got != want {
+			t.Fatal(got, want, err)
+		}
+	}
+}
+
 func Test_KernelStartRequiresReachableEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	started := time.Now()

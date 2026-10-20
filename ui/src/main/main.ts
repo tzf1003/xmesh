@@ -163,6 +163,7 @@ async function start(): Promise<void> {
           }),
     applier,
     store: new UpdateStore(path.join(app.getPath("userData"), "update.json")),
+    kernelBusy: () => kernelLifecycle.busy,
     runningNodes: () => TEST_MODE ? controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id) : discoverInstances(roots).filter((i) => !i.protected).map((i) => i.id),
     stopNode: async (node) => {
       if (TEST_MODE) {
@@ -220,6 +221,7 @@ async function start(): Promise<void> {
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
   const serviceIdentity = (target: KernelTarget): string => target.serviceNode ?? target.instance?.manifest.node ?? kernelConfigNode(target);
   const kernelLifecycle = new KernelLifecycle({
+    blocked: () => updater.state.phase === "downloading" || updater.state.phase === "installing",
     targets: () => discoverKernelTargets(roots, (id) => kernelConfigs.paths(id), undefined, kernelConfigs.nodes()),
     resolve: async (target) => {
       const serviceNode = serviceIdentity(target);
