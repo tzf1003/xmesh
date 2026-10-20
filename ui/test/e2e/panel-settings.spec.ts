@@ -1,5 +1,5 @@
-// The settings page against the fake kernel: the ingress entry lands on it with the ingress role
-// preselected, and a change to the working directories is reviewed before it is written.
+// The settings page against the fake kernel: opening ingress setup keeps the role off,
+// and configuration changes are reviewed before they are written.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -47,19 +47,92 @@ async function open(kernel: FakeKernelOptions = {}): Promise<Page> {
   return page;
 }
 
-test("ingress: the disabled page's button opens settings with the ingress role preselected", async () => {
+test("ingress: opening setup keeps the role off until explicitly selected and saved", async () => {
   const page = await open({ status: { roles: ["agent", "gateway"] } });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  h.kernel.panel.setContent(FULL_CONFIG);
   await page.getByTestId("nav-ingress").click();
   await expect(page.getByTestId("ingress-disabled")).toBeVisible();
   await page.getByTestId("ingress-to-settings").click();
 
   await expect(page.getByTestId("page-settings")).toBeVisible();
-  await expect(page.getByTestId("settings-role-summary")).toContainText("ingress");
+  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
   await expect(page.getByTestId("settings-ingress")).toBeVisible();
+  await expect(page.getByTestId("settings-ingress-enable")).not.toBeChecked();
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("role-gateway")).toBeEnabled();
+  await expect(page.getByTestId("settings-review")).toBeDisabled();
+  await expect(page).toHaveTitle(/xmesh/i);
+  await expect(page).toHaveURL("app://panel/index.html");
+  await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-ingress-disabled.png") });
+  await page.getByTestId("settings-ingress-enable").check();
+  await expect(page.getByTestId("settings-ingress-pending")).toBeVisible();
+  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
   // A public listener or reverse tunnel can use LAN. Funnel requires Tailnet.
   await expect(page.getByTestId("settings-needs-tailnet")).toHaveCount(0);
   await page.getByTestId("settings-listen").selectOption("funnel");
   await expect(page.getByTestId("settings-needs-tailnet")).toBeVisible();
+  expect(h.kernel.panel.writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("ingress: saving unrelated settings from setup leaves ingress disabled", async () => {
+  const page = await open({ status: { roles: ["agent", "gateway"] } });
+  h.kernel.panel.setContent(FULL_CONFIG);
+  await page.getByTestId("nav-ingress").click();
+  await page.getByTestId("ingress-to-settings").click();
+  await page.getByTestId("settings-max-file-size").fill("2GiB");
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("settings-max-file-size")).toHaveValue("2GiB");
+  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
+  expect(h.kernel.panel.content).toContain("roles: [agent, gateway]");
+  expect(h.kernel.panel.content).not.toContain("ingress:");
+});
+
+test("ingress: explicit setup enables only after review, and switching off refreshes the summary", async () => {
+  const page = await open({ status: { roles: ["agent", "gateway"] } });
+  h.kernel.panel.setContent(FULL_CONFIG);
+  await page.getByTestId("role-ingress").click();
+  await page.getByTestId("settings-ingress-enable").check();
+  await page.getByTestId("settings-issuer").fill("https://xmesh.example.com");
+  await page.getByTestId("settings-review").click();
+  await expect(page.getByTestId("settings-diff")).toBeVisible();
+  const preview = h.kernel.requests.filter((r) => r.method === "PUT" && (r.body as { dry_run?: boolean }).dry_run).at(-1);
+  expect((preview?.body as { content: string }).content).toContain("roles: [agent, gateway, ingress]");
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
+  expect(h.kernel.panel.writes).toEqual([]);
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("settings-role-summary")).toContainText("ingress");
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("settings-ingress-pending")).toHaveCount(0);
+  await page.getByTestId("role-ingress").click();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
+  await expect(page.getByTestId("settings-ingress-enable")).not.toBeChecked();
+  await expect(page.getByTestId("settings-review")).toBeDisabled();
+});
+
+test("ingress: cancelling setup discards its draft and keeps other edits", async () => {
+  const page = await open({ status: { roles: ["agent", "gateway"] } });
+  h.kernel.panel.setContent(FULL_CONFIG);
+  await page.getByTestId("role-ingress").click();
+  await page.getByTestId("settings-ingress-enable").check();
+  await page.getByTestId("settings-issuer").fill("https://draft.example.com");
+  await page.getByTestId("settings-ingress-enable").uncheck();
+  await expect(page.getByTestId("settings-review")).toBeDisabled();
+  await expect(page.getByTestId("role-gateway")).toBeEnabled();
+  await page.getByTestId("settings-ingress-enable").check();
+  await expect(page.getByTestId("settings-issuer")).toHaveValue("");
+  await page.getByTestId("settings-max-file-size").fill("2GiB");
+  await page.getByTestId("settings-ingress-enable").uncheck();
+  await expect(page.getByTestId("settings-max-file-size")).toHaveValue("2GiB");
+  await expect(page.getByTestId("settings-review")).toBeEnabled();
   expect(h.kernel.panel.writes).toEqual([]);
 });
 
@@ -228,7 +301,7 @@ for (const mode of ["tailnet", "coexist"] as const) {
   test(`settings: enter an auth key and save ${mode} authorization`, async ({}, testInfo) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-authkey-e2e-"));
     try {
-      const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml") } } });
+      const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
       const errors: string[] = [];
       page.on("pageerror", error => errors.push(error.message));
       page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
@@ -260,11 +333,15 @@ for (const mode of ["tailnet", "coexist"] as const) {
       await expect(input).toHaveValue("");
       await expect(input).toHaveAttribute("placeholder", /已配置授权/);
 
+      await input.fill("  ");
+      await expect(page.getByTestId("settings-review")).toBeDisabled();
+      await input.fill("");
+
       const saved = parse(h.kernel.panel.content);
       expect(saved.mesh.lan.enabled).toBe(mode === "coexist");
       expect(saved.mesh.tailnet.enabled).toBe(true);
       const file = saved.mesh.tailnet.authkey_file as string;
-      expect(path.dirname(file)).toBe(dir);
+      expect(path.dirname(file)).toBe(path.join(dir, "authkeys"));
       expect(fs.readFileSync(file, "utf8")).toBe(`${authkey}\n`);
       expect(JSON.stringify(h.kernel.requests)).not.toContain(authkey);
       await expect(page.locator("body")).not.toContainText(authkey);
@@ -279,7 +356,7 @@ for (const mode of ["tailnet", "coexist"] as const) {
       await page.getByTestId("confirm-ok").click();
       await expect(page.getByTestId("settings-name")).toHaveValue("renamed-node");
       expect(parse(h.kernel.panel.content).mesh.tailnet.authkey_file).toBe(file);
-      expect(fs.readdirSync(dir)).toEqual([path.basename(file)]);
+      expect(fs.readdirSync(path.join(dir, "authkeys"))).toEqual([path.basename(file)]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -289,7 +366,7 @@ for (const mode of ["tailnet", "coexist"] as const) {
 test("settings: a pasted key replaces browser authorization and can be rotated", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-authkey-e2e-"));
   try {
-    const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml") } } });
+    const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
     h.kernel.panel.setContent(FULL_CONFIG.replace("mesh:\n  mode: lan", "schema_version: 2\nmesh:\n  tailnet:\n    enabled: true\n    auth_method: browser"));
     await page.getByTestId("nav-settings").click();
     const input = page.getByTestId("settings-authkey");
@@ -312,6 +389,35 @@ test("settings: a pasted key replaces browser authorization and can be rotated",
     expect(fs.readFileSync(files[0]!, "utf8")).toBe("hskey-e2e-initial\n");
     expect(JSON.stringify(h.kernel.requests)).not.toContain("tskey-auth-e2e-rotated");
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("settings: preview locks the visible key and successful saving clears it before reload", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-authkey-e2e-"));
+  let release = (): void => {};
+  try {
+    const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
+    h.kernel.panel.setContent(FULL_CONFIG);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("settings-mode-tailnet").check();
+    const input = page.getByTestId("settings-authkey");
+    await input.fill("tskey-auth-preview-visible");
+    release = h.kernel.holdNextResponse("/v2/config");
+    await page.getByTestId("settings-review").click();
+    await expect(input).toBeDisabled();
+    await expect(page.getByTestId("settings-name")).toBeDisabled();
+    await expect(input).toHaveValue("tskey-auth-preview-visible");
+    release();
+    await expect(page.getByTestId("settings-authkey-change")).toBeVisible();
+    release = h.kernel.holdNextResponse("/v2/config/reload", "POST");
+    await page.getByTestId("confirm-ok").click();
+    await expect(input).toHaveValue("");
+    await expect(page.getByTestId("settings-diff")).toHaveCount(0);
+    release();
+    await expect(input).toHaveAttribute("placeholder", /已配置授权/);
+  } finally {
+    release();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

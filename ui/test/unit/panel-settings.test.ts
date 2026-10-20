@@ -117,6 +117,29 @@ test("isChanged compares the form with what the file says", () => {
   assert.equal(isChanged(lan, { ...lan, roles: ["agent", "gateway"] }), false);
   assert.equal(isChanged(lan, tailnetIngress), true);
   assert.equal(isChanged(lan, { ...lan, allowDirs: [] }), true);
+  assert.equal(isChanged(tailnetIngress, { ...tailnetIngress, authkey: "  \n" }), false);
+});
+
+test("settings accept a pasted admission key and keep it out of generated config", () => {
+  for (const authkey of ["tskey-auth-settings-test", "hskey-settings-test"]) {
+    const form = { ...lan, mode: "tailnet" as const, authkey: ` ${authkey} ` };
+    assert.equal(checkSettingsForm(form), undefined);
+    assert.equal(isChanged(lan, form), true);
+    const content = applySettingsForm(LAN_CONFIG, form)!;
+    assert.equal(content.includes(authkey), false);
+    assert.equal(parse(content).mesh.tailnet.enabled, true);
+    assert.equal(checkSettingsForm({ ...form, mode: "coexist" }), undefined);
+  }
+  for (const authkey of ["short", "tskey auth spaces", "tskey-auth-one\nsecond", "x".repeat(4097)]) {
+    assert.equal(checkSettingsForm({ ...tailnetIngress, authkey }), "authkey");
+  }
+  assert.equal(checkSettingsForm({ ...lan, mode: "tailnet" }), "authkey");
+  assert.equal(checkSettingsForm({ ...tailnetIngress, authkey: " " }), undefined);
+
+  const browserForm = { ...tailnetIngress, browserLogin: true, authkeyFile: "", authkey: "tskey-auth-new-login" };
+  const content = applySettingsForm(LAN_CONFIG, browserForm)!;
+  assert.equal(parse(content).mesh.tailnet.auth_method, undefined);
+  assert.equal(content.includes(browserForm.authkey), false);
 });
 
 test("settings accept a pasted admission key and keep it out of generated config", () => {

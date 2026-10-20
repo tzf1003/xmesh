@@ -3,6 +3,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { randomBytes } from "node:crypto";
+import { parse } from "yaml";
 import {
   CONTROL_API_VERSION,
   CONTROL_VERSION_HEADER,
@@ -94,6 +95,14 @@ export class FakeKernel {
   private ping: NodeJS.Timeout | undefined;
   private readonly pingMs: number;
   private readonly failures = new Map<string, { status: number; body: unknown }>();
+  private readonly responseGates = new Map<string, Promise<void>>();
+
+  /** Hold one response until the test releases it, exercising outstanding UI saves. */
+  holdNextResponse(route: string, method = "PUT"): () => void {
+    let release!: () => void;
+    this.responseGates.set(`${method} ${route}`, new Promise<void>(resolve => { release = resolve; }));
+    return release;
+  }
 
   private constructor(opts: FakeKernelOptions) {
     this.endpoint = opts.endpoint ?? randomEndpoint();
@@ -308,14 +317,20 @@ export class FakeKernel {
       const url = req.url ?? "/";
       const lastEventId = typeof req.headers["last-event-id"] === "string" ? req.headers["last-event-id"] : undefined;
       const ifMatch = typeof req.headers["if-match"] === "string" ? req.headers["if-match"] : undefined;
-      const rec: RecordedRequest = { method: req.method ?? "GET", path: url, body };
+      const loggedBody = url === "/v2/config" && body && typeof body === "object" && "authkey" in body
+        ? { ...body, authkey: "[redacted]" } : body;
+      const rec: RecordedRequest = { method: req.method ?? "GET", path: url, body: loggedBody };
       if (lastEventId !== undefined) rec.lastEventId = lastEventId;
       if (ifMatch !== undefined) rec.ifMatch = ifMatch;
       this.requests.push(rec);
       if (req.headers.origin !== undefined) {
         return this.error(res, 403, "forbidden", "带 Origin 的请求被拒绝");
       }
-      this.route(rec.method, url, body, lastEventId, res, ifMatch);
+      const gateKey = `${rec.method} ${url}`;
+      const gate = this.responseGates.get(gateKey);
+      this.responseGates.delete(gateKey);
+      if (gate) void gate.then(() => this.route(rec.method, url, body, lastEventId, res, ifMatch));
+      else this.route(rec.method, url, body, lastEventId, res, ifMatch);
     });
   }
 
@@ -368,6 +383,24 @@ export class FakeKernel {
     }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
     if (cap && this.requires(res, method !== "GET" && cap[0] === "/v2/config" ? "config.write" : cap[1])) {
+      const request = body as { content?: string; dry_run?: boolean; authkey?: string } | null;
+      if (method === "PUT" && url === "/v2/config" && request?.authkey !== undefined) {
+        const preview = this.panel.handle(method, url, { ...request, dry_run: true }, ifMatch);
+        if (!preview || preview.status >= 300) return this.send(res, preview?.status ?? 400, preview?.body);
+        const file = parse(request.content ?? "").mesh?.tailnet?.authkey_file as string | undefined;
+        const directory = path.join(this.status.paths.state_dir, "authkeys");
+        if (typeof file !== "string" || path.dirname(file) !== directory || !/^authkey-[0-9a-f-]{36}$/.test(path.basename(file))) {
+          return this.error(res, 400, "invalid_args", "invalid credential location");
+        }
+        if (!request.dry_run) {
+          try {
+            fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+            fs.writeFileSync(file, `${request.authkey}\n`, { flag: "wx", mode: 0o600 });
+          } catch {
+            return this.error(res, 500, "internal", "credential write failed");
+          }
+        }
+      }
       const r = this.panel.handle(method, url, body, ifMatch);
       if (r) {
         if (method !== "GET" && r.status < 300 && (url.startsWith("/v2/config") || url.startsWith("/v2/backends"))) this.publishBackends();

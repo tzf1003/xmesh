@@ -19,6 +19,7 @@ export interface Platform {
   showPanel(): void;
   quit(): void;
   runCli(command: CliCommand, node?: string): Promise<unknown>;
+  manageKernel?(command: CliCommand, node: string): Promise<unknown>;
   notifyError(message: string): void;
   /** Native chooser; resolves to the chosen absolute path or undefined on cancel. */
   pickPath(kind: PickKind): Promise<string | undefined>;
@@ -47,6 +48,46 @@ export class Actions {
     private readonly t: Translate,
     private readonly credentials: GatewayCredentialSource,
   ) {}
+
+  /** Native tray actions require their own confirmation; panel callers already confirm in the renderer. */
+  dispatchFromTray(a: Action): Promise<ActionResult> {
+    if (a.type === "restart-kernel") return this.confirmRestartKernel();
+    if (a.type === "restart-unresponsive") return this.confirmUnresponsiveRestart(a.node);
+    return this.dispatch(a);
+  }
+
+  private async confirmUnresponsiveRestart(node: string): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
+    const bootId = this.controller.nodeBootId?.(node);
+    if (selected.connection.kind !== "offline" || !selected.unresponsiveNodes.includes(node)) return fail("conflict", "The node state changed; refresh and try again.");
+    const yes = await this.platform.confirm({ title: this.t("dialog.restartKernel.title"),
+      detail: this.t("dialog.restartKernel.unresponsive", { name: node }),
+      confirmLabel: this.t("menu.restartKernel"), cancelLabel: this.t("dialog.cancel") });
+    return yes ? this.confirmedUnresponsiveRestart(node, selected.selectedInstance, bootId) : ok;
+  }
+
+  confirmedUnresponsiveRestart(node: string, instance: string, bootId: string | undefined): Promise<ActionResult> {
+    const current = this.controller.snapshot;
+    if (current.selectedInstance !== instance || current.connection.kind !== "offline" || !current.unresponsiveNodes.includes(node) || this.controller.nodeBootId?.(node) !== bootId) {
+      return Promise.resolve(fail("conflict", "The node state changed; refresh and try again."));
+    }
+    return this.runCli("restart", node);
+  }
+
+  private async confirmRestartKernel(): Promise<ActionResult> {
+    const selected = this.controller.snapshot;
+    if (selected.connection.kind !== "connected") return fail("unavailable", "Kernel is not connected.");
+    const status = selected.connection.status;
+    const bootId = status.control.boot_id;
+    const yes = await this.platform.confirm({
+      title: this.t("dialog.restartKernel.title"),
+      detail: this.t("dialog.restartKernel.detail", { name: status.hostname, pty: status.limits.pty_in_use,
+        exec: status.limits.exec_shared_in_use + status.limits.exec_exclusive_in_use, ci: ciCounts(status.ci?.bindings).busy }),
+      confirmLabel: this.t("menu.restartKernel"),
+      cancelLabel: this.t("dialog.cancel"),
+    });
+    return yes ? this.confirmedLifecycle("restart-kernel", selected.selectedInstance, bootId) : ok;
+  }
 
   dispatch(a: Action): Promise<ActionResult> {
     switch (a.type) {
@@ -148,6 +189,10 @@ export class Actions {
     if (selected.selectedInstance !== current.selectedInstance || selected.connection.kind !== "connected" || current.connection.kind !== "connected" || selected.connection.status.control.boot_id !== current.connection.status.control.boot_id) {
       return fail("conflict", "The selected kernel changed; copy the connection again.");
     }
+    const currentGateway = current.connection.status.gateway;
+    if (!currentGateway || !(currentGateway.url === url || currentGateway.addresses.some(a => a.url === url))) {
+      return fail("conflict", "The gateway address changed; copy the connection again.");
+    }
     const text = clipboardText(kind, url, token);
     if (text === undefined) return fail("token_unavailable", "token is not usable");
     this.platform.writeClipboard(text);
@@ -235,7 +280,8 @@ export class Actions {
 
   private async runCli(command: CliCommand, node?: string): Promise<ActionResult> {
     try {
-      await this.platform.runCli(command,node ? this.controller.nodeName?.(node) || node : node);
+      if (node && this.platform.manageKernel) await this.platform.manageKernel(command, node);
+      else await this.platform.runCli(command, node ? this.controller.nodeName?.(node) || node : node);
       return ok;
     } catch (e) {
       this.platform.notifyError(this.t("dialog.cliFailed", { command: `xmesh ${command}` }));

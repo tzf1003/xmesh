@@ -57,6 +57,7 @@ type Mesh struct {
 		Enabled *bool `json:"enabled,omitempty"`
 		MDNS    bool  `json:"mdns"`
 		// Interface pins the network interface the LAN node listens and advertises on.
+		// Explicit selection also accepts a system Tailscale IPv4 address; use mdns: false.
 		Interface string `json:"interface"`
 	} `json:"lan"`
 	Tailnet Tailnet `json:"tailnet,omitempty"`

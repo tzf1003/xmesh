@@ -287,3 +287,39 @@ test("application quit closes an open tray window instead of being cancelled by 
   await closing;
   await expect.poll(() => child.exitCode).toBe(0);
 });
+
+test("native tray restart confirms once and cancellation leaves running work intact", async () => {
+  h = await launch(); await expectIcon(h, "ok");
+  await h.app.evaluate(() => { (globalThis as unknown as { __xmeshUiTest: { answers: { confirm: boolean } } }).__xmeshUiTest.answers.confirm = false; });
+  await h.clickMenu("settings.restartKernel");
+  expect((await h.calls()).filter(c => c.op === "confirm")).toHaveLength(1);
+  expect((await h.calls()).some(c => c.op === "cli")).toBe(false);
+  await h.app.evaluate(() => { (globalThis as unknown as { __xmeshUiTest: { answers: { confirm: boolean } } }).__xmeshUiTest.answers.confirm = true; });
+  await h.clickMenu("settings.restartKernel");
+  expect((await h.calls()).filter(c => c.op === "confirm")).toHaveLength(2);
+  expect((await h.calls()).filter(c => c.op === "cli").map(c => c.arg)).toEqual(["restart"]);
+});
+
+test("320 DIP work areas keep device relationships, service actions and footer inside the viewport", async () => {
+  h = await launch({ lang: "en", kernel: { capabilities: CAPS } }); await expectIcon(h, "ok");
+  const page = await openTray();
+  await page.setViewportSize({ width: 304, height: 364 });
+  for (const tab of ["Overview", "Devices", "Services", "Activity"]) {
+    await page.getByRole("tab", { name: tab === "Devices" ? /^Devices/ : tab }).click();
+    const geometry = await page.evaluate(() => {
+      const viewport = document.documentElement.clientWidth;
+      const targets = [...document.querySelectorAll<HTMLElement>("button, input, .node-pill, .backend-row")].filter(el => el.getClientRects().length);
+      return targets.filter(el => { const r = el.getBoundingClientRect(); return r.left < -1 || r.right > viewport + 1; }).map(el => el.textContent || el.getAttribute("aria-label"));
+    });
+    expect(geometry, `${tab} controls must fit horizontally`).toEqual([]);
+    if (process.env.XMESH_TRAY_EVIDENCE_DIR) {
+      fs.mkdirSync(process.env.XMESH_TRAY_EVIDENCE_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.XMESH_TRAY_EVIDENCE_DIR, `narrow-${tab.toLowerCase()}.png`) });
+    }
+    await expect(page.getByRole("button", { name: "Open xmesh", exact: true })).toBeInViewport();
+    if (tab === "Services") {
+      await page.getByRole("button", { name: "Claude Code", exact: true }).click();
+      await expect.poll(async () => (await h.calls()).some(c => c.op === "clipboard")).toBe(true);
+    }
+  }
+});

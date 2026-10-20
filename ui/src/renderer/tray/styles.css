@@ -1473,3 +1473,44 @@ code {
   width: 7px;
   border-top: 1px solid var(--border);
 }
+
+/* Narrow work areas and zoomed text keep every primary control within the scrollable body. */
+@media (max-width: 360px) {
+  .instance-picker { min-width: 0; max-width: 52%; }
+  .instance-picker > button { max-width: 100%; }
+  .node-status { max-width: 46%; overflow: hidden; text-overflow: ellipsis; }
+  .topology { height: auto; min-height: 110px; padding-inline: 8px; }
+  .topology-main { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1.35fr); gap: 6px; height: auto; min-height: 58px; }
+  .topology-main > .edge { display: none; }
+  .local-node { min-width: 0; }
+  .node-subtitle { max-width: 100%; }
+  .hub { width: 34px; height: 34px; margin: 0; }
+  .hub img { width: 23px; height: 23px; }
+  .peer-nodes { min-width: 0; max-width: 100%; }
+  .node-pill { min-width: 0; max-width: 100%; padding-inline: 5px; }
+  .topology-caption { gap: 5px; font-size: 10px; }
+  .topology-caption > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .resource-strip { flex-direction: column; align-items: stretch; gap: 8px; }
+  .resource-strip button { flex: none; width: 100%; }
+  .vertical-divider { display: none; }
+  .quick-actions { flex-wrap: wrap; }
+  .quick-actions .button { flex: 1 1 120px; }
+  .connect-buttons { flex-wrap: wrap; }
+  .connect-buttons .button { flex: 1 1 100px; }
+  .call-top { flex-wrap: wrap; }
+  .call-top strong { max-width: 100%; }
+  .call-top code { max-width: 100%; }
+  .device-content > span:first-child > strong { max-width: 100%; }
+  .device-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .device-meta code { max-width: 100%; }
+  .device-content { overflow: hidden; }
+  .backend-row strong { min-width: 0; max-width: 85px; }
+  .tag { flex-shrink: 0; }
+  .summary-line { flex-wrap: wrap; }
+  .tabs { gap: 1px; padding-inline: 8px; }
+  .tabs button { font-size: 11px; padding-inline: 3px; }
+  .tab-count { font-size: 10px; }
+  .modal-scrim { padding: 10px; }
+  .modal-actions { flex-wrap: wrap; }
+  .live-label { white-space: nowrap; }
+}

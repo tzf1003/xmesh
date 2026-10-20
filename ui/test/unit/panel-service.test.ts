@@ -169,7 +169,7 @@ test("config diagnostics reach the caller", async () => {
 
 async function admissionSetup() {
   const node = path.join(root, "n1");
-  const fixture = await setup(ALL, { paths: { ...statusFixture().paths, config_file: path.join(node, "xmesh.yaml") } });
+  const fixture = await setup(ALL, { paths: { ...statusFixture().paths, config_file: path.join(node, "xmesh.yaml"), state_dir: node } });
   const cfg = await fixture.service.getConfig();
   assert.ok(cfg.ok);
   const parsed = parse(cfg.data.content);
@@ -185,7 +185,7 @@ test("admission key preview is read-only; confirmation stores a private credenti
   assert.ok(preview.ok);
   assert.ok(preview.data.content);
   const file = parse(preview.data.content).mesh.tailnet.authkey_file as string;
-  assert.equal(path.dirname(file), node);
+  assert.equal(path.dirname(file), path.join(node, "authkeys"));
   assert.deepEqual(fs.readdirSync(node), before);
   assert.equal(k.panel.writes.length, 0);
   assert.equal(JSON.stringify(preview).includes(request.authkey), false);
@@ -238,6 +238,7 @@ test("admission key storage is confined to a fresh managed location", async () =
   assert.ok(preview.ok && preview.data.content);
   const parsed = parse(preview.data.content);
   const file = parsed.mesh.tailnet.authkey_file as string;
+  fs.mkdirSync(path.dirname(file), { mode: 0o700 });
   fs.writeFileSync(file, "existing-credential\n", { mode: 0o600 });
   assert.equal((await service.putConfig({ ...request, content: preview.data.content, dryRun: false })).ok, false);
   assert.equal(fs.readFileSync(file, "utf8"), "existing-credential\n");
@@ -249,28 +250,41 @@ test("admission key storage is confined to a fresh managed location", async () =
   }
 });
 
-test("admission key storage removes a rejected write and retains a credential after an uncertain response", async () => {
+test("admission key persistence belongs to the kernel and commit errors reach the UI", async () => {
   const { service, c, node, request } = await admissionSetup();
   const client = c.requireCapable("config.write");
   const call = client.call.bind(client);
-  let failure = "precondition_failed";
+  let failure = "internal";
   client.call = async (method, route, options) => {
     if (method === "PUT" && route === "/v2/config" && (options?.body as { dry_run?: boolean })?.dry_run === false) {
       throw new ControlRequestError(failure, "test response");
     }
     return call(method, route, options);
   };
-  for (const uncertain of [false, true]) {
-    failure = uncertain ? "unavailable" : "precondition_failed";
+  for (const code of ["internal", "precondition_failed", "unavailable"]) {
+    failure = code;
     const preview = await service.putConfig(request);
     assert.ok(preview.ok && preview.data.content);
     const file = parse(preview.data.content).mesh.tailnet.authkey_file as string;
     const result = await service.putConfig({ ...request, content: preview.data.content, dryRun: false });
     assert.ok(!result.ok);
     assert.equal(result.error.code, failure);
-    assert.equal(fs.existsSync(file), uncertain);
+    assert.equal(fs.existsSync(file), false);
   }
-  assert.equal(fs.readdirSync(node).filter((name) => name.startsWith("authkey-")).length, 1);
+  assert.equal(fs.existsSync(path.join(node, "authkeys")), false);
+});
+
+test("config requests enforce the encoded body limit before sending a preview", async () => {
+  const { k, service, request } = await admissionSetup();
+  const count = k.requests.filter(r => r.path === "/v2/config" && r.method === "PUT").length;
+  const oversized = await service.putConfig({ ...request, content: `${request.content}\n#${"a".repeat(1046000)}`, authkey: "x".repeat(4096) });
+  assert.ok(!oversized.ok);
+  assert.equal(oversized.error.code, "payload_too_large");
+  assert.match(oversized.error.message, /1 MiB/);
+  assert.equal(k.requests.filter(r => r.path === "/v2/config" && r.method === "PUT").length, count);
+  const escaped = await service.putConfig({ ...request, authkey: undefined, content: "\n".repeat(600000) });
+  assert.ok(!escaped.ok);
+  assert.equal(escaped.error.code, "payload_too_large");
 });
 
 test("PAT create, rotate and delete use fixed routes and the secret comes from the kernel", async () => {

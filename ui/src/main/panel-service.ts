@@ -33,6 +33,7 @@ import type {
   SessionsResponse,
 } from "../shared/control";
 import {
+  CONFIG_MAX_BYTES,
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
@@ -140,21 +141,26 @@ export class PanelService {
 
   putConfig(req: ConfigSaveRequest): Promise<DataResult<ConfigSaveResponse>> {
     return this.data("config.write", async (c) => {
-      const put = (content: string, dryRun: boolean): Promise<unknown> =>
-        c.call("PUT", "/v2/config", { body: { content, dry_run: dryRun }, ifMatch: req.etag });
+      const put = (content: string, dryRun: boolean, authkey?: string): Promise<unknown> => {
+        const body = { content, dry_run: dryRun, ...(authkey !== undefined && { authkey }) };
+        if (Buffer.byteLength(JSON.stringify(body)) > CONFIG_MAX_BYTES) {
+          throw new ControlRequestError("payload_too_large", "配置正文与 auth key 编码后超过 1 MiB，请缩小配置后重试");
+        }
+        return c.call("PUT", "/v2/config", { body, ifMatch: req.etag });
+      };
       if (req.authkey === undefined) return put(req.content, req.dryRun);
       const authkey = req.authkey.trim();
       if (!isAuthKey(authkey)) throw new ControlRequestError("invalid_args", "请输入有效的 auth key");
       const connection = this.controller.snapshot.connection;
-      const configFile = connection.kind === "connected" ? connection.status.paths.config_file : undefined;
-      if (typeof configFile !== "string" || !path.isAbsolute(configFile)) {
-        throw new ControlRequestError("unavailable", "内核没有报告配置文件的位置");
+      const stateDir = connection.kind === "connected" ? connection.status.paths.state_dir : undefined;
+      if (typeof stateDir !== "string" || !path.isAbsolute(stateDir)) {
+        throw new ControlRequestError("unavailable", "内核没有报告状态目录的位置");
       }
       const doc = parseDocument(req.content);
       if (doc.errors.length > 0 || doc.get("schema_version") !== 2 || doc.getIn(["mesh", "tailnet", "enabled"]) !== true) {
         throw new ControlRequestError("invalid_args", "auth key 需要启用 Tailnet");
       }
-      const directory = path.dirname(configFile);
+      const directory = path.join(stateDir, "authkeys");
       // The preview chooses a fresh location. Confirming uses that same location,
       // so the reviewed config is exact and an active credential is never overwritten.
       const file = req.dryRun ? path.join(directory, `authkey-${crypto.randomUUID()}`) : doc.getIn(["mesh", "tailnet", "authkey_file"]);
@@ -164,23 +170,10 @@ export class PanelService {
       doc.setIn(["mesh", "tailnet", "authkey_file"], file);
       doc.deleteIn(["mesh", "tailnet", "auth_method"]);
       const content = doc.toString({ flowCollectionPadding: false });
-      const preview = await put(content, true) as ConfigPutResponse;
-      if (req.dryRun) return { ...preview, content };
-
-      // Validation and the etag check precede secret creation. The kernel checks
-      // the etag again when committing, protecting edits from another session.
-      fs.writeFileSync(file, `${authkey}\n`, { mode: 0o600, flag: "wx" });
-      try {
-        const saved = await put(content, false) as ConfigPutResponse;
-        return { ...saved, content };
-      } catch (e) {
-        // A transport failure may follow a successful commit. Keep its credential
-        // in that case; only a definite rejection permits removing the new file.
-        if (e instanceof ControlRequestError && ["precondition_failed", "config_invalid", "conflict", "invalid_args", "forbidden"].includes(e.code)) {
-          fs.unlinkSync(file);
-        }
-        throw e;
-      }
+      // The kernel owns credential creation and config commit, including system
+      // services whose private state directory the desktop cannot write to.
+      const saved = await put(content, req.dryRun, authkey) as ConfigPutResponse;
+      return { ...saved, content };
     });
   }
 

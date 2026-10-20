@@ -1,4 +1,5 @@
 import type { OnboardingRequest, OnboardingResultFor } from "./onboarding";
+import type { KernelRequest, KernelResult } from "./kernel";
 // The renderer receives fixed operations with validated arguments. Tool calls go
 // through the selected local Gateway and its policies; local transfer paths are
 // issued by native dialogs and represented by opaque tickets.
@@ -40,6 +41,7 @@ import { isAuthKey } from "./setup";
 
 /** `ipcMain.handle` channels. The preload script hard-codes the same strings; a unit test checks they agree. */
 export const CHANNELS = {
+  kernel: "xmesh:kernel",
   getSnapshot: "xmesh:get-snapshot",
   navigationReady: "xmesh:panel-ready",
   drain: "xmesh:drain",
@@ -165,7 +167,7 @@ export interface ConfigSaveRequest {
   etag: string;
   /** Validate and diff only; nothing is written. */
   dryRun: boolean;
-  /** Write-only Tailnet admission key; the main process manages its storage. */
+  /** Write-only Tailnet admission key; the kernel manages its private storage. */
   authkey?: string;
 }
 
@@ -283,6 +285,7 @@ export interface SetupPreview {
 export interface PanelApi {
   navigationReady(dirty: boolean): Promise<ActionResult>;
   onNavigate(listener: (target: import("./tray").PanelTarget) => void): () => void;
+  kernel(request: KernelRequest): Promise<DataResult<KernelResult>>;
   playground: PlaygroundApi;
   transfers(request: TransferRequest): Promise<DataResult<TransferReply>>;
   getSnapshot(): Promise<Snapshot>;
@@ -367,6 +370,7 @@ export interface PanelApi {
 export const PANEL_API_METHODS = [
   "navigationReady",
   "onNavigate",
+  "kernel",
   "playground",
   "transfers",
   "getSnapshot",

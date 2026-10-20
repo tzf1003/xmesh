@@ -2,6 +2,7 @@ import * as net from "node:net";
 import { EventEmitter } from "node:events";
 import {
   type CallEventData,
+  type CallEvent,
   type Capability,
   ControlRequestError,
   type ControlEvent,
@@ -82,7 +83,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   private labels = new Map<string, string>();
   private found: Instance[] = [];
   private clients = new Map<string, { client: ControlClient; endpoint: string; bootId: string }>();
-  private current: { id: string; client: ControlClient } | undefined;
+  private current: { id: string; client: ControlClient; bootId?: string; pending: CallEvent[] } | undefined;
   private stream: EventStream | undefined;
   private wake: (() => void) | undefined;
   private refreshTimer: NodeJS.Timeout | undefined;
@@ -260,7 +261,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
         continue;
       }
       const client = this.clientFor(inst);
-      this.current = { id: inst.id, client };
+      this.current = { id: inst.id, client, pending: [] };
       // Subscribe before reading, so a change between the two cannot be missed.
       const stream = client.openEvents((e) => this.onEvent(client, e));
       try {
@@ -311,19 +312,25 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     // `hello` only describes the stream. A call event carries nothing the snapshot shows; it feeds the recent-calls list.
     if (e.type === "hello") return;
     if (e.type === "call") {
-      const conn = this.snap.connection;
-      if (conn.kind !== "connected") return;
-      const bootId = conn.status.control.boot_id;
-      if (!e.id.startsWith(`${bootId}.`) || this.activity.some(x => x.eventId === e.id)) return;
-      this.activity.push({ ...e.data, eventId: e.id, time: e.time, instanceId: this.current.id, bootId });
-      if (this.activity.length > RECENT_CALLS) this.activity.splice(0, this.activity.length - RECENT_CALLS);
-      this.recent.push(e.data);
-      if (this.recent.length > RECENT_CALLS) this.recent.splice(0, this.recent.length - RECENT_CALLS);
-      this.emit("calls", this.recent.slice());
-      this.emit("activity");
+      if (!this.current.bootId || !e.id.startsWith(`${this.current.bootId}.`)) {
+        this.current.pending.push(e);
+        if (this.current.pending.length > RECENT_CALLS) this.current.pending.shift();
+        if (this.current.bootId) this.scheduleRefresh(client);
+      } else this.appendCall(e, this.current.id, this.current.bootId);
       return;
     }
+    if (e.type === "reset") this.current.bootId = undefined;
     this.scheduleRefresh(client);
+  }
+
+  private appendCall(e: CallEvent, instanceId: string, bootId: string): void {
+    if (!e.id.startsWith(`${bootId}.`) || this.activity.some(x => x.eventId === e.id)) return;
+    this.activity.push({ ...e.data, eventId: e.id, time: e.time, instanceId, bootId });
+    if (this.activity.length > RECENT_CALLS) this.activity.splice(0, this.activity.length - RECENT_CALLS);
+    this.recent.push(e.data);
+    if (this.recent.length > RECENT_CALLS) this.recent.splice(0, this.recent.length - RECENT_CALLS);
+    this.emit("calls", this.recent.slice());
+    this.emit("activity");
   }
 
   /** One client per instance and boot, so Last-Event-ID survives reconnects but not a kernel restart. */
@@ -357,12 +364,13 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   }
 
   private async refresh(client: ControlClient, instanceId?: string): Promise<void> {
+    const connection = this.current;
     this.refreshing = true;
     try {
       const status = await client.getStatus();
       // The peer list is only needed for names; the summary in status covers the count.
       const peers = hasCapability(status.control.capabilities, "peers") ? await client.getPeers() : [];
-      if (this.current?.client !== client || (this.explicit && this.explicit !== this.current.id)) return;
+      if (!connection || this.current !== connection || connection.client !== client || (this.explicit && this.explicit !== connection.id)) return;
       const id = instanceId ?? this.current?.id;
       const activityBoot = `${id}:${status.control.boot_id}`;
       if (this.activityBoot !== activityBoot) { this.clearActivity(); this.activityBoot = activityBoot; }
@@ -373,6 +381,9 @@ export class ShellController extends EventEmitter<ControllerEvents> {
         instances: this.instanceInfos(),
         ...(id !== undefined && { selectedInstance: id }),
       });
+      connection.bootId = status.control.boot_id;
+      const pending = connection.pending.splice(0);
+      for (const event of pending) this.appendCall(event, connection.id, status.control.boot_id);
       this.emit("refreshed");
     } catch (e) {
       if (this.current?.client === client && e instanceof VersionMismatchError) {
@@ -412,6 +423,8 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   nodeName(id:string):string {
     return this.found.find((i)=>i.id===id)?.manifest.node || id;
   }
+
+  nodeBootId(id: string): string | undefined { return this.found.find(i => i.id === id)?.manifest.boot_id; }
 
   private instanceInfos(): InstanceInfo[] {
     return this.found.map((i) => ({ id: i.id, label: this.labels.get(i.id) ?? (i.manifest.node || i.id) }));

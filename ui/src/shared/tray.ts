@@ -104,7 +104,9 @@ export interface TrayState {
 }
 export interface TrayConfirmation {
   token: string;
-  action: "stop-kernel" | "restart-kernel";
+  action: "stop-kernel" | "restart-kernel" | "restart-unresponsive";
+  node?: string;
+  impactKnown?: boolean;
   instance: string;
   hostname: string;
   pty: number;

@@ -19,7 +19,11 @@ func readInstalledMigrationPaths(name string) (migrationPaths, error) {
 	if err != nil {
 		return migrationPaths{}, err
 	}
-	raw, err := readLaunchAgent(filepath.Join(home, "Library", "LaunchAgents", label+".plist"))
+	file := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+	if _, err := os.Stat(file); err != nil {
+		return migrationPaths{}, err
+	}
+	raw, err := readLaunchAgent(file)
 	if err != nil {
 		return migrationPaths{}, err
 	}

@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { ShellController } from "../../src/main/controller";
+import { ControlClient } from "../../src/main/client";
 import { discoverConfigured, discoverInstances } from "../../src/main/discovery";
 import type { Snapshot } from "../../src/shared/state";
 import { eventFixture, peerNamed, peersFixture, warningOf } from "../../testserver/fixtures";
@@ -420,4 +421,50 @@ test("recent activity retains the event envelope, caps history, and resets for a
   await until(c, connectedWith(x => x.status.control.boot_id !== priorBoot), "new boot");
   assert.deepEqual(c.recentActivity, []);
   assert.deepEqual(c.recentCalls, []);
+});
+
+test("calls received before initial status are buffered, boot-checked and retained across reconnect", async (t) => {
+  const k = await kernel(); k.writeManifest(root, "n1");
+  const originalStatus = ControlClient.prototype.getStatus;
+  const originalEvents = ControlClient.prototype.openEvents;
+  let release!: () => void, statusRead!: () => void, eventRead!: () => void;
+  const held = new Promise<void>(r => { release = r; });
+  const read = new Promise<void>(r => { statusRead = r; });
+  const received = new Promise<void>(r => { eventRead = r; });
+  let first = true;
+  t.mock.method(ControlClient.prototype, "getStatus", async function(this: InstanceType<typeof ControlClient>) {
+    const status = await originalStatus.call(this);
+    if (first) { first = false; statusRead(); await held; }
+    return status;
+  });
+  let deliver: ((event: import("../../src/shared/control").ControlEvent) => void) | undefined;
+  t.mock.method(ControlClient.prototype, "openEvents", function(this: InstanceType<typeof ControlClient>, callback: Parameters<typeof originalEvents>[0]) {
+    deliver = callback;
+    return originalEvents.call(this, event => { callback(event); if (event.type === "call") eventRead(); });
+  });
+  const c = controller(); c.start();
+  try {
+    await read;
+    const end = Date.now() + 3000;
+    while (!k.connectedStreams && Date.now() < end) await new Promise(r => setTimeout(r, 5));
+    assert.equal(k.connectedStreams, 1);
+    const event = eventFixture<CallEvent>("call");
+    k.emit("call", event.data);
+    await received;
+    assert.deepEqual(c.recentCalls, []);
+    deliver?.({ ...event, id: "old-boot.1" });
+    release();
+    await ready(c, k);
+    const endCalls = Date.now() + 3000;
+    while (!c.recentActivity.length && Date.now() < endCalls) await new Promise(r => setTimeout(r, 5));
+    assert.equal(c.recentActivity.length, 1);
+    assert.equal(c.recentCalls.length, 1);
+    assert.equal(c.recentActivity[0]?.instanceId, "n1");
+    const id = c.recentActivity[0]!.eventId;
+    k.dropStreams();
+    const endReconnect = Date.now() + 3000;
+    while (k.requests.filter(x => x.path === "/v2/events").length < 2 && Date.now() < endReconnect) await new Promise(r => setTimeout(r, 5));
+    assert.equal(c.recentActivity[0]?.eventId, id);
+    assert.equal(c.recentActivity.length, 1);
+  } finally { release(); }
 });

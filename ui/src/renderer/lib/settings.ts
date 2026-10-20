@@ -115,7 +115,7 @@ export function toggleRole(roles: readonly Role[], role: Role, on: boolean): Rol
 
 /** Whether the form asks for something other than what the file says. */
 export function isChanged(current: SettingsForm, next: SettingsForm): boolean {
-  return JSON.stringify(current) !== JSON.stringify(next);
+  return JSON.stringify({ ...current, authkey: current.authkey.trim() }) !== JSON.stringify({ ...next, authkey: next.authkey.trim() });
 }
 
 function validFileSize(value: string): boolean {

@@ -57,6 +57,7 @@ test("each method calls its own channel with only the caller's argument", async 
   const { exposed, invoked } = loadPreload();
   const api = exposed[0]!.api;
   await api.getSnapshot!();
+  await api.kernel!({ op: "reinstall", node: "n1" });
   await api.drain!();
   await api.resume!();
   await api.startKernel!("n1");
@@ -70,6 +71,7 @@ test("each method calls its own channel with only the caller's argument", async 
   await api.openExternal!("docs");
   assert.deepEqual(invoked, [
     { channel: CHANNELS.getSnapshot, args: [] },
+    { channel: CHANNELS.kernel, args: [{ op: "reinstall", node: "n1" }] },
     { channel: CHANNELS.drain, args: [] },
     { channel: CHANNELS.resume, args: [] },
     { channel: CHANNELS.startKernel, args: ["n1"] },
