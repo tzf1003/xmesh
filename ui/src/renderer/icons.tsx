@@ -1,6 +1,6 @@
 import type { JSX } from "preact";
 
-export type IconName = "topology" | "device" | "terminal" | "shield" | "globe" | "activity" | "runner" | "sliders" | "code" | "network" | "info" | "search" | "plus" | "chevron" | "arrow" | "copy" | "folder" | "cloud" | "close";
+export type IconName = "topology" | "device" | "terminal" | "shield" | "globe" | "activity" | "runner" | "sliders" | "code" | "network" | "info" | "search" | "plus" | "chevron" | "arrow" | "copy" | "folder" | "cloud" | "close" | "eye" | "eyeOff" | "refresh" | "link";
 
 /** Small outline symbols shared by navigation, tools and the topology. */
 export function Icon({ name, class: className = "" }: { name: IconName; class?: string }): JSX.Element {
@@ -23,6 +23,10 @@ export function Icon({ name, class: className = "" }: { name: IconName; class?: 
     copy: <><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
     folder: <path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>,
     cloud: <path d="M7 18a5 5 0 0 1-1-10 6 6 0 0 1 11-1 5.5 5.5 0 0 1 0 11H7Z"/>,
+    eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></>,
+    eyeOff: <><path d="m3 3 18 18M10.6 5.1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-3 3.8M6.3 6.3A19 19 0 0 0 2 12s3.5 7 10 7a11 11 0 0 0 5.7-1.7"/></>,
+    refresh: <><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5 8a7 7 0 0 1 12-3l3 4M4 15l3 4a7 7 0 0 0 12-3"/></>,
+    link: <><path d="m10 13 4-4m-5 7-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m0 10a4 4 0 0 0 6 0l5-5a4 4 0 0 0-6-6l-2 2"/></>,
     close: <path d="m6 6 12 12M6 18 18 6"/>,
   };
   return <svg class={`icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{paths[name]}</svg>;

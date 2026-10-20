@@ -20,7 +20,13 @@ test("first launch opens setup automatically when no device is configured", asyn
   await expect.poll(() => h.app.windows().length).toBe(1);
   const page = h.app.windows()[0]!;
   await expect(page.getByTestId("wizard-purpose")).toBeVisible();
-  await expect.poll(() => h.app.evaluate(() => (globalThis as unknown as { __xmeshUiTest: { panelState(): { visible: boolean } } }).__xmeshUiTest.panelState().visible)).toBe(true);
+  await expect.poll(() => h.app.evaluate(() => (globalThis as unknown as { __xmeshUiTest: { panelState(): { visible: boolean } } }).__xmeshUiTest.panelState().visible)).toBe(process.env.XMESH_UI_BACKGROUND_TEST !== "1");
+  await page.reload();
+  await expect(page.getByTestId("page-setup")).toHaveCount(0);
+  await expect(page.getByTestId("offline")).toBeVisible();
+  await expect(page.getByTestId("nav-overview")).toHaveAttribute("aria-current", "page");
+  await navigate(page, "setup");
+  await expect(page.getByTestId("wizard-purpose")).toBeVisible();
 });
 for (const purpose of ["local", "multi-device", "cloud"]) test(`purpose ${purpose}: review shows intended setup and collapsed YAML`, async () => {
   h = await launch({ publish: false, lang: "en" });
@@ -42,9 +48,12 @@ for (const purpose of ["local", "multi-device", "cloud"]) test(`purpose ${purpos
   await page.screenshot({ path: path.join(os.tmpdir(), `xmesh-onboarding-${purpose}.png`) });
   expect(errors).toEqual([]);
 });
-test("device readiness and actual client verification are separate, and feature links work", async () => {
+test("device readiness and actual client verification are separate, and setup opens topology", async () => {
   h = await launch({ lang: "en" });
   const page = await h.openPanel();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await navigate(page, "setup");
   await basics(page); await review(page); await page.getByTestId("wizard-run").click();
   await expect(page.getByTestId("setup-client-pending")).toBeVisible();
@@ -56,11 +65,19 @@ test("device readiness and actual client verification are separate, and feature 
   await page.getByTestId("setup-verify").click();
   await expect(page.getByTestId("setup-readiness")).toContainText("Client tool call verified");
   await page.getByTestId("wizard-finish").click();
-  await expect(page.getByTestId("page-features")).toBeVisible();
-  await expect(page.locator(".feature-card")).toHaveCount(6);
-  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-feature-center.png") });
-  await page.getByTestId("feature-devices").click();
+  await expect(page.getByTestId("page-overview")).toBeVisible();
+  await expect(page).toHaveTitle("xmesh");
+  expect(page.url()).toMatch(/^app:\/\/panel\//);
+  await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+  await expect(page.getByTestId("nav-features")).toHaveCount(0);
+  await page.getByTestId("open-search").click();
+  await page.getByTestId("command-input").fill("Feature center");
+  await expect(page.getByTestId("command-palette").getByRole("option")).toHaveCount(0);
+  await page.getByTestId("command-palette").getByRole("button", { name: "Close", exact: true }).click();
+  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-setup-topology.png") });
+  await navigate(page, "devices");
   await expect(page.getByTestId("page-devices")).toBeVisible();
+  expect(errors).toEqual([]);
 });
 test("browser wait persists through page navigation and authorization needs explicit action", async () => {
   h = await launch({ lang: "en" });
@@ -73,7 +90,7 @@ test("browser wait persists through page navigation and authorization needs expl
   await expect.poll(async () => (await h.calls()).filter((call) => call.op === "openExternal").length).toBe(1);
   await page.reload();
   await expect(page.getByTestId("page-overview")).toBeVisible();
-  await expect(page.getByTestId("setup-reminder")).toBeVisible();
+  await expect(page.getByTestId("nav-setup")).toHaveCount(0);
   await navigate(page, "setup");
   await expect(page.getByTestId("setup-existing")).toBeVisible();
   await page.getByTestId(/^resume-job-/).click();
@@ -127,23 +144,10 @@ test("multi-device readiness links to device pairing while client verification s
   await expect(page.getByTestId("setup-readiness")).toContainText("Client verification pending");
   await page.getByTestId("setup-pair-device").click();
   await expect(page.getByTestId("page-devices")).toBeVisible();
-  await expect(page.getByTestId("setup-reminder")).toBeVisible();
-});
-
-test("feature statuses follow live peers, backend health and runtime warnings", async () => {
-  h = await launch({ lang: "en", kernel: { peers: [], status: { backends: [], network: { mode: "lan", node_id: "self", tags: [] } } } });
-  const page = await h.openPanel(); await navigate(page, "features");
-  await expect(page.getByTestId("feature-devices")).toHaveAttribute("data-state", "unconfigured");
-  await expect(page.getByTestId("feature-clients")).toHaveAttribute("data-state", "unconfigured");
-  await expect(page.getByTestId("feature-mesh")).toHaveAttribute("data-state", "unconfigured");
-  h.kernel.panel.setContent(JSON.stringify({ node: { name: "win-dev-01", roles: ["agent", "gateway"] }, agent: { backends: { mcp: { transport: "stdio", command: ["test-mcp"], policy: "shared" } } } }));
-  h.kernel.setStatus({ network: { mode: "tailnet", node_id: "self", tags: [] } });
-  await expect(page.getByTestId("feature-clients")).toHaveAttribute("data-state", "unconfigured");
-  await expect(page.getByTestId("feature-mesh")).toHaveAttribute("data-state", "ready");
-  h.kernel.setStatus({ warnings: [{ code: "tailnet_not_ready", severity: "warning", message: "network waiting" }, { code: "policy_reload_failed", severity: "error", message: "policy waiting" }] });
-  await expect(page.getByTestId("feature-permissions")).toHaveAttribute("data-state", "attention");
-  await expect(page.getByTestId("feature-mesh")).toContainText("Needs attention");
-  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-feature-states.png") });
+  await navigate(page, "setup");
+  await expect(page.getByTestId("setup-existing")).toBeVisible();
+  await page.getByTestId(/^resume-job-/).click();
+  await expect(page.getByTestId("setup-readiness")).toContainText("Client verification pending");
 });
 
 test("multi-device setup preserves the user's coexist network selection", async () => {

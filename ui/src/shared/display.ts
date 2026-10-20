@@ -5,6 +5,7 @@ export const ZOOM_STEPS = [1, 1.1, 1.25, 1.5] as const;
 export interface DisplayPrefs {
   /** Page zoom; always one of ZOOM_STEPS. */
   zoom: number;
+  theme?: "system" | "light" | "dark";
   /** Typeface for the interface; empty means the system's. */
   uiFont: string;
   /** Typeface for code and paths; empty means the system's. */
@@ -24,13 +25,14 @@ export function isFontName(v: unknown): v is string {
 export function parseDisplay(v: unknown): DisplayPrefs | undefined {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
   const o = v as Record<string, unknown>;
-  if (Object.keys(o).some((k) => k !== "zoom" && k !== "uiFont" && k !== "codeFont")) return undefined;
+  if (Object.keys(o).some((k) => k !== "zoom" && k !== "uiFont" && k !== "codeFont" && k !== "theme")) return undefined;
+  if (o.theme !== undefined && !["system", "light", "dark"].includes(o.theme as string)) return undefined;
   const zoom = o.zoom;
   if (typeof zoom !== "number" || !(ZOOM_STEPS as readonly number[]).includes(zoom)) return undefined;
   const uiFont = o.uiFont ?? "";
   const codeFont = o.codeFont ?? "";
   for (const f of [uiFont, codeFont]) if (f !== "" && !isFontName(f)) return undefined;
-  return { zoom, uiFont: uiFont as string, codeFont: codeFont as string };
+  return { zoom, uiFont: uiFont as string, codeFont: codeFont as string, ...(o.theme !== undefined && { theme: o.theme as DisplayPrefs["theme"] }) };
 }
 
 /** The next larger or smaller step, or the same one at the end of the range. */

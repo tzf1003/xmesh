@@ -1,3 +1,4 @@
+import type { AppPreferences } from "./preferences";
 import type { OnboardingRequest, OnboardingResultFor } from "./onboarding";
 import type { KernelRequest, KernelResult } from "./kernel";
 // The renderer receives fixed operations with validated arguments. Tool calls go
@@ -62,6 +63,7 @@ export const CHANNELS = {
   openPath: "xmesh:open-path",
   setLoginItem: "xmesh:set-login-item",
   setDisplay: "xmesh:set-display",
+  setAppPreferences: "xmesh:set-app-preferences",
   openExternal: "xmesh:open-external",
   checkUpdate: "xmesh:check-update",
   installUpdate: "xmesh:install-update",
@@ -113,7 +115,7 @@ export const CALLS_EVENT = "xmesh:calls";
 export const GATEWAY_COPY_KINDS = ["gatewayUrl", "claudeCodeCommand", "codexConfig"] as const;
 export type GatewayCopyKind = (typeof GATEWAY_COPY_KINDS)[number];
 
-export const COPY_KINDS = [...GATEWAY_COPY_KINDS, "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
+export const COPY_KINDS = [...GATEWAY_COPY_KINDS, "ciWorkflow", "meshLoginRead", "meshLoginWrite", "meshLoginReadHeadscale", "meshLoginWriteHeadscale"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
 
 /** Copy one gateway address in one of the connect formats. `url` must be an address the kernel reports now. */
@@ -308,6 +310,7 @@ export interface PanelApi {
   setLoginItem(enabled: boolean): Promise<ActionResult>;
   /** Saves the panel's text size and typefaces on this machine and applies them at once. */
   setDisplay(prefs: DisplayPrefs): Promise<ActionResult>;
+  setAppPreferences(prefs: AppPreferences): Promise<ActionResult>;
   openExternal(key: ExternalKey): Promise<ActionResult>;
   /** Looks for a newer release now; the answer arrives in the snapshot's `update`. */
   checkForUpdate(): Promise<ActionResult>;
@@ -391,6 +394,7 @@ export const PANEL_API_METHODS = [
   "openPath",
   "setLoginItem",
   "setDisplay",
+  "setAppPreferences",
   "openExternal",
   "checkForUpdate",
   "installUpdate",
@@ -786,6 +790,7 @@ export function parsePairImport(v: unknown): PairImportArgs | undefined {
 
 const AUDIT_EVENTS = [
   "tool_call",
+  "task_complete",
   "pty_open",
   "pty_close",
   "pty_transfer",

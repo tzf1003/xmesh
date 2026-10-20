@@ -90,6 +90,9 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
             <svg class="graph-edges" viewBox="0 0 800 560" preserveAspectRatio="none" aria-hidden="true">
               <defs><marker id="call-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z"/></marker></defs>
               <ellipse class="graph-ring" cx="400" cy="295" rx="130" ry="135"/><ellipse class="graph-ring" cx="400" cy="295" rx="275" ry="235"/>
+              <g class="graph-probe" transform={`translate(${CENTER.x} ${CENTER.y})`}>
+                {[0, 1, 2, 3].map((wave) => <ellipse key={wave} class="graph-ripple" cx="0" cy="0" rx="360" ry="250"/>)}
+              </g>
               {plotted.map((p) => {
                 const id = peerKey(p), point = PEER_SLOTS[slots.get(id)!]!, kind = linkKind(p);
                 const relay = kind === "derp" ? relayPoint(p.derp_region ?? "?") : undefined;

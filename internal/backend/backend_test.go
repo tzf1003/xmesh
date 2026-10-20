@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/lease"
@@ -28,7 +29,8 @@ func TestBackendProcess(t *testing.T) {
 		return
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "mock-ida", Version: "1"}, nil)
-	for _, name := range []string{"echo", "crash", "slow", "env"} {
+	acceptedSession := "<uninitialized>"
+	for _, name := range []string{"echo", "crash", "slow", "env", "run", "result"} {
 		name := name
 		server.AddTool(&mcp.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, r *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if name == "crash" {
@@ -36,6 +38,16 @@ func TestBackendProcess(t *testing.T) {
 			}
 			if name == "slow" {
 				time.Sleep(20 * time.Millisecond)
+			}
+			if name == "run" {
+				acceptedSession = r.Session.ID()
+				return &mcp.CallToolResult{StructuredContent: map[string]any{"run_id": "r_backend", "status": "accepted"}, Content: []mcp.Content{&mcp.TextContent{Text: "accepted"}}}, nil
+			}
+			if name == "result" {
+				if acceptedSession != r.Session.ID() {
+					return nil, toolerr.New("unauthorized", "task belongs to another connection")
+				}
+				return &mcp.CallToolResult{StructuredContent: map[string]any{"protocol_version": 1, "run_id": "r_backend", "status": "passed"}, Content: []mcp.Content{&mcp.TextContent{Text: "passed"}}}, nil
 			}
 			var args map[string]any
 			_ = json.Unmarshal(r.Params.Arguments, &args)
@@ -54,6 +66,37 @@ func TestBackendProcess(t *testing.T) {
 		os.Exit(24)
 	}
 	os.Exit(0)
+}
+
+func TestBackendAsyncExecutionPollKeepsCallerTransport(t *testing.T) {
+	m, _ := fixture(t, "per-caller")
+	l, err := audit.New(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Close)
+	lifecycle, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	x := l.BeginExecution(lifecycle, "n/a", "", "device", "ida.run", "agent")
+	args := raw(map[string]any{"protocol_version": 1})
+	out, err := m.Call(x.Context(lifecycle), "n/a", "ida.run", args, mcpmux.Progress{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	x.FinishCall(args, out.StructuredContent, out.IsError)
+	active, _ := l.Executions()
+	if len(active) != 1 || active[0].State != "async" {
+		t.Fatal(active)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		active, _ = l.Executions()
+		if len(active) == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("async task result not read from accepting backend", active)
 }
 func fixture(t *testing.T, policy string) (*Manager, *lease.Manager) {
 	t.Helper()

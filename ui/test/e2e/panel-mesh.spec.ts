@@ -60,6 +60,22 @@ test("devices: a connected node's config is handed to the CLI so roles can be ma
   expect(first.some((a: string) => a.startsWith("--credential-file="))).toBe(true);
 });
 
+test("devices: search and status filters combine and onboarding opens a drawer", async () => {
+  const page = await open();
+  await page.getByTestId("mesh-search").fill("tag:peer");
+  await expect(page.getByTestId("mesh-device-n200")).toBeVisible();
+  await expect(page.getByTestId("mesh-device-n100")).toHaveCount(0);
+  await page.getByTestId("mesh-device-filter").selectOption("offline");
+  await expect(page.getByTestId("mesh-device-n200")).toHaveCount(0);
+  await page.getByTestId("mesh-search").fill("");
+  await expect(page.getByTestId("mesh-device-n300")).toBeVisible();
+  await page.getByTestId("mesh-tab-onboard").click();
+  await expect(page.getByTestId("mesh-onboard-drawer")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("mesh-onboard-drawer")).toHaveCount(0);
+  await expect(page.getByTestId("mesh-device-filter")).toHaveValue("offline");
+});
+
 test("no credential: the page shows the login commands, copies them, and recovers after login", async () => {
   await (async () => {
     h = await launch({ kernel: { capabilities: ALL } });
@@ -88,15 +104,16 @@ test("login form: the key goes to the CLI on stdin, the field is cleared, and th
   const page = await open();
   await patch({ credential: false });
   await page.getByTestId("mesh-refresh").click();
-  await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open", true);
+  await page.getByTestId("mesh-connect-credentials").or(page.getByTestId("mesh-manage-credentials")).click();
+  await expect(page.getByTestId("mesh-credentials-drawer")).toBeVisible();
   await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
   const key = "tskey-api-e2e-SECRET-42";
   await page.getByTestId("mesh-login-secret").fill(key);
   await page.getByTestId("mesh-login-submit").click();
   await expect(page.getByTestId("mesh-devices")).toContainText("laptop");
   await expect(page.getByTestId("mesh-no-credential")).toHaveCount(0);
-  await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open", false);
-  await expect(page.getByTestId("mesh-login-secret")).toHaveValue("");
+  await expect(page.getByTestId("mesh-credentials-drawer")).toHaveCount(0);
+  await expect(page.getByTestId("mesh-login-secret")).toHaveCount(0);
   expect(await page.content()).not.toContain(key);
   const calls = await fake("calls");
   const login = calls.find((c) => c[1] === "login")!;
@@ -110,6 +127,7 @@ test("login form: a rejected key is reported and cleared; a Headscale address mu
   const page = await open();
   await patch({ credential: false, acceptKeys: false });
   await page.getByTestId("mesh-refresh").click();
+  await page.getByTestId("mesh-connect-credentials").or(page.getByTestId("mesh-manage-credentials")).click();
   await page.getByTestId("mesh-login-kind").selectOption("headscale");
   await page.getByTestId("mesh-login-url").fill("http://headscale.example.com");
   await page.getByTestId("mesh-login-secret").fill("hskey-e2e");
@@ -279,7 +297,7 @@ test("policy: local node selection preserves the draft and credential replacemen
     await expect(page.getByTestId("mesh-policy-text")).toHaveValue(draft);
     await h.clickMenu("instance.node-a");
     await expect(page.getByTestId("mesh-policy-text")).toHaveValue(draft);
-    await page.getByTestId("mesh-login").locator("summary").click();
+    await page.getByTestId("mesh-manage-credentials").click();
     await page.getByTestId("mesh-login-secret").fill("tskey-api-replacement");
     await page.getByTestId("mesh-login-submit").click();
     await expect(page.getByTestId("confirm")).toBeVisible();
@@ -417,7 +435,8 @@ test("verified mesh status belongs to the selected node",async()=>{
  const page=await open();
  await patch({credential:false});
  await page.getByTestId("mesh-refresh").click();
- await expect(page.getByTestId("mesh-login")).toHaveJSProperty("open",true);
+ await page.getByTestId("mesh-connect-credentials").or(page.getByTestId("mesh-manage-credentials")).click();
+ await expect(page.getByTestId("mesh-credentials-drawer")).toBeVisible();
  await expect(page.getByTestId("mesh-login-submit")).toBeDisabled();
  await page.getByTestId("mesh-login-secret").fill("tskey-api-e2e-node-scope");
  await page.getByTestId("mesh-login-submit").click();

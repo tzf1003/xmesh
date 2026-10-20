@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -354,6 +355,10 @@ func (g *Gateway) newView(p Principal) *view {
 		return func(ctx context.Context, method string, r mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
 			if method == "tools/call" && g.opts.Audit != nil {
+				call := r.(*mcp.CallToolRequest)
+				device, caller := v.auditIdentity(call.Params.Name, call.Session.ID())
+				x := g.opts.Audit.BeginExecution(v.ctx, caller, v.p.ClientID, device, call.Params.Name, "gateway")
+				ctx = x.Context(ctx)
 				defer func() {
 					call := r.(*mcp.CallToolRequest)
 					out, ok := result.(*mcp.CallToolResult)
@@ -361,7 +366,9 @@ func (g *Gateway) newView(p Principal) *view {
 						out = agent.Result(nil, toolerr.Internal("tools.call", e))
 					}
 					device, caller := v.auditIdentity(call.Params.Name, call.Session.ID())
-					if err := g.opts.Audit.RecordSessionOrigin(v.p.Origin, v.oauthAudit, caller, v.p.ClientID, device, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+					x.SetTarget(caller, device, call.Params.Name)
+					x.FinishCall(call.Params.Arguments, out.StructuredContent, out.IsError)
+					if err := g.opts.Audit.RecordExecution(x, v.p.Origin, v.oauthAudit, caller, v.p.ClientID, device, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
 						result, e = agent.Result(nil, err), nil
 					}
 				}()
@@ -441,6 +448,9 @@ func (g *Gateway) newView(p Principal) *view {
 						return agent.Result(nil, toolerr.New("not_found", "设备能力尚未就绪", "name", deviceName)), nil
 					}
 				}
+			}
+			if method == "tools/call" {
+				audit.SetExecutionState(ctx, "running")
 			}
 			result, e = next(ctx, method, r)
 			if e == nil && method == "tools/list" {
@@ -814,6 +824,26 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 	if dead {
 		return agent.Result(nil, toolerr.New("not_found", "设备连接已关闭", "name", deviceName)), nil
 	}
+	_, caller := v.auditIdentity(name, r.Session.ID())
+	audit.SetExecutionTarget(ctx, caller, deviceName, name)
+	audit.SetResultPoll(ctx, func(pollCtx context.Context, runID string) (any, error) {
+		resultTool := strings.TrimSuffix(strings.TrimSuffix(tool, ".run"), ".script") + ".result"
+		args := map[string]json.RawMessage{"run_id": json.RawMessage(strconv.Quote(runID))}
+		if !v.allowed(deviceName, resultTool, "") || (!v.p.Local && !oauth.AllowsArguments(v.p.Scopes, deviceName, resultTool, args)) {
+			return nil, toolerr.New("unauthorized", "调用方不允许读取任务结果")
+		}
+		v.mu.Lock()
+		current := v.down[deviceName] == d && !d.dead && !v.closed
+		v.mu.Unlock()
+		if !current {
+			return nil, toolerr.New("not_found", "任务连接已关闭")
+		}
+		out, err := d.bridge.Call(pollCtx, resultTool, map[string]any{"run_id": runID}, mcpmux.Progress{})
+		if out == nil {
+			return nil, err
+		}
+		return audit.PollResult(out.StructuredContent, out.IsError, err)
+	})
 	invoke := func(ctx context.Context, bridge *mcpmux.Bridge) (*mcp.CallToolResult, error) {
 		return bridge.Call(ctx, tool, args, mcpmux.Progress{Original: r.Params.GetProgressToken(), Send: r.Session.NotifyProgress})
 	}

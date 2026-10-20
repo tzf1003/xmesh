@@ -1,3 +1,4 @@
+import type { AppPreferences } from "../shared/preferences";
 import * as net from "node:net";
 import { EventEmitter } from "node:events";
 import {
@@ -28,6 +29,8 @@ export interface ControllerOptions {
   getLoginItem: () => boolean;
   /** Saved display preferences; defaults when absent. */
   getDisplay?: () => DisplayPrefs;
+  getAppPreferences?: () => AppPreferences;
+  setAppPreferences?: (prefs: AppPreferences) => boolean;
   /** Persists and applies new display preferences. */
   setDisplay?: (prefs: DisplayPrefs) => void;
   /** Tray and panel language; default Chinese. */
@@ -100,7 +103,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.snap = {
       ...EMPTY_SNAPSHOT,
       cliCommand: opts.cliCommand ?? EMPTY_SNAPSHOT.cliCommand,
-      settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh", display: opts.getDisplay?.() ?? DEFAULT_DISPLAY },
+      settings: { loginItem: opts.getLoginItem(), locale: opts.locale ?? "zh", display: opts.getDisplay?.() ?? DEFAULT_DISPLAY, ...(opts.getAppPreferences && { preferences: opts.getAppPreferences() }) },
       update: opts.getUpdate?.() ?? EMPTY_SNAPSHOT.update,
     };
   }
@@ -149,6 +152,12 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   setDisplay(prefs: DisplayPrefs): void {
     this.opts.setDisplay?.(prefs);
     this.update({ settings: { ...this.snap.settings, display: prefs } });
+  }
+
+  setAppPreferences(prefs: AppPreferences): boolean {
+    if (!this.opts.setAppPreferences?.(prefs)) return false;
+    this.update({ settings: { ...this.snap.settings, locale: prefs.locale, preferences: prefs } });
+    return true;
   }
 
   setUpdate(update: UpdateState): void {
@@ -413,6 +422,7 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     const live = found.filter((i) => !stale.has(i.id));
     this.update({
       instances: this.instanceInfos(),
+      discoveryReady: true,
       stoppedNodes: stoppedNodes(this.opts.configured?.() ?? [], live),
       staleNodes: [...stale],
       protectedStaleNodes: found.filter((i) => stale.has(i.id) && i.protected).map((i) => i.id),

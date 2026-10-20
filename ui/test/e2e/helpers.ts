@@ -9,9 +9,20 @@ export const UI_ROOT = path.resolve(__dirname, "..", "..");
 
 /** Navigate through the disclosure used by the production sidebar. */
 export async function navigate(page: Page, id: string): Promise<void> {
+  if (id === "about") { await navigate(page, "settings"); await page.getByTestId("settings-tab-about").click(); return; }
+  if (id === "audit") { await navigate(page, "sessions"); await page.getByTestId("sessions-tab-history").click(); return; }
+  if (id === "setup") { await navigate(page, "settings"); await page.getByTestId("settings-maintenance").locator("summary").click(); await page.getByTestId("settings-open-setup").click(); return; }
+  if (id === "config") { await navigate(page, "settings"); await page.getByTestId("settings-tab-diagnostics").click(); await page.getByRole("button", { name: /修复配置|Repair configuration/ }).click(); return; }
   const target = page.getByTestId(`nav-${id}`);
-  if (!(await target.isVisible())) await page.getByTestId("nav-advanced").click();
+  if (!(await target.isVisible())) await target.locator("xpath=ancestor::details[1]").locator("summary").click();
   await target.click();
+}
+
+export async function openModuleSettings(page: Page, scope: "node" | "agent" | "gateway" | "ingress" | "transfers"): Promise<void> {
+  if (scope === "node") { await navigate(page, "devices"); await page.getByTestId("device-settings").click(); }
+  else if (scope === "transfers") { await navigate(page, "transfers"); await page.getByTestId("transfer-settings").click(); }
+  else { await page.getByTestId(`role-${scope}`).click(); await page.getByTestId("role-menu-settings").click(); }
+  await expect(page.getByTestId("module-settings-dialog")).toBeVisible();
 }
 
 export interface Harness {

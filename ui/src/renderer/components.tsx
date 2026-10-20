@@ -1,5 +1,5 @@
 import type { ComponentChildren, JSX } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { ActionError } from "../shared/ipc";
 import { errorText, useT } from "./i18n";
 import type { Resource } from "./hooks";
@@ -68,25 +68,32 @@ export function Dialog({
   children,
   onClose,
   testid = "dialog",
+  drawer = false,
 }: {
   title: string;
   children: ComponentChildren;
   onClose: () => void;
   testid?: string;
+  drawer?: boolean;
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  const close = useRef(onClose); close.current = onClose;
+  useLayoutEffect(() => {
     const el = ref.current;
     const previous = document.activeElement as HTMLElement | null;
-    el?.querySelector<HTMLElement>("input, textarea, select, button")?.focus();
+    const focusable = (): HTMLElement[] => el ? [...el.querySelectorAll<HTMLElement>("input, textarea, select, button:not([disabled]), a[href]")].filter(x => !x.matches(":disabled") && !x.closest("[hidden]") && x.getClientRects().length > 0) : [];
+    focusable()[0]?.focus();
     const onKey = (e: KeyboardEvent): void => {
+      const dialogs = [...document.querySelectorAll<HTMLElement>(".dialog")];
+      if (dialogs.at(-1) !== el) return;
       if (e.key === "Escape") {
+        e.preventDefault();
         e.stopPropagation();
-        onClose();
+        close.current();
         return;
       }
       if (e.key !== "Tab" || !el) return;
-      const items = [...el.querySelectorAll<HTMLElement>("input, textarea, select, button:not([disabled]), a[href]")].filter((x) => !x.hasAttribute("disabled"));
+      const items = focusable();
       if (items.length === 0) return;
       const first = items[0]!;
       const last = items[items.length - 1]!;
@@ -103,11 +110,11 @@ export function Dialog({
       document.removeEventListener("keydown", onKey, true);
       previous?.focus?.();
     };
-  }, [onClose]);
+  }, []);
   return (
-    <div class="overlay">
-      <div class="dialog" role="dialog" aria-modal="true" aria-label={title} ref={ref} data-testid={testid}>
-        <h2>{title}</h2>
+    <div class={`overlay ${drawer ? "drawer-overlay" : ""}`}>
+      <div class={`dialog ${drawer ? "drawer" : ""}`} role="dialog" aria-modal="true" aria-label={title} ref={ref} data-testid={testid}>
+        <div class="dialog-heading"><h2>{title}</h2>{drawer && <button type="button" class="icon-btn" aria-label="Close" onClick={onClose}>×</button>}</div>
         {children}
       </div>
     </div>

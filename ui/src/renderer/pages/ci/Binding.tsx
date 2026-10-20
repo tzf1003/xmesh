@@ -4,6 +4,7 @@ import type { PageContext } from "../../app";
 import { getApi } from "../../api";
 import { Badge, Dialog, Field } from "../../components";
 import { useT } from "../../i18n";
+import { Icon } from "../../icons";
 import { formatTime } from "../../lib/format";
 import { CI_MAX_CONCURRENCY } from "../../../shared/ci";
 import { RESULT_KEY, STATE_KEY, STEP_KEY, parseLabelInput, registrationTokenValid, stateKind, stepOf } from "../../lib/ci";
@@ -11,6 +12,8 @@ import type { CiAccount, CiBinding, CiInstance, CiOverview } from "../../../shar
 import type { ActionError } from "../../../shared/ipc";
 import { AccountDialog } from "./Accounts";
 import { CiError } from "./common";
+import { bindingNeedsAttention } from "../module-model";
+import { useModuleT } from "../module-messages";
 
 interface Props {
   ctx: PageContext;
@@ -22,6 +25,8 @@ interface Props {
 /** One bound repository: its settings, its runner instances, and what to press when an instance needs the user. */
 export function BindingCard({ ctx, overview, binding: b, reload }: Props): JSX.Element {
   const t = useT();
+  const m = useModuleT();
+  const [managing, setManaging] = useState(false);
   const [dialog, setDialog] = useState<"edit" | "unbind" | "repair" | "token" | undefined>();
   const [err, setErr] = useState<ActionError | undefined>();
   const [busy, setBusy] = useState(false);
@@ -50,17 +55,23 @@ export function BindingCard({ ctx, overview, binding: b, reload }: Props): JSX.E
   };
 
   return (
-    <section class="card ci-binding" data-testid={`ci-binding-${b.id}`}>
-      <div class="row">
-        <h2 class="grow">
-          {b.target} <Badge>{source}</Badge>
-          {b.public === true && <Badge kind="warn">{t("ci.public")}</Badge>}
-          {b.paused && <Badge>{t("ci.paused")}</Badge>}
-          {b.removing && <Badge kind="warn">{t("ci.removing")}</Badge>}
-        </h2>
+    <section class={`card ci-binding ${bindingNeedsAttention(b) ? "issue" : ""}`} data-testid={`ci-binding-${b.id}`}>
+      <div class="module-repo-heading">
+        <span class="module-repo-icon"><Icon name="folder"/></span>
+        <div class="module-repo-heading-main"><div class="module-repo-title"><h2>{b.target}</h2>
+          {b.public === true ? <Badge kind="warn">{t("ci.public")}</Badge> : b.public === false && <Badge>{m("private")}</Badge>}
+          {b.paused && <Badge>{t("ci.paused")}</Badge>}{b.removing && <Badge kind="warn">{t("ci.removing")}</Badge>}
+        </div><p>{source} · {m("instanceCount", { n: b.instances.length })}</p></div>
+        <div class="module-repo-actions">
         <button type="button" class="btn small" disabled={busy || b.removing} onClick={() => void togglePause()} data-testid={`ci-pause-${b.id}`}>
           {b.paused ? t("ci.resume") : t("ci.pause")}
         </button>
+        <button type="button" class="module-icon-button" disabled={busy || b.removing} onClick={() => setManaging(!managing)} aria-label={`${m("manage")} ${b.target}`} aria-expanded={managing} data-testid={`ci-manage-${b.id}`}><Icon name="sliders"/></button>
+        </div>
+      </div>
+      <div class="module-repo-tags"><span>{m("tagsTitle")}</span>{b.source !== "import" && <Badge kind="info">xmesh</Badge>}{b.labels.filter((label) => b.source === "import" || label !== "xmesh").map((label) => <Badge key={label}>{label}</Badge>)}{b.source === "import" && b.labels.length === 0 && <span class="hint">—</span>}</div>
+      <div class="module-binding-management" hidden={!managing}>
+        <span>{t("ci.concurrency")} {b.concurrency}</span>
         <button type="button" class="btn small" disabled={busy || b.removing} onClick={() => void restart()} data-testid={`ci-restart-${b.id}`}>
           {t("ci.restartAll")}
         </button>
@@ -71,38 +82,26 @@ export function BindingCard({ ctx, overview, binding: b, reload }: Props): JSX.E
           {t("ci.unbind")}
         </button>
       </div>
-      <p class="hint">
-        {t("ci.concurrency")} {b.concurrency} · {t("ci.labels")}: {b.labels.length === 0 ? "—" : b.labels.join(", ")}
-      </p>
       {err && <CiError error={err} />}
       <ul class="plain" aria-label={t("ci.instances")}>
         {b.instances.map((i) => {
           const step = stepOf(i);
           return (
             <li key={i.index} class="ci-instance" data-testid={`ci-instance-${b.id}-${i.index}`}>
-              <div class="row">
-                <span class="mono grow">{i.name}</span>
-                <Badge kind={stateKind(i.state)}>
+              <div class="module-instance-row">
+                <span class="mono">{i.name}</span>
+                <span class={`module-state ${stateKind(i.state)}`}>
                   <span data-testid={`ci-state-${b.id}-${i.index}`} data-state={i.state}>
                     {t(STATE_KEY[i.state])}
                   </span>
-                </Badge>
+                </span>
+                <div class="module-instance-job"><strong>{i.job ? t("ci.instance.job", { name: i.job.name }) : m("waitingJob")}</strong><small>{i.job ? formatTime(i.job.started_at) : i.last_result ? `${t("ci.instance.last", { name: i.last_result.name, result: t(RESULT_KEY[i.last_result.result]) })} · ${formatTime(i.last_result.finished_at)}` : m("stateSince", { time: formatTime(i.since) })}</small></div>
                 {step && (
                   <button type="button" class="btn small primary" disabled={busy} onClick={() => act(i)} data-testid={`ci-step-${b.id}-${i.index}`}>
                     {t(STEP_KEY[step])}
                   </button>
                 )}
               </div>
-              {i.job && (
-                <p class="hint">
-                  {t("ci.instance.job", { name: i.job.name })} · {formatTime(i.job.started_at)}
-                </p>
-              )}
-              {!i.job && i.last_result && (
-                <p class="hint">
-                  {t("ci.instance.last", { name: i.last_result.name, result: t(RESULT_KEY[i.last_result.result]) })} · {formatTime(i.last_result.finished_at)}
-                </p>
-              )}
               {i.problem && <p class="hint ci-problem">{i.problem.message}</p>}
               {i.restarts > 0 && <p class="hint">{t("ci.instance.restarts", { n: i.restarts })}</p>}
             </li>
@@ -199,7 +198,7 @@ function EditDialog({
   };
 
   return (
-    <Dialog title={t("ci.editTitle", { repo: b.target })} onClose={onClose} testid="ci-edit-dialog">
+    <Dialog title={t("ci.editTitle", { repo: b.target })} onClose={onClose} testid="ci-edit-dialog" drawer>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -318,7 +317,7 @@ function RepairDialog({ ctx, binding: b, onClose, onDone }: { ctx: PageContext; 
   };
 
   return (
-    <Dialog title={`${t("ci.step.repair")} · ${b.target}`} onClose={onClose} testid="ci-repair-dialog">
+    <Dialog title={`${t("ci.step.repair")} · ${b.target}`} onClose={onClose} testid="ci-repair-dialog" drawer>
       <form
         onSubmit={(e) => {
           e.preventDefault();

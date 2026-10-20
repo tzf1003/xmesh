@@ -360,10 +360,14 @@ func mergeReadings(sets ...map[string]gateway.DeviceInfo) map[string]gateway.Dev
 	return out
 }
 func (h *controlHost) Sessions() v2.SessionsResponse {
-	if h.d.agent == nil {
-		return v2.SessionsResponse{PTY: []v2.PtySession{}, Exec: []v2.ExecRun{}, Leases: []v2.BackendLease{}}
+	out := v2.SessionsResponse{PTY: []v2.PtySession{}, Exec: []v2.ExecRun{}, Leases: []v2.BackendLease{}}
+	if h.d.agent != nil {
+		out = h.d.agent.Sessions()
 	}
-	return h.d.agent.Sessions()
+	if h.d.log != nil {
+		out.Executions, out.ExecutionLimits = h.d.log.Executions()
+	}
+	return out
 }
 func (h *controlHost) Drain(kill bool) (closedPTY, releasedLeases int) {
 	if h.d.management != nil {

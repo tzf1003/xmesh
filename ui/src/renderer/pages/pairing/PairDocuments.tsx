@@ -12,7 +12,7 @@ import type { PairDocument } from "../../../shared/control";
  * The pairing-document flow, kept for the cases a password cannot cover and for the command line. The
  * password flow above is the normal path.
  */
-export function PairDocuments({ ctx }: { ctx: PageContext }): JSX.Element {
+export function PairDocuments({ ctx, expanded }: { ctx: PageContext; expanded?: boolean }): JSX.Element {
   const t = useT();
   const [mine, setMine] = useState<PairDocument | undefined>();
   const [mineErr, setMineErr] = useState<ActionError | undefined>();
@@ -51,7 +51,7 @@ export function PairDocuments({ ctx }: { ctx: PageContext }): JSX.Element {
   };
 
   return (
-    <details class="card" data-testid="pair-advanced">
+    <details class="card" open={expanded} data-testid="pair-advanced">
       <summary>
         <strong>{t("pair.advancedTitle")}</strong>
       </summary>

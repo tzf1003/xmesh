@@ -20,6 +20,13 @@ async function capture(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: path.join(process.env.XMESH_UI_QA_DIR, name), fullPage: true, animations: "disabled", scale: "css" });
 }
 
+async function configuration(page: Page): Promise<void> {
+  await navigate(page, "settings");
+  await page.getByTestId("settings-tab-diagnostics").click();
+  await page.getByRole("button", { name: "修复配置", exact: true }).click();
+  await page.getByTestId("config-form-tab").click();
+}
+
 test("topology renders real routes, selects details and filters without moving peers", async () => {
   const page = await open();
   const errors: string[] = [];
@@ -83,7 +90,6 @@ test("the primary client action copies usable configuration through the main pro
 
 test("command search uses keyboard navigation and opens a device or configuration", async () => {
   const page = await open();
-  await expect(page.getByTestId("nav-config")).not.toBeVisible();
   await page.keyboard.press("Control+k");
   await page.getByTestId("command-input").fill("linux-box");
   await page.getByTestId("command-input").press("Enter");
@@ -98,7 +104,7 @@ test("command search uses keyboard navigation and opens a device or configuratio
   await page.getByTestId("command-input").fill("不存在的设备");
   await expect(page.getByTestId("command-palette")).toContainText("没有找到匹配项");
   await page.keyboard.press("Escape");
-  await navigate(page, "config");
+  await configuration(page);
   await expect(page.getByTestId("settings-name")).toBeVisible();
   await page.getByTestId("settings-name").fill("changed-node");
   await page.getByTestId("config-source-tab").click();
@@ -126,9 +132,9 @@ test("compact layout, large text and empty state remain usable", async () => {
   await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await capture(page, "compact.png");
-  await page.getByTestId("open-display").click();
-  await page.getByTestId("zoom-125").click();
-  await page.keyboard.press("Escape");
+  await navigate(page, "settings");
+  await page.getByRole("combobox", {name:"界面缩放"}).selectOption("1.25");
+  await navigate(page, "overview");
   await expect(page.locator(".graph-list")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   expect(await page.locator(".content").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
@@ -154,15 +160,16 @@ test("peer updates retain geometry, distinguish pending routes and show sys.info
   await expect(page.getByTestId("topology-inspector")).toContainText("sys.info timed out");
 });
 
-test("configuration form saves through preview, source reflects the saved file, and onboarding opens the correct tab", async () => {
+test("configuration form saves through preview, source reflects the saved file, and onboarding opens its drawer", async () => {
   const page = await open();
   await page.getByTestId("page-overview").getByRole("button", { name: "接入新设备", exact: true }).first().click();
-  await expect(page.getByTestId("mesh-tab-onboard")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("mesh-onboard-drawer")).toBeVisible();
+  await page.keyboard.press("Escape");
   h.kernel.panel.setContent([
     "node:", "  name: original-node", "  roles: [agent, gateway]", "mesh:", "  mode: lan",
     "gateway:", "  listen: 127.0.0.1:8080", "agent:", "  default_cwd: /tmp", "  cwd_policy:", "    allow: [/tmp]", "",
   ].join("\n"));
-  await navigate(page, "config");
+  await configuration(page);
   await page.getByTestId("settings-name").fill("saved-node");
   await page.getByTestId("settings-review").click();
   expect(h.kernel.panel.writes).toEqual([]);
@@ -206,5 +213,6 @@ test("the complete device list stays reachable when filters hide overflow peers"
   await page.getByTestId("topology-online").check();
   await expect(page.getByTestId("topology-all-devices")).toBeVisible();
   await page.getByTestId("topology-all-devices").click();
-  await expect(page.getByTestId("peers-table").locator("tbody tr")).toHaveCount(13);
+  await expect(page.getByTestId("peers-table").locator('button[data-testid^="peer-"]')).toHaveCount(12);
+  await expect(page.getByTestId("device-local")).toContainText(peersFixture()[0]!.name);
 });

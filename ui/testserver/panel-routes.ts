@@ -561,7 +561,9 @@ export class PanelData {
     if (status) events = events.filter((e) => e.status === status);
     if (event) events = events.filter((e) => e.event === event);
     const limit = Number(q.get("limit") ?? 100);
-    return ok({ enabled: true, events: events.slice(0, limit), next_cursor: null } satisfies AuditResponse);
+    const start = Number(q.get("cursor") ?? 0);
+    const page = events.slice(start, start + limit);
+    return ok({ enabled: true, events: page, next_cursor: start + page.length < events.length ? String(start + page.length) : null } satisfies AuditResponse);
   }
 }
 

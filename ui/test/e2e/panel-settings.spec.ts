@@ -9,7 +9,7 @@ import { parse } from "yaml";
 import type { Capability } from "../../src/shared/control";
 import { statusFixture } from "../../testserver/fixtures";
 import type { FakeKernelOptions } from "../../testserver/server";
-import { type Harness, launch } from "./helpers";
+import { type Harness, launch, navigate, openModuleSettings } from "./helpers";
 
 const ALL: Capability[] = ["status", "events", "peers", "sessions", "drain", "config.read", "config.write", "pair", "pats", "ingress", "audit"];
 const FULL_CONFIG = [
@@ -47,99 +47,56 @@ async function open(kernel: FakeKernelOptions = {}): Promise<Page> {
   return page;
 }
 
-test("ingress: opening setup keeps the role off until explicitly selected and saved", async () => {
+test("ingress settings are independent from role enablement", async () => {
   const page = await open({ status: { roles: ["agent", "gateway"] } });
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("nav-ingress").click();
-  await expect(page.getByTestId("ingress-disabled")).toBeVisible();
-  await page.getByTestId("ingress-to-settings").click();
-
-  await expect(page.getByTestId("page-settings")).toBeVisible();
-  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
+  await openModuleSettings(page, "ingress");
   await expect(page.getByTestId("settings-ingress")).toBeVisible();
-  await expect(page.getByTestId("settings-ingress-enable")).not.toBeChecked();
-  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
-  await expect(page.getByTestId("role-gateway")).toBeEnabled();
-  await expect(page.getByTestId("settings-review")).toBeDisabled();
-  await expect(page).toHaveTitle(/xmesh/i);
-  await expect(page).toHaveURL("app://panel/index.html");
-  await expect(page.locator("vite-error-overlay")).toHaveCount(0);
-  await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-ingress-disabled.png") });
-  await page.getByTestId("settings-ingress-enable").check();
-  await expect(page.getByTestId("settings-ingress-pending")).toBeVisible();
-  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
-  // A public listener or reverse tunnel can use LAN. Funnel requires Tailnet.
-  await expect(page.getByTestId("settings-needs-tailnet")).toHaveCount(0);
-  await page.getByTestId("settings-listen").selectOption("funnel");
-  await expect(page.getByTestId("settings-needs-tailnet")).toBeVisible();
-  expect(h.kernel.panel.writes).toEqual([]);
-  expect(errors).toEqual([]);
-});
-
-test("ingress: saving unrelated settings from setup leaves ingress disabled", async () => {
-  const page = await open({ status: { roles: ["agent", "gateway"] } });
-  h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("nav-ingress").click();
-  await page.getByTestId("ingress-to-settings").click();
-  await page.getByTestId("settings-max-file-size").fill("2GiB");
-  await page.getByTestId("settings-review").click();
-  await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("settings-max-file-size")).toHaveValue("2GiB");
-  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
-  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
-  expect(h.kernel.panel.content).toContain("roles: [agent, gateway]");
-  expect(h.kernel.panel.content).not.toContain("ingress:");
-});
-
-test("ingress: explicit setup enables only after review, and switching off refreshes the summary", async () => {
-  const page = await open({ status: { roles: ["agent", "gateway"] } });
-  h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("role-ingress").click();
-  await page.getByTestId("settings-ingress-enable").check();
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("data-enabled", "false");
   await page.getByTestId("settings-issuer").fill("https://xmesh.example.com");
   await page.getByTestId("settings-review").click();
-  await expect(page.getByTestId("settings-diff")).toBeVisible();
-  const preview = h.kernel.requests.filter((r) => r.method === "PUT" && (r.body as { dry_run?: boolean }).dry_run).at(-1);
-  expect((preview?.body as { content: string }).content).toContain("roles: [agent, gateway, ingress]");
-  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByTestId("settings-diff")).not.toContainText("/node/roles");
   expect(h.kernel.panel.writes).toEqual([]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("settings-diff")).toHaveCount(0);
+  await expect(page.getByTestId("module-settings-dialog")).toBeVisible();
+  await page.getByTestId("settings-review").click();
   await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("settings-role-summary")).toContainText("ingress");
-  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByTestId("settings-ingress-pending")).toHaveCount(0);
-  await page.getByTestId("role-ingress").click();
-  await page.getByTestId("confirm-ok").click();
-  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
-  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
-  await expect(page.getByTestId("settings-ingress-enable")).not.toBeChecked();
-  await expect(page.getByTestId("settings-review")).toBeDisabled();
+  await expect(page.getByTestId("settings-issuer")).toHaveValue("https://xmesh.example.com");
+  expect(parse(h.kernel.panel.content).node.roles).toEqual(["agent", "gateway"]);
+  expect(parse(h.kernel.panel.content).ingress.oauth.issuer).toBe("https://xmesh.example.com");
 });
 
-test("ingress: cancelling setup discards its draft and keeps other edits", async () => {
-  const page = await open({ status: { roles: ["agent", "gateway"] } });
-  h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("role-ingress").click();
-  await page.getByTestId("settings-ingress-enable").check();
-  await page.getByTestId("settings-issuer").fill("https://draft.example.com");
-  await page.getByTestId("settings-ingress-enable").uncheck();
+test("a scoped Gateway drawer preserves Agent settings and reverts its listener", async () => {
+  const page = await open(); h.kernel.panel.setContent(FULL_CONFIG);
+  await openModuleSettings(page, "gateway");
+  await page.getByTestId("settings-gateway-listen").fill("127.0.0.1:9000");
+  await page.getByRole("button", { name: /还原|撤销|Revert/ }).first().click();
+  await expect(page.getByTestId("settings-gateway-listen")).toHaveValue("127.0.0.1:8080");
   await expect(page.getByTestId("settings-review")).toBeDisabled();
-  await expect(page.getByTestId("role-gateway")).toBeEnabled();
-  await page.getByTestId("settings-ingress-enable").check();
-  await expect(page.getByTestId("settings-issuer")).toHaveValue("");
-  await page.getByTestId("settings-max-file-size").fill("2GiB");
-  await page.getByTestId("settings-ingress-enable").uncheck();
-  await expect(page.getByTestId("settings-max-file-size")).toHaveValue("2GiB");
-  await expect(page.getByTestId("settings-review")).toBeEnabled();
-  expect(h.kernel.panel.writes).toEqual([]);
+  await page.getByTestId("settings-gateway-listen").fill("127.0.0.1:9000");
+  await page.getByTestId("settings-review").click();
+  await page.getByTestId("confirm-ok").click();
+  expect(parse(h.kernel.panel.content).gateway.listen).toBe("127.0.0.1:9000");
+  expect(parse(h.kernel.panel.content).agent.default_cwd).toBe("/home/me/work");
+});
+
+test("nested preview Escape and hidden module controls keep keyboard focus in the drawer", async () => {
+  const page = await open(); h.kernel.panel.setContent(FULL_CONFIG);
+  await openModuleSettings(page, "gateway");
+  await page.getByTestId("settings-gateway-listen").fill("127.0.0.1:9000");
+  await page.getByTestId("settings-review").click(); await page.keyboard.press("Escape");
+  await expect(page.getByTestId("confirm")).toHaveCount(0);
+  const drawer=page.getByTestId("module-settings-dialog");
+  const last=drawer.locator("input:visible:enabled,select:visible:enabled,textarea:visible:enabled,button:visible:enabled,a[href]:visible").last(); await last.focus(); await page.keyboard.press("Tab");
+  await expect(drawer.getByRole("button",{name:"Close",exact:true})).toBeFocused();
+  await page.keyboard.press("Shift+Tab"); await expect(last).toBeFocused();
 });
 
 test("settings: removing the last allowed directory is reviewed and saved as an empty list", async () => {
   const page = await open();
   h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("nav-settings").click();
+  await openModuleSettings(page, "agent");
 
   await expect(page.getByTestId("settings-allow-0")).toHaveValue("/home/me/work");
   await page.getByTestId("settings-allow-remove-0").click();
@@ -153,14 +110,14 @@ test("settings: removing the last allowed directory is reviewed and saved as an 
   await expect(page.getByTestId("apply-restart")).toHaveCount(0);
   expect(h.kernel.panel.writes.length).toBe(1);
   expect(h.kernel.panel.content).toContain("allow: []");
-  expect(h.kernel.panel.content).toContain('deny: ["~/.ssh"]');
+  expect(parse(h.kernel.panel.content).agent.cwd_policy.deny).toEqual(["~/.ssh"]);
 });
 
 test("settings: a setting the running kernel could not apply is shown with its reason, not as live", async () => {
   const page = await open();
   h.kernel.panel.setContent(FULL_CONFIG);
   h.kernel.panel.applyErrors = [{ section: "gateway", message: "网关没能改到监听地址 :8080，仍在 127.0.0.1:8080 上：address already in use" }];
-  await page.getByTestId("nav-settings").click();
+  await openModuleSettings(page, "agent");
 
   await page.getByTestId("settings-allow-remove-0").click();
   await page.getByTestId("settings-review").click();
@@ -176,7 +133,7 @@ test("settings: a deny list still inline moves to its own file on save, and the 
   try {
     const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml") } } });
     h.kernel.panel.setContent(FULL_CONFIG);
-    await page.getByTestId("nav-settings").click();
+    await openModuleSettings(page, "agent");
     await expect(page.getByTestId("settings-deny-unset")).toBeVisible();
     await expect(page.getByTestId("deny-entry-0")).toHaveValue("~/.ssh");
 
@@ -200,7 +157,7 @@ test("settings: an unsaved change to the form holds the move until it is saved o
   try {
     const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml") } } });
     h.kernel.panel.setContent(FULL_CONFIG);
-    await page.getByTestId("nav-settings").click();
+    await openModuleSettings(page, "agent");
     await page.getByTestId("settings-allow-remove-0").click();
     await expect(page.getByTestId("deny-finish-first")).toBeVisible();
     await expect(page.getByTestId("deny-review")).toBeDisabled();
@@ -214,7 +171,7 @@ test("settings: a change that only takes effect after a restart says so, names i
   const page = await open();
   h.kernel.panel.setContent(FULL_CONFIG);
   h.kernel.panel.restartPaths = ["/mesh/mode"];
-  await page.getByTestId("nav-settings").click();
+  await openModuleSettings(page, "agent");
 
   await page.getByTestId("settings-allow-remove-0").click();
   await page.getByTestId("settings-review").click();
@@ -235,26 +192,27 @@ test("settings: a change that only takes effect after a restart says so, names i
 test("settings: editing the form again withdraws the 'applied' of the last save", async () => {
   const page = await open();
   h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("nav-settings").click();
+  await openModuleSettings(page, "agent");
 
   await page.getByTestId("settings-allow-remove-0").click();
   await page.getByTestId("settings-review").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("apply-applied")).toBeVisible();
 
-  await page.getByTestId("settings-name").fill("dev-2");
+  await page.getByTestId("settings-default-cwd").fill("/home/me/other");
   await expect(page.getByTestId("apply-applied")).toHaveCount(0);
 });
 
 test("a restart the kernel is waiting on shows on every page, with the restart button, and the 'applied' note does not follow the user around", async () => {
   const page = await open();
   h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("nav-settings").click();
+  await openModuleSettings(page, "agent");
   await page.getByTestId("settings-allow-remove-0").click();
   await page.getByTestId("settings-review").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("apply-applied")).toBeVisible();
 
+  await page.getByTestId("module-settings-dialog").getByRole("button",{name:"Close",exact:true}).click();
   await page.getByTestId("nav-overview").click();
   await expect(page.getByTestId("apply-applied")).toHaveCount(0);
   await expect(page.getByTestId("apply-status")).toHaveCount(0);
@@ -262,7 +220,7 @@ test("a restart the kernel is waiting on shows on every page, with the restart b
   // The kernel says a restart is due (a file edited by hand, an imported pairing): any page shows it.
   h.kernel.setStatus({ restart_required: true });
   await expect(page.getByTestId("apply-restart-needed")).toBeVisible();
-  await page.getByTestId("nav-audit").click();
+  await navigate(page, "audit");
   await expect(page.getByTestId("apply-restart")).toBeEnabled();
 });
 
@@ -274,7 +232,7 @@ test("settings: file transfer limit defaults to 1GiB, saves custom values and un
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await expect(page).toHaveTitle(/xmesh/i);
   h.kernel.panel.setContent(FULL_CONFIG);
-  await page.getByTestId("nav-settings").click();
+  await openModuleSettings(page, "transfers");
   await expect(page.getByTestId("settings-max-file-size")).toHaveValue("1GiB");
   await page.getByTestId("settings-max-file-size").fill("2GiB");
   await page.getByTestId("settings-review").click();
@@ -308,7 +266,7 @@ for (const mode of ["tailnet", "coexist"] as const) {
       await expect(page).toHaveTitle(/xmesh/i);
       expect(page.url()).toContain("app://panel");
       h.kernel.panel.setContent(FULL_CONFIG);
-      await page.getByTestId("nav-settings").click();
+      await openModuleSettings(page, "node");
       await page.getByTestId(`settings-mode-${mode}`).check();
       const input = page.getByTestId("settings-authkey");
       await expect(input).toHaveAttribute("type", "password");
@@ -368,7 +326,7 @@ test("settings: a pasted key replaces browser authorization and can be rotated",
   try {
     const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
     h.kernel.panel.setContent(FULL_CONFIG.replace("mesh:\n  mode: lan", "schema_version: 2\nmesh:\n  tailnet:\n    enabled: true\n    auth_method: browser"));
-    await page.getByTestId("nav-settings").click();
+    await openModuleSettings(page, "node");
     const input = page.getByTestId("settings-authkey");
     await expect(input).toHaveValue("");
     await expect(input).toHaveAttribute("placeholder", /已配置授权/);
@@ -399,7 +357,7 @@ test("settings: preview locks the visible key and successful saving clears it be
   try {
     const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
     h.kernel.panel.setContent(FULL_CONFIG);
-    await page.getByTestId("nav-settings").click();
+    await openModuleSettings(page, "node");
     await page.getByTestId("settings-mode-tailnet").check();
     const input = page.getByTestId("settings-authkey");
     await input.fill("tskey-auth-preview-visible");

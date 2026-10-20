@@ -324,6 +324,7 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 		done <- err
 	}()
 	deadline := time.Now().Add(10 * time.Second)
+	executionID := ""
 	for {
 		var sessions v2.SessionsResponse
 		n.get("/v2/sessions", "SessionsResponse", &sessions)
@@ -332,6 +333,17 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 			raw, _ := json.Marshal(sessions)
 			if run.Cmd != "go" || run.Mode != "shared" || strings.Contains(string(raw), "SECRET") {
 				t.Fatalf("%+v", run)
+			}
+			for _, execution := range sessions.Executions {
+				if execution.Tool == "exec.run" && execution.Layer == "agent" {
+					executionID = execution.ID
+					if execution.State != "running" || execution.Caller == "" || execution.StartedAt.IsZero() || execution.UpdatedAt.IsZero() {
+						t.Fatalf("execution metadata: %+v", execution)
+					}
+				}
+			}
+			if executionID == "" || sessions.ExecutionLimits == nil {
+				t.Fatal("all-tool execution missing", string(raw))
 			}
 			break
 		}
@@ -348,6 +360,21 @@ func Test_ControlSessionsShowRunningExec(t *testing.T) {
 	if len(after.Exec) != 0 {
 		t.Fatalf("%+v", after.Exec)
 	}
+	for _, execution := range after.Executions {
+		if execution.ID == executionID {
+			t.Fatal("completed execution remained live", execution)
+		}
+	}
+	var history v2.AuditResponse
+	n.get("/v2/audit?tool=exec.run", "AuditResponse", &history)
+	for _, raw := range history.Events {
+		var event map[string]any
+		_ = json.Unmarshal(raw, &event)
+		if event["execution_id"] == executionID && event["layer"] == "agent" && event["started_at"] != nil {
+			return
+		}
+	}
+	t.Fatal("completed execution missing from audit history")
 }
 
 // Rule CON-ARCH-10: the kernel does not depend on the UI. An event subscriber that vanishes (a crashed

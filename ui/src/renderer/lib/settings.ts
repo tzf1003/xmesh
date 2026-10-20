@@ -140,6 +140,24 @@ export function checkSettingsForm(f: SettingsForm): SettingsProblem | undefined 
   return checkIngressSettings(f);
 }
 
+/** Validate the fields owned by a module, independently of other module drafts. */
+export function checkSettingsScope(f: SettingsForm, scope: "node" | "agent" | "gateway" | "ingress" | "transfers"): SettingsProblem | undefined {
+  if (scope === "transfers") return f.maxFileSize !== "unlimited" && !validFileSize(f.maxFileSize.trim()) ? "max_file_size" : undefined;
+  if (scope === "agent") {
+    if (!f.defaultCwd.trim() || /[\x00-\x1f]/.test(f.defaultCwd)) return "default_cwd";
+    if (f.allowDirs.some(d => !d.trim() || /[\x00-\x1f]/.test(d))) return "allow_dirs";
+  }
+  if (scope === "ingress") return checkIngressSettings(f);
+  if (scope === "node") {
+    if (!NODE_NAME.test(f.nodeName.trim())) return "node_name";
+    if (f.mode === "tailnet" || f.mode === "coexist") {
+      if (!isHttpsUrl(f.controlUrl.trim())) return "control_url";
+      if (f.authkey.trim() ? !isAuthKey(f.authkey.trim()) : !f.browserLogin && !isAbsolutePath(f.authkeyFile.trim())) return "authkey";
+    }
+  }
+  return undefined;
+}
+
 /** Fields needed to enable ingress, shared by the form and the global role switch. */
 export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
   if (f.listen === "funnel" && f.mode !== "tailnet" && f.mode !== "coexist") return "tailnet";
@@ -167,16 +185,16 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   if (typeof ephemeral === "boolean" && doc.getIn(["mesh", "tailnet", "ephemeral"]) === undefined) {
     doc.setIn(["mesh", "tailnet", "ephemeral"], ephemeral);
   }
-  for (const key of ["mode", "control_url", "authkey_file", "auth_method", "ephemeral"]) doc.deleteIn(["mesh", key]);
+  for (const key of ["mode", "control_url", "authkey_file", "auth_method", "ephemeral"]) deleteExisting(doc, ["mesh", key]);
   doc.setIn(["mesh", "lan", "enabled"], f.mode === "lan" || f.mode === "coexist");
   doc.setIn(["mesh", "tailnet", "enabled"], f.mode === "tailnet" || f.mode === "coexist");
   if (f.mode === "tailnet" || f.mode === "coexist") {
     doc.setIn(["mesh", "tailnet", "control_url"], f.controlUrl.trim());
     if (f.browserLogin && !f.authkey.trim()) {
       doc.setIn(["mesh", "tailnet", "auth_method"], "browser");
-      doc.deleteIn(["mesh", "tailnet", "authkey_file"]);
+      deleteExisting(doc, ["mesh", "tailnet", "authkey_file"]);
     } else {
-      doc.deleteIn(["mesh", "tailnet", "auth_method"]);
+      deleteExisting(doc, ["mesh", "tailnet", "auth_method"]);
       doc.setIn(["mesh", "tailnet", "authkey_file"], f.authkeyFile.trim());
     }
   }
@@ -189,6 +207,10 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   doc.setIn(["agent", "fs", "max_file_size"], f.maxFileSize.trim());
   // No padding inside brackets, as the wizard writes them.
   return doc.toString({ flowCollectionPadding: false });
+}
+
+function deleteExisting(doc: Document, path: string[]): void {
+  if (doc.hasIn(path)) doc.deleteIn(path);
 }
 
 /** A flow-style sequence, as the wizard writes lists; an empty one prints as `[]`. */
@@ -206,15 +228,15 @@ function applyIngress(doc: Document, f: SettingsForm): void {
     doc.setIn(["ingress", "domain"], f.domain.trim());
     doc.setIn(["ingress", "tls"], f.tls);
   } else {
-    doc.deleteIn(["ingress", "domain"]);
-    doc.deleteIn(["ingress", "tls"]);
+    deleteExisting(doc, ["ingress", "domain"]);
+    deleteExisting(doc, ["ingress", "tls"]);
   }
   if (f.listen === "public:443" && f.tls === "file") {
     doc.setIn(["ingress", "cert_file"], f.certFile.trim());
     doc.setIn(["ingress", "key_file"], f.keyFile.trim());
   } else {
-    doc.deleteIn(["ingress", "cert_file"]);
-    doc.deleteIn(["ingress", "key_file"]);
+    deleteExisting(doc, ["ingress", "cert_file"]);
+    deleteExisting(doc, ["ingress", "key_file"]);
   }
 }
 
@@ -227,7 +249,7 @@ export function applyDenyFile(content: string, denyPath: string): string | undef
   const doc = parseDocument(content);
   if (doc.errors.length > 0) return undefined;
   doc.setIn(["agent", "cwd_policy", "deny_file"], denyPath);
-  doc.deleteIn(["agent", "cwd_policy", "deny"]);
+  deleteExisting(doc, ["agent", "cwd_policy", "deny"]);
   return doc.toString({ flowCollectionPadding: false });
 }
 
@@ -249,4 +271,27 @@ export function checkDenyList(entries: readonly string[]): "blank" | "control" |
     if (/[\x00-\x1f]/.test(v) || v.length > 1024) return "control";
   }
   return undefined;
+}
+
+/** Writes only the selected module's fields, preserving the other configuration sections. */
+export function applySettingsScope(content: string, form: SettingsForm, scope: "node" | "agent" | "gateway" | "ingress" | "transfers", extras?: {listen: string; execLimit: number; ptyLimit: number}): string | undefined {
+  const transformed = applySettingsForm(content, scope === "ingress" ? { ...form, roles: [...new Set([...form.roles, "ingress" as const])] } : form);
+  if (!transformed) return undefined;
+  const original = parseDocument(content), next = parseDocument(transformed);
+  if (original.errors.length || next.errors.length) return undefined;
+  const paths: Record<typeof scope, string[][]> = {
+    node: [["schema_version"], ["node", "name"], ["mesh"]],
+    agent: [["agent", "default_cwd"], ["agent", "cwd_policy", "allow"]],
+    gateway: [],
+    ingress: [["ingress"]],
+    transfers: [["agent", "fs", "max_file_size"]],
+  };
+  if (scope === "gateway" && extras) original.setIn(["gateway", "listen"], extras.listen);
+  if (scope === "agent" && extras) { original.setIn(["agent", "exec", "max_concurrent"], extras.execLimit); original.setIn(["agent", "pty", "max_sessions"], extras.ptyLimit); }
+  for (const path of paths[scope]) {
+    const value = next.getIn(path, true);
+    if (value === undefined) deleteExisting(original, path);
+    else original.setIn(path, value);
+  }
+  return original.toString();
 }

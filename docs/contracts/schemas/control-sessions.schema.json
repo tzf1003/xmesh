@@ -57,6 +57,34 @@
         { "$ref": "#/$defs/BackendLease" }
       ]
     },
+    "ToolExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "caller", "device", "tool", "layer", "state", "started_at", "updated_at"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^x-[A-Za-z0-9_-]+$" },
+        "caller": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "oauth_client": { "type": "string", "maxLength": 256 },
+        "device": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tool": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "layer": { "enum": ["agent", "gateway"] },
+        "state": { "enum": ["queued", "running", "async", "unknown"] },
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "updated_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "task_status": { "enum": ["accepted", "running", "passed", "failed", "cancelled", "timed_out", "interrupted", "unknown"] }
+      }
+    },
+    "ExecutionLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_active", "active", "rejected_total"],
+      "properties": {
+        "max_active": { "type": "integer", "minimum": 1 },
+        "active": { "type": "integer", "minimum": 0 },
+        "rejected_total": { "type": "integer", "minimum": 0, "description": "本进程中未纳入实时跟踪的调用数；工具调用和审计继续执行。" }
+      }
+    },
     "SessionsResponse": {
       "type": "object",
       "additionalProperties": false,
@@ -64,7 +92,9 @@
       "properties": {
         "pty": { "type": "array", "items": { "$ref": "#/$defs/PtySession" } },
         "exec": { "type": "array", "items": { "$ref": "#/$defs/ExecRun" } },
-        "leases": { "type": "array", "items": { "$ref": "#/$defs/BackendLease" } }
+        "leases": { "type": "array", "items": { "$ref": "#/$defs/BackendLease" } },
+        "executions": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/ToolExecution" }, "description": "当前接收层的调用与异步 UI 任务元数据。缺省表示内核未提供此能力；已完成调用见 /v2/audit。" },
+        "execution_limits": { "$ref": "#/$defs/ExecutionLimits" }
       }
     }
   }

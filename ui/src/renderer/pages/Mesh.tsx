@@ -2,9 +2,10 @@ import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
-import { Badge, Banner, Confirm, Dialog, Empty, PageHead, ResourceView } from "../components";
+import { Badge, Banner, Confirm, Dialog, PageHead, ResourceView } from "../components";
 import { useResource } from "../hooks";
 import { useT } from "../i18n";
+import { Icon } from "../icons";
 import { formatTime } from "../lib/format";
 import { parseTagText } from "../lib/mesh";
 import { usePolicyDraft, type PolicyDraft, type SavedPolicyDraft } from "../lib/policy-draft";
@@ -17,10 +18,13 @@ import { MeshLogin } from "./mesh/Login";
 import { MeshMatrix } from "./mesh/Matrix";
 import { MeshOnboard } from "./mesh/Onboard";
 import { MeshPolicy } from "./mesh/Policy";
+import { deviceNeedsAttention, filterMeshDevices, type MeshFilter } from "./module-model";
+import { useModuleT } from "./module-messages";
+import { ModuleBox, ModuleBreadcrumb, ModuleFacts, ModuleStat, ModuleSummary } from "./module-ui";
+import "./module-redesign.css";
 
 const TABS = [
   { id: "devices", label: "mesh.tab.devices" },
-  { id: "onboard", label: "mesh.tab.onboard" },
   { id: "policy", label: "mesh.tab.policy" },
   { id: "matrix", label: "mesh.tab.matrix" },
   { id: "derp", label: "mesh.tab.derp" },
@@ -45,11 +49,18 @@ export interface MeshPolicyProps extends MeshTabProps {
  */
 export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
-  const [tab, setTab] = useState<TabId>(ctx.focus?.meshTab ?? "devices");
+  const m = useModuleT();
+  const initialTab = ctx.focus?.meshTab;
+  const [tab, setTab] = useState<TabId>(initialTab === "onboard" ? "devices" : initialTab ?? "devices");
+  const [onboarding, setOnboarding] = useState(initialTab === "onboard");
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [deviceFilter, setDeviceFilter] = useState<MeshFilter>("all");
+  const [deviceQuery, setDeviceQuery] = useState("");
+  const [policyInfo, setPolicyInfo] = useState<{ version: string; regions: number }>();
   const [credentialRevision, setCredentialRevision] = useState(0);
   const savedDrafts = useRef(new Map<string, SavedPolicyDraft>());
   const [draftDirty, setDraftDirty] = useState(false);
-  useEffect(() => { if (ctx.focus?.meshTab) setTab(ctx.focus.meshTab); }, [ctx.focus?.meshTab]);
+  useEffect(() => { const next = ctx.focus?.meshTab; if (next === "onboard") setOnboarding(true); else if (next) setTab(next); }, [ctx.focus?.meshTab]);
   const instance=ctx.snapshot.selectedInstance;
   const currentInstance=useRef(instance);currentInstance.current=instance;
   const [verified,setVerified]=useState<{instance:string;status:MeshStatus}>();
@@ -67,41 +78,28 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   };
 
   return (
-    <div class="page" data-testid="page-mesh">
-      <PageHead title={t("nav.mesh")} sub={t("mesh.sub")}>
-        <button type="button" class="btn" onClick={reload} data-testid="mesh-refresh">
-          {t("common.refresh")}
-        </button>
+    <div class="page module-page" data-testid="page-mesh">
+      <ModuleBreadcrumb title={t("nav.mesh")}/>
+      <PageHead title={t("nav.mesh")} sub={m("meshSub")}>
+        <div class="module-heading-actions"><button type="button" class="btn" onClick={reload} data-testid="mesh-refresh">{t("common.refresh")}</button><button type="button" class="btn primary" onClick={() => setOnboarding(true)} disabled={resource.state !== "ready" && !(resource.state === "error" && resource.stale)} data-testid="mesh-tab-onboard"><Icon name="plus"/>{m("onboard")}</button></div>
       </PageHead>
-      <MeshLogin
+      {loginOpen && <Dialog title={m("credentialTitle")} onClose={() => setLoginOpen(false)} testid="mesh-credentials-drawer" drawer><div class="module-drawer-content"><MeshLogin
         ctx={ctx}
-        open={resource.state === "error" && (resource.error.code === "no_credential" || resource.error.code === "insufficient_scope")}
+        open
         onSaved={() => { setCredentialRevision((v) => v + 1); setVerified(undefined); }}
         verify={verify}
         draftDirty={draftDirty}
-      />
+        onVerified={() => setLoginOpen(false)}
+      /></div></Dialog>}
       {resource.state === "error" && resource.stale === undefined ? (
-        <MeshError error={resource.error} toast={ctx.toast} />
+        <><MeshError error={resource.error} toast={ctx.toast}/><button type="button" class="btn primary" onClick={() => setLoginOpen(true)} data-testid="mesh-connect-credentials">{m("credentials")}</button></>
       ) : (
         <ResourceView resource={resource}>
           {(status, stale) => (
             <>
               {stale && resource.state === "error" && <MeshError error={resource.error} toast={ctx.toast} />}
-              <p data-testid="mesh-provider">
-                {t("mesh.provider")}: <Badge kind="info">{status.provider}</Badge>{" "}
-                {!status.capabilities.policyWrite && <Badge kind="warn">{t("mesh.policyFileMode")}</Badge>}{" "}
-                {status.credential?.access === "read" && (
-                  <span data-testid="mesh-readonly-credential">
-                    <Badge kind="warn">{t("mesh.readOnlyCredential")}</Badge>
-                  </span>
-                )}
-              </p>
-              {status.credential?.source === "file" && status.credential.file !== undefined && (
-                <p class="hint" data-testid="mesh-credential-file">
-                  {t("mesh.credentialFile", { path: status.credential.file })}
-                </p>
-              )}
-              <div class="tabs" role="tablist" aria-label={t("nav.mesh")}>
+              <ModuleSummary icon="network" title={<>{status.credential?.profile || status.provider}<span data-testid="mesh-provider"><Badge>{status.provider}</Badge>{!status.capabilities.policyWrite && <Badge kind="warn">{t("mesh.policyFileMode")}</Badge>}</span></>} detail={<><span class={`module-state ${stale ? "warn" : "ok"}`}>{m(stale ? "staleStatus" : "connected")}</span><span>·</span><span data-testid={status.credential?.access === "read" ? "mesh-readonly-credential" : undefined}>{m(status.credential?.access === "write" ? "write" : status.credential?.access === "read" ? "read" : "unknown")}</span><button type="button" class="module-link" onClick={() => setLoginOpen(true)}>{m("manage")}<Icon name="chevron"/></button></>}><ModuleStat value={status.devices.length} label={m("networkDevices")}/><ModuleStat value={status.devices.filter((report) => report.device.online).length} label={m("onlineDevices")} tone="ok"/><ModuleStat value={policyInfo?.regions ?? "—"} label={t("mesh.tab.derp")}/><ModuleStat value={status.devices.filter(deviceNeedsAttention).length} label={m("issueDevices")} tone={status.devices.some(deviceNeedsAttention) ? "warn" : ""}/></ModuleSummary>
+              <div class="module-tabs" role="tablist" aria-label={t("nav.mesh")}>
                 {TABS.map((x) => (
                   <button
                     key={x.id}
@@ -109,19 +107,25 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
                     role="tab"
                     class="tab"
                     aria-selected={tab === x.id}
+                    aria-controls={`mesh-panel-${x.id}`}
+                    id={`mesh-tab-${x.id}`}
                     data-testid={`mesh-tab-${x.id}`}
                     onClick={() => setTab(x.id)}
                   >
-                    {t(x.label)}
+                    {x.id === "devices" ? m("meshDevices") : t(x.label)}{x.id === "devices" && <span>{status.devices.length}</span>}
                   </button>
                 ))}
               </div>
-              <div class="section-stack" role="tabpanel" data-testid={`mesh-panel-${tab}`}>
-                {tab === "devices" && <MeshDevices ctx={ctx} status={status} reloadStatus={reload} />}
-                {tab === "onboard" && <MeshOnboard ctx={ctx} status={status} reloadStatus={reload} />}
+              <div class="module-layout"><div class="module-main"><div class="section-stack" role="tabpanel" id={`mesh-panel-${tab}`} aria-labelledby={`mesh-tab-${tab}`} data-testid={`mesh-panel-${tab}`}>
+                {tab === "devices" && <MeshDevices ctx={ctx} status={status} reloadStatus={reload} filter={deviceFilter} setFilter={setDeviceFilter} query={deviceQuery} setQuery={setDeviceQuery} />}
                 {tab === "matrix" && <MeshMatrix ctx={ctx} status={status} reloadStatus={reload} />}
-                <PolicyWorkspace key={credentialRevision} revision={credentialRevision} savedDrafts={savedDrafts.current} onDirty={setDraftDirty} ctx={ctx} status={status} reloadStatus={reload} tab={tab} showPolicy={() => setTab("policy")} />
-              </div>
+                <PolicyWorkspace key={credentialRevision} revision={credentialRevision} savedDrafts={savedDrafts.current} onDirty={setDraftDirty} onInfo={setPolicyInfo} ctx={ctx} status={status} reloadStatus={reload} tab={tab} showPolicy={() => setTab("policy")} />
+              </div></div><aside class="module-side">
+                <ModuleBox title={m("controlPlane")} icon="network"><div class="module-health"><Icon name="shield"/><div><strong>{status.provider === "tailscale" ? "Tailscale" : status.provider === "headscale" ? "Headscale" : status.provider}</strong><small>{status.credential?.profile || m("connected")}</small></div></div><ModuleFacts items={[[m("access"), <Badge kind={status.credential?.access === "write" ? "ok" : "warn"}>{m(status.credential?.access === "write" ? "write" : status.credential?.access === "read" ? "read" : "unknown")}</Badge>], [m("policyVersion"), policyInfo?.version || "—"], [m("authorizedDevices"), status.devices.filter((report) => report.device.authorized).length], [m("source"), m(status.credential?.source === "keychain" ? "keychain" : status.credential?.source === "file" ? "file" : "unknown")]]}/>{!status.capabilities.policyWrite && <p><Badge kind="warn">{t("mesh.policyFileMode")}</Badge></p>}{status.credential?.source === "file" && status.credential.file && <p class="hint" data-testid="mesh-credential-file">{t("mesh.credentialFile", { path: status.credential.file })}</p>}<button type="button" class="module-link" onClick={() => setLoginOpen(true)} data-testid="mesh-manage-credentials">{m("credentials")}<Icon name="arrow"/></button></ModuleBox>
+                <ModuleBox title={m("checks")} icon="info"><p>{status.devices.some(deviceNeedsAttention) ? m("checksHint", { n: status.devices.filter(deviceNeedsAttention).length }) : m("checksClear")}</p>{status.devices.some(deviceNeedsAttention) && <button type="button" class="module-link" onClick={() => { setTab("devices"); setDeviceQuery(""); setDeviceFilter("attention"); }}>{m("showIssues")}<Icon name="arrow"/></button>}<div class="module-side-divider"><h3>{m("accessLayers")}</h3><p>{m("accessLayersHint")}</p><button type="button" class="module-link" onClick={() => setTab("matrix")}>{m("checkMatrix")}<Icon name="arrow"/></button></div></ModuleBox>
+                <div class="module-note"><Icon name="info"/><div>{m("tailnetScope")}<br/><button type="button" class="module-link" onClick={() => ctx.go("devices")}>{m("devicesPage")}<Icon name="arrow"/></button></div></div>
+              </aside></div>
+              {onboarding && <Dialog title={m("onboard")} onClose={() => setOnboarding(false)} testid="mesh-onboard-drawer" drawer><div class="module-drawer-content"><MeshOnboard ctx={ctx} status={status} reloadStatus={reload}/></div></Dialog>}
             </>
           )}
         </ResourceView>
@@ -130,16 +134,17 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   );
 }
 
-function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; savedDrafts: Map<string, SavedPolicyDraft>; onDirty(dirty: boolean): void; showPolicy(): void }): JSX.Element {
+function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; savedDrafts: Map<string, SavedPolicyDraft>; onDirty(dirty: boolean): void; onInfo(info: { version: string; regions: number } | undefined): void; showPolicy(): void }): JSX.Element {
   const { ctx, status, tab } = props;
   // A local node selection does not change the control-plane credential.
   const draft = usePolicyDraft(`${props.revision}:${status.provider}:${status.credential?.file ?? "keychain"}`, props.savedDrafts);
   useEffect(() => props.onDirty(draft.dirty), [draft.dirty]);
+  useEffect(() => { if (!draft.dirty) props.onInfo(draft.base && draft.document ? { version: draft.base.exists ? draft.base.version : "—", regions: draft.document.regions.length } : undefined); }, [draft.base?.version, draft.document?.regions.length, draft.dirty]);
   const t = useT();
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { if (tab === "derp" && draft.document && draft.document.text !== draft.text) void draft.edit({}); }, [tab]);
   return <div class="section-stack" hidden={tab !== "policy" && tab !== "derp"}>
-    <section class="card" data-testid="mesh-policy-workspace">
+    <section class="card module-policy-workspace" data-testid="mesh-policy-workspace">
       <p>{t("mesh.draft.intro")}</p>
       <div class="row">
         <Badge kind={draft.dirty ? "warn" : "info"}>{t(draft.dirty ? "mesh.draft.dirty" : "mesh.draft.synced")}</Badge>
@@ -157,35 +162,38 @@ function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; s
   </div>;
 }
 
-function MeshDevices({ ctx, status, reloadStatus }: MeshTabProps): JSX.Element {
+function MeshDevices({ ctx, status, reloadStatus, filter, setFilter, query, setQuery }: MeshTabProps & { filter: MeshFilter; setFilter(filter: MeshFilter): void; query: string; setQuery(query: string): void }): JSX.Element {
   const t = useT();
+  const m = useModuleT();
   const [editing, setEditing] = useState<MeshDeviceReport | undefined>();
-  if (status.devices.length === 0) return <Empty>{t("mesh.devices.none")}</Empty>;
+  const filtered = filterMeshDevices(status.devices, query, filter);
+  const issues = status.devices.filter(deviceNeedsAttention).length;
   return (
-    <section class="card">
+    <>
+      {issues > 0 && <div class="module-alert" data-testid="mesh-attention"><Icon name="info"/><span>{m("checksHint", { n: issues })}</span><button type="button" class="module-link" onClick={() => { setQuery(""); setFilter("attention"); }}>{m("showIssues")}<Icon name="arrow"/></button></div>}
+      <div class="module-toolbar"><label class="module-search"><Icon name="search"/><input type="search" value={query} onInput={(event) => setQuery(event.currentTarget.value)} placeholder={m("searchDevices")} aria-label={m("searchDevices")} data-testid="mesh-search"/></label><select value={filter} onChange={(event) => setFilter(event.currentTarget.value as MeshFilter)} aria-label={m("allDevices")} data-testid="mesh-device-filter"><option value="all">{m("allDevices")}</option><option value="online">{t("mesh.online")}</option><option value="offline">{t("mesh.offline")}</option><option value="attention">{m("issueFilter")}</option></select></div>
+      {status.devices.length === 0 ? <div class="module-empty"><span class="module-avatar"><Icon name="device"/></span><h2>{t("mesh.devices.none")}</h2><p>{m("emptyDevicesHint")}</p></div> : filtered.length === 0 ? <div class="module-empty"><h2>{m("noMatches")}</h2><button type="button" class="btn" onClick={() => { setQuery(""); setFilter("all"); }}>{m("reset")}</button></div> : <section class="card module-device-card">
       <div class="table-wrap">
         <table data-testid="mesh-devices">
           <thead>
             <tr>
-              <th scope="col">{t("col.name")}</th>
+              <th scope="col">{m("deviceAddress")}</th>
               <th scope="col">{t("col.status")}</th>
               <th scope="col">{t("col.tags")}</th>
               <th scope="col">{t("mesh.col.roles")}</th>
-              <th scope="col">{t("mesh.col.issues")}</th>
               <th scope="col" />
             </tr>
           </thead>
           <tbody>
-            {status.devices.map((r) => (
+            {filtered.map((r) => (
               <tr key={r.device.id} data-testid={`mesh-device-${r.device.id}`}>
                 <td>
-                  <strong>{r.device.name}</strong>
-                  <br />
+                  <div class="module-device-name"><span class="module-repo-icon"><Icon name="device"/></span><div><strong>{r.device.name}</strong>
                   <span class="hint mono">{r.device.addresses.join(" ") || r.device.id}</span>
-                  {r.device.lastSeen && !r.device.online && <div class="hint">{t("mesh.lastSeen", { time: formatTime(r.device.lastSeen) })}</div>}
+                  {r.device.lastSeen && !r.device.online && <div class="hint">{t("mesh.lastSeen", { time: formatTime(r.device.lastSeen) })}</div>}</div></div>
                 </td>
                 <td>
-                  <Badge kind={r.device.online ? "ok" : ""}>{r.device.online ? t("mesh.online") : t("mesh.offline")}</Badge>
+                  <span class={`module-state ${r.device.online ? "ok" : ""}`}>{r.device.online ? t("mesh.online") : t("mesh.offline")}</span>
                   {!r.device.authorized && <Badge kind="warn">{t("mesh.unauthorized")}</Badge>}
                 </td>
                 <td>
@@ -193,12 +201,9 @@ function MeshDevices({ ctx, status, reloadStatus }: MeshTabProps): JSX.Element {
                     {r.device.tags.length === 0 ? <span class="hint">{t("mesh.noTags")}</span> : r.device.tags.map((x) => <Badge key={x}>{x}</Badge>)}
                   </div>
                 </td>
-                <td>{r.roles.join(", ") || "—"}</td>
-                <td>
-                  {r.issues.length === 0 ? (
-                    "—"
-                  ) : (
-                    <ul class="plain">
+                <td class="module-device-roles">{r.roles.join(", ") || "—"}
+                  {r.issues.length > 0 && (
+                    <ul class="module-device-issues">
                       {r.issues.map((i, n) => (
                         <li key={n}>
                           <Badge kind={i.severity === "error" ? "danger" : i.severity === "warn" ? "warn" : ""}>{i.severity}</Badge> {i.message}
@@ -208,8 +213,8 @@ function MeshDevices({ ctx, status, reloadStatus }: MeshTabProps): JSX.Element {
                   )}
                 </td>
                 <td>
-                  <button type="button" class="btn small" onClick={() => setEditing(r)} data-testid={`mesh-edit-tags-${r.device.id}`}>
-                    {t("mesh.editTags")}
+                  <button type="button" class="module-icon-button" aria-label={`${t("mesh.editTags")} · ${r.device.name}`} onClick={() => setEditing(r)} data-testid={`mesh-edit-tags-${r.device.id}`}>
+                    <Icon name="chevron"/>
                   </button>
                 </td>
               </tr>
@@ -217,6 +222,8 @@ function MeshDevices({ ctx, status, reloadStatus }: MeshTabProps): JSX.Element {
           </tbody>
         </table>
       </div>
+      <div class="module-device-foot">{m("deviceCount", { n: filtered.length })}</div>
+      </section>}
       {editing && (
         <TagEditor
           ctx={ctx}
@@ -228,7 +235,7 @@ function MeshDevices({ ctx, status, reloadStatus }: MeshTabProps): JSX.Element {
           }}
         />
       )}
-    </section>
+    </>
   );
 }
 
@@ -261,7 +268,7 @@ function TagEditor({ ctx, device, onClose, onApplied }: { ctx: PageContext; devi
   const blocked = plan !== undefined && plan.missingTagOwners.length > 0;
   const unchanged = plan !== undefined && plan.from.join(",") === plan.to.join(",");
   return (
-    <Dialog title={t("mesh.tags.title", { name: device.device.name })} onClose={onClose} testid="mesh-tags-dialog">
+    <Dialog title={t("mesh.tags.title", { name: device.device.name })} onClose={onClose} testid="mesh-tags-dialog" drawer>
       <label class="field">
         <span>{t("mesh.tags.label")}</span>
         <input

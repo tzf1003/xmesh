@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { launch, expectIcon, type Harness } from "./helpers";
+import { launch, expectIcon, openModuleSettings, type Harness } from "./helpers";
 import { eventFixture, peersFixture, peerNamed } from "../../testserver/fixtures";
 import type { CallEvent, Capability } from "../../src/shared/control";
 import * as fs from "node:fs";
@@ -196,7 +196,7 @@ test("unsaved main-window changes block instance switching and external navigati
   try {
     second.writeManifest(h.root, "node-b");
     const panel = await h.openPanel();
-    await panel.getByTestId("nav-settings").click();
+    await openModuleSettings(panel,"node");
     await panel.getByTestId("settings-name").fill("unsaved-node-name");
     const page = await openTray();
     await page.locator(".instance-picker > button").click();

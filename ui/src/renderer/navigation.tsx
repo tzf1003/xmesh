@@ -8,8 +8,7 @@ import { Icon, type IconName } from "./icons";
 import { useT } from "./i18n";
 import { peerKey } from "./lib/topology";
 
-export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; group: "network" | "access" | "runtime" | "advanced" | "settings" }[] = [
-  { id: "features", label: "nav.features", icon: "plus", group: "network" },
+export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; group: "network" | "access" | "runtime" | "modules" | "settings" }[] = [
   { id: "overview", label: "topology.title", icon: "topology", group: "network" },
   { id: "devices", label: "nav.devices", icon: "device", group: "network" },
   { id: "runtime", label: "topology.operations", icon: "sliders", group: "runtime" },
@@ -17,18 +16,14 @@ export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; grou
   { id: "transfers", label: "ws.files", icon: "code", group: "runtime" },
   { id: "playground", label: "pg.title", icon: "code", group: "runtime" },
   { id: "sessions", label: "nav.sessions", icon: "terminal", group: "network" },
-  { id: "computer", label: "nav.computer", icon: "device", group: "network" },
+  { id: "computer", label: "nav.computer", icon: "device", group: "runtime" },
   { id: "authz", label: "nav.authz", icon: "shield", group: "access" },
   { id: "ingress", label: "nav.ingress", icon: "globe", group: "access" },
-  { id: "audit", label: "nav.audit", icon: "activity", group: "runtime" },
-  { id: "ci", label: "nav.ci", icon: "runner", group: "runtime" },
-  { id: "config", label: "nav.config", icon: "code", group: "advanced" },
-  { id: "mesh", label: "nav.mesh", icon: "network", group: "advanced" },
-  { id: "about", label: "nav.about", icon: "info", group: "advanced" },
+  { id: "ci", label: "nav.ci", icon: "runner", group: "modules" },
+  { id: "mesh", label: "nav.mesh", icon: "network", group: "modules" },
   { id: "settings", label: "nav.settings", icon: "sliders", group: "settings" },
-  { id: "setup", label: "nav.setup", icon: "plus", group: "settings" },
 ];
-export const pageAvailable = (id: PageId, connected: boolean): boolean => connected || ["features", "overview", "mesh", "about", "setup"].includes(id);
+export const pageAvailable = (id: PageId, connected: boolean): boolean => connected || ["overview", "mesh", "settings", "about", "setup"].includes(id);
 
 export function CommandPalette({ snapshot, onClose, go }: { snapshot: Snapshot; onClose(): void; go(page: PageId, focus?: PageFocus): void }): JSX.Element {
   const t = useT();
@@ -38,6 +33,11 @@ export function CommandPalette({ snapshot, onClose, go }: { snapshot: Snapshot; 
     const q = query.trim().toLocaleLowerCase();
     const c = snapshot.connection;
     const pages = NAVIGATION.filter((n) => pageAvailable(n.id, c.kind === "connected")).map((n) => ({ id: n.id, label: t(n.label), icon: n.icon, focus: undefined as PageFocus | undefined }));
+    pages.push({ id: "about", label: t("nav.about"), icon: "info", focus: undefined });
+    if (c.kind === "connected") {
+      pages.push({ id: "audit", label: t("nav.audit"), icon: "terminal", focus: { sessionsTab: "history" } });
+      for (const role of ["agent", "gateway", "ingress"] as const) pages.push({ id: "settings", label: `${role[0]!.toUpperCase()}${role.slice(1)} · ${t("nav.settings")}`, icon: "sliders", focus: { role } });
+    }
     const devices = c.kind === "connected" ? c.peers.map((p) => ({ id: "overview" as const, label: p.name, icon: "device" as const, focus: { peer: peerKey(p) } as PageFocus })) : [];
     return [...devices, ...pages].filter((n) => n.label.toLocaleLowerCase().includes(q));
   }, [query, snapshot.connection, snapshot.instances.length, t]);

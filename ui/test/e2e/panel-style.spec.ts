@@ -18,7 +18,7 @@ test("the top bar spans the window and the page takes its colours from the theme
   await expect(page.locator("html")).toHaveClass(/\b(mac|win|linux)\b/);
   const bar = await page.locator("header.topbar").boundingBox();
   const sidebar = await page.locator("nav.sidebar").boundingBox();
-  expect(bar!.height).toBe(46);
+  expect(bar!.height).toBe(54);
   expect(bar!.x).toBe(0);
   expect(sidebar!.y).toBeGreaterThanOrEqual(bar!.height);
 
@@ -26,7 +26,7 @@ test("the top bar spans the window and the page takes its colours from the theme
   await page.emulateMedia({ colorScheme: "light" });
   expect(await bg()).toBe("rgb(247, 248, 247)");
   await page.emulateMedia({ colorScheme: "dark" });
-  expect(await bg()).toBe("rgb(15, 18, 17)");
+  expect(await bg()).toBe("rgb(16, 21, 19)");
 });
 
 async function zoomFactor(h: Harness): Promise<number> {

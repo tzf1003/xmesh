@@ -1,3 +1,4 @@
+import "./control-ui.css";
 import { render } from "preact";
 import { App } from "./app";
 

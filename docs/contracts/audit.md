@@ -4,7 +4,7 @@
 
 每次到达 Agent 的工具调用写一条记录。经过入口的调用在入口再写一条，两层都记，因为入口看得到 OAuth client，Agent 看得到最终是否执行。Gateway 在 tailnet 模式下同样写一条转发记录。
 
-PTY 的 `read` 默认不写每条记录，只在 `pty.read` 返回非空数据时按分钟合并成一条 `pty_io` 摘要，避免 long-poll 刷满磁盘。`open`、`close`、`transfer`、`signal`、`write` 各自一条，`write` 只记字节数。
+MCP 接收层为每次调用写入执行编号、开始时间与层级，`pty.read` 的逐调用记录只保留会话编号和返回字节数。使用旧版 `Record` 接口的 PTY 读取仍按分钟合并成 `pty_io` 摘要。`open`、`close`、`transfer`、`signal`、`write` 各自一条，`write` 只记字节数。
 
 ### 事件
 
@@ -33,10 +33,10 @@ PTY 的 `read` 默认不写每条记录，只在 `pty.read` 返回非空数据�
 | 字段 | 规则 |
 | --- | --- |
 | `time` | RFC3339，毫秒，UTC |
-| `event` | `tool_call`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`progress_unrouted`、`audit_dropped`、`control_call`、`device_link_online`、`device_link_reconnecting`、`device_link_offline`、`device_link_revoked`、`device_link_identity_conflict` |
+| `event` | `tool_call`、`task_complete`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`progress_unrouted`、`audit_dropped`、`control_call`、`device_link_online`、`device_link_reconnecting`、`device_link_offline`、`device_link_revoked`、`device_link_identity_conflict` |
 | `actor` | 可选，`mcp`（缺省）或 `control`。`control` 表示本机控制通道（[CTR-CTL-02](control.md#ctr-ctl-02)），此时 `event` 为 `control_call`，`caller` 形如 `control:uid-1000`，`tool` 是路由编号，见 [RUL-17](rulings.md#rul-17) |
 | `caller` | `caller_id`。Gateway 与入口写入本节点的网络身份加到目标 Agent 的下游会话，与该 Agent 自己审计里的 `caller` 一致；Gateway 自己的工具（`devices.list` 等）和还没有下游会话的调用，填本节点身份加上游 MCP 会话 |
-| `oauth_client` | 仅入口层。预注册名或动态 `client_id` |
+| `oauth_client` | 预注册名或动态 `client_id`，由入口及接受该身份的 Agent 记录 |
 | `oauth_session` | 仅入口层。该请求所属 OAuth 授权的摘要（授权标识的 SHA-256 前 8 字节，十六进制），用于关联同一授权的调用，不是可用凭据 |
 | `device` | 目标节点名；Gateway 自己的工具填本节点名 |
 | `tool` | 对外工具名 |
@@ -45,6 +45,10 @@ PTY 的 `read` 默认不写每条记录，只在 `pty.read` 返回非空数据�
 | `error` | 失败时的 `error` 码，成功为 null |
 | `duration_ms` | 整数 |
 | `output_sha256` | 成功时对结构化结果做规范 JSON 后的 SHA-256。失败时对错误对象哈希 |
+| `execution_id`、`started_at`、`layer` | 可选，接收层的执行编号、开始时间及 `agent` 或 `gateway`，与 `/v2/sessions.executions` 关联 |
+| `run_id`、`task_status` | 可选，UI MCP 异步任务的运行编号及已知状态，逐调用记录表示工具响应，`task_complete` 表示结果轮询确认的终态 |
+
+异步任务 `accepted` 响应与任务终态分别写入历史。结果轮询使用接受任务的同一调用方与连接；读取失败或结果声明 `outcome_unknown` 时，实时状态保持 `unknown`，直到后续确认结果。任务完成事件仅携带标识、状态、来源和耗时，结果正文不进入该事件。
 
 `progress_unrouted` 记录一条被丢弃的进度通知（[CTR-MUX-02](mcpmux.md#ctr-mux-02)）：`tool` 为 `notifications/progress`，`device` 是发出通知的节点，不含参数或 token。同一条下游连接每秒最多记一条，以免异常后端刷满磁盘。
 

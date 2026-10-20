@@ -1,3 +1,4 @@
+import { parseAppPreferences } from "../shared/preferences";
 import { parseOnboarding, type OnboardingRequest } from "../shared/onboarding";
 import { parseKernelRequest, type KernelRequest, type KernelResult } from "../shared/kernel";
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
@@ -152,6 +153,10 @@ export function registerIpc({ kernel, onboarding, transfers, playground, control
   handle(CHANNELS.setDisplay, (prefs: unknown) => {
     const v = parseDisplay(prefs);
     return v === undefined ? bad("display preferences") : actions.setDisplay(v);
+  });
+  handle(CHANNELS.setAppPreferences, (prefs: unknown) => {
+    const value = parseAppPreferences(prefs);
+    return value === undefined ? bad("application preferences") : actions.setAppPreferences(value);
   });
   handle(CHANNELS.openExternal, (key: unknown) => {
     const v = parseExternalKey(key);

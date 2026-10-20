@@ -1,6 +1,7 @@
+import { PreferencesStore } from "./preferences-store";
 import { createOnboardingService, fakeOnboarding } from "./onboarding";
 import * as path from "node:path";
-import { clipboard, dialog, Notification, app, globalShortcut, net, powerMonitor, shell } from "electron";
+import { clipboard, dialog, Notification, app, globalShortcut, net, powerMonitor, shell, nativeTheme } from "electron";
 import { resolveLocale, translator } from "../shared/i18n";
 import { type Snapshot } from "../shared/state";
 import { Actions } from "./actions";
@@ -79,16 +80,18 @@ async function start(): Promise<void> {
   await app.whenReady();
   installSessionHardening();
 
-  const locale = resolveLocale(process.env.XMESH_UI_LANG);
-  const t = translator(locale);
+  const preferences = new PreferencesStore(path.join(app.getPath("userData"), "preferences.json"), resolveLocale(process.env.XMESH_UI_LANG));
+  let locale = preferences.get().locale;
+  const t: ReturnType<typeof translator> = (key, params) => translator(locale)(key, params);
   const roots = stateRoots();
   let panel: PanelWindow | undefined;
   const display = new DisplayStore(path.join(app.getPath("userData"), "display.json"));
+  nativeTheme.themeSource = display.get().theme ?? "system";
   const showPanel = (): void => {
     trayWindow?.hide();
     if (!panel || panel.window.isDestroyed()) {
       // Ctrl/Cmd +, - and 0 in the panel go through the same path as the display dialog.
-      panel = createPanelWindow(undefined, {
+      panel = createPanelWindow(() => { if (!preferences.get().closeToTray) app.quit(); }, {
         get: () => display.get().zoom,
         set: (zoom) => controller.setDisplay({ ...display.get(), zoom }),
       });
@@ -203,7 +206,10 @@ async function start(): Promise<void> {
     locale,
     getLoginItem: () => autostart.get().enabled,
     getDisplay: () => display.get(),
+    getAppPreferences: () => preferences.get(),
+    setAppPreferences: (next) => { const saved = preferences.set(next); if (saved) locale = next.locale; return saved; },
     setDisplay: (prefs) => {
+      nativeTheme.themeSource = prefs.theme ?? "system";
       if (!display.set(prefs)) notify([{ key: "display.save", text: t("display.saveFailed") }]);
       if (panel && !panel.window.isDestroyed()) panel.window.webContents.setZoomFactor(prefs.zoom);
       trayWindow?.contents?.setZoomFactor(prefs.zoom);
@@ -308,7 +314,7 @@ async function start(): Promise<void> {
       }
       let cred: { kind?: string; url?: string };
       try { cred = JSON.parse(fs.readFileSync(meshCredential, "utf8")) as typeof cred; }
-      catch { throw new Error("请先在 Tailnet 管理页保存管理凭据"); }
+      catch { throw new Error("请先在 Tailscale 管理页保存管理凭据"); }
       const official = "https://controlplane.tailscale.com";
       const expected = cred.kind === "tailscale" ? official : cred.url;
       if (!expected || new URL(expected).origin !== new URL(controlUrl || official).origin) {

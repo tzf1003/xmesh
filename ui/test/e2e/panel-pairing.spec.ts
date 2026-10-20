@@ -41,15 +41,17 @@ for (const lang of ["zh", "en"] as const) {
     await expect(page.getByTestId("pair-discovered")).toHaveCount(0);
     await expect(page.getByTestId("pair-manual-form")).toHaveCount(0);
     expect(h.kernel.requests.filter((request) => ["/v2/pair/password", "/v2/pair/discovered", "/v2/pair/connect"].includes(request.path))).toEqual([]);
-    await page.getByTestId("pair-advanced").locator("summary").click();
+    await page.getByTestId("device-method-documents").click();
     await page.getByTestId("pair-export").click();
     await expect(page.getByTestId("pair-my-fingerprint")).toBeVisible();
-    await page.getByTestId("pair-advanced").locator("summary").click();
+    await page.keyboard.press("Escape");
     await page.screenshot({ path: test.info().outputPath(`local-devices-${lang}.png`) });
     await page.getByTestId("pair-local-setup").click();
-    await expect(page.getByTestId("page-setup")).toBeVisible();
-    await page.getByTestId("purpose-multi-device").click();
-    await expect(page.getByTestId("purpose-multi-device")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("module-settings-dialog")).toBeVisible();
+    await expect(page.getByTestId("settings-mode-lan")).toBeVisible();
+    await page.getByTestId("settings-mode-lan").check();
+    await expect(page.getByTestId("settings-mode-lan")).toBeChecked();
+    expect(h.kernel.panel.writes).toEqual([]);
     expect(errors).toEqual([]);
   });
 }
@@ -59,6 +61,7 @@ for (const mode of ["tailnet", "coexist"] as const) {
     h = await launch({ kernel: { capabilities: ALL, status: { network: { ...LAN_STATUS.network, mode } } } });
     const page = await h.openPanel();
     await page.getByTestId("nav-devices").click();
+    await page.getByTestId("device-password").click();
     await expect(page.getByTestId("pair-password-state")).toContainText("尚未设置");
     await expect(page.getByTestId("pair-local-mode")).toHaveCount(0);
   });
@@ -66,29 +69,43 @@ for (const mode of ["tailnet", "coexist"] as const) {
 
 test("pairing: service unavailability reports the pairing state", async () => {
   h = await launch({ kernel: { capabilities: ALL, status: LAN_STATUS } });
-  h.kernel.failNext("/v2/pair/password", 503, "unavailable", "设备配对服务尚未就绪");
   const page = await h.openPanel();
   await page.getByTestId("nav-devices").click();
+  await expect(page.getByTestId("device-password")).toContainText("未设置");
+  h.kernel.failNext("/v2/pair/password", 503, "unavailable", "设备配对服务尚未就绪");
+  await page.getByTestId("device-password").click();
   await expect(page.getByTestId("pair-password-error")).toHaveText("设备配对暂不可用，请稍后重试。");
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
 });
 
 test("pairing: set the connection password, change it, then clear it after confirming", async () => {
   const page = await openDevices();
+  await page.getByTestId("device-password").click();
   await expect(page.getByTestId("pair-password")).toContainText("尚未设置");
-  // The submit button stays off until both entries match and meet the rules.
+  // The password remains masked until the user chooses to reveal it.
   await page.getByTestId("pair-pw-new").fill("short");
   await expect(page.getByTestId("pair-pw-submit")).toBeDisabled();
   await page.getByTestId("pair-pw-new").fill("my local password");
-  await page.getByTestId("pair-pw-again").fill("my local passwort");
-  await expect(page.getByTestId("pair-pw-mismatch")).toBeVisible();
-  await page.getByTestId("pair-pw-again").fill("my local password");
+  await expect(page.getByTestId("pair-pw-new")).toHaveAttribute("type", "password");
+  await page.getByTestId("pair-pw-new-toggle").click();
+  await expect(page.getByTestId("pair-pw-new")).toHaveAttribute("type", "text");
+  await expect(page.getByTestId("pair-pw-new")).toHaveValue("my local password");
+  await page.getByTestId("pair-pw-new-toggle").click();
+  await expect(page.getByTestId("pair-pw-new")).toHaveAttribute("type", "password");
   await page.getByTestId("pair-pw-submit").click();
   await expect(page.getByTestId("pair-password-state")).toContainText("已设置");
   expect(h.kernel.panel.pairPassword.set).toBe(true);
   // The value itself is never shown again.
   await expect(page.getByTestId("pair-password")).not.toContainText("my local password");
+  await expect(page.getByTestId("pair-pw-new")).toHaveValue("");
+  await page.getByTestId("pair-pw-new").fill("my changed password");
+  await page.getByTestId("pair-pw-submit").click();
+  await expect(page.getByTestId("pair-pw-new")).toHaveValue("");
+  expect(h.kernel.requests.filter((request) => request.path === "/v2/pair/password" && request.method === "PUT").map((request) => request.body)).toEqual([{ password: "my local password" }, { password: "my changed password" }]);
 
+  await page.getByTestId("pair-pw-clear").click();
+  await page.getByTestId("confirm-cancel").click();
+  expect(h.kernel.panel.pairPassword.set).toBe(true);
   await page.getByTestId("pair-pw-clear").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("pair-password-state")).toContainText("尚未设置");
@@ -97,7 +114,7 @@ test("pairing: set the connection password, change it, then clear it after confi
 
 test("pairing: a device found on the LAN is offered for connection; a wrong password is refused, the right one pairs", async () => {
   const page = await openDevices();
-  await expect(page.getByTestId("pair-discovered")).toContainText("发现 win-lan");
+  await expect(page.getByTestId("pair-discovered")).toContainText("win-lan");
   await expect(page.getByTestId("pair-discovered")).toContainText("mac-lan");
 
   await page.getByTestId("pair-open-win-lan").click();
@@ -116,6 +133,7 @@ test("pairing: a device found on the LAN is offered for connection; a wrong pass
 
 test("pairing: a device added by hand reports unreachable and rate-limited peers in words", async () => {
   const page = await openDevices();
+  await page.getByTestId("device-method-manual").click();
   await page.getByTestId("pair-manual-form-address").fill("10.0.0.9.unreachable");
   await page.getByTestId("pair-manual-form-password").fill(PEER_PASSWORD);
   await page.getByTestId("pair-manual-form-submit").click();
@@ -128,10 +146,10 @@ test("pairing: a device added by hand reports unreachable and rate-limited peers
   expect(h.kernel.panel.imported).toEqual([]);
 });
 
-test("pairing: the document flow sits under advanced and still works", async () => {
+test("pairing: the document drawer exports the device identity", async () => {
   const page = await openDevices();
-  await expect(page.getByTestId("pair-advanced")).not.toHaveAttribute("open", /.*/);
-  await page.getByTestId("pair-advanced").locator("summary").click();
+  await page.getByTestId("device-method-documents").click();
+  await expect(page.getByTestId("device-panel-documents")).toBeVisible();
   await page.getByTestId("pair-export").click();
   await expect(page.getByTestId("pair-my-fingerprint")).toBeVisible();
 });

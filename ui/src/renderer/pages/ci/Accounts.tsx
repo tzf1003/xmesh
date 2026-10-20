@@ -123,7 +123,7 @@ export function AccountDialog({
   };
 
   return (
-    <Dialog title={replace ? `${t("ci.accountReplace")} · ${replace.login}` : t("ci.accountAddTitle")} onClose={onClose} testid="ci-account-dialog">
+    <Dialog title={replace ? `${t("ci.accountReplace")} · ${replace.login}` : t("ci.accountAddTitle")} onClose={onClose} testid="ci-account-dialog" drawer>
       <form
         onSubmit={(e) => {
           e.preventDefault();
