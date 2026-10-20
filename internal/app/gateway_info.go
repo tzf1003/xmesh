@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/mesh"
 )
@@ -22,13 +22,13 @@ type tailnetAddresser interface {
 // the addresses the gateway answers on right now: the bind address decides whether anything beyond
 // localhost is reachable, and gateway.access decides which of the LAN, tailnet and configured addresses
 // are listed.
-func gatewayInfo(cfg *config.Config, network mesh.Network) *v1.GatewayInfo {
+func gatewayInfo(cfg *config.Config, network mesh.Network) *v2.GatewayInfo {
 	port := strconv.Itoa(gatewayPort(cfg.Gateway.Listen))
 	local := "http://" + net.JoinHostPort("127.0.0.1", port) + "/mcp"
-	info := &v1.GatewayInfo{
+	info := &v2.GatewayInfo{
 		Listen: cfg.Gateway.Listen, URL: local, Auth: "pat",
 		Access: append([]string{}, cfg.Gateway.Access...), Hosts: append([]string{}, cfg.Gateway.Hosts...),
-		Addresses: []v1.GatewayAddress{{Kind: "localhost", Host: "127.0.0.1", URL: local}},
+		Addresses: []v2.GatewayAddress{{Kind: "localhost", Host: "127.0.0.1", URL: local}},
 	}
 	if gatewayLoopbackOnly(cfg.Gateway.Listen) {
 		return info
@@ -38,7 +38,7 @@ func gatewayInfo(cfg *config.Config, network mesh.Network) *v1.GatewayInfo {
 		return info
 	}
 	add := func(kind, host string) {
-		info.Addresses = append(info.Addresses, v1.GatewayAddress{Kind: kind, Host: host, URL: "http://" + net.JoinHostPort(host, port) + "/mcp"})
+		info.Addresses = append(info.Addresses, v2.GatewayAddress{Kind: kind, Host: host, URL: "http://" + net.JoinHostPort(host, port) + "/mcp"})
 	}
 	if access.LANEnabled() {
 		for _, a := range lanIPv4s() {

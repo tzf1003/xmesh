@@ -1,4 +1,4 @@
-// Package v1 holds the Go types of the local control channel, API version 1.
+// Package v2 holds the Go types of the local control channel, API version 2.
 //
 // The JSON Schemas under docs/contracts/schemas (control-*.schema.json) are the only source of the
 // contract (CTR-CTL-12). The types here are hand written to match them, and the tests in this
@@ -14,4 +14,4 @@
 //   - Timestamps use Time, which always encodes as UTC with three fractional digits.
 //   - Nothing here carries command output, file content, terminal data, environment values or
 //     tool arguments. Adding such a field to an event or a view breaks INV-10 and the fixtures.
-package v1
+package v2

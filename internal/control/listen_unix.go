@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 // maxSocketPath is below the smallest sun_path (104 bytes on macOS, 108 on Linux).
@@ -39,7 +39,7 @@ func Listen(o ListenOptions) (net.Listener, Bound, error) {
 	if err != nil {
 		return nil, Bound{}, err
 	}
-	return l, Bound{Transport: v1.TransportUnix, Address: path}, nil
+	return l, Bound{Transport: v2.TransportUnix, Address: path}, nil
 }
 
 // privateDir makes sure dir exists, is owned by this user, is not a symlink and

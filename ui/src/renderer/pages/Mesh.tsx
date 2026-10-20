@@ -50,12 +50,20 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
   const savedDrafts = useRef(new Map<string, SavedPolicyDraft>());
   const [draftDirty, setDraftDirty] = useState(false);
   useEffect(() => { if (ctx.focus?.meshTab) setTab(ctx.focus.meshTab); }, [ctx.focus?.meshTab]);
-  const { resource, reload } = useResource(() => getApi().mesh({ op: "status" }), [ctx.snapshot.selectedInstance]);
+  const instance=ctx.snapshot.selectedInstance;
+  const currentInstance=useRef(instance);currentInstance.current=instance;
+  const [verified,setVerified]=useState<{instance:string;status:MeshStatus}>();
+  useEffect(()=>setVerified(undefined),[instance]);
+  const { resource:loadedResource, reload:requestReload } = useResource(() => getApi().mesh({ op: "status" }), [ctx.snapshot.selectedInstance]);
+  const resource=verified?.instance===instance ? {state:"ready" as const,data:verified.status} : loadedResource;
+  const reload=():void=>{setVerified(undefined);requestReload();};
   // After saving a credential, ask for status once more: the answer says whether
   // the key works and which access level it carries.
   const verify = async (): Promise<ActionError | undefined> => {
     const r = await getApi().mesh({ op: "status" });
-    return r.ok ? undefined : r.error;
+    if(currentInstance.current!==instance) return {code:"cancelled",message:t("mesh.verifyNodeChanged")};
+    if(r.ok) {setVerified({instance,status:r.data});return undefined;}
+    return r.error;
   };
 
   return (
@@ -68,7 +76,7 @@ export function Mesh({ ctx }: { ctx: PageContext }): JSX.Element {
       <MeshLogin
         ctx={ctx}
         open={resource.state === "error" && (resource.error.code === "no_credential" || resource.error.code === "insufficient_scope")}
-        onSaved={() => { setCredentialRevision((v) => v + 1); reload(); }}
+        onSaved={() => { setCredentialRevision((v) => v + 1); setVerified(undefined); }}
         verify={verify}
         draftDirty={draftDirty}
       />

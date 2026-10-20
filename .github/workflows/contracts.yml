@@ -53,10 +53,10 @@ jobs:
 
       - name: 生成物必须与提交一致
         run: |
-          if [ -n "$(git status --porcelain -- api/control/v1/ts)" ]; then
-            git status --porcelain -- api/control/v1/ts
-            git diff -- api/control/v1/ts | head -80
-            echo "api/control/v1/ts 与 JSON Schema 不一致，请运行 node scripts/gen-control-ts/generate.mjs 后提交" >&2
+          if [ -n "$(git status --porcelain -- api/control/v2/ts)" ]; then
+            git status --porcelain -- api/control/v2/ts
+            git diff -- api/control/v2/ts | head -80
+            echo "api/control/v2/ts 与 JSON Schema 不一致，请运行 node scripts/gen-control-ts/generate.mjs 后提交" >&2
             exit 1
           fi
 

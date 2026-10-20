@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 // lineKind is what a line of runner output says about the runner.
@@ -23,12 +23,13 @@ const (
 	lineRunnerRemoved
 	lineVersionDeprecated
 	lineAuthFailed
+	lineMissingDependency
 )
 
 type runnerLine struct {
 	kind   lineKind
 	job    string
-	result v1.CiResultKind
+	result v2.CiResultKind
 }
 
 var (
@@ -54,6 +55,8 @@ func parseLine(line string) runnerLine {
 		return runnerLine{kind: lineVersionDeprecated}
 	case strings.Contains(line, "Failed to create a session") && strings.Contains(line, "Unauthorized"):
 		return runnerLine{kind: lineAuthFailed}
+	case dependencyMissing(line):
+		return runnerLine{kind: lineMissingDependency}
 	}
 	if m := jobDonePattern.FindStringSubmatch(line); m != nil {
 		return runnerLine{kind: lineJobDone, job: m[1], result: resultOf(m[2])}
@@ -64,18 +67,18 @@ func parseLine(line string) runnerLine {
 	return runnerLine{}
 }
 
-func resultOf(word string) v1.CiResultKind {
+func resultOf(word string) v2.CiResultKind {
 	switch strings.ToLower(word) {
 	case "succeeded":
-		return v1.CiSucceeded
+		return v2.CiSucceeded
 	case "failed":
-		return v1.CiFailed
+		return v2.CiFailed
 	case "canceled", "cancelled":
-		return v1.CiCanceled
+		return v2.CiCanceled
 	case "skipped":
-		return v1.CiSkipped
+		return v2.CiSkipped
 	case "abandoned":
-		return v1.CiAbandoned
+		return v2.CiAbandoned
 	}
-	return v1.CiUnknown
+	return v2.CiUnknown
 }

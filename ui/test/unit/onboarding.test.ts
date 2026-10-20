@@ -13,6 +13,8 @@ test("setup input validates purpose, paths, clients and network at the IPC bound
   assert.deepEqual(parseOnboardingInput(input), input);
   for (const patch of [{ node_name: "../x" }, { workspace: "relative" }, { workspace: "/work\nnext" }, { clients: ["codex", "codex"] }, { clients: ["other"] }, { purpose: "cloud" }, { network: { mode: "tailnet", auth_method: "key" } }, { network: { mode: "lan", auth_method: "browser", shell: true } }, { schema_version: 2 }]) assert.equal(parseOnboardingInput({ ...input, ...patch }), undefined);
   assert.ok(parseOnboardingInput({ ...input, clients: [] }));
+  assert.ok(parseOnboardingInput({ ...input, purpose: "multi-device", network: { mode: "coexist", auth_method: "browser" } }));
+  assert.equal(parseOnboardingInput({ ...input, network: { mode: "coexist", auth_method: "browser" } }), undefined);
   assert.equal(parseOnboardingInput({ ...input, network: { mode: "lan", auth_method: "browser" } }), undefined);
 });
 test("setup operations accept fixed fields and bounded durable IDs", () => {

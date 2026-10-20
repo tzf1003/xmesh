@@ -22,10 +22,20 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 	if e := privdir.Ensure(stateDir); e != nil {
 		return "", e
 	}
+	network := c.Mesh
 	tags := tailnetRoleTags(ingress)
-	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: c.Mesh.ControlURL, AdvertiseTags: tags, UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
-	if c.Mesh.AuthMethod != "browser" {
-		key, e := os.ReadFile(c.Mesh.AuthkeyFile)
+	if c.SchemaVersion == 2 {
+		network.ControlURL = c.Mesh.Tailnet.ControlURL
+		network.AuthMethod = c.Mesh.Tailnet.AuthMethod
+		network.AuthkeyFile = c.Mesh.Tailnet.AuthkeyFile
+		tags = nil
+		if ingress {
+			tags = []string{"tag:ingress"}
+		}
+	}
+	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: network.ControlURL, AdvertiseTags: tags, UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
+	if network.AuthMethod != "browser" {
+		key, e := os.ReadFile(network.AuthkeyFile)
 		if e != nil {
 			return "", fmt.Errorf("无法读取入网密钥文件")
 		}
@@ -53,7 +63,7 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 			next = LoginProgress{State: "needs_approval"}
 		}
 		if st.BackendState == "Running" && st.Self != nil && len(st.TailscaleIPs) > 0 {
-			if err := onboardingPrerequisites(st, ingress); err != nil {
+			if err := onboardingPrerequisitesForVersion(st, ingress, c.SchemaVersion != 2); err != nil {
 				return "", err
 			}
 			if e = progress(LoginProgress{State: "ready"}); e != nil {
@@ -76,7 +86,11 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 }
 
 func onboardingPrerequisites(st *ipnstate.Status, ingress bool) error {
-	if e := requireBrowserRole(st); e != nil {
+	return onboardingPrerequisitesForVersion(st, ingress, true)
+}
+
+func onboardingPrerequisitesForVersion(st *ipnstate.Status, ingress, requireDeviceTag bool) error {
+	if e := requireBrowserRole(st); requireDeviceTag && e != nil {
 		return e
 	}
 	if !ingress {

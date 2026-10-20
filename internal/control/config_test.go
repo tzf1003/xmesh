@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/filelock"
 )
@@ -49,10 +49,10 @@ func TestStoreConfigRechecksSharedLock(t *testing.T) {
 	}
 }
 
-func (f *fixture) config() v1.ConfigResponse {
+func (f *fixture) config() v2.ConfigResponse {
 	f.t.Helper()
-	r := f.ok("GET", "/v1/config", nil, "ConfigResponse")
-	var out v1.ConfigResponse
+	r := f.ok("GET", "/v2/config", nil, "ConfigResponse")
+	var out v2.ConfigResponse
 	decodeAs(f.t, r, &out)
 	if tag := r.Header.Get("ETag"); tag != `"`+out.ETag+`"` {
 		f.t.Fatalf("ETag header %q vs body %q", tag, out.ETag)
@@ -75,17 +75,17 @@ func (f *fixture) put(etag, content string, dry bool) *Response {
 	if etag != "" {
 		headers["If-Match"] = `"` + etag + `"`
 	}
-	return f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: content, DryRun: dry}, headers)
+	return f.do("PUT", "/v2/config", v2.ConfigPutRequest{Content: content, DryRun: dry}, headers)
 }
 
-func (f *fixture) putOK(etag, content string, dry bool) v1.ConfigPutResponse {
+func (f *fixture) putOK(etag, content string, dry bool) v2.ConfigPutResponse {
 	f.t.Helper()
 	r := f.put(etag, content, dry)
 	if r.Status != 200 {
 		f.t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	valid(f.t, "ConfigPutResponse", r.Body)
-	var out v1.ConfigPutResponse
+	var out v2.ConfigPutResponse
 	decodeAs(f.t, r, &out)
 	return out
 }
@@ -133,7 +133,7 @@ func Test_ControlConfigPutKeepsContentVerbatim(t *testing.T) {
 	if after.ETag != got.ETag || after.EffectiveETag != after.ETag {
 		t.Fatalf("%+v vs %+v", after, got)
 	}
-	ops := map[string]v1.ConfigChange{}
+	ops := map[string]v2.ConfigChange{}
 	for _, c := range got.Diff {
 		ops[c.Pointer] = c
 	}
@@ -150,8 +150,8 @@ func Test_ControlConfigPreconditions(t *testing.T) {
 	f := newFixture(t)
 	etag := f.config().ETag
 	next := strings.Replace(testConfig, "mdns: true", "mdns: true\n  # edited", 1)
-	apiError(t, f.put("", next, false), v1.ErrPreconditionNeeded)
-	e := apiError(t, f.put("sha256-"+strings.Repeat("0", 64), next, false), v1.ErrPreconditionFailed)
+	apiError(t, f.put("", next, false), v2.ErrPreconditionNeeded)
+	e := apiError(t, f.put("sha256-"+strings.Repeat("0", 64), next, false), v2.ErrPreconditionFailed)
 	if e.CurrentETag != etag {
 		t.Fatalf("current_etag %q, want %q", e.CurrentETag, etag)
 	}
@@ -159,11 +159,11 @@ func Test_ControlConfigPreconditions(t *testing.T) {
 		t.Fatal("rejected write changed the file")
 	}
 	// a quoted header and a bare one both work
-	if r := f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: next}, map[string]string{"If-Match": etag}); r.Status != 200 {
+	if r := f.do("PUT", "/v2/config", v2.ConfigPutRequest{Content: next}, map[string]string{"If-Match": etag}); r.Status != 200 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
 	// a second writer holding the old etag loses
-	e = apiError(t, f.put(etag, next+"# more\n", false), v1.ErrPreconditionFailed)
+	e = apiError(t, f.put(etag, next+"# more\n", false), v2.ErrPreconditionFailed)
 	if e.CurrentETag == etag {
 		t.Fatalf("%+v", e)
 	}
@@ -172,7 +172,7 @@ func Test_ControlConfigPreconditions(t *testing.T) {
 	if err := os.WriteFile(f.path, []byte(testConfig+"\n# edited\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	apiError(t, f.put(etag, next, false), v1.ErrPreconditionFailed)
+	apiError(t, f.put(etag, next, false), v2.ErrPreconditionFailed)
 }
 
 func Test_ControlConfigRejectsInvalid(t *testing.T) {
@@ -186,14 +186,14 @@ func Test_ControlConfigRejectsInvalid(t *testing.T) {
 		"two documents":    testConfig + "---\nnode: {}\n",
 	} {
 		r := f.put(etag, content, false)
-		e := apiError(t, r, v1.ErrConfigInvalid)
+		e := apiError(t, r, v2.ErrConfigInvalid)
 		if len(e.Diagnostics) == 0 || e.Diagnostics[0].Message == "" {
 			t.Errorf("%s: no diagnostics: %s", name, r.Body)
 		}
 	}
 	// the schema failure names the location
 	r := f.put(etag, strings.Replace(testConfig, "default_cwd: .", "default_cwd: .\n  exec:\n    max_concurrent: many", 1), false)
-	var e v1.Error
+	var e v2.Error
 	decodeAs(t, r, &e)
 	found := false
 	for _, d := range e.Diagnostics {
@@ -203,7 +203,7 @@ func Test_ControlConfigRejectsInvalid(t *testing.T) {
 		t.Fatalf("%s", r.Body)
 	}
 	// yaml errors carry a line
-	var y v1.Error
+	var y v2.Error
 	decodeAs(t, f.put(etag, "node: [unclosed", false), &y)
 	if y.Diagnostics[0].Line == 0 {
 		t.Fatalf("%+v", y)
@@ -212,11 +212,11 @@ func Test_ControlConfigRejectsInvalid(t *testing.T) {
 		t.Fatal("an invalid write changed the file")
 	}
 	// body errors
-	e2 := apiError(t, f.do("PUT", "/v1/config", map[string]any{"content": testConfig, "force": true}, map[string]string{"If-Match": etag}), v1.ErrInvalidArgs)
+	e2 := apiError(t, f.do("PUT", "/v2/config", map[string]any{"content": testConfig, "force": true}, map[string]string{"If-Match": etag}), v2.ErrInvalidArgs)
 	if e2.Field != "force" {
 		t.Fatalf("%+v", e2)
 	}
-	apiError(t, f.do("PUT", "/v1/config", map[string]any{}, map[string]string{"If-Match": etag}), v1.ErrConfigInvalid)
+	apiError(t, f.do("PUT", "/v2/config", map[string]any{}, map[string]string{"If-Match": etag}), v2.ErrConfigInvalid)
 }
 
 func Test_ControlConfigBodyLimit(t *testing.T) {
@@ -227,7 +227,7 @@ func Test_ControlConfigBodyLimit(t *testing.T) {
 		t.Fatalf("%d %.200s", r.Status, r.Body)
 	}
 	// ... and 1 MiB plus is not.
-	apiError(t, f.put(etag, testConfig+"# "+strings.Repeat("x", v1.MaxConfigBytes)+"\n", true), v1.ErrPayloadTooLarge)
+	apiError(t, f.put(etag, testConfig+"# "+strings.Repeat("x", v2.MaxConfigBytes)+"\n", true), v2.ErrPayloadTooLarge)
 }
 
 func Test_ControlConfigDryRunAndNoop(t *testing.T) {
@@ -245,7 +245,7 @@ func Test_ControlConfigDryRunAndNoop(t *testing.T) {
 	if same.Applied || len(same.Diff) != 0 || same.ETag != etag {
 		t.Fatalf("identical text should be a no-op: %+v", same)
 	}
-	if strings.Contains(string(f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: testConfig}, map[string]string{"If-Match": etag}).Body), "null") {
+	if strings.Contains(string(f.do("PUT", "/v2/config", v2.ConfigPutRequest{Content: testConfig}, map[string]string{"If-Match": etag}).Body), "null") {
 		t.Fatal("diff must be an array")
 	}
 	// a comment-only change is written even though nothing in the data model moved
@@ -270,9 +270,9 @@ func Test_ControlConfigRestartRequired(t *testing.T) {
 	if c := f.config(); !c.RestartRequired {
 		t.Fatal(c)
 	}
-	var data v1.ConfigEventData
-	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
-	if data.Change != "written" || data.Actor != v1.ActorControl || !data.RestartRequired || len(data.ChangedPaths) != 1 || data.ChangedPaths[0] != "/node/name" || data.ETag == nil || *data.ETag != got.ETag {
+	var data v2.ConfigEventData
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
+	if data.Change != "written" || data.Actor != v2.ActorControl || !data.RestartRequired || len(data.ChangedPaths) != 1 || data.ChangedPaths[0] != "/node/name" || data.ETag == nil || *data.ETag != got.ETag {
 		t.Fatalf("%+v", data)
 	}
 	if strings.Contains(string(mustJSON(t, data)), "renamed") {
@@ -296,17 +296,17 @@ func Test_ControlConfigFileEditsAnnounced(t *testing.T) {
 	if err := os.WriteFile(f.path, []byte(edited), 0600); err != nil {
 		t.Fatal(err)
 	}
-	var data v1.ConfigEventData
-	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
-	if data.Change != "reloaded" || data.Actor != v1.ActorFile || len(data.ChangedPaths) != 1 || data.ChangedPaths[0] != "/agent/policy/allow_dangerous" {
+	var data v2.ConfigEventData
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
+	if data.Change != "reloaded" || data.Actor != v2.ActorFile || len(data.ChangedPaths) != 1 || data.ChangedPaths[0] != "/agent/policy/allow_dangerous" {
 		t.Fatalf("%+v", data)
 	}
 	// a file that does not validate is reported, and the node keeps the last good generation
 	if err := os.WriteFile(f.path, []byte("node: ["), 0600); err != nil {
 		t.Fatal(err)
 	}
-	payload(t, events.next(t, ofType(v1.EventConfig)), &data)
-	if data.Change != "reload_failed" || data.Actor != v1.ActorFile || len(data.ChangedPaths) != 0 {
+	payload(t, events.next(t, ofType(v2.EventConfig)), &data)
+	if data.Change != "reload_failed" || data.Actor != v2.ActorFile || len(data.ChangedPaths) != 0 {
 		t.Fatalf("%+v", data)
 	}
 	if !f.store.Get().Agent.Policy.AllowDangerous {
@@ -359,13 +359,13 @@ func Test_ControlConfigDiffSecurityHints(t *testing.T) {
 // Without a configuration file the config capabilities are not declared and their routes say so.
 func Test_ControlConfigStaticStore(t *testing.T) {
 	f := newFixture(t, func(o *Options) { o.Store = staticStore(t) })
-	for _, c := range []v1.Capability{v1.CapConfigRead, v1.CapConfigWrite} {
+	for _, c := range []v2.Capability{v2.CapConfigRead, v2.CapConfigWrite} {
 		if f.server.hasCapability(c) {
 			t.Fatalf("declared %s", c)
 		}
 	}
-	apiError(t, f.do("GET", "/v1/config", nil, nil), v1.ErrNotImplemented)
-	apiError(t, f.do("PUT", "/v1/config", v1.ConfigPutRequest{Content: "a: 1"}, map[string]string{"If-Match": `"x"`}), v1.ErrNotImplemented)
+	apiError(t, f.do("GET", "/v2/config", nil, nil), v2.ErrNotImplemented)
+	apiError(t, f.do("PUT", "/v2/config", v2.ConfigPutRequest{Content: "a: 1"}, map[string]string{"If-Match": `"x"`}), v2.ErrNotImplemented)
 }
 
 func Test_ApplyEditsKeepsComments(t *testing.T) {

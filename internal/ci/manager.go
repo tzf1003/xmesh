@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 )
 
@@ -51,16 +51,17 @@ type Manager struct {
 
 	pkgMu sync.Mutex // one package download at a time
 
-	mu       sync.Mutex
-	bindings map[string]*binding
-	tokens   map[string]heldToken // registration tokens by binding id, memory only
-	draining bool
-	busy     int
-	release  func()
-	closed   bool
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu           sync.Mutex
+	bindings     map[string]*binding
+	tokens       map[string]heldToken // registration tokens by binding id, memory only
+	draining     bool
+	busy         int
+	preventSleep bool
+	release      func()
+	closed       bool
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 type heldToken struct {
@@ -156,6 +157,8 @@ func (m *Manager) Apply(c config.CI) {
 	if m.closed {
 		return
 	}
+	m.preventSleep = c.PreventSleepWhileBusy
+	m.updateSleepLocked()
 	seen := map[string]bool{}
 	for _, spec := range c.Bindings {
 		seen[spec.ID] = true
@@ -189,9 +192,10 @@ func (m *Manager) Apply(c config.CI) {
 		}
 		for idx, in := range b.instances {
 			if idx > want {
-				in.shutdown(false)
-				delete(b.instances, idx)
-				m.cleanupAfter(b, in, false)
+				if stopping, _, _ := in.flags(); !stopping {
+					in.shutdown(false)
+					m.cleanupAfter(b, in, false)
+				}
 			}
 		}
 	}
@@ -211,16 +215,25 @@ func (m *Manager) Apply(c config.CI) {
 func (m *Manager) removeLocked(id string, b *binding) {
 	b.removing = true
 	instances := make([]*instance, 0, len(b.instances))
+	var cleanups []<-chan struct{}
 	for _, in := range b.instances {
 		in.setSpec(config.CIBinding{ID: b.spec.ID, Paused: true, Source: b.spec.Source, Target: b.spec.Target})
 		in.shutdown(b.force)
-		instances = append(instances, in)
+		if in.cleanupDone != nil {
+			cleanups = append(cleanups, in.cleanupDone)
+		} else {
+			instances = append(instances, in)
+		}
 	}
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
 		for _, in := range instances {
 			<-in.finished
+		}
+		// Scale-down owns these instances through deregistration and directory removal.
+		for _, done := range cleanups {
+			<-done
 		}
 		m.deregister(b.spec, instances...)
 		if m.managedDir(b.spec) {
@@ -241,12 +254,31 @@ func (m *Manager) cleanupAfter(b *binding, in *instance, _ bool) {
 		return
 	}
 	dir := in.dir
+	spec := b.spec
+	in.cleanupDone = make(chan struct{})
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
+		defer close(in.cleanupDone)
 		<-in.finished
-		m.deregister(b.spec, in)
+		m.deregister(spec, in)
 		_ = os.RemoveAll(dir)
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if b.instances[in.idx] != in {
+			return
+		}
+		delete(b.instances, in.idx)
+		want := b.spec.Concurrency
+		if want < 1 {
+			want = 1
+		}
+		if !m.closed && !b.removing && in.idx <= want {
+			replacement := m.newInstance(b, in.idx)
+			b.instances[in.idx] = replacement
+			m.wg.Add(1)
+			go func() { defer m.wg.Done(); replacement.run() }()
+		}
 	}()
 }
 
@@ -385,14 +417,15 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 func (m *Manager) busyChanged(delta int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.busy += delta
-	if m.busy < 0 {
-		m.busy = 0
-	}
-	if m.busy > 0 && m.release == nil && m.o.Inhibit != nil {
+	m.busy = max(0, m.busy+delta)
+	m.updateSleepLocked()
+}
+
+func (m *Manager) updateSleepLocked() {
+	if m.busy > 0 && m.preventSleep && m.release == nil && m.o.Inhibit != nil {
 		m.release = m.o.Inhibit()
 	}
-	if m.busy == 0 && m.release != nil {
+	if (m.busy == 0 || !m.preventSleep) && m.release != nil {
 		m.release()
 		m.release = nil
 	}
@@ -408,10 +441,10 @@ func (m *Manager) releaseSleep() {
 }
 
 // Bindings is the state of every binding, ordered by id.
-func (m *Manager) Bindings() []v1.CiBinding {
+func (m *Manager) Bindings() []v2.CiBinding {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]v1.CiBinding, 0, len(m.bindings))
+	out := make([]v2.CiBinding, 0, len(m.bindings))
 	for _, b := range m.bindings {
 		out = append(out, m.viewLocked(b))
 	}
@@ -420,12 +453,12 @@ func (m *Manager) Bindings() []v1.CiBinding {
 }
 
 // Binding is the state of one binding.
-func (m *Manager) Binding(id string) (v1.CiBinding, bool) {
+func (m *Manager) Binding(id string) (v2.CiBinding, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b := m.bindings[id]
 	if b == nil {
-		return v1.CiBinding{}, false
+		return v2.CiBinding{}, false
 	}
 	return m.viewLocked(b), true
 }
@@ -437,18 +470,18 @@ func (m *Manager) Gone(id string) bool {
 	return m.bindings[id] == nil
 }
 
-func (m *Manager) viewLocked(b *binding) v1.CiBinding {
+func (m *Manager) viewLocked(b *binding) v2.CiBinding {
 	labels := append([]string{}, b.spec.Labels...)
-	view := v1.CiBinding{
-		ID: b.spec.ID, Scope: "repo", Target: b.spec.Target, Source: v1.CiBindingSource(b.spec.Source),
+	view := v2.CiBinding{
+		ID: b.spec.ID, Scope: "repo", Target: b.spec.Target, Source: v2.CiBindingSource(b.spec.Source),
 		Account: b.spec.Account, Public: b.spec.Public, Concurrency: b.spec.Concurrency, Labels: labels,
-		Paused: b.spec.Paused, Removing: b.removing, Dir: b.dir, Instances: []v1.CiInstance{},
+		Paused: b.spec.Paused, Removing: b.removing, Dir: b.dir, Instances: []v2.CiInstance{},
 	}
 	if view.Concurrency < 1 {
 		view.Concurrency = 1
 	}
 	if view.Source == "" {
-		view.Source = v1.CiSourceAccount
+		view.Source = v2.CiSourceAccount
 	}
 	idx := make([]int, 0, len(b.instances))
 	for i := range b.instances {
@@ -462,34 +495,34 @@ func (m *Manager) viewLocked(b *binding) v1.CiBinding {
 }
 
 // Summary is StatusResponse.ci; nil when nothing is bound.
-func (m *Manager) Summary() *v1.CiSummary {
+func (m *Manager) Summary() *v2.CiSummary {
 	bindings := m.Bindings()
 	if len(bindings) == 0 {
 		return nil
 	}
-	return &v1.CiSummary{Bindings: bindings, Draining: m.isDraining()}
+	return &v2.CiSummary{Bindings: bindings, Draining: m.isDraining()}
 }
 
-// Overview is GET /v1/ci apart from the accounts, which the control layer adds.
-func (m *Manager) Overview() v1.CiOverview {
+// Overview is GET /v2/ci apart from the accounts, which the control layer adds.
+func (m *Manager) Overview() v2.CiOverview {
 	c := m.o.Config()
 	bindings := m.Bindings()
-	runner := v1.CiRunnerPackage{}
+	runner := v2.CiRunnerPackage{}
 	if m.o.Cache != nil {
 		if pkg, ok := m.o.Cache.Cached(); ok {
-			runner = v1.CiRunnerPackage{Version: pkg.Version, Cached: true}
+			runner = v2.CiRunnerPackage{Version: pkg.Version, Cached: true}
 		}
 	}
-	return v1.CiOverview{
-		Accounts: []v1.CiAccount{}, Bindings: bindings, Notices: orEmpty(Notices(len(bindings))), Runner: runner,
+	return v2.CiOverview{
+		Accounts: []v2.CiAccount{}, Bindings: bindings, Notices: orEmpty(Notices(len(bindings))), Runner: runner,
 		PreventSleepWhileBusy: c.PreventSleepWhileBusy, StopTimeoutS: int(c.StopTimeoutDuration() / time.Second),
 		Draining: m.isDraining(),
 	}
 }
 
-func orEmpty(n []v1.CiNotice) []v1.CiNotice {
+func orEmpty(n []v2.CiNotice) []v2.CiNotice {
 	if n == nil {
-		return []v1.CiNotice{}
+		return []v2.CiNotice{}
 	}
 	return n
 }
@@ -518,7 +551,7 @@ func scriptName(base string) string {
 }
 
 // SpecView is the contract view of a binding that has no instances yet (or no longer).
-func (m *Manager) SpecView(spec config.CIBinding, removing bool) v1.CiBinding {
+func (m *Manager) SpecView(spec config.CIBinding, removing bool) v2.CiBinding {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.viewLocked(&binding{spec: spec, dir: m.bindingDir(spec), removing: removing, instances: map[int]*instance{}})

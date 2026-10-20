@@ -342,8 +342,8 @@ func (l *LAN) trustedRequest(r *http.Request) bool {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) != 1 {
 		return false
 	}
-	_, ok := l.trust.Find(fingerprint(r.TLS.PeerCertificates[0]))
-	return ok
+	_, err := l.trust.verifyPeer(r.TLS.PeerCertificates[0], "")
+	return err == nil
 }
 
 // PairingHandler serves the routes under PairPath.
@@ -503,11 +503,11 @@ func (l *LAN) PairWith(ctx context.Context, address, password, expected string) 
 	if expected != "" && expected != fingerprint(peer) {
 		return Trusted{}, &PairError{Reason: PairFingerprintMismatch}
 	}
-	if err := pairPost(ctx, client, base+"/lan/pair/confirm", pairConfirmRequest{SID: exchanged.SID, Confirm: confirmA}, nil); err != nil {
-		return Trusted{}, err
-	}
 	if fingerprint(peer) == l.cert.Fingerprint {
 		return Trusted{}, &PairError{Reason: PairBadPeer}
+	}
+	if err := pairPost(ctx, client, base+"/lan/pair/confirm", pairConfirmRequest{SID: exchanged.SID, Confirm: confirmA}, nil); err != nil {
+		return Trusted{}, err
 	}
 	if err := l.pin(peer); err != nil {
 		return Trusted{}, err

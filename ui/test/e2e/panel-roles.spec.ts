@@ -95,6 +95,8 @@ test("ingress setup and unsaved configuration are respected by the top-bar switc
   const page = await open();
   await page.getByTestId("role-ingress").click();
   await expect(page.getByTestId("settings-ingress")).toBeVisible();
+  await expect(page.getByTestId("settings-needs-tailnet")).toHaveCount(0);
+  await page.getByTestId("settings-listen").selectOption("funnel");
   await expect(page.getByTestId("settings-needs-tailnet")).toBeVisible();
   expect(h.kernel.panel.writes).toEqual([]);
   await expect(page.getByTestId("role-gateway")).toBeDisabled();

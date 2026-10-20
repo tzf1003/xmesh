@@ -1,8 +1,8 @@
-package v1
+package v2
 
 // APIVersion is the control API version this package implements: major.minor. A minor bump only
 // adds fields, routes, enum values and capabilities. A major bump changes the path prefix.
-const APIVersion = "1.8"
+const APIVersion = "2.0"
 
 const (
 	// HeaderVersion carries APIVersion on every response and in control.json.
@@ -11,9 +11,9 @@ const (
 	ContentTypeJSON = "application/json; charset=utf-8"
 	ContentTypeSSE  = "text/event-stream"
 
-	// MaxRequestBytes is the body limit for every route except PUT /v1/config.
+	// MaxRequestBytes is the body limit for every route except PUT /v2/config.
 	MaxRequestBytes = 64 << 10
-	// MaxConfigBytes is the body limit for PUT /v1/config.
+	// MaxConfigBytes is the body limit for PUT /v2/config.
 	MaxConfigBytes = 1 << 20
 
 	// EventRingSize is how many events the kernel keeps for Last-Event-ID resume.

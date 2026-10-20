@@ -1,6 +1,6 @@
 # xmesh-ui
 
-xmesh 的桌面托盘壳（Electron，路线图阶段 6 的 U3）。独立的 TypeScript 项目，不 import 任何 Go 代码，和内核之间只有一份契约：本机控制通道（Control API v1，Unix 域套接字或 Windows 命名管道）。设计见 [docs/design/12-ui-and-control.md](../docs/design/12-ui-and-control.md)。
+xmesh 的桌面托盘壳（Electron，路线图阶段 6 的 U3）。独立的 TypeScript 项目，不 import 任何 Go 代码，和内核之间只有一份契约：本机控制通道（Control API v2，Unix 域套接字或 Windows 命名管道）。设计见 [docs/design/12-ui-and-control.md](../docs/design/12-ui-and-control.md)。
 
 这一步交付的是壳：托盘 / 菜单栏图标和菜单、与内核的连接和重连、受限 IPC、窗口安全约束，以及对着假内核的端到端测试。面板页面见下文「面板页面」；平台集成是另一个子任务；打包发布见下文「打包与发布」。
 
@@ -93,7 +93,7 @@ npm start             # 另开终端，启动 Electron
 | 图标 | 条件 |
 | --- | --- |
 | 未运行（灰） | 没有 `control.json`，或连不上 |
-| 版本不匹配（红叉） | `control.json` 的 `api_version` 或响应头 `X-Xmesh-Control-Version` 的主版本不是 1 |
+| 版本不匹配（红叉） | `control.json` 的 `api_version` 或响应头 `X-Xmesh-Control-Version` 的主版本不是 2 |
 | 排空中（暂停） | `drain.draining` |
 | 需重启（带点） | `restart_required` |
 | 降级（黄） | 有 `severity` 为 `warning` 或 `error` 的警告；`info` 级（`restart_required`、`allow_dangerous`）不变黄 |
@@ -156,7 +156,7 @@ XMESH_KERNEL_BIN="$PWD/build/kernel/xmesh.exe" npm run package -- --win --x64
 node scripts/verify-package.mjs --dir release/win-unpacked --kernel   # 本机能运行时再加 --run-kernel --smoke
 ```
 
-`verify-package.mjs --smoke` 启动打包后的应用，对着假内核（`dist/testserver`）确认它真的连上并取到 `/v1/status`，这一步覆盖 asar 完整性、`app://panel` 协议和控制通道客户端。
+`verify-package.mjs --smoke` 启动打包后的应用，对着假内核（`dist/testserver`）确认它真的连上并取到 `/v2/status`，这一步覆盖 asar 完整性、`app://panel` 协议和控制通道客户端。
 
 ### 签名与未签名 beta
 
@@ -183,7 +183,7 @@ macOS 签名时启用 Hardened Runtime，内置的内核二进制也会一并被
 
 UI 以 [docs/contracts/control.md](../docs/contracts/control.md) 为准。
 
-- 类型：`src/shared/generated/control.ts` 是 `api/control/v1/ts/control.ts`（由 `scripts/gen-control-ts` 从模式生成）的副本，用 `npm run sync-types` 更新，`npm run check-types` 在 CI 里检查两份一致。这样 `ui/` 不需要越出自己的目录编译。契约改了而副本没跟上，`ui.yml` 会失败。
+- 类型：`src/shared/generated/control.ts` 是 `api/control/v2/ts/control.ts`（由 `scripts/gen-control-ts` 从模式生成）的副本，用 `npm run sync-types` 更新，`npm run check-types` 在 CI 里检查两份一致。这样 `ui/` 不需要越出自己的目录编译。契约改了而副本没跟上，`ui.yml` 会失败。
 - 夹具：`testserver/` 的假内核从 `docs/contracts/schemas/examples/control/` 读取契约夹具，走与真实内核相同的传输（Unix 域套接字 / 命名管道）。`test/unit/contract.test.ts` 用 JSON Schema 校验它发出的每个响应和事件，所以假内核不会和契约漂移。
 - 能力协商：UI 读 `status.control.capabilities`，没有 `drain` 的内核上，暂停和恢复菜单项置灰；没有 `events` 的内核改为轮询状态；没有 `peers` 的内核不取对端列表，在线数仍取 `status.peers`。
 - 事件流：重连带 `Last-Event-ID`；内核重启（`boot_id` 变化）或缺口时会发 `reset`，无论哪种，控制器都重读状态和对端，所以快照不依赖收到每一条事件。45 秒无任何字节（内核每 15 秒发一次 `: ping`）则断开重连，反复立刻断开时指数退避，上限 10 秒。
@@ -197,3 +197,7 @@ UI 以 [docs/contracts/control.md](../docs/contracts/control.md) 为准。
 - `xmesh restart` / `stop` 子命令由内核通道线程提供，托盘只在菜单里调用 `xmesh <cmd> --json`
 - 事件里的入口新客户端通知：契约的事件类型里没有入口事件，等内核提供
 - 菜单里「执行 n/m」目前只显示共享池，独占池（`exec_exclusive`）在面板里展示
+
+本地下载在校验完成后发布私有临时文件。覆盖已有目标时，先将目标保留在同目录私有临时目录，核对其身份后以独占硬链接发布；发布失败会恢复原文件。若恢复时目标路径已被其他程序占用，保留双方文件并在错误中给出原文件的保留位置。支持硬链接的文件系统使用独占链接发布；其他文件系统使用独占创建后复制。复制阶段失败会保留部分目标和原文件备份，并在错误中给出位置。
+
+工具调试台的历史记录保留参数结构，全部参数值替换为脱敏占位符；重新执行前需填写参数。

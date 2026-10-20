@@ -29,6 +29,8 @@
 
 工具名：`fs.write`。整文件覆盖。
 
+HTTP MCP 请求的完整 JSON 信封最多 16 MiB，Gateway 与 Agent 均执行此传输上限；JSON 转义也计入信封大小。更大的文件通过 [CTR-FS-08](#ctr-fs-08) 的 `fs.upload` 分块写入，其整文件上限由 `agent.fs.max_file_size` 配置。
+
 | 参数 | 要求 |
 | --- | --- |
 | `path` | 必须。父目录必须已存在 |

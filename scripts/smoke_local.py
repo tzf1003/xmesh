@@ -101,15 +101,23 @@ class MCP:
             connection.close()
 
 
-def wait_for_default_token(state, seconds=15):
-    # The kernel creates the gateway token when the configuration has none, before it listens (CTR-CTL-09).
-    path = state / "pats" / "default.token"
+def wait_for_default_token(binary, state, seconds=15):
+    """Read the default PAT's actual file path after the kernel publishes its configuration."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if path.exists() and path.read_text().strip():
-            return path.read_text().strip()
+        try:
+            raw = subprocess.check_output(
+                [str(binary), "control", "pats", "list", "--state-dir", str(state)],
+                stderr=subprocess.DEVNULL, timeout=3)
+            pats = json.loads(raw)["pats"]
+            entry = next(pat for pat in pats if pat["name"] == "default")
+            token = pathlib.Path(entry["token_file"]).read_text().strip()
+            if token:
+                return token
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, StopIteration):
+            pass
         time.sleep(0.1)
-    raise AssertionError("the gateway did not create its default token")
+    raise AssertionError("the gateway did not publish its default token")
 
 
 def wait_for_gateway(process, gateway, log, token=None, seconds=15, host=None):
@@ -153,8 +161,8 @@ def main():
         outside = root / "host-only"
         outside.write_text("host-only")
         direct, gateway = address(), address()
-        cfg = {"node": {"name": "smoke-node", "roles": ["agent", "gateway"]},
-               "mesh": {"mode": "lan", "lan": {"mdns": True}}, "gateway": {"listen": gateway},
+        cfg = {"schema_version": 2, "node": {"name": "smoke-node", "roles": ["agent", "gateway"]},
+               "mesh": {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}}, "gateway": {"listen": gateway},
                "agent": {"default_cwd": str(workspace), "cwd_policy": {"allow": [str(workspace)]},
                          "policy": {"isolation": options.isolation},
                          "pty": {"default_shell": options.shell},
@@ -175,7 +183,7 @@ def main():
                                         "--state-dir", str(state), "--listen", direct], stdout=log, stderr=log)
             try:
                 if not options.pat:
-                    token = wait_for_default_token(state)
+                    token = wait_for_default_token(binary, state)
                 client = wait_for_gateway(process, gateway, log, token)
                 status = subprocess.check_output([str(binary), "status", "--endpoint", f"http://{direct}/mcp", "--json"])
                 info = json.loads(status)

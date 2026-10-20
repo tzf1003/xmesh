@@ -145,3 +145,15 @@ test("feature statuses follow live peers, backend health and runtime warnings", 
   await expect(page.getByTestId("feature-mesh")).toContainText("Needs attention");
   await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-feature-states.png") });
 });
+
+test("multi-device setup preserves the user's coexist network selection", async () => {
+  h = await launch({ publish: false, lang: "en" });
+  const page = await h.openPanel();
+  await basics(page, "multi-device");
+  await page.getByTestId("wizard-coexist").check();
+  await expect(page.getByTestId("wizard-control-url")).toBeVisible();
+  await review(page);
+  const calls = (await h.calls()).filter((entry) => entry.op === "onboarding" && (entry.arg as { op?: string }).op === "plan");
+  const request = calls.at(-1)?.arg as { input: { network: { mode: string } } };
+  expect(request.input.network.mode).toBe("coexist");
+});

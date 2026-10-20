@@ -3,7 +3,7 @@ import { DEFAULT_CONTROL_URL, parseSetup, type SetupProblem } from "../../shared
 
 export interface WizardForm {
   nodeName: string;
-  mode: "lan" | "tailnet";
+  mode: "lan" | "tailnet" | "coexist";
   agent: boolean;
   gateway: boolean;
   workspace: string;
@@ -34,7 +34,7 @@ export function toParams(f: WizardForm): unknown {
   if (f.agent) roles.push("agent");
   if (f.gateway) roles.push("gateway");
   const p: Record<string, unknown> = { nodeName: f.nodeName.trim(), mode: f.mode, roles, workspace: f.workspace.trim() };
-  if (f.mode === "tailnet") {
+  if (f.mode !== "lan") {
     p.controlUrl = f.controlUrl.trim();
     // One source at a time, so the main process never has to pick.
     if (f.authkeySource === "browser") p.browserLogin = true;

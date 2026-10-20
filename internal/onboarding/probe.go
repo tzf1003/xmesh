@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
 )
 
@@ -72,7 +72,7 @@ func ClientEvidence(ctx context.Context, p *Plan, j *Job) (bool, error) {
 		return false, e
 	}
 	client := control.NewClient(ep)
-	found, e := findClientEvidence(ctx, p, j, func(path string, out *v1.AuditResponse) error { return client.Fetch(ctx, path, out) })
+	found, e := findClientEvidence(ctx, p, j, func(path string, out *v2.AuditResponse) error { return client.Fetch(ctx, path, out) })
 	if e != nil {
 		return false, e
 	}
@@ -85,8 +85,8 @@ func ClientEvidence(ctx context.Context, p *Plan, j *Job) (bool, error) {
 		}
 	}
 	if p.Input.Purpose == "multi-device" {
-		var peers v1.PeersResponse
-		if e = client.Fetch(ctx, "/v1/peers", &peers); e != nil {
+		var peers v2.PeersResponse
+		if e = client.Fetch(ctx, "/v2/peers", &peers); e != nil {
 			return false, e
 		}
 		s, e := openProbe(ctx, p)
@@ -122,7 +122,7 @@ func validSystemInfo(result *mcp.CallToolResult, name string) bool {
 	return json.Unmarshal(encoded, &info) == nil && info.Hostname == name
 }
 
-func findClientEvidence(ctx context.Context, p *Plan, j *Job, fetch func(string, *v1.AuditResponse) error) (bool, error) {
+func findClientEvidence(ctx context.Context, p *Plan, j *Job, fetch func(string, *v2.AuditResponse) error) (bool, error) {
 	since := j.CreatedAt.Truncate(time.Millisecond)
 	until := time.Now().UTC()
 	q := url.Values{"since": {since.Format(time.RFC3339Nano)}, "until": {until.Format(time.RFC3339Nano)}, "limit": {"1000"}, "tool": {j.VerificationTool}, "device": {p.Input.NodeName}, "status": {"ok"}, "event": {"tool_call"}}
@@ -131,8 +131,8 @@ func findClientEvidence(ctx context.Context, p *Plan, j *Job, fetch func(string,
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		var out v1.AuditResponse
-		if err := fetch("/v1/audit?"+q.Encode(), &out); err != nil {
+		var out v2.AuditResponse
+		if err := fetch("/v2/audit?"+q.Encode(), &out); err != nil {
 			return false, err
 		}
 		if !out.Enabled {

@@ -211,6 +211,10 @@ func selectLANInterface(want string) (net.Interface, net.IP, error) {
 	return interfaces[picked.index], ip, nil
 }
 
+// SelectLANInterface shares the existing physical-interface selection policy with the
+// device connectivity service, whose listeners and discovery use the same interface.
+func SelectLANInterface(want string) (net.Interface, net.IP, error) { return selectLANInterface(want) }
+
 // A browse delivers each service once. Fresh rounds renew liveness
 // from new replies instead of treating the resolver's cached entry as a heartbeat.
 func (l *LAN) startDiscovery(ctx context.Context, period time.Duration, browse func(context.Context) (<-chan *mdns.Entry, error)) error {
@@ -413,8 +417,8 @@ func (l *LAN) Authenticate(r *http.Request) (identity.Principal, error) {
 		return identity.Principal{}, toolerr.New("unauthenticated", "需要已配对的 mTLS 身份")
 	}
 	fp := fingerprint(r.TLS.PeerCertificates[0])
-	p, ok := l.trust.Find(fp)
-	if !ok {
+	p, err := l.trust.verifyPeer(r.TLS.PeerCertificates[0], "")
+	if err != nil {
 		return identity.Principal{}, toolerr.New("unauthenticated", "对端尚未配对")
 	}
 	return identity.FromPeer("lan-"+fp[:24], p.Tags, r.Header.Get("X-Xmesh-Oauth-Client"))

@@ -53,7 +53,10 @@ func TestPlanProfilesAndSchema(t *testing.T) {
 			if cfg.Gateway.Listen[:10] != "127.0.0.1:" {
 				t.Fatal(cfg.Gateway.Listen)
 			}
-			if purpose == "local" && cfg.Mesh.LAN.MDNS {
+			if cfg.SchemaVersion != 2 {
+				t.Fatal("setup did not generate current network schema")
+			}
+			if purpose == "local" && (cfg.Mesh.LANEnabled() || cfg.Mesh.TailnetEnabled() || cfg.Mesh.LAN.MDNS) {
 				t.Fatal("local mode advertised")
 			}
 			if cfg.Gateway.PATs["onboarding"].Scopes[2] != "fs:read:*" {
@@ -295,5 +298,25 @@ func TestInputValidationAndPathTraversal(t *testing.T) {
 	}
 	if _, e := s.LoadJob("../escape"); e == nil {
 		t.Fatal("invalid id accepted")
+	}
+}
+
+func TestPlanCoexistUsesIndependentNetworkPaths(t *testing.T) {
+	s, in, _, _ := setupFixture(t)
+	in.Purpose = "multi-device"
+	in.Network = NetworkInput{Mode: "coexist", AuthMethod: "browser"}
+	p, err := s.Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse([]byte(p.Config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SchemaVersion != 2 || cfg.Mesh.NetworkMode() != "coexist" || cfg.Mesh.Tailnet.AuthMethod != "browser" || cfg.Mesh.Tailnet.ControlURL != config.DefaultControlURL {
+		t.Fatalf("invalid coexist configuration: %+v", cfg.Mesh)
+	}
+	if _, ok := cfg.Agent.Authz["tag:peer"]; !ok {
+		t.Fatal("missing paired/local device grant")
 	}
 }

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/oauth"
@@ -499,11 +499,11 @@ func TestEvidenceRequiresExactChallengeAndPaginates(t *testing.T) {
 			event := valid()
 			mutate(event)
 			raw, _ := json.Marshal(event)
-			found, err := findClientEvidence(t.Context(), p, j, func(string, *v1.AuditResponse) error { return nil })
+			found, err := findClientEvidence(t.Context(), p, j, func(string, *v2.AuditResponse) error { return nil })
 			if err != nil || found {
 				t.Fatal("empty evidence accepted")
 			}
-			found, err = findClientEvidence(t.Context(), p, j, func(_ string, out *v1.AuditResponse) error {
+			found, err = findClientEvidence(t.Context(), p, j, func(_ string, out *v2.AuditResponse) error {
 				out.Enabled = true
 				out.Events = []json.RawMessage{raw}
 				return nil
@@ -515,7 +515,7 @@ func TestEvidenceRequiresExactChallengeAndPaginates(t *testing.T) {
 	}
 	raw, _ := json.Marshal(valid())
 	pages := 0
-	found, err := findClientEvidence(t.Context(), p, j, func(path string, out *v1.AuditResponse) error {
+	found, err := findClientEvidence(t.Context(), p, j, func(path string, out *v2.AuditResponse) error {
 		pages++
 		out.Enabled = true
 		parsed, _ := url.Parse(path)
@@ -537,7 +537,7 @@ func TestEvidenceRequiresExactChallengeAndPaginates(t *testing.T) {
 		t.Fatal("paginated challenge was not found", err)
 	}
 	p.Input.Purpose = "cloud"
-	found, err = findClientEvidence(t.Context(), p, j, func(_ string, out *v1.AuditResponse) error {
+	found, err = findClientEvidence(t.Context(), p, j, func(_ string, out *v2.AuditResponse) error {
 		out.Enabled = true
 		out.Events = []json.RawMessage{raw}
 		return nil
@@ -546,7 +546,7 @@ func TestEvidenceRequiresExactChallengeAndPaginates(t *testing.T) {
 		t.Fatal("cloud evidence accepted without OAuth client")
 	}
 	pages = 0
-	_, err = findClientEvidence(t.Context(), p, j, func(_ string, out *v1.AuditResponse) error {
+	_, err = findClientEvidence(t.Context(), p, j, func(_ string, out *v2.AuditResponse) error {
 		pages++
 		out.Enabled = true
 		next := strings.Repeat("x", pages)

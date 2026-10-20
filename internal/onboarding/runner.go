@@ -144,7 +144,7 @@ func (s *Store) Run(ctx context.Context, id string, h Host) error {
 				e = s.writeConfig(p, j)
 			}
 		case "network":
-			if p.Input.Network.Mode == "tailnet" {
+			if p.Input.Network.Mode != "lan" {
 				var dns string
 				dns, e = h.Network(ctx, p, func(progress mesh.LoginProgress) error {
 					j.AuthURL = progress.URL

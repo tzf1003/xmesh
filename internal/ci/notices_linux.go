@@ -7,12 +7,12 @@ import (
 	"os/exec"
 	"strings"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
 
 // platformNotices warns when the user's services stop at logout: without lingering, the kernel
 // and the runners under it end when the last session closes.
-func platformNotices() []v1.CiNotice {
+func platformNotices() []v2.CiNotice {
 	if _, err := exec.LookPath("loginctl"); err != nil {
 		return nil
 	}
@@ -20,8 +20,8 @@ func platformNotices() []v1.CiNotice {
 	if err != nil || strings.TrimSpace(string(out)) != "no" {
 		return nil
 	}
-	return []v1.CiNotice{{
-		Code:    v1.CiNoticeLingerDisabled,
+	return []v2.CiNotice{{
+		Code:    v2.CiNoticeLingerDisabled,
 		Message: "退出登录后用户服务会停止，运行器也会停。",
 		Command: "loginctl enable-linger $USER",
 	}}

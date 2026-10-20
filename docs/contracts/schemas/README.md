@@ -22,4 +22,4 @@ python3 docs/contracts/schemas/check_examples.py
 
 脚本会检查正例通过、反例失败，并检查文档库里的相对链接是否都能落到文件。
 
-控制通道（[control.md](../control.md)）的模式是 `control-*.schema.json`，共用 `$defs` 里的类型，没有根类型。它们由 [`check_control.py`](check_control.py) 检查（`check_examples.py` 会调用它）：夹具放在 `examples/control/<定义名>.<变体>.json`，反例在 `examples/control/invalid/`，路由表 `control-routes.json` 的每个请求与响应定义都必须有正例。Go 类型在 `api/control/v1`，TypeScript 类型由 `scripts/gen-control-ts` 生成到 `api/control/v1/ts/control.ts`，见 [CTR-CTL-12](../control.md#ctr-ctl-12)。
+控制通道（[control.md](../control.md)）的模式是 `control-*.schema.json`，共用 `$defs` 里的类型，没有根类型。它们由 [`check_control.py`](check_control.py) 检查（`check_examples.py` 会调用它）：夹具放在 `examples/control/<定义名>.<变体>.json`，反例在 `examples/control/invalid/`，路由表 `control-routes.json` 的每个请求与响应定义都必须有正例。Go 类型在 `api/control/v2`，TypeScript 类型由 `scripts/gen-control-ts` 生成到 `api/control/v2/ts/control.ts`，见 [CTR-CTL-12](../control.md#ctr-ctl-12)。

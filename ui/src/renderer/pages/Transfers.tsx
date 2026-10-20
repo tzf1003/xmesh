@@ -10,6 +10,10 @@ import type { ToolDescriptor } from "../../shared/playground";
 import type { TransferState } from "../../shared/transfers";
 
 export function Transfers({ ctx }: { ctx: PageContext }): JSX.Element {
+  return <InstanceTransfers key={ctx.snapshot.selectedInstance} ctx={ctx}/>;
+}
+
+function InstanceTransfers({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const instance = ctx.snapshot.selectedInstance;
   const [device, setDevice] = useState("local");

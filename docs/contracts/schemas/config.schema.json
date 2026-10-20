@@ -60,6 +60,7 @@
     }
   },
   "properties": {
+    "schema_version": { "type": "integer", "const": 2, "description": "新版设备身份与连接配置；升级后重新配对。" },
     "node": {
       "type": "object",
       "additionalProperties": false,
@@ -77,45 +78,208 @@
     "mesh": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
       "properties": {
         "mode": {
-          "enum": ["tailnet", "lan"],
+          "enum": [
+            "tailnet",
+            "lan"
+          ],
           "description": "relay 不在枚举内。出现该值时模式校验失败，进程不得启动。见 CON-NET-08。"
         },
-        "control_url": { "type": "string", "format": "uri" },
-        "authkey_file": { "type": "string", "minLength": 1 },
-        "auth_method": { "enum": ["authkey", "browser"], "default": "authkey", "description": "browser 使用已在本机完成浏览器授权的持久 tsnet 身份。" },
-        "ephemeral": { "type": "boolean", "default": false, "description": "短生命周期 tailnet 节点；节点凭据只存内存，退出时尝试注销。" },
+        "control_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "authkey_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth_method": {
+          "enum": [
+            "authkey",
+            "browser"
+          ],
+          "default": "authkey",
+          "description": "browser 使用已在本机完成浏览器授权的持久 tsnet 身份。"
+        },
+        "ephemeral": {
+          "type": "boolean",
+          "default": false,
+          "description": "短生命周期 tailnet 节点；节点凭据只存内存，退出时尝试注销。"
+        },
         "lan": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "mdns": { "type": "boolean" },
-            "interface": { "type": "string", "minLength": 1, "maxLength": 256, "description": "监听和 mDNS 通告使用的网卡名（如 WLAN、en0、eth0）。缺省时选第一块带私有 IPv4 的启用网卡，并跳过虚拟机、容器、WSL、Hyper-V、VPN 隧道等虚拟网卡；指定的网卡不存在或没有私有 IPv4 时拒绝启动。" }
+            "mdns": {
+              "type": "boolean"
+            },
+            "interface": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "监听和 mDNS 通告使用的网卡名（如 WLAN、en0、eth0）。缺省时选第一块带私有 IPv4 的启用网卡，并跳过虚拟机、容器、WSL、Hyper-V、VPN 隧道等虚拟网卡；指定的网卡不存在或没有私有 IPv4 时拒绝启动。"
+            },
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            }
           }
+        },
+        "tailnet": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "control_url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "authkey_file": {
+              "type": "string",
+              "minLength": 1
+            },
+            "auth_method": {
+              "enum": [
+                "authkey",
+                "browser"
+              ],
+              "default": "authkey"
+            },
+            "ephemeral": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              },
+              "then": {
+                "required": [
+                  "control_url"
+                ],
+                "if": {
+                  "properties": {
+                    "auth_method": {
+                      "const": "browser"
+                    }
+                  },
+                  "required": [
+                    "auth_method"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "authkey_file"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "ephemeral": {
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "ephemeral"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [
+                    "authkey_file"
+                  ]
+                }
+              }
+            }
+          ]
         }
       },
       "allOf": [
         {
           "if": {
-            "properties": { "mode": { "const": "tailnet" } },
-            "required": ["mode"]
+            "properties": {
+              "mode": {
+                "const": "tailnet"
+              }
+            },
+            "required": [
+              "mode"
+            ]
           },
           "then": {
-            "required": ["control_url"],
-            "if": { "properties": { "auth_method": { "const": "browser" } }, "required": ["auth_method"] },
-            "then": { "not": { "anyOf": [ { "required": ["authkey_file"] }, { "properties": { "ephemeral": { "const": true } }, "required": ["ephemeral"] } ] } },
-            "else": { "required": ["authkey_file"] }
+            "required": [
+              "control_url"
+            ],
+            "if": {
+              "properties": {
+                "auth_method": {
+                  "const": "browser"
+                }
+              },
+              "required": [
+                "auth_method"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "authkey_file"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "ephemeral": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "ephemeral"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "authkey_file"
+              ]
+            }
           }
         },
         {
           "if": {
-            "properties": { "mode": { "const": "lan" } },
-            "required": ["mode"]
+            "properties": {
+              "mode": {
+                "const": "lan"
+              }
+            },
+            "required": [
+              "mode"
+            ]
           },
           "then": {
-            "required": ["lan"],
+            "required": [
+              "lan"
+            ],
             "properties": {
               "ephemeral": { "const": false },
               "lan": { "required": ["mdns"] }
@@ -443,7 +607,11 @@
               "labels": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/ciLabel" } },
               "paused": { "type": "boolean", "default": false },
               "dir": { "type": "string", "minLength": 1 }
-            }
+            },
+            "allOf": [{
+              "if": { "properties": { "source": { "const": "import" } }, "required": ["source"] },
+              "then": { "properties": { "concurrency": { "const": 1 } } }
+            }]
           }
         }
       }
@@ -454,39 +622,142 @@
       "if": {
         "properties": {
           "node": {
-            "properties": { "roles": { "contains": { "const": "gateway" } } },
-            "required": ["roles"]
+            "properties": {
+              "roles": {
+                "contains": {
+                  "const": "gateway"
+                }
+              }
+            },
+            "required": [
+              "roles"
+            ]
           }
         },
-        "required": ["node"]
+        "required": [
+          "node"
+        ]
       },
-      "then": { "required": ["gateway"] }
+      "then": {
+        "required": [
+          "gateway"
+        ]
+      }
     },
     {
       "if": {
         "properties": {
           "node": {
-            "properties": { "roles": { "contains": { "const": "ingress" } } },
-            "required": ["roles"]
+            "properties": {
+              "roles": {
+                "contains": {
+                  "const": "ingress"
+                }
+              }
+            },
+            "required": [
+              "roles"
+            ]
           }
         },
-        "required": ["node"]
+        "required": [
+          "node"
+        ]
       },
-      "then": { "required": ["ingress"] }
+      "then": {
+        "required": [
+          "ingress"
+        ]
+      }
     },
     {
       "if": {
         "properties": {
           "node": {
-            "properties": { "roles": { "contains": { "const": "agent" } } },
-            "required": ["roles"]
+            "properties": {
+              "roles": {
+                "contains": {
+                  "const": "agent"
+                }
+              }
+            },
+            "required": [
+              "roles"
+            ]
           }
         },
-        "required": ["node"]
+        "required": [
+          "node"
+        ]
       },
       "then": {
         "properties": {
-          "agent": { "required": ["cwd_policy"] }
+          "agent": {
+            "required": [
+              "cwd_policy"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "schema_version"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "mesh": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "mode"
+                  ]
+                },
+                {
+                  "required": [
+                    "control_url"
+                  ]
+                },
+                {
+                  "required": [
+                    "authkey_file"
+                  ]
+                },
+                {
+                  "required": [
+                    "auth_method"
+                  ]
+                },
+                {
+                  "required": [
+                    "ephemeral"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "mesh": {
+            "required": [
+              "mode"
+            ],
+            "not": {
+              "required": [
+                "tailnet"
+              ]
+            }
+          }
         }
       }
     }

@@ -39,6 +39,7 @@ func serviceCommand(action string, args []string) error {
 	path := flags.String("config", "xmesh.yaml", "配置路径（用来取得节点名）")
 	name := flags.String("name", "", "服务名；省略时读取 --config 的节点名")
 	system := flags.Bool("system", false, "Windows：操作管理员 SCM 服务")
+	destination := flags.String("relocate-to", "", "Windows，与 uninstall --dir 合用：将本用户登录任务迁移到新安装目录")
 	dir := flags.String("dir", "", "Windows，仅 uninstall：删除本用户程序位于该目录下的登录任务，不动其他目录的节点")
 	if e := flags.Parse(args); e != nil {
 		return e
@@ -46,9 +47,20 @@ func serviceCommand(action string, args []string) error {
 	if *system && runtime.GOOS != "windows" {
 		return fmt.Errorf("--system 仅适用于 Windows")
 	}
+	if *destination != "" && *dir == "" {
+		return fmt.Errorf("--relocate-to 需要 uninstall --dir")
+	}
 	if *dir != "" {
 		if action != "uninstall" {
 			return fmt.Errorf("--dir 仅用于 uninstall")
+		}
+		if *destination != "" {
+			moved, e := relocateUserTasksUnder(*dir, *destination)
+			if e != nil {
+				return e
+			}
+			fmt.Printf("已迁移 %d 个登录任务到 %s\n", moved, *destination)
+			return nil
 		}
 		removed, e := removeUserTasksUnder(*dir)
 		if e != nil {

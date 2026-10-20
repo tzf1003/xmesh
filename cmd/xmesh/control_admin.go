@@ -8,9 +8,11 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
 )
 
@@ -83,6 +85,20 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		return controlPairDiscover(ctx, flags, target, args[1:])
 	case "connect":
 		return controlPairConnect(ctx, flags, target, args[1:])
+	case "revoke":
+		id := flags.String("device-id", "", "撤销信任的设备 ID")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || !strings.HasPrefix(*id, "dev-") || !regexp.MustCompile(`^dev-[0-9a-f]{64}$`).MatchString(*id) {
+			return fmt.Errorf("revoke 需要 --device-id dev-<设备公钥摘要>")
+		}
+		client, err := target.client()
+		if err != nil {
+			return err
+		}
+		response, err := client.Do(ctx, "DELETE", "/v2/pair/trust/"+*id, nil, nil)
+		return showDone(response, err, map[string]any{"device_id": *id, "revoked": true})
 	case "export", "import":
 	default:
 		return fmt.Errorf("%s", pairUsage)
@@ -91,7 +107,7 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 	out := flags.String("out", "", "export：把配对文档写到该文件（0600），可交给对端的 pair --import")
 	file := flags.String("file", "", "import：对端的配对文件")
 	fingerprint := flags.String("fingerprint", "", "import：独立核对过的对端 SHA-256 指纹（冒号与大小写不限）")
-	tags := flags.String("tags", "", "import：授予对端的 LAN 角色，逗号分隔；缺省由内核决定（tag:peer,tag:device）")
+	tags := flags.String("tags", "", "import：授予对端的设备角色，逗号分隔；缺省由内核决定（tag:peer,tag:device）")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -106,7 +122,7 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		if err != nil {
 			return err
 		}
-		r, err := c.Do(ctx, "POST", "/v1/pair/export", nil, nil)
+		r, err := c.Do(ctx, "POST", "/v2/pair/export", nil, nil)
 		if err != nil {
 			return err
 		}
@@ -116,12 +132,12 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		if err = r.Error(); err != nil {
 			return err
 		}
-		var res v1.PairExportResponse
+		var res v2.PairExportResponse
 		if err = json.Unmarshal(r.Body, &res); err != nil {
 			return err
 		}
 		doc, _ := json.MarshalIndent(res.Pair, "", "  ")
-		if err = os.WriteFile(*out, doc, 0600); err != nil {
+		if err = writePairExport(*out, doc); err != nil {
 			return err
 		}
 		return showDone(r, nil, map[string]string{"name": res.Pair.Name, "fingerprint": res.Pair.Fingerprint, "file": *out})
@@ -137,9 +153,9 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		return err
 	}
 	// Both the bare pairing document (xmesh pair --export) and the export reply are accepted.
-	var wrapped v1.PairExportResponse
-	var doc v1.PairDocument
-	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Pair.CertificatePEM != "" {
+	var wrapped v2.PairExportResponse
+	var doc v2.PairDocument
+	if json.Unmarshal(raw, &wrapped) == nil && len(wrapped.Pair.PublicKey) > 0 {
 		doc = wrapped.Pair
 	} else if err = json.Unmarshal(raw, &doc); err != nil {
 		return fmt.Errorf("配对文件不是有效的 JSON: %w", err)
@@ -147,7 +163,7 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 	if doc.Tags == nil {
 		doc.Tags = []string{}
 	}
-	req := v1.PairImportRequest{Pair: doc, Fingerprint: *fingerprint}
+	req := v2.PairImportRequest{Pair: doc, Fingerprint: *fingerprint}
 	if *tags != "" {
 		req.Tags = strings.Split(*tags, ",")
 	}
@@ -155,7 +171,7 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 	if err != nil {
 		return err
 	}
-	r, err := c.Do(ctx, "POST", "/v1/pair/import", req, nil)
+	r, err := c.Do(ctx, "POST", "/v2/pair/import", req, nil)
 	// Without --tags the kernel grants tag:peer and tag:device; only explicit tags can leave it out.
 	if err == nil && r.Error() == nil && len(req.Tags) > 0 {
 		if note := missingDeviceTagNote(req.Tags); note != "" {
@@ -183,9 +199,9 @@ func controlPairPassword(ctx context.Context, flags *flag.FlagSet, target target
 			return err
 		}
 		if verb == "show" {
-			return show(c.Do(ctx, "GET", "/v1/pair/password", nil, nil))
+			return show(c.Do(ctx, "GET", "/v2/pair/password", nil, nil))
 		}
-		r, err := c.Do(ctx, "DELETE", "/v1/pair/password", nil, nil)
+		r, err := c.Do(ctx, "DELETE", "/v2/pair/password", nil, nil)
 		return showDone(r, err, map[string]any{"cleared": true})
 	case "set":
 		secret := registerSecretFlags(flags)
@@ -207,7 +223,7 @@ func controlPairPassword(ctx context.Context, flags *flag.FlagSet, target target
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "PUT", "/v1/pair/password", v1.PairPasswordRequest{Password: password}, nil))
+		return show(c.Do(ctx, "PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: password}, nil))
 	}
 	return fmt.Errorf("未知的 pair password 子命令: %s\n%s", verb, usage)
 }
@@ -224,14 +240,15 @@ func controlPairDiscover(ctx context.Context, flags *flag.FlagSet, target target
 	if err != nil {
 		return err
 	}
-	return show(c.Do(ctx, "GET", "/v1/pair/discovered", nil, nil))
+	return show(c.Do(ctx, "GET", "/v2/pair/discovered", nil, nil))
 }
 
 // controlPairConnect pairs with a device using the connection password it was given.
 func controlPairConnect(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
 	const usage = "用法: xmesh control pair connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)"
 	address := flags.String("address", "", "对端地址，主机或 主机:端口，缺省端口为 7433")
-	fingerprint := flags.String("fingerprint", "", "对端证书 SHA-256 指纹；只给指纹时地址取自发现列表，同时给出地址时核对证书")
+	fingerprint := flags.String("fingerprint", "", "对端设备公钥 SHA-256 指纹")
+	path := flags.String("path", "lan", "本次配对使用的连接路径：lan 或 tailnet")
 	secret := registerSecretFlags(flags)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -241,6 +258,9 @@ func controlPairConnect(ctx context.Context, flags *flag.FlagSet, target targetF
 	}
 	if *address == "" && *fingerprint == "" {
 		return fmt.Errorf("connect 需要 --address 或 --fingerprint\n%s", usage)
+	}
+	if *path != "lan" && *path != "tailnet" {
+		return fmt.Errorf("--path 只能是 lan 或 tailnet")
 	}
 	source, err := secret.source(usage)
 	if err != nil {
@@ -254,8 +274,8 @@ func controlPairConnect(ctx context.Context, flags *flag.FlagSet, target targetF
 	if err != nil {
 		return err
 	}
-	req := v1.PairConnectRequest{Address: strings.TrimSpace(*address), Fingerprint: cleanFingerprint(*fingerprint), Password: password}
-	return show(c.Do(ctx, "POST", "/v1/pair/connect", req, nil))
+	req := v2.PairConnectRequest{Address: strings.TrimSpace(*address), Fingerprint: cleanFingerprint(*fingerprint), Password: password, Path: *path}
+	return show(c.Do(ctx, "POST", "/v2/pair/connect", req, nil))
 }
 
 // secretFlags are the two ways to hand over a connection password. Exactly one must be given.
@@ -305,7 +325,7 @@ func controlPats(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "GET", "/v1/pats", nil, nil))
+		return show(c.Do(ctx, "GET", "/v2/pats", nil, nil))
 	case "create":
 		var scopes scopeFlags
 		name := flags.String("name", "", "PAT 名字（字母、数字、连字符）")
@@ -323,7 +343,7 @@ func controlPats(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "POST", "/v1/pats", v1.PatCreateRequest{Name: *name, Scopes: scopes}, nil))
+		return show(c.Do(ctx, "POST", "/v2/pats", v2.PatCreateRequest{Name: *name, Scopes: scopes}, nil))
 	case "rotate", "delete":
 		positional, rest := leadingName(rest)
 		flagged := flags.String("name", "", "PAT 名字")
@@ -338,7 +358,7 @@ func controlPats(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		if err != nil {
 			return err
 		}
-		path := "/v1/pats/" + url.PathEscape(name)
+		path := "/v2/pats/" + url.PathEscape(name)
 		if verb == "rotate" {
 			return show(c.Do(ctx, "POST", path+"/rotate", nil, nil))
 		}
@@ -359,11 +379,14 @@ func controlIngress(ctx context.Context, flags *flag.FlagSet, target targetFlags
 		if err := flags.Parse(rest); err != nil {
 			return err
 		}
+		if flags.NArg() > 0 {
+			return fmt.Errorf("%s", usage)
+		}
 		c, err := target.client()
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "GET", "/v1/ingress/clients", nil, nil))
+		return show(c.Do(ctx, "GET", "/v2/ingress/clients", nil, nil))
 	case "revoke":
 		positional, rest := leadingName(rest)
 		flagged := flags.String("client-id", "", "OAuth 客户端 ID")
@@ -378,7 +401,7 @@ func controlIngress(ctx context.Context, flags *flag.FlagSet, target targetFlags
 		if err != nil {
 			return err
 		}
-		r, err := c.Do(ctx, "DELETE", "/v1/ingress/clients/"+url.PathEscape(id), nil, nil)
+		r, err := c.Do(ctx, "DELETE", "/v2/ingress/clients/"+url.PathEscape(id), nil, nil)
 		return showDone(r, err, map[string]any{"revoked": true, "client_id": id})
 	case "password":
 		file := flags.String("password-file", "", "新登录口令所在的文件；缺省或 - 从标准输入读（交互终端下不回显）")
@@ -396,10 +419,27 @@ func controlIngress(ctx context.Context, flags *flag.FlagSet, target targetFlags
 		if err != nil {
 			return err
 		}
-		return show(c.Do(ctx, "PUT", "/v1/ingress/password", v1.IngressPasswordRequest{Password: password}, nil))
+		return show(c.Do(ctx, "PUT", "/v2/ingress/password", v2.IngressPasswordRequest{Password: password}, nil))
 	}
 	return fmt.Errorf("未知的 ingress 子命令: %s\n%s", verb, usage)
 }
 
 // controlStdin is where `ingress password` reads from when no file is given.
 var controlStdin io.Reader = os.Stdin
+
+// Write a private inode before publishing it, including when replacing an existing export.
+func writePairExport(name string, body []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(name), ".xmesh-pair-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(body); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), name)
+}

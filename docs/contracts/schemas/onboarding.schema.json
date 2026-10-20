@@ -12,7 +12,8 @@
           "type": "string",
           "enum": [
             "lan",
-            "tailnet"
+            "tailnet",
+            "coexist"
           ]
         },
         "control_url": {

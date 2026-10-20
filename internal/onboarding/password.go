@@ -47,7 +47,7 @@ func (s *Store) SetIngressPassword(ctx context.Context, id, password string) (*J
 	if e != nil {
 		return nil, problem("service_unavailable", "设备服务暂不可连接", "job")
 	}
-	r, e := control.NewClient(ep).Do(ctx, "PUT", "/v1/ingress/password", map[string]string{"password": password}, nil)
+	r, e := control.NewClient(ep).Do(ctx, "PUT", "/v2/ingress/password", map[string]string{"password": password}, nil)
 	if e != nil {
 		return nil, e
 	}

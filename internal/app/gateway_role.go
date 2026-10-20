@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -59,22 +60,28 @@ func (r *gatewayRegistry) all() []*gateway.Gateway {
 // drain marks name as draining on every gateway, including the ones added later.
 func (r *gatewayRegistry) drain(name string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.pending[name] = true
 	current := append([]*gateway.Gateway{}, r.list...)
-	r.mu.Unlock()
 	for _, g := range current {
 		g.Drain(name)
 	}
 }
 
+func (r *gatewayRegistry) draining(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pending[name] || r.pending[""]
+}
+
 // resume undoes drain for the names.
 func (r *gatewayRegistry) resume(names ...string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, name := range names {
 		delete(r.pending, name)
 	}
 	current := append([]*gateway.Gateway{}, r.list...)
-	r.mu.Unlock()
 	for _, g := range current {
 		for _, name := range names {
 			g.Resume(name)
@@ -109,6 +116,7 @@ type gatewayRole struct {
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	listen  string
+	failed  bool
 	bound   []net.Listener
 	retired map[net.Listener]bool
 }
@@ -143,7 +151,7 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 		return nil, err
 	}
 	out := []net.Listener{listener}
-	if tn, ok := r.deps.network.(tailnetGatewayListener); ok && r.deps.mode == "tailnet" && !gatewayLoopbackOnly(listen) {
+	if tn, ok := r.tailnetListener(listen); ok {
 		tailnet, err := tn.ListenPort(gatewayPort(listen))
 		if err != nil {
 			_ = listener.Close()
@@ -152,6 +160,32 @@ func (r *gatewayRole) bind(listen string) ([]net.Listener, error) {
 		out = append(out, tailnet)
 	}
 	return out, nil
+}
+
+func (r *gatewayRole) tailnetListener(listen string) (tailnetGatewayListener, bool) {
+	multiPath := false
+	if network, ok := r.deps.network.(interface{ MultiPath() bool }); ok {
+		multiPath = network.MultiPath()
+	}
+	tn, ok := r.deps.network.(tailnetGatewayListener)
+	return tn, ok && (r.deps.mode == "tailnet" || multiPath) && !gatewayLoopbackOnly(listen)
+}
+
+// restore binds each endpoint independently so a failed endpoint cannot discard a healthy one.
+func (r *gatewayRole) restore(listen string) ([]net.Listener, error) {
+	var bound []net.Listener
+	listener, err := net.Listen("tcp", listen)
+	if err == nil {
+		bound = append(bound, listener)
+	}
+	if tn, ok := r.tailnetListener(listen); ok {
+		tailnet, tailnetErr := tn.ListenPort(gatewayPort(listen))
+		if tailnetErr == nil {
+			bound = append(bound, tailnet)
+		}
+		err = errors.Join(err, tailnetErr)
+	}
+	return bound, err
 }
 
 // serve starts the accept loops for listeners. The caller holds r.mu.
@@ -168,6 +202,10 @@ func (r *gatewayRole) serve(listeners []net.Listener) {
 			err := r.server.Serve(l)
 			r.mu.Lock()
 			deliberate := r.retired[l]
+			if !deliberate {
+				r.bound = slices.DeleteFunc(r.bound, func(bound net.Listener) bool { return bound == l })
+				r.failed = true
+			}
 			r.mu.Unlock()
 			if err != nil && !deliberate && !errors.Is(err, http.ErrServerClosed) && r.deps.serveFailed != nil {
 				r.deps.serveFailed(err)
@@ -196,7 +234,7 @@ func (r *gatewayRole) retire() []net.Listener {
 func (r *gatewayRole) rebind(listen string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if listen == r.listen {
+	if listen == r.listen && len(r.bound) > 0 && !r.failed {
 		return nil
 	}
 	next, err := r.bind(listen)
@@ -204,9 +242,9 @@ func (r *gatewayRole) rebind(listen string) error {
 		previous := r.listen
 		r.retire()
 		if next, err = r.bind(listen); err != nil {
-			if back, e := r.bind(previous); e == nil {
-				r.serve(back)
-			}
+			back, restoreErr := r.restore(previous)
+			r.failed = restoreErr != nil
+			r.serve(back)
 			return err
 		}
 	} else if err != nil {
@@ -214,7 +252,7 @@ func (r *gatewayRole) rebind(listen string) error {
 	} else {
 		r.retire()
 	}
-	r.listen = listen
+	r.listen, r.failed = listen, false
 	r.serve(next)
 	return nil
 }
@@ -228,6 +266,9 @@ func (r *gatewayRole) reconfigure(cfg *config.Config) {
 func (r *gatewayRole) bindAddress() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failed || len(r.bound) == 0 {
+		return ""
+	}
 	return r.listen
 }
 

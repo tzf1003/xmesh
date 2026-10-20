@@ -44,8 +44,7 @@ export function cliCommandText(
   resourcesPath: string | undefined = (process as { resourcesPath?: string }).resourcesPath,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const bin = env.XMESH_BIN || bundledXmesh(resourcesPath, platform);
-  return bin ? quoteForTerminal(bin, platform) : "xmesh";
+  return quoteForTerminal(xmeshBinary(env,resourcesPath,platform),platform);
 }
 
 export class CliError extends Error {
@@ -96,7 +95,7 @@ export function runXmeshRaw(command: CliCommand, node?: string, bin: string = xm
 }
 
 /** First-run subcommands. Unlike `CliCommand` these take arguments, built here from validated values only. */
-export type SetupCliArgs = readonly ["install", "--config", string] | readonly ["install", "--config", string, "--state-dir", string] | readonly ["start", "--config", string];
+export type SetupCliArgs = readonly ["install", "--config", string] | readonly ["install", "--config", string, "--state-dir", string] | readonly ["start", "--config", string] | readonly ["migrate","--config",string,"--state-dir",string] | readonly ["migrate", "--name", string];
 
 /**
  * Runs `xmesh install|start --config <file>` without a shell and returns a

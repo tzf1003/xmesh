@@ -1,13 +1,16 @@
 # 本机工具验收。cwd_policy.allow 按需改为要操作的目录。
+schema_version: 2
 node:
   name: local-dev
   roles: [agent, gateway]
 gateway:
   listen: 127.0.0.1:8080
 mesh:
-  mode: lan
   lan:
+    enabled: true
     mdns: true
+  tailnet:
+    enabled: false
 agent:
   default_cwd: .
   cwd_policy:

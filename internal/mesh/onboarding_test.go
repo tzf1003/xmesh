@@ -59,3 +59,19 @@ func TestOnboardingRequiresDeviceIngressAndFunnelCapabilities(t *testing.T) {
 		t.Fatal("non-Funnel DNS accepted")
 	}
 }
+
+func TestDeviceTrustOnboardingDoesNotRequireLegacyDeviceTag(t *testing.T) {
+	st := runningLoginStatus()
+	if err := onboardingPrerequisitesForVersion(st, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := onboardingPrerequisitesForVersion(st, true, false); err == nil {
+		t.Fatal("cloud prerequisites skipped")
+	}
+	st = runningLoginStatus("tag:ingress")
+	st.Self.DNSName = "node.tailnet.ts.net."
+	st.Self.CapMap = tailcfg.NodeCapMap{"funnel": nil}
+	if err := onboardingPrerequisitesForVersion(st, true, false); err != nil {
+		t.Fatal(err)
+	}
+}

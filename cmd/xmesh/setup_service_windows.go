@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -53,7 +55,7 @@ func verifyStoppedSetupTask(ctx context.Context, p *onboarding.Plan) error {
 	}
 	// Task Scheduler's COM State is numeric and independent of system language.
 	script := `$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\').GetTask('` + strings.ReplaceAll(name, "'", "''") + `'); if ($t.State -eq 4) { exit 2 }`
-	cmd := exec.CommandContext(ctx, filepath.Join(dir, "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := exec.CommandContext(ctx, filepath.Join(dir, "WindowsPowerShell", "v2.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
 	if err := cmd.Run(); err != nil {
 		return errors.New("无法确认旧服务进程已停止，请检查任务管理器和本机服务状态")
 	}
@@ -98,8 +100,7 @@ func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.S
 	}
 	// A live owner-only control channel is the authoritative running signal.
 	if ep, e := control.ReadEndpoint(filepath.Dir(p.ConfigPath)); e == nil {
-		var status any
-		snap.Running = control.NewClient(ep).Fetch(ctx, "/v1/status", &status) == nil
+		snap.Running = setupServiceResponding(ctx, ep) == nil
 	}
 	return snap, nil
 }
@@ -147,8 +148,7 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 			// The restored config may predate onboarding and its PAT grant.
 			// Use the same owner-only status channel as the saved baseline.
 			if ep, err := control.ReadEndpoint(filepath.Dir(p.ConfigPath)); err == nil {
-				var status any
-				if control.NewClient(ep).Fetch(ctx, "/v1/status", &status) == nil {
+				if setupServiceResponding(ctx, ep) == nil {
 					return nil
 				}
 			}
@@ -160,4 +160,35 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 		}
 	}
 	return e
+}
+
+// A rollback may restore a pre-upgrade kernel. Read only its advertised status
+// endpoint; configuration operations continue to require the current API major.
+func setupServiceResponding(ctx context.Context, ep control.Endpoint) error {
+	major := strings.Split(ep.APIVersion, ".")[0]
+	if major != "1" && major != "2" {
+		return errors.New("unsupported saved control API")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	res, err := control.NewClient(ep).Stream(ctx, "/v"+major+"/status", nil)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 || strings.Split(res.Header.Get("X-Xmesh-Control-Version"), ".")[0] != major {
+		return errors.New("saved service status unavailable")
+	}
+	var status struct {
+		Node struct {
+			Name string `json:"name"`
+		} `json:"node"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&status); err != nil {
+		return err
+	}
+	if status.Node.Name != ep.Node {
+		return fmt.Errorf("saved service identity differs")
+	}
+	return nil
 }

@@ -23,11 +23,11 @@ export function parseOnboardingInput(v: unknown): OnboardingInput | undefined {
   if (!["development", "readonly"].includes(String(v.permission)) || typeof v.autostart !== "boolean") return;
   if (!Array.isArray(v.clients) || v.clients.length > 2 || new Set(v.clients).size !== v.clients.length || !v.clients.every((x) => x === "codex" || x === "claude-code")) return;
   const n = v.network;
-  if (!record(n) || !keys(n, ["mode", "control_url", "auth_method", "authkey_file"]) || !["lan", "tailnet"].includes(String(n.mode)) || n.auth_method !== undefined && !["browser", "key"].includes(String(n.auth_method))) return;
+  if (!record(n) || !keys(n, ["mode", "control_url", "auth_method", "authkey_file"]) || !["lan", "tailnet", "coexist"].includes(String(n.mode)) || n.auth_method !== undefined && !["browser", "key"].includes(String(n.auth_method))) return;
   if (n.control_url !== undefined && (typeof n.control_url !== "string" || n.control_url.length > 2048 || !isHttpsUrl(n.control_url))) return;
   if (n.authkey_file !== undefined && (typeof n.authkey_file !== "string" || n.authkey_file.length > 4096 || !isAbsolutePath(n.authkey_file) || /[\x00-\x1f]/.test(n.authkey_file))) return;
   if (n.mode === "lan" && (n.control_url !== undefined || n.auth_method !== undefined || n.authkey_file !== undefined)) return;
-  if (n.mode === "tailnet" && n.auth_method === "key" && !n.authkey_file) return;
+  if (n.mode !== "lan" && n.auth_method === "key" && !n.authkey_file) return;
   if (v.purpose === "local" && n.mode !== "lan" || v.purpose === "cloud" && n.mode !== "tailnet") return;
   return v as unknown as OnboardingInput;
 }

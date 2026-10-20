@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -33,14 +33,14 @@ func (s *Store) detailDiagnostics(ctx context.Context, nodes []NodeInfo) []Diagn
 			}
 			out = append(out, Diagnostic{ID: n.Name + "/credential/" + name, Status: status, Message: message, NextAction: next})
 		}
-		if cfg.Mesh.Mode == "tailnet" && cfg.Mesh.AuthMethod != "browser" {
-			if raw, e := os.ReadFile(cfg.Mesh.AuthkeyFile); e != nil || len(raw) > 4096 || strings.TrimSpace(string(raw)) == "" {
+		if cfg.Mesh.Tailnet.Enabled && cfg.Mesh.Tailnet.AuthMethod != "browser" {
+			if raw, e := os.ReadFile(cfg.Mesh.Tailnet.AuthkeyFile); e != nil || len(raw) > 4096 || strings.TrimSpace(string(raw)) == "" {
 				out = append(out, Diagnostic{ID: n.Name + "/network-key", Status: "error", Message: "入网密钥文件不可用", NextAction: "检查私有密钥文件，或使用浏览器重新授权"})
 			}
 		}
 		if ep, e := control.ReadEndpoint(filepath.Dir(n.ConfigPath)); e == nil {
-			var status v1.StatusResponse
-			if e = control.NewClient(ep).Fetch(ctx, "/v1/status", &status); e == nil {
+			var status v2.StatusResponse
+			if e = control.NewClient(ep).Fetch(ctx, "/v2/status", &status); e == nil {
 				for _, warning := range status.Warnings {
 					out = append(out, Diagnostic{ID: n.Name + "/" + string(warning.Code), Status: "attention", Message: "运行时需要处理：" + string(warning.Code), NextAction: "打开概览查看此警告的修复入口"})
 				}

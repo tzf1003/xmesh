@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/ci"
 	"github.com/tzf1003/xmesh/internal/config"
 )
@@ -21,10 +21,10 @@ import (
 
 // CIAdmin is the runner supervisor as the control channel sees it. *ci.Manager implements it.
 type CIAdmin interface {
-	Summary() *v1.CiSummary
-	Overview() v1.CiOverview
-	Binding(id string) (v1.CiBinding, bool)
-	SpecView(spec config.CIBinding, removing bool) v1.CiBinding
+	Summary() *v2.CiSummary
+	Overview() v2.CiOverview
+	Binding(id string) (v2.CiBinding, bool)
+	SpecView(spec config.CIBinding, removing bool) v2.CiBinding
 	Gone(id string) bool
 	Inspect(dir string) (ci.Inspection, error)
 	HoldToken(id, token string)
@@ -60,13 +60,13 @@ const ciVisibilityTimeout = 20 * time.Second
 
 func (s *Server) ciAdmin(w http.ResponseWriter) CIAdmin {
 	if s.o.CI == nil {
-		failWith(w, newError(v1.ErrUnavailable, "CI 运行器托管尚未就绪"))
+		failWith(w, newError(v2.ErrUnavailable, "CI 运行器托管尚未就绪"))
 		return nil
 	}
 	return s.o.CI
 }
 
-func reasoned(e *v1.Error, reason string) *v1.Error {
+func reasoned(e *v2.Error, reason string) *v2.Error {
 	e.Reason = reason
 	return e
 }
@@ -81,8 +81,8 @@ func (s *Server) getCI(w http.ResponseWriter, _ *http.Request, _ *call) {
 	writeJSON(w, 200, ov)
 }
 
-func (s *Server) ciAccountViews() []v1.CiAccount {
-	out := []v1.CiAccount{}
+func (s *Server) ciAccountViews() []v2.CiAccount {
+	out := []v2.CiAccount{}
 	if s.o.CIAccounts == nil {
 		return out
 	}
@@ -92,7 +92,7 @@ func (s *Server) ciAccountViews() []v1.CiAccount {
 	return out
 }
 
-func ciAccountView(a config.CIAccount, hint string) v1.CiAccount {
+func ciAccountView(a config.CIAccount, hint string) v2.CiAccount {
 	host := a.Host
 	if host == "" {
 		host = "github.com"
@@ -100,11 +100,11 @@ func ciAccountView(a config.CIAccount, hint string) v1.CiAccount {
 	if hint == "" {
 		hint = "…none"
 	}
-	return v1.CiAccount{ID: a.ID, Host: host, Login: a.Login, TokenHint: hint}
+	return v2.CiAccount{ID: a.ID, Host: host, Login: a.Login, TokenHint: hint}
 }
 
 // ciGitHubError turns a failure of a GitHub call into the contract's error.
-func ciGitHubError(err error, field string) *v1.Error {
+func ciGitHubError(err error, field string) *v2.Error {
 	switch {
 	case errors.Is(err, ci.ErrRejected):
 		return reasoned(argError(field, "GitHub 不接受这个令牌：可能已过期、被撤销或权限不足"), "github_rejected")
@@ -113,13 +113,13 @@ func ciGitHubError(err error, field string) *v1.Error {
 	case errors.Is(err, ci.ErrNoToken):
 		return reasoned(argError(field, err.Error()), "account_without_token")
 	default:
-		return reasoned(newError(v1.ErrUnavailable, "连不上 GitHub，请检查网络后重试"), "github_unreachable")
+		return reasoned(newError(v2.ErrUnavailable, "连不上 GitHub，请检查网络后重试"), "github_unreachable")
 	}
 }
 
 func (s *Server) ciAccounts(w http.ResponseWriter) CIAccounts {
 	if s.o.CIAccounts == nil {
-		failWith(w, reasoned(newError(v1.ErrUnavailable, "此内核还不能保存 GitHub 账号"), "accounts_unavailable"))
+		failWith(w, reasoned(newError(v2.ErrUnavailable, "此内核还不能保存 GitHub 账号"), "accounts_unavailable"))
 		return nil
 	}
 	return s.o.CIAccounts
@@ -145,7 +145,7 @@ func (s *Server) createCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 	if admin == nil || accounts == nil {
 		return
 	}
-	var req v1.CiAccountCreate
+	var req v2.CiAccountCreate
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -169,7 +169,7 @@ func (s *Server) createCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	existing := ciAccountsOf(old)
@@ -184,7 +184,7 @@ func (s *Server) createCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 			// The same login again: this is a new token for the account.
 			id := ciString(a, "id")
 			if err = accounts.Save(id, req.Token); err != nil {
-				failWith(w, newError(v1.ErrInternal, "无法保存令牌"))
+				failWith(w, newError(v2.ErrInternal, "无法保存令牌"))
 				return
 			}
 			for _, b := range s.o.Store.Get().CI.Bindings {
@@ -197,7 +197,7 @@ func (s *Server) createCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 		}
 	}
 	if len(existing) >= 8 {
-		failWith(w, reasoned(newError(v1.ErrConflict, "最多保存 8 个账号"), "too_many_accounts"))
+		failWith(w, reasoned(newError(v2.ErrConflict, "最多保存 8 个账号"), "too_many_accounts"))
 		return
 	}
 	base := ciSlug(login)
@@ -209,7 +209,7 @@ func (s *Server) createCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 		id = fmt.Sprintf("%s-%d", base, n)
 	}
 	if err = accounts.Save(id, req.Token); err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法保存令牌"))
+		failWith(w, newError(v2.ErrInternal, "无法保存令牌"))
 		return
 	}
 	list := make([]any, 0, len(existing)+1)
@@ -237,7 +237,7 @@ func (s *Server) deleteCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	list := make([]any, 0)
@@ -250,13 +250,21 @@ func (s *Server) deleteCIAccount(w http.ResponseWriter, r *http.Request, _ *call
 		list = append(list, a)
 	}
 	if !found {
-		failWith(w, newError(v1.ErrNotFound, "没有这个账号"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个账号"))
 		return
 	}
 	for _, b := range ciBindingsOf(old) {
 		if ciString(b, "account") == id {
-			failWith(w, reasoned(newError(v1.ErrConflict, "还有绑定在用这个账号：先解绑或换账号"), "account_in_use"))
+			failWith(w, reasoned(newError(v2.ErrConflict, "还有绑定在用这个账号：先解绑或换账号"), "account_in_use"))
 			return
+		}
+	}
+	if s.o.CI != nil {
+		for _, b := range s.o.CI.Overview().Bindings {
+			if b.Account == id {
+				failWith(w, reasoned(newError(v2.ErrConflict, "运行器仍在停止或注销，请等待清理完成"), "account_in_use"))
+				return
+			}
 		}
 	}
 	edit := Edit{Path: "/ci/accounts", Value: list}
@@ -287,7 +295,7 @@ func (s *Server) ciReposOfAccount(w http.ResponseWriter, r *http.Request, _ *cal
 		}
 	}
 	if !found {
-		failWith(w, newError(v1.ErrNotFound, "没有这个账号"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个账号"))
 		return
 	}
 	query := r.URL.Query()
@@ -316,9 +324,9 @@ func (s *Server) ciReposOfAccount(w http.ResponseWriter, r *http.Request, _ *cal
 	for _, b := range s.o.Store.Get().CI.Bindings {
 		bound[strings.ToLower(b.Target)] = b.ID
 	}
-	out := v1.CiReposResponse{Repos: []v1.CiRepo{}}
+	out := v2.CiReposResponse{Repos: []v2.CiRepo{}}
 	for _, repo := range repos {
-		out.Repos = append(out.Repos, v1.CiRepo{FullName: repo.FullName, Private: repo.Private, Binding: bound[strings.ToLower(repo.FullName)]})
+		out.Repos = append(out.Repos, v2.CiRepo{FullName: repo.FullName, Private: repo.Private, Binding: bound[strings.ToLower(repo.FullName)]})
 	}
 	if next > 0 {
 		n := strconv.Itoa(next)
@@ -364,7 +372,7 @@ func (s *Server) ciVisible(ctx context.Context, host, repo string) (bool, error)
 	return ci.RepoIsPublic(ctx, nil, host, repo)
 }
 
-func validateCiLabels(labels []string) *v1.Error {
+func validateCiLabels(labels []string) *v2.Error {
 	if len(labels) > 16 {
 		return argError("labels", "标签最多 16 个")
 	}
@@ -386,7 +394,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	if admin == nil {
 		return
 	}
-	var req v1.CiBindingCreate
+	var req v2.CiBindingCreate
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -415,6 +423,10 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	}
 	if req.Concurrency < 0 || req.Concurrency > 16 {
 		failWith(w, argError("concurrency", "并发数在 1 到 16 之间"))
+		return
+	}
+	if req.ImportDir != "" && req.Concurrency > 1 {
+		failWith(w, reasoned(argError("concurrency", "接管的运行器只有一个实例"), "import_single_instance"))
 		return
 	}
 	if e := validateCiLabels(req.Labels); e != nil {
@@ -446,7 +458,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 			}
 		}
 		if !found {
-			failWith(w, reasoned(newError(v1.ErrNotFound, "没有这个账号"), "account_not_found"))
+			failWith(w, reasoned(newError(v2.ErrNotFound, "没有这个账号"), "account_not_found"))
 			return
 		}
 		host = hostOfAccount(account)
@@ -459,7 +471,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	public, err := s.ciVisible(ctx, host, target)
 	cancel()
 	if err != nil {
-		failWith(w, reasoned(newError(v1.ErrUnavailable, "连不上 GitHub，无法确认仓库是否公开"), "github_unreachable"))
+		failWith(w, reasoned(newError(v2.ErrUnavailable, "连不上 GitHub，无法确认仓库是否公开"), "github_unreachable"))
 		return
 	}
 	if public && !req.ConfirmPublic {
@@ -489,7 +501,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	existing := ciBindingsOf(old)
@@ -497,13 +509,13 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	for _, b := range existing {
 		used[ciString(b, "id")] = true
 		if strings.EqualFold(ciString(b, "target"), target) {
-			failWith(w, newError(v1.ErrConflict, "这个仓库已经绑定过了"))
+			failWith(w, newError(v2.ErrConflict, "这个仓库已经绑定过了"))
 			return
 		}
 	}
 	id := req.ID
 	if id != "" && used[id] {
-		failWith(w, newError(v1.ErrConflict, "id 已被使用"))
+		failWith(w, newError(v2.ErrConflict, "id 已被使用"))
 		return
 	}
 	if id == "" {
@@ -513,7 +525,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 			id = fmt.Sprintf("%s-%d", base, n)
 		}
 	} else if !admin.Gone(id) {
-		failWith(w, newError(v1.ErrConflict, "id 还在被上一个绑定占用，稍后再试"))
+		failWith(w, newError(v2.ErrConflict, "id 还在被上一个绑定占用，稍后再试"))
 		return
 	}
 
@@ -554,7 +566,7 @@ func (s *Server) createCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 
 // ciBindingView is the binding as the supervisor reports it, or as configured while the
 // supervisor has not picked it up yet.
-func (s *Server) ciBindingView(admin CIAdmin, id string) v1.CiBinding {
+func (s *Server) ciBindingView(admin CIAdmin, id string) v2.CiBinding {
 	if view, ok := admin.Binding(id); ok {
 		return view
 	}
@@ -563,7 +575,7 @@ func (s *Server) ciBindingView(admin CIAdmin, id string) v1.CiBinding {
 			return admin.SpecView(b, false)
 		}
 	}
-	return v1.CiBinding{ID: id, Instances: []v1.CiInstance{}, Labels: []string{}}
+	return v2.CiBinding{ID: id, Instances: []v2.CiInstance{}, Labels: []string{}}
 }
 
 func hostOfAccount(a config.CIAccount) string {
@@ -573,7 +585,7 @@ func hostOfAccount(a config.CIAccount) string {
 	return a.Host
 }
 
-func ciInspectError(err error, field string) *v1.Error {
+func ciInspectError(err error, field string) *v2.Error {
 	switch {
 	case errors.Is(err, ci.ErrNotARunner):
 		return reasoned(argError(field, err.Error()), "not_a_runner")
@@ -585,7 +597,7 @@ func ciInspectError(err error, field string) *v1.Error {
 }
 
 // ciImportable refuses the runners the supervisor cannot take over.
-func ciImportable(in ci.Inspection) *v1.Error {
+func ciImportable(in ci.Inspection) *v2.Error {
 	switch {
 	case in.Ephemeral:
 		return reasoned(argError("import_dir", "这是一次性（ephemeral）运行器，跑完一个任务就失效，不能托管"), "ephemeral_runner")
@@ -603,7 +615,7 @@ func (s *Server) patchCIBinding(w http.ResponseWriter, r *http.Request, _ *call)
 		return
 	}
 	id := pathPart(r, 3)
-	var req v1.CiBindingPatch
+	var req v2.CiBindingPatch
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -624,7 +636,7 @@ func (s *Server) patchCIBinding(w http.ResponseWriter, r *http.Request, _ *call)
 			known = known || a.ID == *req.Account
 		}
 		if !known {
-			failWith(w, reasoned(newError(v1.ErrNotFound, "没有这个账号"), "account_not_found"))
+			failWith(w, reasoned(newError(v2.ErrNotFound, "没有这个账号"), "account_not_found"))
 			return
 		}
 	}
@@ -632,7 +644,7 @@ func (s *Server) patchCIBinding(w http.ResponseWriter, r *http.Request, _ *call)
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	list := make([]any, 0)
@@ -671,7 +683,7 @@ func (s *Server) patchCIBinding(w http.ResponseWriter, r *http.Request, _ *call)
 		list = append(list, b)
 	}
 	if !found {
-		failWith(w, newError(v1.ErrNotFound, "没有这个绑定"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个绑定"))
 		return
 	}
 	if !s.editConfigLocked(w, old, []Edit{{Path: "/ci/bindings", Value: list}}) {
@@ -691,7 +703,7 @@ func (s *Server) deleteCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
 	if err != nil {
-		failWith(w, newError(v1.ErrInternal, "无法读取配置文件"))
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
 	list := make([]any, 0)
@@ -704,7 +716,7 @@ func (s *Server) deleteCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		list = append(list, b)
 	}
 	if !found {
-		failWith(w, newError(v1.ErrNotFound, "没有这个绑定"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个绑定"))
 		return
 	}
 	var spec config.CIBinding
@@ -737,7 +749,7 @@ func (s *Server) restartCIBinding(w http.ResponseWriter, r *http.Request, _ *cal
 		return
 	}
 	if err := admin.Restart(pathPart(r, 3)); err != nil {
-		failWith(w, newError(v1.ErrNotFound, "没有这个绑定"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个绑定"))
 		return
 	}
 	w.WriteHeader(204)
@@ -749,7 +761,7 @@ func (s *Server) repairCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		return
 	}
 	id := pathPart(r, 3)
-	var req v1.CiBindingRepair
+	var req v2.CiBindingRepair
 	if r.ContentLength != 0 {
 		if e := decode(r, &req, false); e != nil {
 			failWith(w, e)
@@ -762,7 +774,7 @@ func (s *Server) repairCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 	}
 	view, ok := admin.Binding(id)
 	if !ok || view.Removing {
-		failWith(w, newError(v1.ErrNotFound, "没有这个绑定"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个绑定"))
 		return
 	}
 	if view.Account == "" && req.RegistrationToken == "" {
@@ -770,7 +782,7 @@ func (s *Server) repairCIBinding(w http.ResponseWriter, r *http.Request, _ *call
 		return
 	}
 	if err := admin.Repair(id, req.RegistrationToken); err != nil {
-		failWith(w, newError(v1.ErrNotFound, "没有这个绑定"))
+		failWith(w, newError(v2.ErrNotFound, "没有这个绑定"))
 		return
 	}
 	writeJSON(w, 200, s.ciBindingView(admin, id))
@@ -781,7 +793,7 @@ func (s *Server) inspectCIImport(w http.ResponseWriter, r *http.Request, _ *call
 	if admin == nil {
 		return
 	}
-	var req v1.CiImportInspectRequest
+	var req v2.CiImportInspectRequest
 	if e := decode(r, &req, true); e != nil {
 		failWith(w, e)
 		return
@@ -793,13 +805,13 @@ func (s *Server) inspectCIImport(w http.ResponseWriter, r *http.Request, _ *call
 	in, err := admin.Inspect(req.Dir)
 	if err != nil {
 		if errors.Is(err, ci.ErrNotARunner) {
-			failWith(w, reasoned(newError(v1.ErrNotFound, err.Error()), "not_a_runner"))
+			failWith(w, reasoned(newError(v2.ErrNotFound, err.Error()), "not_a_runner"))
 			return
 		}
 		failWith(w, ciInspectError(err, "dir"))
 		return
 	}
-	writeJSON(w, 200, v1.CiImportInspectResponse{
+	writeJSON(w, 200, v2.CiImportInspectResponse{
 		Target: in.Target, RunnerName: in.RunnerName, Labels: []string{}, ServiceInstalled: in.ServiceInstalled,
 		ServiceHint: in.ServiceHint, Running: in.Running, Ephemeral: in.Ephemeral,
 	})

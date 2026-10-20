@@ -212,14 +212,14 @@ export class Actions {
     return ok;
   }
 
-  /** The node whose kernel the panel or tray is showing: its state directory is named after it. */
+  /** The selected state-directory ID; runCli resolves the service node once. */
   private selectedNode(): string | undefined {
     return this.controller.snapshot.selectedInstance || undefined;
   }
 
   private async runCli(command: CliCommand, node?: string): Promise<ActionResult> {
     try {
-      await this.platform.runCli(command, node);
+      await this.platform.runCli(command,node ? this.controller.nodeName?.(node) || node : node);
       return ok;
     } catch (e) {
       this.platform.notifyError(this.t("dialog.cliFailed", { command: `xmesh ${command}` }));

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/privdir"
@@ -338,9 +338,9 @@ func (s *Store) Inspect(ctx context.Context) Inspection {
 			n.Problem = "config_invalid"
 		}
 		if ep, e := control.ReadEndpoint(filepath.Dir(path)); e == nil {
-			var status v1.StatusResponse
+			var status v2.StatusResponse
 			c, stop := context.WithTimeout(ctx, time.Second)
-			n.Running = control.NewClient(ep).Fetch(c, "/v1/status", &status) == nil
+			n.Running = control.NewClient(ep).Fetch(c, "/v2/status", &status) == nil
 			stop()
 		}
 		out.Nodes = append(out.Nodes, n)

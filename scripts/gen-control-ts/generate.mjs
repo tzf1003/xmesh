@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generates api/control/v1/ts/control.ts from the control channel JSON Schemas (CTR-CTL-12).
+// Generates api/control/v2/ts/control.ts from the control channel JSON Schemas (CTR-CTL-12).
 //
 //   node generate.mjs          write the file
 //   node generate.mjs --check  fail if the committed file differs from what the schemas produce
@@ -16,7 +16,7 @@ import { compile } from "json-schema-to-typescript";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 const schemaDir = path.join(root, "docs/contracts/schemas");
-const outFile = path.join(root, "api/control/v1/ts/control.ts");
+const outFile = path.join(root, "api/control/v2/ts/control.ts");
 
 const read = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 const schemas = new Map();
@@ -29,7 +29,7 @@ for (const f of fs.readdirSync(schemaDir).sort()) {
 const defs = {};
 const controlIds = [...schemas.keys()].filter((id) => id.startsWith("urn:xmesh:schema:control-")).sort();
 for (const id of controlIds) {
-  if (id === "urn:xmesh:schema:control-routes:1") continue; // 路由表另行生成
+  if (id === "urn:xmesh:schema:control-routes:2") continue; // 路由表另行生成
   for (const [name, def] of Object.entries(schemas.get(id).$defs ?? {})) {
     if (name in defs) throw new Error(`duplicate definition name ${name}`);
     defs[name] = { owner: id, schema: def };
@@ -91,7 +91,7 @@ const rewriteRefs = (node) => {
 
 // 同文件内的 "#/$defs/X" 在合并之后仍然指向同名定义，因为定义名全局唯一。
 const bundle = {
-  $id: "urn:xmesh:schema:control-bundle:1",
+  $id: "urn:xmesh:schema:control-bundle:2",
   title: "ControlBundle",
   type: "object",
   additionalProperties: false,
@@ -114,9 +114,9 @@ types = types.replace(/export interface ControlBundle \{\}\n/, "");
 
 const lastSeg = (ref) => ref.split("/").pop();
 const routes = read(path.join(schemaDir, "control-routes.json"));
-const common = schemas.get("urn:xmesh:schema:control-common:1").$defs;
-const errorSchema = schemas.get("urn:xmesh:schema:control-error:1");
-const eventsSchema = schemas.get("urn:xmesh:schema:control-events:1").$defs;
+const common = schemas.get("urn:xmesh:schema:control-common:2").$defs;
+const errorSchema = schemas.get("urn:xmesh:schema:control-error:2");
+const eventsSchema = schemas.get("urn:xmesh:schema:control-events:2").$defs;
 
 const eventTypes = eventsSchema.ControlEvent.oneOf.map((r) => eventsSchema[lastSeg(r.$ref)].properties.type.const);
 const routeRows = routes.routes.map((r) => ({
@@ -151,7 +151,7 @@ export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
 export const CONTROL_CAPABILITIES = ${json(common.Capability.enum)} as const;
 
-/** Event "type" values on GET /v1/events, in schema order. */
+/** Event "type" values on GET /v2/events, in schema order. */
 export const CONTROL_EVENT_TYPES = ${json(eventTypes)} as const;
 
 /** HTTP status for each control error code. */

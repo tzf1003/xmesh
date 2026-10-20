@@ -120,10 +120,10 @@ test("isChanged compares the form with what the file says", () => {
 test("the check names the first thing the kernel would refuse, without asking it", () => {
   assert.equal(checkSettingsForm({ ...lan, nodeName: "bad name" }), "node_name");
   assert.equal(checkSettingsForm({ ...lan, roles: [] }), "roles");
-  assert.equal(checkSettingsForm({ ...lan, defaultCwd: "work" }), "default_cwd");
-  assert.equal(checkSettingsForm({ ...lan, allowDirs: ["/a", "relative"] }), "allow_dirs");
+  assert.equal(checkSettingsForm({ ...lan, defaultCwd: "work" }), undefined);
+  assert.equal(checkSettingsForm({ ...lan, allowDirs: ["/a", "relative", "~/work", "$HOME/src"] }), undefined);
   assert.equal(checkSettingsForm({ ...lan, allowDirs: [" "] }), "allow_dirs", "a blank line is not an empty list");
-  assert.equal(checkSettingsForm({ ...tailnetIngress, mode: "lan" }), "tailnet");
+  assert.equal(checkSettingsForm({ ...tailnetIngress, mode: "lan", listen: "funnel" }), "tailnet");
   assert.equal(checkSettingsForm({ ...lan, controlUrl: "http://c.example" }), undefined, "the control URL is only checked in tailnet mode");
   assert.equal(checkSettingsForm({ ...tailnetIngress, controlUrl: "http://c.example" }), "control_url");
   assert.equal(checkSettingsForm({ ...tailnetIngress, authkeyFile: "authkey" }), "authkey_file");
@@ -158,9 +158,11 @@ test("applying the form keeps comments, the deny list and the other sections", (
   const parsed = parse(next);
   assert.equal(parsed.node.name, "dev-2");
   assert.equal(parsed.agent.default_cwd, "/home/me/code");
-  assert.equal(parsed.mesh.mode, "tailnet");
-  assert.equal(parsed.mesh.control_url, DEFAULT_CONTROL_URL);
-  assert.equal(parsed.mesh.authkey_file, "/home/me/authkey");
+  assert.equal(parsed.schema_version, 2);
+  assert.equal(parsed.mesh.lan.enabled, false);
+  assert.equal(parsed.mesh.tailnet.enabled, true);
+  assert.equal(parsed.mesh.tailnet.control_url, DEFAULT_CONTROL_URL);
+  assert.equal(parsed.mesh.tailnet.authkey_file, "/home/me/authkey");
   assert.equal(parsed.mesh.lan.mdns, true, "the lan block is not the form's to touch");
   assert.deepEqual(parsed.ingress, { listen: "tunnel", oauth: { issuer: "https://xmesh.example.com" } });
   assert.deepEqual(parsed.agent.cwd_policy.deny, ["~/.ssh"]);
@@ -284,18 +286,18 @@ test("settings switch between browser identity and key files with a valid config
   const browserForm: SettingsForm = { ...tailnetIngress, browserLogin: true, authkeyFile: "" };
   const browserConfig = applySettingsForm(keyConfig, browserForm)!;
   const parsed = parse(browserConfig);
-  assert.equal(parsed.mesh.auth_method, "browser");
-  assert.equal(parsed.mesh.authkey_file, undefined);
+  assert.equal(parsed.mesh.tailnet.auth_method, "browser");
+  assert.equal(parsed.mesh.tailnet.authkey_file, undefined);
   assert.ok(validateConfig(parsed), JSON.stringify(validateConfig.errors));
   assert.deepEqual(formFromConfig(parsed), browserForm);
 
   const edited = applySettingsForm(browserConfig, { ...browserForm, defaultCwd: "/code" })!;
-  assert.equal(parse(edited).mesh.auth_method, "browser");
+  assert.equal(parse(edited).mesh.tailnet.auth_method, "browser");
   assert.ok(validateConfig(parse(edited)), JSON.stringify(validateConfig.errors));
 
   const restored = applySettingsForm(edited, tailnetIngress)!;
-  assert.equal(parse(restored).mesh.auth_method, undefined);
-  assert.equal(parse(restored).mesh.authkey_file, tailnetIngress.authkeyFile);
+  assert.equal(parse(restored).mesh.tailnet.auth_method, undefined);
+  assert.equal(parse(restored).mesh.tailnet.authkey_file, tailnetIngress.authkeyFile);
   assert.ok(validateConfig(parse(restored)), JSON.stringify(validateConfig.errors));
   assert.deepEqual(formFromConfig(parse(restored)), tailnetIngress);
 });
@@ -312,4 +314,22 @@ test("file transfer limits default to 1GiB and persist custom sizes or unlimited
   for (const maxFileSize of ["0", "-1", "2GB", "1.5GiB", "9223372036854775808B", "99TiB garbage"]) {
     assert.equal(checkSettingsForm({ ...lan, maxFileSize }), "max_file_size");
   }
+});
+
+test("saving legacy settings retains Tailnet ephemeral identity across network modes", () => {
+  for (const ephemeral of [true, false]) {
+    for (const mode of ["tailnet", "lan", "coexist"] as const) {
+      const legacy = LAN_CONFIG.replace("mode: lan", `mode: tailnet\n  control_url: https://control.example\n  authkey_file: /authkey\n  ephemeral: ${ephemeral}`);
+      const form = formFromConfig(parse(legacy));
+      const saved = applySettingsForm(legacy, { ...form, mode, defaultCwd: "/other" });
+      assert.ok(saved);
+      const cfg = parse(saved);
+      assert.equal(cfg.mesh.tailnet.ephemeral, ephemeral);
+      assert.equal(cfg.mesh.ephemeral, undefined);
+      assert.equal(cfg.agent.default_cwd, "/other");
+    }
+  }
+  const current = applySettingsForm(LAN_CONFIG, lan)!;
+  const explicit = current.replace("tailnet:", "ephemeral: true\n  tailnet:\n    ephemeral: false");
+  assert.equal(parse(applySettingsForm(explicit, lan)!).mesh.tailnet.ephemeral, false);
 });

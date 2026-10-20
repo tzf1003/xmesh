@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"io"
 	"strings"
 	"unicode/utf8"
 )
@@ -21,7 +22,7 @@ var oemDecode = systemDecode
 // For the start of a stream they cannot be, and a legacy double-byte character
 // must not be mistaken for one.
 func decodeOutput(b []byte, continued bool) string {
-	if utf8.Valid(trimPartialRune(b, continued)) {
+	if utf8.Valid(trimPartialRune(b, false)) {
 		return strings.ToValidUTF8(string(b), "�")
 	}
 	if text, ok := oemDecode(b); ok {
@@ -47,4 +48,18 @@ func trimPartialRune(b []byte, continued bool) []byte {
 		break
 	}
 	return b
+}
+
+// A page may trim a leading UTF-8 fragment only when preceding bytes prove its encoding.
+func decodeOutputPage(reader io.ReaderAt, b []byte, offset int64) string {
+	if offset > 0 {
+		n := min(offset, int64(utf8.UTFMax-1))
+		prefix := make([]byte, n)
+		read, _ := reader.ReadAt(prefix, offset-n)
+		joined := append(prefix[:read], b...)
+		if utf8.Valid(trimPartialRune(joined, true)) {
+			return strings.ToValidUTF8(string(b), "�")
+		}
+	}
+	return decodeOutput(b, false)
 }

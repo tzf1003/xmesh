@@ -6,7 +6,7 @@
   "scripts": {
     "generate": "node generate.mjs",
     "check": "node generate.mjs --check",
-    "typecheck": "tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler ../../api/control/v1/ts/control.ts"
+    "typecheck": "tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler ../../api/control/v2/ts/control.ts"
   },
   "devDependencies": {
     "json-schema-to-typescript": "15.0.4",

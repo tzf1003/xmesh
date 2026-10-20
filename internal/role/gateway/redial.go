@@ -29,9 +29,10 @@ func redialDelay(failures int) time.Duration {
 
 // dialWait is the pacing state of one peer that failed to dial.
 type dialWait struct {
-	failures int
-	until    time.Time
-	err      error
+	failures      int
+	until         time.Time
+	err           error
+	next, applied uint64
 }
 
 // Paced wraps dial with the wait after failures. A dial made during the wait returns the last error
@@ -39,14 +40,23 @@ type dialWait struct {
 // peer, so it neither counts as a failure nor clears the wait.
 func Paced(dial Dial, now func() time.Time) Dial {
 	var mu sync.Mutex
-	waits := map[string]*dialWait{}
+	type pathKey struct{ id, address string }
+	waits := map[pathKey]*dialWait{}
 	return func(ctx context.Context, peer mesh.Peer, p Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+		key := pathKey{peer.ID, peer.Address}
 		mu.Lock()
-		if w := waits[peer.ID]; w != nil && now().Before(w.until) {
+		w := waits[key]
+		if w == nil {
+			w = &dialWait{}
+			waits[key] = w
+		}
+		if now().Before(w.until) {
 			err := w.err
 			mu.Unlock()
 			return nil, err
 		}
+		w.next++
+		attempt := w.next
 		mu.Unlock()
 		bridge, err := dial(ctx, peer, p, opts)
 		if err != nil && ctx.Err() != nil {
@@ -54,14 +64,13 @@ func Paced(dial Dial, now func() time.Time) Dial {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if err == nil {
-			delete(waits, peer.ID)
-			return bridge, nil
+		if attempt < w.applied {
+			return bridge, err
 		}
-		w := waits[peer.ID]
-		if w == nil {
-			w = &dialWait{}
-			waits[peer.ID] = w
+		w.applied = attempt
+		if err == nil {
+			w.failures, w.until, w.err = 0, time.Time{}, nil
+			return bridge, nil
 		}
 		w.failures++
 		w.err = err

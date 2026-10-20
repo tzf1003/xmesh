@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/agent"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +17,41 @@ import (
 )
 
 type fakeNetwork struct{ peers []mesh.Peer }
+
+type drainRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f drainRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestControlDrainPreservesFanoutAndCallerCancellation(t *testing.T) {
+	for _, timeout := range []time.Duration{3 * time.Minute, 30 * time.Minute} {
+		ctx, cancel := context.WithCancel(t.Context())
+		client := &control.Client{RequestTimeout: 30 * time.Second, HTTP: &http.Client{Transport: drainRoundTrip(func(r *http.Request) (*http.Response, error) {
+			if deadline, ok := r.Context().Deadline(); ok {
+				if parent, hasParent := ctx.Deadline(); !hasParent || !deadline.Equal(parent) {
+					t.Fatal("fanout deadline capped", deadline)
+				}
+			}
+			cancel()
+			if r.Context().Err() != context.Canceled {
+				t.Fatal("caller cancellation lost")
+			}
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"outcomes":[{"device":"one"}]}`))}, nil
+		})}}
+		var out bytes.Buffer
+		if err := runControlDrain(ctx, &out, client, agent.DrainRequest{Scope: "mesh", Drain: "keep"}, timeout); err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+	}
+}
+
+func TestDrainReportsPartialVersion2Outcomes(t *testing.T) {
+	var out bytes.Buffer
+	err := printDrainOutcomes(&out, []v2.DrainOutcome{{Device: "one"}, {Device: "two", Error: "permission denied"}}, agent.DrainRequest{Scope: "mesh", Drain: "keep"})
+	if err == nil || !strings.Contains(out.String(), "已下线 one") || !strings.Contains(out.String(), "失败 two") {
+		t.Fatal(out.String(), err)
+	}
+}
 
 func (n fakeNetwork) Peers(context.Context) ([]mesh.Peer, error) { return n.peers, nil }
 func (n fakeNetwork) HTTPClient(mesh.Peer) *http.Client          { return http.DefaultClient }
@@ -87,5 +125,40 @@ func Test_CTRGW05_DrainCommandFansOut(t *testing.T) {
 	}
 	if err = runDrain(context.Background(), &out, fakeNetwork{}, agent.DrainRequest{Scope: "mesh"}, time.Second); err == nil {
 		t.Fatal("an empty mesh must not look drained")
+	}
+}
+
+type cliRemoteDrainHost struct {
+	cliHost
+	received chan v2.DrainRequest
+}
+
+func (h *cliRemoteDrainHost) RemoteDrain(_ context.Context, req v2.DrainRequest) ([]v2.DrainOutcome, error) {
+	h.received <- req
+	return []v2.DrainOutcome{{Device: "remote"}}, nil
+}
+func TestDrainCommandPassesTimeoutToRunningNode(t *testing.T) {
+	host := &cliRemoteDrainHost{received: make(chan v2.DrainRequest, 1)}
+	configText := "schema_version: 2\n" + strings.Replace(cliConfig, "mesh:\n  mode: lan\n  lan:\n    mdns: true\n", "mesh: {}\n", 1)
+	state, configPath := startKernelStubOptions(t, configText, func(o *control.Options) { o.Host = host })
+	for _, item := range []struct {
+		flag         string
+		milliseconds int64
+	}{{"1s", 1000}, {"45s", 45000}, {"1ns", 1}} {
+		out, err := output(t, func() error {
+			return drain([]string{"--config", configPath, "--state-dir", state, "--scope", "mesh", "--timeout", item.flag})
+		})
+		if err != nil || !strings.Contains(out, "已下线 remote") {
+			t.Fatal(out, err)
+		}
+		req := <-host.received
+		if req.TimeoutMS != item.milliseconds {
+			t.Fatal(item, req)
+		}
+	}
+	for _, value := range []string{"0", "-1s"} {
+		if err := drain([]string{"--scope", "mesh", "--timeout", value}); err == nil {
+			t.Fatal("accepted timeout", value)
+		}
 	}
 }

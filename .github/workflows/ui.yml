@@ -7,14 +7,14 @@ on:
     paths:
       - "ui/**"
       - ".github/workflows/ui.yml"
-      - "api/control/v1/ts/**"
+      - "api/control/v2/ts/**"
       - "docs/contracts/control.md"
       - "docs/contracts/schemas/**"
   pull_request:
     paths:
       - "ui/**"
       - ".github/workflows/ui.yml"
-      - "api/control/v1/ts/**"
+      - "api/control/v2/ts/**"
       - "docs/contracts/control.md"
       - "docs/contracts/schemas/**"
 
@@ -38,7 +38,7 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
       - run: npm ci
-      # 契约的 TS 生成物（api/control/v1/ts/control.ts）变了而 UI 里的副本没跟上，这里会失败。
+      # 契约的 TS 生成物（api/control/v2/ts/control.ts）变了而 UI 里的副本没跟上，这里会失败。
       - run: npm run check-types
       - uses: actions/setup-python@v5
         with:

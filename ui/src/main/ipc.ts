@@ -218,6 +218,7 @@ export function registerIpc({ onboarding, transfers, playground, controller, act
     const v = parsePairPassword(password);
     return v === undefined ? bad("pair password") : service.setPairPassword(v);
   });
+  handle(CHANNELS.revokeDevice, (id: unknown) => typeof id === "string" && /^dev-[0-9a-f]{64}$/.test(id) ? service.revokeDevice(id) : bad("device id"));
   handle(CHANNELS.clearPairPassword, () => service.clearPairPassword());
   handle(CHANNELS.discoverPairs, () => service.discoverPairs());
   handle(CHANNELS.connectPair, (args: unknown) => {

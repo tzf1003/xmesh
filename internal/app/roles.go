@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/control"
 )
@@ -265,17 +265,21 @@ func (r *roleRuntime) record(outcome map[string]string) {
 // Settle waits until every generation submitted so far has been applied, and returns what could not
 // be. With retry it first applies the latest generation again when something failed, so a bind that
 // failed because the port was busy can be tried once the port is free.
-func (r *roleRuntime) Settle(ctx context.Context, retry bool) []v1.ApplyError {
+func (r *roleRuntime) Settle(ctx context.Context, retry bool) []v2.ApplyError {
 	if retry {
 		r.mu.Lock()
 		again := len(r.problems) > 0 && r.pending == nil && r.latest != nil
-		cfg := r.latest
 		if again {
 			r.ingressFailed = nil
+			r.pending = r.latest
+			r.submitted++
 		}
 		r.mu.Unlock()
 		if again {
-			r.submit(cfg)
+			select {
+			case r.wake <- struct{}{}:
+			default:
+			}
 		}
 	}
 	for {
@@ -295,15 +299,15 @@ func (r *roleRuntime) Settle(ctx context.Context, retry bool) []v1.ApplyError {
 	return r.applyErrors()
 }
 
-func (r *roleRuntime) applyErrors() []v1.ApplyError {
+func (r *roleRuntime) applyErrors() []v2.ApplyError {
 	if r == nil {
-		return []v1.ApplyError{}
+		return []v2.ApplyError{}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]v1.ApplyError, 0, len(r.problems))
+	out := make([]v2.ApplyError, 0, len(r.problems))
 	for section, message := range r.problems {
-		out = append(out, v1.ApplyError{Section: section, Message: message})
+		out = append(out, v2.ApplyError{Section: section, Message: message})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Section < out[j].Section })
 	return out
@@ -338,7 +342,8 @@ func (r *roleRuntime) gatewayListen() (listen string, ok bool) {
 	if role == nil {
 		return "", false
 	}
-	return role.bindAddress(), true
+	listen = role.bindAddress()
+	return listen, listen != ""
 }
 
 // ingressAdmin is the running ingress as the control channel manages it; nil while none runs.

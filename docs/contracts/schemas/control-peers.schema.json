@@ -1,59 +1,157 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:xmesh:schema:control-peers:1",
+  "$id": "urn:xmesh:schema:control-peers:2",
   "title": "ControlPeers",
-  "description": "CTR-CTL-05。GET /v1/peers。数据来自 mesh 层，不含任何工具调用内容。",
+  "description": "CTR-CTL-05。GET /v2/peers。数据来自 mesh 层，不含任何工具调用内容。",
   "$defs": {
     "Peer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "self", "node_id", "tags", "online", "connection", "derp_region", "addrs", "last_seen", "os", "version"],
+      "required": [
+        "name",
+        "self",
+        "node_id",
+        "tags",
+        "online",
+        "connection",
+        "derp_region",
+        "addrs",
+        "last_seen",
+        "os",
+        "version"
+      ],
       "properties": {
-        "name": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/NodeName" },
-        "self": { "type": "boolean", "description": "本机自己。恰有一项为 true。" },
-        "node_id": { "type": "string", "minLength": 1 },
+        "name": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
+        },
+        "self": {
+          "type": "boolean",
+          "description": "本机自己。恰有一项为 true。"
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "tags": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Tag" }
+          "items": {
+            "$ref": "urn:xmesh:schema:control-common:2#/$defs/Tag"
+          }
         },
-        "online": { "type": "boolean" },
+        "online": {
+          "type": "boolean"
+        },
         "connection": {
-          "enum": ["direct", "derp", "unknown", "local"],
+          "enum": [
+            "direct",
+            "derp",
+            "unknown",
+            "local"
+          ],
           "description": "direct 为点对点，derp 为经中继，unknown 为离线或尚未探测，local 为本机自己。"
         },
-        "derp_region": { "type": ["string", "null"], "description": "connection 为 derp 时的区域名。" },
+        "derp_region": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "connection 为 derp 时的区域名。"
+        },
         "addrs": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "网络内地址，不含公网地址。"
         },
         "last_seen": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
-            { "type": "null" }
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
-        "os": { "type": ["string", "null"] },
-        "version": { "type": ["string", "null"], "description": "对端内核版本，未知为 null。" },
-        "info": { "$ref": "#/$defs/PeerInfo" }
+        "os": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "对端内核版本，未知为 null。"
+        },
+        "info": {
+          "$ref": "#/$defs/PeerInfo"
+        },
+        "device_id": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DeviceId"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "trust_state": {
+          "enum": [
+            "self",
+            "paired",
+            "identity_conflict"
+          ]
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DevicePath"
+          }
+        },
+        "active_path": {
+          "enum": [
+            "lan",
+            "tailnet"
+          ]
+        },
+        "connection_state": {
+          "enum": [
+            "online",
+            "reconnecting",
+            "offline",
+            "identity_conflict"
+          ]
+        }
       }
     },
     "PeerInfo": {
       "type": "object",
       "description": "网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。",
       "additionalProperties": false,
-      "required": ["refreshed_at", "error"],
+      "required": [
+        "refreshed_at",
+        "error"
+      ],
       "properties": {
         "refreshed_at": {
           "oneOf": [
-            { "$ref": "urn:xmesh:schema:control-common:1#/$defs/Timestamp" },
-            { "type": "null" }
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "最近一次成功读取的时间；第一次读取完成前为 null。"
         },
         "error": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 1,
           "description": "最近一次读取失败的原因；成功之后以及读取完成前为 null。"
         }
@@ -62,9 +160,51 @@
     "PeersResponse": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["peers"],
+      "required": [
+        "peers"
+      ],
       "properties": {
-        "peers": { "type": "array", "items": { "$ref": "#/$defs/Peer" } }
+        "peers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Peer"
+          }
+        }
+      }
+    },
+    "DevicePath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "address",
+        "reachable",
+        "verified_at"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "lan",
+            "tailnet"
+          ]
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "verified_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     }
   }

@@ -191,7 +191,7 @@ test("leaving the topology preserves slots when a colliding device joins", async
   const joined = { ...peersFixture()[1]!, name: "aa", node_id: "aa" };
   h.kernel.setPeers([...peersFixture(), joined]);
   h.kernel.emit("peer", { change: "added", peer: joined });
-  await expect.poll(() => h.kernel.requests.filter((r) => r.path === "/v1/peers").length).toBeGreaterThan(1);
+  await expect.poll(() => h.kernel.requests.filter((r) => r.path === "/v2/peers").length).toBeGreaterThan(1);
   await navigate(page, "overview");
   await expect(page.locator('[data-node="aa"]')).toBeVisible();
   await expect(mac).toHaveAttribute("style", before!);

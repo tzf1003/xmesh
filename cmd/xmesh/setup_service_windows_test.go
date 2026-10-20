@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/onboarding"
 	"os"
@@ -15,7 +15,7 @@ func TestSetupWaitRetainsIdentityAfterEndpointRemoval(t *testing.T) {
 	child := sleeper(t)
 	dir := t.TempDir()
 	ep := endpointOf(child.Process.Pid, time.Now().Add(-time.Second)).ControlEndpointFile
-	ep.Transport = v1.TransportPipe
+	ep.Transport = v2.TransportPipe
 	ep.Endpoint = `\\.\pipe\setup-stop-test`
 	if err := control.WriteEndpoint(dir, ep); err != nil {
 		t.Fatal(err)

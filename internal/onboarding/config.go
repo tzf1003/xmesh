@@ -67,7 +67,7 @@ func Normalize(in Input) (Input, error) {
 			in.Network.Mode = "tailnet"
 		}
 	}
-	if !slices.Contains([]string{"lan", "tailnet"}, in.Network.Mode) {
+	if !slices.Contains([]string{"lan", "tailnet", "coexist"}, in.Network.Mode) {
 		return in, problem("invalid_args", "网络模式无效", "network.mode")
 	}
 	if in.Purpose == "local" && in.Network.Mode != "lan" {
@@ -76,7 +76,7 @@ func Normalize(in Input) (Input, error) {
 	if in.Purpose == "cloud" && in.Network.Mode != "tailnet" {
 		return in, problem("invalid_args", "云端用途需要跨网络连接", "network.mode")
 	}
-	if in.Network.Mode == "tailnet" {
+	if in.Network.Mode != "lan" {
 		if in.Network.ControlURL == "" {
 			in.Network.ControlURL = config.DefaultControlURL
 		}
@@ -114,17 +114,17 @@ func scopes(permission, device string) []string {
 }
 
 func configText(in Input, dir, listen string) (string, error) {
-	tag := "tag:peer"
-	mesh := map[string]any{"mode": in.Network.Mode}
-	if in.Network.Mode == "lan" {
-		mesh["lan"] = map[string]any{"mdns": in.Purpose != "local"}
-	} else {
-		tag = "tag:device"
-		mesh["control_url"] = in.Network.ControlURL
+	mesh := map[string]any{
+		"lan":     map[string]any{"enabled": in.Purpose != "local" && in.Network.Mode != "tailnet", "mdns": in.Purpose != "local"},
+		"tailnet": map[string]any{"enabled": in.Network.Mode != "lan"},
+	}
+	if in.Network.Mode != "lan" {
+		tailnet := mesh["tailnet"].(map[string]any)
+		tailnet["control_url"] = in.Network.ControlURL
 		if in.Network.AuthMethod == "browser" {
-			mesh["auth_method"] = "browser"
+			tailnet["auth_method"] = "browser"
 		} else {
-			mesh["authkey_file"] = in.Network.AuthkeyFile
+			tailnet["authkey_file"] = in.Network.AuthkeyFile
 		}
 	}
 	tools := []string{"*"}
@@ -135,14 +135,15 @@ func configText(in Input, dir, listen string) (string, error) {
 	if in.Permission == "development" {
 		grant["backends"] = []string{"*"}
 	}
-	grants := map[string]any{tag: grant}
+	grants := map[string]any{"tag:peer": grant}
 	if in.Purpose == "cloud" {
 		grants["tag:ingress"] = grant
 	}
 	doc := map[string]any{
-		"node":  map[string]any{"name": in.NodeName, "roles": []string{"agent", "gateway"}},
-		"mesh":  mesh,
-		"agent": map[string]any{"default_cwd": in.Workspace, "cwd_policy": map[string]any{"allow": []string{in.Workspace}, "deny_file": filepath.Join(dir, "cwd-deny.yaml")}, "authz": grants},
+		"schema_version": 2,
+		"node":           map[string]any{"name": in.NodeName, "roles": []string{"agent", "gateway"}},
+		"mesh":           mesh,
+		"agent":          map[string]any{"default_cwd": in.Workspace, "cwd_policy": map[string]any{"allow": []string{in.Workspace}, "deny_file": filepath.Join(dir, "cwd-deny.yaml")}, "authz": grants},
 		"gateway": map[string]any{"listen": listen, "access": []string{"localhost"}, "pats": map[string]any{
 			"onboarding": map[string]any{"token_file": filepath.Join(dir, "pats", "onboarding.token"), "scopes": scopes(in.Permission, "*")},
 		}},
@@ -153,6 +154,11 @@ func configText(in Input, dir, listen string) (string, error) {
 		return "", err
 	}
 	if previous, e := os.ReadFile(filepath.Join(dir, "xmesh.yaml")); e == nil {
+		// Migrate the network schema before merging while retaining application policy.
+		previous, err = config.MigrateDeviceConfig(previous)
+		if err != nil {
+			return "", err
+		}
 		// Keep backends, quotas, policy and existing PATs in their original YAML.
 		edits := []control.Edit{{Path: "/node/name", Value: in.NodeName}, {Path: "/node/roles", Value: []string{"agent", "gateway"}}, {Path: "/mesh", Value: mesh}, {Path: "/gateway/listen", Value: listen}, {Path: "/gateway/access", Value: []string{"localhost"}}, {Path: "/gateway/pats/onboarding", Value: doc["gateway"].(map[string]any)["pats"].(map[string]any)["onboarding"]}, {Path: "/agent/default_cwd", Value: in.Workspace}, {Path: "/agent/cwd_policy/allow", Value: []string{in.Workspace}}, {Path: "/agent/cwd_policy/deny_file", Value: filepath.Join(dir, "cwd-deny.yaml")}}
 		edits = append(edits, control.Edit{Path: "/agent/authz", Value: grants})

@@ -55,7 +55,9 @@ test("ingress: the disabled page's button opens settings with the ingress role p
   await expect(page.getByTestId("page-settings")).toBeVisible();
   await expect(page.getByTestId("settings-role-summary")).toContainText("ingress");
   await expect(page.getByTestId("settings-ingress")).toBeVisible();
-  // Nothing is saved by the jump; the lan mode shows why ingress is not ready yet.
+  // A public listener or reverse tunnel can use LAN. Funnel requires Tailnet.
+  await expect(page.getByTestId("settings-needs-tailnet")).toHaveCount(0);
+  await page.getByTestId("settings-listen").selectOption("funnel");
   await expect(page.getByTestId("settings-needs-tailnet")).toBeVisible();
   expect(h.kernel.panel.writes).toEqual([]);
 });

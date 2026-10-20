@@ -1,0 +1,18 @@
+{
+  "drain": {
+    "draining": false,
+    "mode": null,
+    "since": null
+  },
+  "closed_pty": 0,
+  "released_leases": 0,
+  "outcomes": [
+    {
+      "device": "one"
+    },
+    {
+      "device": "two",
+      "error": "permission denied"
+    }
+  ]
+}

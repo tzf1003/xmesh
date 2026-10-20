@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: 标签格式
         run: |
-          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[0-9]+)?$'; then
+          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(beta|rc)\.(0|[1-9][0-9]*))?$'; then
             echo "tag $GITHUB_REF_NAME must look like v0.1.0, v0.1.0-beta.1 or v0.1.0-rc.1" >&2
             exit 1
           fi

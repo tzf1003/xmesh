@@ -10,16 +10,21 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 )
+
+var ErrVersionMismatch = errors.New("控制 API 主版本不兼容")
 
 // Client talks to one node's control channel. The URL host is a placeholder;
 // every connection goes to the endpoint's socket or pipe.
 type Client struct {
 	HTTP *http.Client
-	node string
+	// RequestTimeout bounds an individual call; zero uses only the caller's context.
+	RequestTimeout time.Duration
+	node           string
 }
 
 func NewClient(e Endpoint) *Client {
@@ -28,7 +33,7 @@ func NewClient(e Endpoint) *Client {
 		// A reused connection would outlive a restarted kernel.
 		DisableKeepAlives: true,
 	}
-	return &Client{HTTP: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, node: e.Node}
+	return &Client{HTTP: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, node: e.Node, RequestTimeout: 30 * time.Second}
 }
 
 // unreachable names the node in a transport failure and drops net/http's "Get http://xmesh-control/..."
@@ -48,12 +53,12 @@ type Response struct {
 	Body   json.RawMessage
 }
 
-// Error returns the ControlError body as a *v1.Error when the status is not 2xx.
+// Error returns the ControlError body as a *v2.Error when the status is not 2xx.
 func (r *Response) Error() error {
 	if r.Status/100 == 2 {
 		return nil
 	}
-	var e v1.Error
+	var e v2.Error
 	if json.Unmarshal(r.Body, &e) == nil && e.Code != "" {
 		return &e
 	}
@@ -70,8 +75,11 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, headers 
 		}
 		reader = bytes.NewReader(raw)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	if c.RequestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.RequestTimeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, method, "http://xmesh-control"+path, reader)
 	if err != nil {
 		return nil, err
@@ -87,6 +95,9 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, headers 
 		return nil, c.unreachable(err)
 	}
 	defer res.Body.Close()
+	if version := res.Header.Get(v2.HeaderVersion); version != "" && strings.Split(version, ".")[0] != strings.Split(v2.APIVersion, ".")[0] {
+		return nil, fmt.Errorf("%w: 节点 %s，当前 %s，请更新该节点", ErrVersionMismatch, version, v2.APIVersion)
+	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))
 	if err != nil {
 		return nil, err
@@ -94,7 +105,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, headers 
 	return &Response{Status: res.StatusCode, Header: res.Header, Body: raw}, nil
 }
 
-// Stream opens a long-lived request (GET /v1/events). The caller closes Body.
+// Stream opens a long-lived request (GET /v2/events). The caller closes Body.
 func (c *Client) Stream(ctx context.Context, path string, headers map[string]string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://xmesh-control"+path, nil)
 	if err != nil {

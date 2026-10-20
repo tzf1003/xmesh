@@ -24,6 +24,44 @@ func address(t *testing.T) string {
 	return a
 }
 
+func TestMeshChangeWakesBothRoles(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source := make(chan struct{})
+	gatewayChanged, ingressChanged := fanoutMeshChanges(ctx, source)
+	for i := 0; i < 2; i++ {
+		source <- struct{}{}
+		for _, changed := range []<-chan struct{}{gatewayChanged, ingressChanged} {
+			select {
+			case <-changed:
+			case <-time.After(time.Second):
+				t.Fatal("mesh change did not reach both roles")
+			}
+		}
+	}
+	close(source)
+}
+
+func TestMeshChangeCoalescesForIdleRole(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source := make(chan struct{})
+	gatewayChanged, ingressChanged := fanoutMeshChanges(ctx, source)
+	for i := 0; i < 3; i++ {
+		source <- struct{}{}
+		select {
+		case <-gatewayChanged:
+		case <-time.After(time.Second):
+			t.Fatal("idle role blocked active role")
+		}
+	}
+	select {
+	case <-ingressChanged:
+	case <-time.After(time.Second):
+		t.Fatal("idle role lost its refresh notification")
+	}
+}
+
 // conformance: CON-ARCH-03
 func Test_Runtime_AgentGatewaySharedState(t *testing.T) {
 	root := t.TempDir()

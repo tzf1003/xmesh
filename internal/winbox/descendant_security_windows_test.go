@@ -531,3 +531,31 @@ func Test_WindowsForeignPackageACE(t *testing.T) {
 		}
 	}
 }
+
+// A descriptor edit after final observation must still be reported while cleanup completes.
+func Test_WindowsAppContainerReclaimDetectsLateRootSecurity(t *testing.T) {
+	skipUnlessChangeJournal(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	options := descendantSecurityFixture(t, time.Minute)
+	e, err := newWorkspaceExecution(ctx, options, kernelWriterFencePrepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = e.closeContext(context.Background(), 91) }()
+	journal := e.journal
+	fired := false
+	releaseObjectHook = func(done, total int) {
+		if done == 1 && !fired {
+			fired = true
+			tamperDACL(t, options.Workspace)
+		}
+	}
+	defer func() { releaseObjectHook = nil }()
+	if err := e.closeContext(ctx, 91); !errors.Is(err, errWorkspaceSecurityChanged) {
+		t.Fatal("late descriptor edit was accepted", err)
+	}
+	if !fired || !e.closed || !journal.state.complete {
+		t.Fatal("reclamation did not complete", fired, e.closed, journal.state.complete)
+	}
+}

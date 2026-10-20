@@ -2,7 +2,7 @@
 
 ## CTR-CFG-01
 
-配置文件是 YAML 1.2，路径由 `--config` 指定，默认 `xmesh.yaml`。解析后的数据必须满足 [schemas/config.schema.json](schemas/config.schema.json)。校验失败时进程拒绝启动，错误信息指出 JSON Pointer 路径，例如 `/agent/backends/ida/policy`。
+设备运行配置使用 `schema_version: 2`；旧配置可由 `xmesh migrate` 转换，转换后重新配对。配置文件是 YAML 1.2，路径由 `--config` 指定，默认 `xmesh.yaml`。解析后的数据必须满足 [schemas/config.schema.json](schemas/config.schema.json)。校验失败时进程拒绝启动，错误信息指出 JSON Pointer 路径，例如 `/agent/backends/ida/policy`。
 
 ### 角色联动
 
@@ -16,15 +16,18 @@
 | `roles` 含 `agent` | `agent.cwd_policy.allow` 必须存在，可以为空；空表示除 `deny` 外的全部目录都可访问 |
 | `agent.fs.max_file_size` | 单个上传/下载文件的上限，默认 `1GiB`；支持正整数尺寸（例如 `512MiB`、`2GiB`）及 `unlimited`。面板「设置 → 文件互传」可修改，保存后热更新生效，见 [CTR-FS-08](fs.md#ctr-fs-08) |
 | `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件在每次工具调用时重读，改动在下一次调用生效，不需要重启。空列表要写成 `[]`，没有内容的文件按写了一半处理。启动时文件缺失或无法解析，agent 不能启动，不会视为空列表；运行中文件不再能加载（缺失、不可读、不是字符串列表），继续使用上一份成功的列表，`policy_reload_failed` 计数加一，状态里出现同名警告，文件恢复后清除。向导默认创建该文件并写入凭证目录 |
-| `mesh.mode = tailnet` | `control_url` 与 `authkey_file` 必须存在 |
-| `mesh.ephemeral = true` | 仅 tailnet；请求临时节点注册，节点身份只存内存，每次进程启动重新注册，退出时有界尝试注销 |
-| `mesh.mode = lan` | `mesh.lan.mdns` 必须显式设置；true 启用公告与发现，false 关闭公告与发现，且不读取 auth key。本机首次配置使用 false，并以 `--local-only` 仅开放需认证的回环 Gateway。可选 `mesh.lan.interface` 指定监听、mDNS 通告和浏览用的网卡名，mDNS 组播只经这块网卡收发（Windows 上显式固定组播出口，不受 Clash/Tailscale 等低 metric 隧道网卡影响）；缺省选第一块带私有 IPv4 的启用网卡，并跳过名字像虚拟机、容器、WSL、Hyper-V、VPN 隧道的网卡（只有它们时才退回使用）。指定的网卡不存在或没有私有 IPv4 时拒绝启动 |
-| `ingress.listen = funnel` | `control_url` 必须是官方 Tailscale 控制面：`https://controlplane.tailscale.com` 或 `https://login.tailscale.com`（端口只能是 443，不含用户信息）。其他主机，包括 Headscale 和形似官方域名的后缀，一律拒绝启动。issuer 必须是 `ts.net` 源。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
+| `mesh.tailnet.enabled = true` | `mesh.tailnet.control_url` 必须为 HTTPS；密钥登录需要 `authkey_file`，浏览器登录使用 `auth_method: browser` 并复用本机网络状态 |
+| `mesh.tailnet.ephemeral = true` | Tailnet 网络身份存于内存，每次进程启动重新入网。xmesh 设备公钥仍独立持久化 |
+| `mesh.lan.enabled = true` | 开启局域网路径；`mdns` 缺省 true。可指定物理网卡；网卡暂不可用时该路径独立重试，其他路径与本机管理继续运行。两个 enabled 都为 true 即共存；网络开关热应用 |
+| `ingress.listen = funnel` | `mesh.tailnet.control_url` 必须是官方 Tailscale 控制面：`https://controlplane.tailscale.com` 或 `https://login.tailscale.com`（端口只能是 443，不含用户信息）。其他主机，包括 Headscale 和形似官方域名的后缀，一律拒绝启动。issuer 必须是 `ts.net` 源。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
+| 本机首次配置 | 关闭 LAN 与 Tailnet 路径，以 `--local-only` 开放需认证的回环 Gateway；设备 Agent 仅供该 Gateway 内部调用 |
 | `ingress.listen = public:443` | 必须有 `domain` 和 `tls`，且 `ingress.oauth.issuer` 的主机等于 `domain`。`tls: file` 时还必须有 `cert_file` 与 `key_file`。`tls: autocert` 只在这种监听下使用 |
 | `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供 |
 | `ingress.oauth.dynamic_client_scopes` | 可选 scope 数组，语法与 `clients.*.scopes` 相同。动态注册客户端的 scope 上限，缺省 `["devices:read"]`，空数组表示只能完成 OAuth，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
 | `agent.quota`、`gateway.quota` | 可选对象，字段 `calls_per_hour`（正整数，缺省 10000）、`max_concurrent`（正整数，缺省 64）、`max_call_duration`（Go duration，缺省 `10m`）。`agent.exec.default_timeout` 不得超过 `agent.quota.max_call_duration`，见 [CON-SEC-10](../constraints/security.md#con-sec-10) |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
+
+新版 `mesh` 配置热应用；变更控制面或登录参数只重启对应网络组件。局域网和 Tailnet 共享设备身份及配对信任，路径故障不会撤销设备。
 
 ### 时长与尺寸
 
@@ -35,7 +38,7 @@
 配置文件的生效方式有两条路，结果相同：
 
 - 文件监视：内核约每秒重读一次文件，有效的新内容立即成为生效的配置，并通过控制通道发 `config` 事件。
-- 显式重读：`POST /v1/config/reload`（见 [CTR-CTL-07](control.md#post-v1configreload)）立即重读，返回本次是否生效、变更路径、需重启的段与没能热应用的部分。
+- 显式重读：`POST /v2/config/reload`（见 [CTR-CTL-07](control.md#post-v1configreload)）立即重读，返回本次是否生效、变更路径、需重启的段与没能热应用的部分。
 
 内容无法通过校验时，继续使用上一份有效配置，`policy_reload_failed` 计数加一，`load_error` 给出第一条错误。
 
@@ -56,34 +59,35 @@
 | `node.roles` 中的 `gateway` | 热加载。加入时创建 Gateway（令牌不存在才创建，见 [CTR-GW-07](gateway.md#ctr-gw-07)）并开始监听，去掉时停止监听并关闭它的 MCP 会话；Agent、网络和其他角色不受影响。启动失败（例如端口被占用）时节点照常运行，在 `apply_errors` 与状态警告里报告 |
 | `node.roles` 中的 `ingress` 与 `ingress` 段 | 热加载。加入时检查 `tag:ingress`、登录口令文件并开始监听，去掉时停止监听并关闭它的 MCP 会话；`ingress` 段有任何改动时入口先停再按新配置启动，因为新的监听可能要用同一个端口。已通过入口登录的客户端需要重新授权（OAuth 令牌只在入口进程内存里，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01)）。新配置在启动前就能判定不可用（例如读不到证书）时，入口保持原样；启动时才失败则恢复原来的配置，两种情况都在 `apply_errors` 与状态警告里报告。Agent、网络和其他角色不受影响 |
 | `ci` 段 | 热加载。新增、删除绑定，改并发数、标签、暂停：内核只动变化的绑定，其他绑定的运行器不受影响；改账号只影响之后的注册与注销。段里没有密钥（[CTR-CTL-15](control.md#ctr-ctl-15)） |
-| `node.name`、`node.roles` 里 `agent` 的增减、`mesh`、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
+| `node.name`、`node.roles` 里 `agent` 的增减、`audit`、`agent.policy.windows_appcontainer` | 需要重启（`config.RestartPaths`）。文件保存后 `restart_required` 为真，`restart_paths` 列出这些段；运行中的进程继续使用启动时的值，直到下一次启动 |
 
 #### 热应用失败时
 
 有效的配置可以在应用时失败：新的监听地址被占用，Gateway 没能启动，入口的证书读不到或端口拿不到。此时运行中的进程保持原样，该段不进入 `restart_paths`（重启也不会让占用的端口变空），而是：
 
-- `POST /v1/config/reload` 的 `apply_errors` 列出 `{section, message}`；
+- `POST /v2/config/reload` 的 `apply_errors` 列出 `{section, message}`；
 - 状态警告 `policy_reload_failed` 带同样的文字，`policy_reload_failures` 计数加一，并写一条 `policy_reload_failed` 审计事件；
-- 之后的新配置，或再次调用 `POST /v1/config/reload`（它会重试上一次失败的部分），应用成功时清除。
+- 之后的新配置，或再次调用 `POST /v2/config/reload`（它会重试上一次失败的部分），应用成功时清除。
 
 文件监视不会自行反复重试，所以端口一直被占用时不会刷屏。
 
 #### 为什么这几段需要重启
 
-`node.name`、`mesh` 决定本节点的身份与网络；`node.roles` 里的 `agent` 持有 PTY、exec、租约与沙箱运行器；`audit` 在启动时创建审计目录与保留期的清理任务。在进程内替换它们，等于拆掉整个网络栈或正在服务的会话，进行中的 PTY 会话与 exec 也会随之结束。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。Gateway 与入口只是进来的路径，不保存会话状态（[INV-03](../constraints/invariants.md#inv-03)），所以可以在进程内启停和换地址；入口只丢掉自己进程里的 OAuth 令牌。
+`node.name` 是启动时的节点名称；`node.roles` 里的 `agent` 持有 PTY、exec、租约与沙箱运行器；`audit` 在启动时创建审计目录与保留期的清理任务。这些启动资源的重建会影响正在服务的会话。版本 2 的网络组件独立重启，逻辑会话由设备链路服务保留。因此这些段只置 `restart_required`，由运维或 UI 在合适的时机重启。`agent.policy.windows_appcontainer` 的运行器在启动时安装并做启动恢复，同样只在启动时生效。Gateway 与入口只是进来的路径，不保存会话状态（[INV-03](../constraints/invariants.md#inv-03)），所以可以在进程内启停和换地址；入口只丢掉自己进程里的 OAuth 令牌。
 
 #### 字段速查
 
 | 字段 | 热加载 | 需重启 |
 | --- | --- | --- |
 | `node.name` | | 是 |
-| `node.roles`（`gateway` 的增减） | 是 | |
-| `node.roles`（`agent`、`ingress` 的增减） | | 是 |
-| `mesh.*` | | 是 |
+| `node.roles`（`gateway`、`ingress` 的增减） | 是 | |
+| `node.roles`（`agent` 的增减） | | 是 |
+| `mesh.lan.*`、`mesh.tailnet.*`（版本 2） | 是 | |
+| `schema_version` 与旧版 `mesh.*` | | 是 |
 | `gateway.listen`、`gateway.expose_backends` | 是 | |
 | `gateway.quota` | 是 | |
 | `gateway.access`、`gateway.hosts` | 是 | |
-| `ingress.*` | | 是 |
+| `ingress.*` | 是 | |
 | `agent.policy.windows_appcontainer` | | 是 |
 | `agent.policy.*`（除上一项）、`agent.cwd_policy`、`agent.authz`、`agent.exec`、`agent.pty`、`agent.quota`、`agent.backends`、`agent.workspaces`、`agent.default_cwd` | 是 | |
 | `gateway.pats` | 是 | |

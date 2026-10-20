@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/audit"
 )
 
@@ -25,7 +25,7 @@ func record(at time.Time, tool, status, errCode string) map[string]any {
 // auditTools lists the tool field of every event in an audit response, in order.
 func auditTools(t *testing.T, r *Response) (tools []string, next *string) {
 	t.Helper()
-	var out v1.AuditResponse
+	var out v2.AuditResponse
 	decodeAs(t, r, &out)
 	for _, raw := range out.Events {
 		var e struct{ Tool string }
@@ -57,11 +57,11 @@ func Test_ControlAuditView(t *testing.T) {
 	}
 	list := func(query string) []string {
 		t.Helper()
-		tools, _ := auditTools(t, f.ok("GET", "/v1/audit"+query, nil, "AuditResponse"))
+		tools, _ := auditTools(t, f.ok("GET", "/v2/audit"+query, nil, "AuditResponse"))
 		return tools
 	}
-	var all v1.AuditResponse
-	decodeAs(t, f.ok("GET", "/v1/audit", nil, "AuditResponse"), &all)
+	var all v2.AuditResponse
+	decodeAs(t, f.ok("GET", "/v2/audit", nil, "AuditResponse"), &all)
 	if !all.Enabled || all.NextCursor != nil {
 		t.Fatalf("%+v", all)
 	}
@@ -83,7 +83,7 @@ func Test_ControlAuditView(t *testing.T) {
 	// paging walks all six records exactly once
 	seen, cursor := []string{}, ""
 	for page := 0; page < 10; page++ {
-		path := "/v1/audit?limit=4"
+		path := "/v2/audit?limit=4"
 		if cursor != "" {
 			path += "&cursor=" + cursor
 		}
@@ -98,7 +98,7 @@ func Test_ControlAuditView(t *testing.T) {
 		t.Fatalf("paging: %v", seen)
 	}
 	for _, bad := range []string{"limit=0", "limit=5000", "since=yesterday", "status=maybe", "cursor=../../etc/passwd:1", "cursor=nope"} {
-		apiError(t, f.do("GET", "/v1/audit?"+bad, nil, nil), v1.ErrInvalidArgs)
+		apiError(t, f.do("GET", "/v2/audit?"+bad, nil, nil), v2.ErrInvalidArgs)
 	}
 }
 
@@ -119,8 +119,8 @@ func Test_INV10_AuditViewWithholdsContent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "20261016T1000.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	r := f.ok("GET", "/v1/audit", nil, "AuditResponse")
-	var got v1.AuditResponse
+	r := f.ok("GET", "/v2/audit", nil, "AuditResponse")
+	var got v2.AuditResponse
 	decodeAs(t, r, &got)
 	if len(got.Events) != 1 || strings.Contains(string(r.Body), "SECRET") {
 		t.Fatalf("content leaked or good record lost: %s", r.Body)
@@ -130,8 +130,8 @@ func Test_INV10_AuditViewWithholdsContent(t *testing.T) {
 // With no audit directory the view is empty and says so.
 func Test_ControlAuditDisabled(t *testing.T) {
 	f := newFixture(t, func(o *Options) { o.AuditDir = "" })
-	var got v1.AuditResponse
-	decodeAs(t, f.ok("GET", "/v1/audit", nil, "AuditResponse"), &got)
+	var got v2.AuditResponse
+	decodeAs(t, f.ok("GET", "/v2/audit", nil, "AuditResponse"), &got)
 	if got.Enabled || len(got.Events) != 0 || got.NextCursor != nil {
 		t.Fatalf("%+v", got)
 	}
@@ -139,7 +139,7 @@ func Test_ControlAuditDisabled(t *testing.T) {
 	// gone: the channel's address is derived from the node name)
 	f.server.Close()
 	f2 := newFixture(t)
-	decodeAs(t, f2.ok("GET", "/v1/audit", nil, "AuditResponse"), &got)
+	decodeAs(t, f2.ok("GET", "/v2/audit", nil, "AuditResponse"), &got)
 	if !got.Enabled || len(got.Events) != 0 {
 		t.Fatalf("%+v", got)
 	}
@@ -157,12 +157,12 @@ func Test_ControlCallsAreAudited(t *testing.T) {
 		o.Audit = log
 	})
 	defer log.Close()
-	f.ok("GET", "/v1/status", nil, "StatusResponse")
-	f.ok("POST", "/v1/drain", map[string]string{"mode": "keep"}, "DrainResponse")
-	apiError(t, f.do("POST", "/v1/drain", map[string]string{"mode": "bogus"}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("POST", "/v1/pair/import", v1.PairImportRequest{Fingerprint: "SECRET-FP"}, nil), v1.ErrInvalidArgs)
-	r := f.ok("GET", "/v1/audit?event=control_call", nil, "AuditResponse")
-	var got v1.AuditResponse
+	f.ok("GET", "/v2/status", nil, "StatusResponse")
+	f.ok("POST", "/v2/drain", map[string]string{"mode": "keep"}, "DrainResponse")
+	apiError(t, f.do("POST", "/v2/drain", map[string]string{"mode": "bogus"}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v2/pair/import", v2.PairImportRequest{Fingerprint: "SECRET-FP"}, nil), v2.ErrFingerprintMismatch)
+	r := f.ok("GET", "/v2/audit?event=control_call", nil, "AuditResponse")
+	var got v2.AuditResponse
 	decodeAs(t, r, &got)
 	if len(got.Events) != 3 {
 		t.Fatalf("%s", r.Body)
@@ -186,7 +186,7 @@ func Test_ControlCallsAreAudited(t *testing.T) {
 		byTool[rec.Tool+"/"+rec.Status] = rec
 	}
 	ok := byTool["control.drain.start/ok"]
-	if len(ok.Digest.Keys) != 1 || ok.Digest.Keys[0] != "mode" || ok.Digest.Bytes == 0 || byTool["control.drain.start/error"].Error != "invalid_args" || byTool["control.pair.import/error"].Error != "invalid_args" {
+	if len(ok.Digest.Keys) != 1 || ok.Digest.Keys[0] != "mode" || ok.Digest.Bytes == 0 || byTool["control.drain.start/error"].Error != "invalid_args" || byTool["control.pair.import/error"].Error != "fingerprint_mismatch" {
 		t.Fatalf("%+v", byTool)
 	}
 	for _, raw := range got.Events {

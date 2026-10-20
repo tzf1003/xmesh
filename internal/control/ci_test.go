@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/tzf1003/xmesh/api/control/v1"
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/ci"
 	"github.com/tzf1003/xmesh/internal/config"
 )
@@ -66,22 +66,22 @@ func runnerDir(t *testing.T, url string, ephemeral bool) string {
 // conformance: CTR-CTL-15 a kernel without the supervisor does not declare the capability
 func Test_CTRCTL15_NoSupervisorIsNotImplemented(t *testing.T) {
 	f := newFixture(t)
-	apiError(t, f.do("GET", "/v1/ci", nil, nil), v1.ErrNotImplemented)
-	apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "o/r", RegistrationToken: ciRegistrationToken}, nil), v1.ErrNotImplemented)
+	apiError(t, f.do("GET", "/v2/ci", nil, nil), v2.ErrNotImplemented)
+	apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{Target: "o/r", RegistrationToken: ciRegistrationToken}, nil), v2.ErrNotImplemented)
 }
 
 // conformance: CTR-CTL-15 binding with a one-time registration token, then listing, patching, restarting and unbinding
 func Test_CTRCTL15_BindingLifecycle(t *testing.T) {
 	f := ciFixture(t, nil)
-	create := v1.CiBindingCreate{Target: "tzf1003/xmesh", RegistrationToken: ciRegistrationToken, Concurrency: 2, Labels: []string{"gpu"}}
-	r := f.do("POST", "/v1/ci/bindings", create, nil)
+	create := v2.CiBindingCreate{Target: "tzf1003/xmesh", RegistrationToken: ciRegistrationToken, Concurrency: 2, Labels: []string{"gpu"}}
+	r := f.do("POST", "/v2/ci/bindings", create, nil)
 	if r.Status != 201 {
 		t.Fatalf("create: %d %s", r.Status, r.Body)
 	}
 	valid(t, "CiBinding", r.Body)
-	var created v1.CiBinding
+	var created v2.CiBinding
 	decodeAs(t, r, &created)
-	if created.ID != "tzf1003-xmesh" || created.Source != v1.CiSourceToken || created.Concurrency != 2 {
+	if created.ID != "tzf1003-xmesh" || created.Source != v2.CiSourceToken || created.Concurrency != 2 {
 		t.Fatalf("created = %+v", created)
 	}
 	// The token is held in memory only: not in the file, not in any answer.
@@ -92,34 +92,34 @@ func Test_CTRCTL15_BindingLifecycle(t *testing.T) {
 		t.Fatalf("binding missing from the file:\n%s", text)
 	}
 
-	overview := f.ok("GET", "/v1/ci", nil, "CiOverview")
+	overview := f.ok("GET", "/v2/ci", nil, "CiOverview")
 	if strings.Contains(string(overview.Body), ciRegistrationToken) {
 		t.Fatal("overview echoes the token")
 	}
-	var ov v1.CiOverview
+	var ov v2.CiOverview
 	decodeAs(t, overview, &ov)
 	if len(ov.Bindings) != 1 || len(ov.Accounts) != 0 || !ov.PreventSleepWhileBusy {
 		t.Fatalf("overview = %+v", ov)
 	}
-	status := f.ok("GET", "/v1/status", nil, "StatusResponse")
-	var st v1.StatusResponse
+	status := f.ok("GET", "/v2/status", nil, "StatusResponse")
+	var st v2.StatusResponse
 	decodeAs(t, status, &st)
 	if st.CI == nil || len(st.CI.Bindings) != 1 {
 		t.Fatalf("status.ci = %+v", st.CI)
 	}
 	found := false
 	for _, c := range st.Control.Capabilities {
-		found = found || c == v1.CapCI
+		found = found || c == v2.CapCI
 	}
 	if !found {
 		t.Fatal("ci capability not declared")
 	}
 
-	apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "TZF1003/xmesh", RegistrationToken: ciRegistrationToken}, nil), v1.ErrConflict)
+	apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{Target: "TZF1003/xmesh", RegistrationToken: ciRegistrationToken}, nil), v2.ErrConflict)
 
 	one, paused := 1, true
 	labels := []string{}
-	r = f.do("PATCH", "/v1/ci/bindings/tzf1003-xmesh", v1.CiBindingPatch{Concurrency: &one, Paused: &paused, Labels: &labels}, nil)
+	r = f.do("PATCH", "/v2/ci/bindings/tzf1003-xmesh", v2.CiBindingPatch{Concurrency: &one, Paused: &paused, Labels: &labels}, nil)
 	if r.Status != 200 {
 		t.Fatalf("patch: %d %s", r.Status, r.Body)
 	}
@@ -129,32 +129,32 @@ func Test_CTRCTL15_BindingLifecycle(t *testing.T) {
 		t.Fatalf("config after patch = %+v", got)
 	}
 	bad := 99
-	apiError(t, f.do("PATCH", "/v1/ci/bindings/tzf1003-xmesh", v1.CiBindingPatch{Concurrency: &bad}, nil), v1.ErrInvalidArgs)
-	apiError(t, f.do("PATCH", "/v1/ci/bindings/nope", v1.CiBindingPatch{Concurrency: &one}, nil), v1.ErrNotFound)
+	apiError(t, f.do("PATCH", "/v2/ci/bindings/tzf1003-xmesh", v2.CiBindingPatch{Concurrency: &bad}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("PATCH", "/v2/ci/bindings/nope", v2.CiBindingPatch{Concurrency: &one}, nil), v2.ErrNotFound)
 
-	if r = f.do("POST", "/v1/ci/bindings/tzf1003-xmesh/restart", nil, nil); r.Status != 204 {
+	if r = f.do("POST", "/v2/ci/bindings/tzf1003-xmesh/restart", nil, nil); r.Status != 204 {
 		t.Fatalf("restart: %d %s", r.Status, r.Body)
 	}
-	apiError(t, f.do("POST", "/v1/ci/bindings/nope/restart", nil, nil), v1.ErrNotFound)
+	apiError(t, f.do("POST", "/v2/ci/bindings/nope/restart", nil, nil), v2.ErrNotFound)
 
 	// Without an account, repairing needs a fresh registration token.
-	e := apiError(t, f.do("POST", "/v1/ci/bindings/tzf1003-xmesh/repair", v1.CiBindingRepair{}, nil), v1.ErrInvalidArgs)
+	e := apiError(t, f.do("POST", "/v2/ci/bindings/tzf1003-xmesh/repair", v2.CiBindingRepair{}, nil), v2.ErrInvalidArgs)
 	if e.Field != "registration_token" {
 		t.Fatalf("field = %q", e.Field)
 	}
-	apiError(t, f.do("POST", "/v1/ci/bindings/tzf1003-xmesh/repair", v1.CiBindingRepair{RegistrationToken: "--url http://evil"}, nil), v1.ErrInvalidArgs)
-	r = f.do("POST", "/v1/ci/bindings/tzf1003-xmesh/repair", v1.CiBindingRepair{RegistrationToken: ciRegistrationToken}, nil)
+	apiError(t, f.do("POST", "/v2/ci/bindings/tzf1003-xmesh/repair", v2.CiBindingRepair{RegistrationToken: "--url http://evil"}, nil), v2.ErrInvalidArgs)
+	r = f.do("POST", "/v2/ci/bindings/tzf1003-xmesh/repair", v2.CiBindingRepair{RegistrationToken: ciRegistrationToken}, nil)
 	if r.Status != 200 {
 		t.Fatalf("repair: %d %s", r.Status, r.Body)
 	}
 	valid(t, "CiBinding", r.Body)
 
-	r = f.do("DELETE", "/v1/ci/bindings/tzf1003-xmesh?force=true", nil, nil)
+	r = f.do("DELETE", "/v2/ci/bindings/tzf1003-xmesh?force=true", nil, nil)
 	if r.Status != 200 {
 		t.Fatalf("delete: %d %s", r.Status, r.Body)
 	}
 	valid(t, "CiBinding", r.Body)
-	var gone v1.CiBinding
+	var gone v2.CiBinding
 	decodeAs(t, r, &gone)
 	if !gone.Removing {
 		t.Fatalf("removing = false: %s", r.Body)
@@ -162,14 +162,14 @@ func Test_CTRCTL15_BindingLifecycle(t *testing.T) {
 	if len(f.store.Get().CI.Bindings) != 0 {
 		t.Fatalf("binding still configured: %+v", f.store.Get().CI.Bindings)
 	}
-	apiError(t, f.do("DELETE", "/v1/ci/bindings/tzf1003-xmesh", nil, nil), v1.ErrNotFound)
+	apiError(t, f.do("DELETE", "/v2/ci/bindings/tzf1003-xmesh", nil, nil), v2.ErrNotFound)
 }
 
 // conformance: CTR-CTL-15 a public repository needs a second confirmation
 func Test_CTRCTL15_PublicRepoNeedsConfirm(t *testing.T) {
 	f := ciFixture(t, map[string]bool{"o/open": true})
-	create := v1.CiBindingCreate{Target: "o/open", RegistrationToken: ciRegistrationToken}
-	e := apiError(t, f.do("POST", "/v1/ci/bindings", create, nil), v1.ErrInvalidArgs)
+	create := v2.CiBindingCreate{Target: "o/open", RegistrationToken: ciRegistrationToken}
+	e := apiError(t, f.do("POST", "/v2/ci/bindings", create, nil), v2.ErrInvalidArgs)
 	if e.Reason != "public_repo_requires_confirm" || e.Field != "confirm_public" {
 		t.Fatalf("error = %+v", e)
 	}
@@ -177,11 +177,11 @@ func Test_CTRCTL15_PublicRepoNeedsConfirm(t *testing.T) {
 		t.Fatal("binding written without confirmation")
 	}
 	create.ConfirmPublic = true
-	r := f.do("POST", "/v1/ci/bindings", create, nil)
+	r := f.do("POST", "/v2/ci/bindings", create, nil)
 	if r.Status != 201 {
 		t.Fatalf("create: %d %s", r.Status, r.Body)
 	}
-	var b v1.CiBinding
+	var b v2.CiBinding
 	decodeAs(t, r, &b)
 	if b.Public == nil || !*b.Public {
 		t.Fatalf("public = %v", b.Public)
@@ -191,7 +191,7 @@ func Test_CTRCTL15_PublicRepoNeedsConfirm(t *testing.T) {
 // conformance: CTR-CTL-15 exactly one of the three binding ways, and field checks
 func Test_CTRCTL15_BindingCreateArguments(t *testing.T) {
 	f := ciFixture(t, nil)
-	cases := map[string]v1.CiBindingCreate{
+	cases := map[string]v2.CiBindingCreate{
 		"nothing":      {},
 		"target only":  {Target: "o/r"},
 		"two ways":     {Target: "o/r", Account: "a", RegistrationToken: ciRegistrationToken},
@@ -203,11 +203,11 @@ func Test_CTRCTL15_BindingCreateArguments(t *testing.T) {
 		"bad token":    {Target: "o/r", RegistrationToken: "--url http://evil"},
 	}
 	for name, body := range cases {
-		if r := f.do("POST", "/v1/ci/bindings", body, nil); r.Status != 400 {
+		if r := f.do("POST", "/v2/ci/bindings", body, nil); r.Status != 400 {
 			t.Errorf("%s: %d %s", name, r.Status, r.Body)
 		}
 	}
-	apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "o/r", Account: "nobody"}, nil), v1.ErrNotFound)
+	apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{Target: "o/r", Account: "nobody"}, nil), v2.ErrNotFound)
 	if n := len(f.store.Get().CI.Bindings); n != 0 {
 		t.Fatalf("%d bindings written by refused requests", n)
 	}
@@ -217,22 +217,26 @@ func Test_CTRCTL15_BindingCreateArguments(t *testing.T) {
 func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	f := ciFixture(t, nil)
 	dir := runnerDir(t, "https://github.com/tzf1003/legacy", false)
+	e := apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: dir, Concurrency: 2}, nil), v2.ErrInvalidArgs)
+	if e.Field != "concurrency" || e.Reason != "import_single_instance" || len(f.store.Get().CI.Bindings) != 0 {
+		t.Fatalf("import concurrency: %+v", e)
+	}
 
-	r := f.ok("POST", "/v1/ci/import/inspect", v1.CiImportInspectRequest{Dir: dir}, "CiImportInspectResponse")
-	var in v1.CiImportInspectResponse
+	r := f.ok("POST", "/v2/ci/import/inspect", v2.CiImportInspectRequest{Dir: dir}, "CiImportInspectResponse")
+	var in v2.CiImportInspectResponse
 	decodeAs(t, r, &in)
 	if in.Target != "tzf1003/legacy" || in.RunnerName != "old-runner" || in.ServiceInstalled || in.Running {
 		t.Fatalf("inspect = %+v", in)
 	}
-	apiError(t, f.do("POST", "/v1/ci/import/inspect", v1.CiImportInspectRequest{Dir: t.TempDir()}, nil), v1.ErrNotFound)
-	apiError(t, f.do("POST", "/v1/ci/import/inspect", v1.CiImportInspectRequest{Dir: "relative"}, nil), v1.ErrInvalidArgs)
+	apiError(t, f.do("POST", "/v2/ci/import/inspect", v2.CiImportInspectRequest{Dir: t.TempDir()}, nil), v2.ErrNotFound)
+	apiError(t, f.do("POST", "/v2/ci/import/inspect", v2.CiImportInspectRequest{Dir: "relative"}, nil), v2.ErrInvalidArgs)
 
 	org := runnerDir(t, "https://github.com/some-org", false)
-	e := apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{ImportDir: org}, nil), v1.ErrInvalidArgs)
+	e = apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: org}, nil), v2.ErrInvalidArgs)
 	if e.Reason != "not_a_runner" {
 		t.Fatalf("org runner: %+v", e)
 	}
-	e = apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{ImportDir: runnerDir(t, "https://github.com/o/r", true)}, nil), v1.ErrInvalidArgs)
+	e = apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: runnerDir(t, "https://github.com/o/r", true)}, nil), v2.ErrInvalidArgs)
 	if e.Reason != "ephemeral_runner" {
 		t.Fatalf("ephemeral: %+v", e)
 	}
@@ -240,12 +244,12 @@ func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(service, ".service"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e = apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{ImportDir: service}, nil), v1.ErrInvalidArgs)
+	e = apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: service}, nil), v2.ErrInvalidArgs)
 	if e.Reason != "service_installed" {
 		t.Fatalf("service: %+v", e)
 	}
 
-	r = f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{ImportDir: dir}, nil)
+	r = f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: dir}, nil)
 	if r.Status != 201 {
 		t.Fatalf("import: %d %s", r.Status, r.Body)
 	}
@@ -256,9 +260,13 @@ func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	}
 	// An imported runner is a single instance.
 	two := 2
-	e = apiError(t, f.do("PATCH", "/v1/ci/bindings/"+got[0].ID, v1.CiBindingPatch{Concurrency: &two}, nil), v1.ErrInvalidArgs)
+	e = apiError(t, f.do("PATCH", "/v2/ci/bindings/"+got[0].ID, v2.CiBindingPatch{Concurrency: &two}, nil), v2.ErrInvalidArgs)
 	if e.Field != "concurrency" {
 		t.Fatalf("patch: %+v", e)
+	}
+	one := 1
+	if r := f.do("PATCH", "/v2/ci/bindings/"+got[0].ID, v2.CiBindingPatch{Concurrency: &one}, nil); r.Status != http.StatusOK {
+		t.Fatalf("single instance patch: %d %s", r.Status, r.Body)
 	}
 }
 
@@ -266,9 +274,9 @@ func Test_CTRCTL15_ImportRunner(t *testing.T) {
 func Test_CTRCTL15_AccountRoutesUnavailableWithoutAccounts(t *testing.T) {
 	f := ciFixture(t, nil)
 	for _, c := range []struct{ method, path string }{
-		{"POST", "/v1/ci/accounts"}, {"DELETE", "/v1/ci/accounts/a"}, {"GET", "/v1/ci/accounts/a/repos"},
+		{"POST", "/v2/ci/accounts"}, {"DELETE", "/v2/ci/accounts/a"}, {"GET", "/v2/ci/accounts/a/repos"},
 	} {
-		e := apiError(t, f.do(c.method, c.path, map[string]string{"token": "x"}, nil), v1.ErrUnavailable)
+		e := apiError(t, f.do(c.method, c.path, map[string]string{"token": "x"}, nil), v2.ErrUnavailable)
 		if e.Reason != "accounts_unavailable" {
 			t.Errorf("%s %s: %+v", c.method, c.path, e)
 		}
@@ -327,12 +335,12 @@ func accountFixture(t *testing.T) (*fixture, ci.Accounts) {
 // conformance: CTR-CTL-15 accounts: the token is verified, kept apart from the configuration and never returned
 func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
 	f, store := accountFixture(t)
-	r := f.do("POST", "/v1/ci/accounts", v1.CiAccountCreate{Token: ciAccountToken}, nil)
+	r := f.do("POST", "/v2/ci/accounts", v2.CiAccountCreate{Token: ciAccountToken}, nil)
 	if r.Status != 200 {
 		t.Fatalf("create: %d %s", r.Status, r.Body)
 	}
 	valid(t, "CiAccount", r.Body)
-	var acct v1.CiAccount
+	var acct v2.CiAccount
 	decodeAs(t, r, &acct)
 	if acct.ID != "octo" || acct.Login != "Octo" || acct.Host != "github.com" || acct.TokenHint != "github_pat_1…AAAA" {
 		t.Fatalf("account = %+v", acct)
@@ -348,7 +356,7 @@ func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
 	}
 
 	// The same login again replaces the token and adds no account.
-	r = f.do("POST", "/v1/ci/accounts", v1.CiAccountCreate{Token: ciAccountToken + "B"}, nil)
+	r = f.do("POST", "/v2/ci/accounts", v2.CiAccountCreate{Token: ciAccountToken + "B"}, nil)
 	if r.Status != 200 {
 		t.Fatalf("replace: %d %s", r.Status, r.Body)
 	}
@@ -358,52 +366,52 @@ func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
 	if got, _ := store.Token("octo"); got != ciAccountToken+"B" {
 		t.Fatalf("token not replaced: %q", got)
 	}
-	var ov v1.CiOverview
-	decodeAs(t, f.ok("GET", "/v1/ci", nil, "CiOverview"), &ov)
+	var ov v2.CiOverview
+	decodeAs(t, f.ok("GET", "/v2/ci", nil, "CiOverview"), &ov)
 	if len(ov.Accounts) != 1 || ov.Accounts[0].ID != "octo" {
 		t.Fatalf("overview accounts = %+v", ov.Accounts)
 	}
 
 	// GitHub refuses a bad token: nothing is saved.
-	e := apiError(t, f.do("POST", "/v1/ci/accounts", v1.CiAccountCreate{Token: "github_pat_ZZZZZZZZZZZZZZZZZZZZZZZZ"}, nil), v1.ErrInvalidArgs)
+	e := apiError(t, f.do("POST", "/v2/ci/accounts", v2.CiAccountCreate{Token: "github_pat_ZZZZZZZZZZZZZZZZZZZZZZZZ"}, nil), v2.ErrInvalidArgs)
 	if e.Field != "token" || e.Reason != "github_rejected" {
 		t.Fatalf("rejected = %+v", e)
 	}
 
 	// Repositories: only those the token administers, with the binding that already covers them.
-	r = f.ok("GET", "/v1/ci/accounts/octo/repos", nil, "CiReposResponse")
-	var repos v1.CiReposResponse
+	r = f.ok("GET", "/v2/ci/accounts/octo/repos", nil, "CiReposResponse")
+	var repos v2.CiReposResponse
 	decodeAs(t, r, &repos)
 	if len(repos.Repos) != 1 || repos.Repos[0].FullName != "octo/app" || !repos.Repos[0].Private || repos.NextPage != nil {
 		t.Fatalf("repos = %+v", repos)
 	}
-	apiError(t, f.do("GET", "/v1/ci/accounts/nobody/repos", nil, nil), v1.ErrNotFound)
+	apiError(t, f.do("GET", "/v2/ci/accounts/nobody/repos", nil, nil), v2.ErrNotFound)
 
 	// Binding with the account: GitHub issues the registration token, and the account is in use.
-	r = f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "octo/app", Account: "octo"}, nil)
+	r = f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{Target: "octo/app", Account: "octo"}, nil)
 	if r.Status != 201 {
 		t.Fatalf("bind: %d %s", r.Status, r.Body)
 	}
 	valid(t, "CiBinding", r.Body)
-	var b v1.CiBinding
+	var b v2.CiBinding
 	decodeAs(t, r, &b)
-	if b.Source != v1.CiSourceAccount || b.Account != "octo" {
+	if b.Source != v2.CiSourceAccount || b.Account != "octo" {
 		t.Fatalf("binding = %+v", b)
 	}
 	if strings.Contains(string(r.Body), "REGTOKEN") || strings.Contains(f.configText(), "REGTOKEN") {
 		t.Fatal("the registration token escaped")
 	}
-	e = apiError(t, f.do("POST", "/v1/ci/bindings", v1.CiBindingCreate{Target: "octo/ro", Account: "octo"}, nil), v1.ErrInvalidArgs)
+	e = apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{Target: "octo/ro", Account: "octo"}, nil), v2.ErrInvalidArgs)
 	if e.Reason != "no_admin_permission" {
 		t.Fatalf("read-only repo: %+v", e)
 	}
-	e = apiError(t, f.do("DELETE", "/v1/ci/accounts/octo", nil, nil), v1.ErrConflict)
+	e = apiError(t, f.do("DELETE", "/v2/ci/accounts/octo", nil, nil), v2.ErrConflict)
 	if e.Reason != "account_in_use" {
 		t.Fatalf("in use: %+v", e)
 	}
 
-	f.do("DELETE", "/v1/ci/bindings/octo-app?force=true", nil, nil)
-	if r = f.do("DELETE", "/v1/ci/accounts/octo", nil, nil); r.Status != 204 {
+	f.do("DELETE", "/v2/ci/bindings/octo-app?force=true", nil, nil)
+	if r = f.do("DELETE", "/v2/ci/accounts/octo", nil, nil); r.Status != 204 {
 		t.Fatalf("delete account: %d %s", r.Status, r.Body)
 	}
 	if _, err := store.Token("octo"); err == nil {
@@ -412,5 +420,5 @@ func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
 	if len(f.store.Get().CI.Accounts) != 0 {
 		t.Fatalf("account still configured: %+v", f.store.Get().CI.Accounts)
 	}
-	apiError(t, f.do("DELETE", "/v1/ci/accounts/octo", nil, nil), v1.ErrNotFound)
+	apiError(t, f.do("DELETE", "/v2/ci/accounts/octo", nil, nil), v2.ErrNotFound)
 }

@@ -96,8 +96,8 @@ def main():
         workspace.mkdir()
         log = root / "fake-ida.jsonl"
         direct, gateway = address(), address()
-        cfg = {"node": {"name": "backend-smoke", "roles": ["agent", "gateway"]},
-               "mesh": {"mode": "lan", "lan": {"mdns": True}}, "gateway": {"listen": gateway},
+        cfg = {"schema_version": 2, "node": {"name": "backend-smoke", "roles": ["agent", "gateway"]},
+               "mesh": {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}}, "gateway": {"listen": gateway},
                "agent": {"default_cwd": str(workspace), "cwd_policy": {"allow": [str(workspace)]},
                          "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}},
                          "backends": {"ida": {"transport": "stdio", "policy": "exclusive", "idle_timeout": "30m",
@@ -109,7 +109,7 @@ def main():
                                         "--state-dir", str(root / "state"), "--listen", direct],
                                        stdout=runtime_log, stderr=runtime_log)
             try:
-                gateway_token = wait_for_default_token(root / "state")
+                gateway_token = wait_for_default_token(binary, root / "state")
                 first = wait_for_gateway(process, gateway, runtime_log, gateway_token)
                 second = MCP(gateway, gateway_token)
                 assert first.session != second.session
