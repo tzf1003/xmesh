@@ -38,11 +38,11 @@ func TestMigrateUsesInstalledCustomConfiguration(t *testing.T) {
 func TestMigrationReadsServiceArguments(t *testing.T) {
 	file, state := filepath.Join(t.TempDir(), "配置 file.yaml"), t.TempDir()
 	for _, args := range [][]string{
-		{"xmesh", "serve", "--service", "--config", file, "--state-dir", state},
-		{"xmesh", "serve", "--config=" + file, "--state-dir=" + state},
+		{"xmesh", "serve", "--service", "--config", file, "--state-dir", state, "--oauth-password-file", file, "--local-only"},
+		{"xmesh", "serve", "--config=" + file, "--state-dir=" + state, "--oauth-password-file=" + file, "--local-only=true"},
 	} {
 		got, err := migrationPathsFromArgs(args)
-		if err != nil || got.config != file || got.state != state {
+		if err != nil || got.config != file || got.state != state || got.password != file || !got.localOnly {
 			t.Fatal(got, err)
 		}
 	}

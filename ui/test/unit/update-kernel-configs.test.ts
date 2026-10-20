@@ -43,6 +43,20 @@ test("a service remains running when its upgrade paths cannot be retained", asyn
   await assert.rejects(services.stop("office"), /config snapshot failed/);
 });
 
+test("registration identity survives a config rename and desktop restart until explicit reinstall", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-service-name-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "saved.json"), paths = { configFile: path.join(root, "xmesh.yaml"), stateDir: root };
+  const store = new KernelConfigs(file, async () => "", async () => paths);
+  await store.capture("alias", { manifest: { node: "old-name" } } as Instance);
+  await store.capture("alias", { manifest: { node: "new-name" } } as Instance);
+  const reloaded = new KernelConfigs(file, async () => "");
+  assert.equal(reloaded.paths("alias")?.serviceNode, "old-name");
+  reloaded.register("alias", { ...paths, ...{ running: false, id: "not-persisted" } }, "new-name");
+  assert.equal(reloaded.paths("alias")?.serviceNode, "new-name");
+  assert.deepEqual(reloaded.paths("alias"), { ...paths, serviceNode: "new-name" });
+});
+
 test("upgrade paths can be read through v1 and v2 status before service shutdown", async () => {
   for (const major of ["1", "2"]) {
     const endpoint = randomEndpoint();

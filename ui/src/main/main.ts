@@ -17,9 +17,9 @@ import { TransferService } from "./transfers";
 import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { bundledXmesh, CliError, cliCommandText, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
+import { bundledXmesh, CliError, cliCommandText, kernelServiceOptions, runKernelCli, runXmeshRaw, runXmeshSetup } from "./cli";
 import { discoverKernelTargets, KernelLifecycle } from "./kernel-lifecycle";
-import { kernelInstallOptions } from "./kernel-install-options";
+import { kernelConfigNode, kernelInstallOptions } from "./kernel-install-options";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -134,7 +134,8 @@ async function start(): Promise<void> {
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
   const kernelConfigs = new KernelConfigs(path.join(app.getPath("userData"), "kernel-configs.json"), runXmeshSetup);
-  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw,
+  const updateKernels = kernelServices({ discover: () => discoverInstances(roots),
+    run: (command, node) => runXmeshRaw(command, kernelConfigs.paths(node)?.serviceNode ?? controller.nodeName(node)),
     ...(!TEST_MODE && kernelBundled && {
       beforeStop: (node: string, instance: Instance) => kernelConfigs.capture(node, instance),
       prepare: (node: string) => kernelConfigs.prepare(node),
@@ -233,6 +234,12 @@ async function start(): Promise<void> {
       return target;
     },
     installOptions: kernelInstallOptions,
+    serviceOptions: kernelServiceOptions,
+    installed: async (id, paths) => {
+      const serviceNode = kernelConfigNode(paths);
+      kernelConfigs.register(id, paths, serviceNode);
+      return serviceNode;
+    },
     run: runKernelCli,
     changed: () => controller.nudge(),
     ...(kernelBundled && { version: app.getVersion() }),

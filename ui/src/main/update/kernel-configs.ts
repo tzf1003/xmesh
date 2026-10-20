@@ -4,11 +4,12 @@ import { ControlClient } from "../client";
 import type { Instance } from "../discovery";
 import type { SetupCliArgs } from "../cli";
 
-interface ConfigPaths { configFile: string; stateDir: string }
+interface ConfigPaths { configFile: string; stateDir: string; serviceNode?: string }
 function valid(value: unknown): value is ConfigPaths {
   const p = value as Partial<ConfigPaths> | null;
   return typeof p?.configFile === "string" && path.isAbsolute(p.configFile) &&
-    typeof p.stateDir === "string" && path.isAbsolute(p.stateDir);
+    typeof p.stateDir === "string" && path.isAbsolute(p.stateDir) &&
+    (p.serviceNode === undefined || /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(p.serviceNode));
 }
 
 /** Retains actual service paths across replacement of the desktop process. */
@@ -21,12 +22,24 @@ export class KernelConfigs {
   paths(node: string): ConfigPaths | undefined { return this.read()[node]; }
   nodes(): string[] { return Object.keys(this.read()); }
 
+  register(node: string, paths: ConfigPaths, serviceNode: string): void {
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node) || !valid({ ...paths, serviceNode })) throw new Error("无效的内核服务记录");
+    this.save({ ...this.read(), [node]: { configFile: paths.configFile, stateDir: paths.stateDir, serviceNode } });
+  }
+
   async capture(node: string, instance: Instance): Promise<void> {
     if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(node)) throw new Error("Invalid node name");
     const paths = await this.readPaths(instance);
     if (!valid(paths)) throw new Error("内核配置和状态目录必须使用绝对路径");
     const saved = this.read();
-    saved[node] = paths;
+    const previous = saved[node];
+    const serviceNode = previous?.configFile === paths.configFile && previous.stateDir === paths.stateDir
+      ? previous.serviceNode ?? instance.manifest.node : instance.manifest.node;
+    saved[node] = { ...paths, ...(serviceNode && { serviceNode }) };
+    this.save(saved);
+  }
+
+  private save(saved: Record<string, ConfigPaths>): void {
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const temporary = `${this.file}.tmp`;
     fs.writeFileSync(temporary, JSON.stringify(saved), { mode: 0o600 });

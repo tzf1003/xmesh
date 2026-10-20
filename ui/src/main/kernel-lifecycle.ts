@@ -7,7 +7,7 @@ import type { DataResult } from "../shared/ipc";
 import { parseKernelRequest, type KernelNode, type KernelResult } from "../shared/kernel";
 import { sameVersion } from "../shared/version";
 
-export interface KernelPaths { configFile: string; stateDir: string }
+export interface KernelPaths { configFile: string; stateDir: string; serviceNode?: string }
 export interface KernelTarget extends KernelNode, KernelPaths { instance?: Instance }
 
 /** Only discovered local nodes are addressable; the renderer never supplies paths. */
@@ -25,7 +25,8 @@ export function discoverKernelTargets(roots: string[], saved: (id: string) => Ke
     const stateDir = path.resolve(root, id);
     const paths = recorded ?? { stateDir, configFile: path.join(stateDir, "xmesh.yaml") };
     return [{ id, name: instance?.manifest.node || id, running: !!instance && !kernelGone(instance.manifest.pid, instance.manifest.started_at),
-      managed: !instance?.protected && !protectedRoots.includes(root), ...paths, instance }];
+      managed: !instance?.protected && !protectedRoots.includes(root), configFile: paths.configFile, stateDir: paths.stateDir,
+      ...(paths.serviceNode && { serviceNode: paths.serviceNode }), instance }];
   });
 }
 
@@ -34,6 +35,8 @@ interface Environment {
   resolve(target: KernelTarget): Promise<KernelPaths>;
   run(args: readonly string[]): Promise<CliRun>;
   installOptions?(paths: KernelPaths): string[];
+  serviceOptions?(paths: KernelPaths): Promise<string[]>;
+  installed?(node: string, paths: KernelPaths): Promise<string>;
   changed(): void;
   version?: string;
   gone?: typeof kernelGone;
@@ -79,14 +82,18 @@ export class KernelLifecycle {
       if (!target) throw new KernelFailure("not_found", "未找到该本机节点，请先使用开始使用向导创建配置");
       if (!target.managed) throw new KernelFailure("forbidden", "系统级内核需要由管理员管理");
       const paths = await this.env.resolve(target);
+      paths.serviceNode ??= target.running ? target.instance?.manifest.node : undefined;
+      let retainedOptions: string[] = [];
       if (!path.isAbsolute(paths.configFile) || !path.isAbsolute(paths.stateDir)) throw new KernelFailure("invalid_path", "内核配置和状态目录必须为绝对路径");
       const command = async (op: string, allowMissing = false): Promise<void> => {
         const args = [op, "--config", paths.configFile];
+        if (op !== "install" && op !== "migrate" && paths.serviceNode) args.push("--name", `xmesh-${paths.serviceNode}`);
         if (op === "install" || op === "migrate") args.push("--state-dir", paths.stateDir);
-        if (op === "install") args.push(...(this.env.installOptions?.(paths) ?? []));
+        if (op === "install") args.push(...(this.env.installOptions?.(paths) ?? []), ...retainedOptions);
         if (op !== "migrate") args.push("--json");
         const result = await this.env.run(args);
         if (result.code !== 0 && !(allowMissing && missing(result))) throw cliFailure(result);
+        if (op === "install" && this.env.installed) paths.serviceNode = await this.env.installed(target.id, paths);
       };
       const stop = async (): Promise<void> => {
         const wasRunning = target.running;
@@ -119,6 +126,7 @@ export class KernelLifecycle {
           await command("uninstall", true);
           break;
         case "reinstall":
+          retainedOptions = await this.env.serviceOptions?.(paths) ?? [];
           await stop();
           await command("uninstall", true);
           await command("migrate");

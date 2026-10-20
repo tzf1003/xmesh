@@ -126,6 +126,34 @@ test("a second request cannot race service replacement on the same node", async 
   assert.equal((await first).ok, true);
 });
 
+test("restart targets the original registration after a configuration rename", async () => {
+  const { service, target, calls } = fixture({ running: true });
+  target.serviceNode = "original-service";
+  assert.equal((await service.request({ op: "restart", node: target.id })).ok, true);
+  for (const args of calls.filter((args) => ["stop", "start"].includes(args[0]!))) {
+    assert.equal(args[args.indexOf("--name") + 1], "xmesh-original-service");
+  }
+});
+
+test("reinstall captures service options before stopping and starts the newly named registration", async () => {
+  const { target } = fixture({ running: true });
+  const calls: string[][] = [];
+  const password = path.resolve("custom/password-file");
+  const service = new KernelLifecycle({ targets: () => [target], resolve: async () => ({ ...target, serviceNode: "old-name" }),
+    serviceOptions: async () => { calls.push(["inspect"]); return ["--oauth-password-file", password]; },
+    installed: async () => "new-name", changed: () => undefined, gone: () => true,
+    status: async () => ({ control: { kernel_version: "1.0.0" } }),
+    run: async args => { calls.push([...args]); return { code: 0, stdout: "", stderr: "" }; },
+  });
+  assert.equal((await service.request({ op: "reinstall", node: target.id })).ok, true);
+  assert.equal(calls[0]?.[0], "inspect");
+  assert.ok(calls.find(args => args[0] === "install")?.includes(password));
+  for (const op of ["stop", "uninstall", "start"]) {
+    const args = calls.find(args => args[0] === op)!;
+    assert.equal(args[args.indexOf("--name") + 1], op === "start" ? "xmesh-new-name" : "xmesh-old-name");
+  }
+});
+
 test("saved custom configurations remain manageable after their control manifest is removed", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-targets-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

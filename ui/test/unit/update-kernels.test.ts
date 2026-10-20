@@ -87,6 +87,20 @@ test("manual start verifies the service node when its state directory has a diff
   assert.deepEqual(calls, ["migrate:office", "start:office"]);
 });
 
+test("startup verification prefers the exact directory before a colliding manifest name", async () => {
+  const checked: string[] = [];
+  const k = kernelServices({
+    discover: () => [
+      { ...instance, id: "alias", manifest: { ...instance.manifest, node: "office" } },
+      { ...instance, id: "office", manifest: { ...instance.manifest, node: "actual-office" } },
+    ], run: async () => ({ code: 0, stdout: "", stderr: "" }),
+    status: async (i) => { checked.push(i.id); return { control: { kernel_version: i.id === "office" ? "old" : "1.0.0" } }; },
+    version: "1.0.0", timeoutMs: 5, pollMs: 1,
+  });
+  await assert.rejects(k.start("office"), /启动验收失败/);
+  assert.ok(checked.length > 0 && checked.every((id) => id === "office"));
+});
+
 test("an unavailable control channel and a failed service start are reported", async () => {
   const env = { discover: () => [] as Instance[], run: async () => ({ code: 0, stdout: "", stderr: "" }), timeoutMs: 5, pollMs: 1 };
   await assert.rejects(kernelServices(env).start("mac"), /控制通道未就绪/);
