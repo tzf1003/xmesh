@@ -6,8 +6,10 @@ import { playgroundZh, playgroundEn } from "./playground-messages";
 
 import { topologyEn, topologyZh } from "./topology-messages";
 import { computerEn, computerZh } from "./computer-messages";
+import { kernelEn, kernelZh } from "./kernel-messages";
 
 export const zh = {
+  ...kernelZh,
   "device.preferLan": "连接时优先局域网，断线后自动尝试其他路径；已建立的连接保持当前路径。",
   "mode.coexist": "局域网与 Tailnet 共存",
   "mode.offline": "设备网络已关闭",
@@ -50,6 +52,9 @@ export const zh = {
   "settings.authkey": "auth key 文件",
   "settings.authkeyHint": "填写已有 auth key 文件的绝对路径。首次运行向导支持直接粘贴 key。",
   "settings.ingressTitle": "入口",
+  "settings.ingressDisabled": "ingress 尚未启用。打开此页不会启用入口。",
+  "settings.ingressPending": "ingress 待启用，尚未保存。保存并确认后才会开启。",
+  "settings.ingressEnableOnSave": "保存时启用 ingress",
   "settings.ingressSub": "入口对外提供 OAuth 保护的访问。Funnel 需要 Tailnet，公网端口与反向隧道可使用可达的设备路径。",
   "settings.needsTailnet": "Funnel 需要启用 Tailnet 并使用官方控制面。",
   "settings.listen": "监听方式",
@@ -1014,6 +1019,7 @@ export const zh = {
 export type Key = keyof typeof zh;
 
 export const en: Record<Key, string> = {
+  ...kernelEn,
   "device.path": "Connection path",
   "device.reconnecting": "Reconnecting",
   "device.conflict": "Device identity conflict",
@@ -1056,6 +1062,9 @@ export const en: Record<Key, string> = {
   "settings.authkey": "Auth key file",
   "settings.authkeyHint": "Absolute path of an existing auth key file. The first-run wizard also accepts pasted keys.",
   "settings.ingressTitle": "Ingress",
+  "settings.ingressDisabled": "Ingress is disabled. Opening this page does not enable it.",
+  "settings.ingressPending": "Ingress is pending activation and has not been saved. Save and confirm to enable it.",
+  "settings.ingressEnableOnSave": "Enable ingress when saving",
   "settings.ingressSub": "The ingress serves OAuth-protected access from outside. Funnel requires Tailnet; a public listener or reverse tunnel can use available device paths.",
   "settings.needsTailnet": "Funnel requires Tailnet enabled with the official control plane.",
   "settings.listen": "Listen mode",

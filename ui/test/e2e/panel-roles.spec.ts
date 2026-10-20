@@ -95,6 +95,9 @@ test("ingress setup and unsaved configuration are respected by the top-bar switc
   const page = await open();
   await page.getByTestId("role-ingress").click();
   await expect(page.getByTestId("settings-ingress")).toBeVisible();
+  await expect(page.getByTestId("settings-role-summary")).not.toContainText("ingress");
+  await expect(page.getByTestId("role-ingress")).toHaveAttribute("aria-checked", "false");
+  await page.getByTestId("settings-ingress-enable").check();
   await expect(page.getByTestId("settings-needs-tailnet")).toHaveCount(0);
   await page.getByTestId("settings-listen").selectOption("funnel");
   await expect(page.getByTestId("settings-needs-tailnet")).toBeVisible();
@@ -164,6 +167,7 @@ for (const missing of ["domain", "certificate"]) {
     } });
     await page.getByTestId("role-ingress").click();
     await expect(page.getByTestId("settings-ingress")).toBeVisible();
+    await page.getByTestId("settings-ingress-enable").check();
     await expect(page.getByTestId("settings-domain")).toBeVisible();
     if (missing === "certificate") await expect(page.getByTestId("settings-cert")).toBeVisible();
     expect(h.kernel.panel.writes).toEqual([]);

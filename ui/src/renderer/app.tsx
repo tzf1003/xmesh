@@ -40,7 +40,7 @@ import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
 export type PageId = "features" | "computer" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
-/** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
+/** Where a link into a page lands: a section or a role's setup, without changing configuration. */
 export interface PageFocus {
   device?: string;
   section?: Section;

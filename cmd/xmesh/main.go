@@ -41,6 +41,7 @@ const usage = `用法: xmesh <子命令> [参数]
            --config 路径  --executable 路径  --state-dir 目录
            --oauth-password-file 文件  --system（仅 Windows：管理员 SCM 服务）
   migrate  升级配置并备份原文件；旧节点停止后重新配对  --config 路径
+  service-info  读取已安装服务的配置路径和安装参数  --name 服务名  --json
   pair     交换设备公钥配对文档
            --config 路径  --state-dir 目录
            --export 文件，或 --import 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
@@ -86,6 +87,8 @@ func run(args []string) error {
 		return withJSON("install", args[1:], install)
 	case "migrate":
 		return migrate(args[1:])
+	case "service-info":
+		return withJSON("service-info", args[1:], serviceInfo)
 	case "pair":
 		return withJSON("pair", args[1:], pair)
 	case "status":

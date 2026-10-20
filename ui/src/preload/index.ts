@@ -21,6 +21,7 @@ const api: PanelApi = {
     ipcRenderer.on("xmesh:panel-navigation", handler);
     return () => { ipcRenderer.removeListener("xmesh:panel-navigation", handler); };
   },
+  kernel: (request) => invoke("xmesh:kernel", request),
   transfers: (request) => invoke("xmesh:transfers", request),
   playground: (request) => invoke("xmesh:playground", request),
   getSnapshot: () => invoke("xmesh:get-snapshot"),

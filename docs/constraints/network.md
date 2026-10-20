@@ -4,6 +4,8 @@
 
 设备链路监听器使用 tsnet 或所选 LAN 网卡地址；两者独立启用，均要求 xmesh 设备信任与 mTLS。禁止把 Agent 端口绑定到 `0.0.0.0` 后直接暴露到公网，也禁止对 Agent 端口做端口映射来代替入口。
 
+LAN 网卡默认仅接受私有 IPv4。显式配置 `mesh.lan.interface` 时，也允许使用系统 Tailscale 网卡的 `100.64.0.0/10` IPv4；该路径沿用 LAN 的设备信任与 mTLS，须关闭 mDNS 并按地址配对。
+
 需要公网 URL 时，只允许 Ingress 角色监听，见 [CON-NET-06](#con-net-06)。
 
 ## CON-NET-02
@@ -13,6 +15,8 @@
 ## CON-NET-03
 
 tailnet 接入使用 `tailscale.com/tsnet`。安装文档和 `install` 子命令不得要求先安装官方 Tailscale 客户端，不得要求 root，不得创建 TUN。
+
+已有系统 Tailscale 的用户可选择上述显式网卡监听方式，复用操作系统路由；这不改变默认 tsnet 接入，也不增加安装前置依赖。
 
 Tailnet 的网络准入、ACL、MagicDNS 和网络密钥由控制面负责。xmesh 设备身份来自独立的持久公钥，配对信任及应用角色适用于 LAN 与 Tailnet，网络节点 ID、WhoIs 或控制面标签不授予 xmesh 信任。
 

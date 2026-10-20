@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { bundledXmesh, xmeshBinary } from "../../src/main/cli";
 
@@ -148,4 +149,22 @@ test("xmeshBinary prefers XMESH_BIN, then the bundled kernel, then PATH", () => 
 test("no runtime dependencies: the renderer is bundled, so app.asar must not carry node_modules", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(UI, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
   assert.deepEqual(Object.keys(pkg.dependencies ?? {}), []);
+});
+
+test("kernel configuration parser runs outside the source tree without YAML runtime dependencies", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-bundled-config-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const module = path.join(root, "kernel-install-options.cjs");
+  fs.copyFileSync(path.join(UI, "dist/src/main/kernel-install-options.js"), module);
+  const configFile = path.join(root, "xmesh.yaml");
+  for (const [config, expected] of [
+    ["mesh:\n  lan:\n    enabled: false\n  tailnet:\n    enabled: false\n", ["--local-only"]],
+    ["mesh:\n  lan:\n    enabled: false\n  tailnet:\n    enabled: true\n", []],
+    [JSON.stringify({ mesh: { lan: { enabled: true } } }), []],
+  ] as const) {
+    fs.writeFileSync(configFile, config);
+    const output = execFileSync(process.execPath, ["-e", "console.log(JSON.stringify(require(process.argv[1]).kernelInstallOptions({configFile:process.argv[2]})))", module, configFile],
+      { encoding: "utf8", env: { ...process.env, NODE_PATH: "" } });
+    assert.deepEqual(JSON.parse(output), expected);
+  }
 });
