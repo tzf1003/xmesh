@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/ci"
@@ -410,9 +411,20 @@ func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
 		t.Fatalf("in use: %+v", e)
 	}
 
-	f.do("DELETE", "/v2/ci/bindings/octo-app?force=true", nil, nil)
-	if r = f.do("DELETE", "/v2/ci/accounts/octo", nil, nil); r.Status != 204 {
-		t.Fatalf("delete account: %d %s", r.Status, r.Body)
+	f.ok("DELETE", "/v2/ci/bindings/octo-app?force=true", nil, "CiBinding")
+	// Unbinding returns while the supervisor drains and unregisters runners.
+	// Account deletion must wait for that cleanup to release its credentials.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r = f.do("DELETE", "/v2/ci/accounts/octo", nil, nil)
+		if r.Status == 204 {
+			break
+		}
+		e = apiError(t, r, v2.ErrConflict)
+		if e.Reason != "account_in_use" || time.Now().After(deadline) {
+			t.Fatalf("delete account after cleanup: %d %s", r.Status, r.Body)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := store.Token("octo"); err == nil {
 		t.Fatal("token kept after deleting the account")
