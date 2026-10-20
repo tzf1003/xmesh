@@ -14,21 +14,24 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
 
 jobs:
-  changes:
+  contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       go: ${{ steps.plan.outputs.go }}
+      windows_native: ${{ steps.plan.outputs.windows_native }}
+      l2_unix: ${{ steps.plan.outputs.l2_unix }}
       headscale: ${{ steps.plan.outputs.headscale }}
       ui: ${{ steps.plan.outputs.ui }}
       ui_mcp: ${{ steps.plan.outputs.ui_mcp }}
       computer: ${{ steps.plan.outputs.computer }}
       extended: ${{ steps.plan.outputs.extended }}
     steps:
-      - uses: actions/checkout@v4
+      - name: 取出仓库
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Select suites from changed paths
@@ -37,12 +40,6 @@ jobs:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python3 scripts/ci_changes.py
 
-  contracts:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: 取出仓库
-        uses: actions/checkout@v4
 
       - name: 安装 Python
         uses: actions/setup-python@v5
@@ -93,8 +90,8 @@ jobs:
         run: npm run typecheck --prefix scripts/gen-control-ts
 
   test:
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.go == 'true'
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -111,12 +108,12 @@ jobs:
       - run: go test -race ./... -timeout=120s
       - run: go vet ./...
       - name: 1 GiB file transfer roundtrip
-        if: needs.changes.outputs.extended == 'true'
+        if: needs.contracts.outputs.extended == 'true'
         env:
           XMESH_TEST_LARGE_TRANSFER: "1"
         run: go test ./internal/fs -run '^Test_LargeFileTransfer$' -count=1 -timeout=300s
       - name: Cross-compile every release target
-        if: needs.changes.outputs.extended == 'true' && runner.os == 'Linux'
+        if: needs.contracts.outputs.extended == 'true' && runner.os == 'Linux'
         env:
           XMESH_TEST_CROSSBUILD: "1"
         run: go test ./cmd/xmesh -run 'Test_CONARCH02' -v -count=1 -timeout=900s
@@ -197,8 +194,8 @@ jobs:
           }
 
   windows-native:
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.windows_native == 'true'
     timeout-minutes: 45
     runs-on: windows-latest
     steps:
@@ -214,7 +211,7 @@ jobs:
           XMESH_TEST_WINDOWS_PTY: "1"
         run: go test -race ./internal/exec ./internal/pty ./internal/fs ./internal/winjob ./internal/toolerr -run Windows -v -timeout=180s
       - name: Windows gateway file visibility regression
-        run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=${{ needs.changes.outputs.extended == 'true' && 50 || 3 }} -v -timeout=120s
+        run: go test -race ./internal/role/gateway -run '^Test_CTRGW01_03_SessionDefaults$' -count=${{ needs.contracts.outputs.extended == 'true' && 50 || 3 }} -v -timeout=120s
       - name: Windows ingress PTY budget and cross-process admission
         env:
           XMESH_TEST_WINDOWS_PTY: "1"
@@ -253,14 +250,14 @@ jobs:
           XMESH_TEST_WINDOWS_BINARY: ${{ runner.temp }}\xmesh-service-test.exe
         run: go test -race ./internal/app ./cmd/xmesh -run WindowsL2 -v -count=1 -timeout=900s
       - name: Windows L2 admission cost measurement
-        if: needs.changes.outputs.extended == 'true'
+        if: needs.contracts.outputs.extended == 'true'
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_ADMISSION_COST: "1"
         run: go test ./internal/winbox -run Test_WindowsAdmissionCost -v -count=1 -timeout=1500s
   l2-unix:
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.l2_unix == 'true'
     timeout-minutes: 15
     # L2 sandbox tests that need a real bubblewrap or sandbox-exec: they refuse
     # connections to the kernel control socket, outside reads and the network, and
@@ -290,29 +287,29 @@ jobs:
         run: go test -race ./internal/policy ./internal/pty ./internal/exec -run L2 -v -count=1 -timeout=600s
 
   headscale:
-    needs: changes
-    if: needs.changes.outputs.headscale == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.headscale == 'true'
     uses: ./.github/workflows/headscale.yml
 
   ui:
-    needs: changes
-    if: needs.changes.outputs.ui == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.ui == 'true'
     uses: ./.github/workflows/ui.yml
 
   ui-mcp:
-    needs: changes
-    if: needs.changes.outputs.ui_mcp == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.ui_mcp == 'true'
     uses: ./.github/workflows/ui-mcp.yml
 
   computer:
-    needs: changes
-    if: needs.changes.outputs.computer == 'true'
+    needs: contracts
+    if: needs.contracts.outputs.computer == 'true'
     uses: ./.github/workflows/computer.yml
 
   ci:
     name: CI result
     if: always()
-    needs: [changes, contracts, test, windows-native, l2-unix, headscale, ui, ui-mcp, computer]
+    needs: [contracts, test, windows-native, l2-unix, headscale, ui, ui-mcp, computer]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -325,11 +322,10 @@ jobs:
           needs = json.loads(os.environ['RESULTS'])
           for name, job in needs.items():
               print(f"{name}: {job['result']}")
-          assert needs['changes']['result'] == 'success', 'CI selection failed'
           assert needs['contracts']['result'] == 'success', 'Contract validation failed'
-          suites = {'test': 'go', 'windows-native': 'go', 'l2-unix': 'go',
+          suites = {'test': 'go', 'windows-native': 'windows_native', 'l2-unix': 'l2_unix',
                     'headscale': 'headscale', 'ui': 'ui', 'ui-mcp': 'ui_mcp', 'computer': 'computer'}
-          selected = needs['changes']['outputs']
+          selected = needs['contracts']['outputs']
           for job, suite in suites.items():
               expected = 'success' if selected[suite] == 'true' else 'skipped'
               assert needs[job]['result'] == expected, f"{job}: expected {expected}"

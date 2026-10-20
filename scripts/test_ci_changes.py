@@ -9,7 +9,8 @@ from ci_changes import SUITES, plan, select
 
 class CIChanges(unittest.TestCase):
     def test_documentation_only_uses_contract_job(self):
-        self.assertFalse(any(select(["README.md", "docs/operations.md"]).values()))
+        self.assertFalse(any(select(["README.md", "docs/operations.md", "ui/README.md",
+                                     "packages/ui-mcp/README.md", "docs/contracts/control.md"]).values()))
 
     def test_go_package_runs_platform_and_network_checks(self):
         selected = select(["internal/fs/download.go"])
@@ -23,13 +24,35 @@ class CIChanges(unittest.TestCase):
                 selected = select([path])
                 self.assertTrue(selected["go"] and selected["headscale"])
 
-    def test_renderer_runs_ui_and_mcp(self):
-        selected = select(["ui/src/renderer/settings.tsx"])
+    def test_renderer_and_styles_run_ui(self):
+        for path in ["ui/src/renderer/pages/Settings.tsx", "ui/src/renderer/styles.css"]:
+            with self.subTest(path=path):
+                self.assertEqual({s for s, enabled in select([path]).items() if enabled}, {"ui"})
+
+    def test_runner_management_runs_go_without_unrelated_integration(self):
+        self.assertEqual({s for s, enabled in select(["internal/ci/manager.go"]).items() if enabled}, {"go"})
+
+    def test_workflow_changes_select_their_component(self):
+        self.assertEqual({s for s, enabled in select([".github/workflows/ui.yml"]).items() if enabled}, {"ui"})
+        self.assertEqual({s for s, enabled in select([".github/workflows/headscale.yml"]).items() if enabled}, {"headscale"})
+        self.assertFalse(any(select([".github/workflows/pages.yml"]).values()))
+
+    def test_windows_sandbox_and_unix_sandbox_are_separate(self):
+        selected = select(["internal/winbox/runner_windows.go"])
+        self.assertTrue(selected["windows_native"])
+        self.assertFalse(selected["l2_unix"] or selected["computer"])
+
+    def test_mcp_bridge_and_shared_ui_dependencies(self):
+        selected = select(["ui/src/preload/index.ts"])
         self.assertTrue(selected["ui"] and selected["ui_mcp"])
-        self.assertFalse(selected["go"] or selected["computer"])
+        selected = select(["ui/package-lock.json"])
+        self.assertTrue(all(selected[s] for s in ("ui", "ui_mcp", "computer")))
+
+    def test_new_kernel_package_gets_conservative_coverage(self):
+        self.assertTrue(all(select(["internal/new_feature/handler.go"])[s] for s in SUITES))
 
     def test_schema_runs_consumers(self):
-        selected = select(["docs/contracts/schemas/control.schema.json"])
+        selected = select(["docs/contracts/schemas/config.schema.json", "api/control/v2/types.go"])
         self.assertTrue(all(selected[s] for s in ("go", "headscale", "ui", "ui_mcp")))
 
     def test_native_shared_and_ci_inputs(self):
@@ -38,7 +61,7 @@ class CIChanges(unittest.TestCase):
                      "scripts/package_computer.py"]:
             with self.subTest(path=path):
                 self.assertTrue(select([path])["computer"])
-        for path in ["go.sum", ".github/workflows/ui.yml", "scripts/release_gate.py"]:
+        for path in ["go.sum", ".github/workflows/go.yml", "scripts/release_gate.py"]:
             with self.subTest(path=path):
                 self.assertTrue(all(select([path])[s] for s in SUITES))
 
