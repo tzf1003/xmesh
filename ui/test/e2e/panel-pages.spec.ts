@@ -23,9 +23,15 @@ async function open(opts: Parameters<typeof launch>[0] = {}, nav?: string): Prom
   const page = await h.openPanel();
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
   if (nav) {
-    await navigate(page, nav);
-    await expect(page.getByTestId(`page-${nav}`)).toBeVisible();
-    if (nav === "config") await page.getByTestId("config-source-tab").click();
+    if (nav === "config") {
+      await navigate(page, "settings");
+      await page.getByTestId("settings-tab-diagnostics").click();
+      await page.getByRole("button", { name: "修复配置", exact: true }).click();
+    } else if (nav === "audit") {
+      await navigate(page, "sessions");
+      await page.getByTestId("sessions-tab-history").click();
+    } else await navigate(page, nav);
+    await expect(page.getByTestId(`page-${nav === "audit" ? "sessions" : nav}`)).toBeVisible();
   }
   return page;
 }
@@ -43,11 +49,24 @@ async function watchCsp(page: Page): Promise<() => Promise<string[]>> {
 test("every page renders under the CSP without violations", async () => {
   const page = await open({ kernel: { status: LAN_STATUS } });
   const violations = await watchCsp(page);
-  for (const id of ["overview", "runtime", "devices", "sessions", "authz", "ingress", "settings", "config", "audit", "mesh"]) {
+  for (const id of ["overview", "runtime", "devices", "sessions", "authz", "ingress", "settings", "mesh"]) {
     await navigate(page, id);
     await expect(page.getByTestId(`page-${id}`)).toBeVisible();
   }
-  await expect(page.getByTestId("nav-setup")).toBeVisible();
+  await navigate(page, "sessions");
+  await page.getByTestId("sessions-tab-history").click();
+  await expect(page.getByTestId("audit-table")).toBeVisible();
+  await navigate(page, "settings");
+  await page.getByTestId("settings-tab-diagnostics").click();
+  await page.getByRole("button", { name: "修复配置", exact: true }).click();
+  await expect(page.getByTestId("config-editor")).toBeVisible();
+  await navigate(page, "settings");
+  await page.getByTestId("settings-tab-about").click();
+  await expect(page.getByTestId("page-about")).toBeVisible();
+  await page.getByTestId("settings-tab-general").click();
+  await page.getByTestId("settings-maintenance").locator("summary").click();
+  await page.getByTestId("settings-open-setup").click();
+  await expect(page.getByTestId("page-setup")).toBeVisible();
   expect(await violations()).toEqual([]);
 });
 
@@ -96,8 +115,8 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
   const page = await open({ kernel: { status: LAN_STATUS } }, "devices");
   await expect(page.getByTestId("peers-table")).toBeVisible();
 
-  // The document flow is the advanced fallback, collapsed by default.
-  await page.getByTestId("pair-advanced").locator("summary").click();
+  await page.getByTestId("device-method-documents").click();
+  await expect(page.getByTestId("device-panel-documents")).toBeVisible();
   await page.getByTestId("pair-export").click();
   await expect(page.getByTestId("pair-my-fingerprint")).toContainText(h.kernel.panel.localPair.fingerprint.slice(0, 2));
 
@@ -127,13 +146,18 @@ test("devices: peers are listed and a typed fingerprint is required to import a 
 
 test("devices: pairing is available on a tailnet node", async () => {
   const page = await open({}, "devices");
+  await page.getByTestId("device-method-manual").click();
   await expect(page.getByTestId("pair-manual")).toBeVisible();
 });
 
 test("sessions: the busy fixture shows ptys and executions", async () => {
   const page = await open({}, "sessions");
-  await expect(page.getByTestId("pty-table")).toBeVisible();
   await expect(page.getByTestId("exec-table")).toBeVisible();
+  await expect(page.getByTestId("exec-table")).toContainText("exec.run");
+  await page.getByTestId("sessions-tab-resources").click();
+  const terminal = h.kernel.panel.sessions.pty[0]!;
+  await expect(page.getByTestId("session-resources")).toContainText(terminal.name || terminal.id);
+  await expect(page.getByTestId("session-resources")).toContainText(h.kernel.panel.sessions.leases[0]!.resource);
 });
 
 test("authz: create a PAT, see its secret once, rotate and delete it", async () => {
@@ -254,6 +278,7 @@ test("audit: events are listed and filters narrow them", async () => {
   await expect(page.getByTestId("audit-table")).toContainText("control.config.put");
   await expect(page.getByTestId("audit-table")).toContainText("exec.run");
 
+  await page.getByTestId("execution-more-filters").click();
   await page.getByTestId("audit-tool").fill("exec.run");
   await page.getByTestId("audit-search").click();
   await expect(page.getByTestId("audit-table")).not.toContainText("control.config.put");
@@ -262,7 +287,8 @@ test("audit: events are listed and filters narrow them", async () => {
 
 test("pages for capabilities the kernel lacks say so and send no request", async () => {
   const page = await open({ kernel: { capabilities: ["status", "events", "peers", "sessions", "drain"] } });
-  await page.getByTestId("nav-audit").click();
+  await navigate(page, "sessions");
+  await page.getByTestId("sessions-tab-history").click();
   await expect(page.getByTestId("not-supported")).toBeVisible();
   expect(h.kernel.requests.some((r) => r.path.startsWith("/v2/audit"))).toBe(false);
 });
@@ -302,6 +328,7 @@ test("leftover kernel state: cleanup removes the manifest and keeps the node con
   const config = path.join(dir, "xmesh.yaml");
   fs.writeFileSync(config, "node:\n  name: old-node\n");
   const page = await h.openPanel();
+  await navigate(page, "overview");
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await expect(page.getByTestId("state")).toContainText("内核未运行");
@@ -326,10 +353,15 @@ test("leftover kernel state without a config still offers cleanup and setup", as
   fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, "control.json"), JSON.stringify({ ...h.kernel.manifest(), pid: child.pid, endpoint: `${h.kernel.endpoint}-closed` }));
   const page = await h.openPanel();
+  await navigate(page, "overview");
   await expect(page.getByTestId("cleanup-stale-old-node")).toBeVisible();
-  await expect(page.getByTestId("goto-setup")).toBeVisible();
+  await expect(page.getByTestId("goto-settings")).toBeVisible();
   await page.getByTestId("cleanup-stale-old-node").click();
   await expect(page.getByTestId("stale-state")).toHaveCount(0);
+  await page.getByTestId("goto-settings").click();
+  await expect(page.getByTestId("page-settings")).toBeVisible();
+  await page.getByTestId("settings-maintenance").locator("summary").click();
+  await page.getByTestId("settings-open-setup").click();
   await expect(page.getByTestId("page-setup")).toBeVisible();
 });
 

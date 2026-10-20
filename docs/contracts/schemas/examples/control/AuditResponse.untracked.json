@@ -1,0 +1,21 @@
+{
+  "events": [
+    {
+      "time": "2026-10-20T10:00:00.000Z",
+      "event": "task_untracked",
+      "caller": "node/session",
+      "device": "node",
+      "tool": "ui.run",
+      "status": "error",
+      "error": "authorization_lost",
+      "duration_ms": 1000,
+      "execution_id": "x-untracked",
+      "started_at": "2026-10-20T09:59:59.000Z",
+      "layer": "agent",
+      "run_id": "run-untracked",
+      "task_status": "unknown"
+    }
+  ],
+  "next_cursor": null,
+  "enabled": true
+}

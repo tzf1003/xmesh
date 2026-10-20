@@ -79,7 +79,7 @@ func Test_AuditUnknownToolResult(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	for _, path := range files {
 		body, _ := os.ReadFile(path)
-		if strings.Contains(string(body), `"tool":"local/sys.missing"`) && strings.Contains(string(body), `"error":"internal"`) {
+		if strings.Contains(string(body), `"tool":"local/sys.missing"`) && strings.Contains(string(body), `"error":"internal"`) && strings.Contains(string(body), `"execution_id":"x-`) && strings.Contains(string(body), `"layer":"gateway"`) {
 			return
 		}
 	}

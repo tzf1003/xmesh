@@ -1,141 +1,48 @@
 import type { JSX } from "preact";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
-import { Badge, Banner, Empty, NotSupported, PageHead, ResourceView } from "../components";
+import { Badge, Banner, Dialog, Empty, ErrorBanner, NotSupported, PageHead } from "../components";
+import { Icon, type IconName } from "../icons";
+import { useCopy } from "../design-copy";
 import { useResource } from "../hooks";
-import { useT } from "../i18n";
-import { ago, formatIdle, formatTime } from "../lib/format";
+import { formatTime, formatDuration } from "../lib/format";
+import { buildAuditQuery, EMPTY_AUDIT_FORM, type AuditForm } from "../lib/audit";
+import { auditRow, executionMatches, liveRows, resourceRows, type ExecutionRow, type ExecutionStatus, type ExecutionCategory } from "../lib/executions";
+import { AUDIT_EVENTS, type ActionError } from "../../shared/ipc";
+import type { AuditEvent, SessionsResponse } from "../../shared/control";
+const categoryIcons:Record<ExecutionCategory,IconName>={command:"code",file:"folder",terminal:"terminal",desktop:"device",ui:"runner",backend:"network",system:"shield"};
+const unavailable={ok:false as const,error:{code:"not_implemented",message:"This capability is unavailable"}};
+const EMPTY_SESSIONS:SessionsResponse={pty:[],exec:[],leases:[]};
 
-export function Sessions({ ctx }: { ctx: PageContext }): JSX.Element {
-  const t = useT();
-  const supported = ctx.can("sessions");
-  const { resource, reload } = useResource(() => getApi().getSessions(), [ctx.snapshot.selectedInstance, supported], supported ? 3000 : undefined);
-  if (!supported) {
-    return (
-      <div class="page">
-        <PageHead title={t("nav.sessions")} />
-        <NotSupported what={t("nav.sessions")} />
-      </div>
-    );
-  }
-  return (
-    <div class="page" data-testid="page-sessions">
-      <PageHead title={t("nav.sessions")} sub={t("sessions.sub")}>
-        <button type="button" class="btn" onClick={reload}>
-          {t("common.refresh")}
-        </button>
-      </PageHead>
-      <ResourceView resource={resource}>
-        {(s) => (
-          <>
-            {s.pty.some((p) => p.state === "orphaned") && <Banner kind="warn" testid="orphans">{t("sessions.orphans")}</Banner>}
-            <section class="card">
-              <h2>{t("sessions.pty")}</h2>
-              {s.pty.length === 0 ? (
-                <Empty>{t("sessions.noPty")}</Empty>
-              ) : (
-                <div class="table-wrap">
-                  <table data-testid="pty-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("col.name")}</th>
-                        <th scope="col">{t("col.owner")}</th>
-                        <th scope="col">{t("col.status")}</th>
-                        <th scope="col">{t("col.cwd")}</th>
-                        <th scope="col" class="num">{t("col.idle")}</th>
-                        <th scope="col" class="num">{t("col.size")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {s.pty.map((p) => (
-                        <tr key={p.id}>
-                          <td>
-                            {p.name ?? <span class="sub">{t("sessions.unnamed")}</span>} <span class="hint mono">{p.id}</span>
-                          </td>
-                          <td>{p.oauth_client ?? (p.owner || "—")}</td>
-                          <td>
-                            <Badge kind={p.state === "active" ? "ok" : p.state === "orphaned" ? "warn" : ""}>{t(`pty.${p.state}`)}</Badge>
-                          </td>
-                          <td class="mono">{p.cwd}</td>
-                          <td class="num">{formatIdle(p.idle_s)}</td>
-                          <td class="num">
-                            {p.cols}×{p.rows}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-            <section class="card">
-              <h2>{t("sessions.exec")}</h2>
-              {s.exec.length === 0 ? (
-                <Empty>{t("sessions.noExec")}</Empty>
-              ) : (
-                <div class="table-wrap">
-                  <table data-testid="exec-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("col.command")}</th>
-                        <th scope="col">{t("col.caller")}</th>
-                        <th scope="col">{t("col.mode")}</th>
-                        <th scope="col">{t("col.status")}</th>
-                        <th scope="col">{t("col.started")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {s.exec.map((e) => {
-                        const when = ago(e.started_at);
-                        return (
-                          <tr key={e.id}>
-                            <td class="mono">{e.cmd}</td>
-                            <td>{e.oauth_client ?? e.caller}</td>
-                            <td>{e.mode}</td>
-                            <td>
-                              <Badge kind={e.state === "running" ? "ok" : "warn"}>{t(`exec.${e.state}`)}</Badge>
-                            </td>
-                            <td title={formatTime(e.started_at)}>{when ? t(`ago.${when.unit}`, { n: when.n }) : "—"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-            <section class="card">
-              <h2>{t("sessions.leases")}</h2>
-              {s.leases.length === 0 ? (
-                <Empty>{t("sessions.noLeases")}</Empty>
-              ) : (
-                <div class="table-wrap">
-                  <table data-testid="lease-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">{t("col.resource")}</th>
-                        <th scope="col">{t("col.owner")}</th>
-                        <th scope="col" class="num">{t("col.token")}</th>
-                        <th scope="col">{t("col.expires")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {s.leases.map((l) => (
-                        <tr key={l.resource}>
-                          <td class="mono">{l.resource}</td>
-                          <td>{l.owner}</td>
-                          <td class="num">{l.token}</td>
-                          <td>{formatTime(l.expires_at)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </>
-        )}
-      </ResourceView>
-    </div>
-  );
+export function Sessions({ctx}:{ctx:PageContext}):JSX.Element {
+ const c=useCopy();const [view,setView]=useState<"live"|"history"|"resources">(ctx.focus?.sessionsTab??"live");const [query,setQuery]=useState("");const [type,setType]=useState("all"),[status,setStatus]=useState("all"),[device,setDevice]=useState("all"),[layer,setLayer]=useState("all");const [selected,setSelected]=useState<string>();const [mobileDetail,setMobileDetail]=useState(false);const [advanced,setAdvanced]=useState(false);const [form,setForm]=useState<AuditForm>(EMPTY_AUDIT_FORM),[appliedForm,setAppliedForm]=useState<AuditForm>(EMPTY_AUDIT_FORM);const [events,setEvents]=useState<AuditEvent[]>([]);const [cursor,setCursor]=useState<string|null>(null),[pages,setPages]=useState(1),[loading,setLoading]=useState(false),[auditEnabled,setAuditEnabled]=useState(true),[auditError,setAuditError]=useState<ActionError>();const request=useRef(0);const active=useRef(true);const [clock,setClock]=useState(Date.now());
+ const supported=ctx.can("sessions"),auditSupported=ctx.can("audit"),computerSupported=ctx.can("computer");
+ const sessionResource=useResource(()=>supported?getApi().getSessions():Promise.resolve(unavailable),[ctx.snapshot.selectedInstance,supported],supported?1000:undefined);
+ const computer=useResource(()=>computerSupported&&view==="resources"?getApi().computer({op:"get"}):Promise.resolve(unavailable),[ctx.snapshot.selectedInstance,computerSupported,view],computerSupported&&view==="resources"?3000:undefined);
+ useEffect(()=>{const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer)},[]);
+ useEffect(()=>{active.current=true;return()=>{active.current=false;request.current++}},[]);
+ useEffect(()=>{if(ctx.focus?.sessionsTab)setView(ctx.focus.sessionsTab)},[ctx.focus?.sessionsTab]);
+ const load=async(f:AuditForm,next?:string):Promise<void>=>{const seq=++request.current;setLoading(true);const r=await getApi().queryAudit(buildAuditQuery(f,100,next));if(!active.current||seq!==request.current)return;setLoading(false);if(!r.ok){setAuditError(r.error);return}setAuditError(undefined);setAuditEnabled(r.data.enabled);setEvents(current=>next?[...current,...r.data.events]:r.data.events);setCursor(r.data.next_cursor);if(next)setPages(n=>n+1);else setPages(1)};
+ useEffect(()=>{request.current++;setEvents([]);setCursor(null);setPages(1);if(auditSupported)void load(appliedForm)},[ctx.snapshot.selectedInstance,auditSupported,appliedForm]);
+ useEffect(()=>{if(view!=="history"||!auditSupported||pages>1)return;const timer=setInterval(()=>{if(!loading)void load(appliedForm)},3000);return()=>clearInterval(timer)},[view,pages,auditSupported,appliedForm,loading]);
+ const stateData=sessionResource.resource.state==="ready"?sessionResource.resource.data:sessionResource.resource.state==="error"?sessionResource.resource.stale:undefined;const s=stateData??EMPTY_SESSIONS;const hostname=ctx.snapshot.connection.kind==="connected"?ctx.snapshot.connection.status.hostname:"";
+ const live=liveRows(s,hostname);const history=events.map(auditRow);const resources=resourceRows(s,hostname,computer.resource.state==="ready"?computer.resource.data:undefined);const current=view==="live"?live:view==="history"?history:resources;const visible=current.filter(r=>executionMatches(r,query,type,status,device,layer));const selectedRow=visible.find(r=>r.id===selected)??visible[0];
+ const changeView=(v:typeof view):void=>{setView(v);setSelected(undefined);setQuery("");setType("all");setStatus("all");setDevice("all");setLayer("all");if(v==="history"&&auditSupported)void load(appliedForm)};
+ const statusLabel=(s:ExecutionStatus):string=>({queued:c("排队中","Queued"),running:c("运行中","Running"),async:c("后台执行中","Background task"),unknown:c("状态未知","Unknown"),success:c("成功","Succeeded"),failed:c("失败","Failed"),denied:c("已拒绝","Denied"),accepted:c("任务已受理","Task accepted"),cancelled:c("已取消","Cancelled"),active:c("已连接","Connected"),held:c("占用中","In use"),orphaned:c("待回收","Orphaned"),closed:c("已关闭","Closed"),notice:c("事件通知","Event")})[s];
+ const categoryLabel=(type:ExecutionCategory):string=>({command:c("命令","Commands"),file:c("文件","Files"),terminal:c("终端","Terminals"),desktop:c("桌面","Desktop"),ui:c("UI 自动化","UI automation"),backend:c("后端工具","Backend tools"),system:c("系统事件","System events")})[type];
+ const tone=(s:ExecutionStatus):"ok"|"warn"|"danger"|""=>["failed","denied"].includes(s)?"danger":["unknown","queued","orphaned"].includes(s)?"warn":["running","async","success","active"].includes(s)?"ok":"";
+ const detail=(r:ExecutionRow):JSX.Element=><div class="execution-details"><div class="execution-detail-title"><span class="execution-symbol"><Icon name={categoryIcons[r.category]}/></span><div><h3>{r.tool}</h3><Badge kind={tone(r.status)}>{statusLabel(r.status)}</Badge></div></div><dl class="overview-facts"><dt>{c("目标设备","Target device")}</dt><dd>{r.device}</dd><dt>{c("调用客户端","Client")}</dt><dd>{r.client||"—"}</dd><dt>{c("调用者","Caller")}</dt><dd class="mono">{r.caller||"—"}</dd>{r.layer&&<><dt>{c("记录层","Layer")}</dt><dd>{r.layer==="agent"?"Agent":"Gateway / Ingress"}</dd></>}{r.time&&<><dt>{view==="history"?c("记录时间","Recorded"):c("开始时间","Started")}</dt><dd>{formatTime(r.time)}</dd></>}{(r.duration!==undefined||r.execution)&&<><dt>{c("耗时","Duration")}</dt><dd>{formatDuration(r.duration??Math.max(0,clock-Date.parse(r.time!)))}</dd></>}{r.execution?.run_id&&<><dt>{c("任务编号","Task ID")}</dt><dd class="mono">{r.execution.run_id}</dd></>}{r.fields?.map(([k,v])=><><dt>{k}</dt><dd class="mono">{v}</dd></>)}</dl>{r.target&&<div class="execution-object"><h4>{c("执行对象","Target")}</h4><code>{r.target}</code></div>}{r.execution?.state==="async"&&<Banner>{c("工具调用已返回，后台任务仍在执行。任务的最终状态将单独记录。","The tool returned, while its task is still running. The final outcome is recorded separately.")}</Banner>}{r.status==="unknown"&&<Banner kind="warn">{c("暂时无法确认后台任务的状态，不能据此判断任务已经完成。","The task status is unavailable; completion is not confirmed.")}</Banner>}{r.audit&&<><details class="execution-audit" data-testid="execution-audit"><summary>{c("审计详情","Audit details")}<Icon name="chevron"/></summary><pre>{JSON.stringify(r.audit,null,2)}</pre></details><p class="hint">{c("记录仅包含审计元数据与参数摘要。","Records contain audit metadata and argument summaries.")}</p></>}{r.status==="orphaned"&&<Banner kind="warn">{c("终端已失去所有者，将在宽限期结束后自动关闭。","This terminal has lost its owner and will close after its grace period.")}</Banner>}</div>;
+ if(!supported&&!auditSupported)return <div class="page"><PageHead title={c("会话","Sessions")}/><NotSupported what={c("会话与审计","Sessions and audit")}/></div>;
+ return <div class="page control-page execution-page" data-testid="page-sessions"><PageHead title={c("会话","Sessions")} sub={c("统一查看工具执行、历史记录与审计事件。","Track tool execution, history and audit events.")}><button type="button" class="btn" onClick={()=>{sessionResource.reload();if(auditSupported)void load(appliedForm)}} data-testid="sessions-refresh"><Icon name="refresh"/>{c("刷新","Refresh")}</button></PageHead>
+ <section class="execution-overview"><div><span>{c("正在运行","Running")}</span><strong>{live.filter(r=>r.status!=="queued").length}</strong></div><div><span>{c("等待执行","Queued")}</span><strong>{live.filter(r=>r.status==="queued").length}</strong></div><div><span>{c("已加载历史","Loaded history")}</span><strong>{events.length}</strong></div><button type="button" onClick={()=>{changeView("history");setStatus("issues")}}><span>{c("失败与拒绝","Failed & denied")}</span><strong>{history.filter(r=>r.status==="failed"||r.status==="denied").length}</strong></button></section>
+ <div class="execution-tabs" role="tablist" aria-label={c("执行视图","Execution views")}>{([ ["live",c("实时执行","Live"),live.length], ["history",c("历史记录","History"),events.length], ["resources",c("会话与资源","Sessions & resources"),resources.length] ] as const).map(([id,label,n])=><button type="button" role="tab" aria-selected={view===id} data-testid={`sessions-tab-${id}`} onClick={()=>changeView(id)}>{label}<span>{n}</span></button>)}</div>
+ {view!=="history"&&sessionResource.resource.state==="error"&&<ErrorBanner error={sessionResource.resource.error}/>}{view==="live"&&stateData&&s.executions===undefined&&<Banner>{c("当前内核提供命令执行视图；升级内核后可查看所有工具调用。","This kernel exposes command execution only. Upgrade it to see all tool calls.")}</Banner>}{s.execution_limits&&s.execution_limits.rejected_total>0&&<Banner kind="warn">{c("部分调用未被实时跟踪，历史结果仍可在审计中查询。","Some calls were not tracked live. Completed results remain in audit history.")}</Banner>}
+ {view==="history"&&<>{!auditSupported?<NotSupported what={c("审计记录","Audit records")}/>:auditError?<ErrorBanner error={auditError}/>:!auditEnabled&&<Banner>{c("当前节点未启用审计。","Audit is disabled on this node.")}</Banner>}</>}
+ <div class="execution-filters"><label class="device-search"><Icon name="search"/><input type="search" value={query} onInput={e=>setQuery(e.currentTarget.value)} placeholder={c("搜索工具、对象或调用者…","Search tools, targets or callers…")} aria-label={c("搜索执行记录","Search execution records")} data-testid="execution-search"/></label><select value={type} onChange={e=>setType(e.currentTarget.value)} aria-label={c("工具类型","Tool type")} data-testid="execution-type"><option value="all">{c("全部类型","All types")}</option>{Object.keys(categoryIcons).map(t=><option value={t}>{categoryLabel(t as ExecutionCategory)}</option>)}</select><select value={device} onChange={e=>setDevice(e.currentTarget.value)} aria-label={c("目标设备","Target device")}><option value="all">{c("全部设备","All devices")}</option>{[...new Set(current.map(r=>r.device))].filter(Boolean).map(d=><option>{d}</option>)}</select><select value={status} onChange={e=>setStatus(e.currentTarget.value)} aria-label={c("执行状态","Execution state")} data-testid="execution-status"><option value="all">{c("全部状态","All states")}</option>{([...new Set(current.map(r=>r.status))] as ExecutionStatus[]).map(s=><option value={s}>{statusLabel(s)}</option>)}<option value="issues">{c("失败与拒绝","Failed & denied")}</option></select><button type="button" class="btn" aria-expanded={advanced} onClick={()=>setAdvanced(v=>!v)} data-testid="execution-more-filters"><Icon name="sliders"/>{c("更多筛选","Filters")}</button></div>
+ {advanced&&<form class="execution-advanced" onSubmit={e=>{e.preventDefault();setAppliedForm({...form})}}>{view==="history"&&<><label>{c("起始时间","From")}<input type="datetime-local" value={form.since} onInput={e=>setForm({...form,since:e.currentTarget.value})}/></label><label>{c("截止时间","Until")}<input type="datetime-local" value={form.until} onInput={e=>setForm({...form,until:e.currentTarget.value})}/></label><label>{c("事件类型","Event")}<select value={form.event} onChange={e=>setForm({...form,event:e.currentTarget.value})} data-testid="audit-event"><option value="">{c("全部事件","All events")}</option>{AUDIT_EVENTS.map(ev=><option>{ev}</option>)}</select></label><label>{c("工具名称","Tool name")}<input value={form.tool} onInput={e=>setForm({...form,tool:e.currentTarget.value})} data-testid="audit-tool"/></label><label>{c("调用者","Caller")}<input value={form.caller} onInput={e=>setForm({...form,caller:e.currentTarget.value})}/></label><button type="submit" class="btn primary" disabled={loading} data-testid="audit-search">{c("查询","Search")}</button></>}<label>{c("记录层","Layer")}<select value={layer} onChange={e=>setLayer(e.currentTarget.value)}><option value="all">{c("全部","All")}</option><option value="agent">Agent</option><option value="gateway">Gateway / Ingress</option></select></label><button type="button" class="text-button" onClick={()=>{setForm(EMPTY_AUDIT_FORM);setAppliedForm(EMPTY_AUDIT_FORM);setQuery("");setType("all");setStatus("all");setDevice("all");setLayer("all")}}>{c("重置筛选","Reset filters")}</button></form>}
+ <div class="execution-result-caption"><span>{visible.length} {c("条结果","results")}</span><span>{view==="history"?pages>1?c("历史分页 · 刷新返回最新","History pages · refresh for latest"):c("最新记录 · 每 3 秒刷新","Latest records · refreshed every 3s"):c("每秒更新","Updated every second")}</span></div>
+ <div class="execution-layout"><section class="execution-list-panel" data-testid={view==="history"?"audit-table":view==="live"?"exec-table":"session-resources"}><div class="execution-columns"><span>{c("工具 / 执行对象","Tool / target")}</span><span>{c("目标设备","Device")}</span><span>{c("调用者","Caller")}</span><span>{c("状态","State")}</span><span>{c("耗时","Duration")}</span><span/></div>{visible.length?visible.map(r=><button type="button" class="execution-row" aria-pressed={selectedRow?.id===r.id} onClick={()=>{setSelected(r.id);setMobileDetail(window.matchMedia("(max-width:1050px)").matches)}} data-testid="execution-row"><span class="execution-row-name"><Icon name={categoryIcons[r.category]}/><span><strong>{r.tool}</strong><small>{r.target||categoryLabel(r.category)}</small></span></span><span class="execution-row-device">{r.device}{r.time&&view==="history"&&<small>{formatTime(r.time)}</small>}</span><span class="execution-row-client">{r.client}<small>{r.layer}</small></span><span><Badge kind={tone(r.status)}>{statusLabel(r.status)}</Badge></span><span class="execution-row-duration">{r.duration!==undefined?formatDuration(r.duration):r.execution?formatDuration(Math.max(0,clock-Date.parse(r.time!))):"—"}</span><Icon name="chevron"/></button>):<Empty>{loading?c("正在读取记录…","Loading records…"):c("当前没有符合条件的记录。","No matching records.")}</Empty>}<div class="execution-list-footer"><span>{view==="history"?c("已加载","Loaded"):c("当前","Current")} {current.length} {c("条记录","records")}</span>{view==="history"&&cursor&&<button type="button" class="text-button" disabled={loading} onClick={()=>void load(appliedForm,cursor)} data-testid="audit-more">{c("加载更多","Load more")}<Icon name="chevron"/></button>}</div></section><aside class="execution-inspector"><h2>{c("执行详情","Execution details")}</h2>{selectedRow?detail(selectedRow):<Empty>{c("选择一条记录查看详情。","Select a record to inspect it.")}</Empty>}</aside></div>
+ {mobileDetail&&selectedRow&&<Dialog drawer title={c("执行详情","Execution details")} testid="execution-details-dialog" onClose={()=>setMobileDetail(false)}>{detail(selectedRow)}</Dialog>}
+ </div>;
 }

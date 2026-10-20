@@ -2,6 +2,7 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,15 +21,22 @@ import (
 )
 
 type Logger struct {
-	mu        sync.Mutex
-	dir       string
-	retention time.Duration
-	schema    *jsonschema.Schema
-	io        map[string]ioSummary
-	stop      chan struct{}
-	done      chan struct{}
-	once      sync.Once
-	observer  atomic.Pointer[func(map[string]any)]
+	mu                sync.Mutex
+	dir               string
+	retention         time.Duration
+	schema            *jsonschema.Schema
+	io                map[string]ioSummary
+	stop              chan struct{}
+	done              chan struct{}
+	once              sync.Once
+	observer          atomic.Pointer[func(map[string]any)]
+	executionMu       sync.Mutex
+	executions        map[string]*Execution
+	executionRejected uint64
+	executionsClosed  bool
+	executionWorkers  sync.WaitGroup
+	executionCtx      context.Context
+	executionCancel   context.CancelFunc
 }
 type ioSummary struct {
 	bytes   int
@@ -54,6 +62,7 @@ func New(dir string, retention time.Duration) (*Logger, error) {
 		return nil, e
 	}
 	l := &Logger{dir: dir, retention: retention, schema: schema, io: map[string]ioSummary{}, stop: make(chan struct{}), done: make(chan struct{})}
+	l.executionCtx, l.executionCancel = context.WithCancel(context.Background())
 	if e = l.Prune(time.Now()); e != nil {
 		return nil, e
 	}
@@ -128,6 +137,15 @@ func (l *Logger) RecordSession(oauthSession, caller, client, device, tool string
 
 // RecordSessionOrigin adds a client-reported origin for display and correlation only.
 func (l *Logger) RecordSessionOrigin(origin, oauthSession, caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
+	return l.recordSessionOrigin(nil, origin, oauthSession, caller, client, device, tool, args, result, isError, duration)
+}
+
+// RecordExecution correlates a completed MCP call with its live execution.
+func (l *Logger) RecordExecution(x *Execution, origin, oauthSession, caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
+	return l.recordSessionOrigin(x, origin, oauthSession, caller, client, device, tool, args, result, isError, duration)
+}
+
+func (l *Logger) recordSessionOrigin(x *Execution, origin, oauthSession, caller, client, device, tool string, args json.RawMessage, result any, isError bool, duration time.Duration) error {
 	b, e := json.Marshal(result)
 	if e != nil {
 		return toolerr.Internal("audit.result", e)
@@ -155,6 +173,13 @@ func (l *Logger) RecordSessionOrigin(origin, oauthSession, caller, client, devic
 		status = "error"
 	}
 	record := map[string]any{"time": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "event": event, "caller": caller, "device": device, "tool": tool, "args_digest": Digest(args, resolved), "status": status, "error": code, "duration_ms": max(int64(0), duration.Milliseconds()), "output_sha256": hash(b)}
+	if x != nil {
+		row := x.snapshot()
+		record["execution_id"], record["started_at"], record["layer"] = row.ID, row.StartedAt, row.Layer
+		if row.RunID != "" {
+			record["run_id"], record["task_status"] = row.RunID, row.TaskStatus
+		}
+	}
 	if strings.HasPrefix(localTool, "computer.") {
 		// A digest of a short typed secret can be guessed. Desktop audit keeps only sizes,
 		// key names and opaque operation identifiers, including at forwarding layers.
@@ -193,6 +218,13 @@ func (l *Logger) RecordSessionOrigin(origin, oauthSession, caller, client, devic
 	}
 	if localTool == "pty.read" && !isError {
 		data, _ := out["data"].(string)
+		if x != nil {
+			// Execution history correlates every completed read by its opaque
+			// operation id; retain byte counts rather than terminal text digests.
+			record["args_digest"] = map[string]any{"session_id": params.Session, "bytes": len(data)}
+			delete(record, "output_sha256")
+			return l.Write(record)
+		}
 		if data == "" {
 			return nil
 		}
@@ -312,7 +344,12 @@ func (l *Logger) Prune(now time.Time) error {
 }
 func (l *Logger) Close() {
 	l.once.Do(func() {
+		l.executionMu.Lock()
+		l.executionsClosed = true
+		l.executionCancel()
 		close(l.stop)
+		l.executionMu.Unlock()
+		l.executionWorkers.Wait()
 		<-l.done
 		_ = l.flush(time.Now(), true, "", "")
 	})

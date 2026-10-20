@@ -87,7 +87,7 @@ export function AddBinding({ ctx, overview, onClose, onCreated }: { ctx: PageCon
     { id: "import", label: "ci.way.import" },
   ];
   return (
-    <Dialog title={t("ci.add.title")} onClose={onClose} testid="ci-add-dialog">
+    <Dialog title={t("ci.add.title")} onClose={onClose} testid="ci-add-dialog" drawer>
       <div class="tabs" role="tablist" aria-label={t("ci.add.title")}>
         {ways.map((w) => (
           <button

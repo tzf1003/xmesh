@@ -1,3 +1,4 @@
+import type { AppPreferences } from "../shared/preferences";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { EXTERNAL_LINKS, type ActionResult, type DataResult, type CopyKind, type ExternalKey, type GatewayCopyKind, type PathKind, type PickKind, isGatewayCopyKind } from "../shared/ipc";
@@ -151,6 +152,10 @@ export class Actions {
     return ok;
   }
 
+  async setAppPreferences(prefs: AppPreferences): Promise<ActionResult> {
+    return this.controller.setAppPreferences(prefs) ? ok : fail("unavailable", "Preferences could not be saved");
+  }
+
   async setLoginItem(enabled: boolean): Promise<ActionResult> {
     this.controller.setLoginItem(enabled);
     return ok;
@@ -158,6 +163,15 @@ export class Actions {
 
   /** Copies a terminal command (mesh login) or, for a gateway kind, the local gateway's own address. */
   async copy(kind: CopyKind): Promise<ActionResult> {
+    if (kind === "ciWorkflow") {
+      const c = this.controller.snapshot.connection;
+      if (c.kind !== "connected") return fail("unavailable", "node is offline");
+      const snap = this.controller.snapshot;
+      const name = snap.instances.find(i => i.id === snap.selectedInstance)?.label ?? c.status.hostname;
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(name)) return fail("invalid_args", "node name");
+      this.platform.writeClipboard(`runs-on:\n  - self-hosted\n  - xmesh\n  - xmesh-${name}`);
+      return ok;
+    }
     if (isGatewayCopyKind(kind)) {
       const gateway = this.gatewayStatus();
       if (gateway === undefined) return fail("unavailable", "no gateway address");

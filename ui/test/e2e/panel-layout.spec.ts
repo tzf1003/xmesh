@@ -16,8 +16,8 @@ async function capture(page: Page, name: string): Promise<void> {
 
 /** Compare rendered module edges, including cards separated by component wrappers. */
 async function expectModuleGaps(root: Locator): Promise<void> {
-  const gaps = await root.locator(".card").evaluateAll((elements) => {
-    const cards = elements.filter((el) => el.getClientRects().length > 0 && !el.parentElement?.closest(".card"));
+  const gaps = await root.locator(".card,.settings-card,.module-box").evaluateAll((elements) => {
+    const cards = elements.filter((el) => el.getClientRects().length > 0 && !el.parentElement?.closest(".card,.settings-card,.module-box"));
     return cards.slice(1).flatMap((el, i) => {
       const before = cards[i]!.getBoundingClientRect(), after = el.getBoundingClientRect();
       if (Math.abs(before.x - after.x) > 1 || Math.abs(before.width - after.width) > 1) return [];
@@ -65,15 +65,15 @@ test("module separation, runtime navigation and role capsules work across themes
   await expect(page.getByTestId("page-runtime")).toBeVisible();
   await expect(page.getByTestId("nav-runtime")).toHaveAttribute("aria-current", "page");
   await expect(page.getByTestId("reach-lan")).toBeVisible();
-  await expect(page.locator("header").getByRole("switch")).toHaveCount(3);
+  await expect(page.getByTestId("role-switches").getByRole("button",{ expanded:false })).toHaveCount(3);
   for (const [width, height, scheme] of [[1440, 1180, "light"], [1440, 1180, "dark"], [640, 800, "light"]] as const) {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ colorScheme: scheme });
     for (const id of ["runtime", "devices", "sessions", "authz", "ingress", "settings", "config", "audit", "ci", "about"]) {
       await navigate(page, id);
-      const root = page.getByTestId(`page-${id}`);
+      const root = page.getByTestId(`page-${id === "audit" ? "sessions" : id}`);
       await expect(root).toBeVisible();
-      await expect(root.locator(".card").first()).toBeVisible();
+      await expect(root.locator(".card:visible,.settings-card:visible,.local-device:visible,.execution-list-panel:visible,.module-summary:visible").first()).toBeVisible();
       await expectModuleGaps(root);
       await expect(page.locator("vite-error-overlay")).toHaveCount(0);
     }
@@ -82,9 +82,9 @@ test("module separation, runtime navigation and role capsules work across themes
     expect(await page.locator("header").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
     for (const role of ["agent", "gateway", "ingress"]) await expect(page.getByTestId(`role-${role}`)).toBeInViewport();
   }
-  await page.getByTestId("open-display").click();
-  await page.getByTestId("zoom-125").click();
-  await page.keyboard.press("Escape");
+  await navigate(page, "settings");
+  await page.getByRole("combobox", {name:"界面缩放"}).selectOption("1.25");
+  await navigate(page, "runtime");
   for (const role of ["agent", "gateway", "ingress"]) await expect(page.getByTestId(`role-${role}`)).toBeInViewport();
   expect(await page.locator("header").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
   await capture(page, "runtime-compact-125.png");

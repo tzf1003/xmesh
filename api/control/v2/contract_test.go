@@ -30,6 +30,8 @@ var typeFor = map[string]func() any{
 	"DrainResponse":           func() any { return new(v2.DrainResponse) },
 	"PeersResponse":           func() any { return new(v2.PeersResponse) },
 	"SessionsResponse":        func() any { return new(v2.SessionsResponse) },
+	"ToolExecution":           func() any { return new(v2.ToolExecution) },
+	"ExecutionLimits":         func() any { return new(v2.ExecutionLimits) },
 	"ControlEvent":            func() any { return new(v2.Event) },
 	"ConfigResponse":          func() any { return new(v2.ConfigResponse) },
 	"ConfigPutRequest":        func() any { return new(v2.ConfigPutRequest) },
@@ -342,8 +344,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v2.APIVersion != "2.0" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 2.0", v2.APIVersion)
+	if v2.APIVersion != "2.1" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 2.1", v2.APIVersion)
 	}
 }
 

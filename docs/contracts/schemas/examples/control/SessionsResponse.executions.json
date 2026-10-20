@@ -1,0 +1,21 @@
+{
+  "pty": [],
+  "exec": [],
+  "leases": [],
+  "executions": [
+    {
+      "id": "x-example-call",
+      "caller": "gateway/session",
+      "oauth_client": "example-client",
+      "device": "workstation",
+      "tool": "workstation/ui.run",
+      "layer": "gateway",
+      "state": "async",
+      "started_at": "2026-10-20T08:00:00.000Z",
+      "updated_at": "2026-10-20T08:00:01.000Z",
+      "run_id": "r_example",
+      "task_status": "running"
+    }
+  ],
+  "execution_limits": { "max_active": 256, "active": 1, "rejected_total": 0 }
+}

@@ -1,6 +1,3 @@
-import { Features } from "./pages/Features";
-import { useQuickCopy } from "./onboarding-copy";
-import { setupNeedsAttention } from "../shared/onboarding";
 import type { JSX } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
@@ -34,11 +31,15 @@ import { Playground } from "./pages/Playground";
 import { Sessions } from "./pages/Sessions";
 import { Wizard } from "./pages/Wizard";
 import { Configuration } from "./pages/Configuration";
+import { ModuleSettings, type ModuleScope } from "./pages/ModuleSettings";
+import { DEFAULT_APP_PREFERENCES } from "../shared/preferences";
+import { GatewayCard } from "./pages/gateway/GatewayCard";
+import { Dialog } from "./components";
 import { RoleSwitches } from "./role-switches";
 import { Icon } from "./icons";
 import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
-export type PageId = "features" | "computer" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
+export type PageId = "computer" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section or a role's setup, without changing configuration. */
 export interface PageFocus {
@@ -48,6 +49,8 @@ export interface PageFocus {
   peer?: string;
   meshTab?: "devices" | "onboard" | "policy" | "matrix" | "derp";
   configView?: "form" | "source";
+  settingsTab?: "general" | "diagnostics" | "about";
+  sessionsTab?: "live" | "history" | "resources";
 }
 
 const STATUS_KEY: Record<TrayIcon, Key> = {
@@ -93,12 +96,15 @@ export interface PageContext {
   /** Where the page opens, when the link to it named a place. Cleared by any other navigation. */
   focus: PageFocus | undefined;
   go(page: PageId, focus?: PageFocus): void;
+  openSettings(scope: ModuleScope): void;
 }
 
 export function App(): JSX.Element {
   const snapshot = useSnapshot();
   const topologySlots = useRef(new Map<string, Map<string, number>>());
   const t = useMemo(() => makeT(snapshot.settings.locale), [snapshot.settings.locale]);
+  const [moduleScope, setModuleScope] = useState<ModuleScope>();
+  const [closeModule, setCloseModule] = useState(false);
   const [page, setPage] = useState<PageId | undefined>(undefined);
   const [focus, setFocus] = useState<PageFocus | undefined>(undefined);
   const [configDirty, setConfigDirty] = useState(false);
@@ -108,8 +114,12 @@ export function App(): JSX.Element {
   const { toasts, push } = useToasts();
   // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
   const [fresh, setFresh] = useState<SaveOutcome | undefined>(undefined);
-  const navigate = (next: PageId, nextFocus?: PageFocus): void => {
-    if (next !== current) setConfigDirty(false);
+  const navigate = (next: PageId, nextFocus?: PageFocus, discardModule = false): void => {
+    if (next === "about") { next = "settings"; nextFocus = { ...nextFocus, settingsTab: "about" }; }
+    if (next === "audit") { next = "sessions"; nextFocus = { ...nextFocus, sessionsTab: "history" }; }
+    if (next === "settings" && (nextFocus?.role || nextFocus?.section)) { setModuleScope(nextFocus.role ?? (nextFocus.section === "transfers" ? "transfers" : nextFocus.section === "node" ? "node" : "agent")); return; }
+    if (moduleScope) { if (configDirty && !discardModule) { setCloseModule(true); return; } setModuleScope(undefined); }
+    if (discardModule || next !== current) setConfigDirty(false);
     setFocus(nextFocus);
     setPage(next);
     setFresh(undefined);
@@ -131,17 +141,26 @@ export function App(): JSX.Element {
     return () => document.removeEventListener("keydown", key);
   }, []);
   const { display } = snapshot.settings;
-  useEffect(() => applyDisplay(display), [display.uiFont, display.codeFont]);
+  useEffect(() => applyDisplay(display), [display.uiFont, display.codeFont, display.theme]);
 
   const connected = snapshot.connection.kind === "connected";
-  // With no node configured at all, the first thing worth showing is the setup wizard.
-  const current: PageId =
-    page ?? (snapshot.connection.kind === "offline" && snapshot.instances.length === 0 && snapshot.stoppedNodes.length === 0 ? "setup" : "overview");
+  const initialHandled = useRef(false);
+  useEffect(() => {
+    if (initialHandled.current || !snapshot.discoveryReady) return;
+    initialHandled.current = true;
+    const preferences = snapshot.settings.preferences ?? { ...DEFAULT_APP_PREFERENCES, locale: snapshot.settings.locale };
+    const hasNode = snapshot.instances.length > 0 || snapshot.stoppedNodes.length > 0 || snapshot.connection.kind === "connected";
+    if (!preferences.firstRunSeen) {
+      void getApi().setAppPreferences({ ...preferences, firstRunSeen: true });
+      if (!hasNode) setPage("setup");
+    }
+  }, [snapshot.discoveryReady]);
+  const current: PageId = page ?? "overview";
   const applyNavigation = (target: PanelTarget): void => {
     if (target.instance !== snapshot.selectedInstance) return;
     const c = snapshot.connection;
     const peer = c.kind === "connected" ? c.peers.find(p => p.name === target.peer) : undefined;
-    navigate(target.page, { ...(peer && { peer: peerKey(peer) }), ...(target.device && { device: target.device }) });
+    navigate(target.page, { ...(peer && { peer: peerKey(peer) }), ...(target.device && { device: target.device }) }, true);
     setPendingNavigation(undefined);
   };
   externalNavigation.current = target => { if (configDirty) setPendingNavigation(target); else applyNavigation(target); };
@@ -162,31 +181,41 @@ export function App(): JSX.Element {
     applied: (outcome) => setFresh((last) => outcome ?? (last && outstanding(last) ? last : undefined)),
     focus,
     go: navigate,
+    openSettings: (scope) => { if (!configDirty) setModuleScope(scope); },
   };
 
   return (
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
-        {pendingNavigation && <Confirm title={snapshot.settings.locale === "zh" ? "离开当前页面？" : "Leave this page?"} body={snapshot.settings.locale === "zh" ? "当前页面有未保存的修改。继续将放弃这些修改。" : "This page has unsaved changes. Continuing will discard them."} confirmLabel={snapshot.settings.locale === "zh" ? "放弃并继续" : "Discard and continue"} onCancel={() => setPendingNavigation(undefined)} onConfirm={() => applyNavigation(pendingNavigation)}/>}
+
         <TopBar ctx={ctx} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} />
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
             <UpdateStrip ctx={ctx} current={current} />
-            <SetupReminder ctx={ctx} current={current} />
+
             <StaleState ctx={ctx} />
-            <ApplyBar
+            {!moduleScope && <ApplyBar
               fresh={connected ? fresh : undefined}
               status={snapshot.connection.kind === "connected" ? snapshot.connection.status : undefined}
               writable={ctx.can("config.write")}
               onClear={() => setFresh(undefined)}
               toast={push}
-            />
+            />}
             {(meshVisited || current === "mesh") && <div hidden={current !== "mesh"}><Mesh ctx={ctx} /></div>}
             {current !== "mesh" && <PageSwitch key={current === "setup" ? "setup" : `${snapshot.selectedInstance}:${current === "config" || current === "settings" ? configRevision : 0}`} page={current} ctx={ctx} />}
           </main>
         </div>
       </div>
+      {moduleScope && <Dialog drawer title={moduleScope === "node" ? t("settings.nodeTitle") : moduleScope === "transfers" ? t("settings.transfersTitle") : `${moduleScope[0]!.toUpperCase()}${moduleScope.slice(1)} ${snapshot.settings.locale === "en" ? "settings" : "设置"}`} testid="module-settings-dialog" onClose={() => { if (configDirty) setCloseModule(true); else setModuleScope(undefined); }}><ApplyBar
+              fresh={connected ? fresh : undefined}
+              status={snapshot.connection.kind === "connected" ? snapshot.connection.status : undefined}
+              writable={ctx.can("config.write")}
+              onClear={() => setFresh(undefined)}
+              toast={push}
+            /><ModuleSettings key={`${snapshot.selectedInstance}:${moduleScope}`} ctx={ctx} scope={moduleScope} onDirtyChange={setConfigDirty}/>{moduleScope === "gateway" && snapshot.connection.kind === "connected" && snapshot.connection.status.gateway && <GatewayCard ctx={ctx} gateway={snapshot.connection.status.gateway}/>}</Dialog>}
+      {closeModule && <Confirm title={snapshot.settings.locale === "en" ? "Discard changes?" : "放弃未保存的修改？"} body={snapshot.settings.locale === "en" ? "Your module settings have unsaved changes." : "此模块中有尚未保存的修改。"} confirmLabel={snapshot.settings.locale === "en" ? "Discard" : "放弃修改"} onCancel={() => setCloseModule(false)} onConfirm={() => { setModuleScope(undefined); setConfigDirty(false); setCloseModule(false); }}/>}
+      {pendingNavigation && <Confirm title={snapshot.settings.locale === "zh" ? "离开当前页面？" : "Leave this page?"} body={snapshot.settings.locale === "zh" ? "当前页面有未保存的修改。继续将放弃这些修改。" : "This page has unsaved changes. Continuing will discard them."} confirmLabel={snapshot.settings.locale === "zh" ? "放弃并继续" : "Discard and continue"} onCancel={() => setPendingNavigation(undefined)} onConfirm={() => applyNavigation(pendingNavigation)}/>}
       {showDisplay && <DisplayDialog prefs={display} onClose={() => setShowDisplay(false)} />}
       {showSearch && <CommandPalette snapshot={snapshot} onClose={() => setShowSearch(false)} go={navigate}/>}
       <Toasts toasts={toasts} />
@@ -196,16 +225,25 @@ export function App(): JSX.Element {
 
 function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; connected: boolean; snapshot: Snapshot; onSelect: (p: PageId) => void }): JSX.Element {
   const t = useT();
-  const [advanced, setAdvanced] = useState(false);
-  useEffect(() => { if (NAVIGATION.find((n) => n.id === current)?.group === "advanced") setAdvanced(true); }, [current]);
+  const [expanded, setExpanded] = useState({ runtime: true });
+  const currentGroup = NAVIGATION.find((n) => n.id === current)?.group;
+  useEffect(() => {
+    if (currentGroup === "runtime") {
+      setExpanded((groups) => groups[currentGroup] ? groups : { ...groups, [currentGroup]: true });
+    }
+  }, [current]);
   const item = (n: (typeof NAVIGATION)[number]): JSX.Element => <button key={n.id} type="button" class="nav-item" title={t(n.label)} data-testid={`nav-${n.id}`} aria-current={current === n.id ? "page" : undefined} disabled={!pageAvailable(n.id, connected)} onClick={() => onSelect(n.id)}><Icon name={n.icon}/><span>{t(n.label)}</span></button>;
   return (
     <nav class="sidebar" aria-label={t("nav.label")}>
-      {(["network", "access", "runtime"] as const).map((group) => <div class="nav-group" key={group}><div class="nav-group-label">{t(`nav.${group}`)}</div>{NAVIGATION.filter((n) => n.group === group).map(item)}</div>)}
-      <details class="nav-advanced" open={advanced} onToggle={(e) => setAdvanced(e.currentTarget.open)}>
-        <summary data-testid="nav-advanced" aria-label={t("nav.advanced")}><Icon name="sliders"/><span>{t("nav.advanced")}</span><Icon name="chevron"/></summary>
-        {NAVIGATION.filter((n) => n.group === "advanced").map(item)}
-      </details>
+      {(["network", "access"] as const).map((group) => <div class="nav-group" key={group}><div class="nav-group-label">{t(`nav.${group}`)}</div>{NAVIGATION.filter((n) => n.group === group).map(item)}</div>)}
+      <div class="nav-modules">{NAVIGATION.filter(n => n.group === "modules").map(item)}</div>
+      {(["runtime"] as const).map((group) => <details key={group} class={`nav-disclosure nav-${group}`} open={expanded[group]} data-active={currentGroup === group ? "true" : undefined} onToggle={(e) => {
+        const open = e.currentTarget.open;
+        setExpanded((groups) => groups[group] === open ? groups : { ...groups, [group]: open });
+      }}>
+        <summary data-testid={"nav-runtime-group"} title={t(`nav.${group}`)} aria-label={t(`nav.${group}`)} aria-expanded={expanded[group]} aria-controls={`nav-${group}-children`}><Icon name="runner"/><span>{t(`nav.${group}`)}</span><Icon name="chevron"/></summary>
+        <div class="nav-submenu" id={`nav-${group}-children`}>{NAVIGATION.filter((n) => n.group === group).map(item)}</div>
+      </details>)}
       <div class="spacer" />
       <div class="nav-footer">{NAVIGATION.filter((n) => n.group === "settings").map(item)}</div>
       {snapshot.instances.length > 1 && (
@@ -237,7 +275,7 @@ function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () 
   const c = snapshot.connection;
   return (
     <header class="topbar">
-      <span class="brand">xmesh</span>
+      <span class="brand">xmesh<span class="brand-dot">.</span></span>
       <div class="title">
         <strong data-testid="node">{c.kind === "connected" ? c.status.hostname : "xmesh"}</strong>
       </div>
@@ -259,7 +297,7 @@ function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () 
 function UpdateStrip({ ctx, current }: { ctx: PageContext; current: PageId }): JSX.Element | null {
   const t = useT();
   const u = ctx.snapshot.update;
-  if (current === "about") return null;
+  if (current === "about" || current === "settings" && ctx.focus?.settingsTab === "about") return null;
   const failed = u.outcome !== undefined && !u.outcome.ok;
   const show = u.phase === "available" || u.phase === "downloading" || u.phase === "installing" || failed;
   if (!show) return null;
@@ -282,10 +320,10 @@ function UpdateStrip({ ctx, current }: { ctx: PageContext; current: PageId }): J
 function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Element {
   const t = useT();
   const c = ctx.snapshot.connection;
-  if (page === "features") return <Features ctx={ctx} />;
   if (page === "setup") return <Wizard ctx={ctx} />;
   // Updating needs no running kernel: it is how a kernel that is too old gets replaced.
-  if (page === "about") return <About ctx={ctx} />;
+  if (page === "about") return <Settings ctx={{...ctx,focus:{settingsTab:"about"}}} />;
+  if (page === "settings") return <Settings ctx={ctx} />;
   // The tailnet is administered through the control plane, so this page does not need a running kernel.
   if (page === "mesh") return <Mesh ctx={ctx} />;
   if (c.kind === "offline") return <Unavailable ctx={ctx} t={t} kind="offline" />;
@@ -313,8 +351,6 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Ci ctx={ctx} />;
     case "computer":
       return <Computer ctx={ctx} />;
-    case "settings":
-      return <Settings ctx={ctx} onDirtyChange={ctx.setConfigDirty} />;
     case "config":
       return <Configuration ctx={ctx} />;
     case "audit":
@@ -400,8 +436,8 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
           ) : !unresponsive ? (
             <>
               {staleNodes.length === 0 && <p>{t("offline.body")}</p>}
-              <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="goto-setup">
-                {t("offline.setup")}
+              <button type="button" class="btn primary" onClick={() => ctx.go("settings", { settingsTab: "diagnostics" })} data-testid="goto-settings">
+                {t("nav.settings")}
               </button>
             </>
           ) : null}
@@ -421,24 +457,4 @@ function Unavailable({ ctx, t, kind }: { ctx: PageContext; t: T; kind: "offline"
       )}
     </div>
   );
-}
-
-function SetupReminder({ ctx, current }: { ctx: PageContext; current: PageId }): JSX.Element | null {
-  const copy = useQuickCopy();
-  const [pending, setPending] = useState(false);
-  useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const refresh = async (): Promise<void> => {
-      try {
-        const r = await getApi().onboarding({ op: "inspect" });
-        if (active && r.ok) setPending(r.data.jobs.some(setupNeedsAttention));
-      } catch { /* Keep the last known task state during a transient read failure. */ }
-      if (active) timer = setTimeout(() => void refresh(), 3000);
-    };
-    void refresh();
-    return () => { active = false; clearTimeout(timer); };
-  }, [current]);
-  if (!pending || current === "setup" || current === "features") return null;
-  return <div class="page strip"><Banner testid="setup-reminder"><div class="row"><span class="grow">{copy.existing}</span><button class="btn small" onClick={() => ctx.go("setup")}>{copy.resume}</button></div></Banner></div>;
 }

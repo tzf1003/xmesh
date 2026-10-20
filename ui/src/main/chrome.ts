@@ -5,7 +5,7 @@ export const CHROME_BG = { light: "#f7f8f7", dark: "#0f1211" } as const;
 const SYMBOL = { light: "#161b18", dark: "#e8ece9" } as const;
 
 /** Height of the panel's top bar in CSS pixels; the Windows caption buttons are drawn to this height. */
-export const TOPBAR_HEIGHT = 46;
+export const TOPBAR_HEIGHT = 54;
 
 /**
  * The window frame the panel asks for: the page paints its own top bar, so
@@ -17,7 +17,7 @@ export function windowChrome(platform: NodeJS.Platform, dark: boolean): BrowserW
   const scheme = dark ? "dark" : "light";
   const base: BrowserWindowConstructorOptions = { backgroundColor: CHROME_BG[scheme] };
   if (platform === "darwin") {
-    return { ...base, titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 15 } };
+    return { ...base, titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 19 } };
   }
   if (platform === "win32") {
     return {

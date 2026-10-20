@@ -13,6 +13,7 @@ const CODE_FONTS = ["Cascadia Mono", "Consolas", "SF Mono", "Menlo", "JetBrains 
 
 /** Puts the saved preferences on the page; the zoom itself is applied by the main process. */
 export function applyDisplay(prefs: DisplayPrefs): void {
+  document.documentElement.dataset.theme = prefs.theme ?? "system";
   const root = document.documentElement.style;
   const ui = cssFamily(prefs.uiFont, UI_FONT_FALLBACK);
   const code = cssFamily(prefs.codeFont, CODE_FONT_FALLBACK);

@@ -5,7 +5,7 @@ import { CHROME_BG, TOPBAR_HEIGHT, overlayColors, windowChrome } from "../../src
 test("macOS hides the title bar and keeps the traffic lights over the page's top bar", () => {
   const o = windowChrome("darwin", false);
   assert.equal(o.titleBarStyle, "hiddenInset");
-  assert.deepEqual(o.trafficLightPosition, { x: 16, y: 15 });
+  assert.deepEqual(o.trafficLightPosition, { x: 16, y: 19 });
   assert.equal(o.titleBarOverlay, undefined);
 });
 

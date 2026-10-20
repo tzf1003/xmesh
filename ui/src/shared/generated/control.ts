@@ -251,6 +251,8 @@ export interface AuditEvent {
   time: string;
   event:
     | "tool_call"
+    | "task_complete"
+    | "task_untracked"
     | "pty_open"
     | "pty_close"
     | "pty_transfer"
@@ -275,6 +277,19 @@ export interface AuditEvent {
    * Gateway 客户端声明的调用来源。缺省表示未声明；仅供展示和关联，不构成身份或权限证明。
    */
   origin?: "panel";
+  execution_id?: string;
+  started_at?: string;
+  layer?: "agent" | "gateway";
+  run_id?: string;
+  task_status?:
+    | "accepted"
+    | "running"
+    | "passed"
+    | "failed"
+    | "cancelled"
+    | "timed_out"
+    | "interrupted"
+    | "unknown";
   caller: string;
   oauth_client?: string;
   oauth_session?: string;
@@ -1636,10 +1651,46 @@ export interface PatSecret {
 export interface PeersResponse {
   peers: Peer[];
 }
+export interface ToolExecution {
+  id: string;
+  caller: string;
+  oauth_client?: string;
+  device: string;
+  tool: string;
+  layer: "agent" | "gateway";
+  state: "queued" | "running" | "async" | "unknown";
+  started_at: Timestamp;
+  updated_at: Timestamp;
+  run_id?: string;
+  task_status?:
+    | "accepted"
+    | "running"
+    | "passed"
+    | "failed"
+    | "cancelled"
+    | "timed_out"
+    | "interrupted"
+    | "unknown";
+}
+export interface ExecutionLimits {
+  max_active: number;
+  active: number;
+  /**
+   * 本进程中未纳入实时跟踪的调用数；工具调用和审计继续执行。
+   */
+  rejected_total: number;
+}
 export interface SessionsResponse {
   pty: PtySession[];
   exec: ExecRun[];
   leases: BackendLease[];
+  /**
+   * 当前接收层的调用与异步 UI 任务元数据。缺省表示内核未提供此能力；已完成调用见 /v2/audit。
+   *
+   * @maxItems 256
+   */
+  executions?: ToolExecution[];
+  execution_limits?: ExecutionLimits;
 }
 export interface GatewayInfo1 {
   /**
@@ -1675,7 +1726,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "2.0" as const;
+export const CONTROL_API_VERSION = "2.1" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */

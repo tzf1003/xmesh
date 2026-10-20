@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -138,6 +139,7 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	if a.Key != "" {
 		if old := m.cache[caller][a.Key]; old != nil {
 			m.mu.Unlock()
+			audit.SetExecutionState(ctx, "queued")
 			select {
 			case <-old.done:
 				return clone(old.result), old.err
@@ -174,11 +176,13 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	return result, err
 }
 func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration, p *policy.Engine, run *Run) (Object, error) {
+	audit.SetExecutionState(ctx, "queued")
 	release, wait, e := m.scheduler.acquire(ctx, caller, a.Mode)
 	if e != nil {
 		return nil, e
 	}
 	defer release()
+	audit.SetExecutionState(ctx, "running")
 	m.mu.Lock()
 	run.Running = true
 	m.mu.Unlock()

@@ -4,6 +4,7 @@ import { defineConfig } from "@playwright/test";
 // single-instance state is per user session, so they must not overlap.
 export default defineConfig({
   testDir: "test/e2e",
+  testIgnore: "**/._*",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   workers: 1,

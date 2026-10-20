@@ -25,6 +25,7 @@ async function openCi(capabilities: Capability[] = ALL): Promise<Page> {
 }
 
 async function addAccount(page: Page, token = GOOD_TOKEN): Promise<void> {
+  await page.getByTestId("ci-tab-accounts").click();
   await page.getByTestId("ci-account-add").click();
   await page.getByTestId("ci-token").fill(token);
   await page.getByTestId("ci-account-save").click();
@@ -39,6 +40,7 @@ test("ci: a kernel without the capability gets the not-supported notice", async 
 test("ci: an empty page invites the first binding; a refused token says why and the accepted one is masked", async () => {
   const page = await openCi();
   await expect(page.getByText("还没有绑定任何仓库")).toBeVisible();
+  await page.getByTestId("ci-tab-accounts").click();
   await expect(page.getByTestId("ci-accounts-none")).toBeVisible();
 
   await page.getByTestId("ci-account-add").click();
@@ -140,6 +142,7 @@ test("ci: edit the scale, pause and resume, then unbind", async () => {
   await page.getByTestId("ci-create").click();
   await expect(page.getByTestId("ci-binding-xmesh")).toBeVisible();
 
+  await page.getByTestId("ci-manage-xmesh").click();
   await page.getByTestId("ci-edit-xmesh").click();
   await expect(page.getByTestId("ci-edit-save")).toBeDisabled();
   await page.getByTestId("ci-edit-concurrency").fill("3");
@@ -174,13 +177,17 @@ test("ci: an account that bindings use cannot be deleted; an unused one can", as
   await page.getByTestId("ci-create").click();
   await expect(page.getByTestId("ci-binding-xmesh")).toBeVisible();
 
+  await page.getByTestId("ci-tab-accounts").click();
   await page.getByTestId("ci-account-delete-gh-tzf1003").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("ci-account-error")).toContainText("还有绑定在用这个账号");
 
+  await page.getByTestId("ci-tab-repos").click();
+  await page.getByTestId("ci-manage-xmesh").click();
   await page.getByTestId("ci-unbind-xmesh").click();
   await page.getByTestId("ci-unbind-confirm").click();
   await expect(page.getByTestId("ci-binding-xmesh")).toHaveCount(0, { timeout: 8000 });
+  await page.getByTestId("ci-tab-accounts").click();
   await page.getByTestId("ci-account-delete-gh-tzf1003").click();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("ci-accounts-none")).toBeVisible();
@@ -233,4 +240,26 @@ test("ci: public token registration retains the token through confirmation", asy
   await expect(page.getByTestId("confirm")).toBeVisible();
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("ci-add-dialog")).toHaveCount(0);
+});
+
+test("ci: repository filters combine and workflow labels copy through the native clipboard", async () => {
+  const page = await openCi();
+  const snippet = await page.getByTestId("ci-workflow").innerText();
+  await page.getByTestId("ci-workflow-copy").click();
+  await expect.poll(async () => (await h.calls()).filter((call) => call.op === "clipboard").map((call) => call.arg)).toContain(snippet);
+  await page.getByTestId("ci-add").click();
+  await page.getByTestId("ci-repo").fill("tzf1003/xmesh");
+  await page.getByTestId("ci-reg-token").fill(REG_TOKEN);
+  await page.getByTestId("ci-labels").fill("macOS, GPU");
+  await page.getByTestId("ci-create").click();
+  await expect(page.getByTestId("ci-binding-xmesh")).toBeVisible();
+  await page.getByTestId("ci-search").fill("gpu");
+  await expect(page.getByTestId("ci-binding-xmesh")).toBeVisible();
+  await page.getByTestId("ci-filter").selectOption("paused");
+  await expect(page.getByTestId("ci-binding-xmesh")).toHaveCount(0);
+  await page.getByTestId("ci-filter").selectOption("all");
+  await page.getByTestId("ci-pause-xmesh").click();
+  await expect(page.getByTestId("ci-state-xmesh-1")).toHaveAttribute("data-state", "stopped");
+  await page.getByTestId("ci-filter").selectOption("paused");
+  await expect(page.getByTestId("ci-binding-xmesh")).toBeVisible();
 });

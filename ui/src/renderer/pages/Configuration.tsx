@@ -4,7 +4,7 @@ import type { PageContext } from "../app";
 import { Confirm } from "../components";
 import { useT } from "../i18n";
 import { Config } from "./Config";
-import { Settings } from "./Settings";
+import { ModuleSettings } from "./ModuleSettings";
 
 export function Configuration({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
@@ -25,7 +25,7 @@ export function Configuration({ ctx }: { ctx: PageContext }): JSX.Element {
       <button type="button" class="tab" role="tab" aria-selected={view === "form"} onClick={() => choose("form")} data-testid="config-form-tab">{t("nav.form")}</button>
       <button type="button" class="tab" role="tab" aria-selected={view === "source"} onClick={() => choose("source")} data-testid="config-source-tab">{t("nav.source")}</button>
     </div>
-    <div role="tabpanel">{view === "form" ? <Settings ctx={ctx} onDirtyChange={setDirty}/> : <Config ctx={ctx} onDirtyChange={setDirty}/>}</div>
+    <div role="tabpanel">{view === "form" ? <ModuleSettings ctx={ctx} onDirtyChange={setDirty}/> : <Config ctx={ctx} onDirtyChange={setDirty}/>}</div>
     {pending && <Confirm title={t("config.discardAsk")} body={<p>{t("topology.configDirty")}</p>} confirmLabel={t("config.discard")} onCancel={() => setPending(undefined)} onConfirm={() => { setView(pending); setPending(undefined); setDirty(false); }}/>}
   </div>;
 }

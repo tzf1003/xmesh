@@ -1,3 +1,4 @@
+import { PasswordInput } from "../../password-input";
 import type { JSX } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { PageContext } from "../../app";
@@ -11,12 +12,11 @@ import type { PairPasswordState } from "../../../shared/control";
 import { PairErrorBanner } from "./common";
 
 /** This node's connection password: set, change, or clear. The value is never read back. */
-export function PairPassword({ ctx }: { ctx: PageContext }): JSX.Element {
+export function PairPassword({ ctx, onChanged }: { ctx: PageContext; onChanged?():void }): JSX.Element {
   const t = useT();
   const [state, setState] = useState<PairPasswordState | undefined>();
   const [err, setErr] = useState<ActionError | undefined>();
   const [pw, setPw] = useState("");
-  const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [clearing, setClearing] = useState(false);
 
@@ -30,21 +30,20 @@ export function PairPassword({ ctx }: { ctx: PageContext }): JSX.Element {
   }, []);
 
   const valid = pairPasswordValid(pw);
-  const same = pw === again;
   const locked = state?.locked_until != null && Date.parse(state.locked_until) > Date.now();
 
   const submit = async (e: Event): Promise<void> => {
     e.preventDefault();
-    if (!valid || !same || busy) return;
+    if (!valid || busy) return;
     setBusy(true);
     const r = await getApi().setPairPassword(pw);
     setBusy(false);
     // The field values are dropped as soon as the kernel has them.
     setPw("");
-    setAgain("");
     if (r.ok) {
       setErr(undefined);
       setState(r.data);
+      onChanged?.();
       ctx.toast(t("pair.passwordSaved"));
     } else setErr(r.error);
   };
@@ -58,6 +57,7 @@ export function PairPassword({ ctx }: { ctx: PageContext }): JSX.Element {
       setErr(undefined);
       ctx.toast(t("pair.passwordCleared"));
       await load();
+      onChanged?.();
     } else setErr(r.error);
   };
 
@@ -74,29 +74,11 @@ export function PairPassword({ ctx }: { ctx: PageContext }): JSX.Element {
       )}
       <form onSubmit={(e) => void submit(e)}>
         <Field label={t("pair.passwordNew")} hint={t("pair.passwordRules", { min: PAIR_PASSWORD_MIN, max: PAIR_PASSWORD_MAX })}>
-          <input
-            type="password"
-            value={pw}
-            onInput={(e) => setPw((e.currentTarget as HTMLInputElement).value)}
-            autocomplete="new-password"
-            aria-invalid={pw !== "" && !valid}
-            data-testid="pair-pw-new"
-          />
+          <PasswordInput value={pw} onInput={setPw} autocomplete="new-password" invalid={pw !== "" && !valid} maxLength={PAIR_PASSWORD_MAX} testid="pair-pw-new"/>
         </Field>
-        <Field label={t("pair.repeat")}>
-          <input
-            type="password"
-            value={again}
-            onInput={(e) => setAgain((e.currentTarget as HTMLInputElement).value)}
-            autocomplete="new-password"
-            aria-invalid={again !== "" && !same}
-            data-testid="pair-pw-again"
-          />
-        </Field>
-        {again !== "" && !same && <p class="hint" data-testid="pair-pw-mismatch">{t("pair.noMatch")}</p>}
         {err && <PairErrorBanner error={err} testid="pair-password-error" />}
         <div class="row">
-          <button type="submit" class="btn primary" disabled={!valid || !same || busy} data-testid="pair-pw-submit">
+          <button type="submit" class="btn primary" disabled={!valid || busy} data-testid="pair-pw-submit">
             {state?.set ? t("pair.passwordChange") : t("pair.passwordSet")}
           </button>
           {state?.set && (

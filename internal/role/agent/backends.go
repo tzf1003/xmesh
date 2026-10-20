@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
@@ -94,6 +95,11 @@ func (a *Agent) installBackends(server *mcp.Server, p Principal) {
 			if e != nil {
 				return Result(nil, e), nil
 			}
+			backendName, _, _ := strings.Cut(name, ".")
+			audit.SetResultPollAuthorization(ctx, func() bool {
+				current, exists := a.Callers.Get(caller.ID)
+				return exists && a.toolAllowed(a.store.Get(), current, backendName+".result")
+			})
 			return out, nil
 		})
 	}

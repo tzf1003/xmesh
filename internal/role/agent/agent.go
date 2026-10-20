@@ -70,6 +70,8 @@ type Agent struct {
 	backendChanged  chan struct{}
 	stop            chan struct{}
 	done            chan struct{}
+	executionCtx    context.Context
+	executionCancel context.CancelFunc
 }
 type NetworkInfo struct {
 	Mode string   `json:"mode"`
@@ -109,6 +111,7 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	a := &Agent{store: store, PTY: pty.New(c.Agent.PTY, reg), BudgetAuthority: pty.NewBudgetAuthority(), Exec: ex, Callers: reg, Leases: lease.New(), sessions: map[string]identity.Caller{}, servers: map[*mcp.ServerSession]bool{}, views: map[string]*mcp.Server{}, backendNames: map[*mcp.Server][]string{}}
 	a.stopDenyFile = stopDenyFile
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	a.executionCtx, a.executionCancel = context.WithCancel(context.Background())
 	a.transfers = toolsfs.NewTransfers()
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
 	for _, option := range options {
@@ -519,6 +522,10 @@ func (a *Agent) server(p Principal) *mcp.Server {
 		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
 			if log := a.auditLog.Load(); method == "tools/call" && log != nil {
+				call := req.(*mcp.CallToolRequest)
+				caller := a.bind(call.Session, p)
+				x := log.BeginExecution(a.executionCtx, caller.ID, caller.OAuthClient, a.store.Get().Node.Name, call.Params.Name, "agent")
+				ctx = x.Context(ctx)
 				defer func() {
 					call := req.(*mcp.CallToolRequest)
 					out, ok := result.(*mcp.CallToolResult)
@@ -526,7 +533,8 @@ func (a *Agent) server(p Principal) *mcp.Server {
 						out = Result(nil, toolerr.Internal("tools.call", e))
 					}
 					caller := a.bind(call.Session, p)
-					if err := log.Record(caller.ID, "", a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
+					x.FinishCall(call.Params.Arguments, out.StructuredContent, out.IsError)
+					if err := log.RecordExecution(x, "", "", caller.ID, caller.OAuthClient, a.store.Get().Node.Name, call.Params.Name, call.Params.Arguments, out.StructuredContent, out.IsError, time.Since(started)); err != nil {
 						result, e = Result(nil, err), nil
 					}
 				}()
@@ -547,6 +555,9 @@ func (a *Agent) server(p Principal) *mcp.Server {
 					defer release()
 					ctx = limited
 				}
+			}
+			if method == "tools/call" {
+				audit.SetExecutionState(ctx, "running")
 			}
 			result, e = next(ctx, method, req)
 			if e == nil && method == "tools/list" {
@@ -635,6 +646,7 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 }
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {
+		a.executionCancel()
 		close(a.stop)
 		<-a.done
 		a.watchers.Wait()

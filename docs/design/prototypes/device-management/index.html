@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="jade">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xmesh · 设备管理设计预览</title>
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./shared/navigation.css">
+<link rel="stylesheet" href="./shared/roles.css"></head>
+<body data-preview-page="device-management">
+
+<div class="preview-bar">
+  <span class="preview-title"><span class="preview-dot"></span>设备管理 <span class="muted">/ 设计预览</span></span>
+  <div class="preview-options">
+    <div class="segmented" aria-label="预览数据">
+      <button data-scene="current" aria-pressed="true">单设备示例</button>
+      <button data-scene="sample" aria-pressed="false">多设备示例</button>
+    </div>
+    <span class="preview-divider"></span>
+    <button class="swatch selected" data-theme="jade" aria-label="翡翠深色" aria-pressed="true" title="翡翠深色"><span style="background:#56d3a4"></span></button>
+    <button class="swatch" data-theme="graphite" aria-label="石墨深色" aria-pressed="false" title="石墨深色"><span style="background:#afb7c2"></span></button>
+    <button class="swatch" data-theme="light" aria-label="清透浅色" aria-pressed="false" title="清透浅色"><span style="background:#f4f6f4"></span></button>
+  </div>
+</div>
+<div class="app">
+  <header class="topbar">
+    <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+    <span class="brand">xmesh<span class="brand-dot">.</span></span>
+    <span class="top-divider"></span><span class="host-name">xiaosong-mac</span>
+    <div class="top-spacer"></div>
+    <div class="roles"><span><i class="dot"></i>agent</span><span><i class="dot"></i>gateway</span><span class="inactive"><i class="dot"></i>ingress</span></div>
+    <span class="health"><i class="dot"></i>运行正常</span>
+  </header>
+  <div class="app-body">
+    <aside class="sidebar" aria-label="主导航"></aside>
+    <main>
+      <div class="workspace">
+        <div class="breadcrumb">网络 <span>/</span> <strong>设备</strong></div>
+        <div class="page-heading"><div><h1>设备管理</h1><p>连接你的设备，让工作自由流转。</p></div><button class="button primary" data-action="add"><span data-icon="plus"></span>添加设备</button></div>
+        <section class="local-device" aria-label="本机信息">
+          <div class="local-main"><div class="device-avatar large"><span data-icon="device"></span><span class="avatar-dot"></span></div><div><div class="eyebrow">本机设备</div><h2>xiaosong-mac <span class="badge subtle">本机</span></h2><p>macOS <span>·</span> v0.1.0-beta.6 <span>·</span> <span class="mono" title="设备标识">dev-34d4b6237b67…</span></p></div></div>
+          <div class="local-status"><div><span class="muted">设备状态</span><strong><i class="dot"></i>在线</strong></div><span class="vertical-line"></span><div><span class="muted">连接密码</span><button class="password-state" data-action="password"><span data-icon="lock"></span><span id="password-state">已设置</span><span data-icon="chevron"></span></button></div></div>
+        </section>
+        <div class="content-grid">
+          <section class="device-section">
+            <div class="section-heading"><h2>我的设备 <span class="count" id="device-count">0</span></h2><div class="connection-counts"><span><i class="dot"></i><span id="direct-count">0</span> 直连</span><span><i class="dot relay"></i><span id="relay-count">0</span> 中继</span></div></div>
+            <div class="device-panel">
+              <div class="device-toolbar"><div class="tabs" role="group" aria-label="设备状态筛选"><button data-filter="all" class="selected" aria-pressed="true">全部 <span id="all-count">0</span></button><button data-filter="online" aria-pressed="false">在线 <span id="online-count">0</span></button><button data-filter="offline" aria-pressed="false">离线 <span id="offline-count">0</span></button></div><label class="search"><span data-icon="search"></span><input id="search" aria-label="搜索已配对设备" placeholder="搜索设备…" type="search"></label></div>
+              <div id="device-list"></div>
+              <div class="device-panel-foot"><span data-icon="shield"></span><span>仅显示已与本机配对的设备</span><span class="foot-end" id="data-label">单设备示例</span></div>
+            </div>
+          </section>
+          <aside class="connect-column">
+            <div class="section-heading"><h2>发现设备</h2><button class="icon-button" data-action="refresh" aria-label="刷新可配对设备" title="刷新"><span data-icon="refresh"></span></button></div>
+            <section class="discovery-panel"><div class="discovery-top"><span class="radar-symbol" data-icon="radar"></span><div><strong>可配对设备</strong><span>局域网与 Tailnet</span></div><span class="count" id="discovery-count">0</span></div><div id="discovery-content"></div><div class="discovery-footer"><span class="pulse-dot"></span><span id="refresh-copy">每 15 秒自动发现</span></div></section>
+            <section class="pair-methods"><h3>通过其他方式连接</h3><button class="method" data-action="manual"><span class="method-icon" data-icon="link"></span><span><strong>输入设备地址</strong><small>使用地址和连接密码配对</small></span><span data-icon="chevron"></span></button><button class="method" data-action="document"><span class="method-icon" data-icon="file"></span><span><strong>使用配对文档</strong><small>导入或导出设备配对信息</small></span><span data-icon="chevron"></span></button></section>
+            <div class="pair-tip"><span data-icon="info"></span><p>配对前，请在对方设备上打开 xmesh，并确保双方网络互通。</p></div>
+          </aside>
+        </div>
+        <footer class="page-footer"><span><span class="dot"></span>设备之间，触手可及。</span><span>xmesh / 设备网络</span></footer>
+      </div>
+    </main>
+  </div>
+</div>
+<dialog id="drawer" aria-labelledby="drawer-title"><div class="drawer-head"><div><p class="eyebrow" id="drawer-kicker">设备连接</p><h2 id="drawer-title"></h2></div><button class="icon-button" data-action="close" aria-label="关闭面板"><span data-icon="close"></span></button></div><div id="drawer-content"></div><div class="prototype-note">交互预览 · 操作仅演示界面效果</div></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="./prototype.js"></script>
+<script src="./shared/navigation.js"></script>
+<script src="./shared/roles.js"></script></body>
+</html>

@@ -1,3 +1,4 @@
+import type { AppPreferences } from "./preferences";
 import { ciCounts } from "./ci";
 import { type Peer, type StatusResponse, isDegrading } from "./control";
 import { DEFAULT_DISPLAY, type DisplayPrefs } from "./display";
@@ -25,11 +26,13 @@ export interface UiSettings {
   locale: Locale;
   /** Text size and typefaces of the panel. */
   display: DisplayPrefs;
+  preferences?: AppPreferences;
 }
 
 /** Everything the tray menu and the panel render from. */
 export interface Snapshot {
   connection: Connection;
+  discoveryReady?: boolean;
   instances: InstanceInfo[];
   /** Nodes with a config file but no running kernel; the offline view offers to start them. */
   stoppedNodes: string[];

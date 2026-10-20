@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/lease"
@@ -414,6 +415,7 @@ func (m *Manager) Call(ctx context.Context, caller, name string, raw json.RawMes
 			return nil, e
 		}
 	}
+	audit.SetExecutionState(ctx, "queued")
 	select {
 	case <-a.ready:
 	case <-ctx.Done():
@@ -437,6 +439,32 @@ func (m *Manager) Call(ctx context.Context, caller, name string, raw json.RawMes
 	if b == nil || state != "running" {
 		return nil, a.unavailable()
 	}
+	audit.SetExecutionState(ctx, "running")
+	audit.SetResultPoll(ctx, func(pollCtx context.Context, runID string) (any, error) {
+		select {
+		case a.gate <- struct{}{}:
+			defer func() { <-a.gate }()
+		case <-pollCtx.Done():
+			return nil, pollCtx.Err()
+		}
+		a.mu.Lock()
+		current := a.bridge == b && a.state == "running"
+		a.lastUse = time.Now()
+		a.mu.Unlock()
+		if !current {
+			return nil, a.unavailable()
+		}
+		if a.cfg.Policy == "exclusive" {
+			if err := m.leases.Validate("backend:"+backend, caller, token); err != nil {
+				return nil, err
+			}
+		}
+		out, err := b.Call(pollCtx, "result", map[string]any{"run_id": runID}, mcpmux.Progress{})
+		if out == nil {
+			return nil, err
+		}
+		return audit.PollResult(out.StructuredContent, out.IsError, err)
+	})
 	result, e := b.Call(ctx, tool, args, progress)
 	a.mu.Lock()
 	a.lastUse = time.Now()

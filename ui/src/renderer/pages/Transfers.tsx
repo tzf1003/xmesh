@@ -93,7 +93,7 @@ function InstanceTransfers({ ctx }: { ctx: PageContext }): JSX.Element {
   };
   return (
     <div class="page" data-testid="page-transfers">
-      <PageHead title={t("ws.files")} sub={t("ws.fileSub")} />
+      <PageHead title={t("ws.files")} sub={t("ws.fileSub")} ><button type="button" class="btn" data-testid="transfer-settings" onClick={() => ctx.openSettings("transfers")}>{t("nav.settings")}</button></PageHead>
       {!enabled ? (
         <Banner>{t("pg.needsGateway")}</Banner>
       ) : (

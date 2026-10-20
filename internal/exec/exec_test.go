@@ -5,6 +5,7 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -33,6 +34,45 @@ func fixture(t *testing.T) (*Manager, *cwd.Resolver, *policy.Engine) {
 func run(m *Manager, r *cwd.Resolver, p *policy.Engine, caller string, a Object) (Object, error) {
 	b, _ := json.Marshal(a)
 	return m.Run(context.Background(), caller, r, p, b)
+}
+
+func TestQueuedExecutionMetadataSurvivesCancellation(t *testing.T) {
+	m, r, p := fixture(t)
+	release, _, err := m.scheduler.acquire(context.Background(), "n/blocker", "exclusive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	logger, err := audit.New(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logger.Close()
+	x := logger.BeginExecution(context.Background(), "n/a", "", "device", "exec.run", "agent")
+	ctx, cancel := context.WithCancel(x.Context(context.Background()))
+	defer cancel()
+	args, _ := json.Marshal(Object{"cmd": "/usr/bin/printf", "args": []string{"PRIVATE_COMMAND_ARGUMENT"}})
+	done := make(chan error, 1)
+	go func() { _, err := m.Run(ctx, "n/a", r, p, args); done <- err }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		active, _ := logger.Executions()
+		if len(m.Runs()) == 1 && len(active) == 1 && active[0].State == "queued" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued execution metadata missing", active)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("queued call ignored cancellation")
+	}
+	x.FinishCall(args, nil, true)
+	if active, _ := logger.Executions(); len(active) != 0 {
+		t.Fatal("cancelled call remained live", active)
+	}
 }
 
 // conformance: CTR-EXEC-01 RUL-05

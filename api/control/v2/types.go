@@ -260,9 +260,32 @@ type BackendLease struct {
 }
 
 type SessionsResponse struct {
-	PTY    []PtySession   `json:"pty"`
-	Exec   []ExecRun      `json:"exec"`
-	Leases []BackendLease `json:"leases"`
+	PTY             []PtySession     `json:"pty"`
+	Exec            []ExecRun        `json:"exec"`
+	Leases          []BackendLease   `json:"leases"`
+	Executions      []ToolExecution  `json:"executions,omitzero"`
+	ExecutionLimits *ExecutionLimits `json:"execution_limits,omitempty"`
+}
+
+// ToolExecution is a live call or asynchronous UI task at one receiving layer.
+type ToolExecution struct {
+	ID          string `json:"id"`
+	Caller      string `json:"caller"`
+	OAuthClient string `json:"oauth_client,omitempty"`
+	Device      string `json:"device"`
+	Tool        string `json:"tool"`
+	Layer       string `json:"layer"`
+	State       string `json:"state"`
+	StartedAt   Time   `json:"started_at"`
+	UpdatedAt   Time   `json:"updated_at"`
+	RunID       string `json:"run_id,omitempty"`
+	TaskStatus  string `json:"task_status,omitempty"`
+}
+
+type ExecutionLimits struct {
+	MaxActive     int    `json:"max_active"`
+	Active        int    `json:"active"`
+	RejectedTotal uint64 `json:"rejected_total"`
 }
 
 // Session is the union of the three views; exactly one field is set. It encodes as that view and

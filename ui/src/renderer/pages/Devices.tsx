@@ -1,9 +1,12 @@
-import { useState } from "preact/hooks";
 import type { JSX } from "preact";
+import { useState } from "preact/hooks";
 import type { PageContext } from "../app";
-import { Badge, Confirm, Empty, NotSupported, PageHead } from "../components";
+import { Badge, Confirm, Dialog, Empty, NotSupported, PageHead } from "../components";
 import { getApi } from "../api";
 import { useT } from "../i18n";
+import { useCopy } from "../design-copy";
+import { useResource } from "../hooks";
+import { Icon } from "../icons";
 import { ago, formatTime } from "../lib/format";
 import { deviceInfoState, lacksDeviceTag, relayStats, sortPeers } from "../lib/devices";
 import type { Peer } from "../../shared/control";
@@ -13,111 +16,24 @@ import { PairManual } from "./pairing/PairConnectForm";
 import { PairPassword } from "./pairing/PairPassword";
 
 export function Devices({ ctx }: { ctx: PageContext }): JSX.Element | null {
-  const t = useT();
-  const c = ctx.snapshot.connection;
-  if (c.kind !== "connected") return null;
-  const peers = sortPeers(c.peers);
-  const stats = relayStats(c.peers);
-  return (
-    <div class="page" data-testid="page-devices">
-      <PageHead title={t("nav.devices")} sub={t("devices.sub", { online: c.status.peers.online, total: c.status.peers.total })}>
-        <div class="row">
-          <Badge kind="ok">{t("devices.direct", { n: stats.direct })}</Badge>
-          <Badge kind={stats.derp > 0 ? "warn" : ""}>{t("devices.relayed", { n: stats.derp })}</Badge>
-        </div>
-      </PageHead>
-      {!ctx.can("peers") && <NotSupported what={t("nav.devices")} />}
-      <section class="card">
-        {peers.length === 0 ? (
-          <Empty>{t("devices.none")}</Empty>
-        ) : (
-          <div class="table-wrap">
-            <table data-testid="peers-table">
-              <thead>
-                <tr>
-                  <th scope="col">{t("col.name")}</th>
-                  <th scope="col">{t("col.status")}</th>
-                  <th scope="col">{t("col.tags")}</th>
-                  <th scope="col">{t("col.connection")}</th>
-                  <th scope="col">{t("col.addrs")}</th>
-                  <th scope="col">{t("col.lastSeen")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {peers.map((p) => (
-                  <PeerRow key={p.device_id || p.node_id || p.name} peer={p} ctx={ctx} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-      {ctx.can("pair") ? (
-        <>
-          {c.status.network.mode === "local" ? (
-            <section class="card" data-testid="pair-local-mode">
-              <h2>{t("pair.localTitle")}</h2>
-              <p class="hint">{t("pair.localHint")}</p>
-              <button type="button" class="btn primary" onClick={() => ctx.go("setup")} data-testid="pair-local-setup">
-                {t("pair.localSetup")}
-              </button>
-            </section>
-          ) : (
-            <>
-              <PairPassword ctx={ctx} />
-              <PairDiscovery ctx={ctx} />
-              <PairManual ctx={ctx} />
-            </>
-          )}
-          <PairDocuments ctx={ctx} />
-        </>
-      ) : (
-        <NotSupported what={t("pair.title")} />
-      )}
-    </div>
-  );
+ const t=useT(),copy=useCopy();const connection=ctx.snapshot.connection;
+ const [query,setQuery]=useState("");const [filter,setFilter]=useState("all");const [panel,setPanel]=useState<"add"|"password"|"manual"|"documents">();const [selected,setSelected]=useState<string>();
+ const canPair=ctx.can("pair");const passwordAvailable=canPair&&connection.kind==="connected"&&connection.status.network.mode!=="local";const password=useResource(()=>passwordAvailable?getApi().getPairPassword():Promise.resolve({ok:false as const,error:{code:"not_implemented",message:"Pairing is unavailable"}}),[ctx.snapshot.selectedInstance,passwordAvailable]);
+ if(connection.kind!=="connected")return null;
+ const self=connection.peers.find(p=>p.self);const peers=sortPeers(connection.peers.filter(p=>!p.self));const stats=relayStats(peers);const online=peers.filter(p=>p.online).length;
+ const rows=peers.filter(p=>(filter==="all"||(filter==="online"?p.online:!p.online))&&[p.name,p.display_name,p.os,...p.addrs,...p.tags].filter(Boolean).join(" ").toLowerCase().includes(query.toLowerCase()));
+ const peer=peers.find(p=>(p.device_id||p.node_id||p.name)===selected);
+ const local=connection.status.network.mode==="local";
+ return <div class="page control-page device-manager" data-testid="page-devices">
+  <PageHead title={copy("设备管理","Devices")} sub={copy("连接你的设备，让工作自由流转。","Connect your devices and keep work moving.")}><button type="button" class="btn primary" disabled={!canPair} onClick={()=>setPanel("add")} data-testid="device-add"><Icon name="plus"/>{copy("添加设备","Add device")}</button></PageHead>
+  {!ctx.can("peers")&&<NotSupported what={t("nav.devices")}/>}
+  <section class="local-device" data-testid="device-local"><div class="local-device-identity"><span class="local-device-icon"><Icon name="device"/></span><div><span class="eyebrow">{copy("本机设备","This device")}</span><h2>{self?.display_name||self?.name||connection.status.hostname} <Badge kind="info">{t("devices.self")}</Badge></h2><p class="hint">{self?.os||connection.status.os} · {self?.version||connection.status.control.kernel_version}{self?.device_id&&<> · <span class="mono" title={self.device_id}>{self.device_id.slice(0,16)}…</span></>}</p></div></div><div class="local-device-state"><div><span>{copy("设备状态","Status")}</span><strong><i/>{t("devices.online")}</strong></div>{passwordAvailable&&<div><span>{t("pair.passwordTitle")}</span><button type="button" class="text-button" onClick={()=>setPanel("password")} data-testid="device-password"><Icon name="shield"/>{password.resource.state==="ready"?password.resource.data.set?copy("已设置","Set"):copy("未设置","Not set"):copy("查看","View")}<Icon name="chevron"/></button></div>}<button type="button" class="icon-btn" onClick={()=>ctx.openSettings("node")} aria-label={copy("本机设备设置","Device settings")} data-testid="device-settings"><Icon name="sliders"/></button></div></section>
+  <div class="devices-layout"><section class="device-list-region"><div class="section-title"><h2>{copy("我的设备","My devices")} <Badge>{peers.length}</Badge></h2><span class="device-connection-counts"><span>{t("devices.direct",{n:stats.direct})}</span><span>{t("devices.relayed",{n:stats.derp})}</span></span></div><div class="device-list-panel"><div class="device-list-toolbar"><div class="segs" role="group" aria-label={copy("筛选设备状态","Filter device status")}>{[["all",copy("全部","All"),peers.length],["online",t("devices.online"),online],["offline",t("devices.offline"),peers.length-online]].map(([id,label,n])=><button type="button" aria-pressed={filter===id} onClick={()=>setFilter(String(id))} data-testid={`devices-filter-${id}`}>{label} <small>{n}</small></button>)}</div><label class="device-search"><Icon name="search"/><input type="search" aria-label={copy("搜索设备","Search devices")} placeholder={copy("搜索设备…","Search devices…")} value={query} onInput={e=>setQuery(e.currentTarget.value)} data-testid="devices-search"/></label></div>
+  {rows.length?<div class="device-rows" data-testid="peers-table"><div class="device-list-columns"><span>{copy("设备名称","Device")}</span><span>{t("col.connection")}</span><span>{t("col.status")}</span><span/></div>{rows.map(p=><button type="button" class="device-list-row" onClick={()=>setSelected(p.device_id||p.node_id||p.name)} data-testid={`peer-${p.name}`}><span class="device-row-name"><Icon name="device"/><span><strong>{p.display_name||p.name}</strong><small>{[p.os,p.version].filter(Boolean).join(" · ")}</small></span></span><span class="device-row-path"><span>{p.active_path=== "lan"?t("mode.lan"):p.active_path==="tailnet"?t("mode.tailnet"):"—"}</span><small>{p.connection==="direct"?t("conn.direct"):p.connection==="derp"?t("conn.derp",{region:p.derp_region??"?"}):t("conn.unknown")}</small></span><PeerStatus peer={p}/><Icon name="chevron"/></button>)}</div>:<div class="device-empty"><div class="empty-device-symbol"><Icon name="device"/></div><h3>{peers.length?copy("没有符合条件的设备","No matching devices"):copy("连接你的第一台设备","Connect your first device")}</h3><p>{peers.length?copy("调整搜索或筛选条件。","Try another search or filter."):copy("配对后，在这里查看设备状态与连接路径。","Pair a device to see its status and connection paths here.")}</p>{!peers.length&&canPair&&<button type="button" class="btn primary" onClick={()=>setPanel("add")}><Icon name="plus"/>{copy("添加设备","Add device")}</button>}</div>}
+  <div class="device-list-foot"><Icon name="shield"/>{copy("仅显示已与本机配对的设备","Devices paired with this node")}</div></div></section><aside class="device-pairing-region"><div class="section-title"><h2>{copy("发现设备","Discover devices")}</h2></div>{canPair?<>{local?<section class="card" data-testid="pair-local-mode"><h2>{t("pair.localTitle")}</h2><p class="hint">{t("pair.localHint")}</p><button type="button" class="btn" onClick={()=>ctx.openSettings("node")} data-testid="pair-local-setup">{copy("设置网络","Configure network")}</button></section>:<PairDiscovery ctx={ctx}/>}<div class="pair-methods"><h3>{copy("通过其他方式连接","Other ways to connect")}</h3><button type="button" data-testid="device-method-manual" disabled={local} onClick={()=>setPanel("manual")}><Icon name="link"/><span><strong>{copy("输入设备地址","Enter device address")}</strong><small>{copy("使用地址与连接密码配对","Pair with an address and connection password")}</small></span><Icon name="chevron"/></button><button type="button" data-testid="device-method-documents" onClick={()=>setPanel("documents")}><Icon name="code"/><span><strong>{copy("使用配对文档","Use pairing document")}</strong><small>{copy("导入或导出设备配对信息","Import or export device pairing information")}</small></span><Icon name="chevron"/></button></div></>:<NotSupported what={t("pair.title")}/>}</aside></div>
+  {panel&&<Dialog drawer title={panel==="add"?copy("添加设备","Add device"):panel==="password"?t("pair.passwordTitle"):panel==="manual"?t("pair.manualTitle"):t("pair.advancedTitle")} testid={`device-panel-${panel}`} onClose={()=>setPanel(undefined)}>{panel==="password"?<PairPassword ctx={ctx} onChanged={password.reload}/>:panel==="manual"?<PairManual ctx={ctx}/>:panel==="documents"?<PairDocuments ctx={ctx} expanded/>:<div class="add-device-methods"><p class="hint">{copy("选择连接方式，将另一台设备加入当前设备网络。","Choose how to pair another device.")}</p><button type="button" class="btn" onClick={()=>{setPanel(undefined);document.querySelector<HTMLElement>('[data-testid="pair-discovery"] button')?.focus();}}><Icon name="network"/>{copy("查看可发现的设备","Find discoverable devices")}</button><button type="button" class="btn" disabled={local} onClick={()=>setPanel("manual")}><Icon name="link"/>{copy("通过地址连接","Connect by address")}</button><button type="button" class="btn" onClick={()=>setPanel("documents")}><Icon name="code"/>{copy("使用配对文档","Use pairing document")}</button><hr/><button type="button" class="text-button" onClick={()=>setPanel("password")}>{copy("管理本机连接密码","Manage this device's password")}</button></div>}</Dialog>}
+  {peer&&<Dialog drawer title={peer.display_name||peer.name} testid="device-details" onClose={()=>setSelected(undefined)}><PeerDetails peer={peer} ctx={ctx}/></Dialog>}
+ </div>;
 }
-
-function PeerRow({ peer: p, ctx }: { peer: Peer; ctx: PageContext }): JSX.Element {
-  const t = useT();
-  const [revoke, setRevoke] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const when = ago(p.last_seen);
-  const info = deviceInfoState(p);
-  return (
-    <tr data-testid={`peer-${p.name}`}>
-      <td>
-        <strong>{p.display_name || p.name}</strong> {p.self && <Badge kind="info">{t("devices.self")}</Badge>}
-        {p.device_id && <div class="hint mono" title={p.device_id}>{p.device_id.slice(0, 16)}…</div>}
-        <div class="hint">{[p.os, p.version].filter(Boolean).join(" · ")}</div>
-        {info === "pending" && <div class="hint" data-testid={`peer-info-${p.name}`}>{t("devices.infoPending")}</div>}
-        {info === "failed" && <div class="hint mono" data-testid={`peer-info-${p.name}`}>{p.info?.error}</div>}
-      </td>
-      <td>
-        {p.connection_state === "reconnecting" ? <Badge kind="warn">{t("device.reconnecting")}</Badge> : p.connection_state === "identity_conflict" ? <Badge kind="danger">{t("device.conflict")}</Badge> : p.online ? <Badge kind="ok">{t("devices.online")}</Badge> : <Badge>{t("devices.offline")}</Badge>}
-        {info === "failed" && <> <Badge kind="warn">{t("devices.infoFailed")}</Badge></>}
-      </td>
-      <td>
-        <div class="row">
-          {p.tags.map((tag) => (
-            <Badge key={tag}>{tag}</Badge>
-          ))}
-          {lacksDeviceTag(p) && <Badge kind="warn">{t("devices.noDeviceTag")}</Badge>}
-        </div>
-      </td>
-      <td>
-        {p.active_path && <Badge kind="info">{t(p.active_path === "lan" ? "mode.lan" : "mode.tailnet")}</Badge>}
-        {p.paths?.filter((path) => path.reachable && path.kind !== p.active_path).map((path) => <div class="hint" key={`${path.kind}:${path.address}`}>{t("device.standby", {path: t(path.kind === "lan" ? "mode.lan" : "mode.tailnet")})}</div>)}
-        {p.connection === "direct" && <Badge kind="ok">{t("conn.direct")}</Badge>}
-        {p.connection === "derp" && <Badge kind="warn">{t("conn.derp", { region: p.derp_region ?? "?" })}</Badge>}
-        {p.connection === "local" && <Badge>{t("conn.local")}</Badge>}
-        {p.connection === "unknown" && <Badge>{t("conn.unknown")}</Badge>}
-      </td>
-      <td class="mono">{p.addrs.join(", ")}</td>
-      <td title={formatTime(p.last_seen)}><div>{when ? t(`ago.${when.unit}`, { n: when.n }) : "—"}</div>
-        {!p.self && p.device_id && ctx.can("pair") && <button type="button" class="text-button" onClick={() => setRevoke(true)} data-testid={`device-revoke-${p.name}`}>{t("device.revoke")}</button>}
-        {revoke && <Confirm danger confirmLabel={t("device.revoke")} title={t("device.revoke")} body={t("device.revokeHint", {name: p.display_name || p.name})} busy={busy} onCancel={() => setRevoke(false)} onConfirm={() => { setBusy(true); void getApi().revokeDevice(p.device_id!).then((result) => {setBusy(false); setRevoke(false); ctx.toast(result.ok ? t("device.revoked") : result.error.message, !result.ok);}); }}/>}
-      </td>
-    </tr>
-  );
-}
+function PeerStatus({peer:p}:{peer:Peer}):JSX.Element{const t=useT();return <span class="device-row-status">{p.connection_state==="reconnecting"?<Badge kind="warn">{t("device.reconnecting")}</Badge>:p.connection_state==="identity_conflict"?<Badge kind="danger">{t("device.conflict")}</Badge>:<Badge kind={p.online?"ok":""}>{p.online?t("devices.online"):t("devices.offline")}</Badge>}</span>}
+function PeerDetails({peer:p,ctx}:{peer:Peer;ctx:PageContext}):JSX.Element{const t=useT();const [revoke,setRevoke]=useState(false),[busy,setBusy]=useState(false);const when=ago(p.last_seen);const info=deviceInfoState(p);return <div class="device-details"><PeerStatus peer={p}/><dl class="overview-facts"><dt>{t("col.name")}</dt><dd>{p.name}</dd><dt>{t("col.addrs")}</dt><dd class="mono">{p.addrs.join(", ")||"—"}</dd><dt>{t("col.connection")}</dt><dd>{p.active_path&&<Badge kind="info">{t(p.active_path==="lan"?"mode.lan":"mode.tailnet")}</Badge>} {p.connection==="direct"?t("conn.direct"):p.connection==="derp"?t("conn.derp",{region:p.derp_region??"?"}):t("conn.unknown")}{p.paths?.filter(path=>path.reachable&&path.kind!==p.active_path).map(path=><p class="hint">{t("device.standby",{path:t(path.kind==="lan"?"mode.lan":"mode.tailnet")})}</p>)}</dd><dt>{t("col.tags")}</dt><dd class="row">{p.tags.map(tag=><Badge>{tag}</Badge>)}{lacksDeviceTag(p)&&<Badge kind="warn">{t("devices.noDeviceTag")}</Badge>}</dd><dt>{t("col.lastSeen")}</dt><dd title={formatTime(p.last_seen)}>{when?t(`ago.${when.unit}`,{n:when.n}):"—"}</dd></dl>{p.device_id&&<p class="hint mono">{p.device_id}</p>}{info==="pending"&&<p class="hint">{t("devices.infoPending")}</p>}{info==="failed"&&<p class="hint" data-testid={`peer-info-${p.name}`}>{p.info?.error}</p>}{p.device_id&&ctx.can("pair")&&<button type="button" class="btn danger" data-testid={`device-revoke-${p.name}`} onClick={()=>setRevoke(true)}>{t("device.revoke")}</button>}{revoke&&<Confirm danger title={t("device.revoke")} confirmLabel={t("device.revoke")} body={t("device.revokeHint",{name:p.display_name||p.name})} busy={busy} onCancel={()=>setRevoke(false)} onConfirm={()=>{setBusy(true);void getApi().revokeDevice(p.device_id!).then(result=>{setBusy(false);setRevoke(false);ctx.toast(result.ok?t("device.revoked"):result.error.message,!result.ok)})}}/>}</div>}

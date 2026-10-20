@@ -21,6 +21,7 @@ export function MeshLogin({
   onSaved,
   verify,
   draftDirty = false,
+  onVerified,
 }: {
   ctx: PageContext;
   open: boolean;
@@ -28,6 +29,7 @@ export function MeshLogin({
   /** Runs after a save; resolves to the failure to show, if the credential does not work. */
   verify?: () => Promise<ActionError | undefined>;
   draftDirty?: boolean;
+  onVerified?(): void;
 }): JSX.Element {
   const t = useT();
   const [kind, setKind] = useState<MeshControlPlane>("tailscale");
@@ -76,6 +78,7 @@ export function MeshLogin({
     setBusy(false);
     if (bad !== undefined) return setErr(bad);
     ctx.toast(t("mesh.login.saved"));
+    onVerified?.();
   };
 
   return (

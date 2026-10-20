@@ -49,6 +49,7 @@ const api: PanelApi = {
   openPath: (kind) => invoke("xmesh:open-path", kind),
   setLoginItem: (enabled) => invoke("xmesh:set-login-item", enabled),
   setDisplay: (prefs) => invoke("xmesh:set-display", prefs),
+  setAppPreferences: (prefs) => invoke("xmesh:set-app-preferences", prefs),
   openExternal: (key) => invoke("xmesh:open-external", key),
   checkForUpdate: () => invoke("xmesh:check-update"),
   installUpdate: () => invoke("xmesh:install-update"),

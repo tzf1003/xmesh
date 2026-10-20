@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { auditExecutionStatus, executionCategory, executionMatches, liveRows, auditRow } from "../../src/renderer/lib/executions";
+import type { AuditEvent } from "../../src/shared/control";
+const event:AuditEvent={time:"2026-10-20T10:00:00.000Z",event:"task_complete",caller:"n/s",device:"d",tool:"ui.run",status:"ok",duration_ms:20,task_status:"passed"};
+test("async accepted calls and final task outcomes remain distinct",()=>{assert.equal(auditExecutionStatus({...event,event:"tool_call",task_status:"accepted"}),"accepted");assert.equal(auditExecutionStatus(event),"success");assert.equal(auditExecutionStatus({...event,status:"error",task_status:"unknown"}),"unknown");assert.equal(auditExecutionStatus({...event,status:"error",task_status:"cancelled"}),"cancelled");assert.equal(executionCategory("node/ui.run","task_complete"),"ui")});
+test("all-tool executions supersede legacy exec rows and retain source layer",()=>{const rows=liveRows({pty:[],exec:[],leases:[],executions:[{id:"x-1",tool:"fs.read",caller:"n/s",device:"d",layer:"agent",state:"running",started_at:event.time,updated_at:event.time}]},"local");assert.equal(rows[0]?.category,"file");assert.equal(rows[0]?.layer,"agent");assert.equal(executionMatches(rows[0]!,"fs.read","file","running","d","agent"),true);assert.equal(executionMatches(rows[0]!,"","all","all","d","gateway"),false)});
+test("audit filters combine outcome, source and tool matching",()=>{const row=auditRow({...event,event:"authz_deny",status:"error",error:"unauthorized",layer:"gateway"},0);assert.equal(row.status,"denied");assert.equal(executionMatches(row,"n/s","ui","issues","d","gateway"),true)});
+
+test("retired task tracking is an unknown UI task outcome in history",()=>{const lost={...event,event:"task_untracked" as const,status:"error" as const,error:"authorization_lost",task_status:"unknown" as const};assert.equal(auditExecutionStatus(lost),"unknown");assert.equal(executionCategory(lost.tool,lost.event),"ui")});

@@ -1,3 +1,4 @@
+import { PasswordInput } from "../../password-input";
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
 import type { PageContext } from "../../app";
@@ -69,14 +70,7 @@ export function PairConnectForm({
         </p>
       )}
       <Field label={t("pair.peerPassword")}>
-        <input
-          type="password"
-          value={pw}
-          onInput={(e) => setPw((e.currentTarget as HTMLInputElement).value)}
-          autocomplete="off"
-          aria-invalid={pw !== "" && !valid}
-          data-testid={`${testid}-password`}
-        />
+        <PasswordInput value={pw} onInput={setPw} invalid={pw !== "" && !valid} maxLength={PAIR_PASSWORD_MAX} testid={`${testid}-password`}/>
       </Field>
       {pw !== "" && !valid && <p class="hint">{t("pair.passwordRules", { min: PAIR_PASSWORD_MIN, max: PAIR_PASSWORD_MAX })}</p>}
       {err && <PairErrorBanner error={err} testid={`${testid}-error`} />}

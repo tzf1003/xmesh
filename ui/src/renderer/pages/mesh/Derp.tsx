@@ -75,7 +75,7 @@ export function MeshDerp({ ctx, status, draft }: MeshPolicyProps): JSX.Element {
       <section class="card">
         <h2>{t("mesh.derp.title")}</h2>
         <p class="hint">{t(viaPolicy ? "mesh.draft.derpHint" : "mesh.derp.intro")}</p>
-        {viaPolicy && <section class="section-stack" data-testid="mesh-derp-current">
+        {viaPolicy && <section class="section-stack module-relay-grid" data-testid="mesh-derp-current">
           <h3>{t("mesh.draft.relays")}</h3>
           {draft.document?.regions.length === 0 && <p>{t("mesh.draft.noRelays")}</p>}
           {draft.document?.regions.map((r) => <div class="card" key={r.id} data-testid={`mesh-cloud-region-${r.id}`}>

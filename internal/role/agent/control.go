@@ -106,6 +106,9 @@ func restartState(s *config.Store) (bool, int) {
 // ownership and counts, never terminal output or command lines.
 func (a *Agent) Sessions() v2.SessionsResponse {
 	out := v2.SessionsResponse{PTY: []v2.PtySession{}, Exec: []v2.ExecRun{}, Leases: []v2.BackendLease{}}
+	if log := a.auditLog.Load(); log != nil {
+		out.Executions, out.ExecutionLimits = log.Executions()
+	}
 	for _, s := range a.PTY.Views() {
 		row := v2.PtySession{Kind: "pty", ID: s.ID, Owner: s.Owner, PID: s.PID, State: s.State, IdleS: s.IdleS, Cols: s.Cols, Rows: s.Rows, Cwd: s.CWD, CreatedAt: v2.At(s.Created)}
 		if s.Name != "" {
