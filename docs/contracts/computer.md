@@ -27,7 +27,7 @@
 
 动作类型：move、click、drag、scroll、key、text、wait。点击的 button 为 left / middle / right，clicks 最大 3；拖动最多 2 秒；每批显式等待总预算最多 4 秒，执行和排队使用五秒总预算。按键组合在同一动作中按顺序按下、反向释放。文本使用系统文字输入，正文上限 64 KiB。键盘与文本行为不借用剪贴板授权。
 
-MCP 发现返回的 schema 明确列出 mode、action type 和 button 枚举、租期 / 坐标 / 时间预算，以及不同动作的必填字段；工具描述包含图片坐标、业务结果观察和 unknown 恢复语义。滚轮 delta 为离散步数，正值向右 / 向下。
+MCP 发现返回的 schema 明确列出 mode、action type 和 button 枚举、租期 / 坐标 / 时间预算，以及不同动作的必填字段；工具描述包含图片坐标、业务结果观察和 unknown 恢复语义。文本的 `maxLength` 按 JSON Schema 规则计 Unicode 码点，仅为上界；`x-max-utf8-bytes: 65536` 标注服务端强制执行的 UTF-8 字节预算。客户端须检查编码后的字节数并拆分超长文本，通用 schema 验证通过后仍须满足该运行时限制。滚轮 delta 为离散步数，正值向右 / 向下。
 
 动作 ID 与请求内容绑定。在有效会话内，相同 ID 和相同参数返回既有结果，相同 ID 配不同参数返回 conflict。请求响应丢失后查询 action_status。executed 表示全部输入动作已提交，业务成功仍须观察确认。failed 表示已知失败，executed 数量指出完整执行的前缀；unknown 表示执行结果不能确定，应重新观察。幂等缓存为内存状态，执行器 / 内核重建后桌面代次变化，旧动作不得重放。
 

@@ -20,10 +20,34 @@ func Extract(archive, dst string) error {
 	if err := os.MkdirAll(dst, 0o700); err != nil {
 		return err
 	}
-	if strings.HasSuffix(archive, ".zip") {
-		return extractZip(archive, dst)
+	root, err := os.OpenRoot(dst)
+	if err != nil {
+		return err
 	}
-	return extractTarGz(archive, dst)
+	defer root.Close()
+	var links []string
+	if strings.HasSuffix(archive, ".zip") {
+		err = extractZip(archive, root)
+	} else {
+		err = extractTarGz(archive, root, &links)
+	}
+	if err != nil {
+		return err
+	}
+	for _, name := range links {
+		st, err := root.Lstat(name)
+		if err != nil {
+			return err
+		}
+		if st.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if err := validateArchiveLink(root, name); err != nil {
+			_ = root.Remove(name)
+			return err
+		}
+	}
+	return nil
 }
 
 // rooted reports whether name starts at a root on any system. A leading slash is rooted on Windows too, where
@@ -39,10 +63,10 @@ func inside(dst, name string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rooted(name) {
 		return "", fmt.Errorf("压缩包里的路径越界: %q", name)
 	}
-	return clean, nil
+	return rel, nil
 }
 
-func extractTarGz(archive, dst string) error {
+func extractTarGz(archive string, root *os.Root, links *[]string) error {
 	f, err := os.Open(archive)
 	if err != nil {
 		return err
@@ -63,25 +87,33 @@ func extractTarGz(archive, dst string) error {
 		if err != nil {
 			return err
 		}
-		target, err := inside(dst, h.Name)
+		target, err := inside(".", h.Name)
 		if err != nil {
 			return err
 		}
 		switch h.Typeflag {
 		case tar.TypeDir:
-			err = os.MkdirAll(target, 0o755)
+			err = root.MkdirAll(target, 0o755)
 		case tar.TypeReg:
 			total += h.Size
 			if total > maxExtracted {
 				return fmt.Errorf("压缩包解开后超过 %d 字节", int64(maxExtracted))
 			}
-			err = writeFile(target, tr, h.FileInfo().Mode().Perm())
+			err = writeFile(root, target, tr, h.FileInfo().Mode().Perm())
 		case tar.TypeSymlink:
-			err = makeSymlink(dst, target, h.Linkname)
+			err = makeSymlink(root, target, h.Linkname)
+			if err == nil {
+				*links = append(*links, target)
+			}
 		case tar.TypeLink:
 			var from string
-			if from, err = inside(dst, h.Linkname); err == nil {
-				err = os.Link(from, target)
+			if from, err = inside(".", h.Linkname); err == nil {
+				if err = checkLinkParents(root, target); err == nil {
+					err = root.Link(from, target)
+					if err == nil {
+						*links = append(*links, target)
+					}
+				}
 			}
 		default:
 			// Devices, fifos and the like have no place in a runner package.
@@ -92,22 +124,41 @@ func extractTarGz(archive, dst string) error {
 	}
 }
 
-func makeSymlink(dst, target, link string) error {
+func makeSymlink(root *os.Root, target, link string) error {
 	if rooted(link) {
 		return fmt.Errorf("压缩包里的链接是绝对路径: %q", link)
 	}
 	resolved := filepath.Join(filepath.Dir(target), filepath.FromSlash(link))
-	if rel, err := filepath.Rel(dst, resolved); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if rel, err := filepath.Rel(".", resolved); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("压缩包里的链接指向目录之外: %q", link)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
-	_ = os.Remove(target)
-	return os.Symlink(link, target)
+	if err := checkLinkParents(root, target); err != nil {
+		return err
+	}
+	if err := root.Remove(target); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return root.Symlink(link, target)
 }
 
-func extractZip(archive, dst string) error {
+// Keep tracked link names attached to their actual parent directories through final validation.
+func checkLinkParents(root *os.Root, target string) error {
+	for parent := filepath.Dir(target); parent != "."; parent = filepath.Dir(parent) {
+		st, err := root.Lstat(parent)
+		if err != nil {
+			return err
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("压缩包里的链接父目录是符号链接: %q", parent)
+		}
+	}
+	return nil
+}
+
+func extractZip(archive string, root *os.Root) error {
 	zr, err := zip.OpenReader(archive)
 	if err != nil {
 		return err
@@ -115,12 +166,12 @@ func extractZip(archive, dst string) error {
 	defer zr.Close()
 	var total int64
 	for _, f := range zr.File {
-		target, err := inside(dst, f.Name)
+		target, err := inside(".", f.Name)
 		if err != nil {
 			return err
 		}
 		if f.FileInfo().IsDir() {
-			if err = os.MkdirAll(target, 0o755); err != nil {
+			if err = root.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
 			continue
@@ -136,7 +187,7 @@ func extractZip(archive, dst string) error {
 		if err != nil {
 			return err
 		}
-		err = writeFile(target, rc, f.Mode().Perm())
+		err = writeFile(root, target, rc, f.Mode().Perm())
 		rc.Close()
 		if err != nil {
 			return err
@@ -145,14 +196,18 @@ func extractZip(archive, dst string) error {
 	return nil
 }
 
-func writeFile(path string, r io.Reader, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+func writeFile(root *os.Root, path string, r io.Reader, mode os.FileMode) error {
+	if err := root.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	if mode == 0 {
 		mode = 0o644
 	}
-	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	// Replace the entry rather than truncating a pre-existing symlink or hard link.
+	if err := root.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	out, err := root.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}
@@ -161,4 +216,48 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+// Resolve link components individually so aliases cannot change the meaning of '..'.
+// Missing components remain lexical: forward and dangling links stay valid within the root.
+func validateArchiveLink(root *os.Root, name string) error {
+	pending := strings.Split(filepath.FromSlash(name), string(filepath.Separator))
+	var resolved []string
+	hops := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) == 0 {
+				return fmt.Errorf("压缩包里的链接指向目录之外: %q", name)
+			}
+			resolved = resolved[:len(resolved)-1]
+			continue
+		}
+		current := filepath.Join(append(append([]string{}, resolved...), part)...)
+		st, err := root.Lstat(current)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil && st.Mode()&os.ModeSymlink != 0 {
+			hops++
+			if hops > 40 {
+				return fmt.Errorf("压缩包里的链接循环: %q", name)
+			}
+			link, err := root.Readlink(current)
+			if err != nil {
+				return err
+			}
+			if rooted(link) {
+				return fmt.Errorf("压缩包里的链接是绝对路径: %q", name)
+			}
+			pending = append(strings.Split(filepath.FromSlash(link), string(filepath.Separator)), pending...)
+			continue
+		}
+		resolved = append(resolved, part)
+	}
+	return nil
 }

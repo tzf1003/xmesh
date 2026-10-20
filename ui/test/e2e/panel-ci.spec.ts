@@ -223,3 +223,14 @@ test("ci: notices show the command to run, and a draining node is called out", a
   await expect(page.getByTestId("ci-notice-git_missing")).toContainText("git");
   await expect(page.getByTestId("ci-draining")).toBeVisible();
 });
+
+test("ci: public token registration retains the token through confirmation", async()=>{
+  const page=await openCi();
+  await page.getByTestId("ci-add").click();
+  await page.getByTestId("ci-repo").fill("tzf1003/oss-lib");
+  await page.getByTestId("ci-reg-token").fill(REG_TOKEN);
+  await page.getByTestId("ci-create").click();
+  await expect(page.getByTestId("confirm")).toBeVisible();
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("ci-add-dialog")).toHaveCount(0);
+});

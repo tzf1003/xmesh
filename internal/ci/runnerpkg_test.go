@@ -204,3 +204,212 @@ func Test_CTRCTL15_ExtractRefusesEscapes(t *testing.T) {
 		}
 	}
 }
+
+func Test_ExtractContainsSymlinkChains(t *testing.T) {
+	// a resolves to the root; a/b's lexical parent is a but its real parent is the root.
+	archive := filepath.Join(t.TempDir(), "chain.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range []*tar.Header{
+		{Name: "a", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0755},
+		{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "../outside", Mode: 0755},
+		{Name: "b/victim", Typeflag: tar.TypeReg, Size: 4, Mode: 0600},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			if _, err := tw.Write([]byte("evil")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gz.Close()
+	f.Close()
+	parent := t.TempDir()
+	dst, outside := filepath.Join(parent, "runner"), filepath.Join(parent, "outside")
+	if err := os.Mkdir(outside, 0700); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(archive, dst); err == nil {
+		t.Fatal("chain escaped root")
+	}
+	if got, err := os.ReadFile(victim); err != nil || string(got) != "keep" {
+		t.Fatalf("outside overwritten: %q %v", got, err)
+	}
+}
+
+func Test_ExtractReplacesHardlinkedFile(t *testing.T) {
+	dst := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(victim, filepath.Join(dst, "run.sh")); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "runner.tar.gz")
+	if err := os.WriteFile(archive, tarGz(t, map[string]string{"!run.sh": "updated"}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(archive, dst); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(victim)
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("hardlink target changed: %q %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "run.sh")); err != nil || string(got) != "updated" {
+		t.Fatalf("install failed: %q %v", got, err)
+	}
+}
+
+func Test_ExtractRejectsTerminalEscapingSymlink(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "links.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range []*tar.Header{
+		{Name: "a", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0755},
+		{Name: "a/b", Typeflag: tar.TypeSymlink, Linkname: "../outside", Mode: 0755},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gz.Close()
+	f.Close()
+	if err := Extract(archive, t.TempDir()); err == nil {
+		t.Fatal("escaping link accepted at archive end")
+	}
+}
+
+func Test_ExtractKeepsSafeForwardSymlink(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "forward.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range []*tar.Header{
+		{Name: "bin/tool", Typeflag: tar.TypeSymlink, Linkname: "../run.sh", Mode: 0755},
+		{Name: "run.sh", Typeflag: tar.TypeReg, Size: 4, Mode: 0755},
+	} {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			tw.Write([]byte("safe"))
+		}
+	}
+	tw.Close()
+	gz.Close()
+	f.Close()
+	dst := t.TempDir()
+	if err := Extract(archive, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "bin", "tool")); err != nil || string(got) != "safe" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func Test_ExtractPreservesExistingJobWorkspaceLinks(t *testing.T) {
+	dst := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dst, "_work"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dst, "_work", "job-link")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink privilege unavailable")
+		}
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "runner.tar.gz")
+	if err := os.WriteFile(archive, tarGz(t, map[string]string{"!run.sh": "updated"}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Extract(archive, dst); err != nil {
+		t.Fatal("workspace link blocked reinstall", err)
+	}
+	if target, err := os.Readlink(link); err != nil || target != outside {
+		t.Fatalf("workspace link changed: %q %v", target, err)
+	}
+}
+
+func Test_ExtractValidatesHardlinkedSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support hard links to symlink inodes")
+	}
+	for _, tc := range []struct {
+		name, cloned string
+		safe         bool
+	}{
+		{"relocated escape", "clone", false},
+		{"same parent", "sub/clone", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			archive := filepath.Join(t.TempDir(), "hardlinks.tar.gz")
+			f, err := os.Create(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gz := gzip.NewWriter(f)
+			tw := tar.NewWriter(gz)
+			for _, h := range []*tar.Header{
+				{Name: "sub", Typeflag: tar.TypeDir, Mode: 0755},
+				{Name: "file", Typeflag: tar.TypeReg, Mode: 0644},
+				{Name: "sub/link", Typeflag: tar.TypeSymlink, Linkname: "../file", Mode: 0755},
+				{Name: tc.cloned, Typeflag: tar.TypeLink, Linkname: "sub/link", Mode: 0755},
+				{Name: "sub/link", Typeflag: tar.TypeReg, Mode: 0644},
+			} {
+				if err := tw.WriteHeader(h); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := tw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := gz.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatal(err)
+			}
+			dst := t.TempDir()
+			err = Extract(archive, dst)
+			if !tc.safe {
+				if err == nil {
+					t.Fatal("hardlink clone escaped final validation")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.ReadFile(filepath.Join(dst, tc.cloned)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

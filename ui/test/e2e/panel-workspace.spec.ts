@@ -38,6 +38,11 @@ test("terminal opens, accepts keyboard input, resizes, sends a signal and closes
       h.kernel.playground!.calls.some((c) => c.name === "local/pty.write" && String(c.args.data).includes("pwd")),
     )
     .toBe(true);
+  const paste="中".repeat(25_000);
+  const before=h.kernel.playground!.calls.length;
+  await page.locator(".xterm-helper-textarea").fill(paste);
+  await expect.poll(()=>h.kernel.playground!.calls.slice(before).filter((c)=>c.name==="local/pty.write").map((c)=>String(c.args.data)).join("")).toBe(paste);
+  expect(h.kernel.playground!.calls.slice(before).filter((c)=>c.name==="local/pty.write").every((c)=>Buffer.byteLength(String(c.args.data))<=60_000)).toBe(true);
   await page.setViewportSize({ width: 1400, height: 920 });
   await expect.poll(() => h.kernel.playground!.calls.some((c) => c.name === "local/pty.resize")).toBe(true);
   await page.getByRole("button", { name: "INT", exact: true }).click();

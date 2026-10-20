@@ -160,7 +160,7 @@ async function start(): Promise<void> {
           }),
     applier,
     store: new UpdateStore(path.join(app.getPath("userData"), "update.json")),
-    runningNodes: () => TEST_MODE ? controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id) : discoverInstances(roots).map((i) => i.id),
+    runningNodes: () => TEST_MODE ? controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id) : discoverInstances(roots).filter((i) => !i.protected).map((i) => i.id),
     stopNode: async (node) => {
       if (TEST_MODE) {
         calls.push({ op: "update-stop", arg: node });

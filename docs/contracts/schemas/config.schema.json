@@ -621,7 +621,11 @@
               "labels": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/ciLabel" } },
               "paused": { "type": "boolean", "default": false },
               "dir": { "type": "string", "minLength": 1 }
-            }
+            },
+            "allOf": [{
+              "if": { "properties": { "source": { "const": "import" } }, "required": ["source"] },
+              "then": { "properties": { "concurrency": { "const": 1 } } }
+            }]
           }
         }
       }

@@ -50,7 +50,7 @@ test("named desktop credentials use independent MCP sessions while default calls
 });
 
 test("history recursively redacts secrets and schema checks work under a strict CSP", () => {
-  assert.deepEqual(historyArgs({ cmd: "x", env: { A: "secret" }, nested: [{ api_key: "secret", message: "hello" }], stdin: "secret" }), { cmd: "x", env: "[redacted]", nested: [{ api_key: "[redacted]", message: "hello" }], stdin: "[redacted]" });
+  assert.deepEqual(historyArgs({ cmd: "x", env: { A: "secret" }, nested: [{ api_key: "secret", message: "hello" }], stdin: "secret" }), { cmd: "[redacted]", env: { A: "[redacted]" }, nested: [{ api_key: "[redacted]", message: "[redacted]" }], stdin: "[redacted]" });
   const tool = { name: "demo", inputSchema: { type: "object", required: ["count"], properties: { count: { type: "integer", minimum: 1 } } } };
   assert.ok(argumentError(tool, "[]"));
   assert.ok(argumentError(tool, "{}"));
@@ -164,4 +164,12 @@ test("production MCP path reuses PAT, stamps origin, handles errors, cancellatio
     assert.ok((await service.request({ op: "list", instance: "node", device: "local" })).ok);
     assert.equal((await service.request({ op: "list", instance: "another", device: "local" })).ok, false);
   } finally { await service.close(); await gateway.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("history removes values under arbitrary keys and within arrays", () => {
+  const args = {message:"password-in-message",headers:["Bearer secret"],query:{value:"credential"},count:123456};
+  const result = historyArgs(args);
+  assert.deepEqual(result,{message:"[redacted]",headers:["[redacted]"],query:{value:"[redacted]"},count:"[redacted]"});
+  for (const secret of ["password-in-message","Bearer secret","credential","123456"]) assert.equal(JSON.stringify(result).includes(secret),false);
+  assert.equal(args.message,"password-in-message");
 });

@@ -105,10 +105,14 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
     calls: () => hook("calls"),
     notices: () => hook("notices"),
     openPanel: async () => {
-      await app.evaluate(() =>
-        (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
-      );
-      const page = app.windows()[0] ?? await app.waitForEvent("window");
+      // Subscribe before showing the panel, retaining an existing panel page.
+      const existing = app.windows()[0];
+      const [page] = await Promise.all([
+        existing ? Promise.resolve(existing) : app.waitForEvent("window"),
+        app.evaluate(() =>
+          (globalThis as unknown as { __xmeshUiTest: { showPanel(): void } }).__xmeshUiTest.showPanel(),
+        ),
+      ]);
       await page.waitForLoadState("domcontentloaded");
       return page;
     },

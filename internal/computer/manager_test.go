@@ -6,12 +6,34 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
+
+func TestTextActionsEnforceUTF8ByteBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		valid      bool
+	}{
+		{"ASCII boundary", strings.Repeat("a", 65536), true},
+		{"ASCII overflow", strings.Repeat("a", 65537), false},
+		{"CJK boundary", strings.Repeat("中", 21845) + "a", true},
+		{"CJK overflow", strings.Repeat("中", 21845) + "aa", false},
+		{"CJK under code point limit", strings.Repeat("中", 30000), false},
+		{"emoji boundary", strings.Repeat("😀", 16384), true},
+		{"emoji overflow", strings.Repeat("😀", 16384) + "a", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validActions([]Action{{Type: "text", Text: tc.text}}); (err == nil) != tc.valid {
+				t.Fatalf("UTF-8 byte budget: bytes=%d valid=%v err=%v", len(tc.text), tc.valid, err)
+			}
+		})
+	}
+}
 
 type fakeDesktop struct {
 	mu         sync.Mutex
@@ -368,5 +390,27 @@ func TestFrameMemoryBudgetIsSharedAcrossObservers(t *testing.T) {
 	}
 	if _, retained := m.sessions[one.ID].frames[first.ID]; retained {
 		t.Fatal("oldest frame was retained after global eviction")
+	}
+}
+
+func TestActionFieldsMatchTheirOperation(t *testing.T) {
+	for _, action := range []Action{
+		{Type: "click", X: point(1), Y: point(2), DeltaY: 10},
+		{Type: "move", X: point(1), Y: point(2), Clicks: 2},
+		{Type: "move", X: point(1), Y: point(2), Button: "left"},
+		{Type: "click", X: point(1), Y: point(2), DurationMS: 10},
+		{Type: "scroll", X: point(1), Y: point(2)},
+	} {
+		if err := validActions([]Action{action}); err == nil {
+			t.Fatalf("accepted inapplicable fields: %+v", action)
+		}
+	}
+	for _, action := range []Action{
+		{Type: "scroll", X: point(1), Y: point(2), DeltaY: 1},
+		{Type: "drag", X: point(1), Y: point(2), ToX: point(3), ToY: point(4), Button: "right", DurationMS: 10},
+	} {
+		if err := validActions([]Action{action}); err != nil {
+			t.Fatalf("rejected applicable fields: %+v: %v", action, err)
+		}
 	}
 }

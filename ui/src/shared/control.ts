@@ -74,6 +74,8 @@ export function parseManifest(raw: unknown): ControlEndpointFile | undefined {
   const { endpoint, transport, api_version, kernel_version, node, boot_id, started_at } = raw;
   if (typeof endpoint !== "string" || endpoint === "") return undefined;
   if (transport !== "unix" && transport !== "pipe") return undefined;
+  if (endpoint.includes("\0")) return undefined;
+  if (transport === "unix" ? !/^\/.+/.test(endpoint) : !/^\\\\\.\\pipe\\[^\\/]+$/.test(endpoint)) return undefined;
   if (typeof api_version !== "string") return undefined;
   const caps = Array.isArray(raw.capabilities)
     ? (raw.capabilities.filter((c): c is Capability => typeof c === "string" && KNOWN_CAPABILITIES.includes(c)) as Capability[])
@@ -96,6 +98,9 @@ export function parseManifest(raw: unknown): ControlEndpointFile | undefined {
  * clients ignore unknown fields, so only what the shell reads is checked.
  */
 export function parseStatus(raw: unknown): StatusResponse {
+  const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
+  const fields = (v: Record<string, unknown>, names: string[]): boolean => names.every((k) => typeof v[k] === "string");
+  const counts = (v: Record<string, unknown>, names: string[]): boolean => names.every((k) => typeof v[k] === "number" && Number.isFinite(v[k]) && v[k] >= 0);
   if (
     !isRecord(raw) ||
     !isRecord(raw.control) ||
@@ -103,8 +108,33 @@ export function parseStatus(raw: unknown): StatusResponse {
     !isRecord(raw.paths) ||
     !isRecord(raw.limits) ||
     !isRecord(raw.peers) ||
+    !isRecord(raw.network) ||
+    !fields(raw.control, ["api_version", "kernel_version", "boot_id"]) ||
+    (raw.control.capabilities !== undefined && !strings(raw.control.capabilities)) ||
+    !fields(raw.network, ["node_id"]) ||
+    typeof raw.network.mode !== "string" ||
+    !strings(raw.network.tags) ||
+    typeof raw.drain.draining !== "boolean" ||
+    (raw.drain.mode !== null && typeof raw.drain.mode !== "string") ||
+    (raw.drain.since !== null && typeof raw.drain.since !== "string") ||
+    !fields(raw.paths, ["config_file", "state_dir"]) ||
+    ![raw.paths.log_dir, raw.paths.audit_dir].every((p) => p === null || typeof p === "string") ||
+    !counts(raw.limits, ["exec_shared", "exec_exclusive", "exec_shared_in_use", "exec_exclusive_in_use", "pty_max_sessions", "pty_max_per_caller", "pty_in_use", "pty_active", "pty_closed", "pty_closed_retain_max"]) ||
+    !counts(raw.peers, ["total", "online"]) ||
+    !fields(raw, ["hostname", "home", "arch", "started_at"]) ||
+    typeof raw.os !== "string" ||
+    typeof raw.lifecycle !== "string" ||
+    !["/", "\\"].includes(raw.path_sep as string) ||
+    typeof raw.restart_required !== "boolean" ||
+    typeof raw.authkey_readable !== "boolean" ||
+    !counts(raw, ["pid", "policy_reload_failures"]) ||
+    !strings(raw.shells) ||
+    !Array.isArray(raw.workspaces) ||
+    !raw.workspaces.every((v) => isRecord(v) && fields(v, ["alias", "path", "desc"]) && (v.error === undefined || typeof v.error === "string")) ||
+    !Array.isArray(raw.backends) ||
+    !raw.backends.every((v) => isRecord(v) && fields(v, ["name", "policy", "state"]) && typeof v.favorite === "boolean" && (v.env_names === undefined || strings(v.env_names))) ||
     !Array.isArray(raw.warnings) ||
-    !Array.isArray(raw.roles)
+    !strings(raw.roles)
   ) {
     throw new ControlRequestError("internal", "unexpected status response");
   }
@@ -113,10 +143,24 @@ export function parseStatus(raw: unknown): StatusResponse {
   if (!Array.isArray(status.control.capabilities)) status.control.capabilities = [];
   // Kernels before CTR-CTL-13 send no reach fields: the list is then just the localhost address.
   if (status.gateway !== undefined) {
-    const gw = status.gateway;
-    if (!Array.isArray(gw.access)) gw.access = [];
-    if (!Array.isArray(gw.hosts)) gw.hosts = [];
-    if (!Array.isArray(gw.addresses)) gw.addresses = [];
+    const gw = raw.gateway;
+    if (!isRecord(gw) || !fields(gw, ["listen", "url", "auth"]) ||
+      (gw.access !== undefined && !strings(gw.access)) ||
+      (gw.hosts !== undefined && !strings(gw.hosts)) ||
+      (gw.addresses !== undefined && (!Array.isArray(gw.addresses) || !gw.addresses.every((v) => isRecord(v) && fields(v, ["kind", "host", "url"]))))) {
+      throw new ControlRequestError("internal", "unexpected status response");
+    }
+    status.gateway.access ??= [];
+    status.gateway.hosts ??= [];
+    status.gateway.addresses ??= [];
+  }
+  if (raw.ingress !== undefined && (!isRecord(raw.ingress) || typeof raw.ingress.listen !== "string" || (raw.ingress.issuer !== null && typeof raw.ingress.issuer !== "string"))) {
+    throw new ControlRequestError("internal", "unexpected status response");
+  }
+  if (raw.ci !== undefined && (!isRecord(raw.ci) || !Array.isArray(raw.ci.bindings) || !raw.ci.bindings.every((b) =>
+    isRecord(b) && fields(b, ["id", "target", "scope", "source"]) && strings(b.labels) && counts(b, ["concurrency"]) &&
+    Array.isArray(b.instances) && b.instances.every((i) => isRecord(i) && fields(i, ["name", "state", "since"]) && counts(i, ["index", "restarts"]))))) {
+    throw new ControlRequestError("internal", "unexpected status response");
   }
   status.warnings = status.warnings.filter(
     (w): w is Warning => isRecord(w) && typeof w.code === "string" && typeof w.message === "string",

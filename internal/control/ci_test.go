@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/ci"
@@ -217,6 +218,10 @@ func Test_CTRCTL15_BindingCreateArguments(t *testing.T) {
 func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	f := ciFixture(t, nil)
 	dir := runnerDir(t, "https://github.com/tzf1003/legacy", false)
+	e := apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: dir, Concurrency: 2}, nil), v2.ErrInvalidArgs)
+	if e.Field != "concurrency" || e.Reason != "import_single_instance" || len(f.store.Get().CI.Bindings) != 0 {
+		t.Fatalf("import concurrency: %+v", e)
+	}
 
 	r := f.ok("POST", "/v2/ci/import/inspect", v2.CiImportInspectRequest{Dir: dir}, "CiImportInspectResponse")
 	var in v2.CiImportInspectResponse
@@ -228,7 +233,7 @@ func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	apiError(t, f.do("POST", "/v2/ci/import/inspect", v2.CiImportInspectRequest{Dir: "relative"}, nil), v2.ErrInvalidArgs)
 
 	org := runnerDir(t, "https://github.com/some-org", false)
-	e := apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: org}, nil), v2.ErrInvalidArgs)
+	e = apiError(t, f.do("POST", "/v2/ci/bindings", v2.CiBindingCreate{ImportDir: org}, nil), v2.ErrInvalidArgs)
 	if e.Reason != "not_a_runner" {
 		t.Fatalf("org runner: %+v", e)
 	}
@@ -259,6 +264,10 @@ func Test_CTRCTL15_ImportRunner(t *testing.T) {
 	e = apiError(t, f.do("PATCH", "/v2/ci/bindings/"+got[0].ID, v2.CiBindingPatch{Concurrency: &two}, nil), v2.ErrInvalidArgs)
 	if e.Field != "concurrency" {
 		t.Fatalf("patch: %+v", e)
+	}
+	one := 1
+	if r := f.do("PATCH", "/v2/ci/bindings/"+got[0].ID, v2.CiBindingPatch{Concurrency: &one}, nil); r.Status != http.StatusOK {
+		t.Fatalf("single instance patch: %d %s", r.Status, r.Body)
 	}
 }
 
@@ -402,9 +411,20 @@ func Test_CTRCTL15_AccountLifecycle(t *testing.T) {
 		t.Fatalf("in use: %+v", e)
 	}
 
-	f.do("DELETE", "/v2/ci/bindings/octo-app?force=true", nil, nil)
-	if r = f.do("DELETE", "/v2/ci/accounts/octo", nil, nil); r.Status != 204 {
-		t.Fatalf("delete account: %d %s", r.Status, r.Body)
+	f.ok("DELETE", "/v2/ci/bindings/octo-app?force=true", nil, "CiBinding")
+	// Unbinding returns while the supervisor drains and unregisters runners.
+	// Account deletion must wait for that cleanup to release its credentials.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r = f.do("DELETE", "/v2/ci/accounts/octo", nil, nil)
+		if r.Status == 204 {
+			break
+		}
+		e = apiError(t, r, v2.ErrConflict)
+		if e.Reason != "account_in_use" || time.Now().After(deadline) {
+			t.Fatalf("delete account after cleanup: %d %s", r.Status, r.Body)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := store.Token("octo"); err == nil {
 		t.Fatal("token kept after deleting the account")

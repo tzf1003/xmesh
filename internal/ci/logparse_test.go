@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"strings"
 	"testing"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
@@ -29,5 +30,53 @@ func Test_CTRCTL15_RunnerStatusLines(t *testing.T) {
 		if got := parseLine(c.line); got != c.want {
 			t.Errorf("parseLine(%q) = %+v, want %+v", c.line, got, c.want)
 		}
+	}
+}
+
+func Test_RunnerOutputRetainsOnlyClassifications(t *testing.T) {
+	i := &instance{snap: v2.CiInstance{State: v2.CiIdle}}
+	i.onLine("job-secret-value")
+	i.onLine("job-secret-value: A session for this runner already exists")
+	i.onLine("job-secret-value: missing libicu")
+	if len(i.tail) != 3 {
+		t.Fatalf("classification window: %v", i.tail)
+	}
+	info := i.exitOf(1, false)
+	if !info.conflict || !info.missingDependency || len(info.tailLines) != 0 {
+		t.Fatalf("%+v", info)
+	}
+}
+
+func Test_RunnerExit127HasActionableDiagnosis(t *testing.T) {
+	i := &instance{}
+	_, problem, _ := i.classify(i.exitOf(127, false), 0)
+	if problem == nil || !strings.Contains(problem.Message, "127") || !strings.Contains(problem.Message, "依赖命令") {
+		t.Fatalf("missing startup diagnosis: %+v", problem)
+	}
+}
+
+func Test_RegistrationDiagnosticsDropRawOutput(t *testing.T) {
+	i := &instance{}
+	for _, line := range []string{"arbitrary-secret", "credential-secret libicu failure", "secret 401"} {
+		marker := registrationMarker(line)
+		if marker == line {
+			t.Fatal("raw output retained")
+		}
+		p := i.registrationProblem([]string{marker})
+		if strings.Contains(p.Message, "secret") {
+			t.Fatalf("output disclosed: %s", p.Message)
+		}
+	}
+}
+
+func Test_RunnerFaultClassificationsExpireWithOrdinaryOutput(t *testing.T) {
+	i := &instance{snap: v2.CiInstance{State: v2.CiIdle}}
+	i.onLine("A session for this runner already exists")
+	for range tailLines {
+		i.onLine("ordinary task output containing a private value")
+	}
+	info := i.exitOf(1, false)
+	if info.conflict || len(i.tail) != tailLines || len(info.tailLines) != 0 {
+		t.Fatalf("stale fault: %+v", info)
 	}
 }

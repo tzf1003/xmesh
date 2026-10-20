@@ -120,8 +120,8 @@ test("isChanged compares the form with what the file says", () => {
 test("the check names the first thing the kernel would refuse, without asking it", () => {
   assert.equal(checkSettingsForm({ ...lan, nodeName: "bad name" }), "node_name");
   assert.equal(checkSettingsForm({ ...lan, roles: [] }), "roles");
-  assert.equal(checkSettingsForm({ ...lan, defaultCwd: "work" }), "default_cwd");
-  assert.equal(checkSettingsForm({ ...lan, allowDirs: ["/a", "relative"] }), "allow_dirs");
+  assert.equal(checkSettingsForm({ ...lan, defaultCwd: "work" }), undefined);
+  assert.equal(checkSettingsForm({ ...lan, allowDirs: ["/a", "relative", "~/work", "$HOME/src"] }), undefined);
   assert.equal(checkSettingsForm({ ...lan, allowDirs: [" "] }), "allow_dirs", "a blank line is not an empty list");
   assert.equal(checkSettingsForm({ ...tailnetIngress, mode: "lan", listen: "funnel" }), "tailnet");
   assert.equal(checkSettingsForm({ ...lan, controlUrl: "http://c.example" }), undefined, "the control URL is only checked in tailnet mode");

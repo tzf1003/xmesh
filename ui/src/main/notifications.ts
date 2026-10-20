@@ -22,16 +22,18 @@ export function diffNotices(prev: Snapshot, next: Snapshot): Notice[] {
   if (a.kind !== "connected" || b.kind !== "connected") return [];
   const out: Notice[] = [];
 
-  const before = new Map(a.peers.filter((p) => !p.self).map((p) => [p.name, p.online]));
-  for (const p of b.peers) {
-    if (p.self) continue;
-    const was = before.get(p.name);
-    if (was === undefined || was === p.online) continue;
-    out.push({
-      key: `peer.${p.name}.${p.online ? "online" : "offline"}`,
-      message: p.online ? "notice.peerOnline" : "notice.peerOffline",
-      params: { name: p.name },
-    });
+  if (prev.selectedInstance === next.selectedInstance && a.status.control.boot_id === b.status.control.boot_id) {
+    const before = new Map(a.peers.filter((p) => !p.self).map((p) => [p.name, p.online]));
+    for (const p of b.peers) {
+      if (p.self) continue;
+      const was = before.get(p.name);
+      if (was === undefined || was === p.online) continue;
+      out.push({
+        key: `peer.${p.name}.${p.online ? "online" : "offline"}`,
+        message: p.online ? "notice.peerOnline" : "notice.peerOffline",
+        params: { name: p.name },
+      });
+    }
   }
 
   if (!a.status.warnings.some(isDegrading) && b.status.warnings.some(isDegrading)) {

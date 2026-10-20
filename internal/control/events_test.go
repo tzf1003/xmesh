@@ -192,9 +192,6 @@ func Test_ControlPolledEvents(t *testing.T) {
 	events := f.stream("")
 	f.host.mutate(func(h *fakeHost) {
 		h.warnings = []v2.Warning{{Code: v2.WarnQuotaExhausted, Severity: v2.SeverityWarning, Message: "配额已满"}}
-		h.ptys = []v2.PtySession{pty("p-abcdef12")}
-		h.execs = []v2.ExecRun{{Kind: "exec", ID: "e-1", Caller: "n1/s", Cmd: "cargo", Mode: "shared", State: "queued", StartedAt: v2.Now()}}
-		h.leases = []v2.BackendLease{{Kind: "lease", Resource: "backend:ida", Owner: "n1/s", Token: 1, ExpiresAt: v2.Now()}}
 	})
 	// The first status event is not awaited here: the poller keys its status baseline after its
 	// first peer refresh, so on a slow host a change made right after Start can already be in it.
@@ -204,6 +201,13 @@ func Test_ControlPolledEvents(t *testing.T) {
 	if w.Change != "raised" || w.Warning.Code != v2.WarnQuotaExhausted {
 		t.Fatal(w)
 	}
+	// Status and session samples are independent; introduce sessions after consuming the
+	// warning so filtering for the warning cannot discard an earlier session event.
+	f.host.mutate(func(h *fakeHost) {
+		h.ptys = []v2.PtySession{pty("p-abcdef12")}
+		h.execs = []v2.ExecRun{{Kind: "exec", ID: "e-1", Caller: "n1/s", Cmd: "cargo", Mode: "shared", State: "queued", StartedAt: v2.Now()}}
+		h.leases = []v2.BackendLease{{Kind: "lease", Resource: "backend:ida", Owner: "n1/s", Token: 1, ExpiresAt: v2.Now()}}
+	})
 	opened := map[string]string{}
 	for len(opened) < 3 {
 		var s v2.SessionEventData

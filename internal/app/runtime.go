@@ -251,6 +251,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 			changed = notifier.Changed()
 		}
 	}
+	gatewayChanged, ingressChanged := fanoutMeshChanges(watchCtx, changed)
 	dialPeer := func(ctx context.Context, peer mesh.Peer, p gateway.Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
 		if peer.ID == localPeer.ID {
 			principal := localAgentPrincipal(self, p)
@@ -280,13 +281,14 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if devices != nil {
 		dial = dialPeer
 	}
-	roles = newRoleRuntime(gatewayDeps{store: store, registry: registry, log: log, network: network, nodeID: self.Node, localPeer: localPeer, discover: discover, changed: changed, dial: dial, mode: c.Mesh.Mode}, o.StateDir, func(e error) {
+	roles = newRoleRuntime(gatewayDeps{store: store, registry: registry, log: log, network: network, nodeID: self.Node, localPeer: localPeer, discover: discover, changed: gatewayChanged, dial: dial, mode: c.Mesh.Mode}, o.StateDir, func(e error) {
 		select {
 		case errc <- e:
 		default:
 		}
 	})
 	roles.configureIngress(ingressDeps{local: o.Local, self: self, stateDir: o.StateDir, passwordFile: o.PasswordFile, tunnelListen: o.TunnelListen}, c.HasRole("ingress") && !store.Get().HasRole("ingress"))
+	roles.ingressDeps.changed = ingressChanged
 	// Generations that take effect reach the running gateways; the agent re-reads its own sections
 	// on every call. Sections in config.RestartPaths keep their startup values. The roles follow in
 	// the worker, which starts below.
@@ -342,18 +344,59 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	ciMgr, ciAccounts, stopCI := startCI(store, o.StateDir, c.Node.Name)
 	defer stopCI()
 	if devices != nil {
-		devices.SetAdmin(deviceDrainControl(devices.Authenticate, c.Node.Name, self.Node, a, registry, management, func(bool) { ciMgr.SetDraining(true) }))
+		devices.SetAdmin(deviceDrainControl(devices.Authenticate, c.Node.Name, self.Node, a, registry, management, func(bool) {
+			if ciMgr != nil {
+				ciMgr.SetDraining(true)
+			}
+		}))
 	}
 	defer startControl(controlDeps{management: management, ci: ciMgr, ciAccounts: ciAccounts, store: store, backendEnv: envStore, stateDir: o.StateDir, auditDir: auditDir, log: log, agent: a, network: network, self: self, mode: mode, allowSIDs: o.ControlAllowSIDs, pairing: pairing, peerInfo: peerInfo, roles: roles,
 		isDraining: func() bool { return registry.draining(c.Node.Name) },
-		drain:      func(kill bool) { registry.drain(c.Node.Name); ciMgr.SetDraining(true) },
-		resume:     func() { registry.resume(c.Node.Name, ""); ciMgr.SetDraining(false) }})()
+		drain: func(kill bool) {
+			registry.drain(c.Node.Name)
+			if ciMgr != nil {
+				ciMgr.SetDraining(true)
+			}
+		},
+		resume: func() {
+			registry.resume(c.Node.Name, "")
+			if ciMgr != nil {
+				ciMgr.SetDraining(false)
+			}
+		}})()
 	select {
 	case <-ctx.Done():
 		return nil
 	case e := <-errc:
 		return e
 	}
+}
+
+// fanoutMeshChanges gives each role its own coalesced peer refresh notification.
+func fanoutMeshChanges(ctx context.Context, source <-chan struct{}) (<-chan struct{}, <-chan struct{}) {
+	if source == nil {
+		return nil, nil
+	}
+	gatewayChanged, ingressChanged := make(chan struct{}, 1), make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-source:
+				if !ok {
+					return
+				}
+				for _, changed := range []chan struct{}{gatewayChanged, ingressChanged} {
+					select {
+					case changed <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}
+	}()
+	return gatewayChanged, ingressChanged
 }
 
 // runnerOrNil converts an absent runner to a nil interface value, never a typed nil.

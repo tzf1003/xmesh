@@ -460,3 +460,17 @@ func TestPairingRejectsAnUnreachablePeer(t *testing.T) {
 		t.Fatalf("want a PairError, got %T %v", err, err)
 	}
 }
+
+func Test_SelfPairingIsRejectedBeforeTrustConfirmation(t *testing.T) {
+	self := newPairingNode(t, "self")
+	if _, err := self.SetPairPassword(testPassword); err != nil {
+		t.Fatal(err)
+	}
+	addr := startAgent(t, self)
+	if _, err := self.PairWith(t.Context(), addr, testPassword, ""); err == nil {
+		t.Fatal("self pairing accepted")
+	}
+	if _, ok := self.trust.Find(self.cert.Fingerprint); ok {
+		t.Fatal("self certificate pinned before rejection")
+	}
+}

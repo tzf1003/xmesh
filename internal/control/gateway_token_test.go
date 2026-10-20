@@ -131,3 +131,57 @@ func Test_GatewayUpdateNeedsGatewayRole(t *testing.T) {
 	f := newFixture(t)
 	apiError(t, f.do("PUT", "/v2/gateway", v2.GatewayUpdateRequest{Listen: ":8080", Access: []string{}, Hosts: []string{}}, nil), v2.ErrRoleDisabled)
 }
+
+func Test_GatewayDefaultPatRecoversInterruptedCreation(t *testing.T) {
+	for _, stage := range []string{"token", "receipt", "both"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newFixtureConfig(t, gatewayTokenConfig(""))
+			dir := f.server.patDir()
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			old := filepath.Join(dir, "default.token")
+			if stage != "receipt" {
+				if err := os.WriteFile(old, []byte("orphaned-credential"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if stage != "token" {
+				if err := os.WriteFile(old+".owner", []byte("default\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			created, err := EnsureDefaultPAT(f.store, f.server.o.StateDir)
+			if err != nil || !created {
+				t.Fatalf("recovery: %v %v", created, err)
+			}
+			pat := f.store.Get().Gateway.PATs[DefaultPATName]
+			if pat.TokenFile == old || !managedPatPath(dir, DefaultPATName, pat.TokenFile) {
+				t.Fatalf("reused orphan: %+v", pat)
+			}
+			if stage != "receipt" {
+				if body, err := os.ReadFile(old); err != nil || string(body) != "orphaned-credential" {
+					t.Fatalf("orphan changed %q %v", body, err)
+				}
+			}
+			if stage != "token" {
+				if body, err := os.ReadFile(old + ".owner"); err != nil || string(body) != "default\n" {
+					t.Fatalf("receipt changed %q %v", body, err)
+				}
+			}
+			if body, err := os.ReadFile(pat.TokenFile + ".owner"); err != nil || string(body) != "default\n" {
+				t.Fatalf("new receipt %q %v", body, err)
+			}
+			// The recovered managed file follows the normal deletion path.
+			if r := f.do("POST", "/v2/pats", v2.PatCreateRequest{Name: "spare", Scopes: []string{"devices:read"}}, nil); r.Status != 201 {
+				t.Fatal(r.Status)
+			}
+			if r := f.do("DELETE", "/v2/pats/default", nil, nil); r.Status != 204 {
+				t.Fatal(r.Status)
+			}
+			if _, err := os.Stat(pat.TokenFile); !os.IsNotExist(err) {
+				t.Fatal("recovered token remained", err)
+			}
+		})
+	}
+}

@@ -197,7 +197,7 @@
       "then": {
         "required": ["resource", "expires_in_s", "reason"],
         "properties": {
-          "reason": { "enum": ["held", "token_mismatch", "token_stale", "capacity", "desktop_bound", "input_queue_full", "capture_busy"] }
+          "reason": { "enum": ["held", "token_mismatch", "token_stale", "capacity", "desktop_bound", "input_queue_full", "capture_busy", "portal_busy"] }
         },
         "allOf": [
           {

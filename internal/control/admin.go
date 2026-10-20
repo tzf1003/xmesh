@@ -141,10 +141,78 @@ func (s *Server) pairImport(w http.ResponseWriter, r *http.Request, _ *call) {
 // --- personal access tokens (CTR-CTL-09) ---
 
 var patNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,62}$`)
+var patFileSuffixPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 func (s *Server) patDir() string { return patDirOf(s.o.StateDir) }
 
 func patDirOf(stateDir string) string { return filepath.Join(stateDir, "pats") }
+
+func managedPatPath(dir, name, file string) bool {
+	if filepath.Dir(filepath.Clean(file)) != filepath.Clean(dir) {
+		return false
+	}
+	base := filepath.Base(file)
+	if base == name+".token" {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(base, name+"-")
+	if !ok {
+		return false
+	}
+	suffix, ok = strings.CutSuffix(suffix, ".token")
+	return ok && patFileSuffixPattern.MatchString(suffix)
+}
+
+// Interrupted creation/deletion never blocks a fresh credential or overwrites retained files.
+func writeAvailablePatFile(dir, name, token string) (string, error) {
+	file := filepath.Join(dir, name+".token")
+	err := writeManagedPatFile(file, name, token)
+	if errors.Is(err, os.ErrExist) {
+		suffix, suffixErr := newPatToken()
+		if suffixErr != nil {
+			return "", suffixErr
+		}
+		file = filepath.Join(dir, name+"-"+suffix+".token")
+		err = writeManagedPatFile(file, name, token)
+	}
+	return file, err
+}
+
+// Create the token and its receipt together for both explicit and automatic PATs.
+func writeManagedPatFile(file, name, token string) error {
+	if err := writeNewPatFile(file, []byte(token+"\n")); err != nil {
+		return err
+	}
+	if err := writeNewPatFile(file+".owner", []byte(name+"\n")); err != nil {
+		_ = os.Remove(file)
+		return err
+	}
+	return nil
+}
+
+// A pre-existing credential or receipt belongs to its current owner.
+func writeNewPatFile(path string, body []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		// Windows reports access denied when exclusive creation meets a directory.
+		if _, statErr := os.Lstat(path); statErr == nil {
+			return &os.PathError{Op: "create", Path: path, Err: os.ErrExist}
+		}
+		return err
+	}
+	_, err = f.Write(body)
+	if err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
 
 func newPatToken() (string, error) {
 	b := make([]byte, 32)
@@ -156,6 +224,11 @@ func newPatToken() (string, error) {
 
 func patInfo(name string, pat config.PAT) v2.PatInfo {
 	info := v2.PatInfo{Name: name, Scopes: append([]string{}, pat.Scopes...), TokenFile: pat.TokenFile}
+	if pat.TokenFile != "" {
+		if absolute, err := filepath.Abs(pat.TokenFile); err == nil {
+			info.TokenFile = absolute
+		}
+	}
 	if st, err := os.Stat(pat.TokenFile); err == nil {
 		t := v2.At(st.ModTime())
 		info.ModifiedAt = &t
@@ -261,9 +334,9 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	if err = privdir.Ensure(s.o.StateDir); err == nil {
 		err = privdir.Ensure(s.patDir())
 	}
-	file := filepath.Join(s.patDir(), req.Name+".token")
+	var file string
 	if err == nil {
-		err = writeAtomic(file, []byte(token+"\n"))
+		file, err = writeAvailablePatFile(s.patDir(), req.Name, token)
 	}
 	if err != nil {
 		failWith(w, newError(v2.ErrInternal, "无法写入令牌文件"))
@@ -274,6 +347,7 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 	scopes := append([]string{}, req.Scopes...)
 	if !s.editConfigLocked(w, old, []Edit{{Path: "/gateway/pats/" + req.Name, Value: map[string]any{"token_file": file, "scopes": scopes}}}) {
 		_ = os.Remove(file)
+		_ = os.Remove(file + ".owner")
 		return
 	}
 	writeJSON(w, 201, v2.PatSecret{Pat: patInfo(req.Name, config.PAT{TokenFile: file, Scopes: scopes}), Token: token})
@@ -281,6 +355,10 @@ func (s *Server) createPat(w http.ResponseWriter, r *http.Request, _ *call) {
 
 func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	name := pathPart(r, 2)
+	if !patNamePattern.MatchString(name) {
+		failWith(w, argError("name", "PAT 名称无效"))
+		return
+	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
@@ -306,6 +384,10 @@ func (s *Server) rotatePat(w http.ResponseWriter, r *http.Request, _ *call) {
 
 func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 	name := pathPart(r, 2)
+	if !patNamePattern.MatchString(name) {
+		failWith(w, argError("name", "PAT 名称无效"))
+		return
+	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
@@ -329,8 +411,17 @@ func (s *Server) deletePat(w http.ResponseWriter, r *http.Request, _ *call) {
 		return
 	}
 	// Only a file the channel created is removed; a token file the operator pointed at stays.
-	if filepath.Dir(filepath.Clean(pat.TokenFile)) == filepath.Clean(s.patDir()) {
-		_ = os.Remove(pat.TokenFile)
+	if managedPatPath(s.patDir(), name, pat.TokenFile) {
+		if owner, err := os.ReadFile(pat.TokenFile + ".owner"); err == nil && string(owner) == name+"\n" {
+			if err := os.Remove(pat.TokenFile); err != nil && !os.IsNotExist(err) {
+				failWith(w, newError(v2.ErrInternal, "PAT 已撤销，但令牌文件清理失败"))
+				return
+			}
+			if err := os.Remove(pat.TokenFile + ".owner"); err != nil && !os.IsNotExist(err) {
+				failWith(w, newError(v2.ErrInternal, "PAT 已撤销，但归属凭据清理失败"))
+				return
+			}
+		}
 	}
 	w.WriteHeader(204)
 }

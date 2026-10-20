@@ -14,7 +14,7 @@ interface KernelServices {
 	prepare?(node:string):Promise<void>;
   /** When set, starting a kernel must also prove it runs this bundled version. */
   version?: string;
-  gone?: (pid: number) => boolean;
+  gone?: (pid: number,startedAt?:string) => boolean;
   status?: (instance: Instance) => Promise<{ control: { kernel_version: string } }>;
   timeoutMs?: number;
   pollMs?: number;
@@ -29,13 +29,13 @@ export function kernelServices(env: KernelServices): { stop(node: string): Promi
   const services = {
     async stop(node: string): Promise<StopResult> {
       const instance = env.discover().find((i) => i.id === node);
-      if (!instance || (env.gone ?? kernelGone)(instance.manifest.pid)) return "absent";
+      if (!instance || (env.gone ?? kernelGone)(instance.manifest.pid,instance.manifest.started_at)) return "absent";
       await env.beforeStop?.(node, instance);
       const result = await env.run("stop", node);
       if (result.code !== 0) throw new Error(`无法停止内核 ${node}: ${result.stderr || result.stdout}`);
       const deadline = Date.now() + timeout;
       do {
-        if ((env.gone ?? kernelGone)(instance.manifest.pid)) return "stopped";
+        if ((env.gone ?? kernelGone)(instance.manifest.pid,instance.manifest.started_at)) return "stopped";
         await pause();
       } while (Date.now() < deadline);
       throw new Error(`内核 ${node} 的旧进程仍在运行，更新尚未开始`);
@@ -62,7 +62,7 @@ export function kernelServices(env: KernelServices): { stop(node: string): Promi
     },
     async refresh(node: string): Promise<void> {
       const instance = env.discover().find((i) => i.id === node);
-      if (!env.version || !instance || (env.gone ?? kernelGone)(instance.manifest.pid)) return;
+      if (!env.version || !instance || (env.gone ?? kernelGone)(instance.manifest.pid,instance.manifest.started_at)) return;
       try {
         if (sameVersion((await status(instance)).control.kernel_version, env.version)) return;
       } catch (error) {

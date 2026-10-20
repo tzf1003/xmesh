@@ -15,11 +15,12 @@ export interface SaveOutcome {
 
 export async function applySaved(restartRequired: boolean): Promise<SaveOutcome> {
   const r = await getApi().reloadConfig();
-  if (!r.ok) return { restart: restartRequired, paths: [], applyErrors: [] };
+  if (!r.ok) return { restart: true, paths: [], applyErrors: [r.error.message] };
+  const loadError: unknown = r.data.load_error;
   return {
     restart: r.data.restart_required,
     paths: r.data.restart_paths,
-    loadError: r.data.load_error ?? undefined,
+    loadError: typeof loadError === "string" ? loadError : loadError && typeof loadError === "object" && "message" in loadError ? String(loadError.message) : undefined,
     applyErrors: (r.data.apply_errors ?? []).map((e) => e.message),
   };
 }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
@@ -133,5 +134,38 @@ func Test_CONNET01_LANListenerBindsOnlyAPrivateInterfaceAddress(t *testing.T) {
 	ip := net.ParseIP(host)
 	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || !ip.IsPrivate() {
 		t.Fatalf("LAN agent listener bound to %s, not a private interface address", host)
+	}
+}
+
+func Test_PairingALPNRechecksTrustedCertificateValidity(t *testing.T) {
+	node := newPairingNode(t, "server")
+	cert, err := LoadCertificate(t.TempDir(), "peer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := node.trust.Add(Trusted{Name: "peer", Fingerprint: cert.Fingerprint, CertificatePEM: string(cert.PEM), Tags: []string{"tag:device"}}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	leaf := *cert.Leaf
+	r.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{&leaf}}
+	if _, err := node.Authenticate(r); err != nil || !node.trustedRequest(r) {
+		t.Fatalf("valid identity: %v", err)
+	}
+	for _, name := range []string{"expired", "future", "wrong-name"} {
+		t.Run(name, func(t *testing.T) {
+			leaf = *cert.Leaf
+			switch name {
+			case "expired":
+				leaf.NotAfter = time.Now().Add(-time.Hour)
+			case "future":
+				leaf.NotBefore = time.Now().Add(time.Hour)
+			case "wrong-name":
+				leaf.Subject.CommonName = "other"
+			}
+			if _, err := node.Authenticate(r); err == nil || node.trustedRequest(r) {
+				t.Fatal("invalid pinned certificate accepted")
+			}
+		})
 	}
 }

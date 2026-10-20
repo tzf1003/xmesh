@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 
-from smoke_local import MCP, address
+from smoke_local import MCP, address, wait_for_default_token
 from smoke_peer import verify_peer
 
 
@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--peer-password-file", required=True, action="append", metavar="NAME=PATH",
                         help="Private connection-password file for each peer; used for the first xmesh pairing")
     parser.add_argument("--observer-gateway", help="Existing loopback Gateway used for incoming calls and offline observation")
-    parser.add_argument("--observer-token-file", type=pathlib.Path, help="The observer Gateway's default token file, <state-dir>/pats/default.token")
+    parser.add_argument("--observer-token-file", type=pathlib.Path, help="The observer Gateway token_file returned by xmesh control pats list")
     parser.add_argument("--rounds", type=int, choices=range(1, 4), default=2)
     options = parser.parse_args()
     binary, key = options.binary.resolve(), options.auth_key_file.resolve(strict=True)
@@ -62,10 +62,10 @@ def main():
                 process = subprocess.Popen([str(binary), "serve", "--config", str(config),
                     "--state-dir", str(state)], stdout=log, stderr=log)
                 try:
+                    gateway_token = wait_for_default_token(binary, state, seconds=60)
                     deadline = time.monotonic() + 60
                     while True:
                         try:
-                            gateway_token = (state / "pats" / "default.token").read_text().strip()
                             client = MCP(gateway, gateway_token)
                             result = client.request("tools/call", {"name": "local/sys.info", "arguments": {}})
                             if result.get("isError") and (result.get("structuredContent") or {}).get("error") == "not_found":

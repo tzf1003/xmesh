@@ -429,3 +429,26 @@ func Test_CONNET08_RelayMessage(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func Test_CIImportConcurrency(t *testing.T) {
+	for _, concurrency := range []any{nil, 1, 2, 16} {
+		cfg, err := ingressConfig(t, func(doc map[string]any) {
+			binding := map[string]any{"id": "legacy", "target": "o/r", "source": "import", "dir": "/runner"}
+			if concurrency != nil {
+				binding["concurrency"] = concurrency
+			}
+			doc["ci"] = map[string]any{"bindings": []any{binding}}
+		})
+		if concurrency == nil || concurrency == 1 {
+			if err != nil || cfg.CI.Bindings[0].Concurrency != 1 {
+				t.Fatalf("concurrency=%v: %v, %v", concurrency, cfg, err)
+			}
+			cfg.CI.Bindings[0].Concurrency = 2
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "/concurrency") {
+				t.Fatalf("programmatic import concurrency accepted: %v", err)
+			}
+		} else if err == nil {
+			t.Fatalf("import concurrency %v accepted", concurrency)
+		}
+	}
+}

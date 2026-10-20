@@ -26,7 +26,8 @@ type workspaceGrant struct {
 	monitor     *workspaceChangeMonitor // Protected by operation and profile.mu.
 	// writerCheck proves the external writer boundary on every monitor cycle.
 	// It is set before the monitor starts and never changed afterward.
-	writerCheck func(context.Context) error
+	writerCheck  func(context.Context) error
+	reclaimCheck *workspaceReclaimCheck
 }
 
 // grantWorkspace authorizes selected existing objects and inheritance from each
@@ -254,6 +255,14 @@ func (g *workspaceGrant) closeContext(ctx context.Context) error {
 	if g.profile.journal != nil {
 		g.profile.mu.Lock()
 		j := g.profile.journal
+		if g.reclaimCheck == nil {
+			g.reclaimCheck = &workspaceReclaimCheck{baseline: map[fileIdentity][]byte{}}
+			for _, grant := range g.selected.grants {
+				if grant != nil && grant.reclaimBaseline != nil {
+					g.reclaimCheck.baseline[grant.id] = grant.reclaimBaseline
+				}
+			}
+		}
 		if j.state.changeCursor != nil {
 			// The durable identity manifest takes ownership after process reaping.
 			// Release our descendant handles so classic delete-pending objects can
@@ -287,7 +296,7 @@ func (g *workspaceGrant) closeContext(ctx context.Context) error {
 		}
 		// Recovery owns the complete snapshot, including a write-ahead intent
 		// whose kernel edit failed before an objectGrant could be returned.
-		if err := releaseJournalWorkspaceContext(ctx, j, g.profile.sid, g.maxObjects); err != nil {
+		if err := releaseJournalWorkspaceContext(ctx, j, g.profile.sid, g.maxObjects, g.reclaimCheck); err != nil {
 			g.profile.mu.Unlock()
 			return err
 		}
@@ -318,6 +327,9 @@ func (g *workspaceGrant) closeContext(ctx context.Context) error {
 	g.profile.mu.Lock()
 	g.profile.grants--
 	g.profile.mu.Unlock()
+	if g.reclaimCheck != nil {
+		return g.reclaimCheck.observed
+	}
 	return nil
 }
 

@@ -8,16 +8,20 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tzf1003/xmesh/internal/localendpoint"
 )
 
 func DefaultEndpoint() string { return EndpointForState(DefaultStateDir()) }
+func ValidEndpoint(endpoint string) bool {
+	return filepath.IsAbs(endpoint) && !strings.ContainsRune(endpoint, 0)
+}
 func EndpointForState(state string) string {
 	return localendpoint.UnixSocketPath(state, "computer", "/tmp", os.Geteuid())
 }
 func dialDesktop(ctx context.Context, endpoint string) (net.Conn, error) {
-	if !filepath.IsAbs(endpoint) {
+	if !ValidEndpoint(endpoint) {
 		return nil, fmt.Errorf("desktop endpoint must be absolute")
 	}
 	c, err := (&net.Dialer{}).DialContext(ctx, "unix", endpoint)

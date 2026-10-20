@@ -553,7 +553,7 @@ export interface DenyFileCreated {
 export interface ConfigReloadResponse {
   applied: boolean;
   valid: boolean;
-  load_error?: string | null;
+  load_error?: { message: string; line?: number; column?: number } | string | null;
   changed_paths: string[];
   restart_required: boolean;
   restart_paths: string[];

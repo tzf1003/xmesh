@@ -374,6 +374,11 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     });
   }
 
+  /** Service commands resolve a state directory ID to its configured node name. */
+  nodeName(id:string):string {
+    return this.found.find((i)=>i.id===id)?.manifest.node || id;
+  }
+
   private instanceInfos(): InstanceInfo[] {
     return this.found.map((i) => ({ id: i.id, label: this.labels.get(i.id) ?? (i.manifest.node || i.id) }));
   }

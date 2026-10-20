@@ -474,3 +474,18 @@ test("the copy path reads the default PAT's token from its file, the same one th
   assert.ok(token.length >= 32, "the kernel's tokens are long");
 });
 
+
+test("deny edits ignore a planted predictable temporary symlink", { skip: process.platform === "win32" }, async () => {
+  const { service } = await setup();
+  const file = path.join(root,"deny.yaml"), victim = path.join(root,"victim");
+  fs.writeFileSync(file,"[]\n"); fs.writeFileSync(victim,"keep");
+  fs.symlinkSync(victim,`${file}.${process.pid}.tmp`);
+  const config = await service.getConfig();
+  assert.ok(config.ok);
+  service.getConfig = async () => ({ ok: true, data: { ...config.data, parsed: { agent: { cwd_policy: { deny_file:file } } } } });
+  const saved = await service.writeDenyFile({text:'- "/private"\n',etag:etagOf("[]\n")});
+  assert.ok(saved.ok,JSON.stringify(saved));
+  assert.equal(fs.readFileSync(victim,"utf8"),"keep");
+  assert.equal(fs.readFileSync(file,"utf8"),'- "/private"\n');
+  assert.equal(fs.readdirSync(root).some(x => x.startsWith(".xmesh-deny-")),false);
+});

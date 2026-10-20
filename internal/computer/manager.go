@@ -521,6 +521,18 @@ func validActions(actions []Action) error {
 		if a.Type != "key" && len(a.Keys) > 0 {
 			return toolerr.Args("actions.keys")
 		}
+		if a.Type != "click" && a.Type != "drag" && a.Button != "" {
+			return toolerr.Args("actions.button")
+		}
+		if a.Type != "click" && a.Clicks != 0 {
+			return toolerr.Args("actions.clicks")
+		}
+		if a.Type != "scroll" && (a.DeltaX != 0 || a.DeltaY != 0) {
+			return toolerr.Args("actions.scroll")
+		}
+		if a.Type != "drag" && a.Type != "wait" && a.DurationMS != 0 {
+			return toolerr.Args("actions.duration_ms")
+		}
 		if a.Type != "move" && a.Type != "click" && a.Type != "drag" && a.Type != "scroll" && (a.X != nil || a.Y != nil) {
 			return toolerr.Args("actions.coordinates")
 		}
@@ -529,6 +541,9 @@ func validActions(actions []Action) error {
 		}
 		switch a.Type {
 		case "move", "click", "drag", "scroll":
+			if a.Type == "scroll" && a.DeltaX == 0 && a.DeltaY == 0 {
+				return toolerr.Args("actions.scroll")
+			}
 			if a.X == nil || a.Y == nil {
 				return toolerr.Args("actions.coordinates")
 			}
