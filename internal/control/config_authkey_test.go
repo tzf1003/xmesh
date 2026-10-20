@@ -69,6 +69,30 @@ func TestConfigAuthkeyPreviewAndCommit(t *testing.T) {
 	}
 }
 
+func TestConfigAuthkeyRelativeStateDirectory(t *testing.T) {
+	f := newFixture(t, func(o *Options) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.StateDir, err = filepath.Rel(cwd, o.StateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !filepath.IsAbs(f.server.snapshot().Paths.StateDir) {
+		t.Fatal("control status must publish an absolute credential root")
+	}
+	req, file := authkeyRequest(f)
+	saved := f.do("PUT", "/v2/config", req, map[string]string{"If-Match": f.config().ETag})
+	if saved.Status != 200 {
+		t.Fatalf("relative state save: %d %s", saved.Status, saved.Body)
+	}
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != *req.Authkey+"\n" {
+		t.Fatal("relative state credential unavailable", err)
+	}
+}
+
 func TestConfigAuthkeyRejectsInvalidInputAndStorage(t *testing.T) {
 	f := newFixture(t)
 	req, file := authkeyRequest(f)
