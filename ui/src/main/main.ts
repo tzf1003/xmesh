@@ -262,7 +262,7 @@ async function start(): Promise<void> {
   controller.on("change", snapshot => computerTargets.observe(snapshot));
 
   const runAction = (a: Action): void => {
-    void actions.dispatch(a);
+    void actions.dispatchFromTray(a);
   };
   const trayService = new TrayService(controller, actions, t, { openPanel: target => navigation.request(target), panelDirty: () => navigation.isDirty, copy: text => platform.writeClipboard(text) });
   trayWindow = new TrayWindow(() => trayService.state, () => trayService.clearConfirmation(), () => tray.useNativeFallback());
@@ -449,7 +449,7 @@ async function start(): Promise<void> {
           return undefined;
         };
         const a = find(tray.describe().menu);
-        return a ? actions.dispatch(a) : Promise.reject(new Error(`no enabled action for ${id}`));
+        return a ? actions.dispatchFromTray(a) : Promise.reject(new Error(`no enabled action for ${id}`));
       },
     };
   }

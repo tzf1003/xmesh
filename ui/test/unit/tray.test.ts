@@ -326,3 +326,24 @@ test("panel navigation waits for the exact subscribed renderer and keeps only th
   nav.ready(false);
   assert.equal(sent.length, 2);
 });
+
+test("custom unresponsive restart requires a single-use confirmation bound to the manifest boot", async () => {
+  const h = harness();
+  h.controller.snapshot = { ...EMPTY_SNAPSHOT, unresponsiveNodes: ["node-a"] };
+  let boot = "first";
+  Object.assign(h.controller, { nodeBootId: () => boot });
+  const first = await h.service.execute({ ...h.target(), op: "action", id: "action.restartUnresponsive.node-a" });
+  if (!first.ok || !first.data.confirmation) throw new Error("missing challenge");
+  assert.equal(first.data.confirmation.impactKnown, false);
+  assert.deepEqual(h.calls, []);
+  boot = "new-boot";
+  const stale = await h.service.execute({ ...h.target(), op: "confirm", token: first.data.confirmation.token });
+  assert.equal(stale.ok, false);
+  assert.deepEqual(h.calls, []);
+  const next = await h.service.execute({ ...h.target(), op: "action", id: "action.restartUnresponsive.node-a" });
+  if (!next.ok || !next.data.confirmation) throw new Error("missing challenge");
+  const confirmed = await h.service.execute({ ...h.target(), op: "confirm", token: next.data.confirmation.token });
+  assert.equal(confirmed.ok, true);
+  assert.deepEqual(h.calls, [{ command: "restart", node: "node-a" }]);
+  h.service.dispose();
+});

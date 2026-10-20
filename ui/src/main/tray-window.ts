@@ -57,7 +57,7 @@ export class TrayWindow {
     this.anchor = anchor;
     this.moreOnOpen = more;
     this.opened = true;
-    const generation = this.generation;
+    const generation = ++this.generation;
     try {
       if (!this.window || this.window.isDestroyed()) this.create();
       await this.loading;
@@ -71,7 +71,8 @@ export class TrayWindow {
         this.window.focus();
       }
     } catch {
-      this.opened = false;
+      if (generation !== this.generation || this.destroyed) return;
+      this.hide();
       this.failures++;
       this.window?.destroy();
       this.window = undefined;
@@ -79,6 +80,7 @@ export class TrayWindow {
     }
   }
   hide(blur = false): void {
+    this.generation++;
     if (blur) this.lastBlur = Date.now();
     this.opened = false;
     this.window?.hide();

@@ -684,7 +684,7 @@ export function TrayApp(): JSX.Element {
             ) : (
               <>
                 <div class="summary-line">
-                  <span>{t("最近调用 · 本次连接", "Recent calls · this connection")}</span>
+                  <span>{t("最近调用 · 当前内核启动周期", "Recent calls · current kernel boot")}</span>
                   <button type="button" class="text-button" onClick={() => open("audit")}>
                     {t("查看审计", "Audit log")}
                     <Icon name="chevron" />
@@ -765,8 +765,7 @@ export function TrayApp(): JSX.Element {
             <strong>{confirm.hostname}</strong> · {confirm.instance}
           </p>
           <p>
-            {t("可能中断以下任务", "The following work may be interrupted")}: {confirm.pty} PTY · {confirm.exec} exec ·{" "}
-            {confirm.ci} CI
+            {confirm.impactKnown === false ? t("内核未响应，无法确认任务数量。重启可能中断终端、命令和 CI 任务。", "The kernel is not responding. Restarting may interrupt terminal sessions, commands and CI jobs.") : <>{t("可能中断以下任务", "The following work may be interrupted")}: {confirm.pty} PTY · {confirm.exec} exec · {confirm.ci} CI</>}
           </p>
           <div class="modal-actions">
             <Button onClick={() => setConfirm(undefined)}>{t("取消", "Cancel")}</Button>

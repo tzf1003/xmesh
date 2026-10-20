@@ -19,6 +19,7 @@ export class TrayService extends EventEmitter<{ change: [] }> {
   private confirmation?: {
     value: TrayConfirmation;
     bootId: string | null;
+    nodeBootId?: string;
     id: string;
     expires: number;
   };
@@ -178,7 +179,12 @@ export class TrayService extends EventEmitter<{ change: [] }> {
         return fail("conflict", "Confirmation expired; try again.");
       const item = findItem(buildMenu(snap, this.t), pending.id);
       if (!item?.enabled) return fail("unavailable", "Action is no longer available.");
-      return this.perform(() => this.actions.confirmedLifecycle(pending.value.action, state.instance, state.bootId));
+      if (pending.value.action === "restart-unresponsive" && pending.value.node) {
+        return this.perform(() => this.actions.confirmedUnresponsiveRestart(pending.value.node!, state.instance, pending.nodeBootId));
+      }
+      if (pending.value.action === "restart-unresponsive") return fail("invalid_args", "Missing node");
+      const action = pending.value.action;
+      return this.perform(() => this.actions.confirmedLifecycle(action, state.instance, state.bootId));
     }
     if (command.op === "refresh") {
       if (this.refreshing) return { ok: true, data: {} };
@@ -223,6 +229,12 @@ export class TrayService extends EventEmitter<{ change: [] }> {
         bootId: state.bootId,
         expires: Date.now() + 60_000,
       };
+      return { ok: true, data: { confirmation: value } };
+    }
+    if (action.type === "restart-unresponsive") {
+      const value: TrayConfirmation = { token: randomUUID(), action: action.type, node: action.node, instance: state.instance,
+        hostname: action.node, pty: 0, exec: 0, ci: 0, impactKnown: false };
+      this.confirmation = { value, id: command.id, bootId: state.bootId, nodeBootId: this.controller.nodeBootId(action.node), expires: Date.now() + 60_000 };
       return { ok: true, data: { confirmation: value } };
     }
     if (action.type === "open-panel") {
