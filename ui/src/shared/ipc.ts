@@ -37,6 +37,7 @@ import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { TransferRequest, TransferReply } from "./transfers";
 import type { PlaygroundApi } from "./playground";
 import type { Snapshot } from "./state";
+import { isAuthKey } from "./setup";
 
 /** `ipcMain.handle` channels. The preload script hard-codes the same strings; a unit test checks they agree. */
 export const CHANNELS = {
@@ -165,6 +166,13 @@ export interface ConfigSaveRequest {
   etag: string;
   /** Validate and diff only; nothing is written. */
   dryRun: boolean;
+  /** Write-only Tailnet admission key; the kernel manages its private storage. */
+  authkey?: string;
+}
+
+export interface ConfigSaveResponse extends ConfigPutResponse {
+  /** Reviewed config with the managed credential path, never the key itself. */
+  content?: string;
 }
 
 /**
@@ -307,7 +315,7 @@ export interface PanelApi {
   setUpdatePrefs(prefs: UpdatePrefs): Promise<ActionResult>;
   getSessions(): Promise<DataResult<SessionsResponse>>;
   getConfig(): Promise<DataResult<ConfigResponse>>;
-  putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>>;
+  putConfig(request: ConfigSaveRequest): Promise<DataResult<ConfigSaveResponse>>;
   /** Applies JSON Pointer edits to the config on disk (`PATCH /v2/config`); the form-style settings write through here. */
   patchConfig(request: ConfigPatchRequest): Promise<DataResult<ConfigPutResponse>>;
   /** Sets and removes environment variables of a stdio backend (control API 1.7). The kernel restarts only that backend; the answer lists names, never values. */
@@ -583,12 +591,13 @@ export function parseDenyFileCreate(v: unknown): DenyFileCreateRequest | undefin
 }
 
 export function parseConfigSave(v: unknown): ConfigSaveRequest | undefined {
-  if (!isRecord(v) || !onlyKeys(v, ["content", "etag", "dryRun"])) return undefined;
-  const { content, etag, dryRun } = v;
+  if (!isRecord(v) || !onlyKeys(v, ["content", "etag", "dryRun", "authkey"])) return undefined;
+  const { content, etag, dryRun, authkey } = v;
   if (typeof content !== "string" || new TextEncoder().encode(content).length > CONFIG_MAX_BYTES) return undefined;
   if (typeof etag !== "string" || !ETAG.test(etag)) return undefined;
   if (typeof dryRun !== "boolean") return undefined;
-  return { content, etag, dryRun };
+  if (authkey !== undefined && (typeof authkey !== "string" || !isAuthKey(authkey.trim()))) return undefined;
+  return { content, etag, dryRun, ...(typeof authkey === "string" && { authkey: authkey.trim() }) };
 }
 
 /** The contract's limit on edits per PATCH. */

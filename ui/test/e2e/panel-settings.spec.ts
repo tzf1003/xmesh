@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type Page, expect, test } from "@playwright/test";
+import { parse } from "yaml";
 import type { Capability } from "../../src/shared/control";
 import { statusFixture } from "../../testserver/fixtures";
 import type { FakeKernelOptions } from "../../testserver/server";
@@ -294,4 +295,129 @@ test("settings: file transfer limit defaults to 1GiB, saves custom values and un
   await expect(page.locator("vite-error-overlay")).toHaveCount(0);
   expect(errors).toEqual([]);
   await page.screenshot({ path: path.join(os.tmpdir(), "xmesh-file-transfer-settings.png") });
+});
+
+for (const mode of ["tailnet", "coexist"] as const) {
+  test(`settings: enter an auth key and save ${mode} authorization`, async ({}, testInfo) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-authkey-e2e-"));
+    try {
+      const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+      await expect(page).toHaveTitle(/xmesh/i);
+      expect(page.url()).toContain("app://panel");
+      h.kernel.panel.setContent(FULL_CONFIG);
+      await page.getByTestId("nav-settings").click();
+      await page.getByTestId(`settings-mode-${mode}`).check();
+      const input = page.getByTestId("settings-authkey");
+      await expect(input).toHaveAttribute("type", "password");
+      await expect(page.getByTestId("settings-node").getByRole("button")).toHaveCount(0);
+      await expect(page.getByTestId("settings-review")).toBeDisabled();
+      await input.fill("short");
+      await expect(input).toHaveAttribute("aria-invalid", "true");
+      await expect(page.getByTestId("settings-review")).toBeDisabled();
+
+      const authkey = "tskey-auth-e2e-settings";
+      await input.fill(` ${authkey} `);
+      await expect(page.getByTestId("settings-review")).toBeEnabled();
+      await page.getByTestId("settings-review").click();
+      await expect(page.getByTestId("settings-authkey-change")).toBeVisible();
+      await expect(page.getByTestId("settings-diff")).not.toContainText(authkey);
+      expect(fs.readdirSync(dir)).toEqual([]);
+      expect(h.kernel.panel.writes).toEqual([]);
+      await page.getByTestId("confirm-cancel").click();
+      expect(fs.readdirSync(dir)).toEqual([]);
+      await page.getByTestId("settings-review").click();
+      await page.getByTestId("confirm-ok").click();
+      await expect(input).toHaveValue("");
+      await expect(input).toHaveAttribute("placeholder", /已配置授权/);
+
+      await input.fill("  ");
+      await expect(page.getByTestId("settings-review")).toBeDisabled();
+      await input.fill("");
+
+      const saved = parse(h.kernel.panel.content);
+      expect(saved.mesh.lan.enabled).toBe(mode === "coexist");
+      expect(saved.mesh.tailnet.enabled).toBe(true);
+      const file = saved.mesh.tailnet.authkey_file as string;
+      expect(path.dirname(file)).toBe(path.join(dir, "authkeys"));
+      expect(fs.readFileSync(file, "utf8")).toBe(`${authkey}\n`);
+      expect(JSON.stringify(h.kernel.requests)).not.toContain(authkey);
+      await expect(page.locator("body")).not.toContainText(authkey);
+      await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+      await page.getByTestId("settings-node").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`auth-key-${mode}.png`) });
+      expect(errors).toEqual([]);
+
+      await page.getByTestId("settings-name").fill("renamed-node");
+      await page.getByTestId("settings-review").click();
+      await expect(page.getByTestId("settings-authkey-change")).toHaveCount(0);
+      await page.getByTestId("confirm-ok").click();
+      await expect(page.getByTestId("settings-name")).toHaveValue("renamed-node");
+      expect(parse(h.kernel.panel.content).mesh.tailnet.authkey_file).toBe(file);
+      expect(fs.readdirSync(path.join(dir, "authkeys"))).toEqual([path.basename(file)]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("settings: a pasted key replaces browser authorization and can be rotated", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-authkey-e2e-"));
+  try {
+    const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
+    h.kernel.panel.setContent(FULL_CONFIG.replace("mesh:\n  mode: lan", "schema_version: 2\nmesh:\n  tailnet:\n    enabled: true\n    auth_method: browser"));
+    await page.getByTestId("nav-settings").click();
+    const input = page.getByTestId("settings-authkey");
+    await expect(input).toHaveValue("");
+    await expect(input).toHaveAttribute("placeholder", /已配置授权/);
+
+    const files: string[] = [];
+    for (const authkey of ["hskey-e2e-initial", "tskey-auth-e2e-rotated"]) {
+      await input.fill(authkey);
+      await page.getByTestId("settings-review").click();
+      await page.getByTestId("confirm-ok").click();
+      await expect(input).toHaveValue("");
+      const saved = parse(h.kernel.panel.content);
+      expect(saved.mesh.tailnet.auth_method).toBeUndefined();
+      const file = saved.mesh.tailnet.authkey_file as string;
+      expect(fs.readFileSync(file, "utf8")).toBe(`${authkey}\n`);
+      files.push(file);
+    }
+    expect(files[0]).not.toBe(files[1]);
+    expect(fs.readFileSync(files[0]!, "utf8")).toBe("hskey-e2e-initial\n");
+    expect(JSON.stringify(h.kernel.requests)).not.toContain("tskey-auth-e2e-rotated");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("settings: preview locks the visible key and successful saving clears it before reload", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xmesh-authkey-e2e-"));
+  let release = (): void => {};
+  try {
+    const page = await open({ status: { paths: { ...statusFixture().paths, config_file: path.join(dir, "xmesh.yaml"), state_dir: dir } } });
+    h.kernel.panel.setContent(FULL_CONFIG);
+    await page.getByTestId("nav-settings").click();
+    await page.getByTestId("settings-mode-tailnet").check();
+    const input = page.getByTestId("settings-authkey");
+    await input.fill("tskey-auth-preview-visible");
+    release = h.kernel.holdNextResponse("/v2/config");
+    await page.getByTestId("settings-review").click();
+    await expect(input).toBeDisabled();
+    await expect(page.getByTestId("settings-name")).toBeDisabled();
+    await expect(input).toHaveValue("tskey-auth-preview-visible");
+    release();
+    await expect(page.getByTestId("settings-authkey-change")).toBeVisible();
+    release = h.kernel.holdNextResponse("/v2/config/reload", "POST");
+    await page.getByTestId("confirm-ok").click();
+    await expect(input).toHaveValue("");
+    await expect(page.getByTestId("settings-diff")).toHaveCount(0);
+    release();
+    await expect(input).toHaveAttribute("placeholder", /已配置授权/);
+  } finally {
+    release();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

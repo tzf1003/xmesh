@@ -353,8 +353,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 // secret-carrying type is the only one that has a token field.
 func Test_CTRCTL09_SecretsOnlyInPatSecret(t *testing.T) {
 	secretFields := []string{"token", "password", "secret_hash", "secret", "authkey", "registration_token"}
-	// Request bodies that carry a password are write-only. No response type may carry one.
-	writeOnly := map[string]bool{"PatSecret": true, "IngressPasswordRequest": true, "PairPasswordRequest": true, "PairConnectRequest": true, "CiAccountCreate": true, "CiBindingCreate": true, "CiBindingRepair": true}
+	// Request bodies may carry write-only credentials. No response except PatSecret may carry one.
+	writeOnly := map[string]bool{"PatSecret": true, "ConfigPutRequest": true, "IngressPasswordRequest": true, "PairPasswordRequest": true, "PairConnectRequest": true, "CiAccountCreate": true, "CiBindingCreate": true, "CiBindingRepair": true}
 	for def, mk := range typeFor {
 		if writeOnly[def] {
 			continue

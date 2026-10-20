@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -122,6 +123,13 @@ type Server struct {
 // Start opens the channel, writes control.json and begins serving. A node
 // without a UI keeps working if this fails, so callers should log and continue.
 func Start(o Options) (*Server, error) {
+	if o.StateDir != "" {
+		stateDir, err := filepath.Abs(o.StateDir)
+		if err != nil {
+			return nil, err
+		}
+		o.StateDir = stateDir
+	}
 	if o.Poll <= 0 {
 		o.Poll = time.Second
 	}

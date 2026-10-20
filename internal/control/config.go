@@ -18,6 +18,7 @@ import (
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/filelock"
+	"github.com/tzf1003/xmesh/internal/privdir"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -99,7 +100,82 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 	if !ok {
 		return
 	}
-	s.saveLocked(w, old, []byte(req.Content), req.DryRun)
+	next := []byte(req.Content)
+	if req.Authkey == nil {
+		s.saveLocked(w, old, next, req.DryRun)
+		return
+	}
+	file, err := s.configAuthkeyPath(next, *req.Authkey)
+	if err != nil {
+		failWith(w, argError("authkey", "auth key 或私有存储路径无效"))
+		return
+	}
+	// Configuration validation and the etag check precede all filesystem writes.
+	if _, err := config.Parse(next); err != nil || req.DryRun {
+		s.saveLocked(w, old, next, req.DryRun)
+		return
+	}
+	if err := createConfigAuthkey(file, *req.Authkey); err != nil {
+		failWith(w, newError(v2.ErrInternal, "无法保存 Tailnet auth key"))
+		return
+	}
+	if !s.saveLocked(w, old, next, false) {
+		_ = os.Remove(file)
+	}
+}
+
+var configAuthkeyName = regexp.MustCompile(`^authkey-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// configAuthkeyPath confines write-only credentials to this kernel's private state.
+func (s *Server) configAuthkeyPath(next []byte, key string) (string, error) {
+	if len(key) < 8 || len(key) > 4096 {
+		return "", errors.New("invalid key length")
+	}
+	for _, c := range []byte(key) {
+		if c < '!' || c > '~' {
+			return "", errors.New("invalid key character")
+		}
+	}
+	doc := parsedOf(next)
+	mesh, _ := doc["mesh"].(map[string]any)
+	tailnet, _ := mesh["tailnet"].(map[string]any)
+	file, _ := tailnet["authkey_file"].(string)
+	dir := filepath.Join(s.o.StateDir, "authkeys")
+	if tailnet["enabled"] != true || !filepath.IsAbs(file) || filepath.Clean(file) != file ||
+		filepath.Dir(file) != dir || !configAuthkeyName.MatchString(filepath.Base(file)) {
+		return "", errors.New("invalid key location")
+	}
+	return file, nil
+}
+
+// The service creates the directory with the existing private-directory policy:
+// 0700 on Unix, a protected owner/SYSTEM/Administrators DACL on Windows.
+func createConfigAuthkey(file, key string) error {
+	dir := filepath.Dir(file)
+	if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("credential directory is a link")
+	}
+	if err := privdir.Ensure(dir); err != nil {
+		return err
+	}
+	if err := privdir.Verify(dir); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(key + "\n")
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(file)
+	}
+	return err
 }
 
 // patchConfig applies the edits to the file on disk and saves the result like PUT. Either every edit
@@ -144,12 +220,12 @@ func (s *Server) patchConfig(w http.ResponseWriter, r *http.Request, _ *call) {
 
 // saveLocked validates next like a whole-file write and, unless it is a dry run or changes nothing,
 // stores it. The caller holds configMu and has matched old against If-Match.
-func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool) {
+func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool) bool {
 	if _, err := config.Parse(next); err != nil {
 		e := newError(v2.ErrConfigInvalid, "配置未通过校验，没有写入")
 		e.Diagnostics = diagnostics(err)
 		failWith(w, e)
-		return
+		return false
 	}
 	diff := diffConfigs(parsedOf(old), parsedOf(next))
 	restart, _ := s.o.Store.State()
@@ -159,19 +235,20 @@ func (s *Server) saveLocked(w http.ResponseWriter, old, next []byte, dryRun bool
 	applied := !dryRun && !bytes.Equal(old, next)
 	if !applied {
 		writeJSON(w, 200, v2.ConfigPutResponse{Applied: false, ETag: etagOf(old), Diff: diff, RestartRequired: restart})
-		return
+		return true
 	}
 	etag, restart, err := s.storeConfigLocked(old, next, diff)
 	if err != nil {
 		if errors.Is(err, errConfigChanged) {
 			failWith(w, newError(v2.ErrConflict, "配置已变化，请重新读取后重试"))
-			return
+			return false
 		}
 		failWith(w, newError(v2.ErrInternal, "写入配置文件失败"))
-		return
+		return false
 	}
 	w.Header().Set("ETag", `"`+etag+`"`)
 	writeJSON(w, 200, v2.ConfigPutResponse{Applied: true, ETag: etag, Diff: diff, RestartRequired: restart})
+	return true
 }
 
 // storeConfigLocked replaces the configuration file with next, which the caller has validated and

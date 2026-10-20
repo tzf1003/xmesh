@@ -327,6 +327,8 @@ type ConfigLoadError struct {
 type ConfigPutRequest struct {
 	Content string `json:"content"`
 	DryRun  bool   `json:"dry_run,omitempty"`
+	// Authkey is a write-only Tailnet admission key, stored by the kernel in its private state directory.
+	Authkey *string `json:"authkey,omitempty"`
 }
 
 type ConfigChange struct {

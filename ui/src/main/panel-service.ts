@@ -6,6 +6,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parseDocument } from "yaml";
 
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
@@ -32,6 +33,7 @@ import type {
   SessionsResponse,
 } from "../shared/control";
 import {
+  CONFIG_MAX_BYTES,
   DENY_FILE_MAX_BYTES,
   type ActionError,
   type ActionResult,
@@ -39,6 +41,7 @@ import {
   type ConfigPatchRequest,
   type ConfigReloadResponse,
   type ConfigSaveRequest,
+  type ConfigSaveResponse,
   type DataResult,
   type DenyFileCreateRequest,
   type DenyFileCreated,
@@ -50,7 +53,7 @@ import {
   type PairImportArgs,
   type PatCreateArgs,
 } from "../shared/ipc";
-import { DENY_FILE_NAME } from "../shared/setup";
+import { DENY_FILE_NAME, isAuthKey } from "../shared/setup";
 import type { ControlClient } from "./client";
 import type { ShellController } from "./controller";
 import { resumeComputerHost, setupComputerHost } from "./computer-host";
@@ -136,10 +139,42 @@ export class PanelService {
     return this.data("config.read", (c) => c.call("GET", "/v2/config"));
   }
 
-  putConfig(req: ConfigSaveRequest): Promise<DataResult<ConfigPutResponse>> {
-    return this.data("config.write", (c) =>
-      c.call("PUT", "/v2/config", { body: { content: req.content, dry_run: req.dryRun }, ifMatch: req.etag }),
-    );
+  putConfig(req: ConfigSaveRequest): Promise<DataResult<ConfigSaveResponse>> {
+    return this.data("config.write", async (c) => {
+      const put = (content: string, dryRun: boolean, authkey?: string): Promise<unknown> => {
+        const body = { content, dry_run: dryRun, ...(authkey !== undefined && { authkey }) };
+        if (Buffer.byteLength(JSON.stringify(body)) > CONFIG_MAX_BYTES) {
+          throw new ControlRequestError("payload_too_large", "配置正文与 auth key 编码后超过 1 MiB，请缩小配置后重试");
+        }
+        return c.call("PUT", "/v2/config", { body, ifMatch: req.etag });
+      };
+      if (req.authkey === undefined) return put(req.content, req.dryRun);
+      const authkey = req.authkey.trim();
+      if (!isAuthKey(authkey)) throw new ControlRequestError("invalid_args", "请输入有效的 auth key");
+      const connection = this.controller.snapshot.connection;
+      const stateDir = connection.kind === "connected" ? connection.status.paths.state_dir : undefined;
+      if (typeof stateDir !== "string" || !path.isAbsolute(stateDir)) {
+        throw new ControlRequestError("unavailable", "内核没有报告状态目录的位置");
+      }
+      const doc = parseDocument(req.content);
+      if (doc.errors.length > 0 || doc.get("schema_version") !== 2 || doc.getIn(["mesh", "tailnet", "enabled"]) !== true) {
+        throw new ControlRequestError("invalid_args", "auth key 需要启用 Tailnet");
+      }
+      const directory = path.join(stateDir, "authkeys");
+      // The preview chooses a fresh location. Confirming uses that same location,
+      // so the reviewed config is exact and an active credential is never overwritten.
+      const file = req.dryRun ? path.join(directory, `authkey-${crypto.randomUUID()}`) : doc.getIn(["mesh", "tailnet", "authkey_file"]);
+      if (typeof file !== "string" || path.dirname(file) !== directory || !/^authkey-[0-9a-f-]{36}$/.test(path.basename(file))) {
+        throw new ControlRequestError("invalid_args", "请先预览 auth key 设置再保存");
+      }
+      doc.setIn(["mesh", "tailnet", "authkey_file"], file);
+      doc.deleteIn(["mesh", "tailnet", "auth_method"]);
+      const content = doc.toString({ flowCollectionPadding: false });
+      // The kernel owns credential creation and config commit, including system
+      // services whose private state directory the desktop cannot write to.
+      const saved = await put(content, req.dryRun, authkey) as ConfigPutResponse;
+      return { ...saved, content };
+    });
   }
 
   /** `PATCH /v2/config` through the generic client call: If-Match from the etag, the same error mapping as PUT. */

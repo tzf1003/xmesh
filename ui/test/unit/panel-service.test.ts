@@ -7,6 +7,8 @@ import { ShellController } from "../../src/main/controller";
 import { discoverInstances } from "../../src/main/discovery";
 import { GatewayCredentials } from "../../src/main/gateway-token";
 import { PanelService } from "../../src/main/panel-service";
+import { ControlRequestError } from "../../src/shared/control";
+import { parse, stringify } from "yaml";
 import type { Capability, StatusResponse } from "../../src/shared/control";
 import { statusFixture } from "../../testserver/fixtures";
 import { PEER_PASSWORD, etagOf } from "../../testserver/panel-routes";
@@ -163,6 +165,126 @@ test("config diagnostics reach the caller", async () => {
   assert.ok(!r.ok);
   assert.equal(r.error.code, "config_invalid");
   assert.ok((r.error.diagnostics?.length ?? 0) >= 1);
+});
+
+async function admissionSetup() {
+  const node = path.join(root, "n1");
+  const fixture = await setup(ALL, { paths: { ...statusFixture().paths, config_file: path.join(node, "xmesh.yaml"), state_dir: node } });
+  const cfg = await fixture.service.getConfig();
+  assert.ok(cfg.ok);
+  const parsed = parse(cfg.data.content);
+  parsed.schema_version = 2;
+  parsed.mesh = { lan: { enabled: true }, tailnet: { enabled: true, control_url: "https://controlplane.tailscale.com", authkey_file: "" } };
+  return { ...fixture, node, request: { content: stringify(parsed), etag: cfg.data.etag, dryRun: true, authkey: "tskey-auth-panel-test" } };
+}
+
+test("admission key preview is read-only; confirmation stores a private credential with the reviewed config", async () => {
+  const { k, service, node, request } = await admissionSetup();
+  const before = fs.readdirSync(node);
+  const preview = await service.putConfig(request);
+  assert.ok(preview.ok);
+  assert.ok(preview.data.content);
+  const file = parse(preview.data.content).mesh.tailnet.authkey_file as string;
+  assert.equal(path.dirname(file), path.join(node, "authkeys"));
+  assert.deepEqual(fs.readdirSync(node), before);
+  assert.equal(k.panel.writes.length, 0);
+  assert.equal(JSON.stringify(preview).includes(request.authkey), false);
+
+  const saved = await service.putConfig({ ...request, content: preview.data.content, dryRun: false });
+  assert.ok(saved.ok);
+  assert.equal(k.panel.content, preview.data.content);
+  assert.equal(fs.readFileSync(file, "utf8"), `${request.authkey}\n`);
+  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(JSON.stringify(saved).includes(request.authkey), false);
+  assert.equal(JSON.stringify(k.requests).includes(request.authkey), false);
+  const readback = await service.getConfig();
+  assert.ok(readback.ok);
+  assert.equal(JSON.stringify(readback).includes(request.authkey), false);
+});
+
+test("admission key saves preserve the previous credential and reject stale edits before creating a secret", async () => {
+  const { k, service, node, request } = await admissionSetup();
+  const original = path.join(node, "existing-key");
+  fs.writeFileSync(original, "old-admission-key\n", { mode: 0o600 });
+  const parsed = parse(request.content);
+  parsed.mesh.tailnet.authkey_file = original;
+  k.panel.setContent(stringify(parsed));
+  const cfg = await service.getConfig();
+  assert.ok(cfg.ok);
+  const input = { ...request, content: cfg.data.content, etag: cfg.data.etag };
+  const preview = await service.putConfig(input);
+  assert.ok(preview.ok && preview.data.content);
+  const nextFile = parse(preview.data.content).mesh.tailnet.authkey_file as string;
+  const before = fs.readdirSync(node);
+  k.panel.setContent(`${k.panel.content}# concurrent edit\n`);
+  const stale = await service.putConfig({ ...input, content: preview.data.content, dryRun: false });
+  assert.ok(!stale.ok);
+  assert.equal(stale.error.code, "precondition_failed");
+  assert.deepEqual(fs.readdirSync(node), before);
+  assert.equal(fs.existsSync(nextFile), false);
+  assert.equal(fs.readFileSync(original, "utf8"), "old-admission-key\n");
+
+  const current = await service.getConfig();
+  assert.ok(current.ok);
+  const saved = await service.putConfig({ ...input, content: preview.data.content, etag: current.data.etag, dryRun: false });
+  assert.ok(saved.ok);
+  assert.equal(fs.readFileSync(nextFile, "utf8"), `${request.authkey}\n`);
+  assert.equal(fs.readFileSync(original, "utf8"), "old-admission-key\n");
+});
+
+test("admission key storage is confined to a fresh managed location", async () => {
+  const { service, node, request } = await admissionSetup();
+  const preview = await service.putConfig(request);
+  assert.ok(preview.ok && preview.data.content);
+  const parsed = parse(preview.data.content);
+  const file = parsed.mesh.tailnet.authkey_file as string;
+  fs.mkdirSync(path.dirname(file), { mode: 0o700 });
+  fs.writeFileSync(file, "existing-credential\n", { mode: 0o600 });
+  assert.equal((await service.putConfig({ ...request, content: preview.data.content, dryRun: false })).ok, false);
+  assert.equal(fs.readFileSync(file, "utf8"), "existing-credential\n");
+  for (const target of [path.join(root, path.basename(file)), path.join(node, "xmesh.yaml")]) {
+    parsed.mesh.tailnet.authkey_file = target;
+    const result = await service.putConfig({ ...request, content: stringify(parsed), dryRun: false });
+    assert.ok(!result.ok);
+    assert.equal(result.error.code, "invalid_args");
+  }
+});
+
+test("admission key persistence belongs to the kernel and commit errors reach the UI", async () => {
+  const { service, c, node, request } = await admissionSetup();
+  const client = c.requireCapable("config.write");
+  const call = client.call.bind(client);
+  let failure = "internal";
+  client.call = async (method, route, options) => {
+    if (method === "PUT" && route === "/v2/config" && (options?.body as { dry_run?: boolean })?.dry_run === false) {
+      throw new ControlRequestError(failure, "test response");
+    }
+    return call(method, route, options);
+  };
+  for (const code of ["internal", "precondition_failed", "unavailable"]) {
+    failure = code;
+    const preview = await service.putConfig(request);
+    assert.ok(preview.ok && preview.data.content);
+    const file = parse(preview.data.content).mesh.tailnet.authkey_file as string;
+    const result = await service.putConfig({ ...request, content: preview.data.content, dryRun: false });
+    assert.ok(!result.ok);
+    assert.equal(result.error.code, failure);
+    assert.equal(fs.existsSync(file), false);
+  }
+  assert.equal(fs.existsSync(path.join(node, "authkeys")), false);
+});
+
+test("config requests enforce the encoded body limit before sending a preview", async () => {
+  const { k, service, request } = await admissionSetup();
+  const count = k.requests.filter(r => r.path === "/v2/config" && r.method === "PUT").length;
+  const oversized = await service.putConfig({ ...request, content: `${request.content}\n#${"a".repeat(1046000)}`, authkey: "x".repeat(4096) });
+  assert.ok(!oversized.ok);
+  assert.equal(oversized.error.code, "payload_too_large");
+  assert.match(oversized.error.message, /1 MiB/);
+  assert.equal(k.requests.filter(r => r.path === "/v2/config" && r.method === "PUT").length, count);
+  const escaped = await service.putConfig({ ...request, authkey: undefined, content: "\n".repeat(600000) });
+  assert.ok(!escaped.ok);
+  assert.equal(escaped.error.code, "payload_too_large");
 });
 
 test("PAT create, rotate and delete use fixed routes and the secret comes from the kernel", async () => {
