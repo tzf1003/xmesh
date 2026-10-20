@@ -9,6 +9,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"slices"
 	"strings"
 )
 
@@ -105,8 +106,14 @@ func (a *Agent) refreshBackends() {
 		var p Principal
 		_ = json.Unmarshal([]byte(key), &p)
 		old := a.backendNames[view]
-		view.RemoveTools(old...)
 		a.installBackends(view, p)
+		// Upsert retained tools before removing obsolete names. Callers may
+		// dispatch while this view is refreshed, including just after acquire.
+		for _, name := range old {
+			if !slices.Contains(a.backendNames[view], name) {
+				view.RemoveTools(name)
+			}
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import type { TransferService } from "./transfers";
 import { parsePlayground } from "../shared/playground";
 import type { PlaygroundService } from "./playground";
 import { parseCiRequest } from "../shared/ci";
+import { parseComputerRequest } from "../shared/computer";
 import {
   CALLS_EVENT,
   CHANNELS,
@@ -233,6 +234,10 @@ export function registerIpc({ onboarding, transfers, playground, controller, act
   handle(CHANNELS.onboarding, (request: unknown) => {
     const parsed = parseOnboarding(request);
     return parsed && onboarding ? onboarding(parsed) : bad("setup request");
+  });
+  handle(CHANNELS.computer, (request: unknown) => {
+    const parsed = parseComputerRequest(request);
+    return parsed === undefined ? bad("computer request") : service.computer(parsed);
   });
   handle(CHANNELS.previewSetup, (params: unknown) => previewSetup(params));
   handle(CHANNELS.runSetup, (params: unknown) => setup(params));

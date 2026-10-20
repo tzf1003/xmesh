@@ -148,6 +148,10 @@ export class ShellController extends EventEmitter<ControllerEvents> {
     this.update({ update });
   }
 
+  setComputerShortcutAvailable(available: boolean): void {
+    this.update({ computerShortcutAvailable: available });
+  }
+
   get recentCalls(): CallEventData[] {
     return this.recent.slice();
   }

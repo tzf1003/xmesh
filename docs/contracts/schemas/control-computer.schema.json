@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-computer:1",
+  "title": "Computer 本机管理",
+  "$defs": {
+    "ComputerDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "type": "integer"
+        },
+        "y": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "rotation": {
+          "type": "integer"
+        },
+        "scale": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "x",
+        "y",
+        "width",
+        "height",
+        "rotation",
+        "scale"
+      ]
+    },
+    "ComputerInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "integer"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "desktop_id": {
+          "type": "string"
+        },
+        "desktop_epoch": {
+          "type": "string"
+        },
+        "layout_version": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "displays": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ComputerDisplay"
+          }
+        },
+        "user_input_monitor": {
+          "type": "boolean"
+        },
+        "user_input_serial": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ComputerTarget"
+          }
+        },
+        "default_interaction": {
+          "enum": [
+            "background",
+            "foreground"
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "available",
+        "state",
+        "desktop_id",
+        "desktop_epoch",
+        "layout_version",
+        "capabilities",
+        "displays"
+      ]
+    },
+    "ComputerSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "desktop_id": {
+          "type": "string"
+        },
+        "desktop_epoch": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "control"
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "target_id": {
+          "type": "string"
+        },
+        "interaction": {
+          "enum": [
+            "background",
+            "foreground"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "desktop_id",
+        "desktop_epoch",
+        "mode",
+        "expires_at",
+        "owner"
+      ]
+    },
+    "ComputerState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "info": {
+          "$ref": "#/$defs/ComputerInfo"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ComputerSession"
+          }
+        },
+        "pause_on_user_input": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled",
+        "paused",
+        "info",
+        "sessions"
+      ]
+    },
+    "ComputerPauseRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paused"
+      ]
+    },
+    "ComputerRevokeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "pattern": "^cs-[A-Za-z0-9_-]{8,128}$"
+        }
+      },
+      "required": [
+        "session_id"
+      ]
+    },
+    "ComputerTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "app_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "layout_version": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "user_input_serial": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "app_id",
+        "name",
+        "layout_version",
+        "width",
+        "height",
+        "user_input_serial"
+      ]
+    }
+  }
+}

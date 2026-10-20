@@ -424,7 +424,7 @@ func (g *Gateway) newView(p Principal) *view {
 					if strings.HasPrefix(tool, "backend.") {
 						_ = json.Unmarshal(args["name"], &backend)
 					}
-					if !v.allowed(deviceName, tool, backend) {
+					if !v.allowed(deviceName, tool, backend) || (!v.p.Local && !oauth.AllowsArguments(v.p.Scopes, deviceName, tool, args)) {
 						return agent.Result(nil, toolerr.New("unauthorized", "scope 不允许此工具", "scope", strings.Join(v.p.Scopes, " "), "tool", req.Params.Name)), nil
 					}
 					devices, _ := g.snapshot()
@@ -752,7 +752,7 @@ func (v *view) publish(generation uint64) {
 	}
 }
 func builtin(name string) bool {
-	for _, p := range []string{"sys.", "exec.", "pty.", "fs.", "backend."} {
+	for _, p := range []string{"sys.", "exec.", "pty.", "fs.", "backend.", "computer."} {
 		if strings.HasPrefix(name, p) {
 			return true
 		}
@@ -795,7 +795,7 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 	if strings.HasPrefix(tool, "backend.") {
 		_ = json.Unmarshal(args["name"], &backend)
 	}
-	if !v.allowed(deviceName, tool, backend) {
+	if !v.allowed(deviceName, tool, backend) || (!v.p.Local && !oauth.AllowsArguments(v.p.Scopes, deviceName, tool, args)) {
 		return agent.Result(nil, toolerr.New("unauthorized", "scope 不允许此工具", "scope", strings.Join(v.p.Scopes, " "), "tool", name)), nil
 	}
 	v.mu.Lock()

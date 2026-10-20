@@ -10,13 +10,13 @@ tailnet 内节点之间也使用 MCP。`api/xmesh/v1` 若存在，只用于 MCP 
 
 ## CON-ARCH-02
 
-仓库是一个 Go module，发布物是一个名为 `xmesh` 的二进制。Windows、macOS、Linux 由同一份源码交叉编译。禁止把 Agent、Gateway、Ingress 拆成必须同时部署的多个服务。
+Go 内核是一个 module，发布物名为 `xmesh`，Windows、macOS、Linux 由同一份源码交叉编译。Agent、Gateway、Ingress 不得拆成必须同时部署的多个服务。可选的 computer 能力允许平台原生 `xmesh-computer` 执行器，由图形用户会话中的 `xmesh computer host` 监督；它们只负责本机桌面接入，不成为第二个 mesh 节点或资源权威。见 [Computer](../contracts/computer.md)。
 
 验收：`serve` 在三个 GOOS 上都能至少启动 Agent 的本机监听（阶段 1 可以先不做 tsnet）。
 
 ## CON-ARCH-03
 
-一台机器上的常驻实例是一个 `xmesh` 进程。启用哪些角色由 `node.roles` 决定，而不是由不同的二进制决定。同一进程可以同时是 agent、gateway 和 ingress。
+每个节点实例的常驻内核是一个 `xmesh` 进程。启用哪些角色由 `node.roles` 决定，而不是由不同的二进制决定。同一进程可以同时是 agent、gateway 和 ingress。启用 computer 时，可由独立的图形用户会话 host 和原生执行器提供受保护的本机桌面通道；控制租约仍只由该节点 Agent 仲裁。
 
 验收：配置 `roles: [agent, gateway]` 时，tailnet（或阶段 1 的本地）MCP 与 `127.0.0.1:8080/mcp` 同时可用，且工具状态一致。
 

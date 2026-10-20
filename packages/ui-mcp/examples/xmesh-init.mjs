@@ -14,6 +14,22 @@ export default async ({
 }) => {
   const vars = environment.env ?? {},
     stateRoot = path.join(sessionDir, "state");
+  // The fixture main process reports transport errors separately from renderer
+  // console events. Retain a bounded diagnostic for native acceptance failures.
+  const stderr = electronApp.process().stderr;
+  let pending = "", diagnosticBytes = 0;
+  const diagnostic = (chunk) => {
+    pending = (pending + chunk.toString("utf8")).slice(-8192);
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.includes("test-control-error") || diagnosticBytes >= 8192) continue;
+      const text = Buffer.from(line + "\n").subarray(0, 8192 - diagnosticBytes);
+      fs.appendFileSync(path.join(sessionDir, "panel-control-errors.log"), text, { mode: 0o600 });
+      diagnosticBytes += text.length;
+    }
+  };
+  stderr?.on("data", diagnostic);
   let cleanup;
   const workspace = path.join(sessionDir, "workspace");
   fs.mkdirSync(workspace, { recursive: true });
@@ -110,8 +126,9 @@ export default async ({
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     await electronApp.evaluate(() => globalThis.__xmeshUiTest.showPanel());
-    return cleanup;
+    return async () => { stderr?.off("data", diagnostic); await cleanup(); };
   } catch (error) {
+    stderr?.off("data", diagnostic);
     await cleanup();
     throw error;
   }

@@ -21,7 +21,7 @@ export interface CallOutcome {
 
 export type PlaygroundRequest =
   | { op: "list"; instance: string; device: string; pattern?: string }
-  | { op: "call"; instance: string; id: string; name: string; arguments: Record<string, unknown>; timeoutMs: number }
+  | { op: "call"; instance: string; id: string; name: string; arguments: Record<string, unknown>; timeoutMs: number; pat?: string }
   | { op: "cancel"; instance: string; id: string }
   | { op: "status"; instance: string }
   | { op: "copy" | "save"; instance: string; text: string };
@@ -47,7 +47,7 @@ export function parsePlayground(v: unknown): PlaygroundRequest | undefined {
   if (v.op === "status" && only([])) return v as PlaygroundRequest;
   if (v.op === "cancel" && only(["id"]) && id(v.id)) return v as PlaygroundRequest;
   if (v.op === "list" && only(["device", "pattern"]) && (v.pattern === undefined || (typeof v.pattern === "string" && v.pattern.length > 0 && v.pattern.length <= 200)) && typeof v.device === "string" && /^(local|gateway|[A-Za-z0-9][A-Za-z0-9-]{0,62})$/.test(v.device)) return v as PlaygroundRequest;
-  if (v.op !== "call" || !only(["id", "name", "arguments", "timeoutMs"]) || !id(v.id) || typeof v.name !== "string" || v.name.length > 512 || !/^[A-Za-z0-9_./-]+$/.test(v.name) || !plain(v.arguments)) return undefined;
+  if (v.op !== "call" || !only(["id", "name", "arguments", "timeoutMs", "pat"]) || !id(v.id) || (v.pat !== undefined && !id(v.pat)) || typeof v.name !== "string" || v.name.length > 512 || !/^[A-Za-z0-9_./-]+$/.test(v.name) || !plain(v.arguments)) return undefined;
   if (!Number.isInteger(v.timeoutMs) || (v.timeoutMs as number) < 1000 || (v.timeoutMs as number) > 1_800_000) return undefined;
   try { if (new TextEncoder().encode(JSON.stringify(v.arguments)).length > 256 * 1024) return undefined; } catch { return undefined; }
   return v as PlaygroundRequest;

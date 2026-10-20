@@ -64,6 +64,38 @@ async function setup(capabilities: Capability[] = ALL, status: Partial<StatusRes
 
 const last = (k: FakeKernel, method: string, p: string) => k.requests.filter((r) => r.method === method && r.path.startsWith(p)).at(-1);
 
+test("desktop setup and resume use the selected kernel's effective Host endpoint", async () => {
+  const fixture = statusFixture();
+  const endpoint = "/tmp/selected-computer.sock";
+  const { c } = await setup([...ALL, "computer"], { paths: { ...fixture.paths, computer_endpoint: endpoint } });
+  const calls: { operation: string; endpoint?: string }[] = [];
+  const service = new PanelService(c,
+    async endpoint => { calls.push({ operation: "setup", endpoint }); },
+    async endpoint => { calls.push({ operation: "resume", endpoint }); });
+  assert.equal((await service.computer({ op: "setup" })).ok, true);
+  assert.equal((await service.computer({ op: "pause", paused: false })).ok, true);
+  assert.deepEqual(calls, [{ operation: "setup", endpoint }, { operation: "resume", endpoint }]);
+});
+
+test("resuming desktop control clears Agent pause even when the user Host is unavailable", async () => {
+  const { k, c } = await setup([...ALL, "computer"]);
+  const order: string[] = [];
+  const service = new PanelService(c, undefined, async () => { order.push("host-resume"); });
+  k.panel.computer.paused = true;
+  assert.equal((await service.computer({ op: "pause", paused: false })).ok, true);
+  assert.deepEqual(order, ["host-resume"]);
+  assert.equal(k.panel.computer.paused, false);
+  k.panel.computer.paused = true;
+  k.panel.computer.info.available = false;
+  k.panel.computer.info.state = "desktop_unavailable";
+  const denied = new PanelService(c, undefined, async () => { throw new Error("Host resume denied"); });
+  const result = await denied.computer({ op: "pause", paused: false });
+  assert.equal(result.ok, true);
+  assert.equal(k.panel.computer.paused, false);
+  assert.ok(result.ok && !result.data.info.available);
+  assert.ok(last(k, "POST", "/v2/computer/pause"));
+});
+
 test("sessions and config reads return the kernel's documents", async () => {
   const { k, service } = await setup();
   const s = await service.getSessions();

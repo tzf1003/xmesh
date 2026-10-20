@@ -50,6 +50,8 @@ export interface UpdaterEnv {
   startNode(node: string): Promise<void>;
   /** Repairs a running kernel missed by an older updater, verifying its version before restarting. */
   refreshNode?(node: string): Promise<void>;
+  stopComputer?(): Promise<StopResult>;
+  startComputer?(): Promise<void>;
   quit(): void;
   openPath(p: string): Promise<string>;
   notify(n: UpdateNotice): void;
@@ -63,6 +65,7 @@ interface Pending {
   from: string;
   to: string;
   nodes: string[];
+  computer?: boolean;
 }
 
 export interface UpdaterEvents {
@@ -197,18 +200,20 @@ export class Updater extends EventEmitter<UpdaterEvents> {
 
     this.set({ phase: "installing", progress: undefined });
     const stopped: string[] = [];
+    let computerStopped = false;
     try {
+      if (this.env.stopComputer) computerStopped = (await this.env.stopComputer()) === "stopped";
       for (const node of this.env.runningNodes()) {
         if (!NODE.test(node)) continue;
         if ((await this.env.stopNode(node)) === "stopped") stopped.push(node);
       }
     } catch (e) {
-      const error = { code: "stop_failed", message: await this.withRestart(e instanceof Error ? e.message : String(e), stopped) };
+      const error = { code: "stop_failed", message: await this.withRestart(e instanceof Error ? e.message : String(e), stopped, computerStopped) };
       this.set({ phase: "available", error });
       return { ok: false, error };
     }
 
-    const pending: Pending = { from: this.env.version, to: found.release.version, nodes: stopped };
+    const pending: Pending = { from: this.env.version, to: found.release.version, nodes: stopped, ...(computerStopped && { computer: true }) };
     try {
       // Written whole under another name and then moved over, so a crash leaves either no note or a complete one.
       const note = path.join(this.env.dataDir, PENDING_FILE);
@@ -233,9 +238,9 @@ export class Updater extends EventEmitter<UpdaterEvents> {
       if (e instanceof ApplyError && e.code === "not_writable") {
         // No right to replace the app: show the disk image so the user can drag it over by hand.
         void this.env.openPath(installer);
-        error = { code: "not_writable", message: await this.withRestart(e.message, stopped) };
+        error = { code: "not_writable", message: await this.withRestart(e.message, stopped, computerStopped) };
       } else {
-        error = { code: "install_failed", message: await this.withRestart(e instanceof Error ? e.message : String(e), stopped) };
+        error = { code: "install_failed", message: await this.withRestart(e instanceof Error ? e.message : String(e), stopped, computerStopped) };
       }
       this.set({ phase: "available", error });
       return { ok: false, error };
@@ -273,8 +278,14 @@ export class Updater extends EventEmitter<UpdaterEvents> {
   }
 
   /** Starts the given nodes again and returns those that would not start. */
-  private async restart(nodes: string[]): Promise<string[]> {
+  private async restart(nodes: string[], computer = false): Promise<string[]> {
     const failed: string[] = [];
+    if (computer) {
+      try {
+        if (!this.env.startComputer) throw new Error("desktop lifecycle unavailable");
+        await this.env.startComputer();
+      } catch { failed.push("computer-host"); }
+    }
     for (const n of nodes) {
       try {
         await this.env.startNode(n);
@@ -286,8 +297,8 @@ export class Updater extends EventEmitter<UpdaterEvents> {
   }
 
   /** `message`, with the nodes that could not be brought back named when there are any. */
-  private async withRestart(message: string, nodes: string[]): Promise<string> {
-    const failed = await this.restart(nodes);
+  private async withRestart(message: string, nodes: string[], computer = false): Promise<string> {
+    const failed = await this.restart(nodes, computer);
     return failed.length === 0 ? message : `${message} (could not restart: ${failed.join(", ")})`;
   }
 
@@ -301,7 +312,7 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     try {
       const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<Pending>;
       if (typeof raw.to === "string" && typeof raw.from === "string" && Array.isArray(raw.nodes)) {
-        pending = { from: raw.from, to: raw.to, nodes: raw.nodes.filter((n): n is string => typeof n === "string" && NODE.test(n)) };
+        pending = { from: raw.from, to: raw.to, nodes: raw.nodes.filter((n): n is string => typeof n === "string" && NODE.test(n)), ...(raw.computer === true && { computer: true }) };
       }
     } catch {
       // no update in flight
@@ -314,7 +325,7 @@ export class Updater extends EventEmitter<UpdaterEvents> {
     }
     this.cleanup();
     if (pending === undefined) return;
-    const unstarted = await this.restart(pending.nodes);
+    const unstarted = await this.restart(pending.nodes, pending.computer);
     const appUpdated = sameVersion(this.env.version, pending.to);
     if (appUpdated && this.env.kernelBundled && this.env.refreshNode) {
       // Older updaters omitted a still-running kernel when its installed service name differed.

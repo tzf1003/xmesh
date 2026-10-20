@@ -20,14 +20,16 @@ import (
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/backendenv"
+	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
 type Options struct {
-	Host    Host
-	Store   *config.Store
-	Version string
+	Computer *computer.Manager
+	Host     Host
+	Store    *config.Store
+	Version  string
 	// StateDir receives control.json; AuditDir is read by GET /v2/audit.
 	StateDir, AuditDir string
 	Listen             ListenOptions
@@ -112,8 +114,9 @@ type Server struct {
 	drainMu sync.Mutex
 	drain   v2.DrainState
 
-	peerMu sync.Mutex
-	peers  []v2.Peer
+	peerMu           sync.Mutex
+	peers            []v2.Peer
+	computerEndpoint string
 }
 
 // Start opens the channel, writes control.json and begins serving. A node
@@ -128,6 +131,10 @@ func Start(o Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{o: o, bound: bound, bus: NewBus(), started: v2.Now(), stop: make(chan struct{})}
+	s.computerEndpoint = o.Store.Get().Agent.Computer.Endpoint
+	if s.computerEndpoint == "" {
+		s.computerEndpoint = computer.DefaultEndpoint()
+	}
 	s.lifecycle.Store("starting")
 	s.caps = capabilities(o)
 	s.routes = compileRoutes(v2.Routes())
@@ -174,6 +181,9 @@ func capabilities(o Options) []v2.Capability {
 	caps = append(caps, v2.CapPair, v2.CapIngress, v2.CapAudit)
 	if o.CI != nil && o.Store.Path() != "" {
 		caps = append(caps, v2.CapCI)
+	}
+	if o.Computer != nil {
+		caps = append(caps, v2.CapComputer)
 	}
 	return caps
 }
@@ -293,17 +303,20 @@ func (rt route) match(method, path string) bool {
 // capability the kernel does not declare answers not_implemented without reaching its handler.
 func (s *Server) table() map[string]handler {
 	return map[string]handler{
-		"control.status.get":    s.status,
-		"control.events.stream": func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
-		"control.peers.list":    s.listPeers,
-		"control.sessions.list": s.sessions,
-		"control.drain.start":   s.startDrain,
-		"control.drain.resume":  s.resume,
-		"control.config.get":    s.getConfig,
-		"control.config.put":    s.putConfig,
-		"control.config.reload": s.reloadConfig,
-		"control.config.patch":  s.patchConfig,
-		"control.audit.list":    s.auditList,
+		"control.computer.get":    s.getComputer,
+		"control.computer.pause":  s.pauseComputer,
+		"control.computer.revoke": s.revokeComputer,
+		"control.status.get":      s.status,
+		"control.events.stream":   func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
+		"control.peers.list":      s.listPeers,
+		"control.sessions.list":   s.sessions,
+		"control.drain.start":     s.startDrain,
+		"control.drain.resume":    s.resume,
+		"control.config.get":      s.getConfig,
+		"control.config.put":      s.putConfig,
+		"control.config.reload":   s.reloadConfig,
+		"control.config.patch":    s.patchConfig,
+		"control.audit.list":      s.auditList,
 
 		"control.pair.export":            s.pairExport,
 		"control.pair.import":            s.pairImport,

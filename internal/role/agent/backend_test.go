@@ -98,6 +98,19 @@ func Test_Gate2_TwoMCPClients(t *testing.T) {
 	if grant.IsError {
 		t.Fatal(grant)
 	}
+	// Acquire is a readiness boundary: the restarted catalog must be visible
+	// immediately, without waiting for an asynchronous list-changed refresh.
+	ready, err := two.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyEcho := false
+	for _, advertised := range ready.Tools {
+		readyEcho = readyEcho || advertised.Name == "ida.echo"
+	}
+	if !readyEcho {
+		t.Fatal("successful acquire did not publish the restarted catalog")
+	}
 	denied = tool(t, one, "ida.echo", map[string]any{"_lease_token": token})
 	if !denied.IsError || object(t, denied)["reason"] != "token_stale" {
 		t.Fatal(denied)

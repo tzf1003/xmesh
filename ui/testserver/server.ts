@@ -47,6 +47,7 @@ const RING = 1024;
 
 /** Panel route prefixes and the capability that gates each (PUT and PATCH /v2/config need config.write instead). */
 const PANEL_ROUTE_CAPS: [string, Capability][] = [
+  ["/v2/computer", "computer"],
   ["/v2/config", "config.read"],
   ["/v2/backends", "config.write"],
   ["/v2/pats", "pats"],
@@ -66,7 +67,7 @@ export function randomEndpoint(): string {
 const iso = (): string => new Date().toISOString();
 
 /**
- * A fake xmesh kernel for Control API v1: status, peers, sessions, drain,
+ * A fake xmesh kernel for Control API v2: status, peers, sessions, drain,
  * resume and the event stream, over a Unix socket or named pipe like the real
  * one. Data starts from the contract fixtures; tests script it (`setStatus`,
  * `setPeers`, `emit`, `dropStreams`, `setControlVersion`, `restartBoot`) to

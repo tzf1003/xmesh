@@ -1,0 +1,35 @@
+{
+  "repository": "https://github.com/iFurySt/open-computer-use",
+  "revision": "5136415f52b87f419227bae28767cf469a6bc3b5",
+  "license": "MIT",
+  "files": {
+    "SkyLightSPI.swift": {
+      "source": "packages/OpenComputerUseKit/Sources/OpenComputerUseKit/SkyLightSPI.swift",
+      "sha256": "785f71975041013628ae4ce884968ca4a2c7ba11f7bab1ecc2f4ae1a882dbb5b"
+    },
+    "SkyClickSimulation.swift": {
+      "source": "packages/OpenComputerUseKit/Sources/OpenComputerUseKit/SkyClickSimulation.swift",
+      "sha256": "32aa7422856035c77299692244d53f55b4b775e18a57e10aa900159c9a8f6821"
+    },
+    "SkyKeyboardSimulation.swift": {
+      "source": "packages/OpenComputerUseKit/Sources/OpenComputerUseKit/SkyKeyboardSimulation.swift",
+      "sha256": "7696403989f5751060aeb3e32041dbcdbb228822f853334a5e1808a6bb86b21b"
+    },
+    "KeyMapping.swift": {
+      "source": "packages/OpenComputerUseKit/Sources/OpenComputerUseKit/KeyMapping.swift",
+      "sha256": "e73e8680ceb066d67d8fed73ca7d0a7d2205941df7b24e8512ed150d3c666673"
+    },
+    "LICENSE": {
+      "source": "LICENSE",
+      "sha256": "0fdb775e00e6fdde23984b4f1184cd13c34135caac1e714ad489141c239704bc"
+    },
+    "THIRD_PARTY_NOTICES.md": {
+      "source": "THIRD_PARTY_NOTICES.md",
+      "sha256": "305b20c2922dd2781bb98d2b75cb317fdf6d21f8519ed476eb8e3df3000f8e79"
+    },
+    "Errors.swift": {
+      "source": "packages/OpenComputerUseKit/Sources/OpenComputerUseKit/Errors.swift",
+      "sha256": "1e3188f31ae9a9efd683b831fb2653ca58117649db7ff698658eb85738cf712c"
+    }
+  }
+}

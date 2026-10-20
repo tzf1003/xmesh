@@ -152,16 +152,18 @@ for (const mode of ["mock", "real"] as const)
         });
         const result = await finished(controller, request.run_id, 150000);
         if (result.status !== "passed") {
-          const log = path.join(
+          const sessionDir = path.join(
             c.state_dir,
             "instances",
             controller.instance_id,
             "sessions",
             session,
-            "kernel.log",
           );
-          if (fs.existsSync(log))
-            process.stderr.write(fs.readFileSync(log, "utf8").slice(-8192));
+          for (const name of ["kernel.log", "panel-control-errors.log"]) {
+            const log = path.join(sessionDir, name);
+            if (fs.existsSync(log))
+              process.stderr.write(fs.readFileSync(log, "utf8").slice(-8192));
+          }
           process.stderr.write(
             JSON.stringify(await controller.snapshot(session)),
           );

@@ -38,6 +38,8 @@ stdio 进程退出或 HTTP 连续失败时：
 
 ### backend.acquire
 
+成功返回前，后端已经就绪且其当前工具目录已同步到 Agent 的 MCP 视图。调用方可以立即调用该目录中的工具；后端重启后的目录刷新不会暂时移除同名的保留工具。
+
 参数：`name`（后端名）、`ttl`（duration 字符串，必须，最大不超过配置的 `idle_timeout`，默认上限 30 分钟）。
 
 - 当前没有未过期租约：创建租约，token 加 1，owner 为调用方，`Expires = now + ttl`。返回租约对象。

@@ -94,3 +94,11 @@ test("no PAT, no capability, or an unreadable file: the reader throws, never ret
   await assert.rejects(new GatewayCredentials(controllerWith(undefined, false)).read(), TokenUnavailableError);
   await assert.rejects(new GatewayCredentials(controllerWith({ enforced: true, pats: [patAt("default", path.join(dir, "nope.pat"))] })).read(), TokenUnavailableError);
 });
+
+test("an explicitly selected PAT is read by name and never falls back to a different credential", async () => {
+  const file = path.join(dir, "preview.pat");
+  fs.writeFileSync(file, TOKEN);
+  const creds = new GatewayCredentials(controllerWith({ pats: [patAt("preview", file), patAt("default", "/unreadable")] }));
+  assert.equal(await creds.read("preview"), TOKEN);
+  await assert.rejects(creds.read("missing"), /selected PAT is unavailable/);
+});

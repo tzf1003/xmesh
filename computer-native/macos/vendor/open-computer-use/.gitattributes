@@ -1,0 +1,2 @@
+# Preserve the exact pinned source bytes for the SHA-256 provenance check.
+* -text

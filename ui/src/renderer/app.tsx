@@ -19,6 +19,7 @@ import { About, outcomeText } from "./pages/About";
 import { Audit } from "./pages/Audit";
 import { Authorization } from "./pages/Authorization";
 import { Ci } from "./pages/Ci";
+import { Computer } from "./pages/Computer";
 import { Devices } from "./pages/Devices";
 import { Ingress } from "./pages/Ingress";
 import { Mesh } from "./pages/Mesh";
@@ -35,7 +36,7 @@ import { RoleSwitches } from "./role-switches";
 import { Icon } from "./icons";
 import { CommandPalette, NAVIGATION, pageAvailable } from "./navigation";
 
-export type PageId = "features" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
+export type PageId = "features" | "computer" | "runtime" | "terminal" | "transfers" | "playground" | "overview" | "devices" | "sessions" | "authz" | "ingress" | "ci" | "settings" | "config" | "audit" | "mesh" | "about" | "setup";
 
 /** Where a link into a page lands: a section, and for the ingress role, the role preselected. */
 export interface PageFocus {
@@ -294,6 +295,8 @@ function PageSwitch({ page, ctx }: { page: PageId; ctx: PageContext }): JSX.Elem
       return <Ingress ctx={ctx} />;
     case "ci":
       return <Ci ctx={ctx} />;
+    case "computer":
+      return <Computer ctx={ctx} />;
     case "settings":
       return <Settings ctx={ctx} onDirtyChange={ctx.setConfigDirty} />;
     case "config":

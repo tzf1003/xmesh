@@ -5,6 +5,7 @@ import { playgroundZh, playgroundEn } from "./playground-messages";
 // checks that both tables have the same keys and the same {placeholders}.
 
 import { topologyEn, topologyZh } from "./topology-messages";
+import { computerEn, computerZh } from "./computer-messages";
 
 export const zh = {
   "device.preferLan": "连接时优先局域网，断线后自动尝试其他路径；已建立的连接保持当前路径。",
@@ -18,6 +19,7 @@ export const zh = {
   "device.revokeHint": "撤销 {name} 的设备信任？该设备的所有连接和会话都会结束。",
   "device.revoked": "设备信任已撤销",
 
+  ...computerZh,
   ...playgroundZh,
   ...workspaceZh,
   ...topologyZh,
@@ -1023,6 +1025,7 @@ export const en: Record<Key, string> = {
   "mode.coexist": "LAN and Tailnet",
   "mode.offline": "Device networking disabled",
 
+  ...computerEn,
   ...playgroundEn,
   ...workspaceEn,
   ...topologyEn,

@@ -49,6 +49,7 @@
         "args_len": { "type": "integer", "minimum": 0 },
         "stdin_sha256": { "type": ["string", "null"] },
         "session_id": { "type": "string" },
+        "action_id": { "type": "string", "maxLength": 128 },
         "signal": { "enum": ["INT", "TERM", "KILL"] },
         "mode": { "enum": ["shared", "exclusive"] },
         "backend": { "type": "string" },

@@ -22,6 +22,8 @@ on:
       - "ui/scripts/**"
       - "ui/build/**"
       - "ui/src/main/cli.ts"
+      - "computer-native/**"
+      - "scripts/package_computer.py"
   workflow_dispatch:
     inputs:
       version:
@@ -114,6 +116,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: computer-native
 
       - name: 解析版本
         id: ver
@@ -140,7 +146,26 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      # Stable packaging fails before build when required credentials are absent.
+      - name: 构建桌面执行器
+        working-directory: .
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          if [ "$TARGET_OS" = darwin ]; then
+            target="aarch64-apple-darwin"; [ "$TARGET_ARCH" = amd64 ] && target="x86_64-apple-darwin"
+          else
+            target="x86_64-pc-windows-msvc"; [ "$TARGET_ARCH" = arm64 ] && target="aarch64-pc-windows-msvc"
+          fi
+          rustup target add "$target"
+          XMESH_BUILD_VERSION="$TAG" cargo build --manifest-path computer-native/Cargo.toml --release --locked --target "$target"
+          ext=""; [ "$TARGET_OS" = windows ] && ext=".exe"
+          output="ui/build/kernel/xmesh-computer$ext"
+          [ "$TARGET_OS" = darwin ] && output="ui/build/kernel/xmesh-computer.app"
+          python3 scripts/package_computer.py --binary "computer-native/target/$target/release/xmesh-computer$ext" --output "$output" --platform "$TARGET_OS" --version "$TAG"
+
+      # Stable packaging requires signing credentials.
       - name: 启用签名
         id: sign
         run: |
@@ -181,6 +206,7 @@ jobs:
       - name: 打包
         env:
           XMESH_KERNEL_BIN: ${{ github.workspace }}/ui/build/kernel/xmesh${{ matrix.platform == 'win' && '.exe' || '' }}
+          XMESH_COMPUTER_BIN: ${{ github.workspace }}/ui/build/kernel/xmesh-computer${{ matrix.platform == 'win' && '.exe' || '.app' }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           extra=()
@@ -191,7 +217,7 @@ jobs:
         run: |
           extra=""
           if [ "${{ matrix.native }}" = true ]; then extra="--run-kernel --smoke"; fi
-          node scripts/verify-package.mjs --dir "release/${{ matrix.unpacked }}" --kernel $extra
+          node scripts/verify-package.mjs --dir "release/${{ matrix.unpacked }}" --kernel --computer $extra
 
       - name: 验证 Windows 签名
         if: matrix.platform == 'win'

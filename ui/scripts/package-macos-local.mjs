@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Local release credentials stay in the macOS keychain; this file reads references only.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,11 +15,14 @@ function run(command, args, options = {}) {
   return result;
 }
 
+let computerBuild;
 try {
   if (process.platform !== "darwin") throw new Error("Local Mac packaging requires macOS.");
   const version = process.argv[2];
-  if (process.argv.length !== 3 || (version !== "--check" && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version ?? ""))) {
-    throw new Error("Usage: node scripts/package-macos-local.mjs <version|--check>");
+  const arch = process.argv[3] ?? process.arch;
+  const cross = arch !== process.arch;
+  if (!["arm64", "x64"].includes(arch) || ![3, 4].includes(process.argv.length) || (version !== "--check" && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version ?? ""))) {
+    throw new Error("Usage: node scripts/package-macos-local.mjs <version|--check> [arm64|x64]");
   }
   const references = existsSync(referenceFile) ? JSON.parse(readFileSync(referenceFile, "utf8")) : {};
   const identity = (process.env.CSC_NAME ?? references.identity ?? "").trim();
@@ -38,17 +41,28 @@ try {
     const kernel = path.join(ui, "build", "kernel", "xmesh");
     mkdirSync(path.dirname(kernel), { recursive: true });
     run("go", ["build", "-trimpath", "-ldflags", `-s -w -X main.buildVersion=v${version}`, "-o", kernel, "./cmd/xmesh"], {
-      cwd: path.dirname(ui), env: { ...process.env, CGO_ENABLED: "0" },
+      cwd: path.dirname(ui), env: { ...process.env, CGO_ENABLED: "0", GOOS: "darwin", GOARCH: arch === "x64" ? "amd64" : "arm64" },
     });
     run("codesign", ["--force", "--options", "runtime", "--timestamp", "--sign", identity, kernel]);
+    const repo = path.dirname(ui);
+    const cargoTarget = path.resolve(repo, process.env.CARGO_TARGET_DIR || path.join(homedir(), "Library", "Caches", "xmesh-computer-cargo"));
+    computerBuild = mkdtempSync(path.join(ui, "build", "kernel", "computer-"));
+    const computer = path.join(computerBuild, "xmesh-computer.app");
+    const target = arch === "x64" ? "x86_64-apple-darwin" : "aarch64-apple-darwin";
+    run("cargo", ["build", "--manifest-path", "computer-native/Cargo.toml", "--release", "--locked", "-j2", ...(cross ? ["--target", target] : [])], {
+      cwd: repo, env: { ...process.env, CARGO_TARGET_DIR: cargoTarget, XMESH_BUILD_VERSION: `v${version}` },
+    });
+    run("python3", ["scripts/package_computer.py", "--binary", path.join(cargoTarget, ...(cross ? [target] : []), "release", "xmesh-computer"), "--output", computer, "--platform", "darwin", "--version", version], { cwd: repo });
+    run("codesign", ["--force", "--options", "runtime", "--timestamp", "--sign", identity, computer]);
     run("npm", ["run", "build"]);
-    const env = { ...process.env, CSC_NAME: identity, APPLE_KEYCHAIN_PROFILE: profile, XMESH_KERNEL_BIN: kernel };
+    const env = { ...process.env, CSC_NAME: identity, APPLE_KEYCHAIN_PROFILE: profile, XMESH_KERNEL_BIN: kernel, XMESH_COMPUTER_BIN: computer };
     // This path intentionally uses the selected keychain profile, even if CI credentials are inherited.
     for (const key of ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID", "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER"]) delete env[key];
-    run(path.join(ui, "node_modules", ".bin", "electron-builder"), ["--config", "electron-builder.config.mjs", "--mac", `--${process.arch}`, "--publish", "never", "-c.forceCodeSigning=true", "-c.dmg.sign=true", `-c.extraMetadata.version=${version}`], { env });
-    const app = path.join(ui, "release", process.arch === "arm64" ? "mac-arm64" : "mac", "xmesh.app");
-    const dmg = path.join(ui, "release", `xmesh-ui-${version}-mac-${process.arch}.dmg`);
+    run(path.join(ui, "node_modules", ".bin", "electron-builder"), ["--config", "electron-builder.config.mjs", "--mac", `--${arch}`, "--publish", "never", "-c.forceCodeSigning=true", "-c.dmg.sign=true", `-c.extraMetadata.version=${version}`], { env });
+    const app = path.join(ui, "release", arch === "arm64" ? "mac-arm64" : "mac", "xmesh.app");
+    const dmg = path.join(ui, "release", `xmesh-ui-${version}-mac-${arch}.dmg`);
     run("codesign", ["--verify", "--deep", "--strict", app]);
+    run(process.execPath, ["scripts/verify-package.mjs", "--dir", path.dirname(app), "--kernel", "--computer", ...(!cross ? ["--run-kernel", "--smoke"] : [])]);
     run("codesign", ["--verify", "--strict", dmg]);
     run("xcrun", ["stapler", "validate", app]);
     run("xcrun", ["notarytool", "submit", dmg, "--keychain-profile", profile, ...keychainArgs, "--wait"]);
@@ -60,4 +74,6 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
+} finally {
+  if (computerBuild) rmSync(computerBuild, { recursive: true, force: true });
 }
