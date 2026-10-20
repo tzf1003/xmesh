@@ -14,6 +14,7 @@ const invoke = (channel: string, ...args: unknown[]): Promise<never> =>
   ipcRenderer.invoke(channel, ...args) as Promise<never>;
 
 const api: PanelApi = {
+  kernel: (request) => invoke("xmesh:kernel", request),
   transfers: (request) => invoke("xmesh:transfers", request),
   playground: (request) => invoke("xmesh:playground", request),
   getSnapshot: () => invoke("xmesh:get-snapshot"),

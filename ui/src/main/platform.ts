@@ -3,7 +3,7 @@ import { runXmesh } from "./cli";
 import { removeStaleControl, stateRoots } from "./discovery";
 import type { Platform } from "./actions";
 
-export function electronPlatform(showPanel: () => void, notifyError: (message: string) => void): Platform {
+export function electronPlatform(showPanel: () => void, notifyError: (message: string) => void, manageKernel?: Platform["manageKernel"]): Platform {
   return {
     writeClipboard: (text) => clipboard.writeText(text),
     openPath: (p) => shell.openPath(p),
@@ -24,6 +24,7 @@ export function electronPlatform(showPanel: () => void, notifyError: (message: s
     showPanel,
     quit: () => app.quit(),
     runCli: (command, node) => runXmesh(command, node),
+    manageKernel,
     notifyError,
     removeStaleState: async (node) => {
       // The state roots the panel discovered from; the id was checked against the snapshot before this call.

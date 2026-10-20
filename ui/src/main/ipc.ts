@@ -1,4 +1,5 @@
 import { parseOnboarding, type OnboardingRequest } from "../shared/onboarding";
+import { parseKernelRequest, type KernelRequest, type KernelResult } from "../shared/kernel";
 import { type IpcMainInvokeEvent, type WebContents, ipcMain } from "electron";
 import { parseTransfer } from "../shared/transfers";
 import type { TransferService } from "./transfers";
@@ -60,6 +61,7 @@ export function isTrustedSender(
 }
 
 export interface IpcDeps {
+  kernel?: (request: KernelRequest) => Promise<DataResult<KernelResult>>;
   onboarding?: (request: OnboardingRequest) => Promise<DataResult<unknown>>;
   playground: PlaygroundService;
   transfers: TransferService;
@@ -76,7 +78,7 @@ export interface IpcDeps {
   update: UpdateActions;
 }
 
-export function registerIpc({ onboarding, transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
+export function registerIpc({ kernel, onboarding, transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -89,6 +91,10 @@ export function registerIpc({ onboarding, transfers, playground, controller, act
     });
   };
 
+  handle(CHANNELS.kernel, (request: unknown) => {
+    const req = parseKernelRequest(request);
+    return !req ? bad("kernel request") : kernel?.(req) ?? { ok: false, error: { code: "unavailable", message: "Kernel lifecycle unavailable" } };
+  });
   handle(CHANNELS.transfers, (request: unknown) => {
     const req = parseTransfer(request);
     return req ? transfers.request(req) : bad("transfer request");

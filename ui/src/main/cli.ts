@@ -85,13 +85,54 @@ export interface CliRun {
 
 /** Like `runXmesh`, but never rejects: the caller reads the exit code and the `--json` answer itself. */
 export function runXmeshRaw(command: CliCommand, node?: string, bin: string = xmeshBinary()): Promise<CliRun> {
+  return runKernelCli(cliArgs(command, node), bin);
+}
+
+/** Main-process lifecycle commands; renderer requests never provide argv. */
+export function runKernelCli(args: readonly string[], bin: string = xmeshBinary()): Promise<CliRun> {
   return new Promise((resolve) => {
-    execFile(bin, cliArgs(command, node), { timeout: 120_000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
+    execFile(bin, [...args], { timeout: 120_000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
       if (!err) return resolve({ code: 0, stdout, stderr });
       const e = err as NodeJS.ErrnoException;
       resolve({ code: e.code === "ENOENT" ? 127 : typeof e.code === "number" ? e.code : 1, stdout, stderr: stderr || e.message });
     });
   });
+}
+
+export interface KernelServiceInfo { config_file: string; state_dir: string; oauth_password_file: string; local_only: boolean; system: boolean }
+
+export function sameKernelPath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
+  const paths = platform === "win32" ? path.win32 : path;
+  const normalize = (value: string): string => platform === "win32" ? paths.resolve(value).toLowerCase() : paths.resolve(value);
+  return normalize(a) === normalize(b);
+}
+
+export async function kernelServiceInfo(paths: { configFile: string; serviceNode?: string },
+  run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<KernelServiceInfo | undefined> {
+  const selector = paths.serviceNode ? ["--name", `xmesh-${paths.serviceNode}`] : ["--config", paths.configFile];
+  const result = await run(["service-info", ...selector, "--json"]);
+  let envelope: { error?: { reason?: string }; messages?: string[] };
+  try { envelope = JSON.parse(result.stdout); } catch { throw new CliError("service-info", result.stderr || "无法读取原服务参数"); }
+  if (result.code !== 0) {
+    if (envelope.error?.reason === "not_installed") return undefined;
+    throw new CliError("service-info", result.stderr || result.stdout);
+  }
+  const info = JSON.parse(envelope.messages?.[0] ?? "null") as Partial<KernelServiceInfo> | null;
+  if (typeof info?.config_file !== "string" || !path.isAbsolute(info.config_file) ||
+    typeof info.state_dir !== "string" || (info.state_dir !== "" && !path.isAbsolute(info.state_dir)) ||
+    typeof info.oauth_password_file !== "string" || (info.oauth_password_file !== "" && !path.isAbsolute(info.oauth_password_file)) ||
+    typeof info.local_only !== "boolean" || typeof info.system !== "boolean") throw new CliError("service-info", "原服务的配置、状态目录或安装参数无效");
+  return info as KernelServiceInfo;
+}
+
+/** Retain non-configuration service arguments before a registration is removed. */
+export async function kernelServiceOptions(paths: { configFile: string; stateDir: string; serviceNode?: string },
+  run: (args: readonly string[]) => Promise<CliRun> = runKernelCli): Promise<string[]> {
+  const info = await kernelServiceInfo(paths, run);
+  if (!info) return [];
+  if (info.system || !sameKernelPath(info.config_file, paths.configFile) ||
+    (info.state_dir !== "" && !sameKernelPath(info.state_dir, paths.stateDir))) throw new CliError("service-info", "原服务的配置、状态目录或权限不匹配");
+  return [...(info.local_only ? ["--local-only"] : []), ...(info.oauth_password_file ? ["--oauth-password-file", info.oauth_password_file] : [])];
 }
 
 /** First-run subcommands. Unlike `CliCommand` these take arguments, built here from validated values only. */

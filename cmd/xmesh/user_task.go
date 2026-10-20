@@ -76,13 +76,14 @@ func programUnder(program, dir string) bool {
 }
 
 // taskDocumentText turns the output of schtasks /Query /XML into text. Task documents are UTF-16
-// when they start with a byte order mark or carry NUL bytes; anything else is taken as it is.
+// when they start with a byte order mark or carry NUL bytes. Redirected console
+// output can instead use the Windows OEM code page, even with a UTF-16 declaration.
 func taskDocumentText(raw []byte) string {
 	switch {
 	case len(raw) >= 2 && raw[0] == 0xff && raw[1] == 0xfe:
 		raw = raw[2:]
 	case bytes.IndexByte(raw, 0) < 0:
-		return string(raw)
+		return taskConsoleText(raw)
 	}
 	units := make([]uint16, 0, len(raw)/2)
 	for i := 0; i+1 < len(raw); i += 2 {

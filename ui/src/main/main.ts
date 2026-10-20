@@ -17,7 +17,9 @@ import { TransferService } from "./transfers";
 import { PlaygroundService } from "./playground";
 import { PanelService } from "./panel-service";
 import { fsSetupHost, previewSetup, runSetup } from "./setup";
-import { bundledXmesh, cliCommandText, runXmeshRaw, runXmeshSetup } from "./cli";
+import { bundledXmesh, CliError, cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshRaw, runXmeshSetup, sameKernelPath } from "./cli";
+import { discoverKernelTargets, KernelLifecycle, recoverKernelPaths, type KernelTarget } from "./kernel-lifecycle";
+import { kernelConfigNode, kernelInstallOptions } from "./kernel-install-options";
 import { type Action } from "./menu";
 import { diffNotices, noticeText } from "./notifications";
 import { type RecordedCall, electronPlatform, recordingPlatform } from "./platform";
@@ -132,7 +134,8 @@ async function start(): Promise<void> {
         : undefined;
   const kernelBundled = bundledXmesh((process as { resourcesPath?: string }).resourcesPath) !== undefined && !process.env.XMESH_BIN;
   const kernelConfigs = new KernelConfigs(path.join(app.getPath("userData"), "kernel-configs.json"), runXmeshSetup);
-  const updateKernels = kernelServices({ discover: () => discoverInstances(roots), run: runXmeshRaw,
+  const updateKernels = kernelServices({ discover: () => discoverInstances(roots),
+    run: (command, node) => runXmeshRaw(command, kernelConfigs.paths(node)?.serviceNode ?? controller.nodeName(node)),
     ...(!TEST_MODE && kernelBundled && {
       beforeStop: (node: string, instance: Instance) => kernelConfigs.capture(node, instance),
       prepare: (node: string) => kernelConfigs.prepare(node),
@@ -160,6 +163,7 @@ async function start(): Promise<void> {
           }),
     applier,
     store: new UpdateStore(path.join(app.getPath("userData"), "update.json")),
+    kernelBusy: () => kernelLifecycle.busy,
     runningNodes: () => TEST_MODE ? controller.snapshot.instances.filter((i) => !controller.snapshot.staleNodes.includes(i.id)).map((i) => i.id) : discoverInstances(roots).filter((i) => !i.protected).map((i) => i.id),
     stopNode: async (node) => {
       if (TEST_MODE) {
@@ -186,7 +190,7 @@ async function start(): Promise<void> {
   const controller = new ShellController({
     getUpdate: () => updater.state,
     discover: () => discoverInstances(roots),
-    configured: () => discoverConfigured(roots),
+    configured: () => [...new Set([...discoverConfigured(roots), ...kernelConfigs.nodes()])],
     cliCommand: cliCommandText(),
     locale,
     getLoginItem: () => autostart.get().enabled,
@@ -210,8 +214,41 @@ async function start(): Promise<void> {
   const notifyError = (message: string): void => notify([{ key: `error.${message}`, text: message }]);
   const platform = TEST_MODE
     ? recordingPlatform(showPanel, calls, answers)
-    : electronPlatform(showPanel, notifyError);
+    : electronPlatform(showPanel, notifyError, kernelBundled ? async (op, node) => {
+      const result = await kernelLifecycle.request({ op, node });
+      if (!result.ok) throw new CliError(op, result.error.message);
+    } : undefined);
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
+  const serviceIdentity = (target: KernelTarget): string => target.serviceNode ?? target.instance?.manifest.node ?? kernelConfigNode(target);
+  const kernelLifecycle = new KernelLifecycle({
+    blocked: () => updater.state.phase === "downloading" || updater.state.phase === "installing",
+    targets: () => discoverKernelTargets(roots, (id) => kernelConfigs.paths(id), undefined, kernelConfigs.nodes()),
+    resolve: async (target) => {
+      const serviceNode = serviceIdentity(target);
+      return recoverKernelPaths(target, serviceNode, async () => {
+        if (target.instance) {
+          await kernelConfigs.capture(target.id, target.instance);
+          return kernelConfigs.paths(target.id)!;
+        }
+        throw new Error("控制通道不可用");
+      }, () => kernelServiceInfo({ ...target, serviceNode }),
+      (paths) => kernelConfigs.register(target.id, paths, serviceNode));
+    },
+    managed: process.platform === "win32" ? async (target) => {
+      const info = await kernelServiceInfo({ ...target, serviceNode: serviceIdentity(target) });
+      return info ? !info.system && (!info.state_dir || sameKernelPath(info.state_dir, target.stateDir)) : target.managed;
+    } : undefined,
+    installOptions: kernelInstallOptions,
+    serviceOptions: kernelServiceOptions,
+    installed: async (id, paths) => {
+      const serviceNode = kernelConfigNode(paths);
+      kernelConfigs.register(id, paths, serviceNode);
+      return serviceNode;
+    },
+    run: runKernelCli,
+    changed: () => controller.nudge(),
+    ...(kernelBundled && { version: app.getVersion() }),
+  });
   const computerTargets = new ComputerEmergencyTargets();
   controller.on("change", snapshot => computerTargets.observe(snapshot));
 
@@ -298,6 +335,17 @@ async function start(): Promise<void> {
     if (key !== playgroundKey) { playgroundKey = key; transfers.reset(); void playground.close(); }
   });
   registerIpc({
+    kernel: async (request) => {
+      if (!TEST_MODE) return kernelLifecycle.request(request);
+      const nodes = [...new Set([...controller.snapshot.instances.map((i) => i.id), ...controller.snapshot.stoppedNodes])]
+        .map((id) => ({ id, name: controller.nodeName(id), running: !controller.snapshot.stoppedNodes.includes(id), managed: true }));
+      if (request.op !== "list") {
+        if (!nodes.some((n) => n.id === request.node)) return { ok: false, error: { code: "not_found", message: "Unknown local node" } };
+        calls.push({ op: "kernel", arg: request });
+        if (answers.cliFails) return { ok: false, error: { code: "cli_failed", message: "simulated kernel failure" } };
+      }
+      return { ok: true, data: { nodes } };
+    },
     onboarding: createOnboardingService(roots[0]!, (url) => platform.openExternal(url), TEST_MODE ? fakeOnboarding(roots[0]!, answers, calls) : undefined, (text) => clipboard.writeText(text)),
     playground,
     transfers,

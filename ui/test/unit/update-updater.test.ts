@@ -126,6 +126,20 @@ test("a development run, an unsupported system and a blocked install say why and
   void t;
 });
 
+test("a kernel operation blocks updating before download or service changes", async (t) => {
+  let busy = true;
+  const r = rig({ kernelBusy: () => busy });
+  t.after(() => fs.rmSync(r.dir, { recursive: true, force: true }));
+  await r.updater.check();
+  const result = await r.updater.install();
+  assert.ok(!result.ok && result.error.code === "busy");
+  assert.equal(r.updater.state.phase, "available");
+  assert.equal(r.src.downloads, 0);
+  assert.deepEqual(r.events, []);
+  busy = false;
+  assert.equal((await r.updater.install()).ok, true);
+});
+
 test("a check finds the newer release, remembers when it looked, and an automatic one announces it once", async () => {
   const r = rig();
   await r.updater.check(false);

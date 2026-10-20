@@ -343,3 +343,17 @@ test("service actions use the manifest node name for an aliased state directory"
  await actions.dispatch({type:"stop-kernel"});
  assert.deepEqual(nodes,["real-node","real-node"]);
 });
+
+test("managed lifecycle actions retain an aliased directory ID even without a manifest", async () => {
+  const { controller } = fakeController({ ...connected(), selectedInstance: "alias", stoppedNodes: ["offline-alias"] });
+  controller.nodeName = () => "real-node";
+  const { platform, log } = fakePlatform();
+  const seen: string[] = [];
+  platform.manageKernel = async (command, node) => { seen.push(`${command}:${node}`); };
+  const actions = new Actions(controller, platform, t, OK_CREDENTIALS);
+  await actions.dispatch({ type: "restart-kernel" });
+  await actions.dispatch({ type: "stop-kernel" });
+  await actions.dispatch({ type: "start-kernel", node: "offline-alias" });
+  assert.deepEqual(seen, ["restart:alias", "stop:alias", "start:offline-alias"]);
+  assert.ok(!log.some((entry) => entry.startsWith("cli:")));
+});
