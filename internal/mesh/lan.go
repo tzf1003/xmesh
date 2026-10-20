@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mdns"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -57,7 +59,8 @@ type LANOptions struct {
 	// Interface names the network interface to listen and advertise on. Empty picks the first
 	// up interface with a private IPv4 address that does not look virtual (VM host-only
 	// adapters, container bridges, WSL, Hyper-V switches, VPN tunnels); virtual ones are used only
-	// when nothing else qualifies.
+	// when nothing else qualifies. An explicit interface also accepts a system Tailscale IPv4
+	// address (100.64.0.0/10); disable MDNS and pair by address on that interface.
 	Interface string
 }
 
@@ -92,16 +95,17 @@ func looksVirtual(name string) bool {
 	return false
 }
 
-// pickLANInterface chooses the interface and its first private IPv4 address. A configured name
-// must exist, be up and have such an address, otherwise it is an error rather than a silent
-// fallback to another network.
+// pickLANInterface chooses the interface and its first private IPv4 address. Only an explicitly
+// configured interface may also use a system Tailscale IPv4 address. The interface must exist,
+// be up and have an eligible address, otherwise selection fails without falling back.
 func pickLANInterface(candidates []lanCandidate, want string) (lanCandidate, net.IP, error) {
-	private := func(c lanCandidate) net.IP {
+	address := func(c lanCandidate) net.IP {
 		if !c.Up || c.Loopback {
 			return nil
 		}
 		for _, ip := range c.IPs {
-			if ip.To4() != nil && ip.IsPrivate() {
+			addr, ok := netip.AddrFromSlice(ip.To4())
+			if ok && (addr.IsPrivate() || (want != "" && config.IsTailnetAddr(addr))) {
 				return ip
 			}
 		}
@@ -112,17 +116,17 @@ func pickLANInterface(candidates []lanCandidate, want string) (lanCandidate, net
 			if c.Name != want {
 				continue
 			}
-			if ip := private(c); ip != nil {
+			if ip := address(c); ip != nil {
 				return c, ip, nil
 			}
-			return lanCandidate{}, nil, fmt.Errorf("mesh.lan.interface %q 没有启用或没有私有 IPv4 地址", want)
+			return lanCandidate{}, nil, fmt.Errorf("mesh.lan.interface %q 没有启用或没有私有 IPv4 / 系统 Tailscale IPv4（100.64.0.0/10）地址", want)
 		}
 		return lanCandidate{}, nil, fmt.Errorf("mesh.lan.interface %q 不存在", want)
 	}
 	var fallback *lanCandidate
 	var fallbackIP net.IP
 	for i := range candidates {
-		ip := private(candidates[i])
+		ip := address(candidates[i])
 		if ip == nil {
 			continue
 		}

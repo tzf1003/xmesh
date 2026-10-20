@@ -63,3 +63,56 @@ func Test_LANFallsBackToVirtualAndRefusesNone(t *testing.T) {
 		}
 	}
 }
+
+func Test_LANSystemTailscaleRequiresExplicitInterface(t *testing.T) {
+	for _, name := range []string{"Tailscale", "tailscale0", "utun7"} {
+		t.Run(name, func(t *testing.T) {
+			nics := []lanCandidate{lanNIC(name, true, "100.87.123.24")}
+			if _, _, err := pickLANInterface(nics, ""); err == nil {
+				t.Fatal("system Tailscale must not become the automatic LAN fallback")
+			}
+			got, ip, err := pickLANInterface(nics, name)
+			if err != nil || got.Name != name || ip.String() != "100.87.123.24" {
+				t.Fatalf("explicit system Tailscale interface: %+v %v %v", got, ip, err)
+			}
+		})
+	}
+}
+
+func Test_LANExplicitInterfaceAddressBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		ip string
+		ok bool
+	}{
+		{"100.64.0.0", true},
+		{"100.127.255.255", true},
+		{"100.63.255.255", false},
+		{"100.128.0.0", false},
+		{"8.8.8.8", false},
+		{"198.18.0.1", false},
+		{"169.254.1.1", false},
+		{"127.0.0.1", false},
+		{"0.0.0.0", false},
+		{"224.0.0.251", false},
+		{"fd7a:115c:a1e0::1", false}, // LAN listeners are still IPv4-only.
+	} {
+		t.Run(tc.ip, func(t *testing.T) {
+			_, ip, err := pickLANInterface([]lanCandidate{lanNIC("pinned", true, tc.ip)}, "pinned")
+			if tc.ok {
+				if err != nil || ip.String() != tc.ip {
+					t.Fatalf("expected %s, got %v: %v", tc.ip, ip, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "mesh.lan.interface") {
+				t.Fatalf("must reject pinned interface address %s: %v", tc.ip, err)
+			}
+		})
+	}
+	for _, nic := range []lanCandidate{
+		lanNIC("Tailscale", false, "100.87.123.24"),
+		{Name: "Tailscale", Up: true, Loopback: true, IPs: []net.IP{net.ParseIP("100.87.123.24")}},
+	} {
+		if _, _, err := pickLANInterface([]lanCandidate{nic, lanNIC("WLAN", true, "192.168.1.2")}, "Tailscale"); err == nil {
+			t.Fatal("unusable pinned Tailscale interface must fail without falling back to WLAN")
+		}
+	}
+}

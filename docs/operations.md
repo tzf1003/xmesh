@@ -43,6 +43,32 @@ xmesh control pair revoke --device-id dev-<公钥摘要> --node client
 
 两条 connect 命令是可选连接方式，同一设备只需完成一次配对。首次连接或断线恢复优先局域网，连接成功后保持当前路径。Tailnet 网络授权撤销不改变 xmesh 设备信任；撤销设备信任会结束该设备全部路径的会话。下面部署材料中的单模式配置可先运行 migrate 转成版本 2。
 
+### 复用系统 Tailscale
+
+已安装并联网的系统 Tailscale 可作为可选的设备通信路径，无需再启动 xmesh 内置的 tsnet 节点。在接收连接的设备上，显式指定持有 Tailscale IPv4 的网卡：
+
+```yaml
+mesh:
+  lan:
+    enabled: true
+    interface: Tailscale
+    mdns: false
+  tailnet:
+    enabled: false
+```
+
+`interface` 填操作系统中的真实网卡名：Windows 常见为 `Tailscale`，Linux 常见为 `tailscale0`，macOS 通常为持有 Tailscale IPv4 的 `utunN`，请实际核对。此配置让设备端口仅监听该网卡的 `100.64.0.0/10` IPv4 地址及 TCP 7433；它替代本节点原来的局域网监听，并不会同时监听两块网卡。默认不指定网卡时仍只自动选择私有 IPv4，不会自动改用系统 Tailscale。Tailscale 不传递 mDNS 组播，须关闭 `mdns`，按地址手动配对。
+
+配置生效后，在对端设置连接密码，然后从已通过系统 Tailscale 联网的调用节点连接：
+
+```bash
+xmesh control pair connect --path lan --address https://100.100.1.20:7433 --password-stdin --node client
+```
+
+面板手动连接也选择「LAN / 局域网」路径，填写对端的系统 Tailscale 地址。这里的 `lan` 使用操作系统路由；`tailnet` 则使用 xmesh 内置的独立 tsnet 节点，不能混用。调用节点须启用 `mesh.lan`；为支持双方发起连接，可在双方都指定各自的系统 Tailscale 网卡。系统 Tailscale 在线不代表 TCP 7433 已开放，还需确保对端监听就绪、Tailnet 访问规则和主机防火墙允许该连接。设备信任、连接密码及 mTLS 验证仍由 xmesh 执行。
+
+真实接口验收可运行 `XMESH_TEST_SYSTEM_TAILSCALE_INTERFACE=tailscale0 go test ./internal/connectivity -run '^TestSystemTailscaleListenerPairingAndAgent$' -v -count=1`。PowerShell 中先设置 `$env:XMESH_TEST_SYSTEM_TAILSCALE_INTERFACE='Tailscale'`，再运行同一条 `go test`。该检查在临时状态目录启动节点，使用本机系统 Tailscale IPv4 的 TCP 7433，验证未配对连接被拒绝、密码配对及 Agent `sys.info` 调用；需要该 IP 的 7433 空闲，不代表不同物理主机间的网络验收。
+
 ## 构建与本机验证
 
 需要 Go 1.27.1。复用 Go 模块和构建缓存：
