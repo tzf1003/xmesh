@@ -72,6 +72,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       XMESH_UI_LANG: opts.lang ?? "zh",
     },
   });
+  const child = app.process();
 
   // `start()` finishes a few ticks after Electron reports ready.
   await expect
@@ -106,7 +107,7 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
     notices: () => hook("notices"),
     openPanel: async () => {
       // Subscribe before showing the panel, retaining an existing panel page.
-      const existing = app.windows()[0];
+      const existing = app.windows().find(page => page.url().startsWith("app://panel/"));
       const [page] = await Promise.all([
         existing ? Promise.resolve(existing) : app.waitForEvent("window"),
         app.evaluate(() =>
@@ -122,7 +123,6 @@ export async function launch(opts: { kernel?: FakeKernelOptions; publish?: boole
       closing = (async () => {
         // Test teardown must bypass the production unsaved-draft beforeunload
         // guard, then wait for the native process before deleting its profile.
-        const child = app.process();
         if (child.exitCode === null && child.signalCode === null) {
           await stopNativeTestProcess(child, () => app.evaluate(({ app, BrowserWindow }) => {
             for (const window of BrowserWindow.getAllWindows()) window.destroy();

@@ -37,6 +37,10 @@ import { type UpdateNotice, Updater } from "./update/updater";
 import { httpSource } from "./update/source";
 import { UpdateStore } from "./update/store";
 import { TrayView } from "./tray";
+import { TrayWindow } from "./tray-window";
+import { TrayService } from "./tray-service";
+import { registerTrayIpc } from "./tray-ipc";
+import { PanelNavigation } from "./panel-navigation";
 import { type PanelWindow, createPanelWindow, installSessionHardening, installWebContentsHardening } from "./window";
 
 const UI_ROOT = path.join(__dirname, "..", "..", "..");
@@ -79,15 +83,19 @@ async function start(): Promise<void> {
   let panel: PanelWindow | undefined;
   const display = new DisplayStore(path.join(app.getPath("userData"), "display.json"));
   const showPanel = (): void => {
+    trayWindow?.hide();
     if (!panel || panel.window.isDestroyed()) {
       // Ctrl/Cmd +, - and 0 in the panel go through the same path as the display dialog.
       panel = createPanelWindow(undefined, {
         get: () => display.get().zoom,
         set: (zoom) => controller.setDisplay({ ...display.get(), zoom }),
       });
+      panel.window.webContents.on("did-start-loading", () => navigation.reset());
     }
     panel.show();
   };
+  let trayWindow: TrayWindow | undefined;
+  const navigation = new PanelNavigation(() => panel && !panel.window.isDestroyed() ? panel.window.webContents : undefined, showPanel);
   app.on("second-instance", showPanel);
 
   const notified: string[] = [];
@@ -194,6 +202,7 @@ async function start(): Promise<void> {
     setDisplay: (prefs) => {
       if (!display.set(prefs)) notify([{ key: "display.save", text: t("display.saveFailed") }]);
       if (panel && !panel.window.isDestroyed()) panel.window.webContents.setZoomFactor(prefs.zoom);
+      trayWindow?.contents?.setZoomFactor(prefs.zoom);
     },
     setLoginItem: (enabled) => {
       const hint = autostart.set(enabled).hint;
@@ -218,7 +227,15 @@ async function start(): Promise<void> {
   const runAction = (a: Action): void => {
     void actions.dispatch(a);
   };
-  const tray = new TrayView(t, runAction, showPanel);
+  const trayService = new TrayService(controller, actions, t, { openPanel: target => navigation.request(target), panelDirty: () => navigation.isDirty, copy: text => platform.writeClipboard(text) });
+  trayWindow = new TrayWindow(() => trayService.state, () => trayService.clearConfirmation(), () => tray.useNativeFallback());
+  const tray = new TrayView(t, runAction, (bounds, more) => { void trayWindow?.toggle(bounds, more); });
+  registerTrayIpc(trayService, trayWindow);
+  let trayPush: NodeJS.Timeout | undefined;
+  trayService.on("change", () => {
+    if (trayPush) return;
+    trayPush = setTimeout(() => { trayPush = undefined; trayWindow?.push(); }, 100);
+  });
 
   servePanel(rendererRoot());
   // Tailnet administration shells out to `xmesh mesh --json`. The control-plane
@@ -298,6 +315,7 @@ async function start(): Promise<void> {
     if (key !== playgroundKey) { playgroundKey = key; transfers.reset(); void playground.close(); }
   });
   registerIpc({
+    navigationReady: dirty => navigation.ready(dirty),
     onboarding: createOnboardingService(roots[0]!, (url) => platform.openExternal(url), TEST_MODE ? fakeOnboarding(roots[0]!, answers, calls) : undefined, (text) => clipboard.writeText(text)),
     playground,
     transfers,
@@ -331,7 +349,7 @@ async function start(): Promise<void> {
     void playground.close();
     void controller.stop();
   });
-  app.on("will-quit", () => { globalShortcut.unregisterAll(); tray.destroy(); });
+  app.on("will-quit", () => { clearTimeout(trayPush); trayService.dispose(); trayWindow?.destroy(); globalShortcut.unregisterAll(); tray.destroy(); });
 
   // After sleep or a lock the event stream is stale; do not wait for the idle timeout to notice.
   powerMonitor.on("resume", () => controller.nudge());
@@ -353,6 +371,12 @@ async function start(): Promise<void> {
     // Reachable only from Playwright's main-process evaluate; never set in a packaged app.
     (globalThis as Record<string, unknown>).__xmeshUiTest = {
       tray: () => tray.describe(),
+      showTray: (more = false) => trayWindow?.show({ x: 500, y: 24, width: 24, height: 24 }, more),
+      hideTray: () => trayWindow?.hide(),
+      trayState: () => trayService.state,
+      trayWindow: () => trayWindow?.describe(),
+      trayPreferences: () => trayWindow?.preferences,
+      trayWebContents: () => trayWindow?.contents,
       snapshot: () => controller.snapshot,
       calls: () => calls.slice(),
       notices: () => notified.slice(),

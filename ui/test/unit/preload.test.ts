@@ -177,6 +177,6 @@ test("the preload source mentions only the fixed channel literals", async () => 
   const fs = await import("node:fs");
   const src = fs.readFileSync(path.join(__dirname, "..", "..", "src", "preload", "index.js"), "utf8");
   const literals = new Set([...src.matchAll(/"(xmesh:[a-z-]+)"/g)].map((m) => m[1]));
-  assert.deepEqual([...literals].sort(), [...Object.values(CHANNELS), SNAPSHOT_EVENT, CALLS_EVENT].sort());
+  assert.deepEqual([...literals].sort(), [...Object.values(CHANNELS), SNAPSHOT_EVENT, CALLS_EVENT, "xmesh:panel-navigation"].sort());
   assert.doesNotMatch(src, /exposeInMainWorld\([^)]*ipcRenderer/);
 });

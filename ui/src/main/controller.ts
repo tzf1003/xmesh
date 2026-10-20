@@ -16,6 +16,7 @@ import type { Locale } from "../shared/i18n";
 import { type Connection, EMPTY_SNAPSHOT, type InstanceInfo, type Snapshot } from "../shared/state";
 import { ControlClient, type EventStream } from "./client";
 import { type Instance, kernelGone, stoppedNodes } from "./discovery";
+import type { RecentCallView } from "../shared/tray";
 
 export interface ControllerOptions {
   discover: () => Instance[];
@@ -53,6 +54,8 @@ export interface ControllerEvents {
   change: [snapshot: Snapshot];
   /** The newest `call` events, oldest first. Metadata only (CTR-CTL-04). */
   calls: [calls: CallEventData[]];
+  activity: [];
+  refreshed: [];
 }
 
 /** How many call events are kept for the panel's recent-activity list. */
@@ -87,6 +90,9 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   private refreshDirty = false;
   private loop: Promise<void> = Promise.resolve();
   private recent: CallEventData[] = [];
+  private activity: RecentCallView[] = [];
+  private activityBoot = "";
+  lastUpdatedAt: number | null = null;
 
   constructor(private readonly opts: ControllerOptions) {
     super();
@@ -120,10 +126,10 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   selectInstance(id: string): void {
     if (id === this.explicit) return;
     this.explicit = id;
-    if (this.recent.length > 0) {
-      this.recent = [];
-      this.emit("calls", []);
-    }
+    this.clearActivity();
+    this.current = undefined;
+    this.lastUpdatedAt = null;
+    this.update({ selectedInstance: id, connection: { kind: "offline" } });
     this.stream?.close();
     this.wake?.();
   }
@@ -154,6 +160,21 @@ export class ShellController extends EventEmitter<ControllerEvents> {
 
   get recentCalls(): CallEventData[] {
     return this.recent.slice();
+  }
+
+  get recentActivity(): RecentCallView[] { return this.activity.slice(); }
+
+  async refreshNow(): Promise<void> {
+    if (this.current && this.snap.connection.kind === "connected") await this.refresh(this.current.client);
+    else this.nudge();
+  }
+
+  private clearActivity(): void {
+    this.recent = [];
+    this.activity = [];
+    this.activityBoot = "";
+    this.emit("calls", []);
+    this.emit("activity");
   }
 
   /** `keep` (default): refuse new calls, leave running work alone. `kill` also ends every PTY and lease. */
@@ -286,12 +307,20 @@ export class ShellController extends EventEmitter<ControllerEvents> {
   }
 
   private onEvent(client: ControlClient, e: ControlEvent): void {
+    if (this.current?.client !== client || (this.explicit && this.explicit !== this.current.id)) return;
     // `hello` only describes the stream. A call event carries nothing the snapshot shows; it feeds the recent-calls list.
     if (e.type === "hello") return;
     if (e.type === "call") {
+      const conn = this.snap.connection;
+      if (conn.kind !== "connected") return;
+      const bootId = conn.status.control.boot_id;
+      if (!e.id.startsWith(`${bootId}.`) || this.activity.some(x => x.eventId === e.id)) return;
+      this.activity.push({ ...e.data, eventId: e.id, time: e.time, instanceId: this.current.id, bootId });
+      if (this.activity.length > RECENT_CALLS) this.activity.splice(0, this.activity.length - RECENT_CALLS);
       this.recent.push(e.data);
       if (this.recent.length > RECENT_CALLS) this.recent.splice(0, this.recent.length - RECENT_CALLS);
       this.emit("calls", this.recent.slice());
+      this.emit("activity");
       return;
     }
     this.scheduleRefresh(client);
@@ -333,15 +362,20 @@ export class ShellController extends EventEmitter<ControllerEvents> {
       const status = await client.getStatus();
       // The peer list is only needed for names; the summary in status covers the count.
       const peers = hasCapability(status.control.capabilities, "peers") ? await client.getPeers() : [];
+      if (this.current?.client !== client || (this.explicit && this.explicit !== this.current.id)) return;
       const id = instanceId ?? this.current?.id;
+      const activityBoot = `${id}:${status.control.boot_id}`;
+      if (this.activityBoot !== activityBoot) { this.clearActivity(); this.activityBoot = activityBoot; }
+      this.lastUpdatedAt = Date.now();
       if (id !== undefined) this.labels.set(id, status.hostname);
       this.update({
         connection: { kind: "connected", status, peers },
         instances: this.instanceInfos(),
         ...(id !== undefined && { selectedInstance: id }),
       });
+      this.emit("refreshed");
     } catch (e) {
-      if (e instanceof VersionMismatchError) {
+      if (this.current?.client === client && e instanceof VersionMismatchError) {
         this.update({
           connection: { kind: "mismatch", kernelVersion: e.kernelVersion, apiVersion: e.apiVersion },
         });

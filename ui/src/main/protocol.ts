@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import { protocol } from "electron";
-import { PANEL_SCHEME, mimeFor, panelHeaders, resolvePanelFile } from "./policy";
+import { PANEL_SCHEME, mimeFor, panelHeaders, resolveUiFile } from "./policy";
 
 /** Must run before `app.whenReady()`. */
 export function registerPanelScheme(): void {
@@ -16,7 +16,7 @@ export function servePanel(root: string): void {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response(null, { status: 405 });
     }
-    const file = resolvePanelFile(root, request.url);
+    const file = resolveUiFile(root, request.url);
     const type = file === undefined ? undefined : mimeFor(file);
     if (file === undefined || type === undefined) return new Response(null, { status: 404 });
     try {

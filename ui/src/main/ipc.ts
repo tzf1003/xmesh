@@ -74,9 +74,10 @@ export interface IpcDeps {
   mesh: (request: unknown) => Promise<DataResult<unknown>>;
   panel: () => WebContents | undefined;
   update: UpdateActions;
+  navigationReady?: (dirty: boolean) => void;
 }
 
-export function registerIpc({ onboarding, transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update }: IpcDeps): () => void {
+export function registerIpc({ onboarding, transfers, playground, controller, actions, service, previewSetup, setup, mesh, panel, update, navigationReady }: IpcDeps): () => void {
   const trusted = (e: IpcMainInvokeEvent): boolean => {
     const target = panel();
     return isTrustedSender(e.senderFrame, target !== undefined && e.sender === target);
@@ -98,6 +99,11 @@ export function registerIpc({ onboarding, transfers, playground, controller, act
     return req ? playground.request(req) : bad("playground request");
   });
   handle(CHANNELS.getSnapshot, (): Snapshot => controller.snapshot);
+  handle(CHANNELS.navigationReady, (dirty: unknown) => {
+    if (typeof dirty !== "boolean") return bad("dirty state");
+    navigationReady?.(dirty);
+    return { ok: true };
+  });
   handle(CHANNELS.drain, (mode: unknown) => {
     if (mode === undefined) return actions.drain();
     const v = parseDrainMode(mode);

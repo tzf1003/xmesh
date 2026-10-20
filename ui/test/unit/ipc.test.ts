@@ -46,7 +46,7 @@ test("booleans must be booleans", () => {
 test("every panel method except the two event subscriptions has an IPC channel, and channel names are unique", () => {
   const values = Object.values(CHANNELS);
   assert.equal(new Set(values).size, values.length);
-  assert.equal(PANEL_API_METHODS.length - 2, values.length);
+  assert.equal(PANEL_API_METHODS.length - 3, values.length);
 });
 
 test("a backend env request is a backend name with variables to write and to remove, bounded like the contract", () => {

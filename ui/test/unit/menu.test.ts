@@ -38,6 +38,7 @@ test("connected menu shows header, activity and every action", () => {
     "action.openAudit",
     "settings.loginItem",
     "settings.restartKernel",
+    "settings.help",
     "action.quit",
     "action.stopKernel",
   ]) {
@@ -123,7 +124,7 @@ test("a kernel that does not advertise drain gets the entry disabled, not missin
 
 test("offline menu offers only the panel, settings and quit", () => {
   const ids = menuIds(buildMenu(EMPTY_SNAPSHOT, t)).filter((i) => !i.startsWith("sep."));
-  assert.deepEqual(ids, ["header.state", "hint.offline", "action.openPanel", "settings", "settings.loginItem", "settings.restartKernel", "action.quit", "action.stopKernel"]);
+  assert.deepEqual(ids, ["header.state", "hint.offline", "action.openPanel", "settings", "settings.loginItem", "settings.restartKernel", "settings.help", "action.quit", "action.stopKernel"]);
   const m = buildMenu(EMPTY_SNAPSHOT, t);
   assert.equal(findItem(m, "settings.restartKernel")?.enabled, false);
   assert.equal(findItem(m, "action.stopKernel")?.enabled, false);
