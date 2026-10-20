@@ -170,9 +170,10 @@ func (p *revocableObservationFixture) Capture(ctx context.Context, r computer.Ca
 }
 
 func TestObservationPolicyReloadFencesInflightMCPImages(t *testing.T) {
-	for _, stage := range []string{"info", "capture"} {
-		for _, policy := range []string{"tag", "disabled_tool"} {
-			t.Run(stage+"/"+policy, func(t *testing.T) {
+	for _, tc := range []struct{ stage, operation string }{{"info", "computer.observe"}, {"capture", "computer.observe"}, {"info", "computer.info"}} {
+		stage, operation := tc.stage, tc.operation
+		for _, policy := range []string{"tag", "disabled_tool", "disabled_computer"} {
+			t.Run(operation+"/"+stage+"/"+policy, func(t *testing.T) {
 				file, store := configuration(t)
 				b, _ := os.ReadFile(file)
 				var doc map[string]any
@@ -209,7 +210,12 @@ func TestObservationPolicyReloadFencesInflightMCPImages(t *testing.T) {
 				}
 				result := make(chan outcome, 1)
 				go func() {
-					r, e := client.CallTool(ctx, &mcp.CallToolParams{Name: "computer.observe", Arguments: map[string]any{"session_id": s["session_id"], "desktop_epoch": s["desktop_epoch"]}})
+					r, e := client.CallTool(ctx, &mcp.CallToolParams{Name: operation, Arguments: func() map[string]any {
+						if operation == "computer.info" {
+							return map[string]any{}
+						}
+						return map[string]any{"session_id": s["session_id"], "desktop_epoch": s["desktop_epoch"]}
+					}()})
 					result <- outcome{r, e}
 				}()
 				select {
@@ -218,9 +224,11 @@ func TestObservationPolicyReloadFencesInflightMCPImages(t *testing.T) {
 					t.Fatal("observation did not reach native preflight")
 				}
 				if policy == "tag" {
-					cfg["authz"] = map[string]any{"tag:peer": map[string]any{"tools": []string{"computer.info", "computer.open"}, "backends": []string{}}}
+					cfg["authz"] = map[string]any{"tag:peer": map[string]any{"tools": []string{"computer.open"}, "backends": []string{}}}
+				} else if policy == "disabled_computer" {
+					cfg["computer"] = map[string]any{"enabled": false}
 				} else {
-					cfg["disabled_tools"] = []string{"computer.observe"}
+					cfg["disabled_tools"] = []string{operation}
 				}
 				write()
 				close(p.resume)
@@ -354,6 +362,14 @@ func TestComputerSchemasExposeSupportedActionsAndCoordinateRequirements(t *testi
 		{"computer.open", `{"mode":"observe","ttl_seconds":601}`, false},
 		{"computer.observe", `{"session_id":"s","desktop_epoch":"e","max_width":8193}`, false},
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"click","x":20,"y":30}]}`, true},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"click","x":20,"y":30,"delta_y":10}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"move","x":20,"y":30,"clicks":2}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"scroll","x":20,"y":30}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"scroll","x":20,"y":30,"delta_y":0}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"scroll","x":20,"y":30,"delta_y":1}]}`, true},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"move","x":20,"y":30,"button":"left"}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"click","x":20,"y":30,"duration_ms":10}]}`, false},
+		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"drag","x":20,"y":30,"to_x":1,"to_y":1,"button":"right","duration_ms":10}]}`, true},
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"click"}]}`, false},
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"drag","x":20,"y":30}]}`, false},
 		{"computer.act", `{"session_id":"s","desktop_epoch":"e","lease_token":"1","action_id":"a","actions":[{"type":"key","keys":[]}]}`, false},

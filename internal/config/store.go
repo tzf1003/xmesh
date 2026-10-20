@@ -288,6 +288,7 @@ func restartChanged(startup, next *Config) []string {
 	add("/mesh", (startup.SchemaVersion != 2 || next.SchemaVersion != 2) && !reflect.DeepEqual(startup.Mesh, next.Mesh))
 	add("/audit", !reflect.DeepEqual(startup.Audit, next.Audit))
 	add("/agent/policy/windows_appcontainer", startup.Agent.Policy.WindowsAppContainer != next.Agent.Policy.WindowsAppContainer)
+	add("/agent/computer/endpoint", startup.Agent.Computer.Endpoint != next.Agent.Computer.Endpoint)
 	return out
 }
 

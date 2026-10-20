@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"github.com/tzf1003/xmesh/internal/computer"
 	"os"
 	"path/filepath"
 	"slices"
@@ -58,7 +59,7 @@ func section(doc map[string]any, name string) map[string]any {
 }
 
 func Test_NeedsRestartPointers(t *testing.T) {
-	restart := []string{"", "/node", "/node/name", "/node/roles", "/mesh/mode", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy"}
+	restart := []string{"", "/node", "/node/name", "/node/roles", "/mesh/mode", "/audit/retention", "/agent/policy/windows_appcontainer", "/agent/policy", "/agent/computer/endpoint"}
 	for _, ptr := range restart {
 		if !NeedsRestart(ptr) {
 			t.Errorf("%q should need a restart", ptr)
@@ -81,6 +82,9 @@ func Test_RestartChangedUsesRestartPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	edits := map[string]func(doc map[string]any){
+		"/agent/computer/endpoint": func(doc map[string]any) {
+			section(section(doc, "agent"), "computer")["endpoint"] = computer.DefaultEndpoint()
+		},
 		"/node/name":                         func(doc map[string]any) { section(doc, "node")["name"] = "other-node" },
 		"/node/roles":                        func(doc map[string]any) { section(doc, "node")["roles"] = []string{"gateway"} },
 		"/audit":                             func(doc map[string]any) { section(doc, "audit")["retention"] = "24h" },
@@ -353,5 +357,34 @@ func Test_ReloadSnapshotReadsAfterAdoptionLock(t *testing.T) {
 	snapshot := <-done
 	if snapshot.ReadError != nil || !snapshot.Adopted || string(snapshot.Raw) != string(f.base) || snapshot.config.Agent.Policy.AllowDangerous {
 		t.Fatalf("stale snapshot: %+v", snapshot)
+	}
+}
+
+func TestComputerEndpointReloadKeepsStartupAndReportsRestart(t *testing.T) {
+	f := newReloadFixture(t)
+	s, err := NewStore(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.write(func(doc map[string]any) {
+		section(section(doc, "agent"), "computer")["endpoint"] = computer.DefaultEndpoint()
+	})
+	if !s.Refresh() {
+		t.Fatal("valid endpoint edit was not adopted")
+	}
+	if s.Get().Agent.Computer.Endpoint != "" || !slices.Equal(s.RestartPending(), []string{"/agent/computer/endpoint"}) {
+		t.Fatalf("endpoint state: %+v pending=%v", s.Get().Agent.Computer, s.RestartPending())
+	}
+	restarted, err := NewStore(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.Get().Agent.Computer.Endpoint != computer.DefaultEndpoint() {
+		t.Fatal("restart did not adopt endpoint")
+	}
+	f.write(nil)
+	s.Refresh()
+	if len(s.RestartPending()) != 0 {
+		t.Fatal("restoring endpoint kept restart pending")
 	}
 }

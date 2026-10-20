@@ -7,6 +7,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
+	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
 func TestDesktopErrorsConformToSharedEnvelope(t *testing.T) {
@@ -30,7 +31,9 @@ func TestDesktopErrorsConformToSharedEnvelope(t *testing.T) {
 	_, notfound := m.ActionStatus("a/1", StatusRequest{SessionRequest: request(s), ActionID: "missing"})
 	m.Configure(Settings{Enabled: true, MaxImageBytes: 1})
 	_, large := m.Observe(context.Background(), "a/1", ObserveRequest{SessionRequest: request(s)})
-	for _, err := range []error{busy, owned, missing, frame, notfound, large} {
+	suspended := toolerr.New("policy_denied", "host suspended", "reason", "host_suspended")
+	portalBusy := toolerr.New("resource_busy", "portal channel busy", "reason", "portal_busy")
+	for _, err := range []error{busy, owned, missing, frame, notfound, large, suspended, portalBusy} {
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -40,5 +43,11 @@ func TestDesktopErrorsConformToSharedEnvelope(t *testing.T) {
 		if e := schema.Validate(v); e != nil {
 			t.Fatal(code(err), string(raw), e)
 		}
+	}
+	if rule := Envelope(suspended).Fields["rule"]; rule != "computer.host_suspended" {
+		t.Fatal("host suspension rule", rule)
+	}
+	if rule := Envelope(toolerr.New("policy_denied", "denied", "rule", "computer.disabled")).Fields["rule"]; rule != "computer.disabled" {
+		t.Fatal("existing policy rule changed", rule)
 	}
 }

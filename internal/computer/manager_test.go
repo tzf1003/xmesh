@@ -392,3 +392,25 @@ func TestFrameMemoryBudgetIsSharedAcrossObservers(t *testing.T) {
 		t.Fatal("oldest frame was retained after global eviction")
 	}
 }
+
+func TestActionFieldsMatchTheirOperation(t *testing.T) {
+	for _, action := range []Action{
+		{Type: "click", X: point(1), Y: point(2), DeltaY: 10},
+		{Type: "move", X: point(1), Y: point(2), Clicks: 2},
+		{Type: "move", X: point(1), Y: point(2), Button: "left"},
+		{Type: "click", X: point(1), Y: point(2), DurationMS: 10},
+		{Type: "scroll", X: point(1), Y: point(2)},
+	} {
+		if err := validActions([]Action{action}); err == nil {
+			t.Fatalf("accepted inapplicable fields: %+v", action)
+		}
+	}
+	for _, action := range []Action{
+		{Type: "scroll", X: point(1), Y: point(2), DeltaY: 1},
+		{Type: "drag", X: point(1), Y: point(2), ToX: point(3), ToY: point(4), Button: "right", DurationMS: 10},
+	} {
+		if err := validActions([]Action{action}); err != nil {
+			t.Fatalf("rejected applicable fields: %+v: %v", action, err)
+		}
+	}
+}
