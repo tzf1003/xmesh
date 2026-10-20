@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,6 +30,14 @@ func (a *Agent) callComputer(ctx context.Context, cfg *config.Config, caller ide
 	switch name {
 	case "computer.info":
 		out, err = a.Computer.Info(ctx)
+		if err == nil {
+			current := a.store.Get()
+			liveCaller, ok := a.Callers.Get(caller.ID)
+			if !ok || !current.Agent.Computer.Enabled || slices.Contains(current.Agent.DisabledTools, name) || !Allowed(current, liveCaller, name, "") {
+				out = nil
+				err = toolerr.New("policy_denied", "桌面工具授权已撤销", "rule", "computer.authorization_revoked", "tool", name)
+			}
+		}
 	case "computer.open":
 		var r computer.OpenRequest
 		err = computer.Decode(raw, &r)

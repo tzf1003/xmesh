@@ -17,14 +17,22 @@ func DefaultEndpoint() string {
 	return `\\.\pipe\xmesh-` + u.User.Sid.String() + `-computer`
 }
 func EndpointForState(string) string { return DefaultEndpoint() }
-func dialDesktop(ctx context.Context, endpoint string) (net.Conn, error) {
+func ValidEndpoint(endpoint string) bool {
 	if !strings.HasPrefix(endpoint, `\\.\pipe\xmesh-`) || !strings.HasSuffix(endpoint, "-computer") {
-		return nil, fmt.Errorf("desktop endpoint must be a local computer pipe")
+		return false
 	}
 	sidText := strings.TrimSuffix(strings.TrimPrefix(endpoint, `\\.\pipe\xmesh-`), "-computer")
 	sid, err := windows.StringToSid(sidText)
-	if err != nil || sid.String() != sidText {
-		return nil, fmt.Errorf("desktop endpoint SID is invalid")
+	return err == nil && sid.String() == sidText
+}
+func dialDesktop(ctx context.Context, endpoint string) (net.Conn, error) {
+	if !ValidEndpoint(endpoint) {
+		return nil, fmt.Errorf("desktop endpoint must be a local computer pipe with a valid SID")
+	}
+	sidText := strings.TrimSuffix(strings.TrimPrefix(endpoint, `\\.\pipe\xmesh-`), "-computer")
+	sid, err := windows.StringToSid(sidText)
+	if err != nil {
+		return nil, err
 	}
 	c, err := winio.DialPipeContext(ctx, endpoint)
 	if err != nil {

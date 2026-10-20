@@ -419,8 +419,8 @@ func (c *Config) Validate() error {
 	if cs.MaxSessions < 1 || cs.MaxSessions > 32 || cs.LeaseSeconds < 10 || cs.LeaseSeconds > 600 || cs.MaxImageBytes < 1024 || cs.MaxImageBytes > 4<<20 {
 		return fail("/agent/computer: 会话数、租期或截图大小超出允许范围")
 	}
-	if ep := cs.Endpoint; ep != "" && !absAnyOS(ep) && !strings.HasPrefix(ep, `\\.\pipe\xmesh-`) {
-		return fail("/agent/computer/endpoint: 必须是本机绝对路径或命名管道")
+	if ep := cs.Endpoint; ep != "" && !computer.ValidEndpoint(ep) {
+		return fail("/agent/computer/endpoint: 必须是当前平台支持的本机 Computer 地址")
 	}
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
