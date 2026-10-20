@@ -55,6 +55,7 @@ type Readiness struct {
 type ServiceSnapshot struct {
 	Enabled    string `json:"enabled,omitempty"`
 	Installed  bool   `json:"installed"`
+	Loaded     bool   `json:"loaded,omitempty"`
 	Running    bool   `json:"running"`
 	Definition []byte `json:"definition"`
 	Path       string `json:"path"`

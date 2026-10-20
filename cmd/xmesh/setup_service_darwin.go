@@ -59,7 +59,7 @@ func snapshotSetupService(ctx context.Context, p *onboarding.Plan) (onboarding.S
 		return snap, &onboarding.Error{Code: "service_conflict", Message: "同名服务使用另一个配置，请选择新的设备名", Field: "node_name"}
 	}
 	out, e := exec.CommandContext(ctx, "launchctl", "list", name).Output()
-	snap.Running = e == nil && strings.Contains(string(out), `"PID" =`)
+	snap.Loaded, snap.Running = setupLaunchAgentState(out, e)
 	return snap, nil
 }
 
@@ -72,11 +72,24 @@ func restoreSetupService(ctx context.Context, p *onboarding.Plan, snap onboardin
 	if e := os.WriteFile(snap.Path, snap.Definition, 0600); e != nil {
 		return e
 	}
-	if snap.Running {
-		if e := exec.CommandContext(ctx, "launchctl", "load", snap.Path).Run(); e != nil {
-			return e
+	return restoreSetupLaunchAgent(ctx, name, snap, func(ctx context.Context, args ...string) error {
+		return exec.CommandContext(ctx, "launchctl", args...).Run()
+	})
+}
+
+func setupLaunchAgentState(output []byte, err error) (loaded, running bool) {
+	return err == nil, err == nil && strings.Contains(string(output), `"PID" =`)
+}
+
+func restoreSetupLaunchAgent(ctx context.Context, name string, snap onboarding.ServiceSnapshot, run func(context.Context, ...string) error) error {
+	// Running implies loaded for journals written by older versions.
+	if snap.Loaded || snap.Running {
+		if err := run(ctx, "load", snap.Path); err != nil {
+			return err
 		}
-		return exec.CommandContext(ctx, "launchctl", "start", name).Run()
+	}
+	if snap.Running {
+		return run(ctx, "start", name)
 	}
 	return nil
 }

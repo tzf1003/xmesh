@@ -5,6 +5,7 @@ import (
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/onboarding"
+	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,4 +35,14 @@ func TestSetupWaitRetainsIdentityAfterEndpointRemoval(t *testing.T) {
 	}
 	_ = child.Process.Kill()
 	_, _ = child.Process.Wait()
+}
+
+func TestSetupStoppedTaskUsesInstalledPowerShell(t *testing.T) {
+	dir, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(dir, "WindowsPowerShell", "v1.0", "powershell.exe")); err != nil {
+		t.Fatal(err)
+	}
 }
