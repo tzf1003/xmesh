@@ -52,7 +52,7 @@ func verifyStoppedSetupTask(ctx context.Context, p *onboarding.Plan) error {
 		return err
 	}
 	// Task Scheduler's COM State is numeric and independent of system language.
-	script := `$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\').GetTask('` + strings.ReplaceAll(name, "'", "''") + `'); if ($t.State -eq 4) { exit 2 }`
+	script := `$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\').GetTask('` + strings.ReplaceAll(name, "'", "''") + `'); if ($t.State -notin @(1,3)) { exit 2 }`
 	cmd := exec.CommandContext(ctx, filepath.Join(dir, "WindowsPowerShell", "v2.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
 	if err := cmd.Run(); err != nil {
 		return errors.New("无法确认旧服务进程已停止，请检查任务管理器和本机服务状态")

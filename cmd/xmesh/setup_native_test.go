@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -282,6 +284,67 @@ func TestOnboardingNativeService(t *testing.T) {
 	}
 	if e != nil {
 		t.Fatal("idle cancellation did not restore baseline service", e)
+	}
+
+	freshName := name + "-new"
+	defer func() {
+		for _, action := range []string{"stop", "uninstall"} {
+			cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+			_ = exec.CommandContext(cleanup, bin, action, "--name", "xmesh-"+freshName).Run()
+			stop()
+		}
+	}()
+	input, _ = json.Marshal(onboarding.Input{SchemaVersion: 1, Purpose: "local", NodeName: freshName, Workspace: workspace, Permission: "readonly", Clients: []string{}, Autostart: &no, Network: onboarding.NetworkInput{Mode: "lan"}})
+	var freshPlan onboarding.Plan
+	if e = json.Unmarshal(invoke(input, "setup", "plan", "--input", "-", "--root", root, "--json"), &freshPlan); e != nil {
+		t.Fatal(e)
+	}
+	var freshJob onboarding.Job
+	if e = json.Unmarshal(invoke(nil, "setup", "apply", "--plan", freshPlan.ID, "--root", root, "--json"), &freshJob); e != nil {
+		t.Fatal(e)
+	}
+	deadline = time.Now().Add(40 * time.Second)
+	for time.Now().Before(deadline) {
+		if e = json.Unmarshal(invoke(nil, "setup", "status", "--job", freshJob.ID, "--root", root, "--json"), &freshJob); e != nil {
+			t.Fatal(e)
+		}
+		if freshJob.Status == "waiting_user" && freshJob.Readiness.ServiceReady {
+			break
+		}
+		if freshJob.Status == "failed" {
+			t.Fatalf("fresh setup failed: %+v", freshJob)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !freshJob.Readiness.ServiceReady {
+		t.Fatal("fresh setup never became ready")
+	}
+	if e = json.Unmarshal(invoke(nil, "setup", "cancel", "--job", freshJob.ID, "--root", root, "--json"), &freshJob); e != nil {
+		t.Fatal(e)
+	}
+	deadline = time.Now().Add(40 * time.Second)
+	for time.Now().Before(deadline) {
+		if e = json.Unmarshal(invoke(nil, "setup", "status", "--job", freshJob.ID, "--root", root, "--json"), &freshJob); e != nil {
+			t.Fatal(e)
+		}
+		if freshJob.Status == "cancelled" || freshJob.Status == "failed" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if freshJob.Status != "cancelled" || freshJob.Readiness.Installed {
+		t.Fatalf("fresh service removal did not settle: %+v", freshJob)
+	}
+	if have, err := setupServiceInstalled(freshName); err != nil || have {
+		t.Fatal("fresh registration retained", err)
+	}
+	if _, err := os.Stat(freshPlan.ConfigPath); !os.IsNotExist(err) {
+		t.Fatal("fresh configuration retained", err)
+	}
+	endpoint, _ := url.Parse(freshPlan.Endpoint)
+	if conn, err := net.DialTimeout("tcp", endpoint.Host, 300*time.Millisecond); err == nil {
+		conn.Close()
+		t.Fatal("cancelled service still accepts connections")
 	}
 
 }

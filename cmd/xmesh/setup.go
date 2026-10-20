@@ -246,7 +246,14 @@ func setupHost() onboarding.Host {
 			}
 		},
 		Remove: func(ctx context.Context, p *onboarding.Plan) error {
+			wait, err := prepareSetupServiceStop(ctx, p)
+			if err != nil {
+				return err
+			}
 			_ = runCLI(ctx, "stop", "--name", serviceName(p.Input.NodeName))
+			if err := wait(); err != nil {
+				return err
+			}
 			return runCLI(ctx, "uninstall", "--name", serviceName(p.Input.NodeName))
 		},
 		Network: func(ctx context.Context, p *onboarding.Plan, progress func(mesh.LoginProgress) error) (string, error) {
