@@ -173,7 +173,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
           </div>
           <p class="hint">{t("topology.callHint")}</p>
           {scopedCalls.length === 0 ? <Empty>{t("overview.noCalls")}</Empty> : scopedCalls.map((call, i) => <div key={i} class="inspector-call" data-testid="inspector-call">
-            <div><code>{toolName(call.tool)}</code><small>{t(callBelongsTo(call, picked, "initiated") ? "topology.initiated" : "topology.executed")}</small></div>
+            <div><code>{toolName(call.tool)}</code><span class={`inspector-call-direction ${callBelongsTo(call, picked, "initiated") ? "initiated" : "executed"}`}>{t(callBelongsTo(call, picked, "initiated") ? "topology.initiated" : "topology.executed")}</span></div>
             <Badge kind={call.status === "ok" ? "ok" : "danger"}>{call.error ?? formatDuration(call.duration_ms)}</Badge>
             <button type="button" class="text-button" aria-label={`${t("topology.viewLogs")} · ${toolName(call.tool)}`} onClick={() => ctx.go("sessions", { sessionsTab: "history", device: call.device, auditTool: call.tool })}>{t("topology.viewLogs")}<Icon name="terminal"/></button>
           </div>)}

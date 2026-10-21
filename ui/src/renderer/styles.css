@@ -389,7 +389,9 @@ progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
 .inspector-call { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-2); padding: 10px 0; }
 .inspector-call > div { min-width: 0; flex: 1; }
 .inspector-call code { display: block; font-size: 11px; overflow-wrap: anywhere; }
-.inspector-call small { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+.inspector-call-direction { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 1.4; margin-top: 4px; white-space: nowrap; }
+.inspector-call-direction.initiated { color: var(--accent); background: var(--accent-soft); }
+.inspector-call-direction.executed { color: var(--warn); background: var(--warn-bg); }
 .runtime-config { padding: 20px; min-height: 480px; }
 .config-map { display: grid; grid-template-columns: 120px minmax(0,1fr); gap: 36px; margin: 32px 0; align-items: center; }
 .config-root { display: flex; align-items: center; flex-direction: column; gap: 8px; padding: 20px 10px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); text-align: center; overflow-wrap: anywhere; }
