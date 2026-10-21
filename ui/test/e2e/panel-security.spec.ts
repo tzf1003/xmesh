@@ -172,7 +172,7 @@ test("panel calls reach the kernel through the main process, with validated argu
   await page.getByRole("button", { name: "暂停接收新调用" }).click();
   await expect.poll(() => h.kernel.requests.some((r) => r.path === "/v2/drain")).toBe(true);
   await expect(page.getByTestId("state")).toHaveAttribute("data-state", "draining");
-  await expectIcon(h, "draining");
+  await expectIcon(h, "ok");
 
   const bad = await page.evaluate(async () => {
     const api = (window as unknown as { xmesh: Record<string, (a?: unknown) => Promise<{ ok: boolean; error?: { code: string } }>> }).xmesh;

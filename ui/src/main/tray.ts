@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { Menu, type MenuItemConstructorOptions, Tray, nativeImage } from "electron";
 import type { Translate } from "../shared/i18n";
-import { type Snapshot, type TrayIcon, deriveIcon } from "../shared/state";
+import { type Snapshot, type TrayIcon, deriveTrayIcon } from "../shared/state";
 import { type Action, type MenuItemSpec, buildMenu, statusLabelKey } from "./menu";
 import type { Rect } from "./tray-position";
 
@@ -53,7 +53,7 @@ export class TrayView {
   }
 
   update(snap: Snapshot): void {
-    const icon = deriveIcon(snap.connection);
+    const icon = deriveTrayIcon(snap.connection);
     const spec = buildMenu(snap, this.t);
     const tooltip = this.t("tray.tooltip", { status: this.t(statusLabelKey(snap)) });
     const key = JSON.stringify([icon, tooltip, spec]);

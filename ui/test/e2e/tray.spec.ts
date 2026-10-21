@@ -25,15 +25,17 @@ test("no manifest: gray icon and an offline menu; the icon turns green when a ke
   expect(ok.tooltip).toBe("xmesh：正常");
 });
 
-test("warnings turn the icon yellow and clearing them turns it green", async () => {
+test("warnings update tray details while the system icon stays a checkmark", async () => {
   h = await launch();
   await expectIcon(h, "ok");
   h.kernel.setWarnings([warningOf("policy_reload_failed", "error", "reload failed")]);
-  await expectIcon(h, "degraded");
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：降级");
+  await expectIcon(h, "ok");
   const t = await h.tray();
   expect(menuHas(t.menu, "warning.0.policy_reload_failed")?.label).toBe("reload failed");
   await expect.poll(async () => (await h.notices()).join("|")).toContain("降级");
   h.kernel.setWarnings([]);
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：正常");
   await expectIcon(h, "ok");
 });
 
@@ -51,22 +53,25 @@ test("drain and resume from the menu reach the kernel and flip the menu entry", 
   expect((await h.tray()).menu.some((m) => m.id === "action.drain")).toBe(true);
 
   await h.clickMenu("action.drain");
-  await expectIcon(h, "draining");
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：排空中");
+  await expectIcon(h, "ok");
   expect(h.kernel.requests.find((r) => r.method === "POST" && r.path === "/v2/drain")?.body).toEqual({ mode: "keep" });
   const draining = await h.tray();
   expect(menuHas(draining.menu, "action.drain")).toBeUndefined();
   expect(menuHas(draining.menu, "action.resume")?.enabled).toBe(true);
 
   await h.clickMenu("action.resume");
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：正常");
   await expectIcon(h, "ok");
   expect(h.kernel.requests.some((r) => r.method === "POST" && r.path === "/v2/resume")).toBe(true);
 });
 
-test("restart_required shows the restart icon and a notification", async () => {
+test("restart_required keeps the checkmark and shows a notification", async () => {
   h = await launch();
   await expectIcon(h, "ok");
   h.kernel.setStatus({ restart_required: true });
-  await expectIcon(h, "restart");
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：需要重启");
+  await expectIcon(h, "ok");
   await expect.poll(async () => (await h.notices()).join("|")).toContain("重启");
 });
 
@@ -103,7 +108,8 @@ test("an event stream that breaks reconnects with Last-Event-ID and keeps follow
 
   // The client only has a Last-Event-ID once it has seen an event.
   h.kernel.setWarnings([warningOf()]);
-  await expectIcon(h, "degraded");
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：降级");
+  await expectIcon(h, "ok");
 
   h.kernel.dropStreams();
   await expect.poll(() => h.kernel.connectedStreams).toBe(1);
@@ -111,6 +117,7 @@ test("an event stream that breaks reconnects with Last-Event-ID and keeps follow
   expect(reopen?.lastEventId).toBeDefined();
 
   h.kernel.setWarnings([]);
+  await expect.poll(async () => (await h.tray()).tooltip).toBe("xmesh：正常");
   await expectIcon(h, "ok");
 });
 
@@ -130,9 +137,14 @@ test("peers going offline and online raise notices with the device name only", a
   await expectIcon(h, "ok");
   const peers = peersFixture();
   h.kernel.setPeers(peers.map((p) => (p.name === "cloud-vm" ? peerNamed("cloud-vm", { online: false, connection: "unknown" }) : p)));
+  h.kernel.setWarnings([warningOf("peer_offline", "warning", "1 个对端离线")]);
   await expect.poll(async () => (await h.notices()).join("|")).toContain("设备 cloud-vm 已离线");
+  await expect.poll(async () => menuHas((await h.tray()).menu, "warning.0.peer_offline")?.label).toBe("1 个对端离线");
+  await expectIcon(h, "ok");
   h.kernel.setPeers(peers);
+  h.kernel.setWarnings([]);
   await expect.poll(async () => (await h.notices()).join("|")).toContain("设备 cloud-vm 已上线");
+  await expectIcon(h, "ok");
 });
 
 test("stopping the kernel asks first and runs nothing when declined", async () => {

@@ -87,7 +87,8 @@ test("pause/resume and maintenance confirmations execute actual actions once", a
   await expectIcon(h, "ok");
   const page = await openTray();
   await page.getByRole("button", { name: "暂停接入", exact: true }).click();
-  await expectIcon(h, "draining");
+  await expect(page.getByRole("button", { name: "恢复接入", exact: true })).toBeVisible();
+  await expectIcon(h, "ok");
   await page.getByRole("button", { name: "恢复接入", exact: true }).click();
   await expectIcon(h, "ok");
   await page.getByRole("button", { name: "设置", exact: true }).click();

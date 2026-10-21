@@ -13,6 +13,11 @@ export type Connection =
 
 export type TrayIcon = "offline" | "ok" | "degraded" | "draining" | "restart" | "mismatch";
 
+/** The system tray reports the kernel connection; detailed health stays in the panel. */
+export function deriveTrayIcon(c: Connection): TrayIcon {
+  return c.kind === "connected" ? "ok" : c.kind;
+}
+
 export interface InstanceInfo {
   /** Directory name under `<UserConfigDir>/xmesh`. */
   id: string;
@@ -56,8 +61,8 @@ export interface Snapshot {
  * CTR-CTL-03 / RUL-18, first match wins: not running, version mismatch,
  * draining, restart required, degraded, healthy. Degraded looks only at
  * warnings of severity `warning` or `error`, and at CI runners that need the
- * user; `info` warnings (restart_required, allow_dangerous) do not turn the
- * icon yellow.
+ * user. This detailed health state drives panel indicators and status text;
+ * deriveTrayIcon selects the system tray image.
  */
 export function deriveIcon(c: Connection): TrayIcon {
   switch (c.kind) {
