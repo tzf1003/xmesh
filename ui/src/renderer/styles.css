@@ -196,7 +196,8 @@ legend { color: var(--muted); padding: 0 4px; font-size: 12px; }
 .diff-replace { color: var(--warn); }
 .secret { font-family: var(--mono); word-break: break-all; background: var(--surface-2); border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; user-select: all; }
 
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+/* Keep modal controls interactive where an overlay covers the draggable titlebar. */
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10; -webkit-app-region: no-drag; }
 .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 18px 20px; width: min(520px, 100%); max-height: 100%; overflow-y: auto; }
 .dialog h2 { font-size: 16px; }
 
