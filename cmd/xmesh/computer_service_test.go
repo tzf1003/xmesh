@@ -1,13 +1,91 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/kardianos/service"
 )
+
+func TestEnsureComputerServiceStartedIsIdempotent(t *testing.T) {
+	t.Run("already running", func(t *testing.T) {
+		calls := 0
+		err := ensureComputerServiceStarted(
+			func() (service.Status, error) { return service.StatusRunning, nil },
+			func() error { calls++; return nil },
+			func() error { calls++; return nil },
+		)
+		if err != nil || calls != 0 {
+			t.Fatalf("err=%v calls=%d", err, calls)
+		}
+	})
+
+	t.Run("installed but stopped", func(t *testing.T) {
+		started := false
+		err := ensureComputerServiceStarted(
+			func() (service.Status, error) { return service.StatusStopped, nil },
+			func() error { t.Fatal("installed service should not be reinstalled"); return nil },
+			func() error { started = true; return nil },
+		)
+		if err != nil || !started {
+			t.Fatalf("err=%v started=%v", err, started)
+		}
+	})
+
+	t.Run("not installed", func(t *testing.T) {
+		installed, started := false, false
+		err := ensureComputerServiceStarted(
+			func() (service.Status, error) { return service.StatusUnknown, service.ErrNotInstalled },
+			func() error { installed = true; return nil },
+			func() error { started = true; return nil },
+		)
+		if err != nil || !installed || !started {
+			t.Fatalf("err=%v installed=%v started=%v", err, installed, started)
+		}
+	})
+
+	t.Run("status error", func(t *testing.T) {
+		want := errors.New("launchd status failed")
+		calls := 0
+		err := ensureComputerServiceStarted(
+			func() (service.Status, error) { return service.StatusUnknown, want },
+			func() error { calls++; return nil },
+			func() error { calls++; return nil },
+		)
+		if err != want || calls != 0 {
+			t.Fatalf("err=%v calls=%d", err, calls)
+		}
+	})
+
+	t.Run("install failure", func(t *testing.T) {
+		want := errors.New("install failed")
+		err := ensureComputerServiceStarted(
+			func() (service.Status, error) { return service.StatusUnknown, service.ErrNotInstalled },
+			func() error { return want },
+			func() error { t.Fatal("start called after failed install"); return nil },
+		)
+		if err != want {
+			t.Fatalf("err=%v", err)
+		}
+	})
+
+	t.Run("start failure", func(t *testing.T) {
+		want := errors.New("start failed")
+		err := ensureComputerServiceStarted(
+			func() (service.Status, error) { return service.StatusStopped, nil },
+			func() error { t.Fatal("installed service reinstalled"); return nil },
+			func() error { return want },
+		)
+		if err != want {
+			t.Fatalf("err=%v", err)
+		}
+	})
+}
 
 func TestComputerHostServiceRunsInUserGraphicalSession(t *testing.T) {
 	root := t.TempDir()

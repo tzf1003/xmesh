@@ -64,6 +64,8 @@ func userTaskAction(action string, c *service.Config) error {
 		}
 	}
 	switch action {
+	case "probe":
+		return nil
 	case "uninstall":
 		return run("/Delete", "/TN", name, "/F")
 	case "start":
