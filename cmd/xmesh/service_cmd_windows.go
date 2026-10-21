@@ -55,6 +55,14 @@ func userTaskAction(action string, c *service.Config) error {
 		return err
 	}
 	run := func(args ...string) error { _, err := taskCommand(directory, args...); return err }
+	if action == "start" || action == "restart" {
+		// Upgrade legacy console actions in place before scheduling another run.
+		if err := ensureTaskBackground(document, func(path string) error {
+			return run("/Create", "/TN", name, "/XML", path, "/F")
+		}); err != nil {
+			return err
+		}
+	}
 	switch action {
 	case "uninstall":
 		return run("/Delete", "/TN", name, "/F")

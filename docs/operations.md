@@ -348,6 +348,8 @@ Agent 与 Gateway 的工具调用预算缺省为每主体每小时 10000 次、�
 
 Windows 可用 `install --system` 选择管理员 SCM 服务，默认以 LocalSystem 身份运行于 Session 0，状态目录默认 `%ProgramData%\xmesh\<节点名>`（可用 `--state-dir` 覆盖）；配置、状态和工作目录须允许该账户访问。已有 SCM 安装迁移到用户任务时，先停止并卸载原服务，避免同一节点的两个进程同时占用状态与监听端口。用户任务运行于登录会话；SCM 适用于系统服务场景。
 
+Windows 用户服务（内核和 `computer host`）的任务程序为同目录的 `xmesh-background.exe`，使用 Windows GUI 子系统，启动时不创建控制台。CLI 仍使用 `xmesh.exe`；安装检查后台二进制存在且确为 GUI 子系统，旧任务在 `start` / `restart` 时仅更新程序路径，保留参数、工作目录、账户、自启和重试设置。原生桌面子进程使用 `CREATE_NO_WINDOW`，保留匿名协议管道。桌面服务仍运行在交互用户会话，不能放到 Session 0。从源码构建时需同时运行 `go build -o bin/xmesh.exe ./cmd/xmesh` 和 `go build -ldflags=-H=windowsgui -o bin/xmesh-background.exe ./cmd/xmesh`。
+
 用户任务设置 `LeastPrivilege`；[Windows 的 RunLevel 规则](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskschedulerschema-runlevel-principaltype-element)规定内置 Administrator、LocalSystem、LocalService 或关闭 UAC 时忽略该设置。需要普通权限时使用标准账户或启用 UAC 的普通管理员账户。
 
 服务运行异常以非零状态退出，供管理器处理。Windows 原生验收从目标用户的登录会话执行：

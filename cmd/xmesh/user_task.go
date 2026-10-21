@@ -109,6 +109,47 @@ func parseUserTask(document string) (userTask, error) {
 	return task, nil
 }
 
+// Replace only the action executable, preserving all scheduler settings and
+// arguments, including settings unknown to this version of xmesh.
+func replaceTaskCommand(document, command string) (string, error) {
+	decoder := xml.NewDecoder(strings.NewReader(document))
+	decoder.CharsetReader = func(_ string, in io.Reader) (io.Reader, error) { return in, nil }
+	var path []string
+	var begin, end int64
+	count := 0
+	for {
+		start := decoder.InputOffset()
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		switch t := token.(type) {
+		case xml.StartElement:
+			path = append(path, t.Name.Local)
+			if strings.Join(path, "/") == "Task/Actions/Exec/Command" {
+				begin = decoder.InputOffset()
+				count++
+			}
+		case xml.EndElement:
+			if strings.Join(path, "/") == "Task/Actions/Exec/Command" {
+				end = start
+			}
+			path = path[:len(path)-1]
+		}
+	}
+	if count != 1 || end < begin {
+		return "", fmt.Errorf("任务必须只有一个启动程序")
+	}
+	var escaped strings.Builder
+	if err := xml.EscapeText(&escaped, []byte(command)); err != nil {
+		return "", err
+	}
+	return document[:begin] + escaped.String() + document[end:], nil
+}
+
 // relocateTaskDocument updates the executable and installation-relative working directory while
 // preserving the scheduler's complete task document, including arguments, identity and settings.
 func relocateTaskDocument(document, oldDir, newDir string) (string, error) {

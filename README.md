@@ -78,6 +78,8 @@ go test -race ./...
 | `xmesh status` | 读取运行中节点的 `sys.info`（不读配置文件）。`--endpoint` 指向 Gateway 时要加 `--tool local/sys.info`；`--json` 输出原始 JSON |
 | `xmesh version` | 打印版本号 |
 
+Windows 发行包同时提供命令行 `xmesh.exe` 和无控制台的 `xmesh-background.exe`。内核及桌面宿主的登录任务使用后者，桌面原生执行器通过无窗口进程启动，不显示前台黑框。旧任务在下一次 `start` / `restart` 时自动切换；两份内核必须放在同一目录。
+
 新版配置使用 `schema_version: 2`，通过 `mesh.lan.enabled` 与 `mesh.tailnet.enabled` 开启共存。首次连接和断线恢复优先 LAN，健康连接保持当前路径。一台设备在界面中显示一次。旧节点停止后运行 `xmesh migrate --config xmesh.yaml` 备份并转换配置，再按新版重新配对。
 
 构建、配对、入网和运行的完整步骤见 [运行手册](docs/operations.md)；测试版（pre-release）的发布方式见运行手册的“测试版发布”。

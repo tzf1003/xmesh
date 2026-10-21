@@ -112,6 +112,25 @@ func Test_RelocateTaskDocument(t *testing.T) {
 	}
 }
 
+func Test_ReplaceTaskCommandPreservesRegistration(t *testing.T) {
+	const document = `<Task><Settings><Hidden>true</Hidden><Custom>keep</Custom></Settings><Actions><Exec><Command>C:\old\xmesh.exe</Command><Arguments>serve --config &quot;C:\节点\config.yaml&quot;</Arguments><WorkingDirectory>C:\work</WorkingDirectory></Exec></Actions></Task>`
+	const command = `D:\O'Brien & 中文\xmesh-background.exe`
+	updated, err := replaceTaskCommand(document, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := parseUserTask(document)
+	after, err := parseUserTask(updated)
+	if err != nil || after.Actions.Exec.Command != command || after.Actions.Exec.Arguments != before.Actions.Exec.Arguments || after.Actions.Exec.WorkingDirectory != before.Actions.Exec.WorkingDirectory || !strings.Contains(updated, `<Hidden>true</Hidden><Custom>keep</Custom>`) {
+		t.Fatal(updated, err)
+	}
+	for _, invalid := range []string{`<Task/>`, `<Task><Actions><Exec><Command>a</Command><Command>b</Command></Exec></Actions></Task>`, `<Task><Actions>`} {
+		if _, err := replaceTaskCommand(invalid, command); err == nil {
+			t.Fatal("invalid task accepted", invalid)
+		}
+	}
+}
+
 func Test_InstallerUserTaskOperations(t *testing.T) {
 	const sid = "S-1-5-21-1000"
 	mine, elsewhere, other := userTaskName("xmesh-node", sid), userTaskName("xmesh-other-copy", sid), userTaskName("xmesh-node", "S-1-5-21-2000")

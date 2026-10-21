@@ -75,6 +75,9 @@ jobs:
           mkdir -p "dist/$name"
           ext=""; [ "$GOOS" = windows ] && ext=".exe"
           go build -trimpath -ldflags "-s -w -X main.buildVersion=${GITHUB_REF_NAME}" -o "dist/$name/xmesh$ext" ./cmd/xmesh
+          if [ "$GOOS" = windows ]; then
+            go build -trimpath -ldflags "-s -w -H=windowsgui -X main.buildVersion=${GITHUB_REF_NAME}" -o "dist/$name/xmesh-background.exe" ./cmd/xmesh
+          fi
           # 能在 runner 上运行的那个二进制必须报告标签版本；其余平台只能构建。
           if [ "$GOOS" = linux ] && [ "$GOARCH" = amd64 ]; then
             test "$("dist/$name/xmesh" version)" = "xmesh ${GITHUB_REF_NAME}"

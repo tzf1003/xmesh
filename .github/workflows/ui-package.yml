@@ -143,6 +143,9 @@ jobs:
           ext=""; [ "$GOOS" = windows ] && ext=".exe"
           mkdir -p ui/build/kernel
           go build -trimpath -ldflags "-s -w -X main.buildVersion=${TAG}" -o "ui/build/kernel/xmesh${ext}" ./cmd/xmesh
+          if [ "$GOOS" = windows ]; then
+            go build -trimpath -ldflags "-s -w -H=windowsgui -X main.buildVersion=${TAG}" -o ui/build/kernel/xmesh-background.exe ./cmd/xmesh
+          fi
 
       - run: npm ci
       - run: npm run build
@@ -202,6 +205,8 @@ jobs:
             if (!$tool) { throw 'Windows SDK signtool is required for release signing.' }
             & $tool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $cert /p $env:WIN_CSC_KEY_PASSWORD build/kernel/xmesh.exe
             if ($LASTEXITCODE -ne 0) { throw 'Bundled CLI signing failed.' }
+            & $tool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $cert /p $env:WIN_CSC_KEY_PASSWORD build/kernel/xmesh-background.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled background kernel signing failed.' }
           } finally { Remove-Item -LiteralPath $cert -Force -ErrorAction SilentlyContinue }
 
       - name: 打包
@@ -229,7 +234,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $signed = $env:SIGNED -eq 'true'
           if ($signed) {
-            $files = @((Get-ChildItem 'release/xmesh-ui-*.exe').FullName, 'release/${{ matrix.unpacked }}/xmesh.exe', 'release/${{ matrix.unpacked }}/resources/bin/xmesh.exe')
+            $files = @((Get-ChildItem 'release/xmesh-ui-*.exe').FullName, 'release/${{ matrix.unpacked }}/xmesh.exe', 'release/${{ matrix.unpacked }}/resources/bin/xmesh.exe', 'release/${{ matrix.unpacked }}/resources/bin/xmesh-background.exe')
             foreach ($file in $files) {
               $sig = Get-AuthenticodeSignature -LiteralPath $file
               if ($sig.Status -ne 'Valid') { throw "Authenticode verification failed for $file : $($sig.Status)" }

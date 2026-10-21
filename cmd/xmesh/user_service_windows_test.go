@@ -39,6 +39,27 @@ func Test_WindowsUserKernelStart(t *testing.T) {
 	if err := install([]string{"--config", configFile, "--state-dir", stateDir, "--executable", binary, "--autostart=false"}); err != nil {
 		t.Fatal(err)
 	}
+	// Simulate an older installation. The first start must upgrade the task
+	// action before it can launch a console executable.
+	directory, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskName := userTaskName(serviceName(node), installerSID())
+	raw, err := taskCommand(directory, "/Query", "/TN", taskName, "/XML")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := replaceTaskCommand(taskDocumentText(raw), filepath.Join(filepath.Dir(binary), "xmesh.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := withTaskDocument(legacy, func(path string) error {
+		_, err := taskCommand(directory, "/Create", "/TN", taskName, "/XML", path, "/F")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	args := []string{"--name", serviceName(node)}
 	// Match Electron's background CLI invocation. With no console attached,
 	// schtasks can emit the OEM code page instead of the parent's UTF-8 page.
@@ -89,6 +110,27 @@ func Test_WindowsUserKernelStart(t *testing.T) {
 	}
 	if err := startKernel(); err != nil {
 		t.Fatal("starting an already running kernel must remain idempotent", err)
+	}
+	ep, err := control.ReadEndpoint(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(ep.PID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(process)
+	buffer := make([]uint16, 32768)
+	size := uint32(len(buffer))
+	if err := windows.QueryFullProcessImageName(process, 0, &buffer[0], &size); err != nil {
+		t.Fatal(err)
+	}
+	image := windows.UTF16ToString(buffer[:size])
+	if !strings.EqualFold(filepath.Base(image), "xmesh-background.exe") {
+		t.Fatal("installed kernel did not use the windowless background binary", image)
+	}
+	if err := validateBackgroundExecutable(image); err != nil {
+		t.Fatal(err)
 	}
 }
 
