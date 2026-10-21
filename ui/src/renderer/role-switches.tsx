@@ -47,7 +47,7 @@ export function RoleSwitches({ ctx }: { ctx: PageContext }): JSX.Element | null 
     try {
       const current = await getApi().getConfig();
       if (!current.ok) { ctx.toast(errorText(t, current.error), true); return; }
-      if (!current.data.valid) { ctx.go("config", { configView: "source" }); return; }
+      if (!current.data.valid) { ctx.go("settings", { settingsTab: "configuration" }); return; }
       const form = formFromConfig(current.data.parsed);
       const roles = toggleRole(form.roles, role, !form.roles.includes(role));
       if (roles.length === 0) { ctx.toast(t("settings.problem.roles"), true); return; }

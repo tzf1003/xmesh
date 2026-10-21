@@ -201,7 +201,7 @@ test("applying the form keeps comments, the deny list and the other sections", (
   const next = applySettingsForm(LAN_CONFIG, { ...tailnetIngress, nodeName: "dev-2", defaultCwd: "/home/me/code" });
   assert.ok(next !== undefined);
   assert.match(next, /^# 由 xmesh 首次运行向导生成。/);
-  assert.match(next, /roles: \[agent, gateway, ingress\]/, "roles stay on one line");
+  assert.match(next, /roles:\n    - agent\n    - gateway\n    - ingress/);
   const parsed = parse(next);
   assert.equal(parsed.node.name, "dev-2");
   assert.equal(parsed.agent.default_cwd, "/home/me/code");

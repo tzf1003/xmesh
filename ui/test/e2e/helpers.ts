@@ -9,10 +9,10 @@ export const UI_ROOT = path.resolve(__dirname, "..", "..");
 
 /** Navigate through the disclosure used by the production sidebar. */
 export async function navigate(page: Page, id: string): Promise<void> {
+  if (id === "kernel-config") { await navigate(page, "settings"); await page.getByTestId("settings-tab-configuration").click(); return; }
   if (id === "about") { await navigate(page, "settings"); await page.getByTestId("settings-tab-about").click(); return; }
   if (id === "audit") { await navigate(page, "sessions"); await page.getByTestId("sessions-tab-history").click(); return; }
   if (id === "setup") { await navigate(page, "settings"); await page.getByTestId("settings-maintenance").locator("summary").click(); await page.getByTestId("settings-open-setup").click(); return; }
-  if (id === "config") { await navigate(page, "settings"); await page.getByTestId("settings-tab-diagnostics").click(); await page.getByRole("button", { name: /修复配置|Repair configuration/ }).click(); return; }
   const target = page.getByTestId(`nav-${id}`);
   if (!(await target.isVisible())) await target.locator("xpath=ancestor::details[1]").locator("summary").click();
   await target.click();

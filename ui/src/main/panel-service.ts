@@ -6,7 +6,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseDocument } from "./yaml";
+import { configYaml, parseDocument } from "./yaml";
 
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
@@ -169,7 +169,7 @@ export class PanelService {
       }
       doc.setIn(["mesh", "tailnet", "authkey_file"], file);
       doc.deleteIn(["mesh", "tailnet", "auth_method"]);
-      const content = doc.toString({ flowCollectionPadding: false });
+      const content = configYaml(doc);
       // The kernel owns credential creation and config commit, including system
       // services whose private state directory the desktop cannot write to.
       const saved = await put(content, req.dryRun, authkey) as ConfigPutResponse;

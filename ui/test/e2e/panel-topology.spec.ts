@@ -21,10 +21,7 @@ async function capture(page: Page, name: string): Promise<void> {
 }
 
 async function configuration(page: Page): Promise<void> {
-  await navigate(page, "settings");
-  await page.getByTestId("settings-tab-diagnostics").click();
-  await page.getByRole("button", { name: "修复配置", exact: true }).click();
-  await page.getByTestId("config-form-tab").click();
+  await navigate(page, "config");
 }
 
 test("topology renders real routes, selects details and filters without moving peers", async () => {
@@ -177,15 +174,16 @@ test("command search uses keyboard navigation and opens a device or configuratio
   await configuration(page);
   await expect(page.getByTestId("settings-name")).toBeVisible();
   await page.getByTestId("settings-name").fill("changed-node");
-  await page.getByTestId("config-source-tab").click();
+  await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("confirm")).toBeVisible();
   await page.getByTestId("confirm-cancel").click();
   await expect(page.getByTestId("settings-name")).toHaveValue("changed-node");
-  await page.getByTestId("config-source-tab").click();
+  await page.getByTestId("nav-settings").click();
   await page.getByTestId("confirm-ok").click();
+  await page.getByTestId("settings-tab-configuration").click();
   await expect(page.getByTestId("config-editor")).toBeVisible();
   await page.getByTestId("config-editor").fill("# draft\n");
-  await page.getByTestId("config-form-tab").click();
+  await navigate(page, "config");
   await page.getByTestId("confirm-cancel").click();
   await expect(page.getByTestId("config-editor")).toHaveValue("# draft\n");
 });
@@ -245,7 +243,7 @@ test("configuration form saves through preview, source reflects the saved file, 
   expect(h.kernel.panel.writes).toEqual([]);
   await page.getByTestId("confirm-ok").click();
   await expect.poll(() => h.kernel.panel.content).toContain("saved-node");
-  await page.getByTestId("config-source-tab").click();
+  await navigate(page, "kernel-config");
   await expect(page.getByTestId("config-editor")).toHaveValue(/saved-node/);
   await expect(page.getByTestId("confirm")).toHaveCount(0);
 });

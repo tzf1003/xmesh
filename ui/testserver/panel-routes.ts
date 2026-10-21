@@ -610,8 +610,9 @@ function pointerRemove(doc: Node, segments: string[]): boolean {
   return true;
 }
 
-/** The YAML without comments and blank lines: what the fake treats as the configuration itself. */
+/** Compare parsed values so YAML layout and comments do not become configuration changes. */
 function semantic(content: string): string {
+  try { return JSON.stringify(parse(content)); } catch { /* Invalid source is handled by the route. */ }
   return content
     .split("\n")
     .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"))

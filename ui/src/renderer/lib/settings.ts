@@ -4,8 +4,9 @@
 // wrote them. The kernel validates the result before anything is written; the checks here only catch what
 // the page can explain before the dry run.
 
-import { Document, parseDocument, type YAMLSeq } from "yaml";
+import { Document, parseDocument } from "yaml";
 import { DEFAULT_CONTROL_URL, NODE_NAME, isAbsolutePath, isAuthKey, isHttpsUrl } from "../../shared/setup";
+import { configYaml } from "../../shared/config-yaml";
 
 export const ROLES = ["agent", "gateway", "ingress"] as const;
 export type Role = (typeof ROLES)[number];
@@ -179,7 +180,7 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   const doc = parseDocument(content);
   if (doc.errors.length > 0) return undefined;
   doc.setIn(["node", "name"], f.nodeName.trim());
-  doc.setIn(["node", "roles"], flowList(doc, f.roles));
+  doc.setIn(["node", "roles"], [...f.roles]);
   doc.setIn(["schema_version"], 2);
   const ephemeral = doc.getIn(["mesh", "ephemeral"]);
   if (typeof ephemeral === "boolean" && doc.getIn(["mesh", "tailnet", "ephemeral"]) === undefined) {
@@ -203,21 +204,13 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   }
   if (f.roles.includes("ingress")) applyIngress(doc, f);
   doc.setIn(["agent", "default_cwd"], f.defaultCwd.trim());
-  doc.setIn(["agent", "cwd_policy", "allow"], flowList(doc, f.allowDirs.map((d) => d.trim())));
+  doc.setIn(["agent", "cwd_policy", "allow"], f.allowDirs.map((d) => d.trim()));
   doc.setIn(["agent", "fs", "max_file_size"], f.maxFileSize.trim());
-  // No padding inside brackets, as the wizard writes them.
-  return doc.toString({ flowCollectionPadding: false });
+  return configYaml(doc);
 }
 
 function deleteExisting(doc: Document, path: string[]): void {
   if (doc.hasIn(path)) doc.deleteIn(path);
-}
-
-/** A flow-style sequence, as the wizard writes lists; an empty one prints as `[]`. */
-function flowList(doc: Document, items: readonly string[]): YAMLSeq {
-  const seq = doc.createNode([...items]) as YAMLSeq;
-  seq.flow = true;
-  return seq;
 }
 
 function applyIngress(doc: Document, f: SettingsForm): void {
@@ -250,7 +243,7 @@ export function applyDenyFile(content: string, denyPath: string): string | undef
   if (doc.errors.length > 0) return undefined;
   doc.setIn(["agent", "cwd_policy", "deny_file"], denyPath);
   deleteExisting(doc, ["agent", "cwd_policy", "deny"]);
-  return doc.toString({ flowCollectionPadding: false });
+  return configYaml(doc);
 }
 
 /** The entries of a deny list file: a YAML list of strings. Undefined when the text is anything else. */
@@ -293,5 +286,5 @@ export function applySettingsScope(content: string, form: SettingsForm, scope: "
     if (value === undefined) deleteExisting(original, path);
     else original.setIn(path, value);
   }
-  return original.toString();
+  return configYaml(original);
 }
