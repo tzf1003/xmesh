@@ -259,7 +259,7 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 		st, e := os.Stat(path)
 		if e == nil {
 			if !st.IsDir() {
-				return nil, conflict(path, nil)
+				return nil, existingTargetConflict(path)
 			}
 			return Object{"resolved_path": path, "created": false}, nil
 		}
@@ -283,7 +283,7 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (O
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if _, e = os.Lstat(to.Path); e == nil && !a.Overwrite {
-			return nil, conflict(to.Path, nil)
+			return nil, existingTargetConflict(to.Path)
 		}
 		source, e := s.entry(a.From, base.Path, cwd.Existing)
 		if e != nil {
@@ -396,11 +396,18 @@ func isMissing(e error) bool {
 	return ok && v.Code == "invalid_cwd" && v.Fields["reason"] == "not_found"
 }
 func conflict(path string, b []byte) *toolerr.Error {
+	e := existingTargetConflict(path)
+	e.Fields["current_sha256"] = Hash(b)
+	return e
+}
+
+// Existence checks report metadata only; a content hash requires reading bytes.
+func existingTargetConflict(path string) *toolerr.Error {
 	mtime := ""
-	if st, e := os.Stat(path); e == nil {
+	if st, e := os.Lstat(path); e == nil {
 		mtime = Stamp(st.ModTime())
 	}
-	return toolerr.New("conflict", "目标已存在或内容发生变化", "path", path, "current_sha256", Hash(b), "mtime", mtime)
+	return toolerr.New("conflict", "目标已存在或内容发生变化", "path", path, "mtime", mtime)
 }
 func atomicWrite(path string, b []byte, expected string) error {
 	f, e := os.CreateTemp(filepath.Dir(path), ".xmesh-write-*")

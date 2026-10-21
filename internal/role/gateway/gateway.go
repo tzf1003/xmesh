@@ -398,7 +398,13 @@ func (g *Gateway) newView(p Principal) *view {
 				}
 				v.refresh()
 				if method == "tools/list" {
+					v.mu.Lock()
+					device := v.defaultDeviceLocked()
+					v.mu.Unlock()
 					v.waitReady(ctx, g.opts.LocalPeer.Name)
+					if device != "" && device != g.opts.LocalPeer.Name {
+						v.waitReady(ctx, device)
+					}
 				}
 			}
 			if method == "tools/call" {
@@ -598,20 +604,29 @@ func (v *view) refresh() {
 }
 
 // waitReady only waits for the requested device's first catalogue. Cached calls
-// proceed while an independent background refresh updates that device.
+// proceed while an independent background refresh updates that device. A peer
+// replacement continues the wait; a failed attempt retains its retry backoff.
 func (v *view) waitReady(ctx context.Context, name string) {
-	v.refreshMu.Lock()
-	v.mu.Lock()
-	d, job := v.down[name], v.jobs[name]
-	ready := d != nil && !d.dead && d.tools != nil
-	v.mu.Unlock()
-	v.refreshMu.Unlock()
-	if ready || job == nil {
-		return
-	}
-	select {
-	case <-ctx.Done():
-	case <-job.done:
+	var completed *refreshJob
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		v.refreshMu.Lock()
+		v.mu.Lock()
+		d, job := v.down[name], v.jobs[name]
+		ready := d != nil && !d.dead && d.tools != nil
+		v.mu.Unlock()
+		v.refreshMu.Unlock()
+		if ready || job == nil || job == completed {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-job.done:
+			completed = job
+		}
 	}
 }
 
