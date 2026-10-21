@@ -34,7 +34,7 @@ const meshUsage = `用法: xmesh mesh <子命令> [参数]
   logout   删除凭据  [--access read|write]
   status   设备、角色与 tag 检查  [--node-config xmesh.yaml ...]
   tags     查看或修改设备 tag  --device ID  [--set tag:a,tag:b]  [--apply]
-  authkey  创建预授权 key  --tags tag:device  --out 文件  [--ttl 1h] [--reusable] [--ephemeral] [--user 用户]
+  authkey  创建预授权 key  --out 文件 [--tags tag:a,tag:b]  [--ttl 1h] [--reusable] [--ephemeral] [--user 用户]
   onboard  新设备接入：创建 key 写入 --authkey-file（0600），可选 --config xmesh.yaml --install
   policy   策略：--show | --snapshots | --rollback ID | --template personal|team|restricted --owner 属主
            [--apply] [--expect-version 版本]
@@ -545,7 +545,7 @@ func meshAuthKey(args []string, out io.Writer) error {
 	var c meshCommon
 	fs := flag.NewFlagSet("mesh authkey", flag.ContinueOnError)
 	c.register(fs)
-	tags := fs.String("tags", meshadmin.TagDevice, "key 授予的 tag，逗号分隔")
+	tags := fs.String("tags", "", "可选的网络标签，逗号分隔")
 	ttl := fs.Duration("ttl", time.Hour, "有效期")
 	reusable := fs.Bool("reusable", false, "可重复使用")
 	ephemeral := fs.Bool("ephemeral", false, "临时节点")
@@ -573,9 +573,6 @@ func createAuthKey(c *meshCommon, out io.Writer, tags string, ttl time.Duration,
 	if err != nil {
 		return err
 	}
-	if len(want) == 0 {
-		return fmt.Errorf("需要至少一个 tag")
-	}
 	p, _, _, err := c.provider(meshadmin.AccessWrite)
 	if err != nil {
 		return err
@@ -602,7 +599,7 @@ func meshOnboard(args []string, out io.Writer) error {
 	var c meshCommon
 	fs := flag.NewFlagSet("mesh onboard", flag.ContinueOnError)
 	c.register(fs)
-	tags := fs.String("tags", meshadmin.TagDevice, "新设备的 tag")
+	tags := fs.String("tags", "", "可选的网络标签，逗号分隔")
 	ttl := fs.Duration("ttl", time.Hour, "key 有效期")
 	ephemeral := fs.Bool("ephemeral", false, "临时节点")
 	user := fs.String("user", "", "Headscale 用户名")

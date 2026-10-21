@@ -68,10 +68,19 @@ func TestDeviceTrustOnboardingDoesNotRequireLegacyDeviceTag(t *testing.T) {
 	if err := onboardingPrerequisitesForVersion(st, true, false); err == nil {
 		t.Fatal("cloud prerequisites skipped")
 	}
-	st = runningLoginStatus("tag:ingress")
+	st = runningLoginStatus()
 	st.Self.DNSName = "node.tailnet.ts.net."
 	st.Self.CapMap = tailcfg.NodeCapMap{"funnel": nil}
 	if err := onboardingPrerequisitesForVersion(st, true, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeviceTrustSetupKeepsNetworkTagsOptional(t *testing.T) {
+	c := &config.Config{SchemaVersion: 2}
+	for _, ingress := range []bool{false, true} {
+		if got := onboardingTailnetTags(c, ingress); got != nil {
+			t.Fatalf("ingress=%v tags=%v", ingress, got)
+		}
 	}
 }

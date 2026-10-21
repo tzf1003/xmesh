@@ -153,3 +153,16 @@ test("pairing: the document drawer exports the device identity", async () => {
   await page.getByTestId("pair-export").click();
   await expect(page.getByTestId("pair-my-fingerprint")).toBeVisible();
 });
+
+for (const lang of ["zh", "en"] as const) {
+  test(`pairing: document grants identify local permission groups (${lang})`, async () => {
+    h = await launch({ lang, kernel: { capabilities: ALL, status: LAN_STATUS } });
+    const page = await h.openPanel();
+    await page.getByTestId("nav-devices").click();
+    await page.getByTestId("device-method-documents").click();
+    await page.getByTestId("pair-paste").fill(JSON.stringify({ pair: h.kernel.panel.localPair }));
+    await expect(page.getByTestId("pair-advanced").locator("legend")).toHaveText(lang === "zh" ? "配对权限组" : "Pairing permission groups");
+    await expect(page.getByTestId("pair-tags-scope")).toContainText(lang === "zh" ? "由本机授予" : "Granted locally");
+    await expect(page.getByTestId("pair-tags-scope")).toContainText("Tailscale");
+  });
+}

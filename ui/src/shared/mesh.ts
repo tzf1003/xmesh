@@ -273,7 +273,7 @@ export function parseMeshRequest(v: unknown): MeshParse {
     }
     case "onboard": {
       if (!onlyKeys(v, ["op", "tags", "ttl", "ephemeral", "user", "file", "overwrite"])) return bad("keys");
-      const tags = parseMeshTags(v.tags, false);
+      const tags = parseMeshTags(v.tags, true);
       if (tags === undefined) return bad("tags");
       if (typeof v.ttl !== "string" || !TTL.test(v.ttl)) return bad("ttl");
       if (typeof v.ephemeral !== "boolean") return bad("ephemeral");
@@ -621,6 +621,7 @@ function device(v: unknown): MeshDevice {
 }
 
 function severity(v: unknown): MeshIssue["severity"] {
+  if (v === "warning") return "warn";
   return v === "error" || v === "warn" ? v : "info";
 }
 

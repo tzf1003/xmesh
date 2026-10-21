@@ -85,6 +85,7 @@ export function PairDocuments({ ctx, expanded }: { ctx: PageContext; expanded?: 
           </p>
           <fieldset>
             <legend>{t("pair.tags")}</legend>
+            <p class="hint" data-testid="pair-tags-scope">{t("pair.tagsHint")}</p>
             {PAIR_TAG_CHOICES.map((tag) => (
               <label class="check" key={tag}>
                 <input

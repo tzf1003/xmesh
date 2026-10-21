@@ -4,6 +4,7 @@
 import { type Page, expect, test } from "@playwright/test";
 import type { Capability } from "../../src/shared/control";
 import type { FakeMeshState } from "../../src/main/mesh-fake";
+import * as path from "node:path";
 import { type Harness, launch, navigate } from "./helpers";
 import { FakeKernel } from "../../testserver/server";
 
@@ -23,7 +24,7 @@ async function open(opts: { publish?: boolean } = {}): Promise<Page> {
   return page;
 }
 
-type Patch = Partial<Pick<FakeMeshState, "credential" | "writeCredential" | "acceptKeys" | "provider" | "version" | "delayMs" | "policyText">>;
+type Patch = Partial<Pick<FakeMeshState, "credential" | "writeCredential" | "acceptKeys" | "provider" | "version" | "delayMs" | "policyText" | "devices">>;
 const patch = (p: Patch): Promise<void> =>
   h.app.evaluate((_e, v) => {
     Object.assign((globalThis as unknown as { __xmeshUiTest: { mesh: object } }).__xmeshUiTest.mesh, v);
@@ -37,6 +38,8 @@ const picked = (path: string): Promise<void> =>
 
 test("devices: roles, issues and tags show, and the page works without a running kernel", async () => {
   const page = await open({ publish: false });
+  await expect(page.getByTestId("mesh-devices").getByRole("columnheader", { name: "网络标签", exact: true })).toBeVisible();
+  await expect(page.getByTestId("mesh-network-tags-scope")).toContainText("连接和配对无需分配网络标签");
   await expect(page.getByTestId("mesh-provider")).toContainText("tailscale");
   await expect(page.getByTestId("mesh-devices")).toContainText("laptop");
   await expect(page.getByTestId("mesh-device-n100")).toContainText("agent, gateway");
@@ -49,6 +52,24 @@ test("devices: roles, issues and tags show, and the page works without a running
   expect(calls[0]!.slice(0, 3)).toEqual(["mesh", "status", "--json"]);
   expect(calls[0]!.at(-1)!.startsWith("--credential-file=")).toBe(true);
   expect(calls[0]!.some((a: string) => a.startsWith("--node-config="))).toBe(false);
+});
+
+test("devices: optional network tags do not change pairing permission groups", async () => {
+  const page = await open();
+  const requests = h.kernel.requests.length;
+  await patch({ devices: [{ id: "n100", name: "untagged-v2", tags: [], online: true, roles: ["agent", "gateway"], issues: [] }] });
+  await page.getByTestId("mesh-refresh").click();
+  const row = page.getByTestId("mesh-device-n100");
+  await expect(row).toContainText("未设置（可选）");
+  await expect(row).toContainText("agent, gateway");
+  await expect(page.getByTestId("mesh-attention")).toHaveCount(0);
+  await page.getByTestId("mesh-edit-tags-n100").click();
+  await expect(page.getByRole("dialog")).toContainText("网络标签");
+  await page.getByTestId("mesh-tags-input").fill("tag:device");
+  await page.getByTestId("mesh-tags-preview").click();
+  await page.getByTestId("mesh-tags-apply").click();
+  await expect(row).toContainText("tag:device");
+  expect(h.kernel.requests.slice(requests).some(r => r.path.startsWith("/v2/pair"))).toBe(false);
 });
 
 test("devices: a connected node's config is handed to the CLI so roles can be matched", async () => {
@@ -74,6 +95,59 @@ test("devices: search and status filters combine and onboarding opens a drawer",
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("mesh-onboard-drawer")).toHaveCount(0);
   await expect(page.getByTestId("mesh-device-filter")).toHaveValue("offline");
+});
+
+test("devices: warning review toggles filters and long diagnostics fit the table", async () => {
+  const page = await open();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await patch({ devices: [
+    { id: "n100", name: "healthy", tags: ["tag:device"], online: true, roles: ["agent"], issues: [] },
+    { id: "n200", name: "xiaosong-mac.tailb10244.ts.net", tags: ["tag:mobile"], online: true, roles: [], issues: [
+      { severity: "warning", code: "no-tags", message: "Review device tags" },
+      { severity: "error", code: "missing-role-tag", message: 'xmesh.yaml declares role "gateway" but the node lacks tag:peer or tag:cloud (it will not appear in discovery or will be denied)' },
+      { severity: "info", code: "future", message: "long-diagnostic-".repeat(40) },
+    ] },
+    { id: "n300", name: "warning-only", tags: [], online: false, roles: [], issues: [{ severity: "warning", code: "no-tags", message: "Review tags" }] },
+  ] });
+  await page.getByTestId("mesh-refresh").click();
+  const banner = page.getByTestId("mesh-attention");
+  await expect(banner).toContainText("2 台设备");
+  await page.getByTestId("mesh-search").fill("healthy");
+  await banner.getByRole("button", { name: "查看待处理设备" }).click();
+  await expect(page.getByTestId("mesh-search")).toHaveValue("");
+  await expect(page.getByTestId("mesh-device-filter")).toHaveValue("attention");
+  await expect(page.getByTestId("mesh-device-n100")).toHaveCount(0);
+  await expect(page.getByTestId("mesh-device-n300")).toBeVisible();
+  const report = page.getByTestId("mesh-device-n200");
+  await expect(report).toContainText("配置已启用 gateway 角色");
+  await expect(report.locator(".badge.warn")).toHaveText("警告");
+  await expect(report.locator(".module-device-roles")).toHaveText("—");
+  await expect(report.locator(".module-state")).toHaveText("在线");
+  expect(page.url()).toMatch(/^app:\/\/panel\//);
+  expect(await page.title()).toBeTruthy();
+  await expect(page.getByTestId("page-mesh")).toBeVisible();
+  for (const width of [1440, 1100, 900, 700]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const bounds = await page.evaluate(() => {
+      const alert = document.querySelector('[data-testid="mesh-attention"]')!;
+      const button = alert.querySelector("button")!.getBoundingClientRect();
+      const box = alert.getBoundingClientRect();
+      const table = document.querySelector('[data-testid="mesh-devices"]') as HTMLElement;
+      const status = table.querySelector(".module-state")!.getBoundingClientRect();
+      return { buttonFits: button.left >= box.left && button.right <= box.right && button.bottom <= box.bottom, tableFits: table.scrollWidth <= table.clientWidth + 1, statusHeight: status.height, detailsOverflow: [...table.querySelectorAll(".module-device-issue > span:last-child")].some((el) => el.scrollWidth > el.clientWidth + 1) };
+    });
+    expect(bounds.buttonFits, `banner button at ${width}px`).toBe(true);
+    expect(bounds.tableFits, `table at ${width}px`).toBe(true);
+    expect(bounds.statusHeight).toBeLessThan(25);
+    expect(bounds.detailsOverflow).toBe(false);
+    if (process.env.XMESH_UI_QA_DIR) await page.screenshot({ path: path.join(process.env.XMESH_UI_QA_DIR, `mesh-review-${width}.png`), fullPage: true });
+  }
+  await banner.getByRole("button", { name: "全部设备" }).click();
+  await expect(page.getByTestId("mesh-device-filter")).toHaveValue("all");
+  await expect(page.getByTestId("mesh-device-n100")).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
 test("no credential: the page shows the login commands, copies them, and recovers after login", async () => {
@@ -188,6 +262,7 @@ test("tags: preview first, tags without an owner are blocked, apply writes", asy
 test("onboard: the key goes to the chosen file; the page only ever learns the path", async () => {
   const page = await open();
   await page.getByTestId("mesh-tab-onboard").click();
+  await expect(page.getByTestId("mesh-onboard-tags")).toHaveValue("");
   await expect(page.getByTestId("mesh-onboard-create")).toBeDisabled();
   await picked("/home/me/keys/new-device.key");
   await page.getByTestId("mesh-onboard-pick").click();
@@ -200,7 +275,7 @@ test("onboard: the key goes to the chosen file; the page only ever learns the pa
   expect(await fake("keyFiles")).toEqual(["/home/me/keys/new-device.key"]);
   const call = (await fake("calls")).find((c) => c[1] === "authkey")!;
   expect(call.slice(0, 4)).toEqual(["mesh", "authkey", "--json", "--credential-file=" + call[3]!.slice("--credential-file=".length)]);
-  expect(call.slice(4)).toEqual(["--tags=tag:device", "--ttl=6h", "--out=/home/me/keys/new-device.key", "--ephemeral", "--overwrite"]);
+  expect(call.slice(4)).toEqual(["--tags=", "--ttl=6h", "--out=/home/me/keys/new-device.key", "--ephemeral", "--overwrite"]);
   expect(await page.getByTestId("page-mesh").innerText()).not.toMatch(/tskey|secret/i);
   // A cancelled chooser changes nothing.
   await picked("");

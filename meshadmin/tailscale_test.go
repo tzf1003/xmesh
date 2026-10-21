@@ -78,8 +78,12 @@ func TestTailscaleSetTagsAndAuthKey(t *testing.T) {
 	if strings.Contains(k.Redacted().Secret, "tskey") {
 		t.Fatal("Redacted kept the secret")
 	}
-	if _, err := p.CreateAuthKey(ctx, AuthKeyRequest{}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("key without tags: %v", err)
+	if _, err := p.CreateAuthKey(ctx, AuthKeyRequest{TTL: time.Hour}); err != nil {
+		t.Fatalf("untagged auth key: %v", err)
+	}
+	create = f.lastKey["capabilities"].(map[string]any)["devices"].(map[string]any)["create"].(map[string]any)
+	if _, exists := create["tags"]; exists {
+		t.Fatalf("untagged key request assigned tags: %v", create)
 	}
 }
 

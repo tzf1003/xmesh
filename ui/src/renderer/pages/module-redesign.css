@@ -54,10 +54,10 @@
 .module-page .module-search input[type="search"] { width: 100%; min-width: 0; border: 0; background: transparent; padding: 10px; border-radius: 7px; font-size: 12px; }
 .module-page .module-toolbar > select { width: auto; max-width: 150px; min-height: 37px; padding: 6px 9px; font-size: 11px; }
 .module-page .module-toolbar > small { color: var(--muted); white-space: nowrap; font-size: 10px; }
-.module-page .module-alert { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border)); border-radius: 8px; background: var(--warn-bg); color: var(--warn); margin-bottom: 16px; font-size: 12px; }
+.module-page .module-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border)); border-radius: 8px; background: var(--warn-bg); color: var(--warn); margin-bottom: 16px; font-size: 12px; min-width: 0; }
 .module-page .module-alert > .icon { flex: none; width: 15px; height: 15px; }
-.module-page .module-alert > span { flex: 1; }
-.module-page .module-alert .module-link { color: inherit; white-space: nowrap; }
+.module-page .module-alert > span { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.module-page .module-alert .module-link { color: inherit; white-space: normal; max-width: 100%; margin-left: auto; }
 .module-page .module-empty { display: grid; justify-items: center; align-content: center; text-align: center; gap: 14px; min-height: 260px; padding: 30px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .module-page .module-empty .module-avatar { width: 45px; height: 45px; }
 .module-page .module-empty p { color: var(--muted); max-width: 360px; line-height: 1.8; margin: 0; }
@@ -101,14 +101,28 @@
 .module-page .module-side-divider h3 { color: var(--text); font-size: 13px; text-transform: none; letter-spacing: 0; margin-bottom: 15px; }
 .module-page .module-side-divider .module-link, .module-page .module-box p + .module-link { margin-top: 12px; }
 .module-page .module-device-card { padding: 0; overflow: hidden; }
-.module-page .module-device-card table { min-width: 640px; }
+.module-page .module-device-card table { min-width: 640px; table-layout: fixed; }
+.module-page .module-device-col-name { width: 36%; }
+.module-page .module-device-col-status { width: 13%; }
+.module-page .module-device-col-tags { width: 23%; }
+.module-page .module-device-col-action { width: 50px; }
 .module-page .module-device-card th { font-weight: 450; font-size: 11px; padding: 14px 17px; background: color-mix(in srgb, var(--surface-2) 35%, var(--surface)); }
 .module-page .module-device-card td { padding: 18px 17px; border-bottom-color: var(--border-2); font-size: 11px; }
+.module-page .module-device-card tbody + tbody > tr:first-child > td { border-top: 1px solid var(--border-2); }
+.module-page .module-device-card td .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.module-page .module-device-card .module-state { white-space: nowrap; }
 .module-page .module-device-name { display: flex; gap: 11px; align-items: center; }
+.module-page .module-device-name > div { min-width: 0; overflow-wrap: anywhere; }
 .module-page .module-device-name strong { display: block; font-size: 13px; margin-bottom: 5px; font-weight: 550; }
 .module-page .module-device-name .hint { font-size: 10px; }
-.module-page .module-device-roles { color: var(--text-2); }
-.module-page .module-device-issues { padding: 0; margin: 6px 0 0; color: var(--warn); font-size: 10px; list-style: none; }
+.module-page .module-device-roles { color: var(--text-2); overflow-wrap: anywhere; }
+.module-page .module-device-card .module-device-diagnostics td { padding-top: 0; }
+.module-page .module-device-issues { padding: 11px 13px; margin: 0; background: var(--surface-2); border-radius: 6px; font-size: 11px; list-style: none; }
+.module-page .module-device-issue { display: flex; align-items: flex-start; gap: 8px; line-height: 1.7; color: var(--muted); }
+.module-page .module-device-issue.error { color: var(--danger); }
+.module-page .module-device-issue.warn { color: var(--warn); }
+.module-page .module-device-issue > .badge { flex: none; }
+.module-page .module-device-issue > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .module-page .module-device-issues li + li { margin-top: 5px; }
 .module-page .module-device-foot { padding: 12px 17px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border-2); }
 .module-page .module-policy-workspace { padding: 15px 18px; background: var(--accent-soft); }

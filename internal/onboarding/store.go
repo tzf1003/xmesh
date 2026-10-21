@@ -186,7 +186,7 @@ func (s *Store) Plan(in Input) (*Plan, error) {
 		p.Summary = append(p.Summary, "应用期间会临时停止正在运行的设备服务，再以更新后的连接和权限设置启动")
 	}
 	if in.Purpose == "cloud" {
-		p.Summary = append(p.Summary, "云端连接将启用 Tailscale Funnel 公网 HTTPS 入口及 OAuth 登录；需授予 tag:ingress 并设置入口登录口令")
+		p.Summary = append(p.Summary, "云端连接将启用 Tailscale Funnel 公网 HTTPS 入口及 OAuth 登录；需在控制面启用 Funnel / HTTPS 并设置入口登录口令")
 		if in.Permission == "readonly" {
 			p.Summary = append(p.Summary, "云端 OAuth 权限限制为设备发现、系统信息与文件读取")
 		} else {

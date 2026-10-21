@@ -16,7 +16,7 @@ import { MeshError } from "./common";
 export function MeshOnboard({ ctx, status }: MeshTabProps): JSX.Element {
   const t = useT();
   const headscale = status.provider === "headscale";
-  const [tags, setTags] = useState("tag:device");
+  const [tags, setTags] = useState("");
   const [ttl, setTtl] = useState<(typeof TTL_CHOICES)[number]>("1h");
   const [ephemeral, setEphemeral] = useState(false);
   const [user, setUser] = useState("");
@@ -24,7 +24,7 @@ export function MeshOnboard({ ctx, status }: MeshTabProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError | undefined>();
   const [made, setMade] = useState<MeshKeyResult | undefined>();
-  const parsed = parseTagText(tags, false);
+  const parsed = parseTagText(tags, true);
   const userOk = !headscale || /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/.test(user);
 
   const pick = async (): Promise<void> => {
@@ -50,7 +50,7 @@ export function MeshOnboard({ ctx, status }: MeshTabProps): JSX.Element {
     <section class="card" data-testid="mesh-onboard">
       <h2>{t("mesh.onboard.title")}</h2>
       <p class="hint">{t("mesh.onboard.intro")}</p>
-      <Field label={t("mesh.onboard.tags")} hint={t("mesh.tags.hint")}>
+      <Field label={t("mesh.onboard.tags")} hint={t("mesh.onboard.tagsHint")}>
         <input type="text" value={tags} onInput={(e) => setTags((e.currentTarget as HTMLInputElement).value)} aria-invalid={!parsed.ok} autocomplete="off" data-testid="mesh-onboard-tags" />
       </Field>
       <Field label={t("mesh.onboard.ttl")}>
