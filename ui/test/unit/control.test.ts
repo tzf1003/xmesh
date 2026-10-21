@@ -12,7 +12,7 @@ import {
   parseStatus,
 } from "../../src/shared/control";
 import type { CiBinding } from "../../src/shared/control";
-import { deriveIcon } from "../../src/shared/state";
+import { deriveIcon, deriveTrayIcon } from "../../src/shared/state";
 import { eventFixture, fixture, peersFixture, statusFixture, statusWith, warningOf } from "../../testserver/fixtures";
 
 test("apiMajor and compatibility", () => {
@@ -156,6 +156,22 @@ test("icon priority (RUL-18): offline > mismatch > draining > restart > degraded
   assert.equal(deriveIcon(c({ ci: { bindings: [fixture<CiBinding>("CiBinding.busy")] } })), "ok");
   // The contract's own degraded fixture follows the same order.
   assert.equal(deriveIcon({ kind: "connected", status: statusFixture("degraded-draining"), peers: [] }), "draining");
+});
+
+test("system tray keeps a checkmark while the kernel responds and retains detailed health", () => {
+  assert.equal(deriveTrayIcon({ kind: "offline" }), "offline");
+  assert.equal(deriveTrayIcon({ kind: "mismatch", kernelVersion: "", apiVersion: "3.0" }), "mismatch");
+  for (const patch of [
+    {},
+    { warnings: [warningOf("peer_offline", "warning")] },
+    { warnings: [warningOf("policy_reload_failed", "error")] },
+    { restart_required: true },
+    { drain: { draining: true, mode: "keep" as const, since: "2026-10-16T15:30:00.000Z" } },
+    { ci: { bindings: [fixture<CiBinding>("CiBinding.broken")] } },
+  ]) {
+    const connection = { kind: "connected" as const, status: statusWith(patch), peers: [] };
+    assert.equal(deriveTrayIcon(connection), "ok");
+  }
 });
 
 test("minor-version status additions retain recognized roles and unknown enum strings",()=>{

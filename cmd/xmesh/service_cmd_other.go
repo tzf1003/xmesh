@@ -12,6 +12,10 @@ func userTaskAction(string, *service.Config) error {
 	return fmt.Errorf("Windows 用户任务仅适用于 Windows")
 }
 
+func userTaskStatus(*service.Config) (service.Status, error) {
+	return service.StatusUnknown, fmt.Errorf("Windows 用户任务仅适用于 Windows")
+}
+
 func removeUserTasksUnder(string) (int, error) {
 	return 0, fmt.Errorf("Windows 用户任务仅适用于 Windows")
 }

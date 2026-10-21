@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kardianos/service"
@@ -31,6 +32,33 @@ const (
 // platformServiceMissing recognises the SCM's "no such service".
 func platformServiceMissing(err error) bool {
 	return errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST)
+}
+
+func userTaskStatus(c *service.Config) (service.Status, error) {
+	if err := userTaskAction("probe", c); err != nil {
+		return service.StatusUnknown, err
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return service.StatusUnknown, err
+	}
+	directory, err := windows.GetSystemDirectory()
+	if err != nil {
+		return service.StatusUnknown, err
+	}
+	name := userTaskName(c.Name, user.User.Sid.String())
+	// COM exposes a numeric state on every Windows language. A queued or
+	// running task already owns its next launch and must be reused by setup.
+	script := `$ErrorActionPreference='Stop'; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $t=$s.GetFolder('\').GetTask('` + strings.ReplaceAll(name, "'", "''") + `'); [Console]::Write([int]$t.State)`
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, filepath.Join(directory, "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return service.StatusUnknown, fmt.Errorf("Windows 用户任务状态查询失败: %w: %s", err, output)
+	}
+	return userTaskRuntimeStatus(string(output))
 }
 
 // userTaskAction drives the logon task that install registers for the current user.
@@ -64,6 +92,8 @@ func userTaskAction(action string, c *service.Config) error {
 		}
 	}
 	switch action {
+	case "probe":
+		return nil
 	case "uninstall":
 		return run("/Delete", "/TN", name, "/F")
 	case "start":

@@ -144,7 +144,7 @@ drain 经控制通道重复调用的结果是确定的，不报错：已在 `kee
 
 ## RUL-18
 
-托盘状态的优先级是：未运行，版本不匹配，排空中，需重启，降级，正常，取第一条命中的（[CTR-CTL-03](control.md#ctr-ctl-03)）。降级只看 `severity` 为 `warning` 或 `error` 的警告；`restart_required` 与 `allow_dangerous` 是 `info`，不使图标变黄。理由：排空是用户主动动作，应该比被动告警更显眼；需重启已有专门图标，不重复变黄。
+系统托盘图标表示本机内核连接状态：未运行、版本不匹配或已连接（对号）。面板状态与提示文本的优先级是：未运行，版本不匹配，排空中，需重启，降级，正常，取第一条命中的（[CTR-CTL-03](control.md#ctr-ctl-03)）。降级由 `severity` 为 `warning` 或 `error` 的警告或异常 CI 运行器触发；`restart_required` 与 `allow_dangerous` 是 `info`。对端离线等详细状态在面板和菜单中展示，系统图标保持表示内核连接。
 
 ## RUL-20
 

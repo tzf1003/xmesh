@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"github.com/kardianos/service"
 	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/privdir"
-	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
 const computerServiceName = "xmesh-computer-host"
@@ -42,6 +40,21 @@ func computerServiceConfig(executable, helper, state string) *service.Config {
 		c.Option["LaunchdConfig"] = computerLaunchdConfig
 	}
 	return c
+}
+
+func ensureComputerServiceStarted(status func() (service.Status, error), install, start func() error) error {
+	current, err := status()
+	if err != nil {
+		if !serviceMissing(err) {
+			return err
+		}
+		if err := install(); err != nil {
+			return err
+		}
+	} else if current == service.StatusRunning {
+		return nil
+	}
+	return start()
 }
 
 // The desktop host starts only as part of a graphical user session. In particular
@@ -142,28 +155,30 @@ func computerService(action string, args []string) error {
 			return client.Authorize(ctx)
 		}
 		serviceArgs := []string{"--state-dir", statePath, "--helper", path}
-		// Start first so an existing per-user installation is retained. Only install
-		// after the platform reports absence; other failures remain visible.
-		if err := computerService("start", serviceArgs); err != nil {
-			var missing *toolerr.Error
-			if !serviceMissing(err) && !(errors.As(err, &missing) && missing.Code == "not_found" && missing.Fields["reason"] == "not_installed") {
+		status := func() (service.Status, error) {
+			return userTaskStatus(c)
+		}
+		if runtime.GOOS != "windows" {
+			s, err := service.New(&program{}, c)
+			if err != nil {
 				return err
 			}
-			if err := computerService("install", serviceArgs); err != nil {
-				return err
-			}
-			if err := computerService("start", serviceArgs); err != nil {
-				return err
-			}
+			status = s.Status
+		}
+		if err := ensureComputerServiceStarted(status,
+			func() error { return computerService("install", serviceArgs) },
+			func() error { return computerService("start", serviceArgs) },
+		); err != nil {
+			return err
 		}
 		client := computer.NewClient(computer.EndpointForState(statePath))
 		defer client.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		var err error
+		var authErr error
 		for ctx.Err() == nil {
-			err = client.Authorize(ctx)
-			if err == nil {
+			authErr = client.Authorize(ctx)
+			if authErr == nil {
 				return nil
 			}
 			select {
@@ -171,7 +186,7 @@ func computerService(action string, args []string) error {
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
-		return err
+		return authErr
 	}
 	if action == "install" {
 		if strings.Contains(filepath.ToSlash(exe), "/go-build") {
