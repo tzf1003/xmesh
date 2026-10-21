@@ -8,6 +8,7 @@ import { useCopy } from "../design-copy";
 import { DEFAULT_APP_PREFERENCES } from "../../shared/preferences";
 import { isFontName, ZOOM_STEPS } from "../../shared/display";
 import { About } from "./About";
+import { Config } from "./Config";
 
 function SettingRow({ title, sub, children }: { title: string; sub: string; children: ComponentChildren }): JSX.Element {
   return <div class="setting-row"><div><strong>{title}</strong><p>{sub}</p></div><div class="setting-control">{children}</div></div>;
@@ -18,7 +19,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   const [diagnostics, setDiagnostics] = useState(false);
   const [font, setFont] = useState(ctx.snapshot.settings.display.uiFont);
   const [code, setCode] = useState(ctx.snapshot.settings.display.codeFont);
-  useEffect(() => { if (ctx.focus?.settingsTab) setTab(ctx.focus.settingsTab); }, [ctx.focus?.settingsTab]);
+  useEffect(() => setTab(ctx.focus?.settingsTab ?? "general"), [ctx.focus?.settingsTab]);
   const prefs = { ...DEFAULT_APP_PREFERENCES, ...ctx.snapshot.settings.preferences, locale: ctx.snapshot.settings.locale };
   const display = ctx.snapshot.settings.display;
   useEffect(() => { setFont(display.uiFont); setCode(display.codeFont); }, [display.uiFont, display.codeFont]);
@@ -28,7 +29,7 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
   return <div class="page control-page settings-page" data-testid="page-settings">
     <PageHead title={c("设置", "Settings")} sub={c("让 xmesh 更贴合你的工作习惯。", "Make xmesh fit the way you work.")} />
     <div class="settings-layout"><nav class="settings-local-nav" aria-label={c("设置分类", "Settings sections")}>
-      {([ ["general", c("通用", "General"), "sliders"], ["diagnostics", c("存储与诊断", "Storage & diagnostics"), "folder"], ["about", c("关于与更新", "About & updates"), "info"] ] as const).map(([id,label,icon]) => <button type="button" aria-current={tab === id ? "page" : undefined} data-testid={`settings-tab-${id}`} onClick={() => { setTab(id); ctx.go("settings", { settingsTab: id }); }}><Icon name={icon}/><span>{label}</span></button>)}
+      {([ ["general", c("通用", "General"), "sliders"], ["configuration", c("内核配置", "Kernel configuration"), "code"], ["diagnostics", c("存储与诊断", "Storage & diagnostics"), "folder"], ["about", c("关于与更新", "About & updates"), "info"] ] as const).map(([id,label,icon]) => <button type="button" aria-current={tab === id ? "page" : undefined} data-testid={`settings-tab-${id}`} onClick={() => ctx.go("settings", { settingsTab: id })}><Icon name={icon}/><span>{label}</span></button>)}
     </nav><div class="settings-main">
       {tab === "general" && <>
         <section class="settings-card"><h2>{c("外观与语言", "Appearance & language")}</h2>
@@ -43,14 +44,15 @@ export function Settings({ ctx }: { ctx: PageContext }): JSX.Element {
           <SettingRow title={c("关闭窗口后保留在菜单栏", "Keep running in the tray")} sub={c("关闭面板后可从菜单栏重新打开。", "Reopen the panel from the tray after closing it.")}><input type="checkbox" role="switch" aria-label={c("关闭窗口后保留在菜单栏", "Keep running in the tray")} checked={prefs.closeToTray} onChange={e => setPrefs({ closeToTray: e.currentTarget.checked })}/></SettingRow>
         </section><p class="hint settings-context"><Icon name="info"/>{c("Agent、Gateway 与 Ingress 的设置可从顶部角色菜单打开。CI 和 Tailscale 在各自模块中管理。", "Open role settings from the top bar. CI and Tailscale settings live in their modules.")}</p>
       </>}
+      {tab === "configuration" && <Config ctx={ctx} onDirtyChange={ctx.setConfigDirty} />}
       {tab === "diagnostics" && <>
         <section class="settings-card"><h2>{c("本机数据", "Local data")}</h2>
           <SettingRow title={c("设备名称", "Device name")} sub={c("设备名称与联网方式在本机设备设置中调整。", "Manage the node name and networking in device settings.")}><button type="button" class="btn" onClick={() => ctx.openSettings("node")}>{c("本机设置", "Device settings")}</button></SettingRow>
           {([ ["config",c("配置位置", "Configuration location")], ["logs",c("应用日志", "Application logs")], ["audit",c("审计记录", "Audit records")] ] as const).map(([kind,title]) => <SettingRow title={title} sub={c("打开当前节点的实际目录。", "Open the current node's directory.")}><button type="button" class="btn" onClick={() => void run(getApi().openPath(kind))}>{c("打开位置", "Open folder")}</button></SettingRow>)}
-        </section><section class="settings-card"><h2>{c("诊断与恢复", "Diagnostics & recovery")}</h2><SettingRow title={c("诊断摘要", "Diagnostic summary")} sub={c("查看应用版本、角色状态和连接概况。", "Inspect role and connection state.")}><button type="button" class="btn" onClick={() => setDiagnostics(true)}>{c("查看摘要", "View summary")}</button></SettingRow><SettingRow title={c("配置恢复", "Configuration recovery")} sub={c("配置文件无法读取时，用源码视图定位并修复错误。", "Recover an invalid configuration with the source editor.")}><button type="button" class="text-button" onClick={() => ctx.go("config", { configView: "source" })}>{c("修复配置", "Repair configuration")}</button></SettingRow></section>
+        </section><section class="settings-card"><h2>{c("诊断与恢复", "Diagnostics & recovery")}</h2><SettingRow title={c("诊断摘要", "Diagnostic summary")} sub={c("查看应用版本、角色状态和连接概况。", "Inspect role and connection state.")}><button type="button" class="btn" onClick={() => setDiagnostics(true)}>{c("查看摘要", "View summary")}</button></SettingRow><SettingRow title={c("配置恢复", "Configuration recovery")} sub={c("配置文件无法读取时，用源码视图定位并修复错误。", "Recover an invalid configuration with the source editor.")}><button type="button" class="text-button" onClick={() => ctx.go("settings", { settingsTab: "configuration" })}>{c("修复配置", "Repair configuration")}</button></SettingRow></section>
       </>}
       {tab === "about" && <About ctx={ctx} />}
-      {tab !== "about" && <details class="maintenance-tools" data-testid="settings-maintenance"><summary>{c("维护工具", "Maintenance tools")}<Icon name="chevron"/></summary><p class="hint">{c("需要调整初始设备或接入方式时，可重新运行设置向导。", "Run setup again to configure a device or client.")}</p><button type="button" class="text-button" data-testid="settings-open-setup" onClick={() => ctx.go("setup")}>{c("重新运行设置向导", "Run setup again")}<Icon name="arrow"/></button></details>}
+      {tab !== "about" && tab !== "configuration" && <details class="maintenance-tools" data-testid="settings-maintenance"><summary>{c("维护工具", "Maintenance tools")}<Icon name="chevron"/></summary><p class="hint">{c("需要调整初始设备或接入方式时，可重新运行设置向导。", "Run setup again to configure a device or client.")}</p><button type="button" class="text-button" data-testid="settings-open-setup" onClick={() => ctx.go("setup")}>{c("重新运行设置向导", "Run setup again")}<Icon name="arrow"/></button></details>}
     </div></div>
     {diagnostics && <Dialog title={c("诊断摘要", "Diagnostics")} onClose={() => setDiagnostics(false)}><dl class="overview-facts"><dt>{c("连接状态", "Connection")}</dt><dd>{ctx.snapshot.connection.kind}</dd><dt>{c("角色", "Roles")}</dt><dd>{ctx.snapshot.connection.kind === "connected" ? ctx.snapshot.connection.status.roles.join(", ") : "—"}</dd><dt>{c("当前节点", "Current node")}</dt><dd>{ctx.snapshot.selectedInstance || "—"}</dd><dt>{c("应用版本", "App version")}</dt><dd>{ctx.snapshot.update.current}</dd></dl><button type="button" class="btn" onClick={() => setDiagnostics(false)}>{c("关闭", "Close")}</button></Dialog>}
   </div>;

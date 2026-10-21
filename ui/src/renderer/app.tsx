@@ -48,8 +48,7 @@ export interface PageFocus {
   role?: Role;
   peer?: string;
   meshTab?: "devices" | "onboard" | "policy" | "matrix" | "derp";
-  configView?: "form" | "source";
-  settingsTab?: "general" | "diagnostics" | "about";
+  settingsTab?: "general" | "configuration" | "diagnostics" | "about";
   sessionsTab?: "live" | "history" | "resources";
 }
 
@@ -110,6 +109,7 @@ export function App(): JSX.Element {
   const [configDirty, setConfigDirty] = useState(false);
   const [configRevision, setConfigRevision] = useState(0);
   const [pendingNavigation, setPendingNavigation] = useState<PanelTarget>();
+  const [pendingPage, setPendingPage] = useState<{ page: PageId; focus?: PageFocus }>();
   const externalNavigation = useRef<(target: PanelTarget) => void>(() => {});
   const { toasts, push } = useToasts();
   // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
@@ -117,8 +117,13 @@ export function App(): JSX.Element {
   const navigate = (next: PageId, nextFocus?: PageFocus, discardModule = false): void => {
     if (next === "about") { next = "settings"; nextFocus = { ...nextFocus, settingsTab: "about" }; }
     if (next === "audit") { next = "sessions"; nextFocus = { ...nextFocus, sessionsTab: "history" }; }
-    if (next === "settings" && (nextFocus?.role || nextFocus?.section)) { setModuleScope(nextFocus.role ?? (nextFocus.section === "transfers" ? "transfers" : nextFocus.section === "node" ? "node" : "agent")); return; }
+    if (next === "settings" && (nextFocus?.role || nextFocus?.section)) {
+      if (configDirty) return;
+      setModuleScope(nextFocus.role ?? (nextFocus.section === "transfers" ? "transfers" : nextFocus.section === "node" ? "node" : "agent"));
+      return;
+    }
     if (moduleScope) { if (configDirty && !discardModule) { setCloseModule(true); return; } setModuleScope(undefined); }
+    if (configDirty && !discardModule && (next !== current || next === "settings" && nextFocus?.settingsTab !== focus?.settingsTab)) { setPendingPage({ page: next, focus: nextFocus }); return; }
     if (discardModule || next !== current) setConfigDirty(false);
     setFocus(nextFocus);
     setPage(next);
@@ -216,6 +221,7 @@ export function App(): JSX.Element {
             /><ModuleSettings key={`${snapshot.selectedInstance}:${moduleScope}`} ctx={ctx} scope={moduleScope} onDirtyChange={setConfigDirty}/>{moduleScope === "gateway" && snapshot.connection.kind === "connected" && snapshot.connection.status.gateway && <GatewayCard ctx={ctx} gateway={snapshot.connection.status.gateway}/>}</Dialog>}
       {closeModule && <Confirm title={snapshot.settings.locale === "en" ? "Discard changes?" : "放弃未保存的修改？"} body={snapshot.settings.locale === "en" ? "Your module settings have unsaved changes." : "此模块中有尚未保存的修改。"} confirmLabel={snapshot.settings.locale === "en" ? "Discard" : "放弃修改"} onCancel={() => setCloseModule(false)} onConfirm={() => { setModuleScope(undefined); setConfigDirty(false); setCloseModule(false); }}/>}
       {pendingNavigation && <Confirm title={snapshot.settings.locale === "zh" ? "离开当前页面？" : "Leave this page?"} body={snapshot.settings.locale === "zh" ? "当前页面有未保存的修改。继续将放弃这些修改。" : "This page has unsaved changes. Continuing will discard them."} confirmLabel={snapshot.settings.locale === "zh" ? "放弃并继续" : "Discard and continue"} onCancel={() => setPendingNavigation(undefined)} onConfirm={() => applyNavigation(pendingNavigation)}/>}
+      {pendingPage && <Confirm title={t("topology.configDirty")} body={t("config.unsaved")} confirmLabel={t("config.discard")} onCancel={() => setPendingPage(undefined)} onConfirm={() => { const target = pendingPage; setPendingPage(undefined); navigate(target.page, target.focus, true); }}/>}
       {showDisplay && <DisplayDialog prefs={display} onClose={() => setShowDisplay(false)} />}
       {showSearch && <CommandPalette snapshot={snapshot} onClose={() => setShowSearch(false)} go={navigate}/>}
       <Toasts toasts={toasts} />

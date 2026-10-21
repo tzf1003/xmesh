@@ -17,6 +17,7 @@ export const NAVIGATION: readonly { id: PageId; label: Key; icon: IconName; grou
   { id: "playground", label: "pg.title", icon: "code", group: "runtime" },
   { id: "sessions", label: "nav.sessions", icon: "terminal", group: "network" },
   { id: "computer", label: "nav.computer", icon: "device", group: "runtime" },
+  { id: "config", label: "settings.nodeTitle", icon: "sliders", group: "access" },
   { id: "authz", label: "nav.authz", icon: "shield", group: "access" },
   { id: "ingress", label: "nav.ingress", icon: "globe", group: "access" },
   { id: "ci", label: "nav.ci", icon: "runner", group: "modules" },

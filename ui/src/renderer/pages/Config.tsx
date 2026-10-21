@@ -8,6 +8,7 @@ import { diffRows, isDirty, lineRange, needsRestart, weakening } from "../lib/co
 import { applySaved } from "../lib/reload";
 import { CONFIG_MAX_BYTES, type ActionError } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
+import { formatConfigSource } from "../../shared/config-yaml";
 
 interface Preview {
   changes: ConfigChange[];
@@ -20,20 +21,23 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
   const supported = ctx.can("config.read");
   const writable = ctx.can("config.write");
   const [loaded, setLoaded] = useState<ConfigResponse | undefined>();
+  const [baseline, setBaseline] = useState("");
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<ActionError | undefined>();
   const [preview, setPreview] = useState<Preview | undefined>();
   const [busy, setBusy] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { onDirtyChange?.(loaded !== undefined && isDirty(loaded.content, draft)); }, [loaded, draft, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(loaded !== undefined && isDirty(baseline, draft)); }, [loaded, baseline, draft, onDirtyChange]);
 
   const load = async (): Promise<void> => {
     const r = await getApi().getConfig();
     if (!r.ok) return setErr(r.error);
     setErr(undefined);
+    const content = formatConfigSource(r.data.content);
     setLoaded(r.data);
-    setDraft(r.data.content);
+    setBaseline(content);
+    setDraft(content);
     setPreview(undefined);
     setAskDiscard(false);
   };
@@ -45,25 +49,28 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
   if (!supported) {
     return (
       <div class="page">
-        <PageHead title={t("nav.config")} />
-        <NotSupported what={t("nav.config")} />
+        <PageHead title={t("config.title")} />
+        <NotSupported what={t("config.title")} />
       </div>
     );
   }
 
-  const dirty = loaded !== undefined && isDirty(loaded.content, draft);
+  const dirty = loaded !== undefined && isDirty(baseline, draft);
+  const savable = loaded !== undefined && isDirty(loaded.content, draft);
   const tooBig = new TextEncoder().encode(draft).length > CONFIG_MAX_BYTES;
 
   const review = async (): Promise<void> => {
     if (!loaded) return;
     setBusy(true);
     ctx.applied(undefined);
-    const r = await getApi().putConfig({ content: draft, etag: loaded.etag, dryRun: true });
+    const content = formatConfigSource(draft);
+    setDraft(content);
+    const r = await getApi().putConfig({ content, etag: loaded.etag, dryRun: true });
     setBusy(false);
     if (!r.ok) return setErr(r.error);
     setErr(undefined);
-    // An empty diff with a changed draft means only comments or layout differ; that is still saved, as written.
-    setPreview({ changes: r.data.diff, content: draft });
+    // The preview and save use the same formatted text.
+    setPreview({ changes: r.data.diff, content });
   };
 
   const save = async (): Promise<void> => {
@@ -92,7 +99,7 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
 
   return (
     <div class="page" data-testid="config-source">
-      <PageHead title={t("nav.config")} sub={loaded ? loaded.etag.slice(0, 19) + "…" : undefined}>
+      <PageHead title={t("config.title")} sub={t("config.sub")}>
         <div class="row">
           <button type="button" class="btn" onClick={() => (dirty ? setAskDiscard(true) : void load())} data-testid="config-reload">
             {t("config.reload")}
@@ -161,7 +168,7 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
             value={draft}
             spellcheck={false}
             readOnly={!writable || !loaded}
-            aria-label={t("nav.config")}
+            aria-label={t("config.title")}
             aria-invalid={tooBig}
             onInput={(e) => {
               setDraft((e.currentTarget as HTMLTextAreaElement).value);
@@ -173,10 +180,13 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
         </label>
         {tooBig && <Banner kind="danger">{t("config.tooBig")}</Banner>}
         <div class="row">
-          <button type="button" class="btn primary" disabled={!writable || !dirty || busy || tooBig} onClick={() => void review()} data-testid="config-review">
+          <button type="button" class="btn" disabled={!writable || !loaded || busy || tooBig} onClick={() => { setDraft(formatConfigSource(draft)); setPreview(undefined); }} data-testid="config-format">
+            {t("config.format")}
+          </button>
+          <button type="button" class="btn primary" disabled={!writable || !savable || busy || tooBig} onClick={() => void review()} data-testid="config-review">
             {t("config.review")}
           </button>
-          <button type="button" class="btn" disabled={!dirty} onClick={() => { setDraft(loaded?.content ?? ""); setPreview(undefined); }}>
+          <button type="button" class="btn" disabled={!dirty} onClick={() => { setDraft(baseline); setPreview(undefined); }}>
             {t("config.revert")}
           </button>
           {dirty && <Badge kind="warn">{t("config.unsaved")}</Badge>}

@@ -31,7 +31,7 @@ async function open(opts: Parameters<typeof launch>[0] = {}, nav?: string): Prom
       await navigate(page, "sessions");
       await page.getByTestId("sessions-tab-history").click();
     } else await navigate(page, nav);
-    await expect(page.getByTestId(`page-${nav === "audit" ? "sessions" : nav}`)).toBeVisible();
+    await expect(page.getByTestId(nav === "config" ? "config-source" : `page-${nav === "audit" ? "sessions" : nav}`)).toBeVisible();
   }
   return page;
 }

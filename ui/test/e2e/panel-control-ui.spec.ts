@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { launch, navigate, openModuleSettings, type Harness } from "./helpers";
 import type { Capability, ToolExecution } from "../../src/shared/control";
+import { parse } from "yaml";
 const CAPS:Capability[]=["status","events","peers","sessions","drain","config.read","config.write","pair","pats","ingress","gateway","audit","ci"];
 let h:Harness;
 test.afterEach(async()=>{await h?.close()});
@@ -8,7 +9,16 @@ test.afterEach(async()=>{await h?.close()});
 test("settings owns appearance, about and low-frequency setup; role menus are reachable",async()=>{
  h=await launch({kernel:{capabilities:CAPS}});const page=await h.openPanel();
  await expect(page.getByTestId("nav-advanced")).toHaveCount(0);
- await expect(page.getByTestId("nav-config")).toHaveCount(0);
+ await expect(page.getByTestId("nav-config")).toHaveText("节点与网络");
+ await expect(page.getByTestId("nav-config").locator("xpath=following-sibling::button[1]")).toHaveAttribute("data-testid","nav-authz");
+ await page.getByTestId("nav-config").click();
+ await expect(page.getByTestId("nav-config")).toHaveAttribute("aria-current","page");
+ await expect(page.getByTestId("page-config")).toBeVisible();
+ await expect(page.getByTestId("settings-node")).toBeVisible();
+ await expect(page.getByTestId("config-editor")).toHaveCount(0);
+ await navigate(page,"kernel-config");
+ await expect(page.getByTestId("config-editor")).toBeVisible();
+ await expect(page.getByTestId("settings-tab-configuration")).toHaveAttribute("aria-current","page");
  await expect(page.getByTestId("nav-about")).toHaveCount(0);
  await expect(page.getByTestId("nav-setup")).toHaveCount(0);
  await expect(page.getByTestId("nav-ci")).toBeVisible();await expect(page.getByTestId("nav-mesh")).toBeVisible();
@@ -17,6 +27,44 @@ test("settings owns appearance, about and low-frequency setup; role menus are re
  await page.getByTestId("settings-tab-about").click();await expect(page.getByTestId("page-about")).toBeVisible();
  await page.getByTestId("settings-tab-general").click();await expect(page.getByTestId("settings-open-setup")).not.toBeVisible();
  await page.getByTestId("settings-maintenance").locator("summary").click();await page.getByTestId("settings-open-setup").click();await expect(page.getByTestId("page-setup")).toBeVisible();
+});
+
+test("kernel configuration formats legacy JSON and saves YAML under Settings",async({},info)=>{
+ h=await launch({kernel:{capabilities:CAPS}});
+ const original={schema_version:2,node:{name:"config-test",roles:["agent","gateway"]},mesh:{lan:{enabled:true,mdns:true},tailnet:{enabled:false}},agent:{default_cwd:"/tmp",cwd_policy:{allow:["/tmp"]}},gateway:{listen:"127.0.0.1:8080"},audit:{retention:"24h"}};
+ h.kernel.panel.setContent(JSON.stringify(original));
+ const page=await h.openPanel();const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+ await navigate(page,"kernel-config");
+ await expect(page.getByRole("heading",{name:"内核配置",exact:true})).toBeVisible();
+ const editor=page.getByTestId("config-editor");
+ await expect(editor).toHaveValue(/\n  "name": "config-test"/);
+ expect(parse(await editor.inputValue())).toEqual(original);expect(h.kernel.panel.writes).toEqual([]);
+ await editor.fill(JSON.stringify({...original,audit:{retention:"48h"}}));
+ await page.getByTestId("config-format").click();
+ await expect(editor).toHaveValue(/\n  "retention": "48h"/);
+ await page.getByTestId("settings-tab-general").click();await expect(page.getByTestId("confirm")).toBeVisible();await page.getByTestId("confirm-cancel").click();
+ await expect(editor).toHaveValue(/48h/);
+ await page.getByTestId("config-review").click();await page.getByTestId("confirm-ok").click();
+ await expect.poll(()=>h.kernel.panel.writes.length).toBe(1);expect(parse(h.kernel.panel.content).audit.retention).toBe("48h");expect(h.kernel.panel.content.trimStart().startsWith("{")).toBe(false);
+ await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:info.outputPath("kernel-config-desktop.png")});
+ await page.setViewportSize({width:640,height:900});const size=await page.locator("main").evaluate(e=>({client:e.clientWidth,scroll:e.scrollWidth}));expect(size.scroll).toBeLessThanOrEqual(size.client+1);await page.screenshot({path:info.outputPath("kernel-config-compact.png")});
+ expect(errors).toEqual([]);
+});
+
+test("role search preserves configuration drafts and opens settings after discard",async()=>{
+ h=await launch({kernel:{capabilities:CAPS}});const page=await h.openPanel();
+ for(const source of [false,true]){
+  await navigate(page,source?"kernel-config":"config");
+  const field=page.getByTestId(source?"config-editor":"settings-name");const draft=source?"# retained YAML draft\n":"retained-node-draft";
+  await field.fill(draft);
+  await page.getByTestId("open-search").click();await page.getByTestId("command-input").fill("Agent ·");await page.getByTestId("command-input").press("Enter");
+  await expect(page.getByTestId("command-palette")).toHaveCount(0);await expect(page.getByTestId("module-settings-dialog")).toHaveCount(0);await expect(field).toHaveValue(draft);
+  const destination=page.getByTestId(source?"settings-tab-general":"nav-settings");
+  await destination.click();await expect(page.getByTestId("confirm")).toBeVisible();await page.getByTestId("confirm-cancel").click();await expect(field).toHaveValue(draft);
+  await destination.click();await page.getByTestId("confirm-ok").click();await expect(page.getByTestId("settings-tab-general")).toHaveAttribute("aria-current","page");
+ }
+ await page.getByTestId("open-search").click();await page.getByTestId("command-input").fill("Agent ·");await page.getByTestId("command-input").press("Enter");
+ await expect(page.getByTestId("module-settings-dialog")).toBeVisible();
 });
 
 test("live tools and asynchronous tasks retain their states; history paginates and exposes audit metadata",async()=>{
