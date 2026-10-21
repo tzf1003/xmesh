@@ -77,6 +77,49 @@ test("orthogonal links connect card boundaries and animate with motion preferenc
   await expect(flow).toHaveCSS("animation-name", "none");
 });
 
+test("canvas returns after compact viewport and panel width changes", async () => {
+  const page = await open();
+  const canvas = page.getByTestId("topology-canvas");
+  for (const compact of ["viewport", "panel"]) {
+    if (compact === "viewport") await page.setViewportSize({ width: 640, height: 1000 });
+    else await page.getByTestId("topology").evaluate(el => el.style.setProperty("width", "520px"));
+    await expect(page.locator(".graph-list")).toBeVisible();
+    await expect(canvas).toBeHidden();
+    await page.getByTestId("topology").evaluate(el => el.style.removeProperty("width"));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect(canvas).toBeVisible();
+    await expect(page.locator(".graph-list")).toBeHidden();
+    await expect(page.locator('[data-node="mac-dev-01"]')).toBeVisible();
+  }
+});
+
+test("relay routes stay highlighted when selecting peers or focusing relays", async () => {
+  const page = await open();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const trunk = page.locator('[data-edge="relay:hkg"]');
+  const hop = page.locator('[data-edge="cloud-vm"]');
+  const direct = page.locator('[data-edge="mac-dev-01"]');
+  const peer = page.locator('[data-node="cloud-vm"]');
+  await peer.hover();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+  await expect(direct).toHaveClass(/edge-dim/);
+  await peer.click();
+  await page.getByTestId("topology-inspector").hover();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+  await page.locator('[data-node="mac-dev-01"]').click();
+  const relay = page.locator(".relay-node").filter({ hasText: "hkg" });
+  await relay.hover();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+  await expect(direct).toHaveClass(/edge-dim/);
+  await page.getByTestId("topology-inspector").hover();
+  await relay.focus();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+});
+
 test("new and reconnected peers receive one arrival echo per online transition", async () => {
   const page = await open();
   await page.emulateMedia({ reducedMotion: "no-preference" });

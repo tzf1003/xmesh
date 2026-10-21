@@ -68,11 +68,13 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
     if (ctx.focus?.peer) { setSelected(ctx.focus.peer); setMode("connections"); setOnlyOnline(false); setTag(""); }
   }, [ctx.focus]);
   useLayoutEffect(() => {
-    const el = stage.current;
+    const el = stage.current?.parentElement;
     if (!el) return;
-    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    // The panel remains measurable while the canvas uses its compact fallback.
+    const measure = (): void => setWidth(Math.max(0, el.clientWidth - 16));
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
-    setWidth(el.clientWidth);
+    measure();
     return () => observer.disconnect();
   }, [mode, c.kind]);
   useLayoutEffect(() => {
@@ -91,6 +93,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   const tags = [...new Set(peers.flatMap((p) => p.tags))].sort();
   // Lay out the full snapshot before filtering so controls preserve device geometry.
   const layout = layoutTopology(peers, slots, width);
+  const activeSource = layout.edges.find(edge => edge.to === active)?.from;
   const plotted = layout.nodes.flatMap(n => n.peer && !n.peer.self ? [n.peer] : []);
   const unplotted = peers.length - 1 - plotted.length;
   const visibleIds = new Set(visible.map(peerKey));
@@ -124,7 +127,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
           {!ctx.can("peers") && <NotSupported what={t("nav.devices")}/>}
           <div ref={stage} class={`graph-stage ${width < 560 ? "graph-dense" : ""}`} data-height={layout.height} data-testid="topology-canvas" onClick={(e) => { if (e.target === e.currentTarget) select(selfId); }}>
             <svg class="graph-edges" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden="true">
-              {layout.edges.filter(edge => visibleIds.has(edge.to) || visibleRelays.has(edge.to)).map(edge => <g key={edge.id} data-edge={edge.to} data-kind={edge.kind} class={active !== selfId && active !== edge.to && active !== edge.from ? "edge-dim" : ""}>
+              {layout.edges.filter(edge => visibleIds.has(edge.to) || visibleRelays.has(edge.to)).map(edge => <g key={edge.id} data-edge={edge.to} data-kind={edge.kind} class={active !== selfId && active !== edge.to && active !== edge.from && activeSource !== edge.to ? "edge-dim" : ""}>
                 <path class={`graph-link ${edge.kind}`} d={edge.path}/>
                 {(edge.kind === "direct" || edge.kind === "derp") && <path class={`graph-flow ${edge.kind}`} d={edge.path}/>}
               </g>)}
@@ -133,7 +136,7 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
               kind={node.peer.self ? `self state-${deriveIcon(c)}` : `${linkKind(node.peer)}${node.peer.online && arrivals.has(node.id) ? " arriving" : ""}`}
               title={node.peer.name} sub={node.peer.self ? status.roles.join(" + ") : connectionText(node.peer, t)} onSelect={() => select(node.id)} onHover={setHover}>
               {node.peer.self ? <span class="node-role">{t("devices.self")}</span> : node.peer.info?.error ? <span class="node-role issue" title={node.peer.info.error}>{t("devices.infoFailed")}</span> : undefined}
-            </Node> : visibleRelays.has(node.id) && <Relay key={node.id} point={node} region={node.region!} onClick={() => ctx.go("mesh", { meshTab: "derp" })}/>)}
+            </Node> : visibleRelays.has(node.id) && <Relay key={node.id} id={node.id} point={node} region={node.region!} onHover={setHover} onClick={() => ctx.go("mesh", { meshTab: "derp" })}/>)}
           </div>
           <div class={`graph-list ${width < 560 ? "graph-dense-list" : ""}`} aria-label={t("nav.devices")}>
             {visible.map((p) => <button type="button" key={peerKey(p)} aria-pressed={peerKey(picked) === peerKey(p)} onClick={() => select(peerKey(p))} class="graph-list-row"><Icon name="device"/><strong>{p.name}</strong><span>{connectionText(p, t)}</span></button>)}
@@ -184,11 +187,13 @@ export function Topology({ ctx, calls }: { ctx: PageContext; calls: CallEventDat
   </div>;
 }
 
-function Relay({ point, region, onClick }: { point: Point; region: string; onClick(): void }): JSX.Element {
+function Relay({ id, point, region, onClick, onHover }: { id: string; point: Point; region: string; onClick(): void; onHover(id: string | undefined): void }): JSX.Element {
   const t = useT();
   const ref = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => { ref.current?.style.setProperty("--x", `${point.x}px`); ref.current?.style.setProperty("--y", `${point.y}px`); }, [point.x, point.y]);
-  return <button type="button" ref={ref} class="relay-node" onClick={onClick}><Icon name="network"/><span>DERP · {region}</span><small>{t("topology.relay")}</small></button>;
+  return <button type="button" ref={ref} class="relay-node" onClick={onClick}
+    onMouseEnter={() => onHover(id)} onMouseLeave={() => onHover(undefined)}
+    onFocus={() => onHover(id)} onBlur={() => onHover(undefined)}><Icon name="network"/><span>DERP · {region}</span><small>{t("topology.relay")}</small></button>;
 }
 
 function connectionText(p: Peer, t: ReturnType<typeof useT>): string {
