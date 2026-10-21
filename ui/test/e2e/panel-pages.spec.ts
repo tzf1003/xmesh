@@ -104,11 +104,14 @@ test("overview: an unavailable Windows L2 shows its reason and degrades the stat
   await expect(page.getByTestId("warnings")).toContainText(reason);
 });
 
-test("overview: recent calls arrive over the event stream", async () => {
+test("overview: device calls arrive over the event stream", async () => {
   const page = await open();
-  h.kernel.emit("call", { tool: "exec.run", device: "d1", caller: "claude", oauth_client: null, status: "ok", error: null, duration_ms: 842 });
-  await expect(page.getByTestId("recent-calls")).toContainText("exec.run");
-  await expect(page.getByTestId("recent-calls")).toContainText("842");
+  await page.locator(".graph-node.self").click();
+  await page.getByTestId("inspector-tab-calls").click();
+  h.kernel.emit("call", { tool: "exec.run", device: "win-dev-01", caller: "claude", oauth_client: null, status: "ok", error: null, duration_ms: 842 });
+  const call = page.getByTestId("inspector-call").filter({ hasText: "exec.run" });
+  await expect(call).toContainText("842");
+  await expect(call.locator(".inspector-call-direction")).toHaveText("执行");
 });
 
 test("devices: peers are listed and a typed fingerprint is required to import a pair", async () => {

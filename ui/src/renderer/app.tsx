@@ -49,6 +49,7 @@ export interface PageFocus {
   peer?: string;
   meshTab?: "devices" | "onboard" | "policy" | "matrix" | "derp";
   settingsTab?: "general" | "configuration" | "diagnostics" | "about";
+  auditTool?: string;
   sessionsTab?: "live" | "history" | "resources";
 }
 

@@ -50,7 +50,7 @@ test("topology renders real routes, selects details and filters without moving p
   await page.getByTestId("topology-tag").selectOption("");
   h.kernel.emit("call", { tool: "exec.run", device: "win-dev-01", caller: "codex", oauth_client: "Codex Cloud", status: "ok", error: null, duration_ms: 842 });
   h.kernel.emit("call", { tool: "fs.read", device: "mac-dev-01", caller: "claude", oauth_client: "Claude Cloud", status: "ok", error: null, duration_ms: 38 });
-  await expect(page.locator('[data-node="caller:Codex Cloud"]')).toBeVisible();
+  await expect(page.locator('[data-node^="caller:"]')).toHaveCount(0);
   await page.locator('[data-node="win-dev-01"]').click();
   await capture(page, "desktop-light.png");
   await page.emulateMedia({ colorScheme: "dark" });
@@ -58,29 +58,66 @@ test("topology renders real routes, selects details and filters without moving p
   expect(errors).toEqual([]);
 });
 
-test("soft echoes stay centered behind the graph and follow reduced-motion preferences", async () => {
+test("orthogonal links connect card boundaries and animate with motion preferences", async () => {
   const page = await open();
   await page.setViewportSize({ width: 1440, height: 1050 });
   await page.emulateMedia({ reducedMotion: "no-preference", colorScheme: "dark" });
-  const background = page.locator(".graph-background");
-  const echo = page.locator(".graph-echo");
-  const wave = page.locator(".graph-wave").first();
-  await expect(background).toBeVisible();
-  const local = await page.locator(".graph-node.self").boundingBox();
-  const light = await echo.boundingBox();
-  expect(Math.abs(light!.width - light!.height)).toBeLessThan(1);
-  expect(Math.abs(light!.x + light!.width / 2 - local!.x - local!.width / 2)).toBeLessThan(1);
-  expect(Math.abs(light!.y + light!.height / 2 - local!.y - local!.height / 2)).toBeLessThan(1);
-  const before = await wave.evaluate((el) => getComputedStyle(el).transform);
-  await expect.poll(() => wave.evaluate((el) => getComputedStyle(el).transform)).not.toBe(before);
+  const flow = page.locator(".graph-flow").first();
+  await expect(flow).toBeVisible();
+  await expect(page.locator(".graph-edges marker, .graph-edges [marker-end]")).toHaveCount(0);
+  const paths = await page.locator(".graph-link").evaluateAll(els=>els.map(el=>el.getAttribute("d")));
+  for(const d of paths) expect(d).not.toMatch(/[CQAZ]/);
+  const before = await flow.evaluate(el=>getComputedStyle(el).strokeDashoffset);
+  await expect.poll(()=>flow.evaluate(el=>getComputedStyle(el).strokeDashoffset)).not.toBe(before);
   await page.locator('[data-node="mac-dev-01"]').click();
   await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("mac-dev-01");
   await page.getByTestId("topology-canvas").click({ position: { x: 8, y: 8 } });
   await expect(page.locator(".graph-node.self")).toHaveAttribute("aria-pressed", "true");
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(background).toBeHidden();
-  await expect(page.locator(".graph-ring").first()).toBeVisible();
-  await expect(wave).toHaveCSS("animation-name", "none");
+  await expect(flow).toHaveCSS("animation-name", "none");
+});
+
+test("canvas returns after compact viewport and panel width changes", async () => {
+  const page = await open();
+  const canvas = page.getByTestId("topology-canvas");
+  for (const compact of ["viewport", "panel"]) {
+    if (compact === "viewport") await page.setViewportSize({ width: 640, height: 1000 });
+    else await page.getByTestId("topology").evaluate(el => el.style.setProperty("width", "520px"));
+    await expect(page.locator(".graph-list")).toBeVisible();
+    await expect(canvas).toBeHidden();
+    await page.getByTestId("topology").evaluate(el => el.style.removeProperty("width"));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect(canvas).toBeVisible();
+    await expect(page.locator(".graph-list")).toBeHidden();
+    await expect(page.locator('[data-node="mac-dev-01"]')).toBeVisible();
+  }
+});
+
+test("relay routes stay highlighted when selecting peers or focusing relays", async () => {
+  const page = await open();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const trunk = page.locator('[data-edge="relay:hkg"]');
+  const hop = page.locator('[data-edge="cloud-vm"]');
+  const direct = page.locator('[data-edge="mac-dev-01"]');
+  const peer = page.locator('[data-node="cloud-vm"]');
+  await peer.hover();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+  await expect(direct).toHaveClass(/edge-dim/);
+  await peer.click();
+  await page.getByTestId("topology-inspector").hover();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+  await page.locator('[data-node="mac-dev-01"]').click();
+  const relay = page.locator(".relay-node").filter({ hasText: "hkg" });
+  await relay.hover();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
+  await expect(direct).toHaveClass(/edge-dim/);
+  await page.getByTestId("topology-inspector").hover();
+  await relay.focus();
+  await expect(trunk).not.toHaveClass(/edge-dim/);
+  await expect(hop).not.toHaveClass(/edge-dim/);
 });
 
 test("new and reconnected peers receive one arrival echo per online transition", async () => {
@@ -128,20 +165,39 @@ test("new and reconnected peers receive one arrival echo per online transition",
   expect(await recoveredNode.evaluate((el) => getComputedStyle(el, "::after").animationName)).toBe("none");
 });
 
-test("recent calls identify observed callers and the inspector filters by device", async () => {
+test("device calls filter by direction, shorten tool names and open matching logs", async () => {
   const page = await open();
-  h.kernel.emit("call", { tool: "exec.run", device: "mac-dev-01", caller: "test-cli", oauth_client: null, status: "ok", error: null, duration_ms: 120 });
-  await expect(page.locator('[data-node="caller:test-cli"]')).toContainText("最近调用方");
-  await page.locator('[data-node="caller:test-cli"]').click();
-  await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
-  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("test-cli");
+  const identity = `dev-${"a".repeat(64)}`;
+  const local = {...peersFixture()[0]!,device_id:identity};
+  h.kernel.setPeers([local,...peersFixture().slice(1)]);
+  h.kernel.emit("peer",{change:"updated",peer:local});
+  await expect(page.locator(`[data-node="${identity}"]`)).toBeVisible();
+  h.kernel.emit("call", { tool: `${identity}/sys.info`, device: "mac-dev-01", caller: `${identity}/SESSION`, oauth_client: null, status: "ok", error: null, duration_ms: 120 });
+  h.kernel.emit("call", { tool: "fs.read", device: "win-dev-01", caller: "mac-dev-01/REMOTE", oauth_client: null, status: "ok", error: null, duration_ms: 5 });
+  await page.getByTestId("inspector-tab-calls").click();
+  const rows=page.getByTestId("inspector-call");
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByTestId("topology-inspector")).toContainText("sys.info");
+  await expect(page.getByTestId("topology-inspector")).not.toContainText(identity);
+  await page.getByTestId("calls-initiated").click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("sys.info");
+  await page.getByTestId("calls-executed").click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("fs.read");
   await page.locator('[data-node="mac-dev-01"]').click();
   await page.getByTestId("inspector-tab-calls").click();
-  await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
+  await expect(rows).toContainText("sys.info");
+  await page.getByTestId("calls-all").click();
+  await expect(rows).toHaveCount(2);
+  await capture(page, "device-calls.png");
+  await rows.filter({hasText:"sys.info"}).getByRole("button").click();
+  await expect(page.getByTestId("sessions-tab-history")).toHaveAttribute("aria-selected","true");
+  await expect.poll(()=>h.kernel.requests.some(r=>r.path.includes("/v2/audit")&&r.path.includes("device=mac-dev-01")&&r.path.includes("tool="))).toBe(true);
+  await navigate(page,"overview");
   await page.getByTestId("topology-configuration").click();
   await expect(page.getByTestId("runtime-configuration")).toContainText("Gateway");
-  await expect(page.getByTestId("runtime-configuration")).toContainText("未配置 MCP 后端");
-  await capture(page, "configuration.png");
+  await capture(page,"configuration.png");
 });
 
 test("the primary client action copies usable configuration through the main process", async () => {
@@ -195,8 +251,8 @@ test("compact layout, large text and empty state remain usable", async () => {
   await page.locator(".graph-list-row").filter({ hasText: "mac-dev-01" }).click();
   await expect(page.getByTestId("topology-inspector")).toContainText("mac-dev-01");
   h.kernel.emit("call", { tool: "exec.run", device: "mac-dev-01", caller: "compact-cli", oauth_client: null, status: "ok", error: null, duration_ms: 20 });
-  await page.locator('[data-caller="compact-cli"]').click();
-  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("compact-cli");
+  await page.getByTestId("inspector-tab-calls").click();
+  await expect(page.getByTestId("topology-inspector").locator("h2")).toHaveText("mac-dev-01");
   await expect(page.getByTestId("topology-inspector")).toContainText("exec.run");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await capture(page, "compact.png");
@@ -213,7 +269,7 @@ test("compact layout, large text and empty state remain usable", async () => {
   await expect(page.getByTestId("topology")).toContainText("还没有其他设备入网");
 });
 
-test("peer updates retain geometry, distinguish pending routes and show sys.info errors separately", async () => {
+test("route updates adapt device bands, distinguish pending paths and show sys.info errors separately", async () => {
   const page = await open();
   const mac = page.locator('[data-node="mac-dev-01"]');
   const position = await mac.getAttribute("style");
@@ -222,7 +278,8 @@ test("peer updates retain geometry, distinguish pending routes and show sys.info
   h.kernel.emit("peer", { change: "updated", peer: peers[1]! });
   await expect(page.locator('[data-edge="cloud-vm"]')).toHaveAttribute("data-kind", "unknown");
   await expect(mac).toContainText("读取失败");
-  expect(await mac.getAttribute("style")).toBe(position);
+  expect(await mac.getAttribute("style")).not.toBe(position);
+  expect(await mac.getAttribute("style")).toContain("--y: 84px;");
   await expect(page.locator('[data-edge="mac-dev-01"]')).toHaveAttribute("data-kind", "direct");
   await mac.click();
   await expect(page.getByTestId("topology-inspector")).toContainText("sys.info timed out");
@@ -257,18 +314,16 @@ test("a disconnected kernel removes the live graph and still offers independent 
   await expect(page.getByTestId("mesh-devices")).toBeVisible();
 });
 
-test("leaving the topology preserves slots when a colliding device joins", async () => {
+test("leaving the topology preserves device positions after a snapshot reorder", async () => {
   const page = await open();
   const mac = page.locator('[data-node="mac-dev-01"]');
   await expect(mac).toHaveAttribute("style", /--x:/);
   const before = await mac.getAttribute("style");
   await navigate(page, "sessions");
-  const joined = { ...peersFixture()[1]!, name: "aa", node_id: "aa" };
-  h.kernel.setPeers([...peersFixture(), joined]);
-  h.kernel.emit("peer", { change: "added", peer: joined });
+  h.kernel.setPeers(peersFixture().reverse());
+  h.kernel.emit("peer", { change: "updated", peer: peersFixture()[1]! });
   await expect.poll(() => h.kernel.requests.filter((r) => r.path === "/v2/peers").length).toBeGreaterThan(1);
   await navigate(page, "overview");
-  await expect(page.locator('[data-node="aa"]')).toBeVisible();
   await expect(mac).toHaveAttribute("style", before!);
 });
 
