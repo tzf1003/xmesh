@@ -39,39 +39,7 @@ func Test_WindowsUserKernelStart(t *testing.T) {
 	if err := install([]string{"--config", configFile, "--state-dir", stateDir, "--executable", binary, "--autostart=false"}); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate an older installation. The first start must upgrade the task
-	// action before it can launch a console executable.
-	directory, err := windows.GetSystemDirectory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	taskName := userTaskName(serviceName(node), installerSID())
-	raw, err := taskCommand(directory, "/Query", "/TN", taskName, "/XML")
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := replaceTaskCommand(taskDocumentText(raw), filepath.Join(filepath.Dir(binary), "xmesh.exe"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := withTaskDocument(legacy, func(path string) error {
-		_, err := taskCommand(directory, "/Create", "/TN", taskName, "/XML", path, "/F")
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
 	args := []string{"--name", serviceName(node)}
-	// Match Electron's background CLI invocation. With no console attached,
-	// schtasks can emit the OEM code page instead of the parent's UTF-8 page.
-	startKernel := func() error {
-		cmd := exec.Command(binary, append([]string{"start", "--json"}, args...)...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("background CLI start: %w: %s", err, output)
-		}
-		return nil
-	}
 	t.Cleanup(func() {
 		// Stop removes control.json before Task Scheduler releases the process.
 		// Retain its identity before stopping so TempDir cleanup cannot race it.
@@ -99,6 +67,38 @@ func Test_WindowsUserKernelStart(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	})
+	// Simulate an older installation. The first start must upgrade the task
+	// action before it can launch a console executable.
+	directory, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskName := userTaskName(serviceName(node), installerSID())
+	raw, err := taskCommand(directory, "/Query", "/TN", taskName, "/XML")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := replaceTaskCommand(taskDocumentText(raw), filepath.Join(filepath.Dir(binary), "xmesh.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := withTaskDocument(legacy, func(path string) error {
+		_, err := taskCommand(directory, "/Create", "/TN", taskName, "/XML", path, "/F")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Match Electron's background CLI invocation. With no console attached,
+	// schtasks can emit the OEM code page instead of the parent's UTF-8 page.
+	startKernel := func() error {
+		cmd := exec.Command(binary, append([]string{"start", "--json"}, args...)...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("background CLI start: %w: %s", err, output)
+		}
+		return nil
+	}
 	if err := startKernel(); err == nil {
 		t.Fatal("Task Scheduler accepted a legacy config, but the kernel never started")
 	}
