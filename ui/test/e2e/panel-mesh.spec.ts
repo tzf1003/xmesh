@@ -297,11 +297,10 @@ test("policy: template preview, confirmed write with the previewed version, snap
   await expect(page.getByTestId("mesh-diff")).toContainText("tagOwners");
   expect(await fake("version")).toBe(1);
 
-  await page.getByTestId("mesh-plan-apply").click();
-  await page.getByTestId("confirm-cancel").click();
+  await page.getByTestId("mesh-plan-cancel").click();
   expect(await fake("version")).toBe(1);
+  await page.getByTestId("mesh-draft-preview").click();
   await page.getByTestId("mesh-plan-apply").click();
-  await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("mesh-snapshot-snap-1")).toBeVisible();
   await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
   expect(await fake("version")).toBe(2);
@@ -316,10 +315,82 @@ test("policy: template preview, confirmed write with the previewed version, snap
   await page.getByTestId("mesh-draft-preview").click();
   await expect(page.getByTestId("mesh-policy-plan")).toBeVisible();
   await page.getByTestId("mesh-plan-apply").click();
-  await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
   await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/"acls": \[\]/);
   expect(await fake("version")).toBe(3);
+});
+
+test("policy: applying previews the draft, and saving writes the reviewed policy", async () => {
+  const page = await open();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await page.getByTestId("mesh-tab-policy").click();
+  const workspace = page.getByTestId("mesh-policy-workspace");
+  const applyDraft = workspace.getByRole("button", { name: "应用到云端", exact: true });
+  const refresh = workspace.getByTestId("mesh-policy-cloud-refresh");
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/tagOwners/);
+  await expect(applyDraft).toBeDisabled();
+  const original = await page.getByTestId("mesh-policy-text").inputValue();
+  await page.getByTestId("mesh-policy-text").fill(original.replace('"acls": []', '"acls": [], "note": "save-draft"'));
+  await expect(workspace).toContainText("草稿有待应用的修改");
+  await expect(applyDraft).toBeEnabled();
+  for (const width of [1440, 900, 700]) {
+    await page.setViewportSize({ width, height: 900 });
+    await workspace.scrollIntoViewIfNeeded();
+    await expect(applyDraft).toBeInViewport({ ratio: 1 });
+    await expect(refresh).toBeInViewport({ ratio: 1 });
+    const refreshBounds = (await refresh.boundingBox())!;
+    const applyBounds = (await applyDraft.boundingBox())!;
+    expect(Math.abs(refreshBounds.y - applyBounds.y)).toBeLessThan(1);
+    expect(applyBounds.x - refreshBounds.x - refreshBounds.width).toBeLessThanOrEqual(9);
+    expect(applyBounds.x).toBeGreaterThan(refreshBounds.x);
+    expect(await workspace.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    if (process.env.XMESH_UI_QA_DIR) await page.screenshot({ path: path.join(process.env.XMESH_UI_QA_DIR, `mesh-draft-save-${width}.png`) });
+  }
+  expect(page.url()).toMatch(/^app:\/\/panel\//);
+  expect(await page.title()).toBeTruthy();
+  await expect(page.getByTestId("page-mesh")).toBeVisible();
+  await refresh.click();
+  await page.getByTestId("confirm-cancel").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/save-draft/);
+  await applyDraft.click();
+  await expect(page.getByTestId("mesh-policy-plan").getByRole("button", { name: "保存", exact: true })).toBeEnabled();
+  await expect(page.getByTestId("mesh-diff")).toContainText("save-draft");
+  const preview = page.getByRole("dialog", { name: "预览完整策略差异" });
+  await expect(preview).toHaveAttribute("aria-modal", "true");
+  await expect(preview.getByTestId("mesh-plan-cancel")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(preview.getByTestId("mesh-plan-apply")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(preview.getByTestId("mesh-plan-cancel")).toBeFocused();
+  for (const width of [1440, 900, 700]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(preview).toBeInViewport({ ratio: 1 });
+    await expect(preview.getByTestId("mesh-plan-apply")).toBeInViewport({ ratio: 1 });
+    expect(await preview.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    if (process.env.XMESH_UI_QA_DIR) await page.screenshot({ path: path.join(process.env.XMESH_UI_QA_DIR, `mesh-draft-preview-${width}.png`) });
+  }
+  expect(await fake("version")).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(preview).toHaveCount(0);
+  await expect(applyDraft).toBeFocused();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/save-draft/);
+  const reviewLines = JSON.stringify(Array.from({ length: 100 }, (_, i) => `Review line ${i + 1}`), null, 2);
+  await page.getByTestId("mesh-policy-text").fill(original.replace('"acls": []', `"acls": [], "note": "revised-draft", "reviewLines": ${reviewLines}`));
+  await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
+  await applyDraft.click();
+  await expect(page.getByTestId("mesh-diff")).toContainText("revised-draft");
+  expect(await preview.locator(".module-policy-preview-body").evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await expect(preview.getByTestId("mesh-plan-apply")).toBeInViewport({ ratio: 1 });
+  await preview.locator(".module-policy-preview-body").evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await expect(preview.getByTestId("mesh-plan-apply")).toBeInViewport({ ratio: 1 });
+  if (process.env.XMESH_UI_QA_DIR) await page.screenshot({ path: path.join(process.env.XMESH_UI_QA_DIR, "mesh-draft-preview-long.png") });
+  await page.getByTestId("mesh-plan-apply").click();
+  await expect(workspace).toContainText("已加载云端策略");
+  await expect(applyDraft).toBeDisabled();
+  expect(await fake("policyText")).toContain("revised-draft");
+  expect(errors).toEqual([]);
 });
 
 test("policy: a policy that changed after the preview is not overwritten", async () => {
@@ -332,7 +403,6 @@ test("policy: a policy that changed after the preview is not overwritten", async
   await expect(page.getByTestId("mesh-policy-plan")).toBeVisible();
   await patch({ version: 7 });
   await page.getByTestId("mesh-plan-apply").click();
-  await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("mesh-error")).toContainText("云端策略版本已变化");
   await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
   expect(await fake("version")).toBe(7);
@@ -428,12 +498,13 @@ test("derp: probe, add to shared draft, preview and apply the complete policy", 
   await expect(page.getByTestId("mesh-cloud-region-900")).toContainText("derp.example.com");
   expect(await fake("version")).toBe(1);
   expect(await fake("policyText")).not.toContain("derpMap");
-  await page.getByTestId("mesh-derp-open-policy").click();
-  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/derp.example.com/);
-  await page.getByTestId("mesh-draft-preview").click();
+  await page.getByTestId("mesh-policy-workspace").getByRole("button", { name: "应用到云端", exact: true }).click();
+  await expect(page.getByTestId("mesh-tab-derp")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("mesh-diff")).toContainText("derp.example.com");
   await page.getByTestId("mesh-plan-apply").click();
-  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("mesh-policy-workspace")).toContainText("已加载云端策略");
+  await page.getByTestId("mesh-derp-open-policy").click();
+  await expect(page.getByTestId("mesh-policy-text")).toHaveValue(/derp.example.com/);
   await expect(page.getByTestId("mesh-snapshot-snap-1")).toBeVisible();
   expect(await fake("version")).toBe(2);
   const apply = (await fake("calls")).find((c) => c[2] === "publish" && c.includes("--apply"))!;

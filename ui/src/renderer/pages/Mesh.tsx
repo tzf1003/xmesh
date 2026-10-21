@@ -18,7 +18,7 @@ import { MeshDerp } from "./mesh/Derp";
 import { MeshLogin } from "./mesh/Login";
 import { MeshMatrix } from "./mesh/Matrix";
 import { MeshOnboard } from "./mesh/Onboard";
-import { MeshPolicy } from "./mesh/Policy";
+import { MeshPolicy, MeshPolicyPublish } from "./mesh/Policy";
 import { deviceNeedsAttention, filterMeshDevices, type MeshFilter } from "./module-model";
 import { useModuleT } from "./module-messages";
 import { ModuleBox, ModuleBreadcrumb, ModuleFacts, ModuleStat, ModuleSummary } from "./module-ui";
@@ -145,16 +145,12 @@ function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; s
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { if (tab === "derp" && draft.document && draft.document.text !== draft.text) void draft.edit({}); }, [tab]);
   return <div class="section-stack" hidden={tab !== "policy" && tab !== "derp"}>
-    <section class="card module-policy-workspace" data-testid="mesh-policy-workspace">
-      <p>{t("mesh.draft.intro")}</p>
-      <div class="row">
-        <Badge kind={draft.dirty ? "warn" : "info"}>{t(draft.dirty ? "mesh.draft.dirty" : "mesh.draft.synced")}</Badge>
+    <MeshPolicyPublish {...props} draft={draft} statusLabel={<Badge kind={draft.dirty ? "warn" : "info"}>{t(draft.dirty ? "mesh.draft.dirty" : "mesh.draft.synced")}</Badge>}>
+      <>
+        {tab === "derp" && <button type="button" class="btn" onClick={props.showPolicy} data-testid="mesh-derp-open-policy">{t("mesh.draft.review")}</button>}
         <button type="button" class="btn" disabled={draft.busy} onClick={() => draft.dirty ? setRefreshing(true) : void draft.load()} data-testid="mesh-policy-cloud-refresh">{t("mesh.draft.refresh")}</button>
-        {tab === "derp" && <button type="button" class="btn primary" onClick={props.showPolicy} data-testid="mesh-derp-open-policy">{t("mesh.draft.review")}</button>}
-      </div>
-      {draft.busy && <p role="status">{t("common.loading")}</p>}
-      {draft.error && <MeshError error={draft.error} toast={ctx.toast} />}
-    </section>
+      </>
+    </MeshPolicyPublish>
     {draft.base && draft.document && <>
       <div hidden={tab !== "policy"}><MeshPolicy {...props} draft={draft} /></div>
       <div hidden={tab !== "derp"}><MeshDerp {...props} draft={draft} /></div>
