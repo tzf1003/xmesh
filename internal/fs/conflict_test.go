@@ -109,3 +109,35 @@ func Test_ContentConflictHashesIncludeEmptyFiles(t *testing.T) {
 		}
 	}
 }
+
+// conformance: CTR-FS-07 INV-06
+func Test_DanglingTargetConflictMetadata(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires Windows privileges")
+	}
+	s, root := fixture(t)
+	path := filepath.Join(root, "target")
+	if err := os.Symlink("missing", path); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory entry can become a dangling link after path resolution.
+	v := existingTargetConflict(path)
+	if v.Fields["path"] != path || v.Fields["mtime"] != Stamp(before.ModTime()) {
+		t.Errorf("dangling target metadata: %v", v.Fields)
+	}
+	if _, ok := v.Fields["current_sha256"]; ok {
+		t.Errorf("existence conflict reports unread content hash: %v", v.Fields)
+	}
+	writeBytes(t, filepath.Join(root, "source"), []byte("source"))
+	fail(t, s, "fs.move", Object{"from": "source", "to": "target"}, "invalid_cwd")
+	if got, err := os.Readlink(path); err != nil || got != "missing" {
+		t.Errorf("dangling link changed: %q, %v", got, err)
+	}
+	if string(readBytes(t, filepath.Join(root, "source"))) != "source" {
+		t.Error("source changed")
+	}
+}

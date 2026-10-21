@@ -404,7 +404,7 @@ func conflict(path string, b []byte) *toolerr.Error {
 // Existence checks report metadata only; a content hash requires reading bytes.
 func existingTargetConflict(path string) *toolerr.Error {
 	mtime := ""
-	if st, e := os.Stat(path); e == nil {
+	if st, e := os.Lstat(path); e == nil {
 		mtime = Stamp(st.ModTime())
 	}
 	return toolerr.New("conflict", "目标已存在或内容发生变化", "path", path, "mtime", mtime)
