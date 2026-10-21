@@ -126,8 +126,14 @@
 .module-page .module-device-issues li + li { margin-top: 5px; }
 .module-page .module-device-foot { padding: 12px 17px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border-2); }
 .module-page .module-policy-workspace { padding: 15px 18px; background: var(--accent-soft); }
-.module-page .module-policy-workspace > .row { justify-content: space-between; gap: 12px; }
+.module-page .module-policy-toolbar { gap: 12px; margin-top: 12px; }
+.module-page .module-policy-actions { justify-content: flex-end; gap: 8px; margin-left: auto; max-width: 100%; }
 .module-page .module-policy-workspace p { margin: 0; font-size: 11px; color: var(--text-2); }
+.module-policy-preview .dialog { width: min(900px, 100%); display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+.module-policy-preview .dialog-heading, .module-policy-preview-actions { flex-shrink: 0; }
+.module-policy-preview .dialog-heading h2 { margin: 0; }
+.module-policy-preview-body { min-height: 0; overflow: auto; }
+.module-policy-preview-body .preview { max-height: none; }
 .module-page .editor { min-height: 350px; font-size: 12px; line-height: 1.8; padding: 18px; border: 1px solid var(--border); background: var(--canvas); border-radius: 7px; margin-bottom: 14px; }
 .module-page [data-testid="mesh-policy"] > .card, .module-page [data-testid="mesh-snapshots"] { padding: 20px; }
 .module-page [data-testid="mesh-matrix"] .table-wrap { border-radius: 8px; }

@@ -44,6 +44,9 @@ test("nested Tailnet modules have visible separation", async () => {
   await page.getByTestId("mesh-draft-preview").click();
   await expect(page.getByTestId("mesh-policy-plan")).toBeVisible();
   await expectModuleGaps(page.getByTestId("page-mesh"));
+  await page.getByTestId("mesh-plan-cancel").click();
+  await expect(page.getByTestId("mesh-policy-plan")).toHaveCount(0);
+  await expect(page.getByTestId("mesh-policy-workspace")).toContainText("草稿有待应用的修改");
   await page.getByTestId("mesh-tab-derp").click();
   await expect(page.getByTestId("mesh-admission")).toBeVisible();
   await expect(page.getByTestId("mesh-policy")).not.toBeVisible();
