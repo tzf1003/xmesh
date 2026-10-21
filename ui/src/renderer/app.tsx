@@ -117,7 +117,11 @@ export function App(): JSX.Element {
   const navigate = (next: PageId, nextFocus?: PageFocus, discardModule = false): void => {
     if (next === "about") { next = "settings"; nextFocus = { ...nextFocus, settingsTab: "about" }; }
     if (next === "audit") { next = "sessions"; nextFocus = { ...nextFocus, sessionsTab: "history" }; }
-    if (next === "settings" && (nextFocus?.role || nextFocus?.section)) { setModuleScope(nextFocus.role ?? (nextFocus.section === "transfers" ? "transfers" : nextFocus.section === "node" ? "node" : "agent")); return; }
+    if (next === "settings" && (nextFocus?.role || nextFocus?.section)) {
+      if (configDirty) return;
+      setModuleScope(nextFocus.role ?? (nextFocus.section === "transfers" ? "transfers" : nextFocus.section === "node" ? "node" : "agent"));
+      return;
+    }
     if (moduleScope) { if (configDirty && !discardModule) { setCloseModule(true); return; } setModuleScope(undefined); }
     if (configDirty && !discardModule && (next !== current || next === "settings" && nextFocus?.settingsTab !== focus?.settingsTab)) { setPendingPage({ page: next, focus: nextFocus }); return; }
     if (discardModule || next !== current) setConfigDirty(false);

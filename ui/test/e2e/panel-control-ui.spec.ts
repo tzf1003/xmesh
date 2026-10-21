@@ -51,6 +51,22 @@ test("kernel configuration formats legacy JSON and saves YAML under Settings",as
  expect(errors).toEqual([]);
 });
 
+test("role search preserves configuration drafts and opens settings after discard",async()=>{
+ h=await launch({kernel:{capabilities:CAPS}});const page=await h.openPanel();
+ for(const source of [false,true]){
+  await navigate(page,source?"kernel-config":"config");
+  const field=page.getByTestId(source?"config-editor":"settings-name");const draft=source?"# retained YAML draft\n":"retained-node-draft";
+  await field.fill(draft);
+  await page.getByTestId("open-search").click();await page.getByTestId("command-input").fill("Agent ·");await page.getByTestId("command-input").press("Enter");
+  await expect(page.getByTestId("command-palette")).toHaveCount(0);await expect(page.getByTestId("module-settings-dialog")).toHaveCount(0);await expect(field).toHaveValue(draft);
+  const destination=page.getByTestId(source?"settings-tab-general":"nav-settings");
+  await destination.click();await expect(page.getByTestId("confirm")).toBeVisible();await page.getByTestId("confirm-cancel").click();await expect(field).toHaveValue(draft);
+  await destination.click();await page.getByTestId("confirm-ok").click();await expect(page.getByTestId("settings-tab-general")).toHaveAttribute("aria-current","page");
+ }
+ await page.getByTestId("open-search").click();await page.getByTestId("command-input").fill("Agent ·");await page.getByTestId("command-input").press("Enter");
+ await expect(page.getByTestId("module-settings-dialog")).toBeVisible();
+});
+
 test("live tools and asynchronous tasks retain their states; history paginates and exposes audit metadata",async()=>{
  h=await launch({kernel:{capabilities:CAPS}});const start=new Date().toISOString();
  const calls:ToolExecution[]=[{id:"x-call-001",tool:"fs.read",device:"node-a",caller:"gateway/a",oauth_client:"client-a",layer:"agent",state:"running",started_at:start,updated_at:start},{id:"x-call-002",tool:"ui.run",device:"node-b",caller:"gateway/a",oauth_client:"client-a",layer:"gateway",state:"async",started_at:start,updated_at:start,run_id:"run-ui-1",task_status:"running"}];

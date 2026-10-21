@@ -21,13 +21,14 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
   const supported = ctx.can("config.read");
   const writable = ctx.can("config.write");
   const [loaded, setLoaded] = useState<ConfigResponse | undefined>();
+  const [baseline, setBaseline] = useState("");
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState<ActionError | undefined>();
   const [preview, setPreview] = useState<Preview | undefined>();
   const [busy, setBusy] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { onDirtyChange?.(loaded !== undefined && isDirty(formatConfigSource(loaded.content), draft)); }, [loaded, draft, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(loaded !== undefined && isDirty(baseline, draft)); }, [loaded, baseline, draft, onDirtyChange]);
 
   const load = async (): Promise<void> => {
     const r = await getApi().getConfig();
@@ -35,6 +36,7 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
     setErr(undefined);
     const content = formatConfigSource(r.data.content);
     setLoaded(r.data);
+    setBaseline(content);
     setDraft(content);
     setPreview(undefined);
     setAskDiscard(false);
@@ -53,7 +55,7 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
     );
   }
 
-  const dirty = loaded !== undefined && isDirty(formatConfigSource(loaded.content), draft);
+  const dirty = loaded !== undefined && isDirty(baseline, draft);
   const savable = loaded !== undefined && isDirty(loaded.content, draft);
   const tooBig = new TextEncoder().encode(draft).length > CONFIG_MAX_BYTES;
 
@@ -184,7 +186,7 @@ export function Config({ ctx, onDirtyChange }: { ctx: PageContext; onDirtyChange
           <button type="button" class="btn primary" disabled={!writable || !savable || busy || tooBig} onClick={() => void review()} data-testid="config-review">
             {t("config.review")}
           </button>
-          <button type="button" class="btn" disabled={!dirty} onClick={() => { setDraft(formatConfigSource(loaded?.content ?? "")); setPreview(undefined); }}>
+          <button type="button" class="btn" disabled={!dirty} onClick={() => { setDraft(baseline); setPreview(undefined); }}>
             {t("config.revert")}
           </button>
           {dirty && <Badge kind="warn">{t("config.unsaved")}</Badge>}
