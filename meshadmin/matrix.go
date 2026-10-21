@@ -82,6 +82,9 @@ func BuildMatrix(policyText string, devices []Device, nodes []NodeInfo, port int
 		node := MatchNode(dst, nodes)
 		isAgent := hasAny(dst.Tags, []string{TagDevice})
 		if node != nil {
+			if node.SchemaVersion == 2 {
+				isAgent = false
+			}
 			for _, r := range node.Roles {
 				if r == "agent" {
 					isAgent = true
@@ -101,7 +104,8 @@ func BuildMatrix(policyText string, devices []Device, nodes []NodeInfo, port int
 			} else {
 				c.Network, c.NetworkNote = Unknown, "policy has no acls or grants"
 			}
-			if node == nil || node.Authz == nil {
+			// Network tags cannot identify directional grants in a v2 trust store.
+			if node == nil || node.SchemaVersion == 2 || node.Authz == nil {
 				c.Tools = Unknown
 			} else {
 				c.AllowedTools, c.Backends = authzFor(node.Authz, src.Tags)

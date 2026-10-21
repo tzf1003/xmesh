@@ -153,12 +153,41 @@ func Test_MeshStatusJSON(t *testing.T) {
 			untagged = untagged || (d.Device.Name == "gw.t.ts.net" && i.Code == "no-tags")
 		}
 	}
-	if !untagged {
-		t.Fatalf("gw has no tags and should be flagged:\n%s", out)
+	if untagged {
+		t.Fatalf("unmatched device requires optional network tags:\n%s", out)
 	}
 	if human, err := runMesh(t, "", "status"); err != nil || !strings.Contains(human, "box.t.ts.net") {
 		t.Fatalf("human output: %v\n%s", err, human)
 	}
+}
+
+func Test_MeshStatusDeviceTrustConfig(t *testing.T) {
+	_, dir := setupMesh(t)
+	path := filepath.Join(dir, "xmesh.yaml")
+	if err := os.WriteFile(path, []byte("schema_version: 2\nnode:\n  name: gw\n  roles: [agent, gateway]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runMesh(t, "", "status", "--json", "--node-config="+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Devices []meshadmin.DeviceReport `json:"devices"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, report := range doc.Devices {
+		if report.Device.Hostname != "gw" {
+			continue
+		}
+		roles := report.Roles
+		if len(report.Issues) != 0 || len(roles) != 2 || roles[0] != meshadmin.RoleAgent || roles[1] != meshadmin.RoleGateway {
+			t.Fatalf("device trust report=%+v", report)
+		}
+		return
+	}
+	t.Fatalf("configured device missing: %s", out)
 }
 
 // conformance: CON-MESH-03
@@ -236,6 +265,13 @@ func Test_MeshTagsSetNeedsTagOwners(t *testing.T) {
 
 func Test_MeshAuthKeyAndOnboardWriteSecretFile(t *testing.T) {
 	_, dir := setupMesh(t)
+	untagged := filepath.Join(dir, "untagged-key")
+	if _, err := runMesh(t, "", "authkey", "--out", untagged, "--json"); err != nil {
+		t.Fatalf("default untagged key: %v", err)
+	}
+	if _, err := runMesh(t, "", "onboard", "--authkey-file", filepath.Join(dir, "untagged-onboard"), "--json"); err != nil {
+		t.Fatalf("default untagged onboarding: %v", err)
+	}
 	keyFile := filepath.Join(dir, "authkey")
 	out, err := runMesh(t, "", "authkey", "--tags", "tag:device", "--out", keyFile, "--json")
 	if err != nil {

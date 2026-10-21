@@ -13,7 +13,7 @@ export function splitList(text: string): string[] {
 
 export type TagsParse = { ok: true; tags: string[] } | { ok: false };
 
-/** `allowEmpty` is for editing a device (an empty list removes every tag). */
+/** Empty tags clear a device's network labels or create an untagged onboarding key. */
 export function parseTagText(text: string, allowEmpty: boolean): TagsParse {
   const tags = parseMeshTags(splitList(text), allowEmpty);
   return tags === undefined ? { ok: false } : { ok: true, tags };

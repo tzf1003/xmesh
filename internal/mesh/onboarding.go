@@ -23,15 +23,11 @@ func PrepareOnboarding(ctx context.Context, c *config.Config, stateDir string, i
 		return "", e
 	}
 	network := c.Mesh
-	tags := tailnetRoleTags(ingress)
+	tags := onboardingTailnetTags(c, ingress)
 	if c.SchemaVersion == 2 {
 		network.ControlURL = c.Mesh.Tailnet.ControlURL
 		network.AuthMethod = c.Mesh.Tailnet.AuthMethod
 		network.AuthkeyFile = c.Mesh.Tailnet.AuthkeyFile
-		tags = nil
-		if ingress {
-			tags = []string{"tag:ingress"}
-		}
 	}
 	server := &tsnet.Server{Dir: filepath.Join(stateDir, "tsnet"), Hostname: c.Node.Name, ControlURL: network.ControlURL, AdvertiseTags: tags, UserLogf: func(string, ...any) {}, Logf: func(string, ...any) {}}
 	if network.AuthMethod != "browser" {
@@ -89,6 +85,14 @@ func onboardingPrerequisites(st *ipnstate.Status, ingress bool) error {
 	return onboardingPrerequisitesForVersion(st, ingress, true)
 }
 
+// Device-trust nodes carry application permissions in their local trust store.
+func onboardingTailnetTags(c *config.Config, ingress bool) []string {
+	if c.SchemaVersion == 2 {
+		return nil
+	}
+	return tailnetRoleTags(ingress)
+}
+
 func onboardingPrerequisitesForVersion(st *ipnstate.Status, ingress, requireDeviceTag bool) error {
 	if e := requireBrowserRole(st); requireDeviceTag && e != nil {
 		return e
@@ -96,7 +100,7 @@ func onboardingPrerequisitesForVersion(st *ipnstate.Status, ingress, requireDevi
 	if !ingress {
 		return nil
 	}
-	if !slices.Contains(st.Self.Tags.AsSlice(), "tag:ingress") {
+	if requireDeviceTag && !slices.Contains(st.Self.Tags.AsSlice(), "tag:ingress") {
 		return fmt.Errorf("请在控制面为此设备授予 tag:ingress 后重试")
 	}
 	if !st.Self.HasCap("funnel") {

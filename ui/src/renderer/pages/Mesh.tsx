@@ -4,10 +4,11 @@ import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Confirm, Dialog, PageHead, ResourceView } from "../components";
 import { useResource } from "../hooks";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
 import { Icon } from "../icons";
 import { formatTime } from "../lib/format";
 import { parseTagText } from "../lib/mesh";
+import { meshIssueText } from "../lib/mesh-issues";
 import { usePolicyDraft, type PolicyDraft, type SavedPolicyDraft } from "../lib/policy-draft";
 import type { ActionError } from "../../shared/ipc";
 import type { MeshDeviceReport, MeshStatus, MeshTagPlan } from "../../shared/mesh";
@@ -165,28 +166,31 @@ function PolicyWorkspace(props: MeshTabProps & { tab: TabId; revision: number; s
 function MeshDevices({ ctx, status, reloadStatus, filter, setFilter, query, setQuery }: MeshTabProps & { filter: MeshFilter; setFilter(filter: MeshFilter): void; query: string; setQuery(query: string): void }): JSX.Element {
   const t = useT();
   const m = useModuleT();
+  const locale = useLocale();
   const [editing, setEditing] = useState<MeshDeviceReport | undefined>();
   const filtered = filterMeshDevices(status.devices, query, filter);
   const issues = status.devices.filter(deviceNeedsAttention).length;
   return (
     <>
-      {issues > 0 && <div class="module-alert" data-testid="mesh-attention"><Icon name="info"/><span>{m("checksHint", { n: issues })}</span><button type="button" class="module-link" onClick={() => { setQuery(""); setFilter("attention"); }}>{m("showIssues")}<Icon name="arrow"/></button></div>}
+      <p class="hint" data-testid="mesh-network-tags-scope">{t("mesh.tags.scope")}</p>
+      {issues > 0 && <div class="module-alert" data-testid="mesh-attention"><Icon name="info"/><span>{m("checksHint", { n: issues })}</span><button type="button" class="module-link" onClick={() => { setQuery(""); setFilter(filter === "attention" ? "all" : "attention"); }}>{m(filter === "attention" ? "allDevices" : "showIssues")}<Icon name="arrow"/></button></div>}
       <div class="module-toolbar"><label class="module-search"><Icon name="search"/><input type="search" value={query} onInput={(event) => setQuery(event.currentTarget.value)} placeholder={m("searchDevices")} aria-label={m("searchDevices")} data-testid="mesh-search"/></label><select value={filter} onChange={(event) => setFilter(event.currentTarget.value as MeshFilter)} aria-label={m("allDevices")} data-testid="mesh-device-filter"><option value="all">{m("allDevices")}</option><option value="online">{t("mesh.online")}</option><option value="offline">{t("mesh.offline")}</option><option value="attention">{m("issueFilter")}</option></select></div>
       {status.devices.length === 0 ? <div class="module-empty"><span class="module-avatar"><Icon name="device"/></span><h2>{t("mesh.devices.none")}</h2><p>{m("emptyDevicesHint")}</p></div> : filtered.length === 0 ? <div class="module-empty"><h2>{m("noMatches")}</h2><button type="button" class="btn" onClick={() => { setQuery(""); setFilter("all"); }}>{m("reset")}</button></div> : <section class="card module-device-card">
       <div class="table-wrap">
         <table data-testid="mesh-devices">
+          <colgroup><col class="module-device-col-name"/><col class="module-device-col-status"/><col class="module-device-col-tags"/><col/><col class="module-device-col-action"/></colgroup>
           <thead>
             <tr>
               <th scope="col">{m("deviceAddress")}</th>
               <th scope="col">{t("col.status")}</th>
-              <th scope="col">{t("col.tags")}</th>
+              <th scope="col">{t("mesh.col.networkTags")}</th>
               <th scope="col">{t("mesh.col.roles")}</th>
               <th scope="col" />
             </tr>
           </thead>
-          <tbody>
             {filtered.map((r) => (
-              <tr key={r.device.id} data-testid={`mesh-device-${r.device.id}`}>
+              <tbody key={r.device.id} data-testid={`mesh-device-${r.device.id}`}>
+              <tr>
                 <td>
                   <div class="module-device-name"><span class="module-repo-icon"><Icon name="device"/></span><div><strong>{r.device.name}</strong>
                   <span class="hint mono">{r.device.addresses.join(" ") || r.device.id}</span>
@@ -201,25 +205,18 @@ function MeshDevices({ ctx, status, reloadStatus, filter, setFilter, query, setQ
                     {r.device.tags.length === 0 ? <span class="hint">{t("mesh.noTags")}</span> : r.device.tags.map((x) => <Badge key={x}>{x}</Badge>)}
                   </div>
                 </td>
-                <td class="module-device-roles">{r.roles.join(", ") || "—"}
-                  {r.issues.length > 0 && (
-                    <ul class="module-device-issues">
-                      {r.issues.map((i, n) => (
-                        <li key={n}>
-                          <Badge kind={i.severity === "error" ? "danger" : i.severity === "warn" ? "warn" : ""}>{i.severity}</Badge> {i.message}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </td>
+                <td class="module-device-roles">{r.roles.join(", ") || "—"}</td>
                 <td>
                   <button type="button" class="module-icon-button" aria-label={`${t("mesh.editTags")} · ${r.device.name}`} onClick={() => setEditing(r)} data-testid={`mesh-edit-tags-${r.device.id}`}>
                     <Icon name="chevron"/>
                   </button>
                 </td>
               </tr>
+              {r.issues.length > 0 && <tr class="module-device-diagnostics"><td colSpan={5}>
+                <ul class="module-device-issues">{r.issues.map((issue, n) => <li key={n} class={`module-device-issue ${issue.severity}`}><Badge kind={issue.severity === "error" ? "danger" : issue.severity === "warn" ? "warn" : "info"}>{m(issue.severity === "error" ? "issueError" : issue.severity === "warn" ? "issueWarning" : "issueInfo")}</Badge><span title={issue.message}>{meshIssueText(issue, locale)}</span></li>)}</ul>
+              </td></tr>}
+              </tbody>
             ))}
-          </tbody>
         </table>
       </div>
       <div class="module-device-foot">{m("deviceCount", { n: filtered.length })}</div>

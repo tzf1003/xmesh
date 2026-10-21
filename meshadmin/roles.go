@@ -19,12 +19,13 @@ type Grant struct {
 // NodeInfo is what xmesh.yaml tells us about one node. It is optional input:
 // without it the tag checks fall back to what the control plane shows.
 type NodeInfo struct {
-	Name  string           `json:"name" yaml:"name"`
-	Roles []string         `json:"roles" yaml:"roles"`
-	Authz map[string]Grant `json:"authz,omitempty" yaml:"-"`
+	SchemaVersion int              `json:"schema_version,omitempty" yaml:"-"`
+	Name          string           `json:"name" yaml:"name"`
+	Roles         []string         `json:"roles" yaml:"roles"`
+	Authz         map[string]Grant `json:"authz,omitempty" yaml:"-"`
 }
 
-// LoadNodeInfo reads node.name, node.roles and agent.authz from an xmesh.yaml.
+// LoadNodeInfo reads schema_version, node.name, node.roles and agent.authz from xmesh.yaml.
 // It ignores every other key and never reads secrets: the file only holds paths.
 func LoadNodeInfo(path string) (NodeInfo, error) {
 	b, err := os.ReadFile(path)
@@ -32,8 +33,9 @@ func LoadNodeInfo(path string) (NodeInfo, error) {
 		return NodeInfo{}, err
 	}
 	var doc struct {
-		Node  NodeInfo `yaml:"node"`
-		Agent struct {
+		SchemaVersion int      `yaml:"schema_version"`
+		Node          NodeInfo `yaml:"node"`
+		Agent         struct {
 			Authz map[string]Grant `yaml:"authz"`
 		} `yaml:"agent"`
 	}
@@ -44,15 +46,17 @@ func LoadNodeInfo(path string) (NodeInfo, error) {
 		return NodeInfo{}, fmt.Errorf("%w: %s has no node.name", ErrInvalid, path)
 	}
 	n := doc.Node
+	n.SchemaVersion = doc.SchemaVersion
 	n.Authz = doc.Agent.Authz
 	return n, nil
 }
 
-// Role is an xmesh role as inferred from tags.
+// Role is an xmesh role inferred from tags or a matching device-trust config.
 type Role string
 
 const (
 	RoleAgent   Role = "agent"
+	RoleGateway Role = "gateway"
 	RoleIngress Role = "ingress"
 	RoleAdmin   Role = "admin"
 	RolePeer    Role = "peer" // trusted caller, usually a Gateway on a user device
@@ -135,10 +139,12 @@ func Analyze(devices []Device, nodes []NodeInfo, now time.Time) []DeviceReport {
 	out := make([]DeviceReport, 0, len(devices))
 	for _, d := range devices {
 		r := DeviceReport{Device: d, Roles: RolesFromTags(d.Tags), Tags: nonNil(d.Tags), Issues: []Issue{}}
+		n := MatchNode(d, nodes)
+		deviceTrust := n != nil && n.SchemaVersion == 2
 		add := func(s Severity, code, msg string) {
 			r.Issues = append(r.Issues, Issue{Severity: s, Code: code, Message: msg})
 		}
-		if len(d.Tags) == 0 {
+		if len(d.Tags) == 0 && n != nil && !deviceTrust {
 			add(SevWarning, "no-tags", "node has no tags; agent.authz and the network policy cannot recognise it (give it tag:device, tag:peer, ...)")
 		}
 		if !d.Authorized {
@@ -152,11 +158,21 @@ func Analyze(devices []Device, nodes []NodeInfo, now time.Time) []DeviceReport {
 				add(SevWarning, "key-expiring", "node key expires "+d.Expires.Format(time.RFC3339))
 			}
 		}
-		if n := MatchNode(d, nodes); n != nil {
+		if n != nil {
 			r.Node = n.Name
 			declared := map[string]bool{}
+			if deviceTrust {
+				r.Roles = []Role{}
+			}
 			for _, role := range n.Roles {
+				if deviceTrust && !declared[role] && (role == string(RoleAgent) || role == string(RoleGateway) || role == string(RoleIngress)) {
+					r.Roles = append(r.Roles, Role(role))
+				}
 				declared[role] = true
+				// Device protocol v2 uses local pairing grants for authorization.
+				if deviceTrust {
+					continue
+				}
 				want, ok := roleTags[role]
 				if !ok {
 					continue
@@ -165,7 +181,10 @@ func Analyze(devices []Device, nodes []NodeInfo, now time.Time) []DeviceReport {
 					add(SevError, "missing-role-tag", fmt.Sprintf("xmesh.yaml declares role %q but the node lacks %s (it will not appear in discovery or will be denied)", role, strings.Join(want, " or ")))
 				}
 			}
-			if !declared["agent"] && hasAny(d.Tags, []string{TagDevice}) {
+			if deviceTrust {
+				sort.Slice(r.Roles, func(i, j int) bool { return r.Roles[i] < r.Roles[j] })
+			}
+			if !deviceTrust && !declared["agent"] && hasAny(d.Tags, []string{TagDevice}) {
 				add(SevWarning, "unexpected-device-tag", "node carries tag:device but xmesh.yaml does not enable the agent role")
 			}
 		}

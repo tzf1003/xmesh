@@ -18,6 +18,8 @@ import {
   type MeshRequest,
 } from "../../src/shared/mesh";
 import { regionsFromForms, EMPTY_REGION, parseTagText, splitList } from "../../src/renderer/lib/mesh";
+import { meshIssueText } from "../../src/renderer/lib/mesh-issues";
+import { deviceNeedsAttention, filterMeshDevices } from "../../src/renderer/pages/module-model";
 
 const REGION = { code: "lab", name: "Lab", host: "derp.example.com" };
 
@@ -72,7 +74,7 @@ test("requests are refused for stray keys, bad types and injection attempts", ()
   assert.equal(field({ op: "tags", device: "n1", tags: ["admin"], apply: false }), "tags");
   assert.equal(field({ op: "tags", device: "n1", tags: ["tag:a", "tag:a"], apply: false }), "tags");
   assert.equal(field({ op: "tags", device: "n1", tags: ["tag:a"], apply: "yes" }), "apply");
-  assert.equal(field({ op: "onboard", tags: [], ttl: "1h", ephemeral: false, file: "/k", overwrite: false }), "tags");
+  ok({ op: "onboard", tags: [], ttl: "1h", ephemeral: false, file: "/k", overwrite: false });
   assert.equal(field({ op: "onboard", tags: ["tag:a"], ttl: "1d", ephemeral: false, file: "/k", overwrite: false }), "ttl");
   assert.equal(field({ op: "onboard", tags: ["tag:a"], ttl: "0h", ephemeral: false, file: "/k", overwrite: false }), "ttl");
   assert.equal(field({ op: "onboard", tags: ["tag:a"], ttl: "1h", ephemeral: false, file: "relative/key", overwrite: false }), "file");
@@ -183,6 +185,29 @@ test("the CLI's Go quirks become clean values", () => {
     else assert.doesNotThrow(() => normalizeResult(op, "not an object"));
   }
   assert.deepEqual(normalizeResult("matrix", undefined), { port: 0, cells: [] });
+});
+
+test("Go warning diagnostics remain actionable after status normalization", () => {
+  const devices = ["warning", "warn", "error", "info", "future"].map((severity) => ({
+    device: { id: severity, authorized: true },
+    issues: [{ severity, code: "no-tags", message: "Review tags" }],
+  }));
+  const status = normalizeStatus({ devices });
+  assert.deepEqual(status.devices.map((report) => report.issues[0]!.severity), ["warn", "warn", "error", "info", "info"]);
+  assert.equal(deviceNeedsAttention(status.devices[0]!), true);
+  assert.deepEqual(filterMeshDevices(status.devices, "", "attention").map((report) => report.device.id), ["warning", "warn", "error"]);
+});
+
+test("mesh diagnostics localize known messages and preserve unknown details", () => {
+  const issue = { severity: "error" as const, code: "missing-role-tag", message: 'xmesh.yaml declares role "gateway" but the node lacks tag:peer or tag:cloud (it will not appear in discovery or will be denied)' };
+  assert.match(meshIssueText(issue, "zh"), /gateway.*tag:peer 或 tag:cloud/);
+  assert.equal(meshIssueText(issue, "en"), issue.message);
+  for (const code of ["no-tags", "unauthorized", "unexpected-device-tag"]) assert.notEqual(meshIssueText({ ...issue, code }, "zh"), issue.message);
+  const date = "2026-10-21T08:00:00Z";
+  assert.equal(meshIssueText({ ...issue, code: "key-expired", message: `node key expired ${date}` }, "zh"), `设备密钥已过期（${date}），请重新认证。`);
+  assert.equal(meshIssueText({ ...issue, code: "key-expiring", message: `node key expires ${date}` }, "zh"), `设备密钥即将过期（${date}），请及时重新认证。`);
+  assert.equal(meshIssueText({ ...issue, code: "future" }, "zh"), issue.message);
+  assert.equal(meshIssueText({ ...issue, message: "Custom role details" }, "zh"), "Custom role details");
 });
 
 test("login commands: fixed text, copied by key", () => {

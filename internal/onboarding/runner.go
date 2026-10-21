@@ -320,7 +320,7 @@ func stepFailure(id string) string {
 	return map[string]string{"preflight": "环境检查未通过，尚不能应用配置", "write-config": "无法保存配置，设备设置未完成", "network": "入网未完成，跨网络功能待处理", "install": "服务注册失败，设备尚未就绪", "start": "服务暂不可用，连接功能待处理", "clients": "客户端配置未完成", "verify": "连接验证暂不可用"}[id]
 }
 func stepRecovery(id string) string {
-	return map[string]string{"preflight": "检查工作目录、凭据文件和端口；配置变化时重新预览", "write-config": "检查目录权限和可用空间后重试", "network": "完成浏览器授权、设备审批、tag:device / tag:ingress 与 Funnel 配置后重试", "install": "检查系统用户服务权限后重试；已有服务可通过 doctor 检查", "start": "使用 doctor 检查服务、端口和网络；修复后重试", "clients": "检查客户端配置及文件权限；发生并发修改时重新预览", "verify": "确认客户端已重新加载配置、设备在线，然后重试"}[id]
+	return map[string]string{"preflight": "检查工作目录、凭据文件和端口；配置变化时重新预览", "write-config": "检查目录权限和可用空间后重试", "network": "完成浏览器授权和设备审批；云端入口需检查 Funnel 与 HTTPS 配置后重试", "install": "检查系统用户服务权限后重试；已有服务可通过 doctor 检查", "start": "使用 doctor 检查服务、端口和网络；修复后重试", "clients": "检查客户端配置及文件权限；发生并发修改时重新预览", "verify": "确认客户端已重新加载配置、设备在线，然后重试"}[id]
 }
 
 func (s *Store) preflight(p *Plan) error {

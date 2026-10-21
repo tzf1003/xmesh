@@ -117,6 +117,32 @@ func TestSplitDstAndPorts(t *testing.T) {
 }
 
 // conformance: CTR-MESH-03
+func TestMatrixDeviceTrustUsesConfiguredRolesAndUnknownPairingGrants(t *testing.T) {
+	for _, tags := range [][]string{nil, {TagPeer}, {TagDevice}} {
+		devs := []Device{{ID: "1", Name: "caller", Tags: tags}, {ID: "2", Name: "agent"}}
+		nodes := []NodeInfo{{SchemaVersion: 2, Name: "caller", Roles: []string{"gateway"}}, {SchemaVersion: 2, Name: "agent", Roles: []string{"agent"}, Authz: map[string]Grant{TagPeer: {Tools: []string{"sys.info"}}}}}
+		m, err := BuildMatrix(`{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`, devs, nodes, 0)
+		if err != nil || len(m.Cells) != 1 {
+			t.Fatalf("matrix=%+v err=%v", m, err)
+		}
+		c := m.Cells[0]
+		if c.Network != Allow || c.Tools != Unknown || c.Mismatch != "" || len(c.AllowedTools) != 0 {
+			t.Fatalf("network tags=%v cell=%+v", tags, c)
+		}
+		devs[1].Tags = []string{TagDevice}
+		nodes[1].Roles = []string{"gateway"}
+		m, err = BuildMatrix("", devs, nodes, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range m.Cells {
+			if c.Dst == "agent" {
+				t.Fatalf("network tag overrode configured gateway role: %+v", c)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFlagsTagAndKeyProblems(t *testing.T) {
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	devs := []Device{
@@ -126,7 +152,7 @@ func TestAnalyzeFlagsTagAndKeyProblems(t *testing.T) {
 		{ID: "4", Name: "d.ts.net", Hostname: "d", Tags: []string{TagDevice}, Authorized: true, Expires: now.Add(48 * time.Hour)}, // expiring
 		{ID: "5", Name: "e.ts.net", Hostname: "e", Tags: []string{TagDevice, TagIngress}, Authorized: false},                      // unauthorised
 	}
-	nodes := []NodeInfo{{Name: "b", Roles: []string{"agent", "gateway"}}, {Name: "e", Roles: []string{"gateway"}}}
+	nodes := []NodeInfo{{Name: "a"}, {Name: "b", Roles: []string{"agent", "gateway"}}, {Name: "e", Roles: []string{"gateway"}}}
 	got := map[string][]string{}
 	for _, r := range Analyze(devs, nodes, now) {
 		for _, i := range r.Issues {

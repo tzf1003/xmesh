@@ -191,14 +191,11 @@ func (t *tailscale) SetTags(ctx context.Context, deviceID string, tags []string)
 }
 
 func (t *tailscale) CreateAuthKey(ctx context.Context, req AuthKeyRequest) (AuthKey, error) {
-	if len(req.Tags) == 0 {
-		return AuthKey{}, fmt.Errorf("%w: an auth key needs at least one tag", ErrInvalid)
-	}
 	type create struct {
 		Reusable      bool     `json:"reusable"`
 		Ephemeral     bool     `json:"ephemeral"`
 		Preauthorized bool     `json:"preauthorized"`
-		Tags          []string `json:"tags"`
+		Tags          []string `json:"tags,omitempty"`
 	}
 	var body struct {
 		Capabilities struct {
