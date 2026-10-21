@@ -123,9 +123,13 @@ HTTP MCP 请求的完整 JSON 信封最多 16 MiB，Gateway 与 Agent 均执行�
 
 参数：`path`、`parents`（默认 false）。`parents` 为 false 且父目录不存在 → `invalid_cwd` / `parent_missing`。已存在且是目录：成功，`created: false`。已存在且不是目录：`conflict`。
 
+目标存在冲突返回 `path`、`mtime`。此检查只读取元数据，省略 `current_sha256`；需要文件哈希时调用 `fs.sha256`。
+
 ### fs.move
 
 参数：`from`、`to`、`overwrite`（默认 false）。两端都要通过 Resolver。`overwrite` 为 false 且目标存在 → `conflict`。跨设备时允许复制后删除源；复制未完成时不得删除源。成功：`resolved_path` 为目标路径。
+
+目标存在冲突返回目标的 `path`、`mtime`，省略 `current_sha256`，源和目标保持原状。
 
 ### fs.delete
 

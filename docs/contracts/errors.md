@@ -23,7 +23,7 @@
 | `invalid_args` | 参数类型或必填项不对 | `field`；Windows 上命令或 shell 是 Store 应用执行别名时另带 `reason: "app_execution_alias"` 与 `path`；`backend.*` 另带 `reason: "unknown_backend"` / `"not_exclusive"` |
 | `invalid_cwd` | 路径解析或策略前的路径不成立 | `path`、`reason`：`not_found` / `parent_missing` / `symlink_escape` / `denied` / `not_directory` |
 | `policy_denied` | 策略引擎拒绝 | `rule`、`reason` |
-| `conflict` | 乐观并发失败、移动或上传目标已存在、下载源变化 | `path`；`fs.upload` / `fs.download` 带 `op`，其他情况带 `current_sha256`、`mtime` |
+| `conflict` | 乐观并发失败、移动或上传目标已存在、下载源变化 | `path`；`fs.upload` / `fs.download` 带 `op`；`fs.write` / `fs.edit` 内容冲突带 `current_sha256`、`mtime`；`fs.mkdir` / `fs.move` 目标存在冲突带 `mtime` |
 | `edit_not_found` | `old_string` 零匹配 | `path` |
 | `edit_ambiguous` | `old_string` 多匹配且未 `replace_all` | `path`、`lines`（行号数组） |
 | `binary_rejected` | `fs.read` 遇到二进制 | `path`、`hint` |

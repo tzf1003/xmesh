@@ -398,7 +398,13 @@ func (g *Gateway) newView(p Principal) *view {
 				}
 				v.refresh()
 				if method == "tools/list" {
+					v.mu.Lock()
+					device := v.defaultDeviceLocked()
+					v.mu.Unlock()
 					v.waitReady(ctx, g.opts.LocalPeer.Name)
+					if device != "" && device != g.opts.LocalPeer.Name {
+						v.waitReady(ctx, device)
+					}
 				}
 			}
 			if method == "tools/call" {
