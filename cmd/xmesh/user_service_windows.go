@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
@@ -13,6 +14,15 @@ import (
 )
 
 func installUserService(c *service.Config) error {
+	// Task Scheduler's Hidden setting hides the task, not its console. Use
+	// the GUI-subsystem build so neither the kernel nor Computer Host creates one.
+	background := filepath.Join(filepath.Dir(c.Executable), "xmesh-background.exe")
+	if err := requireBackgroundExecutable(background); err != nil {
+		return err
+	}
+	copy := *c
+	copy.Executable = background
+	c = &copy
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return err
@@ -62,10 +72,18 @@ func taskCommand(systemDirectory string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, filepath.Join(systemDirectory, "schtasks.exe"), args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return output, fmt.Errorf("Windows 用户任务操作失败: %w: %s", err, output)
 	}
 	return output, nil
+}
+
+func requireBackgroundExecutable(path string) error {
+	st, err := os.Stat(path)
+	if err != nil || !st.Mode().IsRegular() {
+		return fmt.Errorf("缺少无控制台后台内核 %s；请使用完整发行包，或用 go build -ldflags=-H=windowsgui -o <内核目录>/xmesh-background.exe ./cmd/xmesh 构建", path)
+	}
+	return validateBackgroundExecutable(path)
 }

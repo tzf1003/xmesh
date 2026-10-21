@@ -194,7 +194,9 @@ func setupHost() onboarding.Host {
 		if e != nil {
 			return e
 		}
-		return exec.CommandContext(ctx, exe, args...).Run()
+		cmd := exec.CommandContext(ctx, exe, args...)
+		prepareSetupCommand(cmd)
+		return cmd.Run()
 	}
 	return onboarding.Host{
 		Snapshot: snapshotSetupService,

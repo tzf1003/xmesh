@@ -88,6 +88,9 @@ jobs:
           export XMESH_TEST_COMPUTER_SERVICE_BINARY="$RUNNER_TEMP/xmesh-computer-lifecycle$ext"
           export XMESH_TEST_COMPUTER_HELPER="$GITHUB_WORKSPACE/computer-native/target/debug/xmesh-computer$ext"
           go build -o "$XMESH_TEST_COMPUTER_SERVICE_BINARY" ./cmd/xmesh
+          if [ "$RUNNER_OS" = Windows ]; then
+            go build -ldflags=-H=windowsgui -o "$RUNNER_TEMP/xmesh-background.exe" ./cmd/xmesh
+          fi
           go test -race ./cmd/xmesh -run '^TestComputerInstalledHostLifecycle$' -v -count=1 -timeout=180s
       - name: macOS isolated DMG and desktop host upgrade recovery
         if: runner.os == 'macOS'

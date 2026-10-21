@@ -61,6 +61,7 @@ func startProcess(path string, authorize bool) (*Process, error) {
 		args = append(args, "--authorize")
 	}
 	cmd := exec.Command(path, args...)
+	prepareNativeProcess(cmd)
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

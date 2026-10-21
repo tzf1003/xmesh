@@ -125,6 +125,9 @@ jobs:
         run: |
           ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
           go build -o "$RUNNER_TEMP/xmesh-smoke$ext" ./cmd/xmesh
+          if [ "$RUNNER_OS" = Windows ]; then
+            go build -ldflags=-H=windowsgui -o "$RUNNER_TEMP/xmesh-background.exe" ./cmd/xmesh
+          fi
           echo "SMOKE_BIN=$RUNNER_TEMP/xmesh-smoke$ext" >> "$GITHUB_ENV"
           echo "XMESH_TEST_ONBOARDING_BINARY=$RUNNER_TEMP/xmesh-smoke$ext" >> "$GITHUB_ENV"
       - name: Smoke test, local Agent and Gateway (L1)
@@ -184,9 +187,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $binary = [IO.Path]::GetFullPath($env:XMESH_TEST_ONBOARDING_BINARY)
+          $background = Join-Path ([IO.Path]::GetDirectoryName($binary)) 'xmesh-background.exe'
           $tasks = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -like 'xmesh-qs-test-*' })
           foreach ($task in $tasks) {
-            $owned = @($task.Actions | Where-Object { $_.Execute -and [IO.Path]::GetFullPath($_.Execute).Equals($binary, [StringComparison]::OrdinalIgnoreCase) })
+            $owned = @($task.Actions | Where-Object { $_.Execute -and ([IO.Path]::GetFullPath($_.Execute).Equals($binary, [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFullPath($_.Execute).Equals($background, [StringComparison]::OrdinalIgnoreCase)) })
             if (!$owned.Count) { continue }
             Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
             Unregister-ScheduledTask -InputObject $task -Confirm:$false
@@ -218,6 +222,8 @@ jobs:
         run: go test -race ./internal/role/gateway -run IngressPTY -count=3 -v -timeout=180s
       - name: Build Windows service acceptance binary
         run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
+      - name: Build Windows background service binary
+        run: go build -ldflags=-H=windowsgui -o "$env:RUNNER_TEMP/xmesh-background.exe" ./cmd/xmesh
       - name: Windows SCM install, runtime, and cleanup
         env:
           XMESH_TEST_WINDOWS_SYSTEM_SERVICE: "1"
@@ -233,7 +239,7 @@ jobs:
           }
           $env:XMESH_TEST_WINDOWS_USER_SERVICE = '1'
           $env:XMESH_TEST_WINDOWS_BINARY = "$env:RUNNER_TEMP/xmesh-service-test.exe"
-          go test -race ./cmd/xmesh -run 'WindowsUser(TaskRuntime|KernelStart)' -v -timeout=90s
+          go test -race ./cmd/xmesh -run 'WindowsUser(TaskRuntime|KernelStart)|Background' -v -timeout=90s
       - name: Windows private state directory ACL
         run: go test -race ./internal/privdir -run Windows -v -count=1 -timeout=120s
       - name: Windows AppContainer isolation primitive

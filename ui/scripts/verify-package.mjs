@@ -70,6 +70,19 @@ const kernel = path.join(resources, "bin", platform === "win32" ? "xmesh.exe" : 
 if (flag("kernel") || flag("run-kernel")) {
   if (!fs.existsSync(kernel)) fail(`kernel not bundled at ${kernel}`);
   ok(`kernel bundled (${fs.statSync(kernel).size} bytes)`);
+  if (platform === "win32") {
+    const background = path.join(resources, "bin", "xmesh-background.exe");
+    if (!fs.existsSync(background)) fail("background kernel is missing");
+    const data = fs.readFileSync(background);
+    const offset = data.readUInt32LE(0x3c);
+    if (data.toString("ascii", offset, offset + 4) !== "PE\0\0" || data.readUInt16LE(offset + 24 + 68) !== 2) fail("background kernel must use the Windows GUI subsystem");
+    if (flag("run-kernel")) {
+      const out = execFileSync(background, ["version"], { encoding: "utf8", timeout: 30_000, windowsHide: true }).trim();
+      const cli = execFileSync(kernel, ["version"], { encoding: "utf8", timeout: 30_000, windowsHide: true }).trim();
+      if (out !== cli) fail("background kernel and CLI versions differ");
+    }
+    ok("background kernel uses Windows GUI subsystem");
+  }
 }
 if (flag("run-kernel")) {
   const out = execFileSync(kernel, ["version"], { encoding: "utf8", timeout: 30_000 }).trim();

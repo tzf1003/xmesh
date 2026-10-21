@@ -160,6 +160,7 @@ Linux 没有托盘支持，不出安装包。
 
 ```sh
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o ui/build/kernel/xmesh.exe ./cmd/xmesh
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags=-H=windowsgui -o ui/build/kernel/xmesh-background.exe ./cmd/xmesh
 cd ui && npm ci
 XMESH_KERNEL_BIN="$PWD/build/kernel/xmesh.exe" npm run package -- --win --x64
 node scripts/verify-package.mjs --dir release/win-unpacked --kernel   # 本机能运行时再加 --run-kernel --smoke

@@ -82,7 +82,8 @@ test("package config: only the compiled app is packaged, never tests or the fake
 
 test("package config: kernel is bundled per platform when XMESH_KERNEL_BIN is set", async () => {
   const { default: cfg } = await loadConfig({ XMESH_KERNEL_BIN: "/k/xmesh" });
-  assert.deepEqual(cfg.win.extraResources, [{ from: "/k/xmesh", to: "bin/xmesh.exe" }]);
+  assert.deepEqual(cfg.win.extraResources, [{ from: "/k/xmesh", to: "bin/xmesh.exe" },
+    { from: path.join("/k", "xmesh-background.exe"), to: "bin/xmesh-background.exe" }]);
   assert.deepEqual(cfg.mac.extraResources, [{ from: "/k/xmesh", to: "bin/xmesh" }]);
   const none = await loadConfig({});
   assert.deepEqual(none.default.win.extraResources, []);

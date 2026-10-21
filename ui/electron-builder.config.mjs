@@ -14,6 +14,7 @@
 
 import { FuseV1Options } from "@electron/fuses";
 import { profiles } from "./scripts/fuses.config.mjs";
+import * as path from "node:path";
 
 const kernel = process.env.XMESH_KERNEL_BIN;
 const computer = process.env.XMESH_COMPUTER_BIN;
@@ -61,7 +62,9 @@ export default {
 
   win: {
     target: [{ target: "nsis" }],
-    extraResources: [...bundledKernel("bin/xmesh.exe"), ...bundledComputer("bin/xmesh-computer.exe")],
+    extraResources: [...bundledKernel("bin/xmesh.exe"),
+      ...(kernel ? [{ from: path.join(path.dirname(kernel), "xmesh-background.exe"), to: "bin/xmesh-background.exe" }] : []),
+      ...bundledComputer("bin/xmesh-computer.exe")],
   },
   nsis: {
     // build/installer.nsh replaces the image-name kill of running xmesh.exe with a check limited to this install's folder.
