@@ -60,6 +60,17 @@ func userTaskName(service, sid string) string {
 	return fmt.Sprintf(`\%s-%x`, service, suffix[:6])
 }
 
+func userTaskRuntimeStatus(state string) (service.Status, error) {
+	switch strings.TrimSpace(state) {
+	case "1", "3": // TASK_STATE_DISABLED, TASK_STATE_READY
+		return service.StatusStopped, nil
+	case "2", "4": // TASK_STATE_QUEUED, TASK_STATE_RUNNING
+		return service.StatusRunning, nil
+	default:
+		return service.StatusUnknown, fmt.Errorf("无法确认 Windows 用户任务状态: %q", state)
+	}
+}
+
 // isUserTaskOf reports whether name is a logon task that userTaskName makes for sid. The names end
 // in a hash of the SID, so this matches the tasks of that user for every node and no one else's.
 func isUserTaskOf(name, sid string) bool {

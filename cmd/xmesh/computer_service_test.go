@@ -87,6 +87,33 @@ func TestEnsureComputerServiceStartedIsIdempotent(t *testing.T) {
 	})
 }
 
+func TestComputerSetupReusesScheduledTask(t *testing.T) {
+	for _, state := range []string{"1", "2", "3", "4", "\r\n4\r\n", "0", "", "Running", "5"} {
+		t.Run(state, func(t *testing.T) {
+			started := false
+			err := ensureComputerServiceStarted(
+				func() (service.Status, error) { return userTaskRuntimeStatus(state) },
+				func() error { t.Fatal("existing task reinstalled"); return nil },
+				func() error { started = true; return nil },
+			)
+			switch strings.TrimSpace(state) {
+			case "1", "3":
+				if err != nil || !started {
+					t.Fatalf("err=%v started=%v", err, started)
+				}
+			case "2", "4":
+				if err != nil || started {
+					t.Fatalf("err=%v started=%v", err, started)
+				}
+			default:
+				if err == nil || started {
+					t.Fatalf("err=%v started=%v", err, started)
+				}
+			}
+		})
+	}
+}
+
 func TestComputerHostServiceRunsInUserGraphicalSession(t *testing.T) {
 	root := t.TempDir()
 	exe := filepath.Join(root, "xmesh")

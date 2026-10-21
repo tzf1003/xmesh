@@ -74,6 +74,9 @@ func Test_WindowsUserKernelStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskName := userTaskName(serviceName(node), installerSID())
+	if status, err := userTaskStatus(&service.Config{Name: serviceName(node)}); err != nil || status != service.StatusStopped {
+		t.Fatal("new task status", status, err)
+	}
 	raw, err := taskCommand(directory, "/Query", "/TN", taskName, "/XML")
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +110,9 @@ func Test_WindowsUserKernelStart(t *testing.T) {
 	}
 	if err := startKernel(); err != nil {
 		t.Fatal("migrated kernel failed startup acceptance", err)
+	}
+	if status, err := userTaskStatus(&service.Config{Name: serviceName(node)}); err != nil || status != service.StatusRunning {
+		t.Fatal("running task status", status, err)
 	}
 	if err := startKernel(); err != nil {
 		t.Fatal("starting an already running kernel must remain idempotent", err)

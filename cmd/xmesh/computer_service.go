@@ -156,7 +156,7 @@ func computerService(action string, args []string) error {
 		}
 		serviceArgs := []string{"--state-dir", statePath, "--helper", path}
 		status := func() (service.Status, error) {
-			return service.StatusStopped, userTaskAction("probe", c)
+			return userTaskStatus(c)
 		}
 		if runtime.GOOS != "windows" {
 			s, err := service.New(&program{}, c)
