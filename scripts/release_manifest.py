@@ -39,7 +39,11 @@ def validate(manifest):
             raise ValueError("invalid asset name or URL")
         if not re.fullmatch(r"[a-f0-9]{64}", asset.get("sha256", "")) or type(asset.get("size")) is not int or asset["size"] <= 0:
             raise ValueError("invalid asset checksum/size")
-        if key[0] not in ("darwin", "windows", "linux") or key[1] not in ("amd64", "arm64") or key[2] not in ("desktop", "cli"):
+        if key[2] == "webui":
+            # One Node script plus static files; it runs on any Linux architecture with Node 22.
+            if key[:2] != ("linux", "any"):
+                raise ValueError("the web panel asset is linux/any")
+        elif key[0] not in ("darwin", "windows", "linux") or key[1] not in ("amd64", "arm64") or key[2] not in ("desktop", "cli"):
             raise ValueError("unsupported platform asset")
         trust = asset.get("trust", {})
         if channel == "stable" and key[0] in ("darwin", "windows"):
@@ -69,6 +73,9 @@ def build(dist, version, repo):
             file = dist / f"xmesh-{version}-{os}-{arch}.{ 'zip' if os == 'windows' else 'tar.gz'}"
             if file.exists():
                 assets.append(record(file, repo, version, os, arch, "cli", {"signed": False}))
+    webui = dist / f"xmesh-webui-{version}-linux.tar.gz"
+    if webui.exists():
+        assets.append(record(webui, repo, version, "linux", "any", "webui", {"signed": False}))
     return validate({"schema_version": 1, "repository": repo, "version": version, "channel": channel,
                      "docs_version": version, "assets": assets})
 

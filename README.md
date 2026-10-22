@@ -38,7 +38,17 @@ bash install.sh --channel stable --json
 
 稳定版要求 Windows Authenticode 和 macOS 签名、公证、装订验证。beta/rc 属于 testing；安装明确未签名的测试包须加 `--allow-unsigned` / `-AllowUnsigned`，系统信任检查仍生效。安装器支持重试、`--download-only` / `-DownloadOnly`、离线目录和 JSON 输出，并返回应用内长期可用的 CLI 路径。完整参数、升级与恢复见[安装说明](docs/agent/install.md)。版本示例需替换为实际已发布版本。
 
-Agent 可沿 [llms.txt](llms.txt) 阅读版本对应的文档，使用 `setup inspect`、`plan`、`apply`、`status`、`resume`、`verify` 与 `doctor`。Linux 继续使用发布归档与[运行手册](docs/operations.md)；图形管理使用发布页的 `xmesh-webui-<版本>-linux.tar.gz`，在浏览器中打开与桌面端相同的面板，凭管理密钥登录，见 [Linux 网页管理界面](ui/README.md#linux-网页管理界面)。
+Agent 可沿 [llms.txt](llms.txt) 阅读版本对应的文档，使用 `setup inspect`、`plan`、`apply`、`status`、`resume`、`verify` 与 `doctor`。
+
+Linux 使用 `install-linux.sh`：校验发布文件后，把内核和网页管理界面各装成一个 systemd 用户服务，并在终端里协助你设置工作目录、权限和网页登录的管理密钥。网页管理界面在浏览器中提供与桌面端相同的面板，需要 Node.js 22.18 或更新版本：
+
+```bash
+bash install-linux.sh --channel stable
+# 固定版本：bash install-linux.sh --version v1.2.3
+# 只装内核：加 --no-webui；离线：--offline DIR
+```
+
+细节见[安装说明](docs/agent/install.md#linux)和 [Linux 网页管理界面](ui/README.md#linux-网页管理界面)。
 
 ## 本机开发
 

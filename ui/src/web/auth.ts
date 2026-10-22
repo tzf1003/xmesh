@@ -14,7 +14,8 @@ export function generateKey(): string {
   return randomBytes(32).toString("base64url");
 }
 
-function validKey(key: string): boolean {
+/** A key the login accepts: long enough, no whitespace. */
+export function validKey(key: string): boolean {
   return key.length >= MIN_KEY_LENGTH && key.length <= MAX_KEY_LENGTH && !/[\s\0]/.test(key);
 }
 

@@ -158,7 +158,7 @@ def build(source, output, version, repo, base_url, manifest=None, homepage=True)
     docs.mkdir(parents=True, exist_ok=True)
     for name, content in render_agent_documents(source / "docs/agent", version).items():
         (docs / name).write_text(content, encoding="utf-8")
-    for name in ("install.sh", "install.ps1"):
+    for name in ("install.sh", "install.ps1", "install-linux.sh"):
         shutil.copy2(source / "scripts" / name, version_dir / name)
     (version_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     for file in (source / "docs/site").iterdir():

@@ -195,7 +195,19 @@ macOS 签名时启用 Hardened Runtime，内置的内核二进制也会一并被
 
 Linux 主机上用浏览器打开和桌面端相同的面板，前面多一个管理密钥登录页。设计与安全约束见 [docs/design/12](../docs/design/12-ui-and-control.md) 的「Linux 网页管理界面」。
 
-需要 Node 22.18 或更新，以运行内核的同一个用户启动（面板从该用户的 `~/.config/xmesh` 找内核）。发布页提供 `xmesh-webui-<版本>-linux.tar.gz`，解开后：
+需要 Node 22.18 或更新，以运行内核的同一个用户运行（面板从该用户的 `~/.config/xmesh` 找内核）。
+
+**一次装好内核和网页界面**：用发布页的 `install-linux.sh`，它把两者各装成一个 systemd 用户服务（`xmesh-<节点名>` 和 `xmesh-webui`），见 [安装说明](../docs/agent/install.md#linux)。
+
+**只装网页界面**：发布页提供 `xmesh-webui-<版本>-linux.tar.gz`，解开后用它自带的 `install` 子命令注册服务：
+
+```sh
+node xmesh-webui/xmesh-webui.js install             # 写 systemd 用户单元并启动；首次生成并打印管理密钥
+node xmesh-webui/xmesh-webui.js install --key-stdin # 用自己的密钥：从标准输入读第一行（不会回显）
+node xmesh-webui/xmesh-webui.js uninstall           # 停止并移除服务（--purge 同时删除密钥和数据目录）
+```
+
+也可以不装服务，前台运行：
 
 ```sh
 node xmesh-webui/xmesh-webui.js                     # 首次启动打印管理密钥，默认监听 http://127.0.0.1:7480/
@@ -215,14 +227,17 @@ node xmesh-webui/xmesh-webui.js --rotate-key        # 更换密钥（旧会话�
 
 远程访问推荐 SSH 隧道：`ssh -L 7480:127.0.0.1:7480 <主机>`，再在本机打开 `http://127.0.0.1:7480/`。若直接对外监听，请配置 TLS；没有 TLS 时启动日志会警告，密钥和会话会以明文传输。修改密钥文件后发送 `SIGHUP`（`systemctl --user reload xmesh-webui`）即可生效，所有会话随之退出。
 
-常驻运行可用归档里的 systemd 用户单元 [`web/xmesh-webui.service`](web/xmesh-webui.service)：
+`install` 子命令的选项与前台运行相同（`--listen`、`--tls-cert/--tls-key`、`--data-dir`、`--key-file`、`--lang`），另有：
 
-```sh
-mkdir -p ~/.local/share/xmesh-webui && tar -xzf xmesh-webui-<版本>-linux.tar.gz --strip-components=1 -C ~/.local/share/xmesh-webui
-cp ~/.local/share/xmesh-webui/xmesh-webui.service ~/.config/systemd/user/
-systemctl --user enable --now xmesh-webui
-journalctl --user -u xmesh-webui     # 首次启动的密钥在这里
-```
+| 选项 | 说明 |
+| --- | --- |
+| `--key-stdin` | 从标准输入第一行读取管理密钥并保存（至少 16 个字符，不含空白）；自己输入的密钥不会被回显，只有自动生成的才会打印一次 |
+| `--rotate-key` | 生成新密钥并替换，旧会话全部失效 |
+| `--xmesh-bin PATH` | 面板调用的 `xmesh`（重启、停止内核等）；默认取 `XMESH_BIN` 或 PATH 中的。用户服务的 PATH 很短，所以单元里固定写成 `Environment=XMESH_BIN=…` |
+| `--insecure` | 监听非本机地址又没有 TLS 时必须显式给出，否则 `install` 拒绝 |
+| `--no-start` / `--linger` / `--print` | 只启用不启动 / 同时执行 `loginctl enable-linger`，让服务在退出登录后继续运行 / 只打印单元文件，不改动任何东西 |
+
+单元里写的是 node 和脚本的**绝对路径**：移动安装目录或用 nvm 切换 Node 版本后，重新执行一次 `install` 即可。密钥本身不会写进单元文件，只有它的文件路径。服务日志用 `journalctl --user -u xmesh-webui` 查看。
 
 与桌面端的差别：
 
@@ -234,7 +249,7 @@ journalctl --user -u xmesh-webui     # 首次启动的密钥在这里
 | 打开配置文件、日志目录 | 不能打开服务器上的文件，改为复制路径 |
 | 托盘、登录项、自动更新、桌面控制紧急停止快捷键 | 不提供；更新时替换归档后重启服务 |
 
-顶栏多一个「退出登录」按钮。实现：`src/web/`（服务端：`auth.ts` 密钥与会话，`server.ts` 路由，`bridge.ts` 把桌面能力转给页面，`main.ts` 组装服务），`src/renderer/web/`（登录页与 `window.xmesh` 的 HTTP 实现），`scripts/build-web.mjs`（打包，并检查服务端没有引入 electron）。测试见 `test/unit/web.test.ts`。
+顶栏多一个「退出登录」按钮。实现：`src/web/`（服务端：`auth.ts` 密钥与会话，`server.ts` 路由，`bridge.ts` 把桌面能力转给页面，`service.ts` systemd 用户服务的安装与卸载，`main.ts` 组装服务），`src/renderer/web/`（登录页与 `window.xmesh` 的 HTTP 实现），`scripts/build-web.mjs`（打包，并检查服务端没有引入 electron）。测试见 `test/unit/web.test.ts` 和 `test/unit/web-service.test.ts`；安装脚本 `scripts/install-linux.sh` 的测试在 `scripts/test_install_distribution.py`。
 
 ## 与契约的关系
 

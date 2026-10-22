@@ -29,6 +29,7 @@ import { PreferencesStore } from "../main/preferences-store";
 import { TransferService } from "../main/transfers";
 import { KernelConfigs } from "../main/update/kernel-configs";
 import { loadKey } from "./auth";
+import { findXmesh, installService, realDeps, uninstallService, type Deps } from "./service";
 import { WebBridge, webPlatform } from "./bridge";
 import { WebServer } from "./server";
 
@@ -72,6 +73,12 @@ function usage(): string {
     "  --rotate-key       replace the management key, print the new one, and continue",
     "  --print-key        print the management key and exit",
     "  --lang zh|en       panel language when nothing is saved (env XMESH_UI_LANG)",
+    "",
+    "systemd user service (run as the user that runs the xmesh kernel):",
+    "  xmesh-webui install [--listen ADDR] [--tls-cert F --tls-key F] [--data-dir D] [--key-file F]",
+    "                      [--key-stdin | --rotate-key] [--xmesh-bin PATH] [--lang zh|en]",
+    "                      [--insecure] [--no-start] [--linger] [--print]",
+    "  xmesh-webui uninstall [--purge]",
   ].join("\n");
 }
 
@@ -288,7 +295,72 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
   };
 }
 
+function readStdinLine(): string {
+  return fs.readFileSync(0, "utf8").split(/\r?\n/, 1)[0]!.trim();
+}
+
+/** `install` and `uninstall`; returns the process exit code. */
+export function runServiceCommand(cmd: "install" | "uninstall", argv: string[], env: NodeJS.ProcessEnv = process.env, deps: Deps = realDeps(), stdinLine: () => string = readStdinLine, script: string = fs.realpathSync(process.argv[1] ?? "")): number {
+  const { values } = parseArgs({
+    args: argv,
+    strict: true,
+    options: {
+      listen: { type: "string" }, "data-dir": { type: "string" }, "key-file": { type: "string" },
+      "tls-cert": { type: "string" }, "tls-key": { type: "string" }, "xmesh-bin": { type: "string" }, lang: { type: "string" },
+      "key-stdin": { type: "boolean" }, "rotate-key": { type: "boolean" }, insecure: { type: "boolean" },
+      "no-start": { type: "boolean" }, linger: { type: "boolean" }, print: { type: "boolean" }, purge: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  if (values.help) {
+    console.log(usage());
+    return 0;
+  }
+  // The service is a systemd user service, so its default directory is the Linux (XDG) one.
+  const dataDir = path.resolve(values["data-dir"] ?? env.XMESH_WEBUI_DATA_DIR ?? path.join(userConfigDir("linux", env, deps.home), "xmesh-webui"));
+  const keyFile = path.resolve(values["key-file"] ?? env.XMESH_WEBUI_KEY_FILE ?? path.join(dataDir, "webui.key"));
+  try {
+    if (cmd === "uninstall") {
+      uninstallService({ dataDir, keyFile, ...(values.purge && { purge: true }) }, deps);
+      return 0;
+    }
+    const listen = values.listen ?? env.XMESH_WEBUI_LISTEN ?? DEFAULT_LISTEN;
+    if (!parseListen(listen)) throw new Error("--listen must be host:port");
+    if (values["key-stdin"] && values["rotate-key"]) throw new Error("--key-stdin and --rotate-key exclude each other");
+    const lang = values.lang ?? env.XMESH_UI_LANG;
+    const xmeshBin = values["xmesh-bin"] ?? findXmesh(env);
+    if (xmeshBin === undefined) deps.out("警告：PATH 中找不到 xmesh，面板的重启、停止等操作会不可用；可用 --xmesh-bin 指定。");
+    const result = installService({
+      node: process.execPath, script, listen, dataDir, keyFile,
+      ...(values["tls-cert"] !== undefined && { tlsCert: values["tls-cert"] }),
+      ...(values["tls-key"] !== undefined && { tlsKey: values["tls-key"] }),
+      ...(xmeshBin !== undefined && { xmeshBin: path.resolve(xmeshBin) }),
+      ...(lang !== undefined && { lang }),
+      ...(values["key-stdin"] && { key: stdinLine() }),
+      ...(values["rotate-key"] && { rotateKey: true }),
+      ...(values.insecure && { insecure: true }), ...(values["no-start"] && { noStart: true }),
+      ...(values.linger && { linger: true }), ...(values.print && { print: true }),
+    }, deps);
+    // Only a key made here is shown; one the user typed or supplied is never echoed back.
+    if (result.key !== undefined && !values["key-stdin"]) deps.out(`管理密钥 / management key: ${result.key}`);
+    if (!values.print) deps.out(`密钥文件 ${result.keyFile}（0600）；随时可用 --print-key 查看`);
+    return 0;
+  } catch (e) {
+    console.error(`xmesh-webui: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
 if (require.main === module) {
+  const sub = process.argv[2];
+  if (sub === "install" || sub === "uninstall") {
+    try {
+      process.exit(runServiceCommand(sub, process.argv.slice(3)));
+    } catch (e) {
+      console.error(`xmesh-webui: ${e instanceof Error ? e.message : String(e)}\n\n${usage()}`);
+      process.exit(2);
+    }
+  }
   let opts: WebOptions;
   try {
     opts = parseWebArgs(process.argv.slice(2));
