@@ -137,7 +137,6 @@ jobs:
           name="xmesh-webui-${GITHUB_REF_NAME}-linux"
           mkdir -p "release/$name"
           cp -R dist/web/. "release/$name/"
-          cp web/xmesh-webui.service "release/$name/"
           test "$(cat "release/$name/VERSION")" = "${GITHUB_REF_NAME#v}"
           node "release/$name/xmesh-webui.js" --help > /dev/null
           tar -C release -czf "release/$name.tar.gz" "$name"
@@ -158,12 +157,12 @@ jobs:
       - name: 安装清单与离线包
         run: |
           python3 scripts/release_manifest.py --dist dist --version "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --offline-bundles
-          cp scripts/install.sh scripts/install.ps1 dist/
+          cp scripts/install.sh scripts/install.ps1 scripts/install-linux.sh dist/
           python3 - <<'PYCODE'
           import os, zipfile
           from pathlib import Path
           tag = os.environ['GITHUB_REF_NAME']
-          files = [Path('llms.txt'), Path('dist/manifest.json'), Path('scripts/install.sh'), Path('scripts/install.ps1'), *Path('docs/agent').glob('*.md'), *Path('docs/site').glob('*')]
+          files = [Path('llms.txt'), Path('dist/manifest.json'), Path('scripts/install.sh'), Path('scripts/install.ps1'), Path('scripts/install-linux.sh'), *Path('docs/agent').glob('*.md'), *Path('docs/site').glob('*')]
           with zipfile.ZipFile(f'dist/xmesh-docs-{tag}.zip', 'w', zipfile.ZIP_DEFLATED) as bundle:
               for file in files:
                   bundle.write(file, 'manifest.json' if file.name == 'manifest.json' else str(file))

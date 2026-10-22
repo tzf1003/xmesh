@@ -264,4 +264,312 @@ class BootstrapTests(unittest.TestCase):
                 result,events=self.invoke(directory,osname,*options)
                 self.assertNotEqual(result.returncode,0);self.assertEqual(events[-1]['phase'],'manifest')
 
+
+LINUX_VERSION = "v1.2.3-beta.2"
+KEY = "typed-secret-key-0123456789"
+
+FAKE_XMESH = """#!/bin/bash
+# Stands in for the kernel: records calls and answers the `setup` protocol.
+D="$FAKE_DIR"; echo "$*" >> "$D/calls.log"
+case "$1 $2" in
+  "version "*) echo "xmesh @VERSION@";;
+  "setup inspect")
+    if [ -f "$D/node" ]; then printf '{"ok":true,"data":{"nodes":[{"name":"%s","running":%s}]}}\\n' "$(cat "$D/node")" "${FAKE_NODE_RUNNING:-true}"
+    else echo '{"ok":true,"data":{"nodes":[]}}'; fi;;
+  "setup plan")
+    while [ "$#" -gt 0 ]; do [ "$1" = --input ] && cp "$2" "$D/plan-input.json"; shift; done
+    echo '{"ok":true,"data":{"id":"plan123","config_path":"/cfg/xmesh.yaml","endpoint":"http://127.0.0.1:8080/mcp","summary":["workspace ok","permission noted"]}}';;
+  "setup apply") echo '{"ok":true,"data":{"id":"job456"}}'; echo new-node > "$D/node";;
+  "setup status")
+    if [ -f "$D/fail-status" ]; then echo '{"ok":true,"data":{"status":"failed","readiness":{"service_ready":false},"steps":[{"id":"install","status":"failed","message":"unit refused","next_action":"check systemd"}],"next_action":"run doctor"}}'
+    else echo '{"ok":true,"data":{"status":"waiting_user","readiness":{"service_ready":true}}}'; fi;;
+  "restart "*) echo '{"ok":true}';;
+  *) echo "unexpected: $*" >&2; exit 9;;
+esac
+"""
+
+FAKE_NODE = """#!/bin/bash
+# Stands in for node: reports a version, and records how the panel installer is called.
+D="$FAKE_DIR"
+if [ "$1" = -p ]; then echo "${FAKE_NODE_VERSION:-22.20.0}"; exit 0; fi
+if [ "$2" = --help ]; then exit 0; fi
+echo "$*" >> "$D/node.log"
+for a in "$@"; do [ "$a" = --key-stdin ] && cat > "$D/node.stdin"; done
+echo "fake panel installed"
+"""
+
+def tar_dir(archive, top, files):
+    import io, tarfile
+    with tarfile.open(archive, "w:gz") as bundle:
+        for name, content, mode in files:
+            data = content.encode("utf-8")
+            info = tarfile.TarInfo(f"{top}/{name}" if top else name)
+            info.size = len(data); info.mode = mode
+            bundle.addfile(info, io.BytesIO(data))
+
+@unittest.skipUnless(platform.system() == "Linux" and shutil.which("bash") and shutil.which("python3"), "the Linux installer needs Linux, bash and python3")
+class LinuxInstallTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.dist = self.root / "dist"; self.dist.mkdir()
+        self.state = self.root / "fake"; self.state.mkdir()
+        self.home = self.root / "home"; self.home.mkdir()
+        self.commands = self.root / "commands"; self.commands.mkdir()
+        self.workspace = self.root / "work"; self.workspace.mkdir()
+        self.build()
+        for name, content in {
+            "node": FAKE_NODE,
+            "systemctl": '#!/bin/bash\necho "systemctl $*" >> "$FAKE_DIR/systemctl.log"\n[ "$FAKE_NO_SYSTEMD" = 1 ] && [ "$2" = show-environment ] && exit 1\nexit 0\n',
+            "loginctl": '#!/bin/bash\necho "loginctl $*" >> "$FAKE_DIR/loginctl.log"\n[ "$1" = show-user ] && echo "${FAKE_LINGER:-no}"\nexit 0\n',
+        }.items():
+            f = self.commands / name; f.write_text(content, encoding="utf-8"); f.chmod(0o755)
+
+    def build(self, kernel_extra=(), version=LINUX_VERSION):
+        kernel = [("xmesh", FAKE_XMESH.replace("@VERSION@", version), 0o755), *kernel_extra]
+        for arch in ("amd64", "arm64"):
+            tar_dir(self.dist / f"xmesh-{version}-linux-{arch}.tar.gz", f"xmesh-{version}-linux-{arch}", kernel)
+        top = f"xmesh-webui-{version}-linux"
+        tar_dir(self.dist / f"{top}.tar.gz", top, [("xmesh-webui.js", "// fake\n", 0o755), ("public/index.html", "<html></html>", 0o644), ("VERSION", version[1:] + "\n", 0o644)])
+        manifest = fixture(self.dist, version)
+        self.manifest = manifest
+
+    def env(self, **extra):
+        env = dict(os.environ, HOME=str(self.home), FAKE_DIR=str(self.state), XMESH_INSTALL_POLL_SECONDS="0",
+                   PATH=str(self.commands) + os.pathsep + os.environ["PATH"], XDG_CONFIG_HOME=str(self.home / ".config"),
+                   XDG_DATA_HOME=str(self.home / ".local/share"), XDG_CACHE_HOME=str(self.home / ".cache"))
+        env.pop("XMESH_BIN", None)
+        env.update(extra)
+        return env
+
+    def run_script(self, *args, stdin=None, **env):
+        command = ["bash", str(ROOT / "scripts/install-linux.sh"), "--offline", str(self.dist), "--version", LINUX_VERSION, "--arch", "amd64", *args]
+        return subprocess.run(command, capture_output=True, text=True, env=self.env(**env), input=stdin if stdin is not None else "", timeout=60)
+
+    @property
+    def prefix(self): return self.home / ".local/share/xmesh"
+
+    def calls(self, name="calls.log"):
+        file = self.state / name
+        return file.read_text(encoding="utf-8").splitlines() if file.exists() else []
+
+    def keyfile(self):
+        file = self.root / "web.key"; file.write_text(KEY + "\n", encoding="utf-8"); return file
+
+    def test_manifest_lists_the_web_panel_archive(self):
+        webui = [a for a in self.manifest["assets"] if a["kind"] == "webui"]
+        self.assertEqual(len(webui), 1)
+        self.assertEqual((webui[0]["os"], webui[0]["arch"], webui[0]["name"]), ("linux", "any", f"xmesh-webui-{LINUX_VERSION}-linux.tar.gz"))
+        self.assertEqual(len([a for a in self.manifest["assets"] if a["kind"] == "cli" and a["os"] == "linux"]), 2)
+        for field, value in (("os", "darwin"), ("arch", "amd64")):
+            changed = copy.deepcopy(self.manifest)
+            next(a for a in changed["assets"] if a["kind"] == "webui")[field] = value
+            with self.assertRaises(ValueError): validate(changed)
+
+    def test_installs_kernel_and_web_panel_as_two_services(self):
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", "--node-name", "box",
+                                 "--web-key-from", str(self.keyfile()), "--linger")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        xmesh = self.prefix / "bin/xmesh"
+        self.assertTrue(os.access(xmesh, os.X_OK))
+        self.assertEqual(os.readlink(self.home / ".local/bin/xmesh"), str(xmesh))
+        self.assertTrue((self.prefix / "webui/xmesh-webui.js").is_file())
+        self.assertTrue((self.prefix / "webui/public/index.html").is_file())
+        # the kernel goes through the supported setup flow, with exactly the access that was asked for
+        self.assertEqual([c.split(" --")[0] for c in self.calls() if c.startswith("setup")], ["setup inspect", "setup plan", "setup apply", "setup status"])
+        plan = json.loads((self.state / "plan-input.json").read_text(encoding="utf-8"))
+        self.assertEqual((plan["purpose"], plan["node_name"], plan["workspace"], plan["permission"], plan["clients"]), ("local", "box", str(self.workspace), "readonly", []))
+        # the panel is installed by its own `install` command, with the key on stdin only
+        line = self.calls("node.log")[0]
+        self.assertIn(f"{self.prefix}/webui/xmesh-webui.js install --listen 127.0.0.1:7480 --xmesh-bin {xmesh} --linger --key-stdin", line)
+        self.assertEqual((self.state / "node.stdin").read_text(encoding="utf-8").strip(), KEY)
+        self.assertNotIn(KEY, line)
+        self.assertNotIn(KEY, result.stdout + result.stderr)
+        self.assertIn("xmesh-webui", result.stdout)
+
+    def test_a_generated_key_is_left_to_the_panel(self):
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "development")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        line = self.calls("node.log")[0]
+        self.assertNotIn("--key-stdin", line)
+        self.assertNotIn("--rotate-key", line)
+        self.assertFalse((self.state / "node.stdin").exists())
+
+    def test_non_interactive_runs_must_name_the_access_they_grant(self):
+        for args in ([], ["--workspace", str(self.workspace)], ["--permission", "development"]):
+            with self.subTest(args=args):
+                result = self.run_script("--yes", *args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("--workspace 和 --permission", result.stderr)
+                self.assertFalse(self.prefix.exists(), "nothing is installed before the questions are settled")
+                self.assertEqual(self.calls(), [])
+
+    def test_an_existing_node_is_kept_and_restarted_without_questions(self):
+        config = self.home / ".config/xmesh/old/xmesh.yaml"
+        config.parent.mkdir(parents=True); config.write_text("node:\n  name: old\n", encoding="utf-8")
+        (self.state / "node").write_text("old\n", encoding="utf-8")
+        result = self.run_script("--yes", "--no-webui")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([c.split(" --")[0] for c in self.calls() if not c.startswith("version")], ["setup inspect", "restart"])
+        self.assertIn("restart --name xmesh-old", " ".join(self.calls()))
+        self.assertEqual(self.calls("node.log"), [])
+        self.assertEqual(config.read_text(encoding="utf-8"), "node:\n  name: old\n")
+
+    def test_a_stopped_existing_node_is_not_started_behind_your_back(self):
+        (self.home / ".config/xmesh/old").mkdir(parents=True)
+        (self.home / ".config/xmesh/old/xmesh.yaml").write_text("x", encoding="utf-8")
+        (self.state / "node").write_text("old\n", encoding="utf-8")
+        result = self.run_script("--yes", "--no-webui", FAKE_NODE_RUNNING="false")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(any(c.startswith("restart") for c in self.calls()))
+        self.assertIn("systemctl --user start xmesh-old", result.stdout)
+
+    def test_a_kernel_that_does_not_come_up_is_reported_with_its_next_step(self):
+        (self.state / "fail-status").write_text("", encoding="utf-8")
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", "--no-webui")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("install: failed unit refused check systemd", result.stderr)
+        self.assertIn("setup resume --job job456", result.stderr)
+        self.assertEqual(self.calls("node.log"), [])
+
+    def test_node_must_be_recent_enough_for_the_panel_unless_it_is_skipped(self):
+        for version in ("20.11.0", "22.17.9"):
+            result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", FAKE_NODE_VERSION=version)
+            self.assertNotEqual(result.returncode, 0, version)
+            self.assertIn("22.18", result.stderr)
+            self.assertFalse(self.prefix.exists())
+        ok = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", FAKE_NODE_VERSION="22.18.0")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        (self.root / "nonode").mkdir()
+        skipped = self.run_script("--yes", "--no-webui", "--workspace", str(self.workspace), "--permission", "readonly", PATH=f"{self.commands}:{os.environ['PATH']}", FAKE_NODE_VERSION="14.0.0")
+        self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
+
+    def test_without_a_systemd_user_session_nothing_is_installed(self):
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", FAKE_NO_SYSTEMD="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("systemd 用户会话", result.stderr)
+        self.assertFalse(self.prefix.exists())
+
+    def test_the_panel_needs_tls_or_an_explicit_choice_off_localhost(self):
+        base = ["--yes", "--workspace", str(self.workspace), "--permission", "readonly"]
+        refused = self.run_script(*base, "--web-listen", "0.0.0.0:7480")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("没有 TLS", refused.stderr)
+        self.assertFalse(self.prefix.exists())
+        cert = self.root / "c.pem"; key = self.root / "c.key"
+        cert.write_text("x"); key.write_text("x")
+        tls = self.run_script(*base, "--web-listen", "0.0.0.0:7480", "--web-tls-cert", str(cert), "--web-tls-key", str(key))
+        self.assertEqual(tls.returncode, 0, tls.stdout + tls.stderr)
+        self.assertIn(f"--tls-cert {cert} --tls-key {key}", self.calls("node.log")[0])
+        self.assertIn("https://0.0.0.0:7480/", tls.stdout)
+        (self.state / "node").unlink(); (self.state / "node.log").unlink()
+        shutil.rmtree(self.prefix)
+        insecure = self.run_script(*base, "--web-listen", "0.0.0.0:7480", "--web-insecure")
+        self.assertEqual(insecure.returncode, 0, insecure.stdout + insecure.stderr)
+        self.assertIn("--insecure", self.calls("node.log")[0])
+
+    def test_tampered_archives_and_unsafe_paths_are_refused_before_anything_is_installed(self):
+        archive = self.dist / f"xmesh-{LINUX_VERSION}-linux-amd64.tar.gz"
+        archive.write_bytes(archive.read_bytes() + b"x")
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("校验和", result.stderr)
+        self.assertFalse(self.prefix.exists())
+        # an archive whose checksum matches the manifest but that escapes its directory
+        self.build(kernel_extra=[("../../escape.txt", "x", 0o644)])
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", "--no-webui")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("越界路径", result.stderr)
+        self.assertFalse((self.root / "escape.txt").exists())
+        self.assertFalse(self.prefix.exists())
+        # a symlink could point anywhere once extracted
+        import io, tarfile
+        self.build()
+        archive = self.dist / f"xmesh-{LINUX_VERSION}-linux-amd64.tar.gz"
+        with tarfile.open(archive, "w:gz") as bundle:
+            data = FAKE_XMESH.replace("@VERSION@", LINUX_VERSION).encode("utf-8")
+            info = tarfile.TarInfo("top/xmesh"); info.size = len(data); info.mode = 0o755
+            bundle.addfile(info, io.BytesIO(data))
+            link = tarfile.TarInfo("top/link"); link.type = tarfile.SYMTYPE; link.linkname = "/etc/passwd"
+            bundle.addfile(link)
+        (self.dist / "manifest.json").write_text(json.dumps(build(self.dist, LINUX_VERSION, "tzf1003/xmesh")), encoding="utf-8")
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", "--no-webui")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("链接或特殊文件", result.stderr)
+        self.assertFalse(self.prefix.exists())
+
+    def test_the_installed_binary_must_report_the_release_version(self):
+        self.build(version=LINUX_VERSION)
+        for arch in ("amd64",):
+            tar_dir(self.dist / f"xmesh-{LINUX_VERSION}-linux-{arch}.tar.gz", f"xmesh-{LINUX_VERSION}-linux-{arch}", [("xmesh", FAKE_XMESH.replace("@VERSION@", "v9.9.9"), 0o755)])
+        (self.dist / "manifest.json").write_text(json.dumps(build(self.dist, LINUX_VERSION, "tzf1003/xmesh")), encoding="utf-8")
+        result = self.run_script("--yes", "--workspace", str(self.workspace), "--permission", "readonly", "--no-webui")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("xmesh v9.9.9", result.stderr)
+
+    def test_download_only_verifies_and_installs_nothing(self):
+        result = self.run_script("--download-only")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"xmesh-{LINUX_VERSION}-linux-amd64.tar.gz", result.stdout)
+        self.assertFalse(self.prefix.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_argument_errors(self):
+        for args, text in ((["--permission", "root"], "development 或 readonly"), (["--purpose", "cloud"], "local 或 multi-device"),
+                           (["--workspace", "relative/dir"], "绝对路径"), (["--web-tls-cert", "a.pem"], "同时给出"),
+                           (["--lang", "fr"], "zh 或 en"), (["--no-kernel", "--no-webui"], "没有可安装的内容"), (["--web-listen", "nope"], "host:port")):
+            with self.subTest(args=args):
+                result = self.run_script("--yes", *args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(text, result.stderr)
+        self.assertEqual(self.run_script("--bogus").returncode, 2)
+        self.assertEqual(self.run_script("--help").returncode, 0)
+
+    def test_questions_are_asked_in_a_terminal_and_the_key_is_confirmed(self):
+        import pty, select, time
+        master, slave = pty.openpty()
+        command = ["bash", str(ROOT / "scripts/install-linux.sh"), "--offline", str(self.dist), "--version", LINUX_VERSION, "--arch", "amd64"]
+        process = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave, env=self.env(), close_fds=True)
+        os.close(slave)
+        transcript = ""
+        def answer(prompt, text, timeout=30):
+            nonlocal transcript
+            deadline = time.time() + timeout
+            while prompt not in transcript:
+                if time.time() > deadline: self.fail(f"no prompt {prompt!r}; got:\n{transcript}")
+                if select.select([master], [], [], 0.2)[0]:
+                    try: transcript += os.read(master, 4096).decode("utf-8", "replace")
+                    except OSError: break
+            transcript = transcript.split(prompt, 1)[1]
+            os.write(master, (text + "\n").encode("utf-8"))
+        try:
+            answer("用途：", "")
+            answer("节点名", "mybox")
+            answer("工作目录", str(self.workspace))
+            answer("权限", "")
+            answer("监听地址", "")
+            answer("管理密钥（留空", "short")
+            answer("请重新输入", KEY)
+            answer("再次输入以确认", "does-not-match-at-all")
+            answer("两次输入不一致", KEY)
+            answer("再次输入以确认", KEY)
+            answer("退出登录后继续运行", "n")
+            answer("按此计划创建节点", "y")
+            deadline = time.time() + 30
+            while process.poll() is None and time.time() < deadline:
+                if select.select([master], [], [], 0.2)[0]:
+                    try: transcript += os.read(master, 4096).decode("utf-8", "replace")
+                    except OSError: break
+            self.assertEqual(process.wait(timeout=30), 0, transcript)
+        finally:
+            if process.poll() is None: process.kill()
+            os.close(master)
+        plan = json.loads((self.state / "plan-input.json").read_text(encoding="utf-8"))
+        self.assertEqual((plan["node_name"], plan["permission"], plan["purpose"]), ("mybox", "development", "local"))
+        self.assertEqual((self.state / "node.stdin").read_text(encoding="utf-8").strip(), KEY)
+        self.assertNotIn(KEY, transcript, "typed secrets are not echoed")
+        self.assertNotIn("--linger", self.calls("node.log")[0])
+        self.assertIn("未启用 linger", transcript)
+
 if __name__=='__main__':unittest.main()

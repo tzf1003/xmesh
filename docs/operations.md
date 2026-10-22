@@ -71,7 +71,9 @@ xmesh control pair connect --path lan --address https://100.100.1.20:7433 --pass
 
 ## Linux 网页管理界面
 
-Linux 没有托盘应用，用 `xmesh-webui` 在浏览器里提供与桌面端相同的面板。以运行内核的同一用户执行 `node xmesh-webui/xmesh-webui.js`：首次启动打印管理密钥（保存在 `~/.config/xmesh-webui/webui.key`，`0600`），默认只监听 `127.0.0.1:7480`。远程使用 SSH 隧道或 `--tls-cert/--tls-key`。选项、systemd 用户单元和与桌面端的差别见 [ui/README.md](../ui/README.md#linux-网页管理界面)，安全设计见 [12 · Linux 网页管理界面](design/12-ui-and-control.md#linux-网页管理界面)。
+Linux 没有托盘应用，用 `xmesh-webui` 在浏览器里提供与桌面端相同的面板。推荐用发布页的 `install-linux.sh`：它把内核和网页界面各装成一个 systemd 用户服务（`xmesh-<节点名>`、`xmesh-webui`），并在终端里协助设置工作目录、权限和管理密钥，见 [安装说明](agent/install.md#linux)。
+
+只装网页界面时，以运行内核的同一用户执行 `node xmesh-webui/xmesh-webui.js install`：写入 systemd 用户单元并启动，首次生成管理密钥（保存在 `~/.config/xmesh-webui/webui.key`，`0600`），默认只监听 `127.0.0.1:7480`。远程使用 SSH 隧道或 `--tls-cert/--tls-key`。选项和与桌面端的差别见 [ui/README.md](../ui/README.md#linux-网页管理界面)，安全设计见 [12 · Linux 网页管理界面](design/12-ui-and-control.md#linux-网页管理界面)。
 
 ## 构建与本机验证
 
