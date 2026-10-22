@@ -9,6 +9,8 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/build-renderer.mjs && node scripts/build-mcp.mjs",
+    "build:web": "npm run build && node scripts/build-web.mjs",
+    "web": "npm run build:web && node dist/web/xmesh-webui.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-reporter=spec \"dist/test/unit/**/*.test.js\"",
     "test:e2e": "npm run build && node scripts/build-policy-test-cli.mjs && node scripts/flip-fuses.mjs --profile test && playwright test",

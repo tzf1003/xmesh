@@ -1,0 +1,19 @@
+/* Login page and browser-only dialogs of the web management panel; colours come from styles.css. */
+.web-page { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); }
+.web-login { width: 100%; max-width: 380px; display: grid; gap: 10px; padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); }
+.web-login h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.web-login label { font-weight: 500; color: var(--text-2); margin-top: 6px; }
+.web-login input { font: inherit; font-family: var(--mono); padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); }
+.web-login input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.web-lead, .web-hint { margin: 0; color: var(--muted); }
+.web-hint { font-size: 12px; }
+.web-error { margin: 0; min-height: 1.45em; color: var(--danger); }
+.web-btn { font: inherit; padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.web-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.web-btn:disabled { opacity: 0.6; cursor: default; }
+.web-layer { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.35); }
+.web-modal { width: 100%; max-width: 560px; display: grid; gap: 10px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-pop); }
+.web-modal h2 { margin: 0; font-size: 15px; }
+.web-modal p { margin: 0; color: var(--muted); }
+.web-copy { width: 100%; font: 12px/1.45 var(--mono); padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); resize: vertical; }
+.web-actions { display: flex; justify-content: flex-end; }

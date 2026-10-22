@@ -67,7 +67,7 @@ npm start             # 另开终端，启动 Electron
 - 下载与校验：只从 `github.com/tzf1003/xmesh/releases/download/<tag>/` 取 `xmesh-ui-<版本>-<win|mac>-<x64|arm64>.<exe|dmg>`，边下边算 SHA-256，必须和 `SHA256SUMS.txt`（以及 API 给出的 digest，两者都在时必须一致）相符才继续；不符就丢弃，不会停任何东西。
 - 替换：先对每个在运行的节点执行 `xmesh stop`，记下停掉的节点；写下 `pending.json`；启动一个脱离的脚本后退出。Windows 的脚本（`cmd`）等应用进程结束，静默运行 NSIS 安装程序（沿用原安装目录），成功后启动新应用；macOS 的脚本（`/bin/sh`）等应用退出，挂载 dmg，把 `xmesh.app` 换成新的（先改名保留旧的，复制失败就放回去），清除隔离属性后打开。路径都经环境变量或参数传入，脚本文本里没有路径。
 - 恢复：新应用启动时读 `pending.json`，重新启动被停掉的节点（`xmesh start`），版本对上就提示「已更新到 X」，没对上就带着脚本留下的原因提示失败，旧版本仍可用。配置、令牌、节点状态都在安装目录之外，更新不碰它们。
-- 限制：macOS 要求应用在可写的位置（通常是「应用程序」）；从 dmg 或 AppTranslocation 运行时只提示先拖进「应用程序」；没有写权限时打开 dmg 让用户手动覆盖。内核若来自 `XMESH_BIN` 或 `PATH`（不是安装包里的那个），面板会说明它不会被更换。Linux 没有 UI 安装包，不在范围内。
+- 限制：macOS 要求应用在可写的位置（通常是「应用程序」）；从 dmg 或 AppTranslocation 运行时只提示先拖进「应用程序」；没有写权限时打开 dmg 让用户手动覆盖。内核若来自 `XMESH_BIN` 或 `PATH`（不是安装包里的那个），面板会说明它不会被更换。Linux 没有 UI 安装包，网页管理界面不自动更新（见下文「Linux 网页管理界面」）。
 - 试用：`XMESH_UPDATE_FEED=<地址>` 把检测和下载指向一个仿 GitHub 的目录（`<地址>/releases` 返回发布列表，`<地址>/download/<tag>/<文件>` 提供文件），用来不发版本就演练一次更新。
 
 ### Tailscale 管理页面
@@ -151,7 +151,7 @@ Fuses 有两档。`release` 是发布用的，由后续的打包任务在 `after
 | Windows x64、arm64 | `xmesh-ui-<版本>-win-<arch>.exe`（NSIS，用户级安装，可改目录） | `resources\bin\xmesh.exe` |
 | macOS arm64、x64 | `xmesh-ui-<版本>-mac-<arch>.dmg`（`.app` 设 `LSUIElement`，无 Dock 图标） | `Contents/Resources/bin/xmesh` |
 
-Linux 没有托盘支持，不出安装包。
+Linux 没有托盘支持，不出安装包；Linux 使用网页管理界面（见下文）。
 
 - **内核查找顺序**：`XMESH_BIN`，其次安装包内置的内核（`process.resourcesPath/bin/xmesh[.exe]`，`src/main/cli.ts`），最后 `PATH` 里的 `xmesh`。托盘调用 `xmesh restart|stop --json` 时用它。
 - **Fuses**：`electronFuses` 直接取自 `scripts/fuses.config.mjs` 的 release 档，由 electron-builder 在写入 asar 摘要之后、签名之前翻转，所以 ASAR 完整性校验有效。`scripts/verify-package.mjs` 对产物再复核一遍。
@@ -190,6 +190,51 @@ macOS 签名时启用 Hardened Runtime，内置的内核二进制也会一并被
 ### 并入发布流水线
 
 `release.yml` 的 `ui` 作业调用本工作流（`workflow_call`），同样排在 `verify` 之后。`release` 作业等待 `build` 与 `ui` 两者，所以安装包和内核归档进入同一个预发布。`release` 作业的 `download-artifact` 用 `merge-multiple` 把 `xmesh-ui-*` 收进 `dist/`，`SHA256SUMS.txt` 随之列入安装包。版本号取自标签，所以文件名形如 `xmesh-ui-0.1.0-beta.1-win-x64.exe`。
+
+## Linux 网页管理界面
+
+Linux 主机上用浏览器打开和桌面端相同的面板，前面多一个管理密钥登录页。设计与安全约束见 [docs/design/12](../docs/design/12-ui-and-control.md) 的「Linux 网页管理界面」。
+
+需要 Node 22.18 或更新，以运行内核的同一个用户启动（面板从该用户的 `~/.config/xmesh` 找内核）。发布页提供 `xmesh-webui-<版本>-linux.tar.gz`，解开后：
+
+```sh
+node xmesh-webui/xmesh-webui.js                     # 首次启动打印管理密钥，默认监听 http://127.0.0.1:7480/
+node xmesh-webui/xmesh-webui.js --print-key         # 再次查看密钥
+node xmesh-webui/xmesh-webui.js --rotate-key        # 更换密钥（旧会话全部失效）
+```
+
+从源码运行：`cd ui && npm ci && npm run web`（产物在 `dist/web/`）。
+
+| 选项 | 说明 |
+| --- | --- |
+| `--listen ADDR` | 监听地址，默认 `127.0.0.1:7480`（环境变量 `XMESH_WEBUI_LISTEN`）；`:7480` 表示所有地址 |
+| `--tls-cert FILE --tls-key FILE` | 以 HTTPS 提供，Cookie 带 `Secure`；监听非本机地址时请使用 |
+| `--data-dir DIR` | 面板偏好与密钥文件所在目录，默认 `$XDG_CONFIG_HOME/xmesh-webui`（`XMESH_WEBUI_DATA_DIR`） |
+| `--key-file FILE` | 密钥文件，默认 `<data-dir>/webui.key`（`XMESH_WEBUI_KEY_FILE`）；手写的密钥至少 16 个字符，文件必须是 `0600` |
+| `--lang zh\|en` | 未保存偏好时的面板语言 |
+
+远程访问推荐 SSH 隧道：`ssh -L 7480:127.0.0.1:7480 <主机>`，再在本机打开 `http://127.0.0.1:7480/`。若直接对外监听，请配置 TLS；没有 TLS 时启动日志会警告，密钥和会话会以明文传输。修改密钥文件后发送 `SIGHUP`（`systemctl --user reload xmesh-webui`）即可生效，所有会话随之退出。
+
+常驻运行可用归档里的 systemd 用户单元 [`web/xmesh-webui.service`](web/xmesh-webui.service)：
+
+```sh
+mkdir -p ~/.local/share/xmesh-webui && tar -xzf xmesh-webui-<版本>-linux.tar.gz --strip-components=1 -C ~/.local/share/xmesh-webui
+cp ~/.local/share/xmesh-webui/xmesh-webui.service ~/.config/systemd/user/
+systemctl --user enable --now xmesh-webui
+journalctl --user -u xmesh-webui     # 首次启动的密钥在这里
+```
+
+与桌面端的差别：
+
+| 桌面端 | 网页端 |
+| --- | --- |
+| 写剪贴板（连接配置、令牌、命令） | 浏览器写剪贴板；非 HTTPS 的远程地址浏览器不允许时，弹出文本框供手动复制 |
+| 原生确认框、文件选择框 | 浏览器对话框；文件路径是**服务器上**的绝对路径 |
+| 工具调试台「保存结果」 | 由浏览器下载到访问者的电脑 |
+| 打开配置文件、日志目录 | 不能打开服务器上的文件，改为复制路径 |
+| 托盘、登录项、自动更新、桌面控制紧急停止快捷键 | 不提供；更新时替换归档后重启服务 |
+
+顶栏多一个「退出登录」按钮。实现：`src/web/`（服务端：`auth.ts` 密钥与会话，`server.ts` 路由，`bridge.ts` 把桌面能力转给页面，`main.ts` 组装服务），`src/renderer/web/`（登录页与 `window.xmesh` 的 HTTP 实现），`scripts/build-web.mjs`（打包，并检查服务端没有引入 electron）。测试见 `test/unit/web.test.ts`。
 
 ## 与契约的关系
 

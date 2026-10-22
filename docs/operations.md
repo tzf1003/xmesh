@@ -69,6 +69,10 @@ xmesh control pair connect --path lan --address https://100.100.1.20:7433 --pass
 
 真实接口验收可运行 `XMESH_TEST_SYSTEM_TAILSCALE_INTERFACE=tailscale0 go test ./internal/connectivity -run '^TestSystemTailscaleListenerPairingAndAgent$' -v -count=1`。PowerShell 中先设置 `$env:XMESH_TEST_SYSTEM_TAILSCALE_INTERFACE='Tailscale'`，再运行同一条 `go test`。该检查在临时状态目录启动节点，使用本机系统 Tailscale IPv4 的 TCP 7433，验证未配对连接被拒绝、密码配对及 Agent `sys.info` 调用；需要该 IP 的 7433 空闲，不代表不同物理主机间的网络验收。
 
+## Linux 网页管理界面
+
+Linux 没有托盘应用，用 `xmesh-webui` 在浏览器里提供与桌面端相同的面板。以运行内核的同一用户执行 `node xmesh-webui/xmesh-webui.js`：首次启动打印管理密钥（保存在 `~/.config/xmesh-webui/webui.key`，`0600`），默认只监听 `127.0.0.1:7480`。远程使用 SSH 隧道或 `--tls-cert/--tls-key`。选项、systemd 用户单元和与桌面端的差别见 [ui/README.md](../ui/README.md#linux-网页管理界面)，安全设计见 [12 · Linux 网页管理界面](design/12-ui-and-control.md#linux-网页管理界面)。
+
 ## 构建与本机验证
 
 需要 Go 1.27.1。复用 Go 模块和构建缓存：
