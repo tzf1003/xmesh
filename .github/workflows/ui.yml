@@ -35,6 +35,10 @@ jobs:
       - run: npm run check-types
       - run: npm run typecheck
       - run: npm test
+      # Linux 网页管理界面：服务端打包后不得引入 electron（build-web.mjs 会检查）。
+      - name: Web management panel bundle
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: node scripts/build-web.mjs && node dist/web/xmesh-webui.js --help
       - name: Release fuse profile can be applied and verified
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |

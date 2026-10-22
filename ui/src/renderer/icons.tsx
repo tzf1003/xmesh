@@ -1,6 +1,6 @@
 import type { JSX } from "preact";
 
-export type IconName = "topology" | "device" | "terminal" | "shield" | "globe" | "activity" | "runner" | "sliders" | "code" | "network" | "info" | "search" | "plus" | "chevron" | "arrow" | "copy" | "folder" | "cloud" | "close" | "eye" | "eyeOff" | "refresh" | "link";
+export type IconName = "topology" | "device" | "terminal" | "shield" | "globe" | "activity" | "runner" | "sliders" | "code" | "network" | "info" | "search" | "plus" | "chevron" | "arrow" | "copy" | "folder" | "cloud" | "close" | "eye" | "eyeOff" | "refresh" | "link" | "logout";
 
 /** Small outline symbols shared by navigation, tools and the topology. */
 export function Icon({ name, class: className = "" }: { name: IconName; class?: string }): JSX.Element {
@@ -28,6 +28,7 @@ export function Icon({ name, class: className = "" }: { name: IconName; class?: 
     refresh: <><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5 8a7 7 0 0 1 12-3l3 4M4 15l3 4a7 7 0 0 0 12-3"/></>,
     link: <><path d="m10 13 4-4m-5 7-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m0 10a4 4 0 0 0 6 0l5-5a4 4 0 0 0-6-6l-2 2"/></>,
     close: <path d="m6 6 12 12M6 18 18 6"/>,
+    logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></>,
   };
   return <svg class={`icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }

@@ -111,8 +111,42 @@ jobs:
       version: ${{ github.ref_name }}
       require_signing: ${{ needs.verify.outputs.channel == 'stable' }}
     secrets: inherit
+  # Linux 网页管理界面（ui/README.md「Linux 网页管理界面」）：一个 Node 22 脚本加静态页面，与平台架构无关。
+  webui:
+    needs: verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: 构建与打包
+        env:
+          VERSION: ${{ github.ref_name }}
+          XMESH_UI_MINIFY: "1"
+        run: |
+          npm run build:web
+          name="xmesh-webui-${GITHUB_REF_NAME}-linux"
+          mkdir -p "release/$name"
+          cp -R dist/web/. "release/$name/"
+          cp web/xmesh-webui.service "release/$name/"
+          test "$(cat "release/$name/VERSION")" = "${GITHUB_REF_NAME#v}"
+          node "release/$name/xmesh-webui.js" --help > /dev/null
+          tar -C release -czf "release/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xmesh-webui-linux
+          path: ui/release/*.tar.gz
   release:
-    needs: [verify, build, ui]
+    needs: [verify, build, ui, webui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

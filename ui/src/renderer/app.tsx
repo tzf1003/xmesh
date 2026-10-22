@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Capability } from "../shared/control";
 import { hasCapability } from "../shared/control";
 import { deriveIcon, EMPTY_SNAPSHOT, type Snapshot, type TrayIcon } from "../shared/state";
-import { getApi } from "./api";
+import { getApi, getWebSession } from "./api";
 import { ApplyBar } from "./apply-bar";
 import { Badge, Banner, Confirm, Toasts, useToasts } from "./components";
 import type { PanelTarget } from "../shared/tray";
@@ -280,6 +280,7 @@ function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () 
   const { snapshot } = ctx;
   const icon = deriveIcon(snapshot.connection);
   const c = snapshot.connection;
+  const web = getWebSession();
   return (
     <header class="topbar">
       <span class="brand">xmesh<span class="brand-dot">.</span></span>
@@ -291,6 +292,11 @@ function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () 
       <button type="button" class="icon-btn" onClick={onDisplay} title={t("display.open")} aria-label={t("display.open")} data-testid="open-display">
         Aa
       </button>
+      {web && (
+        <button type="button" class="icon-btn" onClick={() => web.logout()} title={t("web.logout")} aria-label={t("web.logout")} data-testid="web-logout">
+          <Icon name="logout"/>
+        </button>
+      )}
       <Badge kind={STATUS_KIND[icon]}>
         <span data-testid="state" data-state={icon}>
           {t(icon === "offline" && snapshot.unresponsiveNodes.length > 0 ? "status.unresponsive" : STATUS_KEY[icon])}
