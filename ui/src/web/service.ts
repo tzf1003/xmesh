@@ -86,15 +86,17 @@ export function realDeps(): Deps {
   };
 }
 
+/** systemd user units are a Linux feature: always the XDG layout, with POSIX separators. */
 export function unitDir(env: NodeJS.ProcessEnv, home: string): string {
-  return path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "systemd", "user");
+  return path.posix.join(env.XDG_CONFIG_HOME || path.posix.join(home, ".config"), "systemd", "user");
 }
 
-/** The panel's control-plane binary: XMESH_BIN, else `xmesh` on PATH (an absolute path that exists). */
+/** The panel's control-plane binary: XMESH_BIN, else `xmesh` on PATH (an absolute path that exists). PATH is a Linux one, so POSIX rules. */
 export function findXmesh(env: NodeJS.ProcessEnv, exists: (p: string) => boolean = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } }): string | undefined {
-  if (env.XMESH_BIN && path.isAbsolute(env.XMESH_BIN) && exists(env.XMESH_BIN)) return env.XMESH_BIN;
+  const posix = path.posix;
+  if (env.XMESH_BIN && posix.isAbsolute(env.XMESH_BIN) && exists(env.XMESH_BIN)) return env.XMESH_BIN;
   for (const d of (env.PATH ?? "").split(":")) {
-    if (d !== "" && path.isAbsolute(d) && exists(path.join(d, "xmesh"))) return path.join(d, "xmesh");
+    if (d !== "" && posix.isAbsolute(d) && exists(posix.join(d, "xmesh"))) return posix.join(d, "xmesh");
   }
   return undefined;
 }

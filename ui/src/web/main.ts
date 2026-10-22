@@ -316,7 +316,8 @@ export function runServiceCommand(cmd: "install" | "uninstall", argv: string[], 
     console.log(usage());
     return 0;
   }
-  const dataDir = path.resolve(values["data-dir"] ?? env.XMESH_WEBUI_DATA_DIR ?? path.join(userConfigDir(process.platform, env), "xmesh-webui"));
+  // The service is a systemd user service, so its default directory is the Linux (XDG) one.
+  const dataDir = path.resolve(values["data-dir"] ?? env.XMESH_WEBUI_DATA_DIR ?? path.join(userConfigDir("linux", env, deps.home), "xmesh-webui"));
   const keyFile = path.resolve(values["key-file"] ?? env.XMESH_WEBUI_KEY_FILE ?? path.join(dataDir, "webui.key"));
   try {
     if (cmd === "uninstall") {
