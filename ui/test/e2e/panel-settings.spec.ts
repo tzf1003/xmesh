@@ -167,6 +167,39 @@ test("settings: an unsaved change to the form holds the move until it is saved o
   }
 });
 
+test("web panel: logging out asks first while a configuration draft is unsaved", async () => {
+  const page = await open();
+  h.kernel.panel.setContent(FULL_CONFIG);
+  // The web shell provides window.xmeshWeb (src/renderer/web/boot.ts); here a stand-in records the call.
+  await page.addInitScript(() => {
+    (window as unknown as { __logouts: number }).__logouts = 0;
+    (window as unknown as { xmeshWeb: unknown }).xmeshWeb = { logout: () => { (window as unknown as { __logouts: number }).__logouts++; } };
+  });
+  await page.reload();
+  await expect(page.getByTestId("state")).toHaveAttribute("data-state", /ok|degraded/);
+  const logouts = (): Promise<number> => page.evaluate(() => (window as unknown as { __logouts: number }).__logouts);
+
+  await page.getByTestId("web-logout").click();
+  expect(await logouts()).toBe(1);
+
+  await navigate(page, "settings");
+  await page.getByTestId("settings-tab-diagnostics").click();
+  await page.getByRole("button", { name: "修复配置", exact: true }).click();
+  const editor = page.getByTestId("config-editor");
+  await expect(editor).not.toHaveValue("");
+  await editor.fill("# unsaved draft\n");
+  await page.getByTestId("web-logout").click();
+  await expect(page.getByTestId("confirm")).toBeVisible();
+  expect(await logouts()).toBe(1);
+  await page.getByTestId("confirm-cancel").click();
+  await expect(page.getByTestId("confirm")).toHaveCount(0);
+  expect(await logouts()).toBe(1);
+
+  await page.getByTestId("web-logout").click();
+  await page.getByTestId("confirm-ok").click();
+  expect(await logouts()).toBe(2);
+});
+
 test("settings: a change that only takes effect after a restart says so, names it, and restarts from the same place", async () => {
   const page = await open();
   h.kernel.panel.setContent(FULL_CONFIG);

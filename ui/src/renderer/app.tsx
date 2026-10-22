@@ -111,6 +111,7 @@ export function App(): JSX.Element {
   const [configRevision, setConfigRevision] = useState(0);
   const [pendingNavigation, setPendingNavigation] = useState<PanelTarget>();
   const [pendingPage, setPendingPage] = useState<{ page: PageId; focus?: PageFocus }>();
+  const [pendingLogout, setPendingLogout] = useState(false);
   const externalNavigation = useRef<(target: PanelTarget) => void>(() => {});
   const { toasts, push } = useToasts();
   // The answer to the last save, until the user moves on. What the kernel is still waiting on outlives it (see ApplyBar).
@@ -194,7 +195,7 @@ export function App(): JSX.Element {
     <I18nContext.Provider value={{ t, locale: snapshot.settings.locale }}>
       <div class="shell">
 
-        <TopBar ctx={ctx} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} />
+        <TopBar ctx={ctx} onDisplay={() => setShowDisplay(true)} onSearch={() => setShowSearch(true)} onLogout={() => { if (configDirty) setPendingLogout(true); else getWebSession()?.logout(); }} />
         <div class="body">
           <Sidebar current={current} connected={connected} snapshot={snapshot} onSelect={(p) => navigate(p)} />
           <main class="content" id="content" tabIndex={-1}>
@@ -222,6 +223,7 @@ export function App(): JSX.Element {
             /><ModuleSettings key={`${snapshot.selectedInstance}:${moduleScope}`} ctx={ctx} scope={moduleScope} onDirtyChange={setConfigDirty}/>{moduleScope === "gateway" && snapshot.connection.kind === "connected" && snapshot.connection.status.gateway && <GatewayCard ctx={ctx} gateway={snapshot.connection.status.gateway}/>}</Dialog>}
       {closeModule && <Confirm title={snapshot.settings.locale === "en" ? "Discard changes?" : "放弃未保存的修改？"} body={snapshot.settings.locale === "en" ? "Your module settings have unsaved changes." : "此模块中有尚未保存的修改。"} confirmLabel={snapshot.settings.locale === "en" ? "Discard" : "放弃修改"} onCancel={() => setCloseModule(false)} onConfirm={() => { setModuleScope(undefined); setConfigDirty(false); setCloseModule(false); }}/>}
       {pendingNavigation && <Confirm title={snapshot.settings.locale === "zh" ? "离开当前页面？" : "Leave this page?"} body={snapshot.settings.locale === "zh" ? "当前页面有未保存的修改。继续将放弃这些修改。" : "This page has unsaved changes. Continuing will discard them."} confirmLabel={snapshot.settings.locale === "zh" ? "放弃并继续" : "Discard and continue"} onCancel={() => setPendingNavigation(undefined)} onConfirm={() => applyNavigation(pendingNavigation)}/>}
+      {pendingLogout && <Confirm title={t("web.logoutDirty")} body={t("config.unsaved")} confirmLabel={t("web.logoutDiscard")} onCancel={() => setPendingLogout(false)} onConfirm={() => { setPendingLogout(false); getWebSession()?.logout(); }}/>}
       {pendingPage && <Confirm title={t("topology.configDirty")} body={t("config.unsaved")} confirmLabel={t("config.discard")} onCancel={() => setPendingPage(undefined)} onConfirm={() => { const target = pendingPage; setPendingPage(undefined); navigate(target.page, target.focus, true); }}/>}
       {showDisplay && <DisplayDialog prefs={display} onClose={() => setShowDisplay(false)} />}
       {showSearch && <CommandPalette snapshot={snapshot} onClose={() => setShowSearch(false)} go={navigate}/>}
@@ -275,7 +277,7 @@ function Sidebar({ current, connected, snapshot, onSelect }: { current: PageId; 
   );
 }
 
-function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () => void; onSearch(): void }): JSX.Element {
+function TopBar({ ctx, onDisplay, onSearch, onLogout }: { ctx: PageContext; onDisplay: () => void; onSearch(): void; onLogout(): void }): JSX.Element {
   const t = useT();
   const { snapshot } = ctx;
   const icon = deriveIcon(snapshot.connection);
@@ -293,7 +295,7 @@ function TopBar({ ctx, onDisplay, onSearch }: { ctx: PageContext; onDisplay: () 
         Aa
       </button>
       {web && (
-        <button type="button" class="icon-btn" onClick={() => web.logout()} title={t("web.logout")} aria-label={t("web.logout")} data-testid="web-logout">
+        <button type="button" class="icon-btn" onClick={onLogout} title={t("web.logout")} aria-label={t("web.logout")} data-testid="web-logout">
           <Icon name="logout"/>
         </button>
       )}
