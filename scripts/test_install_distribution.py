@@ -91,11 +91,31 @@ class Links(HTMLParser):
             if key in values:self.links.append(values[key])
 
 class SiteTests(unittest.TestCase):
+    def test_rebuilds_historical_bundle_before_linux_installer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            source = directory / 'source'
+            (source / 'scripts').mkdir(parents=True)
+            shutil.copytree(ROOT / 'docs/agent', source / 'docs/agent')
+            shutil.copytree(ROOT / 'docs/site', source / 'docs/site')
+            shutil.copy2(ROOT / 'llms.txt', source / 'llms.txt')
+            for name in ('install.sh', 'install.ps1'):
+                shutil.copy2(ROOT / 'scripts' / name, source / 'scripts' / name)
+            manifest = fixture(directory)
+            version_dir = build_site(source, directory / 'site', manifest['version'],
+                                     'tzf1003/xmesh', 'https://tzf1003.github.io/xmesh', manifest)
+            self.assertTrue((version_dir / 'index.html').is_file())
+            self.assertEqual(json.loads((version_dir / 'manifest.json').read_text()), manifest)
+            for name in ('install.sh', 'install.ps1'):
+                self.assertEqual((version_dir / name).read_bytes(), (source / 'scripts' / name).read_bytes())
+            self.assertFalse((version_dir / 'install-linux.sh').exists())
+
     def test_versioned_site_links_and_prompt(self):
         with tempfile.TemporaryDirectory() as temp:
             directory=Path(temp);dist=directory/'dist';dist.mkdir();manifest=fixture(dist)
             site=directory/'site'
             version_dir=build_site(ROOT,site,manifest['version'],'tzf1003/xmesh','https://tzf1003.github.io/xmesh',manifest)
+            self.assertEqual((version_dir/'install-linux.sh').read_bytes(), (ROOT/'scripts/install-linux.sh').read_bytes())
             for page in site.rglob('*.html'):
                 text=page.read_text(encoding="utf-8");self.assertNotIn('@@',text)
                 parser=Links();parser.feed(text)
