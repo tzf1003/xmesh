@@ -67,7 +67,7 @@ npm start             # 另开终端，启动 Electron
 - 下载与校验：只从 `github.com/tzf1003/xmesh/releases/download/<tag>/` 取 `xmesh-ui-<版本>-<win|mac>-<x64|arm64>.<exe|dmg>`，边下边算 SHA-256，必须和 `SHA256SUMS.txt`（以及 API 给出的 digest，两者都在时必须一致）相符才继续；不符就丢弃，不会停任何东西。
 - 替换：先对每个在运行的节点执行 `xmesh stop`，记下停掉的节点；写下 `pending.json`；启动一个脱离的脚本后退出。Windows 的脚本（`cmd`）等应用进程结束，静默运行 NSIS 安装程序（沿用原安装目录），成功后启动新应用；macOS 的脚本（`/bin/sh`）等应用退出，挂载 dmg，把 `xmesh.app` 换成新的（先改名保留旧的，复制失败就放回去），清除隔离属性后打开。路径都经环境变量或参数传入，脚本文本里没有路径。
 - 恢复：新应用启动时读 `pending.json`，重新启动被停掉的节点（`xmesh start`），版本对上就提示「已更新到 X」，没对上就带着脚本留下的原因提示失败，旧版本仍可用。配置、令牌、节点状态都在安装目录之外，更新不碰它们。
-- 限制：macOS 要求应用在可写的位置（通常是「应用程序」）；从 dmg 或 AppTranslocation 运行时只提示先拖进「应用程序」；没有写权限时打开 dmg 让用户手动覆盖。内核若来自 `XMESH_BIN` 或 `PATH`（不是安装包里的那个），面板会说明它不会被更换。Linux 没有 UI 安装包，网页管理界面不自动更新（见下文「Linux 网页管理界面」）。
+- 限制：macOS 要求应用在可写的位置（通常是「应用程序」）；从 dmg 或 AppTranslocation 运行时只提示先拖进「应用程序」；没有写权限时打开 dmg 让用户手动覆盖。内核若来自 `XMESH_BIN` 或 `PATH`（不是安装包里的那个），面板会说明它不会被更换。Linux 没有 UI 安装包：用 `install-linux.sh` 装的网页管理界面通过同一个更新面板自更新，见下文「Linux 网页管理界面」。
 - 试用：`XMESH_UPDATE_FEED=<地址>` 把检测和下载指向一个仿 GitHub 的目录（`<地址>/releases` 返回发布列表，`<地址>/download/<tag>/<文件>` 提供文件），用来不发版本就演练一次更新。
 
 ### Tailscale 管理页面
@@ -224,6 +224,8 @@ node xmesh-webui/xmesh-webui.js --rotate-key        # 更换密钥（旧会话�
 | `--data-dir DIR` | 面板偏好与密钥文件所在目录，默认 `$XDG_CONFIG_HOME/xmesh-webui`（`XMESH_WEBUI_DATA_DIR`） |
 | `--key-file FILE` | 密钥文件，默认 `<data-dir>/webui.key`（`XMESH_WEBUI_KEY_FILE`）；手写的密钥至少 16 个字符，文件必须是 `0600` |
 | `--lang zh\|en` | 未保存偏好时的面板语言 |
+
+**自动更新**：由 `install-linux.sh` 安装的网页界面（`<前缀>/webui` 加 `xmesh-webui` 用户服务）会像桌面端一样检测新发布，在面板的更新页一键更新。下载的是发布里的 `install-linux.sh`（先按 `SHA256SUMS.txt` 校验），面板退出后由一个临时的 systemd 用户单元以 `install-linux.sh --update --version <标签>` 运行它：按发布清单校验并替换内核与网页界面文件，重启运行中的内核服务和 `xmesh-webui`，服务配置、管理密钥和节点配置不动；失败时旧文件保持原样，面板重新启动并显示原因。手工解压运行的网页界面（没有 `xmesh-webui` 服务）仍需自己替换发布归档。
 
 远程访问推荐 SSH 隧道：`ssh -L 7480:127.0.0.1:7480 <主机>`，再在本机打开 `http://127.0.0.1:7480/`。若直接对外监听，请配置 TLS；没有 TLS 时启动日志会警告，密钥和会话会以明文传输。修改密钥文件后发送 `SIGHUP`（`systemctl --user reload xmesh-webui`）即可生效，所有会话随之退出。
 

@@ -21,7 +21,7 @@ export interface RawAsset {
   digest?: string | null;
 }
 
-export type InstallerPlatform = "win" | "mac";
+export type InstallerPlatform = "win" | "mac" | "linux";
 
 export interface Target {
   platform: InstallerPlatform;
@@ -30,13 +30,17 @@ export interface Target {
 
 /** Maps Node's platform and arch to the installer naming; undefined where no installer is published. */
 export function targetFor(platform: NodeJS.Platform, arch: string): Target | undefined {
-  const p = platform === "win32" ? "win" : platform === "darwin" ? "mac" : undefined;
+  const p = platform === "win32" ? "win" : platform === "darwin" ? "mac" : platform === "linux" ? "linux" : undefined;
   const a = arch === "x64" || arch === "arm64" ? arch : undefined;
   return p !== undefined && a !== undefined ? { platform: p, arch: a } : undefined;
 }
 
+/** Linux has no UI installer: the release's `install-linux.sh` (in SHA256SUMS.txt) updates the kernel and the web panel in place. */
+export const LINUX_INSTALLER = "install-linux.sh";
+
 /** `xmesh-ui-0.1.0-beta.3-win-x64.exe`, the artifactName in electron-builder.config.mjs. */
 export function installerName(version: Version, t: Target): string {
+  if (t.platform === "linux") return LINUX_INSTALLER;
   return `xmesh-ui-${formatVersion(version)}-${t.platform}-${t.arch}.${t.platform === "win" ? "exe" : "dmg"}`;
 }
 

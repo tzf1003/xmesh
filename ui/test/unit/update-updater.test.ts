@@ -114,7 +114,7 @@ function rig(over: Partial<UpdaterEnv> = {}): Rig {
 
 test("a development run, an unsupported system and a blocked install say why and never check", async () => {
   assert.equal(rig({ packaged: false }).updater.state.blocked, "unpackaged");
-  assert.equal(rig({ platform: "linux" }).updater.state.blocked, "unsupported");
+  assert.equal(rig({ platform: "freebsd" }).updater.state.blocked, "unsupported");
   assert.equal(rig({ applier: undefined }).updater.state.blocked, "unsupported");
   const r = rig({ packaged: false });
   await r.updater.check();

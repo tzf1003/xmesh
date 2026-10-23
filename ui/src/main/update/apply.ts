@@ -18,6 +18,8 @@ export interface HandOver {
   dir: string;
   /** The script writes a one-line reason here when it could not install. */
   resultFile: string;
+  /** The release tag being installed (`v0.2.0`), for installers that fetch more than the file they were handed. */
+  tag?: string;
 }
 
 export class ApplyError extends Error {
@@ -198,10 +200,10 @@ function launch(spawn: SpawnFn, command: string, args: string[], options: SpawnO
           finish();
         } catch (e) { finish(e instanceof Error ? e : new Error(String(e))); }
       }, 50);
-      timer = setTimeout(() => finish(new Error("the Windows update helper did not become ready")), 15_000);
+      timer = setTimeout(() => finish(new Error("the update helper did not become ready")), 15_000);
     });
     if (readyFile) child.once("exit", (code) => {
-      if (code !== 0) finish(new Error(`the Windows update launcher exited (${code})`));
+      if (code !== 0) finish(new Error(`the update launcher exited (${code})`));
     });
   });
 }
@@ -263,4 +265,69 @@ function canWrite(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Linux: `/bin/sh script <pid> <install-linux.sh> <prefix> <tag> <result file> <ready file> <log file>`. Runs as a
+ * transient systemd user unit, because the panel's own unit kills every process left in its cgroup once the panel
+ * exits. Tells the app it is ready, waits for the go-ahead and for the panel to exit, then runs the release's
+ * installer in `--update` mode, which replaces the kernel and the panel files and restarts their services. When
+ * that fails the old files are still in place: the panel service is started again and the reason is left in the
+ * result file.
+ */
+export const LINUX_SCRIPT = `#!/bin/sh
+pid="$1"; installer="$2"; prefix="$3"; tag="$4"; result="$5"; ready="$6"; log="$7"
+printf ready > "$ready"
+i=0
+while [ "$(cat "$ready" 2>/dev/null)" != install ]; do
+  i=$((i + 1))
+  # Not authorized in time: the app did not hand over, so it keeps running and nothing is touched.
+  [ "$i" -ge 200 ] && exit 1
+  sleep 0.1
+done
+fail() {
+  echo "$1" > "$result"
+  systemctl --user restart xmesh-webui >/dev/null 2>&1
+  exit 1
+}
+i=0
+while kill -0 "$pid" 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -ge 60 ] && fail "the panel did not exit"
+  sleep 1
+done
+if ! bash "$installer" --update --yes --version "$tag" --prefix "$prefix" >"$log" 2>&1; then
+  reason=$(grep -v '^[[:space:]]*$' "$log" | tail -n 1)
+  fail "\${reason:-the installer failed}"
+fi
+`;
+
+export interface LinuxLayout {
+  /** `<prefix>` of `<prefix>/webui/xmesh-webui.js`, the layout install-linux.sh creates. */
+  prefix: string;
+}
+
+/** The install-linux.sh layout of a running panel: undefined for a panel run from anywhere else. */
+export function linuxLayout(script: string, unitFile: string, exists: (p: string) => boolean = fs.existsSync): LinuxLayout | undefined {
+  const dir = path.posix.dirname(script);
+  if (path.posix.basename(script) !== "xmesh-webui.js" || path.posix.basename(dir) !== "webui") return undefined;
+  return exists(unitFile) ? { prefix: path.posix.dirname(dir) } : undefined;
+}
+
+export function linuxApplier(script: string, unitFile: string, env: NodeJS.ProcessEnv = process.env, spawn: SpawnFn = nodeSpawn, exists: (p: string) => boolean = fs.existsSync): Applier {
+  const layout = linuxLayout(script, unitFile, exists);
+  return {
+    blocked: () => (layout === undefined ? "unsupported" : ""),
+    async start(h) {
+      if (layout === undefined) throw new ApplyError("spawn_failed", "not running from an install-linux.sh install");
+      if (h.tag === undefined) throw new ApplyError("spawn_failed", "no release tag to install");
+      const file = path.join(h.dir, "apply-update.sh");
+      const ready = path.join(h.dir, `apply-update-${randomUUID()}.ready`);
+      fs.writeFileSync(file, LINUX_SCRIPT, { mode: 0o700 });
+      // The transient unit starts with the user manager's short PATH; the installer needs node, python3, curl and tar.
+      const args = ["--user", "--collect", "--quiet", `--unit=xmesh-webui-update-${randomUUID().slice(0, 8)}`, `--setenv=PATH=${env.PATH ?? ""}`,
+        "/bin/sh", file, String(h.pid), h.installer, layout.prefix, h.tag, h.resultFile, ready, path.join(h.dir, "apply-update.log")];
+      await launch(spawn, "systemd-run", args, {}, ready);
+    },
+  };
 }

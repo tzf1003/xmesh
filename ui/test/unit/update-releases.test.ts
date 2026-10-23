@@ -42,7 +42,9 @@ test("installer names follow electron-builder's artifactName", () => {
   assert.equal(installerName(v("0.1.0-beta.3"), { platform: "mac", arch: "arm64" }), "xmesh-ui-0.1.0-beta.3-mac-arm64.dmg");
   assert.deepEqual(targetFor("win32", "x64"), { platform: "win", arch: "x64" });
   assert.deepEqual(targetFor("darwin", "arm64"), { platform: "mac", arch: "arm64" });
-  assert.equal(targetFor("linux", "x64"), undefined);
+  assert.deepEqual(targetFor("linux", "x64"), { platform: "linux", arch: "x64" });
+  assert.equal(installerName(v("0.2.0"), { platform: "linux", arch: "arm64" }), "install-linux.sh");
+  assert.equal(targetFor("freebsd", "x64"), undefined);
   assert.equal(targetFor("win32", "ia32"), undefined);
 });
 

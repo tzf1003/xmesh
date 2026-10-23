@@ -1,17 +1,17 @@
 // xmesh web management panel for Linux hosts: the desktop panel served over
 // HTTP(S) behind a management key. Same services as the Electron shell
-// (src/main/main.ts) minus the tray, native dialogs and the self-updater.
+// (src/main/main.ts) minus the tray and native dialogs.
 //
 //   node xmesh-webui.js [--listen 127.0.0.1:7480] [--data-dir DIR] [--key-file FILE]
 //                       [--tls-cert FILE --tls-key FILE] [--rotate-key] [--print-key] [--lang zh|en]
 
 import * as fs from "node:fs";
 import * as http from "node:http";
+import * as os from "node:os";
 import * as https from "node:https";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { resolveLocale, translator, type Translate } from "../shared/i18n";
-import { EMPTY_UPDATE, type UpdateState } from "../shared/update";
 import { Actions } from "../main/actions";
 import { CliError, cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshSetup } from "../main/cli";
 import { ShellController } from "../main/controller";
@@ -27,9 +27,14 @@ import { PanelService } from "../main/panel-service";
 import { PlaygroundService } from "../main/playground";
 import { PreferencesStore } from "../main/preferences-store";
 import { TransferService } from "../main/transfers";
+import { linuxApplier } from "../main/update/apply";
 import { KernelConfigs } from "../main/update/kernel-configs";
+import { httpSource } from "../main/update/source";
+import { UpdateStore } from "../main/update/store";
+import { UpdateActions } from "../main/update/service";
+import { Updater } from "../main/update/updater";
 import { loadKey } from "./auth";
-import { findXmesh, installService, realDeps, uninstallService, type Deps } from "./service";
+import { SERVICE_NAME, findXmesh, installService, realDeps, uninstallService, unitDir, type Deps } from "./service";
 import { WebBridge, webPlatform } from "./bridge";
 import { WebServer } from "./server";
 
@@ -153,13 +158,38 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
   const display = new DisplayStore(path.join(opts.dataDir, "display.json"));
   const log = (line: string): void => console.error(line);
 
-  // Nothing replaces a Linux install from the panel; the release archive is updated by hand.
-  const update: UpdateState = { ...EMPTY_UPDATE, blocked: "unsupported", current: version(), kernelBundled: false };
-  const unsupported = async () => ({ ok: false as const, error: { code: "unsupported", message: locale === "en" ? "The web panel does not update itself; replace the release archive." : "网页管理界面不能自动更新，请替换发布归档。" } });
+  // The panel updates itself from the release's install-linux.sh when it was installed by it (see apply.ts); the
+  // kernel services are restarted by that script, so the updater here stops and starts no nodes.
+  const feed = process.env.XMESH_UPDATE_FEED;
+  const script = (() => { try { return fs.realpathSync(process.argv[1] ?? ""); } catch { return ""; } })();
+  const updater = new Updater({
+    version: version(),
+    packaged: fs.existsSync(path.join(__dirname, "VERSION")),
+    platform: process.platform,
+    arch: process.arch,
+    kernelBundled: false,
+    execPath: process.execPath,
+    pid: process.pid,
+    dataDir: path.join(opts.dataDir, "update"),
+    source: httpSource({
+      fetch: (url, init) => fetch(url, init),
+      // XMESH_UPDATE_FEED: a directory that serves `releases` and `download/<tag>/<file>` like GitHub does.
+      ...(feed && /^https?:\/\//.test(feed) && { apiBase: feed, downloadBase: `${feed.replace(/\/+$/, "")}/download` }),
+    }),
+    applier: process.platform === "linux" ? linuxApplier(script, path.join(unitDir(process.env, os.homedir()), `${SERVICE_NAME}.service`)) : undefined,
+    store: new UpdateStore(path.join(opts.dataDir, "update.json")),
+    runningNodes: () => [],
+    stopNode: async () => "absent",
+    startNode: async () => {},
+    quit: () => { void web?.close().finally(() => process.exit(0)); },
+    openPath: async () => "",
+    notify: (n) => log(`xmesh-webui: ${n.kind} ${n.version}`),
+  });
+  let web: { close: () => Promise<void> } | undefined;
 
   const kernelConfigs = new KernelConfigs(path.join(opts.dataDir, "kernel-configs.json"), runXmeshSetup);
   const controller = new ShellController({
-    getUpdate: () => update,
+    getUpdate: () => updater.state,
     discover: () => discoverInstances(roots),
     configured: () => [...new Set([...discoverConfigured(roots), ...kernelConfigs.nodes()])],
     cliCommand: cliCommandText(),
@@ -249,7 +279,7 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
     previewSetup: () => ({ ok: false, error: { code: "setup_migrated", message: "请使用开始使用向导生成设置计划。" } }),
     setup: async () => ({ ok: false, error: { code: "setup_migrated", message: "请使用开始使用向导继续设置任务。" } }),
     mesh: (request) => meshService.request(request),
-    update: { check: unsupported, install: unsupported, cancel: async () => ({ ok: true }), setPrefs: async () => ({ ok: true }) },
+    update: new UpdateActions(updater),
   });
 
   const secure = opts.tlsCert !== undefined;
@@ -266,6 +296,8 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
     listener.listen(opts.port, opts.host, () => { listener.off("error", reject); resolve(); });
   });
   controller.start();
+  updater.on("change", (state) => controller.setUpdate(state));
+  void updater.finishPending().finally(() => updater.start());
 
   const addr = listener.address();
   const port = typeof addr === "object" && addr ? addr.port : opts.port;
@@ -287,9 +319,10 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
   };
   process.on("SIGHUP", reload);
 
-  return {
+  const handle = {
     url,
     close: async () => {
+      updater.stop();
       process.off("SIGHUP", reload);
       server?.close();
       transfers.reset();
@@ -299,6 +332,8 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
       await new Promise<void>((resolve) => listener.close(() => resolve()));
     },
   };
+  web = handle;
+  return handle;
 }
 
 function readStdinLine(): string {

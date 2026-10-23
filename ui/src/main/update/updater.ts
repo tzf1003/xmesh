@@ -228,6 +228,7 @@ export class Updater extends EventEmitter<UpdaterEvents> {
         pid: this.env.pid,
         dir: this.env.dataDir,
         resultFile: path.join(this.env.dataDir, RESULT_FILE),
+        tag: found.tag,
       });
     } catch (e) {
       try {
