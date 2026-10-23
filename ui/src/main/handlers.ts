@@ -30,6 +30,7 @@ import {
   parseInstanceId,
   parseNodeName,
   parsePairConnect,
+  parseDeviceTags,
   parsePairImport,
   parsePairPassword,
   parsePassword,
@@ -224,6 +225,10 @@ export function createHandlers({ kernel, onboarding, transfers, playground, cont
     return v === undefined ? bad("pair password") : service.setPairPassword(v);
   });
   handle(CHANNELS.revokeDevice, (id: unknown) => typeof id === "string" && /^dev-[0-9a-f]{64}$/.test(id) ? service.revokeDevice(id) : bad("device id"));
+  handle(CHANNELS.setDeviceTags, (id: unknown, tags: unknown) => {
+    const picked = parseDeviceTags(tags);
+    return typeof id === "string" && /^dev-[0-9a-f]{64}$/.test(id) && picked !== undefined ? service.setDeviceTags(id, picked) : bad("device tags");
+  });
   handle(CHANNELS.clearPairPassword, () => service.clearPairPassword());
   handle(CHANNELS.discoverPairs, () => service.discoverPairs());
   handle(CHANNELS.connectPair, (args: unknown) => {

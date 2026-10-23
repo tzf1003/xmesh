@@ -78,6 +78,7 @@ const api: PanelApi = {
   discoverPairs: () => invoke("xmesh:discover-pairs"),
   connectPair: (args) => invoke("xmesh:connect-pair", args),
   revokeDevice: (id) => invoke("xmesh:revoke-device", id),
+  setDeviceTags: (id, tags) => invoke("xmesh:set-device-tags", id, tags),
   queryAudit: (query) => invoke("xmesh:query-audit", query),
   getRecentCalls: () => invoke("xmesh:get-recent-calls"),
   onCalls: (listener) => {

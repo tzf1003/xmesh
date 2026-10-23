@@ -333,6 +333,7 @@ func (s *Server) table() map[string]handler {
 		"control.pair.password.delete":   s.deletePairPassword,
 		"control.pair.discovered":        s.listPairDiscovered,
 		"control.pair.connect":           s.connectPair,
+		"control.pair.trust.update":      s.updateDeviceTrust,
 		"control.pair.trust.delete":      s.deleteDeviceTrust,
 		"control.pats.list":              s.listPats,
 		"control.pats.create":            s.createPat,

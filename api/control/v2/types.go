@@ -445,6 +445,17 @@ type PairImportResponse struct {
 	RestartRequired bool     `json:"restart_required"`
 }
 
+// PairTrustUpdateRequest replaces the roles of an already trusted device. It is served only on the
+// local control channel, like import and revoke.
+type PairTrustUpdateRequest struct {
+	Tags []string `json:"tags"`
+}
+
+type PairTrustUpdateResponse struct {
+	DeviceID string   `json:"device_id"`
+	Tags     []string `json:"tags"`
+}
+
 // PairPasswordRequest sets or changes the connection password. The password is write-only: no
 // response ever carries it or anything derived from it.
 type PairPasswordRequest struct {

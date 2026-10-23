@@ -299,6 +299,42 @@ func (s *TrustStore) Grant(ctx context.Context, doc Document, tags []string, exp
 	})
 }
 
+// SetTags replaces the roles of an already trusted device without re-pairing. Adding roles keeps
+// the generation, so live logical sessions survive and the next session open or resume sees the
+// new roles. Removing a role bumps the generation, which ends every session that was authorized
+// under the broader set.
+func (s *TrustStore) SetTags(ctx context.Context, id string, tags []string) (Trust, error) {
+	if err := validateTags(tags); err != nil {
+		return Trust{}, err
+	}
+	tags = slices.Compact(slices.Sorted(slices.Values(tags)))
+	if tags == nil {
+		tags = []string{}
+	}
+	var updated Trust
+	err := s.update(ctx, func(state *trustFile) error {
+		t, ok := state.Peers[id]
+		if !ok || t.Revoked {
+			return ErrUntrusted
+		}
+		if slices.Equal(t.Tags, tags) {
+			updated = cloneTrust(t)
+			return nil
+		}
+		for _, old := range t.Tags {
+			if !slices.Contains(tags, old) {
+				t.Generation++
+				break
+			}
+		}
+		t.Tags = tags
+		state.Peers[id] = t
+		updated = cloneTrust(t)
+		return nil
+	})
+	return updated, err
+}
+
 func (s *TrustStore) Revoke(ctx context.Context, id string) error {
 	return s.update(ctx, func(state *trustFile) error {
 		t, ok := state.Peers[id]

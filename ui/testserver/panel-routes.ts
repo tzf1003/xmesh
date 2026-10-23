@@ -510,6 +510,11 @@ export class PanelData {
       this.imported.push({ name: b.pair.name, tags });
       return ok({ name: b.pair.name, fingerprint: b.pair.fingerprint, tags, restart_required: false });
     }
+    if (method === "PATCH" && p.startsWith("/v2/pair/trust/")) {
+      const tags = (body as { tags?: string[] } | null)?.tags;
+      if (!Array.isArray(tags) || tags.length === 0) return err(400, "invalid_args", "至少保留一个设备角色");
+      return ok({ device_id: p.slice("/v2/pair/trust/".length), tags });
+    }
     return err(404, "not_found", "没有这个接口");
   }
 

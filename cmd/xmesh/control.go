@@ -47,9 +47,11 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
   pair discover                   列出内网中尚未配对、可以连接的设备
   pair connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)
                                    用对端的连接密码配对，成功即生效
+  pair tags --device-id 设备ID --tags tag:peer,tag:device[,tag:ingress]
+                                   修改已配对设备的角色，立即生效、无需重新配对；新会话按新角色判定，去掉角色会结束该设备现有会话
   pair export [--out 文件]        导出配对文档（高级用法，仅 lan 模式）
   pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
-                                   导入配对文档（高级用法）；指纹须是另行核对过的，导入后重启节点生效
+                                   导入配对文档（高级用法）；指纹须是另行核对过的，导入后即时生效
   pats list                       列出 Gateway PAT（不含令牌）
   pats create --name 名字 --scope S[,S...]
                                    创建 PAT；令牌只在这条输出里出现一次
