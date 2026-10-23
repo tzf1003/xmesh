@@ -162,6 +162,29 @@ elif mode == "manifest":
         if web is None:
             raise SystemExit("this release has no web panel archive; rerun with --no-webui")
         print(web)
+elif mode == "rebind":
+    # Point the xmesh named in a service unit at the binary installed now. A unit keeps the path it was
+    # installed with, so restarting a node after an upgrade would otherwise run the old binary again.
+    path, new = sys.argv[2], sys.argv[3]
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    changed = False
+    for i, line in enumerate(lines):
+        for key in ("ExecStart=", "ConditionFileIsExecutable="):
+            if not line.startswith(key):
+                continue
+            rest = line[len(key):]
+            quoted = rest.startswith('"')
+            end = rest.find('"', 1) + 1 if quoted else (rest.find(" ") if " " in rest else len(rest))
+            old = rest[1:end - 1] if quoted else rest[:end]
+            if os.path.basename(old) == "xmesh" and old != new:
+                lines[i] = key + (('"' + new + '"') if quoted else new) + rest[end:]
+                changed = True
+    if changed:
+        with open(path + ".new", "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        os.replace(path + ".new", path)
+    print("changed" if changed else "same")
 elif mode == "get":
     v = dig(load(sys.argv[2]), sys.argv[3])
     if isinstance(v, bool):
@@ -465,7 +488,14 @@ if "$WANT_KERNEL"; then
   "$XMESH" setup inspect --json > "$WORK/inspect.json" 2>"$WORK/inspect.err" || fail "xmesh setup inspect 失败：$(head -c 300 "$WORK/inspect.err")"
   nodes="$(py nodes "$WORK/inspect.json")"
   if [ -n "$nodes" ]; then
-    # Already set up: keep the node and its configuration, and start the new binary.
+    # Already set up: keep the node and its configuration, and start the new binary. The services still name
+    # the binary they were installed with, so they are pointed at this one first.
+    rebound=false
+    for unit in "${XDG_CONFIG_HOME:-$HOME/.config}"/systemd/user/xmesh-*.service; do
+      [ -f "$unit" ] && [ "$(basename "$unit")" != xmesh-webui.service ] || continue
+      [ "$(py rebind "$unit" "$XMESH")" = changed ] && { rebound=true; say "已把 $(basename "$unit") 指向 $XMESH。"; }
+    done
+    ! "$rebound" || systemctl --user daemon-reload || warn "systemctl --user daemon-reload 失败。"
     while IFS=$'\t' read -r name running; do
       [ -n "$name" ] || continue
       if [ "$running" = true ]; then

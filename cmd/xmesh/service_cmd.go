@@ -108,6 +108,19 @@ func serviceCommand(action string, args []string) error {
 			e = s.Restart()
 		}
 		if e != nil {
+			// A unit file on disk is an installed service whatever the library's status check says: it asks the
+			// system manager about a user service. Uninstall then removes the file itself; the other actions
+			// report the real failure instead of "not installed".
+			if !*system && userUnitExists(serviceID) {
+				if action != "uninstall" {
+					return e
+				}
+				if e = removeUserUnit(serviceID); e != nil {
+					return e
+				}
+				fmt.Printf("已卸载服务: %s\n", serviceID)
+				return nil
+			}
 			if _, status := s.Status(); serviceMissing(e) || serviceMissing(status) {
 				return notInstalled(serviceID)
 			}
