@@ -161,6 +161,43 @@ test("restart targets the original registration after a configuration rename", a
   }
 });
 
+test("a stale recorded service name falls back to the configuration's own node name and is corrected", async () => {
+  const { target } = fixture({ running: true });
+  target.serviceNode = "stale-name";
+  const calls: string[][] = [];
+  const recorded: string[] = [];
+  let exited = false;
+  const service = new KernelLifecycle({ targets: () => [target], resolve: async (node) => node,
+    installed: async () => { recorded.push("config-name"); return "config-name"; },
+    run: async (args) => {
+      calls.push([...args]);
+      // Only the config-derived name exists; the recorded one is not a service.
+      if (args.includes("--name") && args[args.indexOf("--name") + 1] !== "xmesh-config-name") return { code: 1, stdout: '{"error":{"reason":"not_installed"}}', stderr: "服务未安装" };
+      if (args[0] === "stop") { exited = true; target.running = false; }
+      if (args[0] === "start") { exited = false; target.running = true; }
+      return { code: 0, stdout: "", stderr: "" };
+    },
+    changed: () => undefined, gone: () => exited,
+    status: async () => ({ control: { kernel_version: "1.0.0" } }), version: "1.0.0", timeoutMs: 8, pollMs: 1 });
+  assert.equal((await service.request({ op: "restart", node: target.id })).ok, true);
+  const stop = calls.filter((args) => args[0] === "stop");
+  assert.equal(stop.length, 2, "tried the recorded name, then the configuration");
+  assert.equal(stop[0]!.includes("--name"), true);
+  assert.equal(stop[1]!.includes("--name"), false);
+  assert.deepEqual(recorded, ["config-name"], "the working name is recorded for the next request");
+  const start = calls.find((args) => args[0] === "start")!;
+  assert.equal(start[start.indexOf("--name") + 1], "xmesh-config-name", "start uses the corrected name straight away");
+});
+
+test("a service missing under both names is still reported as failed", async () => {
+  const { target } = fixture({ running: true });
+  target.serviceNode = "stale-name";
+  const service = new KernelLifecycle({ targets: () => [target], resolve: async (node) => node, changed: () => undefined,
+    run: async () => ({ code: 1, stdout: '{"error":{"error":"not_found","message":"服务未安装: xmesh-x（先运行 xmesh install）","reason":"not_installed"}}', stderr: "" }) });
+  const result = await service.request({ op: "restart", node: target.id });
+  assert.ok(!result.ok && result.error.message.includes("服务未安装"));
+});
+
 test("reinstall captures service options before stopping and starts the newly named registration", async () => {
   const { target } = fixture({ running: true });
   const calls: string[][] = [];

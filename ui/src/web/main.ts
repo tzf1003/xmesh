@@ -13,7 +13,7 @@ import { parseArgs } from "node:util";
 import { resolveLocale, translator, type Translate } from "../shared/i18n";
 import { EMPTY_UPDATE, type UpdateState } from "../shared/update";
 import { Actions } from "../main/actions";
-import { cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshSetup } from "../main/cli";
+import { CliError, cliCommandText, kernelServiceInfo, kernelServiceOptions, runKernelCli, runXmeshSetup } from "../main/cli";
 import { ShellController } from "../main/controller";
 import { DisplayStore } from "../main/display-store";
 import { discoverConfigured, discoverInstances, stateRoots, userConfigDir } from "../main/discovery";
@@ -201,7 +201,13 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
 
   let server: WebServer | undefined;
   const bridge = new WebBridge((session, ask) => server?.sendAsk(session, ask) ?? false);
-  const platform = webPlatform(bridge, (message) => log(`xmesh-webui: ${message}`));
+  // Start, stop and restart go through the lifecycle, which finds the service by the registration it recorded
+  // or the config's node name; the node name in the control manifest is not always the one the service was
+  // installed under.
+  const platform = webPlatform(bridge, (message) => log(`xmesh-webui: ${message}`), async (op, node) => {
+    const result = await kernelLifecycle.request({ op, node });
+    if (!result.ok) throw new CliError(op, result.error.message);
+  });
   const actions = new Actions(controller, platform, t, new GatewayCredentials(controller));
 
   const meshCredential = meshCredentialPath(roots[0]!);

@@ -33,7 +33,7 @@ type ingressDeps struct {
 	stateDir string
 	// passwordFile is the OAuth login password file; empty means oauth-password in stateDir.
 	passwordFile string
-	// tunnelListen is where a reverse tunnel reaches the ingress; empty means 127.0.0.1:8443.
+	// tunnelListen is where a reverse tunnel reaches the ingress; empty falls back to ingress.tunnel_listen, then 127.0.0.1:8443.
 	tunnelListen string
 }
 
@@ -44,9 +44,14 @@ func (d ingressDeps) password() string {
 	return filepath.Join(d.stateDir, "oauth-password")
 }
 
-func (d ingressDeps) tunnel() string {
+// tunnel is the address the reverse tunnel reaches: the --tunnel-listen flag, else ingress.tunnel_listen,
+// else 127.0.0.1:8443.
+func (d ingressDeps) tunnel(cfg *config.Config) string {
 	if d.tunnelListen != "" {
 		return d.tunnelListen
+	}
+	if cfg.Ingress.TunnelListen != "" {
+		return cfg.Ingress.TunnelListen
 	}
 	return "127.0.0.1:8443"
 }
@@ -93,7 +98,7 @@ func validateIngress(deps ingressDeps, cfg *config.Config) error {
 			return fmt.Errorf("Funnel 需要 tailnet")
 		}
 	case "tunnel":
-		host, _, err := net.SplitHostPort(deps.tunnel())
+		host, _, err := net.SplitHostPort(deps.tunnel(cfg))
 		if err != nil || host != "127.0.0.1" {
 			return fmt.Errorf("反向隧道入口必须绑定 127.0.0.1")
 		}
@@ -123,7 +128,7 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 	for id, client := range cfg.Ingress.OAuth.Clients {
 		clients[id] = client.Scopes
 	}
-	authorization, e := oauth.New(oauth.Options{Issuer: cfg.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(deps.stateDir, "oauth"), Clients: clients, DynamicScopes: cfg.Ingress.OAuth.DynamicClientScopes, Proxied: cfg.Ingress.Listen == "tunnel"})
+	authorization, e := oauth.New(oauth.Options{Issuer: cfg.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(deps.stateDir, "oauth"), Clients: clients, DynamicScopes: cfg.Ingress.OAuth.DynamicClientScopes, RefreshTTL: cfg.Ingress.RefreshTokenTTL(), Proxied: cfg.Ingress.Listen == "tunnel"})
 	if e != nil {
 		return nil, e
 	}
@@ -146,7 +151,7 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 	case "funnel":
 		listener, e = deps.network.(interface{ Funnel() (net.Listener, error) }).Funnel()
 	case "tunnel":
-		listener, e = net.Listen("tcp", deps.tunnel())
+		listener, e = net.Listen("tcp", deps.tunnel(cfg))
 	case "public:443":
 		if cfg.Ingress.TLS == "file" {
 			cert, err := tls.LoadX509KeyPair(cfg.Ingress.CertFile, cfg.Ingress.KeyFile)

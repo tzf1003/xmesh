@@ -17,6 +17,40 @@ export type Mode = (typeof MODES)[number];
 export const LISTEN_MODES = ["tunnel", "public:443", "funnel"] as const;
 export type ListenMode = (typeof LISTEN_MODES)[number];
 
+/** Where a reverse tunnel reaches the ingress when `ingress.tunnel_listen` is absent. */
+export const DEFAULT_TUNNEL_PORT = 8443;
+
+/** `ingress.oauth.dynamic_client_scopes` when the key is absent: a dynamically registered client may only list devices. */
+export const DEFAULT_DYNAMIC_SCOPES: readonly string[] = ["devices:read"];
+
+/** The kernel's default refresh token lifetime and the longest it accepts, in days. */
+export const DEFAULT_REFRESH_DAYS = 30;
+export const MAX_REFRESH_DAYS = 365;
+
+/** A whole number of days from a duration such as `720h`, rounded up; undefined for anything the page cannot show. */
+function refreshDaysOf(value: unknown): string | undefined {
+  const m = typeof value === "string" ? /^([0-9]+)h$/.exec(value) : null;
+  return m ? String(Math.max(1, Math.ceil(Number(m[1]) / 24))) : undefined;
+}
+
+/** The scopes the page offers as choices, in the order the kernel lists them as supported. */
+export const SCOPE_CHOICES = [
+  "devices:read",
+  "sys:*",
+  "fs:read:*",
+  "fs:write:*",
+  "exec:*",
+  "pty:*",
+  "backend:*:*",
+  "computer:observe:*",
+  "computer:control:*",
+  "computer:clipboard-read:*",
+  "computer:clipboard-write:*",
+] as const;
+
+/** The shape of one scope: the kernel checks the device and backend names, this only catches what is plainly not one. */
+const SCOPE = /^[a-z]+(:(\*|[A-Za-z0-9][A-Za-z0-9-]{0,62})){1,2}$/;
+
 export const TLS_MODES = ["autocert", "file"] as const;
 export type TLSMode = (typeof TLS_MODES)[number];
 
@@ -34,6 +68,12 @@ export interface SettingsForm {
   browserLogin: boolean;
   roles: Role[];
   listen: ListenMode;
+  /** The loopback port a reverse tunnel reaches (`ingress.tunnel_listen`); empty leaves the default. */
+  tunnelPort: string;
+  /** `ingress.oauth.dynamic_client_scopes`: the most a dynamically registered client may hold. */
+  dynamicScopes: string[];
+  /** `ingress.oauth.refresh_token_ttl` in days; empty leaves the kernel's default of 30. */
+  refreshDays: string;
   issuer: string;
   domain: string;
   tls: TLSMode;
@@ -53,6 +93,9 @@ export type SettingsProblem =
   | "control_url"
   | "authkey"
   | "issuer"
+  | "tunnel_port"
+  | "dynamic_scopes"
+  | "refresh_days"
   | "domain"
   | "cert_files"
   | "default_cwd"
@@ -98,6 +141,9 @@ export function formFromConfig(parsed: unknown): SettingsForm {
     browserLogin: tailnet.auth_method === "browser",
     roles: ROLES.filter((r) => roles.includes(r)),
     listen: LISTEN_MODES.find((m) => m === ingress.listen) ?? "tunnel",
+    tunnelPort: /^127\.0\.0\.1:([0-9]{1,5})$/.exec(text(ingress.tunnel_listen))?.[1] ?? "",
+    dynamicScopes: Array.isArray(oauth.dynamic_client_scopes) ? strings(oauth.dynamic_client_scopes) : [...DEFAULT_DYNAMIC_SCOPES],
+    refreshDays: refreshDaysOf(oauth.refresh_token_ttl) ?? "",
     issuer: text(oauth.issuer),
     domain: text(ingress.domain),
     tls: TLS_MODES.find((m) => m === ingress.tls) ?? "autocert",
@@ -124,6 +170,32 @@ function validFileSize(value: string): boolean {
   if (!m) return false;
   const shift = m[2] && m[2] !== "B" ? ("KMGT".indexOf(m[2][0]!) + 1) * 10 : 0;
   return (BigInt(m[1]!) << BigInt(shift)) <= 9223372036854775807n;
+}
+
+function validPort(value: string): boolean {
+  return /^[0-9]{1,5}$/.test(value) && Number(value) >= 1 && Number(value) <= 65535;
+}
+
+/** Scopes typed as a list, split on commas, whitespace and newlines, without blanks or repeats. */
+export function parseScopes(value: string): string[] {
+  return [...new Set(value.split(/[\s,]+/).filter((scope) => scope !== ""))];
+}
+
+const isChoice = (scope: string): boolean => (SCOPE_CHOICES as readonly string[]).includes(scope);
+
+/** The scopes the page has no checkbox for, such as ones limited to one device. */
+export function otherScopes(scopes: readonly string[]): string[] {
+  return scopes.filter((scope) => !isChoice(scope));
+}
+
+/** `scopes` with one offered choice ticked or cleared; the choices keep their listed order and the other scopes follow them. */
+export function toggleScope(scopes: readonly string[], scope: string, on: boolean): string[] {
+  return [...SCOPE_CHOICES.filter((c) => (c === scope ? on : scopes.includes(c))), ...otherScopes(scopes)];
+}
+
+/** `scopes` with its other scopes replaced by the ones typed in `value`. */
+export function withOtherScopes(scopes: readonly string[], value: string): string[] {
+  return [...SCOPE_CHOICES.filter((c) => scopes.includes(c)), ...parseScopes(value).filter((scope) => !isChoice(scope))];
 }
 
 /** The first thing the form gets wrong, found before the kernel is asked. */
@@ -160,10 +232,13 @@ export function checkSettingsScope(f: SettingsForm, scope: "node" | "agent" | "g
 }
 
 /** Fields needed to enable ingress, shared by the form and the global role switch. */
-export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
+export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "tunnelPort" | "dynamicScopes" | "refreshDays" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
   if (f.listen === "funnel" && f.mode !== "tailnet" && f.mode !== "coexist") return "tailnet";
   const issuer = f.issuer.trim();
   if (!ISSUER.test(issuer) || !isHttpsUrl(issuer)) return "issuer";
+  if (f.listen === "tunnel" && f.tunnelPort.trim() !== "" && !validPort(f.tunnelPort.trim())) return "tunnel_port";
+  if (f.dynamicScopes.some((scope) => !SCOPE.test(scope))) return "dynamic_scopes";
+  if (f.refreshDays.trim() !== "" && !(/^[0-9]{1,3}$/.test(f.refreshDays.trim()) && Number(f.refreshDays.trim()) >= 1 && Number(f.refreshDays.trim()) <= MAX_REFRESH_DAYS)) return "refresh_days";
   if (f.listen !== "public:443") return undefined;
   if (f.domain.trim() === "") return "domain";
   if (f.tls === "file" && (!isAbsolutePath(f.certFile.trim()) || !isAbsolutePath(f.keyFile.trim()))) return "cert_files";
@@ -216,6 +291,18 @@ function deleteExisting(doc: Document, path: string[]): void {
 function applyIngress(doc: Document, f: SettingsForm): void {
   doc.setIn(["ingress", "listen"], f.listen);
   doc.setIn(["ingress", "oauth", "issuer"], f.issuer.trim());
+  // Only a reverse tunnel has a local port to choose; an empty field leaves the kernel's default.
+  if (f.listen === "tunnel" && f.tunnelPort.trim() !== "") doc.setIn(["ingress", "tunnel_listen"], `127.0.0.1:${Number(f.tunnelPort.trim())}`);
+  else deleteExisting(doc, ["ingress", "tunnel_listen"]);
+  // An absent cap already means devices:read, so the default is only written once the key exists.
+  const scopes = [...new Set(f.dynamicScopes)];
+  const isDefault = scopes.length === DEFAULT_DYNAMIC_SCOPES.length && scopes.every((scope) => DEFAULT_DYNAMIC_SCOPES.includes(scope));
+  if (!isDefault || doc.hasIn(["ingress", "oauth", "dynamic_client_scopes"])) doc.setIn(["ingress", "oauth", "dynamic_client_scopes"], scopes);
+  // The lifetime is written in hours, the unit the kernel's duration syntax has for days. A value the kernel already
+  // has that shows as the same number of days is left alone, so saving other fields never rounds it.
+  const days = f.refreshDays.trim() === "" ? "" : String(Number(f.refreshDays.trim()));
+  if (days === "") deleteExisting(doc, ["ingress", "oauth", "refresh_token_ttl"]);
+  else if (refreshDaysOf(doc.getIn(["ingress", "oauth", "refresh_token_ttl"])) !== days) doc.setIn(["ingress", "oauth", "refresh_token_ttl"], `${Number(days) * 24}h`);
   // Only public:443 takes a domain and a certificate; the kernel refuses them with the other two listen modes.
   if (f.listen === "public:443") {
     doc.setIn(["ingress", "domain"], f.domain.trim());

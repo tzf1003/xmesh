@@ -72,7 +72,7 @@ issuer 的来源必须与客户端实际访问的 HTTPS 源一致。禁止返回
 
 `POST /oauth/token` 用 `grant_type=authorization_code` 交换时校验 `code_verifier`。成功返回 `access_token`、`token_type: Bearer`、`expires_in`、`refresh_token`、`scope`。
 
-access token 有效期默认 1 小时。refresh token 旋转：每次使用后旧 refresh token 失效。
+access token 有效期固定 1 小时。refresh token 旋转：每次使用后旧 refresh token 失效，新的重新计时；有效期默认 30 天，用 `ingress.oauth.refresh_token_ttl` 在 1 小时到 365 天之间调整。
 
 ### 保护 MCP
 

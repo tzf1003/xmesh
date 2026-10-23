@@ -126,12 +126,24 @@ export class KernelLifecycle {
       let retainedOptions: string[] = [];
       if (!path.isAbsolute(paths.configFile) || !path.isAbsolute(paths.stateDir)) throw new KernelFailure("invalid_path", "内核配置和状态目录必须为绝对路径");
       const command = async (op: string, allowMissing = false): Promise<void> => {
-        const args = [op, "--config", paths.configFile];
-        if (op !== "install" && op !== "migrate" && paths.serviceNode) args.push("--name", `xmesh-${paths.serviceNode}`);
-        if (op === "install" || op === "migrate") args.push("--state-dir", paths.stateDir);
-        if (op === "install") args.push(...(this.env.installOptions?.(paths) ?? []), ...retainedOptions);
-        if (op !== "migrate") args.push("--json");
-        const result = await this.env.run(args);
+        const build = (byName: boolean): string[] => {
+          const args = [op, "--config", paths.configFile];
+          if (byName) args.push("--name", `xmesh-${paths.serviceNode}`);
+          if (op === "install" || op === "migrate") args.push("--state-dir", paths.stateDir);
+          if (op === "install") args.push(...(this.env.installOptions?.(paths) ?? []), ...retainedOptions);
+          if (op !== "migrate") args.push("--json");
+          return args;
+        };
+        const byName = op !== "install" && op !== "migrate" && !!paths.serviceNode;
+        let result = await this.env.run(build(byName));
+        if (byName && result.code !== 0 && missing(result)) {
+          // The recorded name can be stale: the node was renamed, or the service was installed under another
+          // name than the one remembered. Without --name the CLI derives it from the config's node name, which
+          // is what install registers, so ask that way before calling the service missing.
+          const retry = await this.env.run(build(false));
+          if (retry.code === 0 && this.env.installed) paths.serviceNode = await this.env.installed(target.id, paths);
+          result = retry;
+        }
         if (result.code !== 0 && !(allowMissing && missing(result))) throw cliFailure(result);
         if (op === "install" && this.env.installed) paths.serviceNode = await this.env.installed(target.id, paths);
       };

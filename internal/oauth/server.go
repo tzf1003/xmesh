@@ -62,6 +62,7 @@ type Server struct {
 	now             func() time.Time
 	maxScopes       []string
 	dynamicScopes   []string
+	refreshTTL      time.Duration
 	issuerHost      string
 	proxied         bool
 }
@@ -71,12 +72,18 @@ type Options struct {
 	// DynamicScopes caps what a dynamically registered client may hold. Nil means
 	// devices:read only; an empty slice means no tool scope at all.
 	DynamicScopes []string
+	// RefreshTTL is how long a refresh token lasts after it is issued; every use rotates it, so a
+	// client that returns within the period keeps its authorization. Zero means DefaultRefreshTTL.
+	RefreshTTL time.Duration
 	// Proxied marks a deployment where exactly one trusted reverse proxy fronts a
 	// loopback-only listener (ingress.listen = tunnel). Only then are the proxy's
 	// X-Forwarded-For and X-Forwarded-Host headers believed, and only their last
 	// entry, and a loopback Host (the proxy rewriting it) is accepted.
 	Proxied bool
 }
+
+// DefaultRefreshTTL is how long a refresh token lasts when the operator has not set ingress.oauth.refresh_token_ttl.
+const DefaultRefreshTTL = 30 * 24 * time.Hour
 
 // DefaultDynamicScopes is what an open registration may receive when the
 // operator has not widened it.
@@ -98,7 +105,11 @@ func New(o Options) (*Server, error) {
 	if e != nil {
 		return nil, e
 	}
-	s := &Server{issuer: o.Issuer, issuerHost: hostKey(u.Host), proxied: o.Proxied, dynamicScopes: dynamic, passwordHash: sha256.Sum256([]byte(o.Password)), clients: map[string]Client{}, codes: map[string]grant{}, access: map[string]Token{}, refresh: map[string]Token{}, csrf: map[string]time.Time{}, windows: map[string][]time.Time{}, login: map[string]loginLimit{}, now: time.Now, maxScopes: []string{"devices:read", "exec:*", "pty:*", "fs:read:*", "fs:write:*", "sys:*", "backend:*:*", "computer:observe:*", "computer:control:*", "computer:clipboard-read:*", "computer:clipboard-write:*"}}
+	refreshTTL := o.RefreshTTL
+	if refreshTTL <= 0 {
+		refreshTTL = DefaultRefreshTTL
+	}
+	s := &Server{issuer: o.Issuer, issuerHost: hostKey(u.Host), proxied: o.Proxied, dynamicScopes: dynamic, refreshTTL: refreshTTL, passwordHash: sha256.Sum256([]byte(o.Password)), clients: map[string]Client{}, codes: map[string]grant{}, access: map[string]Token{}, refresh: map[string]Token{}, csrf: map[string]time.Time{}, windows: map[string][]time.Time{}, login: map[string]loginLimit{}, now: time.Now, maxScopes: []string{"devices:read", "exec:*", "pty:*", "fs:read:*", "fs:write:*", "sys:*", "backend:*:*", "computer:observe:*", "computer:control:*", "computer:clipboard-read:*", "computer:clipboard-write:*"}}
 	if o.StateDir != "" {
 		if e = os.MkdirAll(o.StateDir, 0700); e != nil {
 			return nil, e
@@ -627,7 +638,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	}
 	access, refresh := random(), random()
 	s.access[digest(access)] = Token{id, scopes, s.now().Add(time.Hour), family}
-	s.refresh[digest(refresh)] = Token{id, scopes, s.now().Add(30 * 24 * time.Hour), family}
+	s.refresh[digest(refresh)] = Token{id, scopes, s.now().Add(s.refreshTTL), family}
 	s.sweep()
 	writeJSON(w, 200, map[string]any{"access_token": access, "token_type": "Bearer", "expires_in": 3600, "refresh_token": refresh, "scope": strings.Join(scopes, " ")})
 }
