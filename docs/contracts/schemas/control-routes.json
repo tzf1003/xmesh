@@ -624,6 +624,24 @@
       ]
     },
     {
+      "id": "control.pair.trust.update",
+      "method": "PATCH",
+      "path": "/v2/pair/trust/{device_id}",
+      "capability": "pair",
+      "since": "2.0",
+      "query": null,
+      "body": "urn:xmesh:schema:control-pair:2#/$defs/PairTrustUpdateRequest",
+      "response": "urn:xmesh:schema:control-pair:2#/$defs/PairTrustUpdateResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "internal"
+      ]
+    },
+    {
       "id": "control.pair.trust.delete",
       "method": "DELETE",
       "path": "/v2/pair/trust/{device_id}",

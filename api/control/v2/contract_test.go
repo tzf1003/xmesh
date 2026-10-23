@@ -41,6 +41,8 @@ var typeFor = map[string]func() any{
 	"PairExportResponse":      func() any { return new(v2.PairExportResponse) },
 	"PairImportRequest":       func() any { return new(v2.PairImportRequest) },
 	"PairImportResponse":      func() any { return new(v2.PairImportResponse) },
+	"PairTrustUpdateRequest":  func() any { return new(v2.PairTrustUpdateRequest) },
+	"PairTrustUpdateResponse": func() any { return new(v2.PairTrustUpdateResponse) },
 	"PairPasswordRequest":     func() any { return new(v2.PairPasswordRequest) },
 	"PairPasswordState":       func() any { return new(v2.PairPasswordState) },
 	"PairDiscoveredResponse":  func() any { return new(v2.PairDiscoveredResponse) },

@@ -27,6 +27,7 @@ import type {
   PairDiscoveredResponse,
   PairExportResponse,
   PairImportResponse,
+  PairTrustUpdateResponse,
   PairPasswordState,
   PatList,
   PatSecret,
@@ -338,6 +339,10 @@ export class PanelService {
 
   revokeDevice(deviceId: string): Promise<ActionResult> {
     return this.action("pair", (c) => c.call("DELETE", `/v2/pair/trust/${deviceId}`));
+  }
+
+  setDeviceTags(deviceId: string, tags: string[]): Promise<DataResult<PairTrustUpdateResponse>> {
+    return this.data("pair", (c) => c.call("PATCH", `/v2/pair/trust/${deviceId}`, { body: { tags } }));
   }
 
   clearPairPassword(): Promise<ActionResult> {

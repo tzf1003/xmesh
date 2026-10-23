@@ -1559,6 +1559,21 @@ export interface PairImportResponse {
    */
   restart_required: false;
 }
+export interface PairTrustUpdateRequest {
+  /**
+   * 替换该设备的全部角色。只增加角色不打断现有逻辑会话；去掉任一角色会结束该设备现有的逻辑会话。
+   *
+   * @minItems 1
+   */
+  tags: [
+    "tag:peer" | "tag:device" | "tag:ingress" | "tag:admin",
+    ...("tag:peer" | "tag:device" | "tag:ingress" | "tag:admin")[]
+  ];
+}
+export interface PairTrustUpdateResponse {
+  device_id: string;
+  tags: Tag[];
+}
 export interface PairPasswordRequest {
   password: PairPassword;
 }
@@ -2420,6 +2435,24 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.pair.trust.update",
+    "method": "PATCH",
+    "path": "/v2/pair/trust/{device_id}",
+    "capability": "pair",
+    "since": "2.0",
+    "query": null,
+    "body": "PairTrustUpdateRequest",
+    "response": "PairTrustUpdateResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "internal"
+    ]
+  },
+  {
     "id": "control.pair.trust.delete",
     "method": "DELETE",
     "path": "/v2/pair/trust/{device_id}",
@@ -2529,6 +2562,7 @@ export interface ControlRouteTypes {
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };
   "control.ingress.password.put": { query: undefined; body: IngressPasswordRequest; response: IngressPasswordResponse };
   "control.audit.list": { query: AuditQuery; body: undefined; response: AuditResponse };
+  "control.pair.trust.update": { query: undefined; body: PairTrustUpdateRequest; response: PairTrustUpdateResponse };
   "control.pair.trust.delete": { query: undefined; body: undefined; response: undefined };
   "control.computer.get": { query: undefined; body: undefined; response: ComputerState };
   "control.computer.pause": { query: undefined; body: ComputerPauseRequest; response: ComputerState };

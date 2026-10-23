@@ -50,3 +50,42 @@ func TestDeviceProviderChangesAreHotInConfigPreview(t *testing.T) {
 		t.Fatal("path toggle requires a process restart", diff)
 	}
 }
+
+func TestDeviceTrustTagsUpdateKeepsSessionsOnlyWhenWidening(t *testing.T) {
+	var store *device.TrustStore
+	f := newFixture(t, func(o *Options) {
+		id, err := device.LoadIdentity(context.Background(), o.StateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store, err = device.OpenTrust(o.StateDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.DeviceIdentity, o.DeviceTrust = id, store
+	})
+	doc := pairingDocument(t, "paired-cloud")
+	f.ok("POST", "/v2/pair/import", v2.PairImportRequest{Pair: doc, Fingerprint: doc.Fingerprint}, "PairImportResponse")
+	before, _ := store.Find(doc.DeviceID)
+	path := "/v2/pair/trust/" + doc.DeviceID
+
+	f.ok("PATCH", path, v2.PairTrustUpdateRequest{Tags: []string{"tag:ingress", "tag:device", "tag:peer"}}, "PairTrustUpdateResponse")
+	widened, _ := store.Find(doc.DeviceID)
+	if len(widened.Tags) != 3 || widened.Generation != before.Generation {
+		t.Fatal("widening roles must apply immediately without ending sessions", widened.Tags, widened.Generation, before.Generation)
+	}
+
+	f.ok("PATCH", path, v2.PairTrustUpdateRequest{Tags: []string{"tag:peer", "tag:device"}}, "PairTrustUpdateResponse")
+	narrowed, _ := store.Find(doc.DeviceID)
+	if len(narrowed.Tags) != 2 || narrowed.Generation != before.Generation+1 {
+		t.Fatal("removing a role must end sessions authorized under it", narrowed.Tags, narrowed.Generation)
+	}
+
+	apiError(t, f.do("PATCH", path, v2.PairTrustUpdateRequest{Tags: []string{}}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("PATCH", path, v2.PairTrustUpdateRequest{Tags: []string{"tag:root"}}, nil), v2.ErrInvalidArgs)
+	apiError(t, f.do("PATCH", "/v2/pair/trust/not-a-device", v2.PairTrustUpdateRequest{Tags: []string{"tag:peer"}}, nil), v2.ErrInvalidArgs)
+	if r := f.do("DELETE", path, nil, nil); r.Status != 204 {
+		t.Fatal(r.Status)
+	}
+	apiError(t, f.do("PATCH", path, v2.PairTrustUpdateRequest{Tags: []string{"tag:peer"}}, nil), v2.ErrNotFound)
+}

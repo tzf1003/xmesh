@@ -285,6 +285,8 @@ UI MCP `protocol_version: 1` 的 `.run`、`.script` 返回已知状态与 `run_i
 
 `POST /v2/pair/import` 接收文档、用户独立确认的指纹及本地授予的角色。内核同时验证版本、公钥、设备 ID 和指纹的一致性。默认授予 `tag:peer`、`tag:device`；`tag:ingress` 和 `tag:admin` 必须显式指定。导入由共享信任服务即时应用，`restart_required` 为 `false`。
 
+`PATCH /v2/pair/trust/{device_id}` 接收 `{tags}`，替换已配对设备的全部角色，返回 `{device_id, tags}`；设备不存在或已撤销返回 `not_found`。角色只能经本机控制通道修改，远端设备没有入口。只增加角色时不打断现有逻辑会话，新开或续连的会话立即按新角色判定；去掉任一角色会结束该设备现有的逻辑会话，因为它们是按更宽的角色授权的。
+
 `DELETE /v2/pair/trust/{device_id}` 撤销设备信任，返回 204。全部连接路径使用同一撤销记录，现有逻辑会话结束；撤销前启动的迟到配对事务不能恢复信任。移除 Tailnet 网络授权不改变 xmesh 的设备信任。
 
 密码管理和公钥文档操作与网络模式解耦。未启动设备配对服务时，密码与主动连接路由返回 `unavailable`。

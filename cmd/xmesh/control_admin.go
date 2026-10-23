@@ -72,6 +72,7 @@ func showDone(r *control.Response, err error, v any) error {
 const pairUsage = "用法: xmesh control pair password show | set (--password-stdin | --password-file 文件) | clear\n" +
 	"      pair discover\n" +
 	"      pair connect (--address 地址 | --fingerprint 指纹) (--password-stdin | --password-file 文件)\n" +
+	"      pair tags --device-id 设备ID --tags tag:peer,tag:device[,tag:ingress]\n" +
 	"      pair export [--out 文件] | pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]"
 
 func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, args []string) error {
@@ -99,6 +100,27 @@ func controlPair(ctx context.Context, flags *flag.FlagSet, target targetFlags, a
 		}
 		response, err := client.Do(ctx, "DELETE", "/v2/pair/trust/"+*id, nil, nil)
 		return showDone(response, err, map[string]any{"device_id": *id, "revoked": true})
+	case "tags":
+		id := flags.String("device-id", "", "要修改角色的已配对设备 ID")
+		tags := flags.String("tags", "", "替换为这些设备角色，逗号分隔")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || !regexp.MustCompile(`^dev-[0-9a-f]{64}$`).MatchString(*id) || *tags == "" {
+			return fmt.Errorf("tags 需要 --device-id dev-<设备公钥摘要> 和 --tags tag:peer,tag:device[,tag:ingress]")
+		}
+		client, err := target.client()
+		if err != nil {
+			return err
+		}
+		list := strings.Split(*tags, ",")
+		response, err := client.Do(ctx, "PATCH", "/v2/pair/trust/"+*id, v2.PairTrustUpdateRequest{Tags: list}, nil)
+		if err == nil && response.Error() == nil {
+			if note := missingDeviceTagNote(list); note != "" {
+				fmt.Fprintln(os.Stderr, note)
+			}
+		}
+		return show(response, err)
 	case "export", "import":
 	default:
 		return fmt.Errorf("%s", pairUsage)

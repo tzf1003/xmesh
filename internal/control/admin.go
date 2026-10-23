@@ -93,6 +93,49 @@ func (s *Server) deleteDeviceTrust(w http.ResponseWriter, r *http.Request, _ *ca
 	}
 	w.WriteHeader(204)
 }
+
+func (s *Server) updateDeviceTrust(w http.ResponseWriter, r *http.Request, _ *call) {
+	id := pathPart(r, 3)
+	if !strings.HasPrefix(id, "dev-") || !pairFingerprintPattern.MatchString(strings.TrimPrefix(id, "dev-")) {
+		failWith(w, argError("device_id", "设备 ID 无效"))
+		return
+	}
+	var req v2.PairTrustUpdateRequest
+	if e := decode(r, &req, true); e != nil {
+		failWith(w, e)
+		return
+	}
+	tags := []string{}
+	for _, tag := range req.Tags {
+		if !pairTags[tag] {
+			failWith(w, argError("tags", "设备角色无效"))
+			return
+		}
+		if !slices.Contains(tags, tag) {
+			tags = append(tags, tag)
+		}
+	}
+	if len(tags) == 0 {
+		failWith(w, argError("tags", "至少保留一个设备角色；要移除设备请撤销设备信任"))
+		return
+	}
+	_, trust, err := s.deviceState(r.Context())
+	if err != nil {
+		failWith(w, newError(v2.ErrInternal, "设备信任服务不可用"))
+		return
+	}
+	updated, err := trust.SetTags(r.Context(), id, tags)
+	if errors.Is(err, device.ErrUntrusted) {
+		failWith(w, newError(v2.ErrNotFound, "该设备尚未配对"))
+		return
+	}
+	if err != nil {
+		failWith(w, newError(v2.ErrInternal, "无法保存设备角色"))
+		return
+	}
+	writeJSON(w, 200, v2.PairTrustUpdateResponse{DeviceID: id, Tags: updated.Tags})
+}
+
 func (s *Server) pairImport(w http.ResponseWriter, r *http.Request, _ *call) {
 	var req v2.PairImportRequest
 	if e := decode(r, &req, true); e != nil {

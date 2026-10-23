@@ -24,6 +24,7 @@ import type {
   PairDocument,
   PairExportResponse,
   PairImportResponse,
+  PairTrustUpdateResponse,
   PairPasswordState,
   PatList,
   PatSecret,
@@ -90,6 +91,7 @@ export const CHANNELS = {
   discoverPairs: "xmesh:discover-pairs",
   connectPair: "xmesh:connect-pair",
   revokeDevice: "xmesh:revoke-device",
+  setDeviceTags: "xmesh:set-device-tags",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
   onboarding: "xmesh:onboarding",
@@ -355,6 +357,8 @@ export interface PanelApi {
   discoverPairs(): Promise<DataResult<PairDiscoveredResponse>>;
   connectPair(args: PairConnectArgs): Promise<DataResult<PairConnectResponse>>;
   revokeDevice(deviceId: string): Promise<ActionResult>;
+  /** Replaces the roles this node grants an already paired device. Local control channel only. */
+  setDeviceTags(deviceId: string, tags: string[]): Promise<DataResult<PairTrustUpdateResponse>>;
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
@@ -423,6 +427,7 @@ export const PANEL_API_METHODS = [
   "discoverPairs",
   "connectPair",
   "revokeDevice",
+  "setDeviceTags",
   "queryAudit",
   "getRecentCalls",
   "onCalls",
@@ -752,6 +757,16 @@ export function parsePairConnect(v: unknown): PairConnectArgs | undefined {
   }
   if (out.address === undefined && out.fingerprint === undefined) return undefined;
   return out;
+}
+
+export function parseDeviceTags(v: unknown): string[] | undefined {
+  if (!Array.isArray(v) || v.length === 0) return undefined;
+  const picked: string[] = [];
+  for (const t of v) {
+    if (!(PAIR_TAGS as readonly unknown[]).includes(t) || picked.includes(t as string)) return undefined;
+    picked.push(t as string);
+  }
+  return picked;
 }
 
 export function parsePairImport(v: unknown): PairImportArgs | undefined {
