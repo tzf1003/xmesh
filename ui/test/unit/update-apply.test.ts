@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { ApplyError, MAC_SCRIPT, type Spawned, WINDOWS_LAUNCH, WINDOWS_SCRIPT, macApplier, macBundle, windowsApplier } from "../../src/main/update/apply";
+import { ApplyError, LINUX_SCRIPT, MAC_SCRIPT, type Spawned, WINDOWS_LAUNCH, WINDOWS_SCRIPT, linuxApplier, linuxLayout, macApplier, macBundle, windowsApplier } from "../../src/main/update/apply";
 
 const handOver = (dir: string) => ({ installer: path.join(dir, "i.dmg"), execPath: "/Applications/xmesh.app/Contents/MacOS/xmesh", pid: 4242, dir, resultFile: path.join(dir, "result.txt") });
 /** A child process that reports it started on the next tick. */
@@ -370,4 +370,62 @@ test("macOS script: paths with spaces and quotes survive", sh, () => {
   const s = spawnSync("/bin/sh", [script, String(gone), path.join(r.dir, "i.dmg"), odd, r.result], { env });
   assert.equal(s.status, 0);
   assert.equal(fs.readFileSync(path.join(odd, "Contents", "version"), "utf8").trim(), "new");
+});
+
+const WEB = "/home/u/.local/share/xmesh/webui/xmesh-webui.js";
+const UNIT = "/home/u/.config/systemd/user/xmesh-webui.service";
+
+test("Linux updates only a panel installed by install-linux.sh with its service", () => {
+  assert.deepEqual(linuxLayout(WEB, UNIT, () => true), { prefix: "/home/u/.local/share/xmesh" });
+  assert.equal(linuxLayout(WEB, UNIT, () => false), undefined);
+  assert.equal(linuxLayout("/srv/xmesh-webui/xmesh-webui.js", UNIT, () => true), undefined);
+  assert.equal(linuxApplier(WEB, UNIT, {}, undefined, () => true).blocked(), "");
+  assert.equal(linuxApplier("/tmp/x/dist/web/xmesh-webui.js", UNIT, {}, undefined, () => true).blocked(), "unsupported");
+});
+
+test("Linux runs the script as a transient user unit and waits for the helper to be ready", async () => {
+  const dir = tmpDir();
+  const seen: { cmd: string; args: string[] }[] = [];
+  const a = linuxApplier(WEB, UNIT, { PATH: "/usr/bin:/opt/node/bin" }, (cmd, args) => {
+    seen.push({ cmd, args });
+    const ready = args.at(-2)!;
+    setImmediate(() => fs.writeFileSync(ready, "ready"));
+    return child();
+  }, () => true);
+  await a.start({ ...handOver(dir), installer: path.join(dir, "install-linux.sh"), tag: "v0.2.0" });
+  const s = seen[0]!;
+  assert.equal(s.cmd, "systemd-run");
+  assert.ok(s.args.includes("--user") && s.args.includes("--collect"));
+  assert.ok(s.args.includes("--setenv=PATH=/usr/bin:/opt/node/bin"));
+  const at = s.args.indexOf("/bin/sh");
+  assert.deepEqual(s.args.slice(at + 2, at + 6), ["4242", path.join(dir, "install-linux.sh"), "/home/u/.local/share/xmesh", "v0.2.0"]);
+  assert.equal(fs.readFileSync(s.args[at + 1]!, "utf8"), LINUX_SCRIPT);
+  assert.equal(fs.readFileSync(s.args.at(-2)!, "utf8"), "install");
+  await assert.rejects(a.start(handOver(dir)), (e: ApplyError) => /no release tag/.test(e.message));
+});
+
+test("the Linux script installs after the panel exits, and restarts the panel with a reason when it fails", { skip: process.platform === "win32" }, () => {
+  for (const installerFails of [false, true]) {
+    const dir = tmpDir();
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "systemctl"), `#!/bin/sh\necho "$@" >> "${dir}/systemctl.log"\n`, { mode: 0o755 });
+    const installer = path.join(dir, "install-linux.sh");
+    fs.writeFileSync(installer, `echo "$@" > "${dir}/installer.args"\n${installerFails ? 'echo "boom" >&2; echo >&2; exit 3' : "exit 0"}\n`);
+    const script = path.join(dir, "apply.sh");
+    const ready = path.join(dir, "ready");
+    fs.writeFileSync(script, LINUX_SCRIPT);
+    const result = path.join(dir, "result.txt");
+    const dead = spawnSync("sh", ["-c", "echo $$"]).stdout.toString().trim();
+    // The script announces itself by overwriting the ready file; the app then answers "install".
+    const r = spawnSync("/bin/sh", ["-c", '(sleep 0.5; printf install > "$7") & /bin/sh "$@"; s=$?; wait; exit $s', "sh", script, dead, installer, "/p", "v0.2.0", result, ready, path.join(dir, "log")], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    assert.equal(r.status, installerFails ? 1 : 0);
+    assert.equal(fs.readFileSync(path.join(dir, "installer.args"), "utf8").trim(), "--update --yes --version v0.2.0 --prefix /p");
+    if (installerFails) {
+      assert.equal(fs.readFileSync(result, "utf8").trim(), "boom");
+      assert.match(fs.readFileSync(path.join(dir, "systemctl.log"), "utf8"), /--user restart xmesh-webui/);
+    } else {
+      assert.equal(fs.existsSync(result), false);
+    }
+  }
 });

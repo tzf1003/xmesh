@@ -8,7 +8,7 @@ CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/xmesh/install"
 WANT_KERNEL=true; WANT_WEBUI=true; ASSUME_YES=false; DOWNLOAD_ONLY=false
 NODE_NAME=""; WORKSPACE=""; PERMISSION=""; PURPOSE=""
 WEB_LISTEN=""; WEB_KEY_FROM=""; WEB_TLS_CERT=""; WEB_TLS_KEY=""; WEB_INSECURE=false; WEB_LANG=""
-LINGER=ask; PHASE=arguments
+LINGER=ask; UPDATE=false; PHASE=arguments
 WORK=""; TTY=""
 
 usage() {
@@ -44,6 +44,7 @@ usage() {
   --lang zh|en                      网页界面的默认语言
 
 其他
+  --update                          就地更新：保留服务配置、密钥和节点，只替换程序并重启服务
   --linger | --no-linger            是否让服务在退出登录后继续运行（loginctl enable-linger）
   --yes                             非交互：不提问；须同时给出 --workspace 和 --permission
   --help                            显示本帮助
@@ -78,7 +79,7 @@ while [ "$#" -gt 0 ]; do
       esac; shift 2;;
     --no-kernel) WANT_KERNEL=false; shift;; --no-webui) WANT_WEBUI=false; shift;;
     --web-insecure) WEB_INSECURE=true; shift;; --linger) LINGER=yes; shift;; --no-linger) LINGER=no; shift;;
-    --download-only) DOWNLOAD_ONLY=true; shift;; --yes|-y) ASSUME_YES=true; shift;;
+    --download-only) DOWNLOAD_ONLY=true; shift;; --update) UPDATE=true; shift;; --yes|-y) ASSUME_YES=true; shift;;
     --help|-h) usage; exit 0;;
     *) die_usage "未知选项: $1（见 --help）";;
   esac
@@ -251,6 +252,13 @@ if [ -n "$WEB_TLS_CERT$WEB_TLS_KEY" ]; then
   [ -r "$WEB_TLS_CERT" ] && [ -r "$WEB_TLS_KEY" ] || fail "读不到 TLS 证书或私钥文件。"
 fi
 [ -z "$WEB_KEY_FROM" ] || [ -r "$WEB_KEY_FROM" ] || fail "读不到 --web-key-from 指定的文件。"
+if "$UPDATE"; then
+  # An update changes only what is installed here; the services keep the settings they were installed with.
+  ASSUME_YES=true; LINGER=already
+  [ -x "$PREFIX/bin/xmesh" ] || WANT_KERNEL=false
+  [ -f "$PREFIX/webui/xmesh-webui.js" ] || WANT_WEBUI=false
+  "$WANT_KERNEL" || "$WANT_WEBUI" || fail "在 $PREFIX 下没有已安装的内核或网页界面，无法更新。" "去掉 --update 重新安装，或用 --prefix 指向安装目录。"
+fi
 "$WANT_KERNEL" || "$WANT_WEBUI" || "$DOWNLOAD_ONLY" || fail "--no-kernel 与 --no-webui 同时给出时没有可安装的内容。"
 
 # ---- tools ---------------------------------------------------------------------
@@ -350,8 +358,8 @@ ask_webui() {
   fi
 }
 WEB_REGENERATE=false
-"$DOWNLOAD_ONLY" || ! "$WANT_KERNEL" || ask_kernel
-"$DOWNLOAD_ONLY" || ! "$WANT_WEBUI" || ask_webui
+"$DOWNLOAD_ONLY" || "$UPDATE" || ! "$WANT_KERNEL" || ask_kernel
+"$DOWNLOAD_ONLY" || "$UPDATE" || ! "$WANT_WEBUI" || ask_webui
 if ! "$DOWNLOAD_ONLY" && [ "$LINGER" = ask ]; then
   linger_now="$(loginctl show-user "$(id -un)" --property=Linger --value 2>/dev/null || true)"
   if [ "$linger_now" = yes ]; then LINGER=already
@@ -468,6 +476,8 @@ if "$WANT_KERNEL"; then
       fi
     done <<< "$nodes"
     KERNEL_SUMMARY="已有节点（配置未改动）"
+  elif "$UPDATE"; then
+    KERNEL_SUMMARY="程序已更新（没有节点配置，未创建服务）"
   else
     [ -n "$WORKSPACE" ] && [ -n "$PERMISSION" ] && [ -n "$PURPOSE" ] && [ -n "$NODE_NAME" ] || fail "程序已安装，但没有节点配置可更新，也没有给出创建节点所需的 --workspace 和 --permission。" "加上这两个选项后重新运行本脚本。"
     py input "$PURPOSE" "$NODE_NAME" "$WORKSPACE" "$PERMISSION" > "$WORK/input.json"
@@ -502,7 +512,12 @@ fi
 
 # ---- web panel service ---------------------------------------------------------
 WEB_SUMMARY=""
-if [ -n "$WEB_ARCHIVE" ]; then
+if [ -n "$WEB_ARCHIVE" ] && "$UPDATE"; then
+  PHASE=webui
+  # The unit already points at $PREFIX/webui/xmesh-webui.js; only the running process has to pick up the new files.
+  systemctl --user restart xmesh-webui || fail "重启网页管理界面服务失败。" "查看 systemctl --user status xmesh-webui。"
+  WEB_SUMMARY="已重启服务 xmesh-webui"
+elif [ -n "$WEB_ARCHIVE" ]; then
   PHASE=webui
   args=(install --listen "$WEB_LISTEN" --xmesh-bin "$XMESH")
   [ -z "$WEB_TLS_CERT" ] || args+=(--tls-cert "$WEB_TLS_CERT" --tls-key "$WEB_TLS_KEY")

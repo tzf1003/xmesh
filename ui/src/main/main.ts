@@ -129,8 +129,8 @@ async function start(): Promise<void> {
   // The updater reads the running nodes from the controller (only when an update runs), and the controller starts from its state.
   const updateNotice = (n: UpdateNotice): void =>
     notify([{ key: `update.${n.kind}.${n.version}`, text: t(n.kind === "available" ? "notice.updateAvailable" : n.kind === "updated" ? "notice.updated" : "notice.updateFailed", { version: n.version }) }]);
-  // CI runs the end-to-end tests on Windows and macOS; on Linux, where no installer exists, the test pretends to be Windows.
-  const fakeAsWindows = TEST_MODE && targetFor(process.platform, process.arch) === undefined;
+  // CI runs the end-to-end tests on Windows and macOS; on Linux, where the desktop shell has no installer, the test pretends to be Windows.
+  const fakeAsWindows = TEST_MODE && process.platform !== "win32" && process.platform !== "darwin";
   const updatePlatform = fakeAsWindows ? "win32" : process.platform;
   const arch = fakeAsWindows ? "x64" : process.arch;
   const target = targetFor(updatePlatform, arch);
