@@ -67,10 +67,10 @@ test("a gateway-only node still gets the agent section the config schema require
 });
 
 test("trusted device roles are the same on every network path", () => {
-  assert.match(generateConfig(must(lan), deny), /^ {4}"tag:peer":/m);
+  assert.match(generateConfig(must(lan), deny), /^ {4}"tag:*":/m);
   assert.doesNotMatch(generateConfig(must(lan), deny), /tag:device/);
   const tn = generateConfig(must({ ...lan, mode: "tailnet", authkeyFile: "/k" }), deny);
-  assert.match(tn, /^ {4}"tag:peer":/m);
+  assert.match(tn, /^ {4}"tag:*":/m);
   assert.doesNotMatch(tn, /tag:device/);
 });
 

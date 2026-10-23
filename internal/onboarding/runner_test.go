@@ -314,7 +314,7 @@ func TestPlanCoexistUsesIndependentNetworkPaths(t *testing.T) {
 	if cfg.SchemaVersion != 2 || cfg.Mesh.NetworkMode() != "coexist" || cfg.Mesh.Tailnet.AuthMethod != "browser" || cfg.Mesh.Tailnet.ControlURL != config.DefaultControlURL {
 		t.Fatalf("invalid coexist configuration: %+v", cfg.Mesh)
 	}
-	if _, ok := cfg.Agent.Authz["tag:peer"]; !ok {
+	if _, ok := cfg.Agent.Authz["tag:*"]; !ok {
 		t.Fatal("missing paired/local device grant")
 	}
 }
