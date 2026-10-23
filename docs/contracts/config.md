@@ -24,6 +24,7 @@
 | `ingress.listen = public:443` | 必须有 `domain` 和 `tls`，且 `ingress.oauth.issuer` 的主机等于 `domain`。`tls: file` 时还必须有 `cert_file` 与 `key_file`。`tls: autocert` 只在这种监听下使用 |
 | `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供。可选 `ingress.tunnel_listen` 指定隧道到达入口的本机地址，必须是 `127.0.0.1:端口`，只在 `tunnel` 下允许；命令行 `--tunnel-listen` 优先，两者都没有时为 `127.0.0.1:8443`。入口角色热应用，改端口后入口重新监听 |
 | `ingress.oauth.dynamic_client_scopes` | 可选 scope 数组，语法与 `clients.*.scopes` 相同。动态注册客户端的 scope 上限，缺省 `["devices:read"]`，空数组表示只能完成 OAuth，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
+| `ingress.oauth.refresh_token_ttl` | 可选 Go 时长，刷新令牌的有效期，范围 `1h` 到 `8760h`（365 天），缺省 `720h`（30 天）。刷新令牌每次使用都会旋转并重新计时，客户端只要在这段时间内回来一次就不必重新授权；访问令牌固定 1 小时。令牌保存在入口进程内存，入口重启后须重新授权，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
 | `agent.quota`、`gateway.quota` | 可选对象，字段 `calls_per_hour`（正整数，缺省 10000）、`max_concurrent`（正整数，缺省 64）、`max_call_duration`（Go duration，缺省 `10m`）。`agent.exec.default_timeout` 不得超过 `agent.quota.max_call_duration`，见 [CON-SEC-10](../constraints/security.md#con-sec-10) |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
 

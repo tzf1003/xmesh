@@ -155,8 +155,31 @@ type Ingress struct {
 		// DynamicClientScopes caps what a dynamically registered client may hold.
 		// Absent means devices:read only; an empty list means none.
 		DynamicClientScopes []string `json:"dynamic_client_scopes"`
+		// RefreshTokenTTL is a Go duration for how long a refresh token lasts; empty means 30 days.
+		// Each use issues a new one, so it is how long a client may stay away before signing in again.
+		RefreshTokenTTL string `json:"refresh_token_ttl"`
 	} `json:"oauth"`
 }
+
+const (
+	DefaultRefreshTokenTTL = 30 * 24 * time.Hour
+	MinRefreshTokenTTL     = time.Hour
+	MaxRefreshTokenTTL     = 365 * 24 * time.Hour
+)
+
+// RefreshTokenTTL returns the effective refresh token lifetime. A value outside the allowed range falls
+// back to the default; Validate rejects such a file before it gets here.
+func (i Ingress) RefreshTokenTTL() time.Duration {
+	if i.OAuth.RefreshTokenTTL == "" {
+		return DefaultRefreshTokenTTL
+	}
+	d, e := time.ParseDuration(i.OAuth.RefreshTokenTTL)
+	if e != nil || d < MinRefreshTokenTTL || d > MaxRefreshTokenTTL {
+		return DefaultRefreshTokenTTL
+	}
+	return d
+}
+
 type Agent struct {
 	Computer   computer.Settings        `json:"computer"`
 	DefaultCWD string                   `json:"default_cwd"`
@@ -440,6 +463,11 @@ func (c *Config) Validate() error {
 		n, perr := strconv.Atoi(port)
 		if c.Ingress.Listen != "tunnel" || e != nil || host != "127.0.0.1" || perr != nil || n < 1 || n > 65535 {
 			return fail("/ingress/tunnel_listen: 只用于 listen: tunnel，且必须是 127.0.0.1:端口")
+		}
+	}
+	if v := c.Ingress.OAuth.RefreshTokenTTL; v != "" {
+		if d, e := time.ParseDuration(v); e != nil || d < MinRefreshTokenTTL || d > MaxRefreshTokenTTL {
+			return fail("/ingress/oauth/refresh_token_ttl: 必须是 1h 到 8760h（365 天）之间的时长")
 		}
 	}
 	if c.Gateway.Listen != "" {

@@ -8,7 +8,9 @@ import { Badge, Banner, Confirm, ErrorBanner, Field, NotSupported, PageHead } fr
 import { useT } from "../i18n";
 import { cwdPolicy, diffRows, needsRestart, weakening } from "../lib/config";
 import {
+  DEFAULT_REFRESH_DAYS,
   DEFAULT_TUNNEL_PORT,
+  MAX_REFRESH_DAYS,
   LISTEN_MODES,
   MODES,
   SCOPE_CHOICES,
@@ -60,6 +62,7 @@ const PROBLEM: Record<SettingsProblem, Key> = {
   issuer: "settings.problem.issuer",
   tunnel_port: "settings.problem.tunnel_port",
   dynamic_scopes: "settings.problem.dynamic_scopes",
+  refresh_days: "settings.problem.refresh_days",
   domain: "settings.problem.domain",
   cert_files: "settings.problem.cert_files",
   default_cwd: "settings.problem.default_cwd",
@@ -391,6 +394,17 @@ export function ModuleSettings({ ctx, scope = "node", onDirtyChange }: { ctx: Pa
                       />
                     </Field>
                   )}
+                  <Field label={t("settings.refreshDays")} hint={t("settings.refreshDaysHint", { days: String(DEFAULT_REFRESH_DAYS), max: String(MAX_REFRESH_DAYS) })}>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={form.refreshDays}
+                      placeholder={String(DEFAULT_REFRESH_DAYS)}
+                      onInput={(e) => update({ refreshDays: (e.currentTarget as HTMLInputElement).value })}
+                      aria-invalid={problem === "refresh_days"}
+                      data-testid="settings-refresh-days"
+                    />
+                  </Field>
                   <fieldset data-testid="settings-dynamic-scopes">
                     <legend>{t("settings.dynamicScopes")}</legend>
                     <p class="hint">{t("settings.dynamicScopesHint")}</p>

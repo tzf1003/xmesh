@@ -58,6 +58,7 @@ const lan: SettingsForm = {
   listen: "tunnel",
   tunnelPort: "",
   dynamicScopes: ["devices:read"],
+  refreshDays: "",
   issuer: "",
   domain: "",
   tls: "autocert",
@@ -104,6 +105,7 @@ test("the form reads what the first run set, the ingress and the working directo
     listen: "public:443",
     tunnelPort: "",
     dynamicScopes: ["devices:read"],
+    refreshDays: "",
     issuer: "https://x.example.com",
     domain: "x.example.com",
     tls: "file",
@@ -312,6 +314,33 @@ test("the dynamic client scope cap is written only once it differs from the defa
   assert.deepEqual(withOtherScopes(mixed, ""), ["devices:read", "exec:*"]);
 });
 
+test("the refresh token lifetime is written in hours, read back as days, and never rounded by saving other fields", () => {
+  const form: SettingsForm = { ...tailnetIngress, refreshDays: "365" };
+  const next = applySettingsForm(LAN_CONFIG, form);
+  assert.ok(next !== undefined);
+  assert.equal(parse(next).ingress.oauth.refresh_token_ttl, "8760h");
+  assert.ok(validateConfig(parse(next)), JSON.stringify(validateConfig.errors));
+  assert.equal(formFromConfig(parse(next)).refreshDays, "365");
+
+  const cleared = applySettingsForm(next, { ...form, refreshDays: "" });
+  assert.ok(cleared !== undefined);
+  assert.equal(parse(cleared).ingress.oauth.refresh_token_ttl, undefined, "an empty field leaves the kernel's default");
+
+  // A value written by hand that is not whole days shows as the days it rounds up to, and stays as written until the field is edited.
+  const odd = (LAN_CONFIG + "ingress:\n  listen: tunnel\n  oauth:\n    issuer: https://xmesh.example.com\n    refresh_token_ttl: 36h\n").replace(/^schema_version:.*\n/m, "");
+  const loaded = formFromConfig(parse(odd));
+  assert.equal(loaded.refreshDays, "2");
+  const saved = applySettingsForm(odd, { ...tailnetIngress, refreshDays: loaded.refreshDays });
+  assert.ok(saved !== undefined);
+  assert.equal(parse(saved).ingress.oauth.refresh_token_ttl, "36h");
+  const edited = applySettingsForm(odd, { ...tailnetIngress, refreshDays: "3" });
+  assert.ok(edited !== undefined);
+  assert.equal(parse(edited).ingress.oauth.refresh_token_ttl, "72h");
+
+  for (const days of ["0", "366", "1.5", "-1", "abc", "1000"]) assert.equal(checkSettingsForm({ ...form, refreshDays: days }), "refresh_days", days);
+  for (const days of ["", "1", " 30 ", "365"]) assert.equal(checkSettingsForm({ ...form, refreshDays: days }), undefined, days);
+});
+
 test("a gateway added by the form gets the loopback listen address; an existing one is kept", () => {
   const withoutGateway = LAN_CONFIG.replace('gateway:\n  listen: "127.0.0.1:8080"\n', "");
   const added = applySettingsForm(withoutGateway, lan);
@@ -336,7 +365,7 @@ test("the form round-trips through the file for every listen mode", () => {
     { ...tailnetIngress, listen: "public:443", domain: "xmesh.example.com", tls: "autocert" },
     { ...tailnetIngress, listen: "public:443", domain: "xmesh.example.com", tls: "file", certFile: "/c.pem", keyFile: "/k.pem" },
     { ...tailnetIngress, allowDirs: [] },
-    { ...tailnetIngress, tunnelPort: "8444", dynamicScopes: ["devices:read", "exec:*", "fs:read:*"] },
+    { ...tailnetIngress, tunnelPort: "8444", dynamicScopes: ["devices:read", "exec:*", "fs:read:*"], refreshDays: "365" },
   ];
   for (const f of forms) {
     const next = applySettingsForm(LAN_CONFIG, f);
@@ -352,7 +381,7 @@ test("the text the form writes is valid under the config schema", () => {
     tailnetIngress,
     { ...tailnetIngress, listen: "funnel", issuer: "https://node.tail1234.ts.net" },
     { ...tailnetIngress, listen: "public:443", domain: "xmesh.example.com", tls: "file", certFile: "/c.pem", keyFile: "/k.pem", issuer: "https://xmesh.example.com" },
-    { ...tailnetIngress, tunnelPort: "8444", dynamicScopes: ["devices:read", "exec:*"] },
+    { ...tailnetIngress, tunnelPort: "8444", dynamicScopes: ["devices:read", "exec:*"], refreshDays: "90" },
   ];
   for (const f of forms) {
     const next = applySettingsForm(LAN_CONFIG, f);

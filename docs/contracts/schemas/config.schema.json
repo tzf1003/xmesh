@@ -379,6 +379,11 @@
               "items": { "$ref": "#/$defs/scope" },
               "default": ["devices:read"],
               "description": "动态注册客户端的 scope 上限。省略时只有 devices:read；空数组表示只能完成 OAuth。"
+            },
+            "refresh_token_ttl": {
+              "$ref": "#/$defs/duration",
+              "default": "720h",
+              "description": "刷新令牌的有效期，1h 到 8760h（365 天）。每次使用都会换发新的刷新令牌并重新计时，客户端只要在这段时间内回来一次就不必重新授权。省略时为 30 天。"
             }
           }
         }

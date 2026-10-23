@@ -23,6 +23,16 @@ export const DEFAULT_TUNNEL_PORT = 8443;
 /** `ingress.oauth.dynamic_client_scopes` when the key is absent: a dynamically registered client may only list devices. */
 export const DEFAULT_DYNAMIC_SCOPES: readonly string[] = ["devices:read"];
 
+/** The kernel's default refresh token lifetime and the longest it accepts, in days. */
+export const DEFAULT_REFRESH_DAYS = 30;
+export const MAX_REFRESH_DAYS = 365;
+
+/** A whole number of days from a duration such as `720h`, rounded up; undefined for anything the page cannot show. */
+function refreshDaysOf(value: unknown): string | undefined {
+  const m = typeof value === "string" ? /^([0-9]+)h$/.exec(value) : null;
+  return m ? String(Math.max(1, Math.ceil(Number(m[1]) / 24))) : undefined;
+}
+
 /** The scopes the page offers as choices, in the order the kernel lists them as supported. */
 export const SCOPE_CHOICES = [
   "devices:read",
@@ -62,6 +72,8 @@ export interface SettingsForm {
   tunnelPort: string;
   /** `ingress.oauth.dynamic_client_scopes`: the most a dynamically registered client may hold. */
   dynamicScopes: string[];
+  /** `ingress.oauth.refresh_token_ttl` in days; empty leaves the kernel's default of 30. */
+  refreshDays: string;
   issuer: string;
   domain: string;
   tls: TLSMode;
@@ -83,6 +95,7 @@ export type SettingsProblem =
   | "issuer"
   | "tunnel_port"
   | "dynamic_scopes"
+  | "refresh_days"
   | "domain"
   | "cert_files"
   | "default_cwd"
@@ -130,6 +143,7 @@ export function formFromConfig(parsed: unknown): SettingsForm {
     listen: LISTEN_MODES.find((m) => m === ingress.listen) ?? "tunnel",
     tunnelPort: /^127\.0\.0\.1:([0-9]{1,5})$/.exec(text(ingress.tunnel_listen))?.[1] ?? "",
     dynamicScopes: Array.isArray(oauth.dynamic_client_scopes) ? strings(oauth.dynamic_client_scopes) : [...DEFAULT_DYNAMIC_SCOPES],
+    refreshDays: refreshDaysOf(oauth.refresh_token_ttl) ?? "",
     issuer: text(oauth.issuer),
     domain: text(ingress.domain),
     tls: TLS_MODES.find((m) => m === ingress.tls) ?? "autocert",
@@ -218,12 +232,13 @@ export function checkSettingsScope(f: SettingsForm, scope: "node" | "agent" | "g
 }
 
 /** Fields needed to enable ingress, shared by the form and the global role switch. */
-export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "tunnelPort" | "dynamicScopes" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
+export function checkIngressSettings(f: Pick<SettingsForm, "mode" | "issuer" | "listen" | "tunnelPort" | "dynamicScopes" | "refreshDays" | "domain" | "tls" | "certFile" | "keyFile">): SettingsProblem | undefined {
   if (f.listen === "funnel" && f.mode !== "tailnet" && f.mode !== "coexist") return "tailnet";
   const issuer = f.issuer.trim();
   if (!ISSUER.test(issuer) || !isHttpsUrl(issuer)) return "issuer";
   if (f.listen === "tunnel" && f.tunnelPort.trim() !== "" && !validPort(f.tunnelPort.trim())) return "tunnel_port";
   if (f.dynamicScopes.some((scope) => !SCOPE.test(scope))) return "dynamic_scopes";
+  if (f.refreshDays.trim() !== "" && !(/^[0-9]{1,3}$/.test(f.refreshDays.trim()) && Number(f.refreshDays.trim()) >= 1 && Number(f.refreshDays.trim()) <= MAX_REFRESH_DAYS)) return "refresh_days";
   if (f.listen !== "public:443") return undefined;
   if (f.domain.trim() === "") return "domain";
   if (f.tls === "file" && (!isAbsolutePath(f.certFile.trim()) || !isAbsolutePath(f.keyFile.trim()))) return "cert_files";
@@ -283,6 +298,11 @@ function applyIngress(doc: Document, f: SettingsForm): void {
   const scopes = [...new Set(f.dynamicScopes)];
   const isDefault = scopes.length === DEFAULT_DYNAMIC_SCOPES.length && scopes.every((scope) => DEFAULT_DYNAMIC_SCOPES.includes(scope));
   if (!isDefault || doc.hasIn(["ingress", "oauth", "dynamic_client_scopes"])) doc.setIn(["ingress", "oauth", "dynamic_client_scopes"], scopes);
+  // The lifetime is written in hours, the unit the kernel's duration syntax has for days. A value the kernel already
+  // has that shows as the same number of days is left alone, so saving other fields never rounds it.
+  const days = f.refreshDays.trim() === "" ? "" : String(Number(f.refreshDays.trim()));
+  if (days === "") deleteExisting(doc, ["ingress", "oauth", "refresh_token_ttl"]);
+  else if (refreshDaysOf(doc.getIn(["ingress", "oauth", "refresh_token_ttl"])) !== days) doc.setIn(["ingress", "oauth", "refresh_token_ttl"], `${Number(days) * 24}h`);
   // Only public:443 takes a domain and a certificate; the kernel refuses them with the other two listen modes.
   if (f.listen === "public:443") {
     doc.setIn(["ingress", "domain"], f.domain.trim());

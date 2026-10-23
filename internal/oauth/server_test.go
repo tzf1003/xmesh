@@ -644,3 +644,45 @@ func Test_ControlRevokeClientAndSetPassword(t *testing.T) {
 		t.Fatal("new password refused", status)
 	}
 }
+
+// A refresh token lasts refresh_token_ttl, 30 days by default, and each use starts the period again.
+func Test_RefreshTokenTTL(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		ttl   time.Duration
+		after time.Duration
+		valid bool
+	}{
+		{"default expires after 30 days", 0, 31 * 24 * time.Hour, false},
+		{"default lasts 29 days", 0, 29 * 24 * time.Hour, true},
+		{"a year lasts 300 days", 365 * 24 * time.Hour, 300 * 24 * time.Hour, true},
+		{"a year ends after 366 days", 365 * 24 * time.Hour, 366 * 24 * time.Hour, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s, e := New(Options{Issuer: "https://mesh.example", Password: "correct horse battery staple", StateDir: t.TempDir(), DynamicScopes: testScopes, RefreshTTL: c.ttl})
+			if e != nil {
+				t.Fatal(e)
+			}
+			h := serve(s, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, "ok") }))
+			t.Cleanup(h.Close)
+			id := registerClient(t, h)
+			verifier := strings.Repeat("v", 43)
+			code, _ := authCode(t, h, id, verifier)
+			form := url.Values{"grant_type": {"authorization_code"}, "client_id": {id}, "code": {code}, "redirect_uri": {"http://127.0.0.1:1234/callback"}, "code_verifier": {verifier}}
+			status, _, body := request(t, h, "POST", "/oauth/token", form.Encode(), "application/x-www-form-urlencoded")
+			if status != 200 {
+				t.Fatal(status, body)
+			}
+			var token map[string]any
+			_ = json.Unmarshal([]byte(body), &token)
+			s.mu.Lock()
+			s.now = func() time.Time { return time.Now().Add(c.after) }
+			s.mu.Unlock()
+			refresh := url.Values{"grant_type": {"refresh_token"}, "client_id": {id}, "refresh_token": {token["refresh_token"].(string)}}
+			status, _, body = request(t, h, "POST", "/oauth/token", refresh.Encode(), "application/x-www-form-urlencoded")
+			if (status == 200) != c.valid {
+				t.Fatal(status, body)
+			}
+		})
+	}
+}

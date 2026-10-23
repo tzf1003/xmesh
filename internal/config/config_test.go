@@ -490,3 +490,41 @@ func TestIngressTunnelListenConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressRefreshTokenTTLConfiguration(t *testing.T) {
+	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		ttl   string
+		valid bool
+		want  time.Duration
+	}{
+		{"", true, 30 * 24 * time.Hour},
+		{"720h", true, 30 * 24 * time.Hour},
+		{"8760h", true, 365 * 24 * time.Hour},
+		{"1h", true, time.Hour},
+		{"59m", false, 0},
+		{"8761h", false, 0},
+		{"0s", false, 0},
+		{"30d", false, 0},
+		{"forever", false, 0},
+	} {
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if c.ttl != "" {
+			doc["ingress"].(map[string]any)["oauth"].(map[string]any)["refresh_token_ttl"] = c.ttl
+		}
+		data, _ := json.Marshal(doc)
+		cfg, err := Parse(data)
+		if c.valid && (err != nil || cfg.Ingress.RefreshTokenTTL() != c.want) {
+			t.Fatal("valid refresh_token_ttl rejected or misread", c, err)
+		}
+		if !c.valid && err == nil {
+			t.Fatal("invalid refresh_token_ttl accepted", c)
+		}
+	}
+}

@@ -128,7 +128,7 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 	for id, client := range cfg.Ingress.OAuth.Clients {
 		clients[id] = client.Scopes
 	}
-	authorization, e := oauth.New(oauth.Options{Issuer: cfg.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(deps.stateDir, "oauth"), Clients: clients, DynamicScopes: cfg.Ingress.OAuth.DynamicClientScopes, Proxied: cfg.Ingress.Listen == "tunnel"})
+	authorization, e := oauth.New(oauth.Options{Issuer: cfg.Ingress.OAuth.Issuer, Password: strings.TrimSpace(string(password)), StateDir: filepath.Join(deps.stateDir, "oauth"), Clients: clients, DynamicScopes: cfg.Ingress.OAuth.DynamicClientScopes, RefreshTTL: cfg.Ingress.RefreshTokenTTL(), Proxied: cfg.Ingress.Listen == "tunnel"})
 	if e != nil {
 		return nil, e
 	}
