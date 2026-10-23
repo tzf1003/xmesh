@@ -515,6 +515,13 @@ WEB_SUMMARY=""
 if [ -n "$WEB_ARCHIVE" ] && "$UPDATE"; then
   PHASE=webui
   # The unit already points at $PREFIX/webui/xmesh-webui.js; only the running process has to pick up the new files.
+  # The unit names the xmesh the panel shells out to; after an update it must be the one installed here.
+  unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/xmesh-webui.service"
+  if [ -f "$unit" ] && grep -q '^Environment=XMESH_BIN=' "$unit" && ! grep -qxF "Environment=XMESH_BIN=$XMESH" "$unit"; then
+    awk -v new="Environment=XMESH_BIN=$XMESH" '/^Environment=XMESH_BIN=/ { print new; next } { print }' "$unit" > "$unit.new" && mv -f "$unit.new" "$unit"
+    systemctl --user daemon-reload || warn "systemctl --user daemon-reload 失败。"
+    say "已把网页界面服务使用的 xmesh 指向 $XMESH。"
+  fi
   systemctl --user restart xmesh-webui || fail "重启网页管理界面服务失败。" "查看 systemctl --user status xmesh-webui。"
   WEB_SUMMARY="已重启服务 xmesh-webui"
 elif [ -n "$WEB_ARCHIVE" ]; then
