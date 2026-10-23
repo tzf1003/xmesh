@@ -112,6 +112,7 @@ type peerLink struct {
 	attempting   bool
 	closed       bool
 	conflicted   bool
+	unstable     bool
 	revoked      bool
 	failures     map[string]pathFailure
 	workers      sync.WaitGroup
@@ -189,7 +190,11 @@ func (m *Manager) Activity(id string) Activity {
 		return Activity{DeviceID: id, State: "identity_conflict"}
 	}
 	if p.active != nil && p.active.committed {
-		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: "online"}
+		state := "online"
+		if p.unstable {
+			state = "unstable"
+		}
+		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: state}
 	}
 	if !p.disconnected.IsZero() && time.Since(p.disconnected) < m.opts.RecoveryWindow {
 		for _, l := range p.pending {
@@ -785,6 +790,7 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 	c.committed = true
 	p.control = nil
 	p.disconnected = time.Time{}
+	p.unstable = false
 	p.signalLocked()
 	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: "online"})
 	p.workers.Go(func() { m.serveCarrier(ctx, p, c) })
@@ -799,6 +805,7 @@ func (m *Manager) serveCarrier(ctx context.Context, p *peerLink, c *carrier) {
 		p.mu.Lock()
 		if p.active == c {
 			p.active = nil
+			p.unstable = false
 			p.disconnected = time.Now()
 			state := "offline"
 			if !p.closed && m.ctx.Err() == nil {

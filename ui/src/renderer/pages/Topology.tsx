@@ -198,6 +198,7 @@ function Relay({ id, point, region, onClick, onHover }: { id: string; point: Poi
 
 function connectionText(p: Peer, t: ReturnType<typeof useT>): string {
   if (p.self) return t("devices.self");
+  if (p.connection_state === "unstable") return t("device.unstable");
   if (p.connection_state === "reconnecting") return t("device.reconnecting");
   if (p.connection_state === "identity_conflict") return t("device.conflict");
   if (!p.online) return t("devices.offline");

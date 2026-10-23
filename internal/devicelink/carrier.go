@@ -300,9 +300,12 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-heartbeat.C:
-			if time.Since(time.Unix(0, c.seen.Load())) >= m.opts.DeadAfter {
+			silent := time.Since(time.Unix(0, c.seen.Load()))
+			if silent >= m.opts.DeadAfter {
 				return ErrLinkSilent
 			}
+			// Show the panel a warning well before the link is given up.
+			m.setUnstable(p, c, silent >= m.opts.DeadAfter/3)
 			// A pong only proves liveness. It is awaited off the write path, because a
 			// slow peer must not stall data and a late pong is not a failure by itself.
 			if pinging.CompareAndSwap(false, true) {
@@ -390,4 +393,20 @@ func delegatedPrincipal(node string, tags []string, oauth string) (identity.Prin
 		tags = []string{"tag:ingress"}
 	}
 	return identity.FromPeer(node, tags, oauth)
+}
+
+// setUnstable records that the carrier has gone quiet, or has recovered, and reports the
+// change. It does nothing if c is no longer the active carrier.
+func (m *Manager) setUnstable(p *peerLink, c *carrier, unstable bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active != c || !c.committed || p.unstable == unstable {
+		return
+	}
+	p.unstable = unstable
+	state := "online"
+	if unstable {
+		state = "unstable"
+	}
+	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: state})
 }

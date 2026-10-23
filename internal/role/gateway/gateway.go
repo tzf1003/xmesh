@@ -25,6 +25,10 @@ import (
 	"time"
 )
 
+// toolsExpiry is how long a device may keep failing its refresh before its tool table is dropped.
+// It outlasts a few missed heartbeats so a flapping link does not empty the client's tool list.
+const toolsExpiry = 90 * time.Second
+
 type Principal struct {
 	ClientID     string
 	Origin       string
@@ -699,7 +703,7 @@ func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d 
 				if d.failedSince.IsZero() {
 					d.failedSince = time.Now()
 				}
-				if time.Since(d.failedSince) > 30*time.Second {
+				if time.Since(d.failedSince) > toolsExpiry {
 					d.tools = nil
 				}
 			}

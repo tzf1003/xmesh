@@ -1156,7 +1156,7 @@ export interface Peer {
   trust_state?: "self" | "paired" | "identity_conflict";
   paths?: DevicePath[];
   active_path?: "lan" | "tailnet";
-  connection_state?: "online" | "reconnecting" | "offline" | "identity_conflict";
+  connection_state?: "online" | "unstable" | "reconnecting" | "offline" | "identity_conflict";
 }
 /**
  * 网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。

@@ -120,6 +120,7 @@
         "connection_state": {
           "enum": [
             "online",
+            "unstable",
             "reconnecting",
             "offline",
             "identity_conflict"
