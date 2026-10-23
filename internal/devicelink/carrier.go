@@ -213,6 +213,7 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 	defer ticker.Stop()
 	heartbeat := time.NewTicker(m.opts.Heartbeat)
 	defer heartbeat.Stop()
+	missed := 0
 	sent := map[string]uint64{}
 	announced := map[string]bool{}
 	resuming := map[string]bool{}
@@ -227,7 +228,18 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 			err := c.conn.Ping(ping)
 			cancel()
 			if err != nil {
-				return err
+				if ctx.Err() != nil {
+					return err
+				}
+				missed++
+				if missed >= m.opts.PingFailures {
+					return err
+				}
+				// The link looks unstable but is not given up yet; tell the panel before it drops.
+				m.setUnstable(p, c, true)
+			} else if missed > 0 {
+				missed = 0
+				m.setUnstable(p, c, false)
 			}
 		case <-ticker.C:
 		case <-p.wake:
@@ -304,4 +316,20 @@ func delegatedPrincipal(node string, tags []string, oauth string) (identity.Prin
 		tags = []string{"tag:ingress"}
 	}
 	return identity.FromPeer(node, tags, oauth)
+}
+
+// setUnstable records that the carrier is missing heartbeat pings, or has recovered, and reports the
+// change. It does nothing if c is no longer the active carrier.
+func (m *Manager) setUnstable(p *peerLink, c *carrier, unstable bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active != c || !c.committed || p.unstable == unstable {
+		return
+	}
+	p.unstable = unstable
+	state := "online"
+	if unstable {
+		state = "unstable"
+	}
+	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: state})
 }

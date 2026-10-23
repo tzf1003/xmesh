@@ -40,6 +40,8 @@ type Options struct {
 	RecoveryWindow time.Duration
 	Heartbeat      time.Duration
 	PingTimeout    time.Duration
+	// PingFailures is how many consecutive heartbeat pings must fail before the carrier is dropped.
+	PingFailures int
 	// OnActivity runs under the device lock to retain transition order. It must not reenter Manager.
 	OnActivity func(Activity)
 }
@@ -103,6 +105,7 @@ type peerLink struct {
 	attempting   bool
 	closed       bool
 	conflicted   bool
+	unstable     bool
 	revoked      bool
 	failures     map[string]pathFailure
 	workers      sync.WaitGroup
@@ -136,7 +139,10 @@ func NewManager(ctx context.Context, opts Options) (*Manager, error) {
 		opts.Heartbeat = 5 * time.Second
 	}
 	if opts.PingTimeout <= 0 {
-		opts.PingTimeout = 2 * time.Second
+		opts.PingTimeout = 60 * time.Second
+	}
+	if opts.PingFailures <= 0 {
+		opts.PingFailures = 3
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	m := &Manager{opts: opts, ctx: ctx, cancel: cancel, peers: map[string]*peerLink{}, budget: NewBudget(0)}
@@ -180,7 +186,11 @@ func (m *Manager) Activity(id string) Activity {
 		return Activity{DeviceID: id, State: "identity_conflict"}
 	}
 	if p.active != nil && p.active.committed {
-		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: "online"}
+		state := "online"
+		if p.unstable {
+			state = "unstable"
+		}
+		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: state}
 	}
 	if !p.disconnected.IsZero() && time.Since(p.disconnected) < m.opts.RecoveryWindow {
 		for _, l := range p.pending {
@@ -776,6 +786,7 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 	c.committed = true
 	p.control = nil
 	p.disconnected = time.Time{}
+	p.unstable = false
 	p.signalLocked()
 	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: "online"})
 	p.workers.Go(func() { m.serveCarrier(ctx, p, c) })
@@ -790,6 +801,7 @@ func (m *Manager) serveCarrier(ctx context.Context, p *peerLink, c *carrier) {
 		p.mu.Lock()
 		if p.active == c {
 			p.active = nil
+			p.unstable = false
 			p.disconnected = time.Now()
 			state := "offline"
 			if !p.closed && m.ctx.Err() == nil {
