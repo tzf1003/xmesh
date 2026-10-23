@@ -135,10 +135,8 @@ func configText(in Input, dir, listen string) (string, error) {
 	if in.Permission == "development" {
 		grant["backends"] = []string{"*"}
 	}
-	grants := map[string]any{"tag:peer": grant}
-	if in.Purpose == "cloud" {
-		grants["tag:ingress"] = grant
-	}
+	// tag:* covers every caller tag (tag:peer, tag:ingress, ...); callers still need a paired or tagged identity.
+	grants := map[string]any{"tag:*": grant}
 	doc := map[string]any{
 		"schema_version": 2,
 		"node":           map[string]any{"name": in.NodeName, "roles": []string{"agent", "gateway"}},

@@ -173,7 +173,7 @@ export function generateConfig(p: SetupParams, denyFile: string): string {
     `    allow: [${q(p.workspace)}]`,
     `    deny_file: ${q(denyFile)}`,
     "  authz:",
-    '    \"tag:peer\":',
+    '    "tag:*":',
     '      tools: ["*"]',
     '      backends: ["*"]',
   );

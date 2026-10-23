@@ -23,7 +23,7 @@ agent:
   cwd_policy:
     allow: []
   authz:
-    tag:peer:
+    "tag:*":
       tools: ["*"]
       backends: ["*"]
 ```
@@ -120,7 +120,7 @@ agent:
   cwd_policy:
     allow: [/srv/workspace]
   authz:
-    tag:peer:
+    "tag:*":
       tools: ['*']
       backends: ['*']
 ```
