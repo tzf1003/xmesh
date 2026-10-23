@@ -59,6 +59,7 @@ type Server struct {
 	windows         map[string][]time.Time
 	login           map[string]loginLimit
 	path            string
+	tokensPath      string
 	now             func() time.Time
 	maxScopes       []string
 	dynamicScopes   []string
@@ -123,6 +124,7 @@ func New(o Options) (*Server, error) {
 		} else if !os.IsNotExist(e) {
 			return nil, e
 		}
+		s.tokensPath = filepath.Join(o.StateDir, "oauth-tokens.json")
 	}
 	// A dynamic client keeps no more than the current cap, so tightening the cap
 	// (or upgrading from a build that granted every scope) takes effect on restart.
@@ -148,6 +150,11 @@ func New(o Options) (*Server, error) {
 			s.clients[id] = existing
 		} else {
 			s.clients[id] = Client{ID: id, Name: id, Method: "none", Scopes: expanded}
+		}
+	}
+	if s.tokensPath != "" {
+		if e = s.loadTokens(); e != nil {
+			return nil, e
 		}
 	}
 	return s, nil
@@ -294,7 +301,59 @@ func (s *Server) saveClients() error {
 	if e != nil {
 		return e
 	}
-	f, e := os.CreateTemp(filepath.Dir(s.path), ".oauth-clients-*")
+	return writeAtomic(s.path, b)
+}
+
+// persistedTokens is the on-disk form of the issued tokens. Both maps are keyed by token digest,
+// so the file never holds a usable bearer or refresh token.
+type persistedTokens struct {
+	Access  map[string]Token `json:"access"`
+	Refresh map[string]Token `json:"refresh"`
+}
+
+// loadTokens restores the tokens saved by saveTokens, so that a restart does not force every
+// client to authorize again. Expired tokens and tokens of unknown clients are dropped.
+func (s *Server) loadTokens() error {
+	b, e := os.ReadFile(s.tokensPath)
+	if os.IsNotExist(e) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	var saved persistedTokens
+	if e = json.Unmarshal(b, &saved); e != nil {
+		return e
+	}
+	for k, t := range saved.Access {
+		if _, ok := s.clients[t.ClientID]; ok {
+			s.access[k] = t
+		}
+	}
+	for k, t := range saved.Refresh {
+		if _, ok := s.clients[t.ClientID]; ok {
+			s.refresh[k] = t
+		}
+	}
+	s.sweep()
+	return nil
+}
+
+// saveTokens writes the issued tokens next to the clients. A failed write is not fatal: the
+// tokens still work until the process restarts.
+func (s *Server) saveTokens() error {
+	if s.tokensPath == "" {
+		return nil
+	}
+	b, e := json.Marshal(persistedTokens{Access: s.access, Refresh: s.refresh})
+	if e != nil {
+		return e
+	}
+	return writeAtomic(s.tokensPath, b)
+}
+
+func writeAtomic(path string, b []byte) error {
+	f, e := os.CreateTemp(filepath.Dir(path), ".oauth-*")
 	if e != nil {
 		return e
 	}
@@ -312,7 +371,7 @@ func (s *Server) saveClients() error {
 	if e = f.Close(); e != nil {
 		return e
 	}
-	return os.Rename(f.Name(), s.path)
+	return os.Rename(f.Name(), path)
 }
 
 // Issuer is the origin this server issues tokens for.
@@ -361,6 +420,7 @@ func (s *Server) RevokeClient(id string) (bool, error) {
 			delete(s.refresh, k)
 		}
 	}
+	_ = s.saveTokens()
 	return true, nil
 }
 
@@ -640,6 +700,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	s.access[digest(access)] = Token{id, scopes, s.now().Add(time.Hour), family}
 	s.refresh[digest(refresh)] = Token{id, scopes, s.now().Add(s.refreshTTL), family}
 	s.sweep()
+	_ = s.saveTokens()
 	writeJSON(w, 200, map[string]any{"access_token": access, "token_type": "Bearer", "expires_in": 3600, "refresh_token": refresh, "scope": strings.Join(scopes, " ")})
 }
 func (s *Server) Authenticate(r *http.Request) (Token, bool) {
