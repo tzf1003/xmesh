@@ -686,3 +686,54 @@ func Test_RefreshTokenTTL(t *testing.T) {
 		})
 	}
 }
+
+// Issued tokens survive a restart, are stored only as digests, and die with their client.
+func Test_TokensPersistAcrossRestart(t *testing.T) {
+	s, h := oauthFixture(t)
+	id := registerClient(t, h)
+	verifier := strings.Repeat("v", 43)
+	code, _ := authCode(t, h, id, verifier)
+	form := url.Values{"grant_type": {"authorization_code"}, "client_id": {id}, "code": {code}, "redirect_uri": {"http://127.0.0.1:1234/callback"}, "code_verifier": {verifier}}
+	status, _, body := request(t, h, "POST", "/oauth/token", form.Encode(), "application/x-www-form-urlencoded")
+	if status != 200 {
+		t.Fatal(status, body)
+	}
+	var token map[string]any
+	_ = json.Unmarshal([]byte(body), &token)
+	access, refresh := token["access_token"].(string), token["refresh_token"].(string)
+	b, e := os.ReadFile(s.tokensPath)
+	if e != nil || strings.Contains(string(b), access) || strings.Contains(string(b), refresh) {
+		t.Fatal("tokens must be stored as digests only", e)
+	}
+	dir := filepath.Dir(s.path)
+	restored, e := New(Options{Issuer: s.issuer, Password: "correct horse battery staple", StateDir: dir, DynamicScopes: testScopes})
+	if e != nil {
+		t.Fatal(e)
+	}
+	h2 := serve(restored, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, "ok") }))
+	defer h2.Close()
+	req, _ := http.NewRequest("POST", h2.URL+"/mcp", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+access)
+	resp, e := http.DefaultClient.Do(req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatal("access token lost on restart", resp.StatusCode)
+	}
+	rf := url.Values{"grant_type": {"refresh_token"}, "client_id": {id}, "refresh_token": {refresh}}
+	if status, _, body = request(t, h2, "POST", "/oauth/token", rf.Encode(), "application/x-www-form-urlencoded"); status != 200 {
+		t.Fatal("refresh token lost on restart", status, body)
+	}
+	if ok, e := restored.RevokeClient(id); e != nil || !ok {
+		t.Fatal(ok, e)
+	}
+	again, e := New(Options{Issuer: s.issuer, Password: "correct horse battery staple", StateDir: dir, DynamicScopes: testScopes})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(again.access) != 0 || len(again.refresh) != 0 {
+		t.Fatal("revoked client's tokens came back", len(again.access), len(again.refresh))
+	}
+}
