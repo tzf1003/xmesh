@@ -1,10 +1,115 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>xmesh · 安装与连接</title><meta name="description" content="安装 xmesh，选择工作目录和权限，将设备连接到本地客户端、其他设备或云端 Agent。"><link rel="stylesheet" href="@@STATIC@@/style.css"></head>
-<body><header><a class="brand" href="#">xmesh<span>设备 · 工作目录 · Agent</span></a><a href="@@RELEASE@@">@@VERSION@@ · @@CHANNEL@@</a></header>
-<main><section class="intro"><p class="eyebrow">从你的设备开始</p><h1>把工作目录连接到<br>你的 Agent。</h1><p>xmesh 在 Windows 和 macOS 上运行。选择目录、访问权限和客户端，按步骤完成连接。</p><nav aria-label="安装入口"><a href="#download">下载安装包 <span>01 ↗</span></a><a href="#prompt">复制安装提示词 <span>02 ↗</span></a><a href="#steps">三步连接 <span>03 ↗</span></a><a href="#help">遇到问题 <span>04 ↗</span></a></nav></section>
-<section id="download"><div class="section-title"><span>01</span><h2>下载安装包</h2></div><p>选择这台设备的系统与芯片。无法确定芯片时，请打开系统“关于”查看后手动选择。</p><div class="selectors"><label>操作系统<select id="os"><option value="">请选择</option><option value="darwin">macOS</option><option value="windows">Windows</option></select></label><label>芯片架构<select id="arch"><option value="">请选择 / 尚不确定</option><option value="arm64">ARM64 · Apple silicon / Windows ARM</option><option value="amd64">AMD64 · Intel / AMD x64</option></select></label></div><p id="detection" role="status">请确认设备架构。</p><a id="download-link" class="button" aria-disabled="true">选择系统与架构</a><a id="offline-link" class="secondary" aria-disabled="true">离线安装包</a><p id="trust" class="note">稳定版需要系统签名验证；测试版的签名状态见对应版本清单。</p><p class="note">安装后打开 xmesh，进入设置向导。<a href="@@DOCS@@/install.html">命令行安装、SHA-256 与离线说明 ↗</a></p></section>
-<section id="prompt"><div class="section-title"><span>02</span><h2>让 Agent 帮你安装</h2></div><p>把这段提示词交给本机 Agent。它将使用当前版本的说明，先检查环境，再展示安装与配置计划。</p><textarea id="install-prompt" readonly aria-label="安装提示词">@@PROMPT@@</textarea><button id="copy" class="button" type="button">复制提示词</button><span id="copy-status" role="status"></span></section>
-<section id="steps"><div class="section-title"><span>03</span><h2>三步连接</h2></div><ol class="steps"><li><strong>选择用途和目录</strong><p>本机使用、多设备互联或云端 Agent；选定实际工作目录。</p></li><li><strong>确认权限与客户端</strong><p>开发或只读访问，选择 Codex、Claude Code，确认计划后执行。</p></li><li><strong>登录并验证连接</strong><p>需要时在浏览器完成登录，再从客户端发起一次真实请求。</p></li></ol><a href="@@DOCS@@/setup.html">查看计划、恢复与验证命令 ↗</a></section>
-<section id="help"><div class="section-title"><span>04</span><h2>遇到问题</h2></div><p>安装会报告阶段和下一步操作。保留已校验的安装包，重试同一版本；已开始的配置可使用 job ID 恢复。</p><div class="help-links"><a href="@@DOCS@@/recovery.html">安装与连接排查 ↗</a><a href="@@DOCS@@/README.html">Agent 文档 ↗</a><a href="@@LLMS@@">llms.txt ↗</a><a href="@@RELEASE@@">版本清单与发布说明 ↗</a></div></section></main>
-<footer>xmesh · 当前用户安装 · @@VERSION@@<a href="@@REPO@@">GitHub ↗</a></footer>
-<script id="release-data" type="application/json">@@CONFIG@@</script><script src="@@STATIC@@/install.js" defer></script></body></html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>xmesh · 安装与连接</title>
+<meta name="description" content="xmesh 把 Windows、macOS、Linux 设备上的终端、文件和本机 MCP 工具，通过标准 Remote MCP 交给本地客户端与云端 Agent。">
+<link rel="stylesheet" href="@@STATIC@@/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="container topbar-inner">
+    <a class="brand" href="#"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="6" r="2.4"/><circle cx="12" cy="18.5" r="2.4"/><path d="M5 6h14M5 6l7 12.5M19 6l-7 12.5"/></svg>xmesh</a>
+    <nav class="topnav" aria-label="页面导航"><a href="#features">功能</a><a href="#download">下载</a><a href="#prompt">Agent 安装</a><a href="#steps">连接</a><a href="#help">帮助</a></nav>
+    <div class="topbar-right"><a class="label" href="@@RELEASE@@"><span class="dot"></span>@@VERSION@@ · @@CHANNEL@@</a><a class="btn btn-sm" href="@@REPO@@"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>GitHub</a></div>
+  </div>
+</header>
+
+<main>
+<section class="hero">
+  <div class="container">
+    <p class="eyebrow">Remote MCP · Windows · macOS · Linux</p>
+    <h1>让 Agent 用上你<span class="accent">真实的开发机器</span></h1>
+    <p class="lead">xmesh 把设备上的终端、文件和本机已有的 MCP 工具组成网格，通过标准 Remote MCP 交给 Codex、Claude Code 以及云端 Agent。每台机器运行同一个进程，局域网与 Tailnet 自动互联，需要时一键开放带 OAuth 2.1 的公网入口。</p>
+    <div class="hero-actions"><a class="btn btn-primary btn-lg" href="#download">下载 @@VERSION@@</a><a class="btn btn-lg" href="#prompt">让 Agent 帮我安装</a></div>
+    <div class="flow" aria-label="连接示意">
+      <div class="node"><strong>云端 / 本机 Agent</strong><span>Codex · Claude Code</span></div>
+      <div class="edge"><span>MCP · OAuth 2.1</span></div>
+      <div class="node node-accent"><strong>Gateway / Ingress</strong><span>聚合所有设备</span></div>
+      <div class="edge"><span>LAN · Tailnet</span></div>
+      <div class="node"><strong>你的设备</strong><span>终端 · 文件 · 本机 MCP</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="features" class="container">
+  <h2 class="section-heading">它能做什么</h2>
+  <div class="grid features">
+    <div class="box feature"><span class="ficon">⌘</span><h3>终端与命令</h3><p><code>exec.*</code> 执行命令，<code>pty.*</code> 提供可交互的伪终端会话。</p></div>
+    <div class="box feature"><span class="ficon">⇅</span><h3>文件读写与互传</h3><p><code>fs.*</code> 读写文件，分块上传下载并校验 SHA-256。</p></div>
+    <div class="box feature"><span class="ficon">◎</span><h3>本机 MCP 聚合</h3><p>挂载设备上已有的 MCP 服务，统一以 <code>设备名/工具</code> 暴露。</p></div>
+    <div class="box feature"><span class="ficon">⌗</span><h3>多设备网格</h3><p>LAN 与 Tailnet 共存，首选局域网，断线自动恢复。</p></div>
+    <div class="box feature"><span class="ficon">☁</span><h3>云端入口</h3><p>任一节点可开启 Ingress，提供带 OAuth 2.1 的公网 MCP 端点。</p></div>
+    <div class="box feature"><span class="ficon">⛨</span><h3>权限边界</h3><p>按目录 allow / deny，开发与只读两档权限，并发有租约规则。</p></div>
+  </div>
+</section>
+
+<section id="download" class="container">
+  <h2 class="section-heading"><span class="step-num">1</span>下载安装</h2>
+  <div class="grid two">
+    <div class="box">
+      <div class="box-header"><strong>Windows / macOS 桌面应用</strong><span class="counter">当前用户安装</span></div>
+      <div class="box-body">
+        <p class="muted">选择这台设备的系统与芯片。无法确定芯片时，请打开系统「关于」查看后手动选择。</p>
+        <div class="selectors">
+          <label>操作系统<select id="os"><option value="">请选择</option><option value="darwin">macOS</option><option value="windows">Windows</option></select></label>
+          <label>芯片架构<select id="arch"><option value="">请选择 / 尚不确定</option><option value="arm64">ARM64 · Apple silicon / Windows ARM</option><option value="amd64">AMD64 · Intel / AMD x64</option></select></label>
+        </div>
+        <p id="detection" class="note" role="status">请确认设备架构。</p>
+        <div class="actions"><a id="download-link" class="btn btn-primary" aria-disabled="true">选择系统与架构</a><a id="offline-link" class="btn" aria-disabled="true">离线安装包</a></div>
+        <p id="trust" class="flash">稳定版需要系统签名验证；测试版的签名状态见对应版本清单。</p>
+        <p class="note">安装后打开 xmesh，进入设置向导。<a href="@@DOCS@@/install.html">命令行安装、SHA-256 与离线说明 →</a></p>
+      </div>
+    </div>
+    <div class="box" id="linux">
+      <div class="box-header"><strong>Linux 服务器 / 工作站</strong><span class="counter">systemd 用户服务</span></div>
+      <div class="box-body">
+        <p class="muted">安装脚本把内核和网页管理面板各装成一个 systemd 用户服务，并引导你设置工作目录、权限和管理密钥。请以普通用户运行，不要使用 sudo。</p>
+        <div class="code"><button class="copy-code" type="button" data-copy="linux-command" aria-label="复制命令">复制</button><pre id="linux-command">curl -fsSLO @@LINUX_SCRIPT@@
+# 检查脚本内容后运行
+bash install-linux.sh --version @@VERSION@@</pre></div>
+        <p class="note">完成后在浏览器打开 <code>http://127.0.0.1:7480/</code>。只装内核加 <code>--no-webui</code>；网页面板需要 Node.js ≥ 22.18。<a href="@@DOCS@@/install.html#linux">Linux 安装说明 →</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="prompt" class="container">
+  <h2 class="section-heading"><span class="step-num">2</span>或者，让 Agent 帮你安装</h2>
+  <div class="box">
+    <div class="box-header"><strong>安装提示词</strong><button id="copy" class="btn btn-sm" type="button">复制提示词</button></div>
+    <div class="box-body">
+      <p class="muted">把这段提示词交给本机的 Codex 或 Claude Code。它会按当前版本的说明先检查环境，再展示安装与配置计划，等你确认后执行。<span id="copy-status" class="status" role="status"></span></p>
+      <textarea id="install-prompt" readonly aria-label="安装提示词">@@PROMPT@@</textarea>
+    </div>
+  </div>
+</section>
+
+<section id="steps" class="container">
+  <h2 class="section-heading"><span class="step-num">3</span>三步连接</h2>
+  <ol class="grid three timeline">
+    <li class="box feature"><span class="badge">01</span><h3>选择用途和目录</h3><p>本机使用、多设备互联或云端 Agent；选定实际工作目录。</p></li>
+    <li class="box feature"><span class="badge">02</span><h3>确认权限与客户端</h3><p>开发或只读访问，选择 Codex、Claude Code，确认计划后执行。</p></li>
+    <li class="box feature"><span class="badge">03</span><h3>登录并验证连接</h3><p>需要时在浏览器完成登录，再从客户端发起一次真实请求。</p></li>
+  </ol>
+  <p class="note"><a href="@@DOCS@@/setup.html">查看计划、恢复与验证命令 →</a></p>
+</section>
+
+<section id="help" class="container">
+  <h2 class="section-heading">遇到问题</h2>
+  <div class="box">
+    <div class="box-body"><p class="muted">安装会报告所处阶段和下一步操作。保留已校验的安装包，重试同一版本；已开始的配置可使用 job ID 恢复。</p></div>
+    <div class="box-row"><a href="@@DOCS@@/recovery.html">安装与连接排查</a><span class="muted">失败阶段与恢复动作</span></div>
+    <div class="box-row"><a href="@@DOCS@@/README.html">Agent 文档</a><span class="muted">按版本固定的安装与配置流程</span></div>
+    <div class="box-row"><a href="@@LLMS@@">llms.txt</a><span class="muted">给 Agent 阅读的文档索引</span></div>
+    <div class="box-row"><a href="@@RELEASE@@">版本清单与发布说明</a><span class="muted">@@VERSION@@</span></div>
+  </div>
+</section>
+</main>
+
+<footer class="container footer"><span>xmesh · 当前用户安装 · @@VERSION@@</span><a href="@@REPO@@">GitHub</a></footer>
+<script id="release-data" type="application/json">@@CONFIG@@</script><script src="@@STATIC@@/install.js" defer></script>
+</body>
+</html>
