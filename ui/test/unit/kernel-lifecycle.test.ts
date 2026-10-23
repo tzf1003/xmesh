@@ -196,6 +196,7 @@ test("a service missing under both names is still reported as failed", async () 
     run: async () => ({ code: 1, stdout: '{"error":{"error":"not_found","message":"服务未安装: xmesh-x（先运行 xmesh install）","reason":"not_installed"}}', stderr: "" }) });
   const result = await service.request({ op: "restart", node: target.id });
   assert.ok(!result.ok && result.error.message.includes("服务未安装"));
+  assert.ok(!result.ok && result.error.code === "not_managed" && result.error.message.includes("手动结束"));
 });
 
 test("reinstall captures service options before stopping and starts the newly named registration", async () => {

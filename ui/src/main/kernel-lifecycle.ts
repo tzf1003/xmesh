@@ -144,7 +144,11 @@ export class KernelLifecycle {
           if (retry.code === 0 && this.env.installed) paths.serviceNode = await this.env.installed(target.id, paths);
           result = retry;
         }
-        if (result.code !== 0 && !(allowMissing && missing(result))) throw cliFailure(result);
+        if (result.code !== 0 && !(allowMissing && missing(result))) {
+          // A kernel that runs without a registered service (started by hand) cannot be stopped through one.
+          if (op === "stop" && missing(result)) throw new KernelFailure("not_managed", `服务未安装: xmesh-${paths.serviceNode ?? target.name}。这个内核正在运行，但不是由服务启动的（多半是手动运行的 xmesh serve），面板无法停止它。请先手动结束该进程（pid ${target.instance?.manifest.pid ?? "未知"}），再选择内核重装。`);
+          throw cliFailure(result);
+        }
         if (op === "install" && this.env.installed) paths.serviceNode = await this.env.installed(target.id, paths);
       };
       const stop = async (): Promise<void> => {
