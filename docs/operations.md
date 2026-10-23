@@ -244,7 +244,7 @@ bin/xmesh pair --config xmesh.yaml --state-dir /secure/state --import /tmp/peer-
 
 后端启动命令、工作目录和策略配置在 `agent.backends`。exclusive 后端先 `backend.acquire`，后续请求以 `_lease_token` 携带返回的 fencing token；Agent 转发业务参数前剥离此字段。普通业务 `token` 字段照常转发。续期必须显式调用 `backend.renew`。只改策略时有效后端进程和租约保留，后端配置变更或故障会使旧租约失效。
 
-公网入口节点需要控制面授予 `tag:ingress`，并配置对应 Agent 权限。登录口令来自 `--oauth-password-file`，默认状态目录内的 `oauth-password`，建议权限 `0600`。`ingress.oauth.issuer` 必须匹配客户端访问的 HTTPS 外部地址。Funnel 需要官方控制面；反向隧道监听回环地址，外层隧道负责 HTTPS；public:443 使用证书文件或 ACME。
+公网入口节点需要控制面授予 `tag:ingress`，并配置对应 Agent 权限。登录口令来自 `--oauth-password-file`，默认状态目录内的 `oauth-password`，建议权限 `0600`。`ingress.oauth.issuer` 必须匹配客户端访问的 HTTPS 外部地址。Funnel 需要官方控制面；反向隧道监听回环地址，缺省 `127.0.0.1:8443`，端口被占用时用 `ingress.tunnel_listen`（如 `127.0.0.1:8444`）或 `--tunnel-listen` 更换，命令行优先，外层隧道把 HTTPS 指向它并负责证书；public:443 使用证书文件或 ACME。
 
 动态注册客户端提供允许的回调 URI，只获得 `ingress.oauth.dynamic_client_scopes`（缺省 `devices:read`）里的 scope；要让 claude.ai 或 Codex 的动态注册客户端调用工具，须把需要的 scope 写进该上限，或把客户端预注册在 `clients`。入口只响应 issuer 主机上的请求（其他 `Host` 返回 421）；`tunnel` 的外层隧道须转发真实 `Host` 或 `X-Forwarded-Host`，并追加 `X-Forwarded-For`，限速才按真实客户端计数。配置文件中的客户端只定义 scope，其首次通过口令与 CSRF 校验的授权会绑定并持久化回调 URI。授权码采用 PKCE S256、一次性、最长 60 秒；访问令牌有效 1 小时，刷新令牌 30 天且轮转。令牌保存在内存，入口重启后须重新授权。scope 收窄后建立新的 MCP 会话，使工具表和 owner 使用新的权限上下文。
 

@@ -22,7 +22,7 @@ func Test_CTRCFG01(t *testing.T) {
 			})
 		}
 	}
-	for _, name := range []string{"config-relay.json", "config-funnel-with-domain.json", "config-pat-empty-scopes.json", "config-lan-ephemeral.json", "config-quota-zero.json", "config-dynamic-scope-invalid.json", "config-windows-appcontainer-not-boolean.json"} {
+	for _, name := range []string{"config-relay.json", "config-funnel-with-domain.json", "config-pat-empty-scopes.json", "config-lan-ephemeral.json", "config-quota-zero.json", "config-dynamic-scope-invalid.json", "config-tunnel-listen-with-funnel.json", "config-tunnel-listen-not-loopback.json", "config-windows-appcontainer-not-boolean.json"} {
 		if _, e := Load(filepath.Join(root, "invalid", name)); e == nil {
 			t.Fatal("invalid accepted", name)
 		}
@@ -449,6 +449,44 @@ func Test_CIImportConcurrency(t *testing.T) {
 			}
 		} else if err == nil {
 			t.Fatalf("import concurrency %v accepted", concurrency)
+		}
+	}
+}
+
+func TestIngressTunnelListenConfiguration(t *testing.T) {
+	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		listen, addr string
+		valid        bool
+	}{
+		{"tunnel", "", true},
+		{"tunnel", "127.0.0.1:8444", true},
+		{"tunnel", "0.0.0.0:8444", false},
+		{"tunnel", "localhost:8444", false},
+		{"tunnel", "127.0.0.1", false},
+		{"tunnel", "127.0.0.1:0", false},
+		{"tunnel", "127.0.0.1:65536", false},
+		{"funnel", "127.0.0.1:8444", false},
+	} {
+		var doc map[string]any
+		if err := json.Unmarshal(body, &doc); err != nil {
+			t.Fatal(err)
+		}
+		ingress := doc["ingress"].(map[string]any)
+		ingress["listen"] = c.listen
+		if c.addr != "" {
+			ingress["tunnel_listen"] = c.addr
+		}
+		data, _ := json.Marshal(doc)
+		cfg, err := Parse(data)
+		if c.valid && (err != nil || cfg.Ingress.TunnelListen != c.addr) {
+			t.Fatal("valid tunnel_listen rejected", c, err)
+		}
+		if !c.valid && err == nil {
+			t.Fatal("invalid tunnel_listen accepted", c)
 		}
 	}
 }

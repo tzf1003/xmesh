@@ -8,8 +8,10 @@ import { Badge, Banner, Confirm, ErrorBanner, Field, NotSupported, PageHead } fr
 import { useT } from "../i18n";
 import { cwdPolicy, diffRows, needsRestart, weakening } from "../lib/config";
 import {
+  DEFAULT_TUNNEL_PORT,
   LISTEN_MODES,
   MODES,
+  SCOPE_CHOICES,
   TLS_MODES,
   applyDenyFile,
   applySettingsScope,
@@ -17,7 +19,10 @@ import {
   checkSettingsScope,
   formFromConfig,
   isChanged,
+  otherScopes,
   parseDenyList,
+  toggleScope,
+  withOtherScopes,
   type ListenMode,
   type Mode,
   type SettingsForm,
@@ -32,6 +37,19 @@ import type { Key } from "../messages";
 
 const MODE_LABEL: Record<Mode, Key> = { lan: "mode.lan", tailnet: "mode.tailnet", coexist: "mode.coexist", offline: "mode.offline" };
 const LISTEN_LABEL: Record<ListenMode, Key> = { tunnel: "settings.listen.tunnel", "public:443": "settings.listen.public443", funnel: "settings.listen.funnel" };
+const SCOPE_LABEL: Record<(typeof SCOPE_CHOICES)[number], Key> = {
+  "devices:read": "settings.scope.devicesRead",
+  "sys:*": "settings.scope.sys",
+  "fs:read:*": "settings.scope.fsRead",
+  "fs:write:*": "settings.scope.fsWrite",
+  "exec:*": "settings.scope.exec",
+  "pty:*": "settings.scope.pty",
+  "backend:*:*": "settings.scope.backend",
+  "computer:observe:*": "settings.scope.computerObserve",
+  "computer:control:*": "settings.scope.computerControl",
+  "computer:clipboard-read:*": "settings.scope.clipboardRead",
+  "computer:clipboard-write:*": "settings.scope.clipboardWrite",
+};
 const TLS_LABEL: Record<TLSMode, Key> = { autocert: "settings.tls.autocert", file: "settings.tls.file" };
 const PROBLEM: Record<SettingsProblem, Key> = {
   node_name: "settings.problem.node_name",
@@ -40,6 +58,8 @@ const PROBLEM: Record<SettingsProblem, Key> = {
   control_url: "settings.problem.control_url",
   authkey: "settings.problem.authkey",
   issuer: "settings.problem.issuer",
+  tunnel_port: "settings.problem.tunnel_port",
+  dynamic_scopes: "settings.problem.dynamic_scopes",
   domain: "settings.problem.domain",
   cert_files: "settings.problem.cert_files",
   default_cwd: "settings.problem.default_cwd",
@@ -358,6 +378,44 @@ export function ModuleSettings({ ctx, scope = "node", onDirtyChange }: { ctx: Pa
                       data-testid="settings-issuer"
                     />
                   </Field>
+                  {form.listen === "tunnel" && (
+                    <Field label={t("settings.tunnelPort")} hint={t("settings.tunnelPortHint", { port: String(DEFAULT_TUNNEL_PORT) })}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={form.tunnelPort}
+                        placeholder={String(DEFAULT_TUNNEL_PORT)}
+                        onInput={(e) => update({ tunnelPort: (e.currentTarget as HTMLInputElement).value })}
+                        aria-invalid={problem === "tunnel_port"}
+                        data-testid="settings-tunnel-port"
+                      />
+                    </Field>
+                  )}
+                  <fieldset data-testid="settings-dynamic-scopes">
+                    <legend>{t("settings.dynamicScopes")}</legend>
+                    <p class="hint">{t("settings.dynamicScopesHint")}</p>
+                    {SCOPE_CHOICES.map((scope) => (
+                      <label class="check" key={scope}>
+                        <input
+                          type="checkbox"
+                          checked={form.dynamicScopes.includes(scope)}
+                          onChange={(e) => update({ dynamicScopes: toggleScope(form.dynamicScopes, scope, e.currentTarget.checked) })}
+                          data-testid={`settings-scope-${scope}`}
+                        />
+                        <span><code>{scope}</code> {t(SCOPE_LABEL[scope])}</span>
+                      </label>
+                    ))}
+                    <Field label={t("settings.dynamicScopesOther")} hint={t("settings.dynamicScopesOtherHint")}>
+                      <input
+                        type="text"
+                        spellcheck={false}
+                        value={otherScopes(form.dynamicScopes).join(", ")}
+                        onChange={(e) => update({ dynamicScopes: withOtherScopes(form.dynamicScopes, e.currentTarget.value) })}
+                        aria-invalid={problem === "dynamic_scopes"}
+                        data-testid="settings-scope-other"
+                      />
+                    </Field>
+                  </fieldset>
                   {form.listen === "public:443" && (
                     <>
                       <Field label={t("settings.domain")} hint={t("settings.domainHint")}>

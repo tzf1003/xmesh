@@ -1,0 +1,18 @@
+{
+  "node": { "name": "vps-tunnel", "roles": ["agent", "gateway", "ingress"] },
+  "mesh": {
+    "mode": "tailnet",
+    "control_url": "https://hs.example.com",
+    "authkey_file": "/etc/xmesh/authkey"
+  },
+  "gateway": { "listen": "127.0.0.1:8080" },
+  "ingress": {
+    "listen": "tunnel",
+    "tunnel_listen": "127.0.0.1:8444",
+    "oauth": {
+      "issuer": "https://mcp.example.com",
+      "dynamic_client_scopes": ["devices:read", "exec:*", "fs:read:*"]
+    }
+  },
+  "agent": { "cwd_policy": { "allow": ["/tmp"] } }
+}

@@ -42,7 +42,7 @@ xmesh 用 tsnet 以用户态加入 tailnet，不需要安装 Tailscale，不需�
 | 参数 | 默认 | 作用 |
 | --- | --- | --- |
 | `--ingress` | 关 | 为已配置 `ingress` 段的节点临时加上 `ingress` 角色 |
-| `--tunnel-listen` | `127.0.0.1:8443` | `ingress.listen: tunnel` 时的本机监听地址；必须是 `127.0.0.1`，隧道侧把 HTTPS 指向它 |
+| `--tunnel-listen` | 配置 `ingress.tunnel_listen`，再缺省 `127.0.0.1:8443` | `ingress.listen: tunnel` 时的本机监听地址；必须是 `127.0.0.1`，隧道侧把 HTTPS 指向它。命令行参数优先于配置 |
 | `--oauth-password-file` | `<状态目录>/oauth-password` | OAuth 单主体登录口令文件；文件缺失或不可读时入口拒绝启动 |
 
 入口节点必须实现 OAuth 2.1 + 动态客户端注册。claude.ai 自定义连接器默认走 OAuth 并尝试动态客户端注册，没有无认证选项；Codex 同样走 OAuth。契约见 [CTR-OAUTH-01](../contracts/oauth-authz.md#ctr-oauth-01)。

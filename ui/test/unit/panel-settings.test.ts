@@ -11,8 +11,12 @@ import {
   checkSettingsForm,
   formFromConfig,
   isChanged,
+  otherScopes,
   parseDenyList,
+  parseScopes,
   toggleRole,
+  toggleScope,
+  withOtherScopes,
   type SettingsForm,
 } from "../../src/renderer/lib/settings";
 import { DEFAULT_CONTROL_URL, DEFAULT_DENY, denyListText } from "../../src/shared/setup";
@@ -52,6 +56,8 @@ const lan: SettingsForm = {
   browserLogin: false,
   roles: ["agent", "gateway"],
   listen: "tunnel",
+  tunnelPort: "",
+  dynamicScopes: ["devices:read"],
   issuer: "",
   domain: "",
   tls: "autocert",
@@ -96,6 +102,8 @@ test("the form reads what the first run set, the ingress and the working directo
     browserLogin: false,
     roles: ["agent", "ingress"],
     listen: "public:443",
+    tunnelPort: "",
+    dynamicScopes: ["devices:read"],
     issuer: "https://x.example.com",
     domain: "x.example.com",
     tls: "file",
@@ -245,6 +253,65 @@ test("only public:443 keeps a domain and a certificate; the other listen modes d
   assert.deepEqual(parse(funnel).ingress, { listen: "funnel", oauth: { issuer: "https://node.tail1234.ts.net" } });
 });
 
+test("a tunnel port is written as a loopback address, only for the tunnel, and read back as a port", () => {
+  const form: SettingsForm = { ...tailnetIngress, tunnelPort: "8444" };
+  const next = applySettingsForm(LAN_CONFIG, form);
+  assert.ok(next !== undefined);
+  assert.equal(parse(next).ingress.tunnel_listen, "127.0.0.1:8444");
+  assert.ok(validateConfig(parse(next)), JSON.stringify(validateConfig.errors));
+  assert.equal(formFromConfig(parse(next)).tunnelPort, "8444");
+
+  const cleared = applySettingsForm(next, { ...form, tunnelPort: "" });
+  assert.ok(cleared !== undefined);
+  assert.equal(parse(cleared).ingress.tunnel_listen, undefined, "an empty port leaves the kernel's default");
+
+  const funnel = applySettingsForm(next, { ...form, listen: "funnel", issuer: "https://node.tail1234.ts.net" });
+  assert.ok(funnel !== undefined);
+  assert.equal(parse(funnel).ingress.tunnel_listen, undefined, "the kernel refuses a tunnel address with any other listen mode");
+
+  for (const port of ["0", "65536", "80a", "-1", "8 4"]) assert.equal(checkSettingsForm({ ...form, tunnelPort: port }), "tunnel_port", port);
+  assert.equal(checkSettingsForm({ ...form, tunnelPort: " 8444 " }), undefined);
+  assert.equal(checkSettingsForm({ ...form, tunnelPort: "" }), undefined);
+  assert.equal(checkSettingsForm({ ...form, listen: "funnel", issuer: "https://node.tail1234.ts.net", mode: "tailnet", tunnelPort: "bad" }), undefined, "the port only matters for a tunnel");
+});
+
+test("the dynamic client scope cap is written only once it differs from the default", () => {
+  const untouched = applySettingsForm(LAN_CONFIG, tailnetIngress);
+  assert.ok(untouched !== undefined);
+  assert.equal(parse(untouched).ingress.oauth.dynamic_client_scopes, undefined, "the default stays implicit");
+  assert.deepEqual(formFromConfig(parse(untouched)).dynamicScopes, ["devices:read"]);
+
+  const scopes = ["devices:read", "exec:*", "fs:read:*", "exec:my-device"];
+  const wider = applySettingsForm(LAN_CONFIG, { ...tailnetIngress, dynamicScopes: scopes });
+  assert.ok(wider !== undefined);
+  assert.deepEqual(parse(wider).ingress.oauth.dynamic_client_scopes, scopes);
+  assert.ok(validateConfig(parse(wider)), JSON.stringify(validateConfig.errors));
+  assert.deepEqual(formFromConfig(parse(wider)).dynamicScopes, scopes);
+
+  const back = applySettingsForm(wider, tailnetIngress);
+  assert.ok(back !== undefined);
+  assert.deepEqual(parse(back).ingress.oauth.dynamic_client_scopes, ["devices:read"], "a key that exists is kept, now at the default");
+
+  const none = applySettingsForm(LAN_CONFIG, { ...tailnetIngress, dynamicScopes: [] });
+  assert.ok(none !== undefined);
+  assert.deepEqual(parse(none).ingress.oauth.dynamic_client_scopes, [], "an empty cap is a choice: OAuth only");
+  assert.deepEqual(formFromConfig(parse(none)).dynamicScopes, []);
+
+  assert.equal(checkSettingsForm({ ...tailnetIngress, dynamicScopes: ["exec:*", "fs:read:my-device", "computer:clipboard-read:*"] }), undefined);
+  for (const bad of ["exec", "Exec:*", "exec:", "exec:a b", "fs:read:write:x", "*"]) {
+    assert.equal(checkSettingsForm({ ...tailnetIngress, dynamicScopes: ["devices:read", bad] }), "dynamic_scopes", bad);
+  }
+  assert.deepEqual(parseScopes("exec:a, fs:read:b\n pty:a  exec:a"), ["exec:a", "fs:read:b", "pty:a"]);
+
+  // The checkboxes and the free-text field edit the same list without disturbing each other.
+  const mixed = ["devices:read", "exec:*", "exec:my-device"];
+  assert.deepEqual(otherScopes(mixed), ["exec:my-device"]);
+  assert.deepEqual(toggleScope(mixed, "fs:read:*", true), ["devices:read", "fs:read:*", "exec:*", "exec:my-device"]);
+  assert.deepEqual(toggleScope(mixed, "exec:*", false), ["devices:read", "exec:my-device"]);
+  assert.deepEqual(withOtherScopes(mixed, "pty:box, exec:*, exec:*"), ["devices:read", "exec:*", "pty:box"], "a typed scope that has a checkbox is not duplicated");
+  assert.deepEqual(withOtherScopes(mixed, ""), ["devices:read", "exec:*"]);
+});
+
 test("a gateway added by the form gets the loopback listen address; an existing one is kept", () => {
   const withoutGateway = LAN_CONFIG.replace('gateway:\n  listen: "127.0.0.1:8080"\n', "");
   const added = applySettingsForm(withoutGateway, lan);
@@ -269,6 +336,7 @@ test("the form round-trips through the file for every listen mode", () => {
     { ...tailnetIngress, listen: "public:443", domain: "xmesh.example.com", tls: "autocert" },
     { ...tailnetIngress, listen: "public:443", domain: "xmesh.example.com", tls: "file", certFile: "/c.pem", keyFile: "/k.pem" },
     { ...tailnetIngress, allowDirs: [] },
+    { ...tailnetIngress, tunnelPort: "8444", dynamicScopes: ["devices:read", "exec:*", "fs:read:*"] },
   ];
   for (const f of forms) {
     const next = applySettingsForm(LAN_CONFIG, f);
@@ -284,6 +352,7 @@ test("the text the form writes is valid under the config schema", () => {
     tailnetIngress,
     { ...tailnetIngress, listen: "funnel", issuer: "https://node.tail1234.ts.net" },
     { ...tailnetIngress, listen: "public:443", domain: "xmesh.example.com", tls: "file", certFile: "/c.pem", keyFile: "/k.pem", issuer: "https://xmesh.example.com" },
+    { ...tailnetIngress, tunnelPort: "8444", dynamicScopes: ["devices:read", "exec:*"] },
   ];
   for (const f of forms) {
     const next = applySettingsForm(LAN_CONFIG, f);

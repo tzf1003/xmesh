@@ -122,7 +122,7 @@ func serve(args []string) error {
 	state := flags.String("state-dir", "", "节点状态目录")
 	password := flags.String("oauth-password-file", "", "OAuth 单主体口令文件")
 	ingress := flags.Bool("ingress", false, "启用已配置的公网入口")
-	tunnel := flags.String("tunnel-listen", "127.0.0.1:8443", "反向隧道入口地址")
+	tunnel := flags.String("tunnel-listen", "", "反向隧道入口地址；缺省读 ingress.tunnel_listen，再缺省 127.0.0.1:8443")
 	asService := flags.Bool("service", false, "由系统服务管理器启动")
 	controlSIDs := flags.String("control-allow-sid", "", "Windows：额外允许访问控制管道的 SID，逗号分隔")
 	if e := flags.Parse(args); e != nil {

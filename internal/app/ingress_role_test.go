@@ -186,3 +186,22 @@ func Test_RoleRuntimeRestoresTheIngressWhenTheNewOneFailsToStart(t *testing.T) {
 		t.Fatal("the ingress is down after the retry")
 	}
 }
+
+// The tunnel address comes from the flag first, then ingress.tunnel_listen, then 127.0.0.1:8443.
+func Test_IngressTunnelAddressPrecedence(t *testing.T) {
+	plain := ingressConfigFor(t, []string{"ingress"}, nil)
+	set := ingressConfigFor(t, []string{"ingress"}, func(s map[string]any) { s["tunnel_listen"] = "127.0.0.1:9001" })
+	for _, c := range []struct {
+		flag string
+		cfg  *config.Config
+		want string
+	}{
+		{"", plain, "127.0.0.1:8443"},
+		{"", set, "127.0.0.1:9001"},
+		{"127.0.0.1:9002", set, "127.0.0.1:9002"},
+	} {
+		if got := (ingressDeps{tunnelListen: c.flag}).tunnel(c.cfg); got != c.want {
+			t.Fatalf("flag %q: got %s, want %s", c.flag, got, c.want)
+		}
+	}
+}

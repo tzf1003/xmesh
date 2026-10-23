@@ -340,6 +340,11 @@
         "max_pty_per_client": { "type": "integer", "minimum": 1, "default": 8 },
         "pty_budget_file": { "type": "string", "minLength": 1, "description": "本机共享的 PTY 预算文件绝对路径；默认使用入口状态目录中的 ingress-pty.json。" },
         "pty_budget_authority": { "$ref": "#/$defs/nodeName", "description": "托管跨入口主机 PTY 准入租约的 Agent 设备名；多台主机上的入口须配置同一设备。留空表示只在本机协调。" },
+        "tunnel_listen": {
+          "type": "string",
+          "pattern": "^127\\.0\\.0\\.1:[0-9]{1,5}$",
+          "description": "只允许 listen 为 tunnel：反向隧道到达入口的本机地址，必须是 127.0.0.1:端口。命令行 --tunnel-listen 优先；省略时为 127.0.0.1:8443。"
+        },
         "domain": {
           "type": "string",
           "minLength": 1,
@@ -410,6 +415,15 @@
             "required": ["tls"]
           },
           "then": { "required": ["cert_file", "key_file"] }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": { "listen": { "const": "tunnel" } },
+              "required": ["listen"]
+            }
+          },
+          "then": { "not": { "required": ["tunnel_listen"] } }
         }
       ]
     },

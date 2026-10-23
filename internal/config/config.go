@@ -140,11 +140,14 @@ type Ingress struct {
 	// PTYBudgetAuthority names the Agent that hosts the cross-host admission lease.
 	PTYBudgetAuthority string `json:"pty_budget_authority"`
 	Listen             string `json:"listen"`
-	Domain             string `json:"domain"`
-	TLS                string `json:"tls"`
-	CertFile           string `json:"cert_file"`
-	KeyFile            string `json:"key_file"`
-	OAuth              struct {
+	// TunnelListen is the loopback address a reverse tunnel reaches the ingress on; only for
+	// listen "tunnel". The --tunnel-listen flag wins over it; absent means 127.0.0.1:8443.
+	TunnelListen string `json:"tunnel_listen"`
+	Domain       string `json:"domain"`
+	TLS          string `json:"tls"`
+	CertFile     string `json:"cert_file"`
+	KeyFile      string `json:"key_file"`
+	OAuth        struct {
 		Issuer  string `json:"issuer"`
 		Clients map[string]struct {
 			Scopes []string `json:"scopes"`
@@ -431,6 +434,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Ingress.PTYBudgetAuthority != "" && !nodeNamePattern.MatchString(c.Ingress.PTYBudgetAuthority) {
 		return fail("/ingress/pty_budget_authority")
+	}
+	if c.Ingress.TunnelListen != "" {
+		host, port, e := net.SplitHostPort(c.Ingress.TunnelListen)
+		n, perr := strconv.Atoi(port)
+		if c.Ingress.Listen != "tunnel" || e != nil || host != "127.0.0.1" || perr != nil || n < 1 || n > 65535 {
+			return fail("/ingress/tunnel_listen: 只用于 listen: tunnel，且必须是 127.0.0.1:端口")
+		}
 	}
 	if c.Gateway.Listen != "" {
 		if host, _, e := GatewayListenHost(c.Gateway.Listen); e != nil || !listenHostAllowed(host) {

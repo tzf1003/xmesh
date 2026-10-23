@@ -7,7 +7,7 @@
 | [`error.schema.json`](error.schema.json) | [CTR-ERR-01](../errors.md#ctr-err-01) | `examples/error-*.json` |
 | [`lease.schema.json`](lease.schema.json) | [CTR-LEASE-01](../backend-lease.md#ctr-lease-01) | `examples/lease.json` |
 | [`audit-event.schema.json`](audit-event.schema.json) | [CTR-AUD-01](../audit.md#ctr-aud-01) | `examples/audit-event.json` |
-| [`config.schema.json`](config.schema.json) | [CTR-CFG-01](../config.md#ctr-cfg-01) | `examples/xmesh.config.json`、`examples/xmesh.ingress-public.json`、`examples/xmesh.ingress-multihost.json` |
+| [`config.schema.json`](config.schema.json) | [CTR-CFG-01](../config.md#ctr-cfg-01) | `examples/xmesh.config.json`、`examples/xmesh.ingress-public.json`、`examples/xmesh.ingress-multihost.json`、`examples/xmesh.ingress-tunnel.json` |
 
 `config.schema.json` 的顶层必填项是 `node`、`mesh`、`agent`，与 `roles` 无关：只启用 `gateway` 或 `ingress` 角色的配置也必须带 `agent` 段，并且 `agent.cwd_policy.allow` 必须存在（可以为空）。这比 [CTR-CFG-01](../config.md#ctr-cfg-01) 的角色联动表（“`roles` 含 `agent` 才要求 `cwd_policy.allow`”）严格；以模式和实际校验行为为准。
 
