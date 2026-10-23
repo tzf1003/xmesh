@@ -182,7 +182,7 @@ def build(source, output, version, repo, base_url, manifest=None, homepage=True)
     def render(prefix):
         values = {"VERSION": version, "CHANNEL": channel, "RELEASE": f"https://github.com/{repo}/releases/tag/{version}",
                   "REPO": f"https://github.com/{repo}", "DOCS": prefix + "agent", "LLMS": prefix + "llms.txt",
-                  "STATIC": prefix.rstrip("/") or ".", "PROMPT": prompt,
+                  "STATIC": prefix.rstrip("/") or ".", "PROMPT": prompt, "LINUX_SCRIPT": f"{release}/install-linux.sh",
                   "CONFIG": json.dumps(config, ensure_ascii=False).replace("<", "\\u003c")}
         page = template
         for key, value in values.items():
