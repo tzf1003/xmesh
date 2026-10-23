@@ -26,6 +26,7 @@ var (
 	ErrRestarted        = errors.New("设备已重启，原会话已结束")
 	ErrResumeExpired    = errors.New("设备会话恢复窗口已到期")
 	ErrIdentityConflict = errors.New("设备身份对应多个运行实例，请检查设备状态目录")
+	ErrLinkSilent       = errors.New("设备链路长时间没有收到数据")
 )
 
 type Options struct {
@@ -38,8 +39,10 @@ type Options struct {
 	// Accept binds an incoming logical connection to an Agent without tying it to a carrier.
 	Accept         func(context.Context, identity.Principal, *Session) error
 	RecoveryWindow time.Duration
-	Heartbeat      time.Duration
-	PingTimeout    time.Duration
+	// Heartbeat is how often a ping measures the link; any inbound frame or pong proves it alive.
+	Heartbeat time.Duration
+	// DeadAfter ends a carrier that has received nothing for this long. Default 30s.
+	DeadAfter time.Duration
 	// OnActivity runs under the device lock to retain transition order. It must not reenter Manager.
 	OnActivity func(Activity)
 }
@@ -57,7 +60,11 @@ type frame struct {
 	Sequence     uint64 `json:"sequence,omitempty"`
 	Ack          uint64 `json:"ack,omitempty"`
 	Payload      []byte `json:"payload,omitempty"`
-	Error        string `json:"error,omitempty"`
+	// Part and Parts split one large data packet into consecutive frames so a pong never
+	// waits behind a multi-megabyte write. Parts is zero for an unsplit packet.
+	Part  uint32 `json:"part,omitempty"`
+	Parts uint32 `json:"parts,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 type logical struct {
@@ -80,6 +87,8 @@ type carrier struct {
 	path      device.Path
 	cancel    context.CancelFunc
 	committed bool
+	// seen is the unix-nano time of the last inbound frame or pong.
+	seen atomic.Int64
 }
 
 type pathFailure struct {
@@ -135,8 +144,8 @@ func NewManager(ctx context.Context, opts Options) (*Manager, error) {
 	if opts.Heartbeat <= 0 {
 		opts.Heartbeat = 5 * time.Second
 	}
-	if opts.PingTimeout <= 0 {
-		opts.PingTimeout = 2 * time.Second
+	if opts.DeadAfter <= 0 {
+		opts.DeadAfter = 30 * time.Second
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	m := &Manager{opts: opts, ctx: ctx, cancel: cancel, peers: map[string]*peerLink{}, budget: NewBudget(0)}
