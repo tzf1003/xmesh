@@ -47,7 +47,7 @@ func (a *assembler) add(v frame) ([]byte, bool, error) {
 		if a.pending() {
 			return nil, false, ErrSequence
 		}
-		*a = assembler{session: v.SessionID, sequence: v.Sequence, parts: v.Parts, buf: make([]byte, 0, len(v.Payload)*int(v.Parts))}
+		*a = assembler{session: v.SessionID, sequence: v.Sequence, parts: v.Parts, buf: make([]byte, 0, min(len(v.Payload)*int(v.Parts), MaxFrameBytes))}
 	} else if !a.pending() || a.session != v.SessionID || a.sequence != v.Sequence || a.parts != v.Parts || a.next != v.Part {
 		return nil, false, ErrSequence
 	}
@@ -290,6 +290,29 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 	defer heartbeat.Stop()
 	c.seen.Store(time.Now().UnixNano())
 	var pinging atomic.Bool
+	// beat checks liveness and starts a ping. It also runs between the fragments of a
+	// large packet, so a slow uplink cannot hide a dead link behind one long write.
+	beat := func() error {
+		silent := time.Since(time.Unix(0, c.seen.Load()))
+		if silent >= m.opts.DeadAfter {
+			return ErrLinkSilent
+		}
+		// Show the panel a warning well before the link is given up.
+		m.setUnstable(p, c, silent >= m.opts.DeadAfter/3)
+		// A pong only proves liveness. It is awaited off the write path, because a
+		// slow peer must not stall data and a late pong is not a failure by itself.
+		if pinging.CompareAndSwap(false, true) {
+			go func() {
+				defer pinging.Store(false)
+				ping, cancel := context.WithTimeout(ctx, m.opts.DeadAfter)
+				defer cancel()
+				if c.conn.Ping(ping) == nil {
+					c.seen.Store(time.Now().UnixNano())
+				}
+			}()
+		}
+		return nil
+	}
 	sent := map[string]uint64{}
 	announced := map[string]bool{}
 	resuming := map[string]bool{}
@@ -300,23 +323,8 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-heartbeat.C:
-			silent := time.Since(time.Unix(0, c.seen.Load()))
-			if silent >= m.opts.DeadAfter {
-				return ErrLinkSilent
-			}
-			// Show the panel a warning well before the link is given up.
-			m.setUnstable(p, c, silent >= m.opts.DeadAfter/3)
-			// A pong only proves liveness. It is awaited off the write path, because a
-			// slow peer must not stall data and a late pong is not a failure by itself.
-			if pinging.CompareAndSwap(false, true) {
-				go func() {
-					defer pinging.Store(false)
-					ping, cancel := context.WithTimeout(ctx, m.opts.DeadAfter)
-					defer cancel()
-					if c.conn.Ping(ping) == nil {
-						c.seen.Store(time.Now().UnixNano())
-					}
-				}()
+			if err := beat(); err != nil {
+				return err
 			}
 		case <-ticker.C:
 		case <-p.wake:
@@ -360,6 +368,13 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 				sent[value.SessionID] = 0
 				retryAfter[value.SessionID] = time.Now().Add(100 * time.Millisecond)
 				continue
+			}
+			select {
+			case <-heartbeat.C:
+				if err := beat(); err != nil {
+					return err
+				}
+			default:
 			}
 			value.Epoch = c.epoch
 			writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
