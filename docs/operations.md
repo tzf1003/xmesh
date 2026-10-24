@@ -119,7 +119,7 @@ xmesh cloudflare invite --name phone --config xmesh.yaml --apply  # 为 phone �
 xmesh join xmesh-join-… --config xmesh.yaml
 ```
 
-新设备配置里的 `node.name` 必须与 `--name` 相同（邀请方靠它认出是谁加入）。加入码 15 分钟内有效、只能用一次，内含新设备自己的隧道令牌、网格 Access 凭据和一次性连接密码，按密钥对待；它不含 Cloudflare API 令牌。已有设备会临时设置连接密码，新设备配对成功后立刻清除；到期或失败会清除密码并回收为新设备创建的 Cloudflare 资源；若新设备配对成功后才在本机写文件失败，邀请方已认为它加入了，需要在邀请方运行 `xmesh cloudflare remove --name 新设备名 --apply` 再重新邀请。配对仍是逐对的：新设备只信任发出邀请的设备，其他设备需要各自再配对。加入后重启 xmesh 即可上线。
+新设备配置里的 `node.name` 必须与 `--name` 相同（邀请方靠它认出是谁加入）。加入码 15 分钟内有效、只能用一次，内含新设备自己的隧道令牌、网格 Access 凭据和一次性连接密码，按密钥对待，只通过你信任的渠道交给新设备（加入码本身就是信任的起点，被整个替换时新设备无从分辨）；它不含 Cloudflare API 令牌。已有设备会临时设置连接密码，新设备配对成功后立刻清除；到期或失败会清除密码并回收为新设备创建的 Cloudflare 资源；若新设备配对成功后才在本机写文件失败，邀请方已认为它加入了，需要在邀请方运行 `xmesh cloudflare remove --name 新设备名 --apply` 再重新邀请。配对仍是逐对的：新设备只信任发出邀请的设备，其他设备需要各自再配对。加入后重启 xmesh 即可上线。
 
 ## Linux 网页管理界面
 
