@@ -341,11 +341,15 @@ func joinRun(args []string, out io.Writer) error {
 	if id != adminID {
 		return errors.New("配对到的设备与加入码不一致")
 	}
+	// The inviter already counts this device as joined, so a failure here needs the inviter to start over.
+	late := func(err error) error {
+		return fmt.Errorf("已与邀请方配对，但本机写入失败：%w\n请让邀请方运行 xmesh cloudflare remove --name %s --apply 后重新邀请", err, inv.Name)
+	}
 	if err := writePrivate(section.TunnelTokenFile, inv.TunnelToken); err != nil {
-		return err
+		return late(err)
 	}
 	if err := setCloudflareConfig(*cfgPath, section); err != nil {
-		return err
+		return late(err)
 	}
 	done = true
 	fmt.Fprintf(out, "已加入网格，并与 %s 配对。重启 xmesh 后，本机会通过 %s 上线；需要先安装 cloudflared。\n", strings.TrimPrefix(adminID, "dev-")[:12], inv.Hostname)

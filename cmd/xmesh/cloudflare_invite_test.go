@@ -256,8 +256,8 @@ func TestJoinCleansUpSecretsWhenSetupFailsAfterPairing(t *testing.T) {
 	}
 	t.Cleanup(func() { joinPair = old })
 	var out bytes.Buffer
-	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil {
-		t.Fatal("join succeeded")
+	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil || !strings.Contains(err.Error(), "cloudflare remove --name phone") {
+		t.Fatalf("the failure does not tell the inviter how to start over: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(secrets, "access-secret")); !os.IsNotExist(err) {
 		t.Fatal("the Access secret was left behind")
