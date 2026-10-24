@@ -57,6 +57,7 @@ const usage = `用法: xmesh <子命令> [参数]
            --config 路径（或 --name 服务名）  --system（仅 Windows）  --json
   login    在浏览器授权此节点  --config 路径  --state-dir 目录  --json
   mesh     管理 tailnet 控制面：tag、权限矩阵、策略、DERP；见 xmesh mesh help
+  join     用 xmesh cloudflare invite 生成的加入码加入网格  加入码 --config xmesh.yaml
   cloudflare  用 Cloudflare API 给设备创建隧道、DNS 与 Access 应用；见 xmesh cloudflare help
   setup    首次配置计划、执行、恢复和实际连接验证；见 xmesh setup help
   doctor   只读诊断设备配置和服务，支持 --json
@@ -99,6 +100,8 @@ func run(args []string) error {
 		return login(args[1:], os.Stdout)
 	case "mesh":
 		return meshCmd(args[1:])
+	case "join":
+		return joinCmd(args[1:])
 	case "cloudflare":
 		return cloudflareCmd(args[1:])
 	case "control":

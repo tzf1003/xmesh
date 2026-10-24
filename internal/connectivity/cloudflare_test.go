@@ -146,7 +146,7 @@ func TestCloudflarePathCarriesDeviceLinkThroughTunnel(t *testing.T) {
 		t.Fatal("edge accepted a request without the service token")
 	}
 
-	// An unpaired device cannot pair through the tunnel unless allow_pairing is set.
+	// An unpaired device cannot pair through the tunnel until a connection password is set (an open invite).
 	c, _ := node(t, "stranger")
 	c.cfg.Cloudflare = a.cfg.Cloudflare
 	c.cfg.Cloudflare.AccessClientID, c.cfg.Cloudflare.AccessClientSecretFile = "id.access", secret
@@ -154,10 +154,33 @@ func TestCloudflarePathCarriesDeviceLinkThroughTunnel(t *testing.T) {
 	if err := c.directory.SetProvider(device.Cloudflare, 1, true); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := c.PairWith(ctx, device.Cloudflare, "https://"+host, "correct horse battery", b.identity.ID); err == nil {
+		t.Fatal("pairing succeeded through a tunnel with no open invite")
+	}
 	if err := b.pairing.SetPassword("correct horse battery"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.PairWith(ctx, device.Cloudflare, "https://"+host, "correct horse battery", b.identity.ID); err == nil {
-		t.Fatal("pairing succeeded through a tunnel that does not allow it")
+	if _, err := c.PairWith(ctx, device.Cloudflare, "https://"+host, "wrong horse battery", b.identity.ID); err == nil {
+		t.Fatal("pairing succeeded with the wrong password")
+	}
+	if _, err := c.PairWith(ctx, device.Cloudflare, "https://"+host, "correct horse battery", b.identity.ID); err != nil {
+		t.Fatal("pairing failed while an invite was open:", err)
+	}
+	if _, ok := b.trust.Find(c.identity.ID); !ok {
+		t.Fatal("the paired device is not trusted")
+	}
+
+	// An ordinary trusted connection is served as before while the invite window is open.
+	a.cfg.Cloudflare.AccessClientID, a.cfg.Cloudflare.AccessClientSecretFile = "id.access", secret
+	a.probe(ctx, candidates[0])
+	devices, _ = a.directory.Snapshot(time.Now())
+	reachable := false
+	for _, d := range devices {
+		for _, path := range d.Paths {
+			reachable = reachable || (d.DeviceID == b.identity.ID && path.Kind == device.Cloudflare && path.Reachable)
+		}
+	}
+	if !reachable {
+		t.Fatal("a trusted device could not connect while an invite was open", devices)
 	}
 }

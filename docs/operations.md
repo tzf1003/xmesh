@@ -104,7 +104,22 @@ mesh:
       dev-<64 位十六进制>: win.link.example.com
 ```
 
-配对：隧道默认不接受未配对设备。可先经局域网或 tailnet 配对；只有隧道可用时，在被连接的一端临时设置 `allow_pairing: true`，用 `xmesh control pair connect --path cloudflare --address https://win.link.example.com --password-stdin` 配对后关掉。局域网和 tailnet 都拨不通时才会尝试这条路径。
+配对：隧道只在被连接的一端设置了连接密码期间接受未配对设备，其余时间只放行已配对设备（`allow_pairing: true` 让它一直允许，不建议）。局域网和 tailnet 都拨不通时才会尝试这条路径。
+
+### 邀请新设备加入
+
+已经用 `xmesh cloudflare login` 和 `setup` 配好一台设备后，可以让第二台设备一步加入，不需要在新设备上登录 Cloudflare：
+
+```
+# 已有设备（xmesh 需正在运行）
+xmesh cloudflare invite --name phone --config xmesh.yaml          # 先预览
+xmesh cloudflare invite --name phone --config xmesh.yaml --apply  # 为 phone 建隧道，打印加入码并等待
+
+# 新设备（已有 schema_version 2 的 xmesh.yaml）
+xmesh join xmesh-join-… --config xmesh.yaml
+```
+
+新设备配置里的 `node.name` 必须与 `--name` 相同（邀请方靠它认出是谁加入）。加入码 15 分钟内有效、只能用一次，内含新设备自己的隧道令牌、网格 Access 凭据和一次性连接密码，按密钥对待，只通过你信任的渠道交给新设备（加入码本身就是信任的起点，被整个替换时新设备无从分辨）；它不含 Cloudflare API 令牌。已有设备会临时设置连接密码，新设备配对成功后立刻清除；到期或失败会清除密码并回收为新设备创建的 Cloudflare 资源；若新设备配对成功后才在本机写文件失败，邀请方已认为它加入了，需要在邀请方运行 `xmesh cloudflare remove --name 新设备名 --apply` 再重新邀请。邀请方会把新设备写入自己的 `mesh.cloudflare.peers`（重启后生效）。配对仍是逐对的：新设备只信任发出邀请的设备，其他设备需要各自再配对。加入后重启 xmesh 即可上线。
 
 ## Linux 网页管理界面
 
