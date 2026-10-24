@@ -2,18 +2,20 @@ package config
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestCloudflareValidation(t *testing.T) {
 	id := "dev-" + strings.Repeat("a", 64)
+	secret := filepath.Join(t.TempDir(), "secret")
 	cases := map[string]struct {
 		cf   map[string]any
 		fail bool
 	}{
 		"dial only":                    {map[string]any{"enabled": true}, false},
-		"reachable":                    {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "access_client_id": "x.access", "access_client_secret_file": "/tmp/secret", "peers": map[string]string{id: "win.link.example.com"}}, false},
+		"reachable":                    {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "access_client_id": "x.access", "access_client_secret_file": secret, "peers": map[string]string{id: "win.link.example.com"}}, false},
 		"bad hostname":                 {map[string]any{"enabled": true, "hostname": "not a host"}, true},
 		"public listen":                {map[string]any{"enabled": true, "listen": "0.0.0.0:7434"}, true},
 		"id without file":              {map[string]any{"enabled": true, "access_client_id": "x.access"}, true},
