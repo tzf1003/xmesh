@@ -61,7 +61,7 @@ Funnel 公网入口仍需控制面允许 Funnel 与 HTTPS，具体授权对象�
 
 设备没有公网地址时，`cloudflare` 路径让每台设备用自己的 Cloudflare Tunnel 互连。每台可被连接的设备运行一条隧道，主机名各不相同，cloudflared 用 `tcp://127.0.0.1:7434` 规则把隧道转发到本机回环监听；隧道只出站，不需要入站端口。连接方先向对端主机名发起外层 WebSocket（携带 Access 服务令牌），再在其中完成与其他路径相同的固定公钥 mTLS 和 `/mesh/v2/link`。Access 只做门禁，设备身份、配对信任、标签和 `agent.authz` 与其他路径完全一致，不信任任何 Cloudflare 头。
 
-该路径是最后一选：LAN 与 Tailnet 都拨不通时才在 15 秒预算内尝试。隧道往返较慢，所以探测每 20 秒一次，探测超时 10 秒、有效期 40 秒。监听默认只放行已配对设备（握手阶段要求客户端证书），未配对设备不能用连接密码经隧道配对，除非显式设置 `allow_pairing`。只拨出的设备不设置 `hostname`，不监听。
+该路径是最后一选：LAN 与 Tailnet 都拨不通时才在 15 秒预算内尝试。隧道往返较慢，所以探测每 20 秒一次，探测超时 10 秒、有效期 40 秒。监听默认只放行已配对设备（握手阶段要求客户端证书），未配对设备只有在被连接端设置了连接密码期间（邀请新设备时由 `xmesh cloudflare invite` 打开，成功、失败或 15 分钟到期后关闭）才能经隧道配对，或显式设置 `allow_pairing`。只拨出的设备不设置 `hostname`，不监听。
 
 隧道可由 `xmesh cloudflare` 经 Cloudflare API 创建（`internal/cfadmin`）：每台设备一条远程配置的隧道、一条代理 CNAME、一个只放行网格服务令牌的 Access 应用，同网格设备共用一个服务令牌。API 令牌只存在运行命令的机器的系统钥匙串或 0600 文件里，内核不持有，内核只收到隧道令牌文件的路径。配置了 `tunnel_token_file` 时内核自己运行 `cloudflared tunnel --no-autoupdate --protocol http2 run --token-file …`（HTTP/2 写死，令牌不出现在进程参数里），退出后按 1 秒起翻倍到 1 分钟的间隔重启；cloudflared 的输出被丢弃，因为它会回显连接器信息。
 

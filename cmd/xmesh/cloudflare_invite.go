@@ -1,0 +1,309 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+	"github.com/tzf1003/xmesh/internal/app"
+	"github.com/tzf1003/xmesh/internal/cfadmin"
+	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/connectivity"
+	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/device"
+)
+
+// inviteNode is the running inviting node: its identity, and the connection password that opens the
+// pairing window.
+type inviteNode interface {
+	Fingerprint(ctx context.Context) (string, error)
+	SetPassword(ctx context.Context, password string) error
+	ClearPassword(ctx context.Context) error
+	// Trusted lists the device IDs this node already trusts.
+	Trusted() (map[string]bool, error)
+}
+
+var (
+	// openInviteNode and invitePoll are replaced by tests.
+	openInviteNode = controlInviteNode
+	invitePoll     = 2 * time.Second
+)
+
+type controlNode struct {
+	client *control.Client
+	dir    string
+}
+
+func controlInviteNode(node, stateDir string) (inviteNode, error) {
+	e, err := controlTarget(node, stateDir)
+	if err != nil {
+		return nil, err
+	}
+	return controlNode{client: control.NewClient(e), dir: e.Dir}, nil
+}
+
+func (n controlNode) Fingerprint(ctx context.Context) (string, error) {
+	r, err := n.client.Do(ctx, "POST", "/v2/pair/export", nil, nil)
+	if err != nil {
+		return "", err
+	}
+	if err = r.Error(); err != nil {
+		return "", err
+	}
+	var res v2.PairExportResponse
+	if err = json.Unmarshal(r.Body, &res); err != nil {
+		return "", err
+	}
+	return res.Pair.Fingerprint, nil
+}
+
+func (n controlNode) SetPassword(ctx context.Context, password string) error {
+	r, err := n.client.Do(ctx, "PUT", "/v2/pair/password", v2.PairPasswordRequest{Password: password}, nil)
+	if err != nil {
+		return err
+	}
+	return r.Error()
+}
+
+func (n controlNode) ClearPassword(ctx context.Context) error {
+	r, err := n.client.Do(ctx, "DELETE", "/v2/pair/password", nil, nil)
+	if err != nil {
+		return err
+	}
+	return r.Error()
+}
+
+func (n controlNode) Trusted() (map[string]bool, error) {
+	trust, err := device.OpenTrust(n.dir)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[string]bool{}
+	for _, t := range trust.Snapshot() {
+		ids[t.Document.DeviceID] = true
+	}
+	return ids, nil
+}
+
+// cloudflareInvite prepares a new device's tunnel, opens the pairing window on this node and waits for
+// the new device to pair, then closes the window. Nothing it creates outlives a failed or expired invite.
+func cloudflareInvite(args []string, out io.Writer) error {
+	var c cloudflareCommon
+	fs := flag.NewFlagSet("cloudflare invite", flag.ContinueOnError)
+	c.register(fs)
+	name := fs.String("name", "", "新设备名")
+	cfgPath := fs.String("config", "", "本机 xmesh.yaml 路径")
+	node := fs.String("node", "", "本机节点名")
+	stateDir := fs.String("state-dir", "", "本机节点状态目录")
+	ttl := fs.Duration("ttl", cfadmin.InviteTTL, "加入码有效时长")
+	apply := fs.Bool("apply", false, "确认创建并等待对方加入")
+	if err := cloudflareFlags(fs, args); err != nil {
+		return err
+	}
+	if *name == "" || *cfgPath == "" {
+		return errors.New("需要 --name 与 --config")
+	}
+	if *ttl <= 0 || *ttl > cfadmin.InviteTTL {
+		return fmt.Errorf("--ttl 须在 0 到 %s 之间", cfadmin.InviteTTL)
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	cf := cfg.Mesh.Cloudflare
+	if cfg.SchemaVersion != 2 || !cf.Enabled || cf.Hostname == "" {
+		return errors.New("本机还没有启用 Cloudflare 通道：先对本机运行 xmesh cloudflare setup")
+	}
+	if *stateDir == "" && *node == "" {
+		*node = cfg.Node.Name
+	}
+	mesh, cred, err := c.mesh()
+	if err != nil {
+		return err
+	}
+	state, err := c.state()
+	if err != nil {
+		return err
+	}
+	if !*apply {
+		return emit(out, c.json, map[string]any{"device": *name, "domain": cred.Domain, "ttl": ttl.String()}, func(w io.Writer) {
+			fmt.Fprintf(w, "将为新设备 %s 在 %s 下创建隧道，生成 %s 内有效的加入码，并临时开启本机的连接密码。加 --apply 执行。\n", *name, cred.Domain, *ttl)
+		})
+	}
+	ctx, cancel := ctx30()
+	fingerprint, node2, err := func() (string, inviteNode, error) {
+		defer cancel()
+		n, err := openInviteNode(*node, *stateDir)
+		if err != nil {
+			return "", nil, fmt.Errorf("连不上本机运行中的 xmesh（需要先启动）：%w", err)
+		}
+		fp, err := n.Fingerprint(ctx)
+		return fp, n, err
+	}()
+	if err != nil {
+		return err
+	}
+	before, err := node2.Trusted()
+	if err != nil {
+		return err
+	}
+	password, err := cfadmin.NewPassword()
+	if err != nil {
+		return err
+	}
+	ctx, cancel = ctx30()
+	defer cancel()
+	mesh.Service = "tcp://127.0.0.1:7434"
+	dev, token, err := mesh.Setup(ctx, state, *name)
+	if err != nil {
+		return err
+	}
+	joined := false
+	defer func() {
+		bg, stop := ctx30()
+		defer stop()
+		_ = node2.ClearPassword(bg)
+		if !joined {
+			if err := mesh.Remove(bg, state, *name); err != nil {
+				fmt.Fprintf(os.Stderr, "未能回收 %s 的 Cloudflare 资源，可运行 xmesh cloudflare remove --name %s --apply：%v\n", *name, *name, err)
+			}
+		}
+	}()
+	expires := time.Now().Add(*ttl)
+	invite := cfadmin.Invite{Version: 1, Name: *name, Admin: cf.Hostname, Fingerprint: fingerprint, Password: password, Hostname: dev.Hostname, TunnelToken: dev.TunnelToken, AccessID: token.ClientID, AccessKey: token.Secret, Expires: expires.Unix()}
+	code, err := invite.Encode()
+	if err != nil {
+		return err
+	}
+	if err := node2.SetPassword(ctx, password); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "在新设备 %s 上运行（%s 前有效，只能用一次）：\n\n  xmesh join %s\n\n等待它加入…（Ctrl-C 取消）\n", *name, expires.Format("15:04:05"), code)
+	deadline := time.NewTimer(*ttl)
+	defer deadline.Stop()
+	tick := time.NewTicker(invitePoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			return errors.New("加入码已过期，已回收为新设备创建的 Cloudflare 资源")
+		case <-tick.C:
+			now, err := node2.Trusted()
+			if err != nil {
+				return err
+			}
+			for id := range now {
+				if !before[id] {
+					joined = true
+					fmt.Fprintf(out, "设备 %s（%s）已加入，配对窗口已关闭。\n", *name, id)
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// joinFlags is shared so tests can drive the command.
+func joinCmd(args []string) error { return joinRun(args, os.Stdout) }
+
+const joinUsage = "用法: xmesh join 加入码 --config xmesh.yaml [--state-dir 目录] [--dir 目录]\n" +
+	"加入码来自已有设备上的 xmesh cloudflare invite。加入后重启 xmesh，本机会用 cloudflared 连上隧道。"
+
+// joinPair opens this device's pairing state and pairs with the inviting device through the tunnel.
+var joinPair = func(ctx context.Context, cfg *config.Config, stateDir string, inv cfadmin.Invite) (string, error) {
+	node, err := connectivity.OpenPairingClient(ctx, cfg, stateDir)
+	if err != nil {
+		return "", err
+	}
+	defer node.Close()
+	doc, err := node.PairWith(ctx, device.Cloudflare, "https://"+inv.Admin, inv.Password, "dev-"+inv.Fingerprint)
+	if err != nil {
+		return "", err
+	}
+	return doc.DeviceID, nil
+}
+
+func joinRun(args []string, out io.Writer) error {
+	code, rest := leadingName(args)
+	fs := flag.NewFlagSet("join", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	cfgPath := fs.String("config", "", "本机 xmesh.yaml 路径（schema_version 2）")
+	stateDir := fs.String("state-dir", "", "本机节点状态目录")
+	dir := fs.String("dir", "", "放隧道令牌与 Access 密钥的目录")
+	if err := fs.Parse(rest); err != nil {
+		return fmt.Errorf("%w\n%s", err, joinUsage)
+	}
+	if code == "" && fs.NArg() == 1 {
+		code = fs.Arg(0)
+	} else if fs.NArg() > 0 {
+		return fmt.Errorf("多余的参数\n%s", joinUsage)
+	}
+	if code == "" || *cfgPath == "" {
+		return errors.New(joinUsage)
+	}
+	inv, err := cfadmin.DecodeInvite(code, time.Now())
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if cfg.SchemaVersion != 2 {
+		return errors.New("配置不是 schema_version 2；先运行 xmesh migrate")
+	}
+	if cfg.Mesh.Cloudflare.Hostname != "" {
+		return errors.New("本机已经配置了 Cloudflare 主机名；加入前先清理 mesh.cloudflare")
+	}
+	if *stateDir == "" {
+		if *stateDir, err = app.StateDir(cfg.Node.Name); err != nil {
+			return err
+		}
+	}
+	secrets := *dir
+	if secrets == "" {
+		secrets = filepath.Join(filepath.Dir(*cfgPath), "cloudflare")
+	}
+	if secrets, err = filepath.Abs(secrets); err != nil {
+		return err
+	}
+	adminID := "dev-" + inv.Fingerprint
+	section := cloudflareSection{Hostname: inv.Hostname, AccessClientID: inv.AccessID, AccessClientSecretFile: filepath.Join(secrets, "access-secret"), TunnelTokenFile: filepath.Join(secrets, "tunnel-token"), Peers: map[string]string{adminID: inv.Admin}}
+	// Prove the result loads before anything is written or the invite is spent.
+	if _, _, err := editedCloudflareConfig(*cfgPath, section); err != nil {
+		return err
+	}
+	if err := writePrivate(section.AccessClientSecretFile, inv.AccessKey); err != nil {
+		return err
+	}
+	cleanup := func() { _ = os.Remove(section.AccessClientSecretFile) }
+	pairCfg := *cfg
+	pairCfg.Mesh.Cloudflare = config.Cloudflare{Enabled: true, Hostname: section.Hostname, AccessClientID: section.AccessClientID, AccessClientSecretFile: section.AccessClientSecretFile}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	id, err := joinPair(ctx, &pairCfg, *stateDir, inv)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("加入失败（加入码只能用一次，失败后请让对方重新生成）：%w", err)
+	}
+	if id != adminID {
+		cleanup()
+		return errors.New("配对到的设备与加入码不一致")
+	}
+	if err := writePrivate(section.TunnelTokenFile, inv.TunnelToken); err != nil {
+		return err
+	}
+	if err := setCloudflareConfig(*cfgPath, section); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "已加入网格，并与 %s 配对。重启 xmesh 后，本机会通过 %s 上线；需要先安装 cloudflared。\n", strings.TrimPrefix(adminID, "dev-")[:12], inv.Hostname)
+	return nil
+}

@@ -2,11 +2,13 @@ package cfadmin
 
 import (
 	"context"
+	"fmt"
 	"github.com/tzf1003/xmesh/internal/cfadmin/cftest"
 	"os"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newFake() (*cftest.Fake, *Client, func()) {
@@ -186,5 +188,34 @@ func TestProvisionRoutesToTheConfiguredService(t *testing.T) {
 	}
 	if f.Service != "tcp://127.0.0.1:9000" {
 		t.Fatalf("routed to %q", f.Service)
+	}
+}
+
+func TestInviteRoundTripAndValidation(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	inv := Invite{Version: 1, Name: "phone", Admin: "xmesh-a.mesh.example.com", Fingerprint: strings.Repeat("ab", 32), Password: "pw-pw-pw-pw-pw", Hostname: "xmesh-phone.mesh.example.com", TunnelToken: "tt", AccessID: "cid.access", AccessKey: "sec", Expires: now.Add(InviteTTL).Unix()}
+	code, err := inv.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeInvite(" "+code+"\n", now)
+	if err != nil || got != inv {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if _, err := DecodeInvite(code, now.Add(InviteTTL)); err == nil {
+		t.Fatal("expired code accepted")
+	}
+	for _, bad := range []string{"", "xmesh-join-!!!", "other-" + code[len(InvitePrefix):], InvitePrefix + "e30"} {
+		_, err := DecodeInvite(bad, now)
+		if err == nil || strings.Contains(err.Error(), "sec") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	if s := fmt.Sprintf("%v %#v", inv, inv); strings.Contains(s, inv.Password) || strings.Contains(s, inv.TunnelToken+"\"") {
+		t.Fatalf("secrets printed: %s", s)
+	}
+	pw, err := NewPassword()
+	if err != nil || len(pw) < 10 {
+		t.Fatal(pw, err)
 	}
 }
