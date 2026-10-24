@@ -221,3 +221,22 @@ func TestSetupReplacesServiceTokenDeletedElsewhere(t *testing.T) {
 		t.Fatal("replacement service token missing")
 	}
 }
+
+func TestSetupRefusesWhenSharedServiceTokenVanishedUnderExistingDevices(t *testing.T) {
+	f, client, done := newFake()
+	defer done()
+	m := &Mesh{Client: client, Domain: "example.com", Prefix: "xmesh-test"}
+	state := &StateFile{Path: t.TempDir() + "/state.json"}
+	ctx := context.Background()
+	_, token, err := m.Setup(ctx, state, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(f.Things, "svc/"+token.ID)
+	if _, _, err := m.Setup(ctx, state, "desktop"); err == nil || !strings.Contains(err.Error(), "remove") {
+		t.Fatalf("err %v", err)
+	}
+	if st, _ := state.Load(); len(st.Devices) != 1 {
+		t.Fatalf("devices %v", st.Devices)
+	}
+}
