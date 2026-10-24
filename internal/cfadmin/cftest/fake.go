@@ -59,8 +59,8 @@ func (f *Fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	p := strings.TrimPrefix(path, "/accounts/acct")
 	switch {
-	case route == "GET /accounts/acct":
-		reply(200, map[string]any{"id": "acct"})
+	case route == "GET /accounts/acct/cfd_tunnel":
+		reply(200, []any{})
 	case route == "POST /accounts/acct/cfd_tunnel":
 		if body["config_src"] != "cloudflare" {
 			reply(400, nil, "tunnels must be remotely managed")
@@ -109,6 +109,12 @@ func (f *Fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := f.id("svc")
 		f.Things["svc/"+id] = body["name"].(string)
 		reply(200, map[string]any{"id": id, "client_id": "cid-" + id + ".access", "client_secret": "csecret-" + id})
+	case strings.HasPrefix(p, "/access/service_tokens/") && r.Method == "GET":
+		if _, ok := f.Things["svc/"+strings.TrimPrefix(p, "/access/service_tokens/")]; !ok {
+			reply(404, nil, "not found")
+			return
+		}
+		reply(200, map[string]any{})
 	case strings.HasPrefix(p, "/access/service_tokens/") && r.Method == "DELETE":
 		f.drop(w, "svc/"+strings.TrimPrefix(p, "/access/service_tokens/"), reply)
 	default:

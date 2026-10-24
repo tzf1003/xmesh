@@ -150,6 +150,17 @@ func (m *Mesh) Setup(ctx context.Context, state *StateFile, name string) (Device
 	if _, ok := st.Devices[name]; ok {
 		return Device{}, SavedToken{}, fmt.Errorf("设备 %q 已有 Cloudflare 资源；先用 remove 删除再重建", name)
 	}
+	// A recorded token that was deleted elsewhere would make Access reject every policy, so only reuse
+	// it while Cloudflare still has it.
+	if st.ServiceToken != nil && len(st.Devices) == 0 {
+		exists, err := m.Client.ServiceTokenExists(ctx, st.ServiceToken.ID)
+		if err != nil {
+			return Device{}, SavedToken{}, err
+		}
+		if !exists {
+			st.ServiceToken = nil
+		}
+	}
 	createdToken := false
 	if st.ServiceToken == nil {
 		token, err := m.NewServiceToken(ctx, "mesh")
@@ -162,6 +173,7 @@ func (m *Mesh) Setup(ctx context.Context, state *StateFile, name string) (Device
 			_ = m.Client.DeleteServiceToken(context.WithoutCancel(ctx), token.ID)
 			return Device{}, SavedToken{}, err
 		}
+		createdToken = true
 	}
 	// A token this call created is only useful with a device; without one nothing could remove it later.
 	dropToken := func() {

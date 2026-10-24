@@ -188,3 +188,36 @@ func TestProvisionRoutesToTheConfiguredService(t *testing.T) {
 		t.Fatalf("routed to %q", f.Service)
 	}
 }
+
+func TestVerifyListsTunnelsInsteadOfReadingTheAccount(t *testing.T) {
+	f, client, done := newFake()
+	defer done()
+	if err := client.Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Requests) != 1 || f.Requests[0] != "GET /accounts/acct/cfd_tunnel" {
+		t.Fatalf("requests %v", f.Requests)
+	}
+}
+
+func TestSetupReplacesServiceTokenDeletedElsewhere(t *testing.T) {
+	f, client, done := newFake()
+	defer done()
+	m := &Mesh{Client: client, Domain: "example.com", Prefix: "xmesh-test"}
+	state := &StateFile{Path: t.TempDir() + "/state.json"}
+	ctx := context.Background()
+	stale := SavedToken{ID: "svc-gone", ClientID: "cid", Secret: "s"}
+	if err := state.Save(State{ServiceToken: &stale, Devices: map[string]Device{}}); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := m.Setup(ctx, state, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.ID == stale.ID {
+		t.Fatal("stale service token reused")
+	}
+	if _, ok := f.Things["svc/"+token.ID]; !ok {
+		t.Fatal("replacement service token missing")
+	}
+}
