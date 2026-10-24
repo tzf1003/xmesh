@@ -1,0 +1,74 @@
+name: 打发布标签
+# 手动触发：在 master 最新提交上推一个版本标签，由 release.yml 照常发布。
+# 标签必须由 RELEASE_PUSH_TOKEN 推送：默认 GITHUB_TOKEN 推的标签不会触发 CI 和 release.yml，
+# 而发布闸门（scripts/release_gate.py）只认标签推送触发的 CI 运行。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本标签，例如 v0.1.0-beta.17'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 令牌已配置
+        env:
+          RELEASE_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_PUSH_TOKEN" ]; then
+            echo "缺少仓库密钥 RELEASE_PUSH_TOKEN（只限本仓库、Contents 读写的细粒度令牌）" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PUSH_TOKEN }}
+      - name: 校验版本号
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PYCODE'
+          import os, re, subprocess, sys
+          version = os.environ['VERSION']
+          pattern = re.compile(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(beta|rc)\.(0|[1-9][0-9]*))?')
+          def key(tag):
+              m = pattern.fullmatch(tag)
+              if not m:
+                  return None
+              major, minor, patch, kind, n = m.groups()
+              # 同一 x.y.z 下 beta < rc < 正式版。
+              rank = {'beta': 0, 'rc': 1, None: 2}[kind]
+              return (int(major), int(minor), int(patch), rank, int(n or 0))
+          wanted = key(version)
+          if wanted is None:
+              sys.exit(f'{version} must look like v0.1.0, v0.1.0-beta.1 or v0.1.0-rc.1')
+          tags = subprocess.run(['git', 'tag', '--list', 'v*'], check=True, capture_output=True, text=True).stdout.split()
+          if version in tags:
+              sys.exit(f'tag {version} already exists')
+          newest = max((t for t in tags if key(t)), key=key, default=None)
+          if newest and wanted <= key(newest):
+              sys.exit(f'{version} must be newer than the latest tag {newest}')
+          print(f'{version} is newer than {newest}')
+          PYCODE
+      - name: 推送标签
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "$VERSION" HEAD
+          git push origin "refs/tags/$VERSION"
+          {
+            echo "已在 \`$(git rev-parse --short HEAD)\` 推送 \`$VERSION\`。"
+            echo "发布流程见「发布」工作流：它会先等该提交上的完整 CI 全绿。"
+          } >> "$GITHUB_STEP_SUMMARY"

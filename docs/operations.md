@@ -596,6 +596,8 @@ xmesh install|pair|uninstall|start|stop|restart ... --json
 
 向仓库推送形如 `v0.2.0-beta.1`（或 `-rc`）的标签，`.github/workflows/release.yml` 会为 linux/amd64、linux/arm64、darwin/amd64、darwin/arm64、windows/amd64 和 windows/arm64 六个目标构建二进制（Windows 为 `.zip`，其余为 `.tar.gz`），生成 `SHA256SUMS.txt`，并创建 GitHub 预发布版。`xmesh version` 输出标签名。二进制未签名；该工作流只在标签推送时运行，不属于常规 CI。例如：`git tag v0.2.0-beta.1 && git push origin v0.2.0-beta.1`。
 
+不想在本机打标签时，用 `.github/workflows/cut-release.yml`：在 Actions 里手动运行「打发布标签」并填入版本号（例如 `v0.2.0-beta.2`），它会校验格式、要求版本号高于现有最新标签，然后在 `master` 最新提交上推送该标签，随后 `release.yml` 照常运行。标签必须用仓库密钥 `RELEASE_PUSH_TOKEN` 推送（只限本仓库、Contents 读写的细粒度令牌）：默认 `GITHUB_TOKEN` 推的标签不会触发 CI，发布闸门会因找不到标签上的 CI 运行而一直等待。
+
 ## tailnet 管理（xmesh mesh）
 
 桌面「策略」和「DERP 中继」先读取云端策略，共用一份本地会话草稿。
