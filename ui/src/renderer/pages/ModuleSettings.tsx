@@ -37,7 +37,7 @@ import type { ActionError, DenyFileResponse } from "../../shared/ipc";
 import type { ConfigChange, ConfigResponse } from "../../shared/control";
 import type { Key } from "../messages";
 
-const MODE_LABEL: Record<Mode, Key> = { lan: "mode.lan", tailnet: "mode.tailnet", coexist: "mode.coexist", offline: "mode.offline" };
+const MODE_LABEL: Record<Mode, Key> = { lan: "mode.lan", tailnet: "mode.tailnet", cloudflare: "mode.cloudflare", coexist: "mode.coexist", offline: "mode.offline" };
 const LISTEN_LABEL: Record<ListenMode, Key> = { tunnel: "settings.listen.tunnel", "public:443": "settings.listen.public443", funnel: "settings.listen.funnel" };
 const SCOPE_LABEL: Record<(typeof SCOPE_CHOICES)[number], Key> = {
   "devices:read": "settings.scope.devicesRead",
@@ -313,7 +313,7 @@ export function ModuleSettings({ ctx, scope = "node", onDirtyChange }: { ctx: Pa
                   <label class="check" key={m}>
                     <input type="radio" name="settings-mode" checked={form.mode === m} onChange={() => update({ mode: m })} data-testid={`settings-mode-${m}`} />
                     <span>
-                      <strong>{t(MODE_LABEL[m])}</strong> <span class="hint">{t(m === "coexist" ? "device.preferLan" : m === "lan" ? "wizard.lanHint" : m === "tailnet" ? "wizard.tailnetHint" : "mode.offline")}</span>
+                      <strong>{t(MODE_LABEL[m])}</strong> <span class="hint">{t(m === "coexist" ? "device.preferLan" : m === "lan" ? "wizard.lanHint" : m === "tailnet" ? "wizard.tailnetHint" : m === "cloudflare" ? "wizard.cloudflareHint" : "mode.offline")}</span>
                     </span>
                   </label>
                 ))}

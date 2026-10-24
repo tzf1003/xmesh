@@ -44,7 +44,10 @@ export function PairConnectForm({
     e.preventDefault();
     if (!addressOk || !valid || busy) return;
     setBusy(true);
-    const args: PairConnectArgs = { address: target, password: pw, path: path ?? selectedPath };
+    // A tunnel hostname is served on 443; the kernel's bare-host default is the LAN pairing port.
+    const via = path ?? selectedPath;
+    const dial = via === "cloudflare" && !target.includes("://") ? `https://${target}` : target;
+    const args: PairConnectArgs = { address: dial, password: pw, path: via };
     if (fingerprint !== undefined) args.fingerprint = fingerprint;
     const r = await getApi().connectPair(args);
     setBusy(false);
