@@ -246,10 +246,19 @@ func (c *Client) DeleteServiceToken(ctx context.Context, id string) error {
 	return c.do(ctx, "DELETE", c.account("/access/service_tokens/"+id), nil, nil)
 }
 
-// Verify checks that the token can see the account, so a wrong ID or token fails at login.
-func (c *Client) Verify(ctx context.Context) error {
-	var out struct {
-		ID string `json:"id"`
+// ServiceTokenExists reports whether Cloudflare still has the service token.
+func (c *Client) ServiceTokenExists(ctx context.Context, id string) (bool, error) {
+	err := c.do(ctx, "GET", c.account("/access/service_tokens/"+id), nil, nil)
+	if IsNotFound(err) {
+		return false, nil
 	}
-	return c.do(ctx, "GET", "/accounts/"+c.AccountID, nil, &out)
+	return err == nil, err
+}
+
+// Verify checks that the token can use the account's tunnels, so a wrong ID or token fails at login.
+// It lists tunnels rather than reading the account, which needs Account Settings permission the
+// documented token does not carry.
+func (c *Client) Verify(ctx context.Context) error {
+	var out []json.RawMessage
+	return c.do(ctx, "GET", c.account("/cfd_tunnel?per_page=1"), nil, &out)
 }
