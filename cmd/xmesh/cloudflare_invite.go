@@ -27,8 +27,8 @@ type inviteNode interface {
 	Fingerprint(ctx context.Context) (string, error)
 	SetPassword(ctx context.Context, password string) error
 	ClearPassword(ctx context.Context) error
-	// Trusted lists the device IDs this node already trusts.
-	Trusted() (map[string]bool, error)
+	// Trusted maps the device IDs this node trusts to their names.
+	Trusted() (map[string]string, error)
 }
 
 var (
@@ -81,14 +81,14 @@ func (n controlNode) ClearPassword(ctx context.Context) error {
 	return r.Error()
 }
 
-func (n controlNode) Trusted() (map[string]bool, error) {
+func (n controlNode) Trusted() (map[string]string, error) {
 	trust, err := device.OpenTrust(n.dir)
 	if err != nil {
 		return nil, err
 	}
-	ids := map[string]bool{}
+	ids := map[string]string{}
 	for _, t := range trust.Snapshot() {
-		ids[t.Document.DeviceID] = true
+		ids[t.Document.DeviceID] = t.Document.Name
 	}
 	return ids, nil
 }
@@ -186,7 +186,13 @@ func cloudflareInvite(args []string, out io.Writer) error {
 	if err := node2.SetPassword(ctx, password); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "在新设备 %s 上运行（%s 前有效，只能用一次）：\n\n  xmesh join %s\n\n等待它加入…（Ctrl-C 取消）\n", *name, expires.Format("15:04:05"), code)
+	if c.json {
+		if err := emit(out, true, map[string]any{"event": "invite", "device": *name, "code": code, "expires": expires.UTC().Format(time.RFC3339)}, nil); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(out, "在新设备 %s 上运行（%s 前有效，只能用一次）：\n\n  xmesh join %s\n\n新设备的节点名必须是 %s。等待它加入…（Ctrl-C 取消）\n", *name, expires.Format("15:04:05"), code, *name)
+	}
 	deadline := time.NewTimer(*ttl)
 	defer deadline.Stop()
 	tick := time.NewTicker(invitePoll)
@@ -200,9 +206,13 @@ func cloudflareInvite(args []string, out io.Writer) error {
 			if err != nil {
 				return err
 			}
-			for id := range now {
-				if !before[id] {
+			// Only the device that carries the invited name counts, so an unrelated pairing cannot end the invite.
+			for id, got := range now {
+				if _, known := before[id]; !known && got == *name {
 					joined = true
+					if c.json {
+						return emit(out, true, map[string]any{"event": "joined", "device": *name, "device_id": id}, nil)
+					}
 					fmt.Fprintf(out, "设备 %s（%s）已加入，配对窗口已关闭。\n", *name, id)
 					return nil
 				}
@@ -260,6 +270,9 @@ func joinRun(args []string, out io.Writer) error {
 	if cfg.SchemaVersion != 2 {
 		return errors.New("配置不是 schema_version 2；先运行 xmesh migrate")
 	}
+	if cfg.Node.Name != inv.Name {
+		return fmt.Errorf("这个加入码是给节点名 %q 的，本机配置里的节点名是 %q", inv.Name, cfg.Node.Name)
+	}
 	if cfg.Mesh.Cloudflare.Hostname != "" {
 		return errors.New("本机已经配置了 Cloudflare 主机名；加入前先清理 mesh.cloudflare")
 	}
@@ -284,18 +297,22 @@ func joinRun(args []string, out io.Writer) error {
 	if err := writePrivate(section.AccessClientSecretFile, inv.AccessKey); err != nil {
 		return err
 	}
-	cleanup := func() { _ = os.Remove(section.AccessClientSecretFile) }
+	done := false
+	defer func() {
+		if !done {
+			_ = os.Remove(section.AccessClientSecretFile)
+			_ = os.Remove(section.TunnelTokenFile)
+		}
+	}()
 	pairCfg := *cfg
 	pairCfg.Mesh.Cloudflare = config.Cloudflare{Enabled: true, Hostname: section.Hostname, AccessClientID: section.AccessClientID, AccessClientSecretFile: section.AccessClientSecretFile}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	id, err := joinPair(ctx, &pairCfg, *stateDir, inv)
 	if err != nil {
-		cleanup()
 		return fmt.Errorf("加入失败（加入码只能用一次，失败后请让对方重新生成）：%w", err)
 	}
 	if id != adminID {
-		cleanup()
 		return errors.New("配对到的设备与加入码不一致")
 	}
 	if err := writePrivate(section.TunnelTokenFile, inv.TunnelToken); err != nil {
@@ -304,6 +321,7 @@ func joinRun(args []string, out io.Writer) error {
 	if err := setCloudflareConfig(*cfgPath, section); err != nil {
 		return err
 	}
+	done = true
 	fmt.Fprintf(out, "已加入网格，并与 %s 配对。重启 xmesh 后，本机会通过 %s 上线；需要先安装 cloudflared。\n", strings.TrimPrefix(adminID, "dev-")[:12], inv.Hostname)
 	return nil
 }

@@ -20,7 +20,8 @@ type fakeInviteNode struct {
 	mu       sync.Mutex
 	password string
 	cleared  int
-	joinOn   bool // a new device appears once the password is set
+	joinOn   bool   // a new device appears once the password is set
+	joiner   string // its name; defaults to "phone"
 }
 
 func (f *fakeInviteNode) Fingerprint(context.Context) (string, error) {
@@ -39,13 +40,17 @@ func (f *fakeInviteNode) ClearPassword(context.Context) error {
 	f.password = ""
 	return nil
 }
-func (f *fakeInviteNode) Trusted() (map[string]bool, error) {
+func (f *fakeInviteNode) Trusted() (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.joinOn && f.password != "" {
-		return map[string]bool{"dev-" + strings.Repeat("cd", 32): true}, nil
+		name := f.joiner
+		if name == "" {
+			name = "phone"
+		}
+		return map[string]string{"dev-" + strings.Repeat("cd", 32): name}, nil
 	}
-	return map[string]bool{}, nil
+	return map[string]string{}, nil
 }
 
 func inviteFixture(t *testing.T, node *fakeInviteNode) (fakeThings func() int, cfg string, args []string) {
@@ -199,5 +204,64 @@ func TestJoinRejectsExpiredAndGarbageCodes(t *testing.T) {
 		if err == nil || strings.Contains(err.Error(), code) && len(code) > 12 {
 			t.Errorf("%q: %v", code, err)
 		}
+	}
+}
+
+func TestCloudflareInviteIgnoresUnrelatedPairings(t *testing.T) {
+	node := &fakeInviteNode{joinOn: true, joiner: "someone-else"}
+	things, _, args := inviteFixture(t, node)
+	var out bytes.Buffer
+	err := cloudflareRun(append(args, "--apply", "--ttl", "80ms"), &out, nil)
+	if err == nil || !strings.Contains(err.Error(), "过期") {
+		t.Fatalf("an unrelated pairing ended the invite: %v", err)
+	}
+	if things() != 0 {
+		t.Fatal("resources of an unused invite were kept")
+	}
+}
+
+func TestCloudflareInviteJSON(t *testing.T) {
+	node := &fakeInviteNode{joinOn: true}
+	_, _, args := inviteFixture(t, node)
+	var out bytes.Buffer
+	if err := cloudflareRun(append(args, "--apply", "--json"), &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"event":"invite"`) || !strings.Contains(lines[0], cfadmin.InvitePrefix) || !strings.Contains(lines[1], `"event":"joined"`) {
+		t.Fatalf("%q", out.String())
+	}
+}
+
+func TestJoinRejectsCodeForAnotherNodeName(t *testing.T) {
+	cfg, code := joinFixture(t)
+	raw, _ := os.ReadFile(cfg)
+	if err := os.WriteFile(cfg, bytes.Replace(raw, []byte("name: phone"), []byte("name: tablet"), 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil || !strings.Contains(err.Error(), "节点名") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestJoinCleansUpSecretsWhenSetupFailsAfterPairing(t *testing.T) {
+	cfg, code := joinFixture(t)
+	secrets := filepath.Join(filepath.Dir(cfg), "cloudflare")
+	// A directory where the tunnel token goes makes the write after pairing fail.
+	if err := os.MkdirAll(filepath.Join(secrets, "tunnel-token"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := joinPair
+	joinPair = func(_ context.Context, _ *config.Config, _ string, inv cfadmin.Invite) (string, error) {
+		return "dev-" + inv.Fingerprint, nil
+	}
+	t.Cleanup(func() { joinPair = old })
+	var out bytes.Buffer
+	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil {
+		t.Fatal("join succeeded")
+	}
+	if _, err := os.Stat(filepath.Join(secrets, "access-secret")); !os.IsNotExist(err) {
+		t.Fatal("the Access secret was left behind")
 	}
 }
