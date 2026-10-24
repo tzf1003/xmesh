@@ -1155,7 +1155,7 @@ export interface Peer {
   display_name?: string;
   trust_state?: "self" | "paired" | "identity_conflict";
   paths?: DevicePath[];
-  active_path?: "lan" | "tailnet";
+  active_path?: "lan" | "tailnet" | "cloudflare";
   connection_state?: "online" | "unstable" | "reconnecting" | "offline" | "identity_conflict";
 }
 /**
@@ -1172,7 +1172,7 @@ export interface PeerInfo {
   error: string | null;
 }
 export interface DevicePath {
-  kind: "lan" | "tailnet";
+  kind: "lan" | "tailnet" | "cloudflare";
   address: string;
   reachable: boolean;
   verified_at: Timestamp | null;
@@ -1620,7 +1620,7 @@ export interface PairConnectRequest {
    */
   fingerprint?: string;
   password: PairPassword;
-  path?: "lan" | "tailnet";
+  path?: "lan" | "tailnet" | "cloudflare";
 }
 export interface PairConnectResponse {
   name: NodeName;
@@ -1628,7 +1628,7 @@ export interface PairConnectResponse {
   address: PairAddress;
   tags: Tag[];
   device_id: DeviceId;
-  path: "lan" | "tailnet";
+  path: "lan" | "tailnet" | "cloudflare";
 }
 export interface PatInfo {
   name: NodeName;

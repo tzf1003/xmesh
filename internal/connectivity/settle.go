@@ -2,11 +2,9 @@ package connectivity
 
 import (
 	"context"
-	"reflect"
 	"time"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
-	"github.com/tzf1003/xmesh/internal/device"
 )
 
 // Settle waits for the submitted network configuration to become operational.
@@ -18,13 +16,10 @@ func (n *Node) Settle(ctx context.Context) []v2.ApplyError {
 		cfg := n.cfg
 		out := []v2.ApplyError{}
 		pending := false
-		for _, kind := range []device.PathKind{device.LAN, device.Tailnet} {
-			enabled := cfg.LANEnabled()
-			if kind == device.Tailnet {
-				enabled = cfg.TailnetEnabled()
-			}
+		for _, kind := range pathKinds {
+			enabled := providerEnabled(cfg, kind)
 			p := n.providers[kind]
-			same := p != nil && ((kind == device.LAN && reflect.DeepEqual(p.cfg.LAN, cfg.LAN)) || (kind == device.Tailnet && reflect.DeepEqual(p.cfg.Tailnet, cfg.Tailnet)))
+			same := p != nil && providerSame(p.cfg, cfg, kind)
 			if !enabled && (p == nil || (same && !p.ready)) {
 				continue
 			}

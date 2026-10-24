@@ -69,6 +69,25 @@ xmesh control pair connect --path lan --address https://100.100.1.20:7433 --pass
 
 真实接口验收可运行 `XMESH_TEST_SYSTEM_TAILSCALE_INTERFACE=tailscale0 go test ./internal/connectivity -run '^TestSystemTailscaleListenerPairingAndAgent$' -v -count=1`。PowerShell 中先设置 `$env:XMESH_TEST_SYSTEM_TAILSCALE_INTERFACE='Tailscale'`，再运行同一条 `go test`。该检查在临时状态目录启动节点，使用本机系统 Tailscale IPv4 的 TCP 7433，验证未配对连接被拒绝、密码配对及 Agent `sys.info` 调用；需要该 IP 的 7433 空闲，不代表不同物理主机间的网络验收。
 
+## Cloudflare Tunnel（没有公网地址）
+
+每台要被连接的设备运行自己的隧道。在 Cloudflare Zero Trust 里为每台设备建一条隧道，公共主机名各一个（如 `mac.link.example.com`），服务类型选 **TCP**，目标 `tcp://127.0.0.1:7434`；再建一个只放行服务令牌（Service Auth）的 Access 应用覆盖 `*.link.example.com`，并创建服务令牌。国内网络强制 TCP：`cloudflared tunnel --protocol http2 run --token <隧道令牌>`（隧道连边缘走 7844 端口，须可达）。
+
+把服务令牌的密钥写入 0600 文件，然后配置每台设备：
+
+```yaml
+mesh:
+  cloudflare:
+    enabled: true
+    hostname: mac.link.example.com            # 只拨出的设备不填
+    access_client_id: xxxxxxxx.access
+    access_client_secret_file: /home/me/.xmesh/cf-access-secret
+    peers:                                    # 已配对设备 ID -> 它的隧道主机名
+      dev-<64 位十六进制>: win.link.example.com
+```
+
+配对：隧道默认不接受未配对设备。可先经局域网或 tailnet 配对；只有隧道可用时，在被连接的一端临时设置 `allow_pairing: true`，用 `xmesh control pair connect --path cloudflare --address https://win.link.example.com --password-stdin` 配对后关掉。局域网和 tailnet 都拨不通时才会尝试这条路径。
+
 ## Linux 网页管理界面
 
 Linux 没有托盘应用，用 `xmesh-webui` 在浏览器里提供与桌面端相同的面板。推荐用发布页的 `install-linux.sh`：它把内核和网页界面各装成一个 systemd 用户服务（`xmesh-<节点名>`、`xmesh-webui`），并在终端里协助设置工作目录、权限和管理密钥，见 [安装说明](agent/install.md#linux)。

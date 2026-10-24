@@ -127,6 +127,52 @@
             }
           }
         },
+        "cloudflare": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "经 Cloudflare Tunnel 互连，设备不需要公网地址。每台设备运行自己的 cloudflared，内层仍是固定公钥的 mTLS。",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "hostname": {
+              "type": "string",
+              "pattern": "^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$",
+              "description": "本机隧道的主机名。留空表示只拨出，不接受连接。"
+            },
+            "listen": {
+              "type": "string",
+              "default": "127.0.0.1:7434",
+              "description": "cloudflared 以 tcp:// 转发到的回环地址。"
+            },
+            "access_client_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "access_client_secret_file": {
+              "type": "string",
+              "minLength": 1,
+              "description": "绝对路径，文件权限 0600，保存 Access 服务令牌的密钥。须与 access_client_id 同时填写。"
+            },
+            "peers": {
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^dev-[0-9a-f]{64}$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,63}$"
+              },
+              "description": "已配对设备的 ID 到隧道主机名。"
+            },
+            "allow_pairing": {
+              "type": "boolean",
+              "default": false,
+              "description": "允许未配对设备经隧道用连接密码配对。默认关闭：持有 Access 令牌的人否则可以反复试错锁住配对。"
+            }
+          }
+        },
         "tailnet": {
           "type": "object",
           "additionalProperties": false,

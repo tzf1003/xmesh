@@ -489,7 +489,11 @@ func (m *Manager) connect(p *peerLink) {
 	if m.preferLAN(m.ctx, p) {
 		return
 	}
-	m.connectPaths(m.ctx, p, m.candidates(p.id), device.Tailnet, 5*time.Second)
+	if m.connectPaths(m.ctx, p, m.candidates(p.id), device.Tailnet, 5*time.Second) {
+		return
+	}
+	// Cloudflare is the path of last resort: it works with no inbound address but adds latency.
+	m.connectPaths(m.ctx, p, m.candidates(p.id), device.Cloudflare, 15*time.Second)
 }
 
 // Give authenticated LAN discovery the same bounded opportunity for local opens

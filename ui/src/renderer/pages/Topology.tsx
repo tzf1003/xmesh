@@ -203,6 +203,7 @@ function connectionText(p: Peer, t: ReturnType<typeof useT>): string {
   if (p.connection_state === "identity_conflict") return t("device.conflict");
   if (!p.online) return t("devices.offline");
   if (p.active_path === "lan") return t("mode.lan");
+  if (p.active_path === "cloudflare") return t("mode.cloudflare");
   if (p.active_path === "tailnet") return `${t("mode.tailnet")} · ${p.connection === "derp" ? t("conn.derp", {region: p.derp_region ?? "?"}) : t("conn.direct")}`;
   if (p.connection === "direct") return t("conn.direct");
   if (p.connection === "derp") return t("conn.derp", { region: p.derp_region ?? "?" });

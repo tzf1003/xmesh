@@ -315,7 +315,8 @@
         "path": {
           "enum": [
             "lan",
-            "tailnet"
+            "tailnet",
+            "cloudflare"
           ],
           "default": "lan"
         }
@@ -354,7 +355,8 @@
         "path": {
           "enum": [
             "lan",
-            "tailnet"
+            "tailnet",
+            "cloudflare"
           ]
         }
       }

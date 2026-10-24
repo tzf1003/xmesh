@@ -114,7 +114,8 @@
         "active_path": {
           "enum": [
             "lan",
-            "tailnet"
+            "tailnet",
+            "cloudflare"
           ]
         },
         "connection_state": {
@@ -186,7 +187,8 @@
         "kind": {
           "enum": [
             "lan",
-            "tailnet"
+            "tailnet",
+            "cloudflare"
           ]
         },
         "address": {

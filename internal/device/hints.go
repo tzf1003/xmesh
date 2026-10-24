@@ -16,7 +16,7 @@ type PathHint struct {
 
 func (h PathHint) Validate() error {
 	u, err := url.Parse(h.Address)
-	if err != nil || len(h.Address) > 2048 || (h.Kind != LAN && h.Kind != Tailnet) || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || len(h.Address) > 2048 || !h.Kind.Valid() || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("设备连接提示地址无效")
 	}
 	return nil
