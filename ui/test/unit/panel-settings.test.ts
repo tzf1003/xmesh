@@ -50,6 +50,7 @@ const LAN_CONFIG = [
 const lan: SettingsForm = {
   nodeName: "dev-1",
   mode: "lan",
+  cloudflare: false,
   controlUrl: DEFAULT_CONTROL_URL,
   authkey: "",
   authkeyFile: "",
@@ -110,6 +111,7 @@ test("the form reads what the first run set, the ingress and the working directo
     domain: "x.example.com",
     tls: "file",
     certFile: "/c",
+    cloudflare: false,
     keyFile: "/k",
     defaultCwd: "/w",
     allowDirs: ["/w", "/x"],
@@ -477,4 +479,16 @@ test("saving legacy settings retains Tailnet ephemeral identity across network m
   const current = applySettingsForm(LAN_CONFIG, lan)!;
   const explicit = current.replace("tailnet:", "ephemeral: true\n  tailnet:\n    ephemeral: false");
   assert.equal(parse(applySettingsForm(explicit, lan)!).mesh.tailnet.ephemeral, false);
+});
+
+test("cloudflare combines with the LAN and Tailnet modes in the settings form", () => {
+  {
+    const cfg = "schema_version: 2\nnode:\n  name: n\n  roles: [agent]\nmesh:\n  lan:\n    enabled: true\n  cloudflare:\n    enabled: true\n    hostname: a.example.com\n";
+    const form = formFromConfig(parse(cfg));
+    assert.equal(form.mode, "lan");
+    assert.equal(form.cloudflare, true);
+    const off = formFromConfig(parse("schema_version: 2\nnode:\n  name: n\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\n  cloudflare:\n    enabled: true\n"));
+    assert.equal(off.mode, "offline");
+    assert.equal(off.cloudflare, true);
+  }
 });

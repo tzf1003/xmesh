@@ -11,7 +11,7 @@ import { configYaml } from "../../shared/config-yaml";
 export const ROLES = ["agent", "gateway", "ingress"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const MODES = ["lan", "tailnet", "cloudflare", "coexist", "offline"] as const;
+export const MODES = ["lan", "tailnet", "coexist", "offline"] as const;
 export type Mode = (typeof MODES)[number];
 
 export const LISTEN_MODES = ["tunnel", "public:443", "funnel"] as const;
@@ -61,6 +61,8 @@ export type Section = (typeof SECTIONS)[number] | "mcp";
 export interface SettingsForm {
   nodeName: string;
   mode: Mode;
+  /** Also reachable through a Cloudflare Tunnel; combines with any mode. Hostname and credentials stay in the file. */
+  cloudflare: boolean;
   controlUrl: string;
   /** A replacement key, held only until the settings are saved. */
   authkey: string;
@@ -126,7 +128,7 @@ export function formFromConfig(parsed: unknown): SettingsForm {
   const mesh = record(cfg.mesh);
   const lan = record(mesh.lan);
   const tailnet = cfg.schema_version === 2 ? record(mesh.tailnet) : mesh;
-  const mode: Mode = cfg.schema_version === 2 ? (lan.enabled !== false ? (tailnet.enabled === true ? "coexist" : "lan") : (tailnet.enabled === true ? "tailnet" : record(mesh.cloudflare).enabled === true ? "cloudflare" : "offline")) : (mesh.mode === "tailnet" ? "tailnet" : "lan");
+  const mode: Mode = cfg.schema_version === 2 ? (lan.enabled !== false ? (tailnet.enabled === true ? "coexist" : "lan") : (tailnet.enabled === true ? "tailnet" : "offline")) : (mesh.mode === "tailnet" ? "tailnet" : "lan");
   const agent = record(cfg.agent);
   const policy = record(agent.cwd_policy);
   const ingress = record(cfg.ingress);
@@ -135,6 +137,7 @@ export function formFromConfig(parsed: unknown): SettingsForm {
   return {
     nodeName: text(node.name),
     mode,
+    cloudflare: cfg.schema_version === 2 && record(mesh.cloudflare).enabled === true,
     controlUrl: text(tailnet.control_url) || DEFAULT_CONTROL_URL,
     authkey: "",
     authkeyFile: text(tailnet.authkey_file),
@@ -264,8 +267,7 @@ export function applySettingsForm(content: string, f: SettingsForm): string | un
   for (const key of ["mode", "control_url", "authkey_file", "auth_method", "ephemeral"]) deleteExisting(doc, ["mesh", key]);
   doc.setIn(["mesh", "lan", "enabled"], f.mode === "lan" || f.mode === "coexist");
   doc.setIn(["mesh", "tailnet", "enabled"], f.mode === "tailnet" || f.mode === "coexist");
-  // Cloudflare is configured in the file; the form only turns it on for its own mode and never turns off a tunnel it did not select.
-  if (f.mode === "cloudflare") doc.setIn(["mesh", "cloudflare", "enabled"], true);
+  if (f.cloudflare || doc.getIn(["mesh", "cloudflare", "enabled"]) !== undefined) doc.setIn(["mesh", "cloudflare", "enabled"], f.cloudflare);
   if (f.mode === "tailnet" || f.mode === "coexist") {
     doc.setIn(["mesh", "tailnet", "control_url"], f.controlUrl.trim());
     if (f.browserLogin && !f.authkey.trim()) {
