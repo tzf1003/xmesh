@@ -37,6 +37,32 @@ import (
 const serviceType = "_xmesh-v2._tcp"
 const identityPath = "/mesh/v2/identity"
 
+var pathKinds = []device.PathKind{device.LAN, device.Tailnet, device.Cloudflare}
+
+func providerEnabled(cfg config.Mesh, kind device.PathKind) bool {
+	switch kind {
+	case device.Tailnet:
+		return cfg.TailnetEnabled()
+	case device.Cloudflare:
+		return cfg.CloudflareEnabled()
+	}
+	return cfg.LANEnabled()
+}
+
+// providerSame reports whether a provider started with old still matches the section of cfg it depends on.
+func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
+	switch kind {
+	case device.Tailnet:
+		return reflect.DeepEqual(old.Tailnet, cfg.Tailnet)
+	case device.Cloudflare:
+		return reflect.DeepEqual(old.Cloudflare, cfg.Cloudflare)
+	}
+	return reflect.DeepEqual(old.LAN, cfg.LAN)
+}
+
+// Tunnel probes cost a round trip through Cloudflare, so they are rarer and given more time than LAN ones.
+const cloudflareProbeEvery = 20 * time.Second
+
 type Candidate struct {
 	Name       string
 	DeviceID   string
@@ -87,6 +113,8 @@ type Node struct {
 	probes         chan Candidate
 	probing        map[string]bool
 	auditLog       atomic.Pointer[audit.Logger]
+	// cloudflareOuter replaces the HTTP client that opens the tunnel WebSocket; tests point it at a fake edge.
+	cloudflareOuter *http.Client
 }
 
 func Open(ctx context.Context, c *config.Config, stateDir string) (*Node, error) {
@@ -195,12 +223,8 @@ func (n *Node) ProviderStatuses() []ProviderStatus {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	result := []ProviderStatus{}
-	for _, kind := range []device.PathKind{device.LAN, device.Tailnet} {
-		enabled := n.cfg.LANEnabled()
-		if kind == device.Tailnet {
-			enabled = n.cfg.TailnetEnabled()
-		}
-		status := ProviderStatus{Kind: kind, Enabled: enabled}
+	for _, kind := range pathKinds {
+		status := ProviderStatus{Kind: kind, Enabled: providerEnabled(n.cfg, kind)}
 		if p := n.providers[kind]; p != nil {
 			status.Ready, status.Error = p.ready, p.err
 		}
@@ -358,6 +382,17 @@ func (n *Node) Candidates() []Candidate {
 			result = append(result, Candidate{Name: trusted.Document.Name, DeviceID: trusted.Document.DeviceID, Kind: hint.Kind, Address: hint.Address, Generation: generation})
 		}
 	}
+	if generation, enabled := n.directory.Provider(device.Cloudflare); enabled {
+		for id, host := range n.cfg.Cloudflare.Peers {
+			address := "https://" + host
+			key := string(device.Cloudflare) + "|" + address
+			if seen[key] || id == n.identity.ID {
+				continue
+			}
+			seen[key] = true
+			result = append(result, Candidate{DeviceID: id, Kind: device.Cloudflare, Address: address, Generation: generation})
+		}
+	}
 	for key, c := range n.candidates {
 		if time.Now().After(c.ExpiresAt) {
 			delete(n.candidates, key)
@@ -379,6 +414,13 @@ func (n *Node) httpClient(kind device.PathKind, target string, bootstrap bool) (
 		tlsConfig = n.pairing.BootstrapTLS()
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, TLSHandshakeTimeout: 2 * time.Second, ResponseHeaderTimeout: 5 * time.Second, IdleConnTimeout: time.Second}
+	if kind == device.Cloudflare {
+		// The tunnel adds latency, and the pinned mTLS runs inside the WebSocket the tunnel carries.
+		transport.ResponseHeaderTimeout = 10 * time.Second
+		transport.DialTLSContext = func(ctx context.Context, _, address string) (net.Conn, error) {
+			return n.dialCloudflare(ctx, address, tlsConfig)
+		}
+	}
 	if kind == device.Tailnet {
 		n.mu.Lock()
 		p := n.providers[kind]
@@ -491,7 +533,11 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 		return
 	}
 	defer client.CloseIdleConnections()
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	budget, validFor := 2*time.Second, 30*time.Second
+	if c.Kind == device.Cloudflare {
+		budget, validFor = 10*time.Second, 2*cloudflareProbeEvery
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", c.Address+identityPath, nil)
 	if err != nil {
@@ -512,7 +558,7 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if json.NewDecoder(http.MaxBytesReader(nil, response.Body, 16<<10)).Decode(&body) != nil || body.Identity.Validate() != nil || body.Identity.DeviceID != c.DeviceID || body.BootID == "" {
 		return
 	}
-	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, ExpiresAt: started.Add(30 * time.Second)}) == nil
+	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, ExpiresAt: started.Add(validFor)}) == nil
 }
 
 func (n *Node) Close() error {
@@ -582,19 +628,17 @@ func (n *Node) supervise() {
 			<-p.done
 		}
 	}()
+	var nextTunnelProbe time.Time
 	for {
 		n.mu.Lock()
 		cfg := n.cfg
 		n.mu.Unlock()
-		for _, kind := range []device.PathKind{device.LAN, device.Tailnet} {
-			enabled := cfg.LANEnabled()
-			if kind == device.Tailnet {
-				enabled = cfg.TailnetEnabled()
-			}
+		for _, kind := range pathKinds {
+			enabled := providerEnabled(cfg, kind)
 			n.mu.Lock()
 			old := n.providers[kind]
 			n.mu.Unlock()
-			same := old != nil && ((kind == device.LAN && reflect.DeepEqual(old.cfg.LAN, cfg.LAN)) || (kind == device.Tailnet && reflect.DeepEqual(old.cfg.Tailnet, cfg.Tailnet)))
+			same := old != nil && providerSame(old.cfg, cfg, kind)
 			if same {
 				continue
 			}
@@ -619,7 +663,14 @@ func (n *Node) supervise() {
 			}
 			go func(kind device.PathKind, p *provider) { defer close(p.done); n.runProvider(ctx, kind, p) }(kind, p)
 		}
+		probeTunnel := !time.Now().Before(nextTunnelProbe)
+		if probeTunnel {
+			nextTunnelProbe = time.Now().Add(cloudflareProbeEvery)
+		}
 		for _, candidate := range n.Candidates() {
+			if candidate.Kind == device.Cloudflare && !probeTunnel {
+				continue
+			}
 			n.enqueueProbe(candidate)
 		}
 		select {
@@ -633,9 +684,12 @@ func (n *Node) supervise() {
 func (n *Node) runProvider(ctx context.Context, kind device.PathKind, p *provider) {
 	for ctx.Err() == nil {
 		var err error
-		if kind == device.LAN {
+		switch kind {
+		case device.LAN:
 			err = n.runLAN(ctx, p)
-		} else {
+		case device.Cloudflare:
+			err = n.runCloudflare(ctx, p)
+		default:
 			err = n.runTailnet(ctx, p)
 		}
 		n.retireProvider(kind, p)
@@ -677,7 +731,12 @@ func (n *Node) retireProvider(kind device.PathKind, p *provider) {
 
 func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, listener net.Listener, discovery func(context.Context)) error {
 	server := &http.Server{Handler: n.handler(kind, p.generation), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	listener = tls.NewListener(listener, n.pairing.ServerTLS())
+	tlsConfig := n.pairing.ServerTLS()
+	if kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing {
+		// The tunnel is reachable by anyone holding the Access token, so only paired devices get through.
+		tlsConfig = n.trust.TLS(n.identity, "", true)
+	}
+	listener = tls.NewListener(listener, tlsConfig)
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	n.mu.Lock()

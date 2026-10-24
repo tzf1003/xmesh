@@ -18,6 +18,7 @@
 | `agent.cwd_policy.deny_file` | 可选绝对路径，指向一个字符串列表的 YAML 文件，其中的目录与 `deny` 一样始终拒绝，与 `allow` 是否为空无关。文件在每次工具调用时重读，改动在下一次调用生效，不需要重启。空列表要写成 `[]`，没有内容的文件按写了一半处理。启动时文件缺失或无法解析，agent 不能启动，不会视为空列表；运行中文件不再能加载（缺失、不可读、不是字符串列表），继续使用上一份成功的列表，`policy_reload_failed` 计数加一，状态里出现同名警告，文件恢复后清除。向导默认创建该文件并写入凭证目录 |
 | `mesh.tailnet.enabled = true` | `mesh.tailnet.control_url` 必须为 HTTPS；密钥登录需要 `authkey_file`，浏览器登录使用 `auth_method: browser` 并复用本机网络状态 |
 | `mesh.tailnet.ephemeral = true` | Tailnet 网络身份存于内存，每次进程启动重新入网。xmesh 设备公钥仍独立持久化 |
+| `mesh.cloudflare.enabled = true` | 经 Cloudflare Tunnel 互连，设备不需要公网地址。`hostname` 是本机隧道主机名，留空表示只拨出；`listen` 必须是回环地址（默认 `127.0.0.1:7434`），cloudflared 用 `tcp://` 规则转发到它；`access_client_id` 与 `access_client_secret_file`（绝对路径）须同时填写；`peers` 把已配对设备 ID 映射到它的隧道主机名。隧道只转发字节，设备身份仍由内层固定公钥的 mTLS 决定。默认只放行已配对设备，`allow_pairing: true` 才允许未配对设备经隧道用连接密码配对。局域网、Tailnet、Cloudflare 可任意组合同时启用：只启用一条时状态里的网络模式是 `lan`/`tailnet`/`cloudflare`，两条及以上是 `coexist`，全部关闭是 `offline`（局域网默认开启，仅用 Cloudflare 时须设 `mesh.lan.enabled: false`） |
 | `mesh.lan.enabled = true` | 开启局域网路径；`mdns` 缺省 true。可指定物理网卡；网卡暂不可用时该路径独立重试，其他路径与本机管理继续运行。两个 enabled 都为 true 即共存；网络开关热应用 |
 | `ingress.listen = funnel` | `mesh.tailnet.control_url` 必须是官方 Tailscale 控制面：`https://controlplane.tailscale.com` 或 `https://login.tailscale.com`（端口只能是 443，不含用户信息）。其他主机，包括 Headscale 和形似官方域名的后缀，一律拒绝启动。issuer 必须是 `ts.net` 源。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
 | 本机首次配置 | 关闭 LAN 与 Tailnet 路径，以 `--local-only` 开放需认证的回环 Gateway；设备 Agent 仅供该 Gateway 内部调用 |
@@ -83,7 +84,7 @@
 | `node.name` | | 是 |
 | `node.roles`（`gateway`、`ingress` 的增减） | 是 | |
 | `node.roles`（`agent` 的增减） | | 是 |
-| `mesh.lan.*`、`mesh.tailnet.*`（版本 2） | 是 | |
+| `mesh.lan.*`、`mesh.tailnet.*`、`mesh.cloudflare.*`（版本 2） | 是 | |
 | `schema_version` 与旧版 `mesh.*` | | 是 |
 | `gateway.listen`、`gateway.expose_backends` | 是 | |
 | `gateway.quota` | 是 | |

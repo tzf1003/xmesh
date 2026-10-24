@@ -24,7 +24,7 @@
       "additionalProperties": false,
       "required": ["mode", "node_id", "tags"],
       "properties": {
-        "mode": { "enum": ["local", "lan", "tailnet", "coexist", "offline"] },
+        "mode": { "enum": ["local", "lan", "tailnet", "cloudflare", "coexist", "offline"] },
         "node_id": { "type": "string", "minLength": 1 },
         "tags": {
           "type": "array",

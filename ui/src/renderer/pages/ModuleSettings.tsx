@@ -317,6 +317,12 @@ export function ModuleSettings({ ctx, scope = "node", onDirtyChange }: { ctx: Pa
                     </span>
                   </label>
                 ))}
+                <label class="check">
+                  <input type="checkbox" checked={form.cloudflare} onChange={(e) => update({ cloudflare: e.currentTarget.checked })} data-testid="settings-cloudflare" />
+                  <span>
+                    <strong>{t("mode.cloudflare")}</strong> <span class="hint">{t("wizard.cloudflareHint")}</span>
+                  </span>
+                </label>
               </fieldset>
               {(form.mode === "tailnet" || form.mode === "coexist") && (
                 <>

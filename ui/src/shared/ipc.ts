@@ -228,7 +228,7 @@ export interface PairImportArgs {
 
 /** Pairing with a device found on the LAN or typed in. The password is the other device's connection password. */
 export interface PairConnectArgs {
-  path?: "lan" | "tailnet";
+  path?: "lan" | "tailnet" | "cloudflare";
   /** Host or host:port; the kernel uses port 7433 when none is given. */
   address?: string;
   /** The certificate fingerprint the user saw in discovery; the kernel refuses any other certificate. */
@@ -743,7 +743,7 @@ export function parsePairConnect(v: unknown): PairConnectArgs | undefined {
   if (password === undefined) return undefined;
   const out: PairConnectArgs = { password };
   if (v.path !== undefined) {
-    if (v.path !== "lan" && v.path !== "tailnet") return undefined;
+    if (v.path !== "lan" && v.path !== "tailnet" && v.path !== "cloudflare") return undefined;
     out.path = v.path;
   }
   if (v.address !== undefined) {

@@ -60,7 +60,37 @@ type Mesh struct {
 		// Explicit selection also accepts a system Tailscale IPv4 address; use mdns: false.
 		Interface string `json:"interface"`
 	} `json:"lan"`
-	Tailnet Tailnet `json:"tailnet,omitempty"`
+	Tailnet    Tailnet    `json:"tailnet,omitempty"`
+	Cloudflare Cloudflare `json:"cloudflare,omitempty"`
+}
+
+// Cloudflare connects devices that have no public address through Cloudflare Tunnel. Every device
+// runs its own tunnel with its own hostname; the tunnel only forwards bytes and the inner pinned
+// mTLS decides who is a device. cloudflared itself is started by the user (or, later, by xmesh).
+type Cloudflare struct {
+	Enabled bool `json:"enabled"`
+	// Hostname is this device's tunnel hostname. Empty means dial-only: the device connects to others
+	// but cannot be connected to.
+	Hostname string `json:"hostname,omitempty"`
+	// Listen is the loopback address cloudflared forwards the tunnel to (tcp://). Default 127.0.0.1:7434.
+	Listen string `json:"listen,omitempty"`
+	// AccessClientID and AccessClientSecretFile are the Cloudflare Access service token presented when
+	// dialing other devices; the secret lives in a private file, never in the config.
+	AccessClientID         string `json:"access_client_id,omitempty"`
+	AccessClientSecretFile string `json:"access_client_secret_file,omitempty"`
+	// Peers maps a paired device ID to its tunnel hostname.
+	Peers map[string]string `json:"peers,omitempty"`
+	// AllowPairing lets an unpaired device run the connection-password pairing through the tunnel.
+	// It is off by default because anyone holding the Access token could otherwise lock pairing.
+	AllowPairing bool `json:"allow_pairing,omitempty"`
+}
+
+// ListenAddr is the loopback address of the tunnel listener.
+func (c Cloudflare) ListenAddr() string {
+	if c.Listen == "" {
+		return "127.0.0.1:7434"
+	}
+	return c.Listen
 }
 
 type Tailnet struct {
@@ -71,16 +101,26 @@ type Tailnet struct {
 	Ephemeral   bool   `json:"ephemeral,omitempty"`
 }
 
-func (m Mesh) LANEnabled() bool     { return m.LAN.Enabled == nil || *m.LAN.Enabled }
-func (m Mesh) TailnetEnabled() bool { return m.Tailnet.Enabled }
+func (m Mesh) LANEnabled() bool        { return m.LAN.Enabled == nil || *m.LAN.Enabled }
+func (m Mesh) TailnetEnabled() bool    { return m.Tailnet.Enabled }
+func (m Mesh) CloudflareEnabled() bool { return m.Cloudflare.Enabled }
+// NetworkMode names the enabled device paths: one provider by its own name, any two or more as
+// "coexist" (LAN, Tailnet and Cloudflare may run in every combination).
 func (m Mesh) NetworkMode() string {
-	if m.LANEnabled() && m.TailnetEnabled() {
+	enabled := 0
+	for _, on := range []bool{m.LANEnabled(), m.TailnetEnabled(), m.CloudflareEnabled()} {
+		if on {
+			enabled++
+		}
+	}
+	switch {
+	case enabled > 1:
 		return "coexist"
-	}
-	if m.TailnetEnabled() {
+	case m.TailnetEnabled():
 		return "tailnet"
-	}
-	if m.LANEnabled() {
+	case m.CloudflareEnabled():
+		return "cloudflare"
+	case m.LANEnabled():
 		return "lan"
 	}
 	return "offline"
@@ -434,12 +474,40 @@ func listenHostAllowed(host string) bool {
 	return false
 }
 
+var (
+	hostnamePattern = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$`)
+	devicePattern   = regexp.MustCompile(`^dev-[0-9a-f]{64}$`)
+)
+
 func (c *Config) Validate() error {
 	fail := func(p string) error { return fmt.Errorf("配置无效: %s", p) }
 	if c.SchemaVersion == 2 && c.Mesh.Tailnet.Enabled {
 		u, err := url.Parse(c.Mesh.Tailnet.ControlURL)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 			return fail("/mesh/tailnet/control_url")
+		}
+	}
+	if cf := c.Mesh.Cloudflare; c.SchemaVersion == 2 && cf.Enabled {
+		if cf.Hostname != "" && !hostnamePattern.MatchString(cf.Hostname) {
+			return fail("/mesh/cloudflare/hostname")
+		}
+		host, port, e := net.SplitHostPort(cf.ListenAddr())
+		number, perr := strconv.Atoi(port)
+		if e != nil || (host != "127.0.0.1" && host != "::1") || perr != nil || number < 1 || number > 65535 {
+			return fail("/mesh/cloudflare/listen: 必须是回环地址 127.0.0.1:端口（1 到 65535）")
+		}
+		if (cf.AccessClientID == "") != (cf.AccessClientSecretFile == "") {
+			return fail("/mesh/cloudflare/access_client_id: 服务令牌的 ID 与密钥文件须同时填写")
+		}
+		if cf.AccessClientSecretFile != "" && !filepath.IsAbs(cf.AccessClientSecretFile) {
+			return fail("/mesh/cloudflare/access_client_secret_file")
+		}
+		hosts := map[string]bool{}
+		for id, host := range cf.Peers {
+			if !devicePattern.MatchString(id) || !hostnamePattern.MatchString(host) || hosts[strings.ToLower(host)] {
+				return fail("/mesh/cloudflare/peers: 设备 ID 与主机名须有效，且主机名不能重复")
+			}
+			hosts[strings.ToLower(host)] = true
 		}
 	}
 	cs := c.Agent.Computer.Effective()

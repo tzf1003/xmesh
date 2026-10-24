@@ -15,6 +15,8 @@ type PathKind string
 const (
 	LAN     PathKind = "lan"
 	Tailnet PathKind = "tailnet"
+	// Cloudflare reaches a device through its own Cloudflare Tunnel hostname; it needs no inbound address.
+	Cloudflare PathKind = "cloudflare"
 )
 
 var ErrStalePath = errors.New("连接路径版本已过期")
@@ -95,8 +97,11 @@ func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Director
 	return d
 }
 
+// Valid reports whether k is a path kind this runtime knows.
+func (k PathKind) Valid() bool { return k == LAN || k == Tailnet || k == Cloudflare }
+
 func (d *Directory) SetProvider(kind PathKind, generation uint64, enabled bool) error {
-	if (kind != LAN && kind != Tailnet) || generation == 0 {
+	if !kind.Valid() || generation == 0 {
 		return ErrStalePath
 	}
 	d.mu.Lock()

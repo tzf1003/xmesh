@@ -136,8 +136,8 @@ func (s *Server) connectPair(w http.ResponseWriter, r *http.Request, _ *call) {
 	if kind == "" {
 		kind = device.LAN
 	}
-	if kind != device.LAN && kind != device.Tailnet {
-		failWith(w, argError("path", "连接路径须为 lan 或 tailnet"))
+	if !kind.Valid() {
+		failWith(w, argError("path", "连接路径须为 lan、tailnet 或 cloudflare"))
 		return
 	}
 	address := strings.TrimSpace(req.Address)
