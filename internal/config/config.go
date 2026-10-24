@@ -104,14 +104,23 @@ type Tailnet struct {
 func (m Mesh) LANEnabled() bool        { return m.LAN.Enabled == nil || *m.LAN.Enabled }
 func (m Mesh) TailnetEnabled() bool    { return m.Tailnet.Enabled }
 func (m Mesh) CloudflareEnabled() bool { return m.Cloudflare.Enabled }
+// NetworkMode names the enabled device paths: one provider by its own name, any two or more as
+// "coexist" (LAN, Tailnet and Cloudflare may run in every combination).
 func (m Mesh) NetworkMode() string {
-	if m.LANEnabled() && m.TailnetEnabled() {
+	enabled := 0
+	for _, on := range []bool{m.LANEnabled(), m.TailnetEnabled(), m.CloudflareEnabled()} {
+		if on {
+			enabled++
+		}
+	}
+	switch {
+	case enabled > 1:
 		return "coexist"
-	}
-	if m.TailnetEnabled() {
+	case m.TailnetEnabled():
 		return "tailnet"
-	}
-	if m.LANEnabled() {
+	case m.CloudflareEnabled():
+		return "cloudflare"
+	case m.LANEnabled():
 		return "lan"
 	}
 	return "offline"

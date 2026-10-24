@@ -11,7 +11,7 @@ import { kernelEn, kernelZh } from "./kernel-messages";
 export const zh = {
   ...kernelZh,
   "device.preferLan": "连接时优先局域网，断线后自动尝试其他路径；已建立的连接保持当前路径。",
-  "mode.coexist": "局域网与 Tailnet 共存",
+  "mode.coexist": "多条连接路径共存",
   "mode.offline": "设备网络已关闭",
   "device.path": "连接路径",
   "device.reconnecting": "重连中",
@@ -1081,7 +1081,7 @@ export const en: Record<Key, string> = {
   "device.tagsSaved": "Permission groups updated; new sessions use them immediately",
   "device.tagsNarrowHint": "Removing a group ends this device's current sessions; adding groups does not interrupt them.",
   "device.preferLan": "Prefer LAN when connecting; try another path after a disconnect. Established connections keep their current path.",
-  "mode.coexist": "LAN and Tailnet",
+  "mode.coexist": "Multiple paths coexist",
   "mode.offline": "Device networking disabled",
 
   ...computerEn,

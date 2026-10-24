@@ -1319,7 +1319,7 @@ export interface ControlInfo {
   capabilities: Capability[];
 }
 export interface NetworkIdentity {
-  mode: "local" | "lan" | "tailnet" | "coexist" | "offline";
+  mode: "local" | "lan" | "tailnet" | "cloudflare" | "coexist" | "offline";
   node_id: string;
   tags: Tag[];
 }
