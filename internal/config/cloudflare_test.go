@@ -24,6 +24,10 @@ func TestCloudflareValidation(t *testing.T) {
 		"port too large":               {map[string]any{"enabled": true, "listen": "127.0.0.1:99999"}, true},
 		"port not number":              {map[string]any{"enabled": true, "listen": "127.0.0.1:abc"}, true},
 		"duplicate host":               {map[string]any{"enabled": true, "peers": map[string]string{id: "win.link.example.com", "dev-" + strings.Repeat("b", 64): "WIN.link.example.com"}}, true},
+		"managed cloudflared":          {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "tunnel_token_file": filepath.Join(t.TempDir(), "token"), "cloudflared": "cloudflared"}, false},
+		"token file needs hostname":    {map[string]any{"enabled": true, "tunnel_token_file": filepath.Join(t.TempDir(), "token")}, true},
+		"relative token file":          {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "tunnel_token_file": "token"}, true},
+		"binary without token file":    {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "cloudflared": "cloudflared"}, true},
 		"bad peer id":                  {map[string]any{"enabled": true, "peers": map[string]string{"win": "win.link.example.com"}}, true},
 		"schema applies when disabled": {map[string]any{"enabled": false, "hostname": "not a host"}, true},
 	}

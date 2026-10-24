@@ -1,0 +1,109 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/tzf1003/xmesh/internal/cfadmin"
+	"github.com/tzf1003/xmesh/internal/cfadmin/cftest"
+)
+
+const (
+	cfAccount = "0123456789abcdef0123456789abcdef"
+	cfZone    = "fedcba9876543210fedcba9876543210"
+	cfToken   = "cf-API-TOKEN-VALUE"
+)
+
+func cloudflareFixture(t *testing.T) (*cftest.Fake, string, []string) {
+	t.Helper()
+	fake, url, done := cftest.New()
+	t.Cleanup(done)
+	old, oldAPI := cloudflareStore, cloudflareAPI
+	cloudflareStore, cloudflareAPI = &cfadmin.MemoryStore{}, url
+	t.Cleanup(func() { cloudflareStore, cloudflareAPI = old, oldAPI })
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "xmesh.yaml")
+	body := "# my node\nschema_version: 2\nnode:\n  name: laptop\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\nagent:\n  cwd_policy:\n    allow: []\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return fake, cfg, []string{"--state-file", filepath.Join(dir, "cf-state.json")}
+}
+
+func cloudflareLogin_(t *testing.T) {
+	t.Helper()
+	var out bytes.Buffer
+	args := []string{"login", "--account", cfAccount, "--zone", cfZone, "--domain", "mesh.example.com"}
+	if err := cloudflareRun(args, &out, strings.NewReader(cfToken+"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), cfToken) {
+		t.Fatal("login printed the token")
+	}
+}
+
+func TestCloudflareSetupCreatesResourcesAndWritesConfig(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+
+	if err := run("setup", "--name", "laptop", "--config", cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.Things) != 0 {
+		t.Fatalf("preview created %v", fake.Things)
+	}
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "tunnel-token-") {
+		t.Fatal("setup printed the tunnel token")
+	}
+	raw, _ := os.ReadFile(cfg)
+	text := string(raw)
+	for _, want := range []string{"# my node", "enabled: true", "hostname: xmesh-laptop-", ".mesh.example.com", "access_client_id: cid-", "tunnel_token_file: " + filepath.Join(filepath.Dir(cfg), "cloudflare", "tunnel-token")} {
+		if !strings.Contains(text, want) {
+			t.Errorf("config lacks %q:\n%s", want, text)
+		}
+	}
+	token, err := os.ReadFile(filepath.Join(filepath.Dir(cfg), "cloudflare", "tunnel-token"))
+	if err != nil || !strings.HasPrefix(string(token), "tunnel-token-") {
+		t.Fatalf("%q %v", token, err)
+	}
+	if runtime.GOOS != "windows" {
+		if info, _ := os.Stat(filepath.Join(filepath.Dir(cfg), "cloudflare", "access-secret")); info.Mode().Perm() != 0o600 {
+			t.Fatalf("secret mode %v", info.Mode())
+		}
+	}
+	if err := run("status"); err != nil || !strings.Contains(out.String(), "laptop") {
+		t.Fatalf("%v %s", err, out.String())
+	}
+	if err := run("remove", "--name", "laptop", "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.Things) != 0 {
+		t.Fatalf("left behind %v", fake.Things)
+	}
+}
+
+func TestCloudflareLoginRejectsBadInputAndKeepsTokenOutOfErrors(t *testing.T) {
+	cloudflareFixture(t)
+	var out bytes.Buffer
+	for _, args := range [][]string{
+		{"login", "--account", "short", "--zone", cfZone, "--domain", "mesh.example.com"},
+		{"login", "--account", cfAccount, "--zone", cfZone, "--domain", "NotADomain"},
+	} {
+		err := cloudflareRun(args, &out, strings.NewReader(cfToken))
+		if err == nil || strings.Contains(err.Error(), cfToken) {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+	if err := cloudflareRun([]string{"setup", "--name", "x", "--config", "x.yaml"}, &out, nil); err == nil {
+		t.Fatal("setup without a login succeeded")
+	}
+}

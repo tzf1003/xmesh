@@ -63,6 +63,8 @@ Funnel 公网入口仍需控制面允许 Funnel 与 HTTPS，具体授权对象�
 
 该路径是最后一选：LAN 与 Tailnet 都拨不通时才在 15 秒预算内尝试。隧道往返较慢，所以探测每 20 秒一次，探测超时 10 秒、有效期 40 秒。监听默认只放行已配对设备（握手阶段要求客户端证书），未配对设备不能用连接密码经隧道配对，除非显式设置 `allow_pairing`。只拨出的设备不设置 `hostname`，不监听。
 
+隧道可由 `xmesh cloudflare` 经 Cloudflare API 创建（`internal/cfadmin`）：每台设备一条远程配置的隧道、一条代理 CNAME、一个只放行网格服务令牌的 Access 应用，同网格设备共用一个服务令牌。API 令牌只存在运行命令的机器的系统钥匙串或 0600 文件里，内核不持有，内核只收到隧道令牌文件的路径。配置了 `tunnel_token_file` 时内核自己运行 `cloudflared tunnel --no-autoupdate --protocol http2 run --token-file …`（HTTP/2 写死，令牌不出现在进程参数里），退出后按 1 秒起翻倍到 1 分钟的间隔重启；cloudflared 的输出被丢弃，因为它会回显连接器信息。
+
 ## 逻辑会话
 
 内部节点通信使用 `/mesh/v2/link`，子协议为 `xmesh-link-v2`。

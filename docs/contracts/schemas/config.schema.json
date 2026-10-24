@@ -155,6 +155,16 @@
               "minLength": 1,
               "description": "绝对路径，文件权限 0600，保存 Access 服务令牌的密钥。须与 access_client_id 同时填写。"
             },
+            "tunnel_token_file": {
+              "type": "string",
+              "minLength": 1,
+              "description": "绝对路径，文件权限 0600，保存隧道令牌。填写后内核自己运行 cloudflared（--protocol http2），需要 hostname。"
+            },
+            "cloudflared": {
+              "type": "string",
+              "minLength": 1,
+              "description": "cloudflared 可执行文件，缺省从 PATH 查找。只在 tunnel_token_file 时使用。"
+            },
             "peers": {
               "type": "object",
               "propertyNames": {

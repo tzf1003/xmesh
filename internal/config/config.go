@@ -78,6 +78,11 @@ type Cloudflare struct {
 	// dialing other devices; the secret lives in a private file, never in the config.
 	AccessClientID         string `json:"access_client_id,omitempty"`
 	AccessClientSecretFile string `json:"access_client_secret_file,omitempty"`
+	// TunnelTokenFile makes the kernel run cloudflared for this device: a private file holding the tunnel
+	// token, so the device needs no separate cloudflared service. Empty means cloudflared is run by hand.
+	TunnelTokenFile string `json:"tunnel_token_file,omitempty"`
+	// Cloudflared is the cloudflared binary to run. Empty means "cloudflared" from PATH.
+	Cloudflared string `json:"cloudflared,omitempty"`
 	// Peers maps a paired device ID to its tunnel hostname.
 	Peers map[string]string `json:"peers,omitempty"`
 	// AllowPairing lets an unpaired device run the connection-password pairing through the tunnel.
@@ -104,6 +109,7 @@ type Tailnet struct {
 func (m Mesh) LANEnabled() bool        { return m.LAN.Enabled == nil || *m.LAN.Enabled }
 func (m Mesh) TailnetEnabled() bool    { return m.Tailnet.Enabled }
 func (m Mesh) CloudflareEnabled() bool { return m.Cloudflare.Enabled }
+
 // NetworkMode names the enabled device paths: one provider by its own name, any two or more as
 // "coexist" (LAN, Tailnet and Cloudflare may run in every combination).
 func (m Mesh) NetworkMode() string {
@@ -501,6 +507,12 @@ func (c *Config) Validate() error {
 		}
 		if cf.AccessClientSecretFile != "" && !filepath.IsAbs(cf.AccessClientSecretFile) {
 			return fail("/mesh/cloudflare/access_client_secret_file")
+		}
+		if cf.TunnelTokenFile != "" && (!filepath.IsAbs(cf.TunnelTokenFile) || cf.Hostname == "") {
+			return fail("/mesh/cloudflare/tunnel_token_file: 须为绝对路径，且需要 hostname")
+		}
+		if cf.Cloudflared != "" && (cf.TunnelTokenFile == "" || strings.ContainsAny(cf.Cloudflared, "\x00\r\n")) {
+			return fail("/mesh/cloudflare/cloudflared: 只在 tunnel_token_file 时使用")
 		}
 		hosts := map[string]bool{}
 		for id, host := range cf.Peers {
