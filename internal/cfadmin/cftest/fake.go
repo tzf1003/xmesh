@@ -18,6 +18,7 @@ type Fake struct {
 	Things   map[string]string // kind/id -> detail
 	next     int
 	FailOn   string
+	Service  string // the service the last tunnel was routed to
 	Requests []string
 	Auth     []string
 }
@@ -71,10 +72,11 @@ func (f *Fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/cfd_tunnel/") && strings.HasSuffix(p, "/configurations") && r.Method == "PUT":
 		ingress := body["config"].(map[string]any)["ingress"].([]any)
 		first := ingress[0].(map[string]any)
-		if first["service"] != "tcp://127.0.0.1:7434" || !strings.HasSuffix(first["hostname"].(string), ".example.com") || ingress[len(ingress)-1].(map[string]any)["service"] != "http_status:404" {
+		if !strings.HasPrefix(first["service"].(string), "tcp://127.0.0.1:") || !strings.HasSuffix(first["hostname"].(string), ".example.com") || ingress[len(ingress)-1].(map[string]any)["service"] != "http_status:404" {
 			reply(400, nil, "bad ingress")
 			return
 		}
+		f.Service = first["service"].(string)
 		reply(200, map[string]any{})
 	case strings.HasSuffix(p, "/connections") && r.Method == "DELETE":
 		reply(200, nil)

@@ -3,8 +3,10 @@ package cfadmin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 )
 
@@ -34,10 +36,18 @@ type StateFile struct {
 }
 
 func (f *StateFile) Load() (State, error) {
-	raw, err := os.ReadFile(f.Path)
+	info, err := os.Stat(f.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		return State{Devices: map[string]Device{}}, nil
 	}
+	if err != nil {
+		return State{}, err
+	}
+	// The file holds the service token secret, so refuse one other users can read.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		return State{}, fmt.Errorf("Cloudflare 状态文件 %s 权限过宽，应为 0600", f.Path)
+	}
+	raw, err := os.ReadFile(f.Path)
 	if err != nil {
 		return State{}, err
 	}

@@ -145,3 +145,46 @@ func TestSetupSharesOneServiceTokenAndRemoveCleansUp(t *testing.T) {
 		t.Fatal("removing an unknown device succeeded")
 	}
 }
+
+func TestFailedFirstSetupLeavesNoServiceTokenBehind(t *testing.T) {
+	f, client, done := newFake()
+	defer done()
+	m := &Mesh{Client: client, Domain: "example.com"}
+	state := &StateFile{Path: t.TempDir() + "/state.json"}
+	f.FailOn = "POST /accounts/acct/access/apps"
+	if _, _, err := m.Setup(context.Background(), state, "laptop"); err == nil {
+		t.Fatal("setup succeeded")
+	}
+	f.FailOn = ""
+	if len(f.Things) != 0 {
+		t.Fatalf("left behind %v", f.Things)
+	}
+	if st, err := state.Load(); err != nil || st.ServiceToken != nil || len(st.Devices) != 0 {
+		t.Fatalf("%+v %v", st, err)
+	}
+}
+
+func TestStateFileMustBePrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	path := t.TempDir() + "/state.json"
+	if err := os.WriteFile(path, []byte(`{"service_token":{"id":"a","client_id":"b","secret":"c"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&StateFile{Path: path}).Load(); err == nil {
+		t.Fatal("world-readable state accepted")
+	}
+}
+
+func TestProvisionRoutesToTheConfiguredService(t *testing.T) {
+	f, client, done := newFake()
+	defer done()
+	m := &Mesh{Client: client, Domain: "example.com", Service: "tcp://127.0.0.1:9000"}
+	if _, err := m.ProvisionDevice(context.Background(), "box", "token-id"); err != nil {
+		t.Fatal(err)
+	}
+	if f.Service != "tcp://127.0.0.1:9000" {
+		t.Fatalf("routed to %q", f.Service)
+	}
+}

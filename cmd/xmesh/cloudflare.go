@@ -215,6 +215,8 @@ func cloudflareSetup(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// cloudflared forwards to wherever this node listens, which may not be the default port.
+	mesh.Service = "tcp://" + cfg.Mesh.Cloudflare.ListenAddr()
 	state, err := c.state()
 	if err != nil {
 		return err

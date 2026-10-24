@@ -80,6 +80,9 @@ func TestCloudflareSetupCreatesResourcesAndWritesConfig(t *testing.T) {
 			t.Fatalf("secret mode %v", info.Mode())
 		}
 	}
+	if fake.Service != "tcp://127.0.0.1:7434" {
+		t.Fatalf("routed to %q", fake.Service)
+	}
 	if err := run("status"); err != nil || !strings.Contains(out.String(), "laptop") {
 		t.Fatalf("%v %s", err, out.String())
 	}
@@ -105,5 +108,25 @@ func TestCloudflareLoginRejectsBadInputAndKeepsTokenOutOfErrors(t *testing.T) {
 	}
 	if err := cloudflareRun([]string{"setup", "--name", "x", "--config", "x.yaml"}, &out, nil); err == nil {
 		t.Fatal("setup without a login succeeded")
+	}
+}
+
+func TestCloudflareSetupRoutesToTheConfiguredListener(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	body := "schema_version: 2\nnode:\n  name: laptop\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\n  cloudflare:\n    enabled: true\n    listen: 127.0.0.1:9000\nagent:\n  cwd_policy:\n    allow: []\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cloudflareRun(append([]string{"setup", "--name", "laptop", "--config", cfg, "--apply"}, state...), &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if fake.Service != "tcp://127.0.0.1:9000" {
+		t.Fatalf("routed to %q", fake.Service)
+	}
+	raw, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(raw), "listen: 127.0.0.1:9000") {
+		t.Fatalf("listen was lost:\n%s", raw)
 	}
 }

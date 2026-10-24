@@ -150,19 +150,33 @@ func (m *Mesh) Setup(ctx context.Context, state *StateFile, name string) (Device
 	if _, ok := st.Devices[name]; ok {
 		return Device{}, SavedToken{}, fmt.Errorf("设备 %q 已有 Cloudflare 资源；先用 remove 删除再重建", name)
 	}
+	createdToken := false
 	if st.ServiceToken == nil {
 		token, err := m.NewServiceToken(ctx, "mesh")
 		if err != nil {
 			return Device{}, SavedToken{}, err
 		}
 		st.ServiceToken = &SavedToken{ID: token.ID, ClientID: token.ClientID, Secret: token.Secret}
+		createdToken = true
 		if err := state.Save(st); err != nil {
 			_ = m.Client.DeleteServiceToken(context.WithoutCancel(ctx), token.ID)
 			return Device{}, SavedToken{}, err
 		}
 	}
+	// A token this call created is only useful with a device; without one nothing could remove it later.
+	dropToken := func() {
+		if !createdToken {
+			return
+		}
+		bg := context.WithoutCancel(ctx)
+		if err := m.Client.DeleteServiceToken(bg, st.ServiceToken.ID); err == nil || IsNotFound(err) {
+			st.ServiceToken = nil
+			_ = state.Save(st)
+		}
+	}
 	d, err := m.ProvisionDevice(ctx, name, st.ServiceToken.ID)
 	if err != nil {
+		dropToken()
 		return Device{}, SavedToken{}, err
 	}
 	recorded := d
@@ -170,6 +184,8 @@ func (m *Mesh) Setup(ctx context.Context, state *StateFile, name string) (Device
 	st.Devices[name] = recorded
 	if err := state.Save(st); err != nil {
 		_ = m.Teardown(context.WithoutCancel(ctx), d)
+		delete(st.Devices, name)
+		dropToken()
 		return Device{}, SavedToken{}, err
 	}
 	return d, *st.ServiceToken, nil
