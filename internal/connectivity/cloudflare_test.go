@@ -169,4 +169,18 @@ func TestCloudflarePathCarriesDeviceLinkThroughTunnel(t *testing.T) {
 	if _, ok := b.trust.Find(c.identity.ID); !ok {
 		t.Fatal("the paired device is not trusted")
 	}
+
+	// An ordinary trusted connection is served as before while the invite window is open.
+	a.cfg.Cloudflare.AccessClientID, a.cfg.Cloudflare.AccessClientSecretFile = "id.access", secret
+	a.probe(ctx, candidates[0])
+	devices, _ = a.directory.Snapshot(time.Now())
+	reachable := false
+	for _, d := range devices {
+		for _, path := range d.Paths {
+			reachable = reachable || (d.DeviceID == b.identity.ID && path.Kind == device.Cloudflare && path.Reachable)
+		}
+	}
+	if !reachable {
+		t.Fatal("a trusted device could not connect while an invite was open", devices)
+	}
 }

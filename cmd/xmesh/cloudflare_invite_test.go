@@ -20,6 +20,7 @@ type fakeInviteNode struct {
 	mu       sync.Mutex
 	password string
 	cleared  int
+	clearErr error
 	joinOn   bool   // a new device appears once the password is set
 	joiner   string // its name; defaults to "phone"
 }
@@ -38,7 +39,7 @@ func (f *fakeInviteNode) ClearPassword(context.Context) error {
 	defer f.mu.Unlock()
 	f.cleared++
 	f.password = ""
-	return nil
+	return f.clearErr
 }
 func (f *fakeInviteNode) Trusted() (map[string]string, error) {
 	f.mu.Lock()
@@ -248,13 +249,10 @@ func TestJoinRejectsCodeForAnotherNodeName(t *testing.T) {
 func TestJoinCleansUpSecretsWhenSetupFailsAfterPairing(t *testing.T) {
 	cfg, code := joinFixture(t)
 	secrets := filepath.Join(filepath.Dir(cfg), "cloudflare")
-	// A directory where the tunnel token goes makes the write after pairing fail.
-	if err := os.MkdirAll(filepath.Join(secrets, "tunnel-token"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	old := joinPair
 	joinPair = func(_ context.Context, _ *config.Config, _ string, inv cfadmin.Invite) (string, error) {
-		return "dev-" + inv.Fingerprint, nil
+		// A directory where the tunnel token goes makes the write after pairing fail.
+		return "dev-" + inv.Fingerprint, os.MkdirAll(filepath.Join(secrets, "tunnel-token"), 0o700)
 	}
 	t.Cleanup(func() { joinPair = old })
 	var out bytes.Buffer
@@ -289,5 +287,34 @@ func TestJoinRejectsNonDefaultListener(t *testing.T) {
 	var out bytes.Buffer
 	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil || !strings.Contains(err.Error(), "listen") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestCloudflareInviteReportsAWindowThatCouldNotBeClosed(t *testing.T) {
+	node := &fakeInviteNode{joinOn: true, clearErr: errors.New("control unreachable")}
+	_, _, args := inviteFixture(t, node)
+	var out bytes.Buffer
+	if err := cloudflareRun(append(args, "--apply"), &out, nil); err == nil || !strings.Contains(err.Error(), "配对窗口") {
+		t.Fatalf("a window left open was reported as success: %v", err)
+	}
+}
+
+func TestJoinKeepsExistingCloudflareCredentials(t *testing.T) {
+	cfg, code := joinFixture(t)
+	secret := filepath.Join(filepath.Dir(cfg), "mine")
+	if err := os.WriteFile(secret, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(cfg)
+	raw = bytes.Replace(raw, []byte("  lan:\n    enabled: false\n"), []byte("  lan:\n    enabled: false\n  cloudflare:\n    enabled: true\n    access_client_id: old.access\n    access_client_secret_file: "+secret+"\n"), 1)
+	if err := os.WriteFile(cfg, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil {
+		t.Fatal("join went ahead over existing credentials")
+	}
+	if got, _ := os.ReadFile(secret); string(got) != "keep\n" {
+		t.Fatal("existing secret was touched")
 	}
 }

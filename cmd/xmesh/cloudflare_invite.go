@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
@@ -95,7 +97,7 @@ func (n controlNode) Trusted() (map[string]string, error) {
 
 // cloudflareInvite prepares a new device's tunnel, opens the pairing window on this node and waits for
 // the new device to pair, then closes the window. Nothing it creates outlives a failed or expired invite.
-func cloudflareInvite(args []string, out io.Writer) error {
+func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 	var c cloudflareCommon
 	fs := flag.NewFlagSet("cloudflare invite", flag.ContinueOnError)
 	c.register(fs)
@@ -173,7 +175,12 @@ func cloudflareInvite(args []string, out io.Writer) error {
 	defer func() {
 		bg, stop := ctx30()
 		defer stop()
-		_ = node2.ClearPassword(bg)
+		if err := node2.ClearPassword(bg); err != nil {
+			fmt.Fprintf(os.Stderr, "警告：未能关闭本机的连接密码（%v）；请运行 xmesh control pair password clear 关闭配对窗口\n", err)
+			if retErr == nil {
+				retErr = errors.New("未能关闭配对窗口")
+			}
+		}
 		if !joined {
 			if err := mesh.Remove(bg, state, *name); err != nil {
 				fmt.Fprintf(os.Stderr, "未能回收 %s 的 Cloudflare 资源，可运行 xmesh cloudflare remove --name %s --apply：%v\n", *name, *name, err)
@@ -196,12 +203,16 @@ func cloudflareInvite(args []string, out io.Writer) error {
 	} else {
 		fmt.Fprintf(out, "在新设备 %s 上运行（%s 前有效，只能用一次）：\n\n  xmesh join %s\n\n新设备的节点名必须是 %s。等待它加入…（Ctrl-C 取消）\n", *name, expires.Format("15:04:05"), code, *name)
 	}
+	interrupted, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	deadline := time.NewTimer(*ttl)
 	defer deadline.Stop()
 	tick := time.NewTicker(invitePoll)
 	defer tick.Stop()
 	for {
 		select {
+		case <-interrupted.Done():
+			return errors.New("已取消，已关闭配对窗口并回收为新设备创建的 Cloudflare 资源")
 		case <-deadline.C:
 			return errors.New("加入码已过期，已回收为新设备创建的 Cloudflare 资源")
 		case <-tick.C:
@@ -280,8 +291,8 @@ func joinRun(args []string, out io.Writer) error {
 	if l := cfg.Mesh.Cloudflare.Listen; l != "" && l != defaultListen {
 		return fmt.Errorf("邀请创建的隧道转发到 %s；本机 mesh.cloudflare.listen 是 %s，加入前请先改回默认值", defaultListen, l)
 	}
-	if cfg.Mesh.Cloudflare.Hostname != "" {
-		return errors.New("本机已经配置了 Cloudflare 主机名；加入前先清理 mesh.cloudflare")
+	if existing := cfg.Mesh.Cloudflare; existing.Hostname != "" || existing.AccessClientID != "" || existing.AccessClientSecretFile != "" || existing.TunnelTokenFile != "" {
+		return errors.New("本机已经配置了 Cloudflare 凭据；加入前先清理 mesh.cloudflare，以免覆盖它们")
 	}
 	if *stateDir == "" {
 		if *stateDir, err = app.StateDir(cfg.Node.Name); err != nil {
@@ -301,6 +312,11 @@ func joinRun(args []string, out io.Writer) error {
 	if _, _, err := editedCloudflareConfig(*cfgPath, section); err != nil {
 		return err
 	}
+	for _, path := range []string{section.AccessClientSecretFile, section.TunnelTokenFile} {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s 已存在，不会覆盖；换一个 --dir 或先移走它", path)
+		}
+	}
 	if err := writePrivate(section.AccessClientSecretFile, inv.AccessKey); err != nil {
 		return err
 	}
@@ -313,7 +329,9 @@ func joinRun(args []string, out io.Writer) error {
 	}()
 	pairCfg := *cfg
 	pairCfg.Mesh.Cloudflare = config.Cloudflare{Enabled: true, Hostname: section.Hostname, AccessClientID: section.AccessClientID, AccessClientSecretFile: section.AccessClientSecretFile}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	interrupted, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancel := context.WithTimeout(interrupted, 45*time.Second)
 	defer cancel()
 	id, err := joinPair(ctx, &pairCfg, *stateDir, inv)
 	if err != nil {
