@@ -20,7 +20,8 @@ func (p devicePairing) ClearPairPassword() error { return p.node.Pairing().Clear
 func (p devicePairing) Discovered(context.Context) ([]v2.PairDiscoveredDevice, error) {
 	result := []v2.PairDiscoveredDevice{}
 	for _, candidate := range p.node.Candidates() {
-		if _, trusted := p.node.Trust().Find(candidate.DeviceID); trusted {
+		// Tunnel peers are configured, not discovered.
+		if _, trusted := p.node.Trust().Find(candidate.DeviceID); trusted || candidate.Kind == device.Cloudflare {
 			continue
 		}
 		result = append(result, v2.PairDiscoveredDevice{Name: candidate.Name, DeviceID: candidate.DeviceID, Fingerprint: strings.TrimPrefix(candidate.DeviceID, "dev-"), Address: candidate.Address, Path: string(candidate.Kind), SeenAt: v2.At(candidate.SeenAt)})
