@@ -71,9 +71,27 @@ xmesh control pair connect --path lan --address https://100.100.1.20:7433 --pass
 
 ## Cloudflare Tunnel（没有公网地址）
 
-每台要被连接的设备运行自己的隧道。在 Cloudflare Zero Trust 里为每台设备建一条隧道，公共主机名各一个（如 `mac.link.example.com`），服务类型选 **TCP**，目标 `tcp://127.0.0.1:7434`；再建一个只放行服务令牌（Service Auth）的 Access 应用覆盖 `*.link.example.com`，并创建服务令牌。国内网络强制 TCP：`cloudflared tunnel --protocol http2 run --token <隧道令牌>`（隧道连边缘走 7844 端口，须可达）。
+每台要被连接的设备运行自己的隧道。可以让 xmesh 通过 Cloudflare API 自动创建，也可以在 Cloudflare Zero Trust 里手工建。
 
-把服务令牌的密钥写入 0600 文件，然后配置每台设备：
+### 自动创建（推荐）
+
+先在 Cloudflare 创建一个专用 API 令牌，权限：Account 的 Cloudflare Tunnel（编辑）、Access: Apps and Policies（编辑）、Access: Service Tokens（编辑），Zone 的 DNS（编辑），资源范围限定到用于网格的那个域名。令牌只保存在系统钥匙串（或 `--credential-file`），不进 `xmesh.yaml`，内核不持有。
+
+```bash
+echo "$TOKEN" | xmesh cloudflare login --account <账号ID> --zone <区域ID> --domain mesh.example.com
+xmesh cloudflare setup --name laptop --config xmesh.yaml            # 预览
+xmesh cloudflare setup --name laptop --config xmesh.yaml --apply    # 创建并写好配置
+```
+
+`setup` 为这台设备创建远程配置的隧道（转发 `tcp://127.0.0.1:7434`）、代理 CNAME、只放行网格服务令牌的 Access 应用；同一网格的所有设备共用一个服务令牌（首台设备时创建，记录在本机状态文件里）。隧道令牌与 Access 密钥写入配置文件旁 `cloudflare/` 下的 0600 文件，`mesh.cloudflare` 同时写好 `tunnel_token_file`，内核启动后自己运行 `cloudflared tunnel --no-autoupdate --protocol http2 run --token-file …`，所以只需要装好 `cloudflared`。`xmesh cloudflare remove --name laptop --apply` 删除这台设备的全部资源，最后一台删完时一并删除网格服务令牌。
+
+国内网络强制 HTTP/2（走 TCP 443/7844）是写死的，不是选项；隧道连边缘的 7844 端口须可达。
+
+### 手工创建
+
+在 Cloudflare Zero Trust 里为每台设备建一条隧道，公共主机名各一个（如 `mac.link.example.com`），服务类型选 **TCP**，目标 `tcp://127.0.0.1:7434`；再建一个只放行服务令牌（Service Auth）的 Access 应用覆盖 `*.link.example.com`，并创建服务令牌。自己运行 cloudflared：`cloudflared tunnel --protocol http2 run --token <隧道令牌>`。
+
+手工创建时把服务令牌的密钥写入 0600 文件，然后配置每台设备：
 
 ```yaml
 mesh:

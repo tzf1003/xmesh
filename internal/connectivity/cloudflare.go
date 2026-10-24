@@ -1,6 +1,7 @@
 package connectivity
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -31,7 +33,42 @@ func (n *Node) runCloudflare(ctx context.Context, p *provider) error {
 	if err != nil {
 		return err
 	}
+	if cfg.TunnelTokenFile != "" {
+		binary, err := exec.LookPath(cmp.Or(cfg.Cloudflared, "cloudflared"))
+		if err != nil {
+			_ = listener.Close()
+			return errors.New("找不到 cloudflared，请安装或设置 mesh.cloudflare.cloudflared")
+		}
+		go n.runCloudflared(ctx, binary, cfg.TunnelTokenFile)
+	}
 	return n.serve(ctx, device.Cloudflare, p, listener, func(ctx context.Context) { <-ctx.Done() })
+}
+
+// cloudflaredArgs forces HTTP/2 over TCP 443: QUIC over UDP is often blocked or throttled where devices
+// reach Cloudflare from, and the token comes from a private file so it never appears in a process list.
+func cloudflaredArgs(tokenFile string) []string {
+	return []string{"tunnel", "--no-autoupdate", "--protocol", "http2", "run", "--token-file", tokenFile}
+}
+
+// runCloudflared keeps cloudflared running for the life of the provider, restarting it with a growing
+// pause after each exit. Its output is dropped: it can echo the tunnel's connector details.
+func (n *Node) runCloudflared(ctx context.Context, binary, tokenFile string) {
+	pause := time.Second
+	for ctx.Err() == nil {
+		started := time.Now()
+		cmd := exec.CommandContext(ctx, binary, cloudflaredArgs(tokenFile)...)
+		cmd.WaitDelay = 5 * time.Second
+		_ = cmd.Run()
+		if time.Since(started) > time.Minute {
+			pause = time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(pause):
+		}
+		pause = min(pause*2, time.Minute)
+	}
 }
 
 // dialCloudflare opens a WebSocket to a peer's tunnel hostname, presents the Access service token, and
