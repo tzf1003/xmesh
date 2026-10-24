@@ -108,6 +108,7 @@ export function peerPath(p: TrayPeer, t: Text): string {
       ? `${t("上次在线", "Last seen")} ${new Date(p.last_seen).toLocaleString()}`
       : t("离线", "Offline");
   if (p.active_path === "lan") return t("局域网 · 直连", "LAN · Direct");
+  if (p.active_path === "cloudflare") return t("Cloudflare 通道", "Cloudflare Tunnel");
   if (p.connection === "direct") return t("点对点直连", "Direct");
   if (p.connection === "derp") return `${t("中继", "Relay")}${p.derp_region ? ` · ${p.derp_region}` : ""}`;
   return t("连接方式待确认", "Connection pending");

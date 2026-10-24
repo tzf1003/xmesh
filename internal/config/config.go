@@ -482,8 +482,10 @@ func (c *Config) Validate() error {
 		if cf.Hostname != "" && !hostnamePattern.MatchString(cf.Hostname) {
 			return fail("/mesh/cloudflare/hostname")
 		}
-		if host, port, e := net.SplitHostPort(cf.ListenAddr()); e != nil || (host != "127.0.0.1" && host != "::1") || port == "" {
-			return fail("/mesh/cloudflare/listen: 必须是回环地址 127.0.0.1:端口")
+		host, port, e := net.SplitHostPort(cf.ListenAddr())
+		number, perr := strconv.Atoi(port)
+		if e != nil || (host != "127.0.0.1" && host != "::1") || perr != nil || number < 1 || number > 65535 {
+			return fail("/mesh/cloudflare/listen: 必须是回环地址 127.0.0.1:端口（1 到 65535）")
 		}
 		if (cf.AccessClientID == "") != (cf.AccessClientSecretFile == "") {
 			return fail("/mesh/cloudflare/access_client_id: 服务令牌的 ID 与密钥文件须同时填写")
@@ -491,10 +493,12 @@ func (c *Config) Validate() error {
 		if cf.AccessClientSecretFile != "" && !filepath.IsAbs(cf.AccessClientSecretFile) {
 			return fail("/mesh/cloudflare/access_client_secret_file")
 		}
+		hosts := map[string]bool{}
 		for id, host := range cf.Peers {
-			if !devicePattern.MatchString(id) || !hostnamePattern.MatchString(host) {
-				return fail("/mesh/cloudflare/peers")
+			if !devicePattern.MatchString(id) || !hostnamePattern.MatchString(host) || hosts[strings.ToLower(host)] {
+				return fail("/mesh/cloudflare/peers: 设备 ID 与主机名须有效，且主机名不能重复")
 			}
+			hosts[strings.ToLower(host)] = true
 		}
 	}
 	cs := c.Agent.Computer.Effective()

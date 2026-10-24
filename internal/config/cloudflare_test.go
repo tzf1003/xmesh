@@ -20,6 +20,10 @@ func TestCloudflareValidation(t *testing.T) {
 		"public listen":                {map[string]any{"enabled": true, "listen": "0.0.0.0:7434"}, true},
 		"id without file":              {map[string]any{"enabled": true, "access_client_id": "x.access"}, true},
 		"relative secret":              {map[string]any{"enabled": true, "access_client_id": "x.access", "access_client_secret_file": "secret"}, true},
+		"port zero":                    {map[string]any{"enabled": true, "listen": "127.0.0.1:0"}, true},
+		"port too large":               {map[string]any{"enabled": true, "listen": "127.0.0.1:99999"}, true},
+		"port not number":              {map[string]any{"enabled": true, "listen": "127.0.0.1:abc"}, true},
+		"duplicate host":               {map[string]any{"enabled": true, "peers": map[string]string{id: "win.link.example.com", "dev-" + strings.Repeat("b", 64): "WIN.link.example.com"}}, true},
 		"bad peer id":                  {map[string]any{"enabled": true, "peers": map[string]string{"win": "win.link.example.com"}}, true},
 		"schema applies when disabled": {map[string]any{"enabled": false, "hostname": "not a host"}, true},
 	}
