@@ -71,7 +71,7 @@ func inviteFixture(t *testing.T, node *fakeInviteNode) (fakeThings func() int, c
 
 func TestCloudflareInviteKeepsDeviceOnceItJoins(t *testing.T) {
 	node := &fakeInviteNode{joinOn: true}
-	things, _, args := inviteFixture(t, node)
+	things, cfgPath, args := inviteFixture(t, node)
 	var out bytes.Buffer
 	if err := cloudflareRun(append(args, "--apply"), &out, nil); err != nil {
 		t.Fatal(err)
@@ -92,6 +92,10 @@ func TestCloudflareInviteKeepsDeviceOnceItJoins(t *testing.T) {
 	}
 	if things() == 0 {
 		t.Fatal("joined device's resources were removed")
+	}
+	cfg, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(cfg), "dev-"+strings.Repeat("cd", 32)+": "+inv.Hostname) || !strings.Contains(string(cfg), "hostname: xmesh-laptop.mesh.example.com") {
+		t.Fatalf("the inviter did not record the new device as a peer:\n%s", cfg)
 	}
 }
 

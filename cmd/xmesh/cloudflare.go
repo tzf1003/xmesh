@@ -321,9 +321,50 @@ func writePrivate(path, content string) error {
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(content+"\n"), 0o600); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// addCloudflarePeer records a paired device's tunnel hostname in mesh.cloudflare.peers and touches nothing
+// else, so the node can dial it after its next start.
+func addCloudflarePeer(path, deviceID, hostname string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+	}
+	peers := childMapping(childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare"), "peers")
+	setScalar(peers, deviceID, hostname, "!!str")
+	edited, err := yaml.Marshal(&doc)
+	if err != nil {
+		return err
+	}
+	if _, err := config.Parse(edited); err != nil {
+		return fmt.Errorf("修改后的配置无效：%w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // cloudflareSection is what setup writes into mesh.cloudflare. Other keys the user set are kept.

@@ -225,10 +225,13 @@ func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 			for id, got := range now {
 				if _, known := before[id]; !known && got == *name {
 					joined = true
+					if err := addCloudflarePeer(*cfgPath, id, dev.Hostname); err != nil {
+						fmt.Fprintf(os.Stderr, "警告：未能把 %s 写入本机的 mesh.cloudflare.peers（%v）；请手动添加 %s: %s\n", *name, err, id, dev.Hostname)
+					}
 					if c.json {
 						return emit(out, true, map[string]any{"event": "joined", "device": *name, "device_id": id}, nil)
 					}
-					fmt.Fprintf(out, "设备 %s（%s）已加入，配对窗口已关闭。\n", *name, id)
+					fmt.Fprintf(out, "设备 %s（%s）已加入，配对窗口已关闭，已写入本机 mesh.cloudflare.peers（重启 xmesh 后生效）。\n", *name, id)
 					return nil
 				}
 			}
