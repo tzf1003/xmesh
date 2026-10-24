@@ -265,3 +265,29 @@ func TestJoinCleansUpSecretsWhenSetupFailsAfterPairing(t *testing.T) {
 		t.Fatal("the Access secret was left behind")
 	}
 }
+
+func TestCloudflareInviteRejectsNamesJoinCannotUse(t *testing.T) {
+	node := &fakeInviteNode{}
+	things, _, args := inviteFixture(t, node)
+	args[2] = "my.phone"
+	var out bytes.Buffer
+	if err := cloudflareRun(append(args, "--apply"), &out, nil); err == nil {
+		t.Fatal("accepted a name no node can have")
+	}
+	if things() != 0 {
+		t.Fatal("created resources for it")
+	}
+}
+
+func TestJoinRejectsNonDefaultListener(t *testing.T) {
+	cfg, code := joinFixture(t)
+	raw, _ := os.ReadFile(cfg)
+	raw = bytes.Replace(raw, []byte("  lan:\n    enabled: false\n"), []byte("  lan:\n    enabled: false\n  cloudflare:\n    enabled: false\n    listen: 127.0.0.1:9000\n"), 1)
+	if err := os.WriteFile(cfg, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := joinRun([]string{code, "--config", cfg, "--state-dir", t.TempDir()}, &out); err == nil || !strings.Contains(err.Error(), "listen") {
+		t.Fatalf("%v", err)
+	}
+}

@@ -111,6 +111,9 @@ func cloudflareInvite(args []string, out io.Writer) error {
 	if *name == "" || *cfgPath == "" {
 		return errors.New("需要 --name 与 --config")
 	}
+	if !cfadmin.ValidInviteName(*name) {
+		return errors.New("--name 须是合法的节点名：字母或数字开头，只含字母、数字和连字符，最长 63 个字符")
+	}
 	if *ttl <= 0 || *ttl > cfadmin.InviteTTL {
 		return fmt.Errorf("--ttl 须在 0 到 %s 之间", cfadmin.InviteTTL)
 	}
@@ -272,6 +275,10 @@ func joinRun(args []string, out io.Writer) error {
 	}
 	if cfg.Node.Name != inv.Name {
 		return fmt.Errorf("这个加入码是给节点名 %q 的，本机配置里的节点名是 %q", inv.Name, cfg.Node.Name)
+	}
+	defaultListen := config.Cloudflare{}.ListenAddr()
+	if l := cfg.Mesh.Cloudflare.Listen; l != "" && l != defaultListen {
+		return fmt.Errorf("邀请创建的隧道转发到 %s；本机 mesh.cloudflare.listen 是 %s，加入前请先改回默认值", defaultListen, l)
 	}
 	if cfg.Mesh.Cloudflare.Hostname != "" {
 		return errors.New("本机已经配置了 Cloudflare 主机名；加入前先清理 mesh.cloudflare")

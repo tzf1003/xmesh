@@ -14,13 +14,16 @@ import (
 // InvitePrefix starts every join code.
 const InvitePrefix = "xmesh-join-"
 
+// ValidInviteName reports whether name can be a node name, which is what join matches it against.
+func ValidInviteName(name string) bool { return namePattern.MatchString(name) }
+
 // InviteTTL is how long a join code stays usable.
 const InviteTTL = 15 * time.Minute
 
 const maxInvite = 8 << 10
 
 var (
-	namePattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+	namePattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,62}$`)
 	fingerprintPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	hostPattern        = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 )
