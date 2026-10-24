@@ -41,7 +41,7 @@ type Invite struct {
 	TunnelToken string `json:"tunnel"`
 	AccessID    string `json:"cid"`
 	AccessKey   string `json:"cs"`
-	Expires     int64  `json:"exp"`
+	Expires     int64  `json:"exp"` // Unix milliseconds
 }
 
 func (i Invite) String() string   { return "Invite{name=" + i.Name + " secrets=<redacted>}" }
@@ -59,7 +59,7 @@ func (i Invite) Validate(now time.Time) error {
 		return errors.New("加入码里的设备指纹无效")
 	case i.Password == "" || i.TunnelToken == "" || i.AccessID == "" || i.AccessKey == "":
 		return errors.New("加入码缺少凭据")
-	case !now.Before(time.Unix(i.Expires, 0)):
+	case !now.Before(time.UnixMilli(i.Expires)):
 		return errors.New("加入码已过期，请让对方重新生成")
 	}
 	return nil

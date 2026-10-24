@@ -131,7 +131,7 @@ func joinFixture(t *testing.T) (string, string) {
 	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	inv := cfadmin.Invite{Version: 1, Name: "phone", Admin: "xmesh-laptop.mesh.example.com", Fingerprint: strings.Repeat("ab", 32), Password: "one-time-password", Hostname: "xmesh-phone.mesh.example.com", TunnelToken: "TUNNEL-SECRET", AccessID: "cid.access", AccessKey: "ACCESS-SECRET", Expires: time.Now().Add(time.Minute).Unix()}
+	inv := cfadmin.Invite{Version: 1, Name: "phone", Admin: "xmesh-laptop.mesh.example.com", Fingerprint: strings.Repeat("ab", 32), Password: "one-time-password", Hostname: "xmesh-phone.mesh.example.com", TunnelToken: "TUNNEL-SECRET", AccessID: "cid.access", AccessKey: "ACCESS-SECRET", Expires: time.Now().Add(time.Minute).UnixMilli()}
 	code, err := inv.Encode()
 	if err != nil {
 		t.Fatal(err)

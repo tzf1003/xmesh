@@ -193,7 +193,7 @@ func TestProvisionRoutesToTheConfiguredService(t *testing.T) {
 
 func TestInviteRoundTripAndValidation(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	inv := Invite{Version: 1, Name: "phone", Admin: "xmesh-a.mesh.example.com", Fingerprint: strings.Repeat("ab", 32), Password: "pw-pw-pw-pw-pw", Hostname: "xmesh-phone.mesh.example.com", TunnelToken: "tt", AccessID: "cid.access", AccessKey: "sec", Expires: now.Add(InviteTTL).Unix()}
+	inv := Invite{Version: 1, Name: "phone", Admin: "xmesh-a.mesh.example.com", Fingerprint: strings.Repeat("ab", 32), Password: "pw-pw-pw-pw-pw", Hostname: "xmesh-phone.mesh.example.com", TunnelToken: "tt", AccessID: "cid.access", AccessKey: "sec", Expires: now.Add(InviteTTL).UnixMilli()}
 	code, err := inv.Encode()
 	if err != nil {
 		t.Fatal(err)
@@ -217,5 +217,17 @@ func TestInviteRoundTripAndValidation(t *testing.T) {
 	pw, err := NewPassword()
 	if err != nil || len(pw) < 10 {
 		t.Fatal(pw, err)
+	}
+}
+
+func TestInviteKeepsSubSecondExpiry(t *testing.T) {
+	now := time.Unix(1_800_000_000, 400_000_000)
+	inv := Invite{Version: 1, Name: "phone", Admin: "xmesh-a.mesh.example.com", Fingerprint: strings.Repeat("ab", 32), Password: "pw-pw-pw-pw-pw", Hostname: "xmesh-phone.mesh.example.com", TunnelToken: "tt", AccessID: "cid.access", AccessKey: "sec", Expires: now.Add(500 * time.Millisecond).UnixMilli()}
+	code, _ := inv.Encode()
+	if _, err := DecodeInvite(code, now); err != nil {
+		t.Fatal("a half-second invite was rejected at once:", err)
+	}
+	if _, err := DecodeInvite(code, now.Add(600*time.Millisecond)); err == nil {
+		t.Fatal("expired invite accepted")
 	}
 }

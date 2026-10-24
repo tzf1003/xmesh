@@ -36,7 +36,7 @@ type inviteNode interface {
 var (
 	// openInviteNode and invitePoll are replaced by tests.
 	openInviteNode = controlInviteNode
-	invitePoll     = 2 * time.Second
+	invitePoll     = 250 * time.Millisecond
 )
 
 type controlNode struct {
@@ -143,7 +143,10 @@ func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 			fmt.Fprintf(w, "将为新设备 %s 在 %s 下创建隧道，生成 %s 内有效的加入码，并临时开启本机的连接密码。加 --apply 执行。\n", *name, cred.Domain, *ttl)
 		})
 	}
-	ctx, cancel := ctx30()
+	// Ctrl-C or SIGTERM at any point after this returns through the cleanup below.
+	interrupted, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	ctx, cancel := context.WithTimeout(interrupted, 30*time.Second)
 	fingerprint, node2, err := func() (string, inviteNode, error) {
 		defer cancel()
 		n, err := openInviteNode(*node, *stateDir)
@@ -164,7 +167,7 @@ func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 	if err != nil {
 		return err
 	}
-	ctx, cancel = ctx30()
+	ctx, cancel = context.WithTimeout(interrupted, 30*time.Second)
 	defer cancel()
 	mesh.Service = "tcp://127.0.0.1:7434"
 	dev, token, err := mesh.Setup(ctx, state, *name)
@@ -188,7 +191,7 @@ func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 		}
 	}()
 	expires := time.Now().Add(*ttl)
-	invite := cfadmin.Invite{Version: 1, Name: *name, Admin: cf.Hostname, Fingerprint: fingerprint, Password: password, Hostname: dev.Hostname, TunnelToken: dev.TunnelToken, AccessID: token.ClientID, AccessKey: token.Secret, Expires: expires.Unix()}
+	invite := cfadmin.Invite{Version: 1, Name: *name, Admin: cf.Hostname, Fingerprint: fingerprint, Password: password, Hostname: dev.Hostname, TunnelToken: dev.TunnelToken, AccessID: token.ClientID, AccessKey: token.Secret, Expires: expires.UnixMilli()}
 	code, err := invite.Encode()
 	if err != nil {
 		return err
@@ -203,8 +206,6 @@ func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 	} else {
 		fmt.Fprintf(out, "在新设备 %s 上运行（%s 前有效，只能用一次）：\n\n  xmesh join %s\n\n新设备的节点名必须是 %s。等待它加入…（Ctrl-C 取消）\n", *name, expires.Format("15:04:05"), code, *name)
 	}
-	interrupted, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
 	deadline := time.NewTimer(*ttl)
 	defer deadline.Stop()
 	tick := time.NewTicker(invitePoll)
