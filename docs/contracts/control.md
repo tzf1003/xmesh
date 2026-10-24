@@ -168,7 +168,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ### GET /v2/peers
 
-新版设备以 `device_id` 合并，`name` 是稳定本地别名，`display_name` 是显示名称；`paths` 分别报告路径地址、可达性和验证时间，`active_path` 与 `connection_state` 报告当前链路。自连、本地开发模式和尚未探测的字段按模式规定省略。
+新版设备以 `device_id` 合并，`name` 是稳定本地别名，`display_name` 是显示名称；`paths` 分别报告路径地址、可达性和验证时间，`active_path` 与 `connection_state` 报告当前链路；`connection_state` 为 `unstable` 表示链路在线但已有一段时间没有收到数据，尚未断开。自连、本地开发模式和尚未探测的字段按模式规定省略。
 
 响应 `PeersResponse`。`self` 为真的恰有一项（本机）。`connection` 是 `direct`、`derp`、`unknown`（离线或尚未探测）、`local`（本机自己）。数据来自 mesh 层，不触发任何工具调用。
 

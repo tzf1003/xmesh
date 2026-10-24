@@ -243,7 +243,7 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 	}
 	for _, d := range devices {
 		a := n.links.Activity(d.DeviceID)
-		online := a.State == "online" || a.State == "reconnecting"
+		online := a.State == "online" || a.State == "unstable" || a.State == "reconnecting"
 		for _, path := range d.Paths {
 			if path.Reachable {
 				online = true

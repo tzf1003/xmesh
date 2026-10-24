@@ -7,11 +7,76 @@ import (
 	"fmt"
 	"github.com/tzf1003/xmesh/internal/device"
 	"github.com/tzf1003/xmesh/internal/identity"
+	"sync/atomic"
 	"time"
 )
 
 const maxLogicalSessions = 128
 const maxControlFrames = 1024
+
+// chunkBytes bounds one data frame on the wire (about 256 KiB after JSON base64) so
+// control traffic interleaves between frames even on a slow uplink.
+const chunkBytes = 192 << 10
+const maxParts = (MaxFrameBytes+chunkBytes-1)/chunkBytes + 1
+
+// assembler joins the consecutive frames of one split packet. The sender never
+// interleaves other data frames inside a packet, so one partial per carrier suffices.
+type assembler struct {
+	session  string
+	sequence uint64
+	parts    uint32
+	next     uint32
+	buf      []byte
+}
+
+func (a *assembler) pending() bool { return a.buf != nil }
+
+func (a *assembler) reset() { *a = assembler{} }
+
+func (a *assembler) add(v frame) ([]byte, bool, error) {
+	if v.Parts <= 1 {
+		if a.pending() {
+			return nil, false, ErrSequence
+		}
+		return v.Payload, true, nil
+	}
+	if v.Parts > maxParts || v.Part >= v.Parts {
+		return nil, false, ErrSequence
+	}
+	if v.Part == 0 {
+		if a.pending() {
+			return nil, false, ErrSequence
+		}
+		*a = assembler{session: v.SessionID, sequence: v.Sequence, parts: v.Parts, buf: make([]byte, 0, min(len(v.Payload)*int(v.Parts), MaxFrameBytes))}
+	} else if !a.pending() || a.session != v.SessionID || a.sequence != v.Sequence || a.parts != v.Parts || a.next != v.Part {
+		return nil, false, ErrSequence
+	}
+	if len(a.buf)+len(v.Payload) > MaxFrameBytes {
+		return nil, false, ErrFrameTooLarge
+	}
+	a.buf = append(a.buf, v.Payload...)
+	a.next = v.Part + 1
+	if a.next < a.parts {
+		return nil, false, nil
+	}
+	out := a.buf
+	a.reset()
+	return out, true, nil
+}
+
+// splitData returns the wire frames for one packet.
+func splitData(sid string, packet Packet) []frame {
+	if len(packet.Payload) <= chunkBytes {
+		return []frame{{Type: "data", SessionID: sid, Sequence: packet.Sequence, Payload: packet.Payload}}
+	}
+	parts := uint32((len(packet.Payload) + chunkBytes - 1) / chunkBytes)
+	out := make([]frame, 0, parts)
+	for i := uint32(0); i < parts; i++ {
+		end := min((int(i)+1)*chunkBytes, len(packet.Payload))
+		out = append(out, frame{Type: "data", SessionID: sid, Sequence: packet.Sequence, Payload: packet.Payload[int(i)*chunkBytes : end], Part: i, Parts: parts})
+	}
+	return out
+}
 
 func (p *peerLink) queueLocked(value frame) error {
 	if len(p.control) >= maxControlFrames {
@@ -23,11 +88,13 @@ func (p *peerLink) queueLocked(value frame) error {
 }
 
 func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) error {
+	var join assembler
 	for {
 		value, err := readFrame(ctx, c.conn)
 		if err != nil {
 			return err
 		}
+		c.seen.Store(time.Now().UnixNano())
 		if value.Epoch != c.epoch {
 			return ErrSequence
 		}
@@ -164,7 +231,15 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 				err = ErrSequence
 				break
 			}
-			ack, e := l.session.Receive(Packet{Sequence: value.Sequence, Payload: value.Payload})
+			payload, complete, e := join.add(value)
+			if e != nil {
+				err = e
+				break
+			}
+			if !complete {
+				break
+			}
+			ack, e := l.session.Receive(Packet{Sequence: value.Sequence, Payload: payload})
 			if errors.Is(e, ErrBackpressure) {
 				err = p.queueLocked(frame{Type: "wait", SessionID: value.SessionID, Sequence: value.Sequence})
 				break
@@ -213,6 +288,31 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 	defer ticker.Stop()
 	heartbeat := time.NewTicker(m.opts.Heartbeat)
 	defer heartbeat.Stop()
+	c.seen.Store(time.Now().UnixNano())
+	var pinging atomic.Bool
+	// beat checks liveness and starts a ping. It also runs between the fragments of a
+	// large packet, so a slow uplink cannot hide a dead link behind one long write.
+	beat := func() error {
+		silent := time.Since(time.Unix(0, c.seen.Load()))
+		if silent >= m.opts.DeadAfter {
+			return ErrLinkSilent
+		}
+		// Show the panel a warning well before the link is given up.
+		m.setUnstable(p, c, silent >= m.opts.DeadAfter/3)
+		// A pong only proves liveness. It is awaited off the write path, because a
+		// slow peer must not stall data and a late pong is not a failure by itself.
+		if pinging.CompareAndSwap(false, true) {
+			go func() {
+				defer pinging.Store(false)
+				ping, cancel := context.WithTimeout(ctx, m.opts.DeadAfter)
+				defer cancel()
+				if c.conn.Ping(ping) == nil {
+					c.seen.Store(time.Now().UnixNano())
+				}
+			}()
+		}
+		return nil
+	}
 	sent := map[string]uint64{}
 	announced := map[string]bool{}
 	resuming := map[string]bool{}
@@ -223,10 +323,7 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-heartbeat.C:
-			ping, cancel := context.WithTimeout(ctx, m.opts.PingTimeout)
-			err := c.conn.Ping(ping)
-			cancel()
-			if err != nil {
+			if err := beat(); err != nil {
 				return err
 			}
 		case <-ticker.C:
@@ -261,7 +358,7 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 				continue
 			}
 			if packet, ok := l.session.Next(0); ok && packet.Sequence != sent[sid] && !time.Now().Before(retryAfter[sid]) {
-				out = append(out, frame{Type: "data", SessionID: sid, Sequence: packet.Sequence, Payload: packet.Payload})
+				out = append(out, splitData(sid, packet)...)
 				sent[sid] = packet.Sequence
 			}
 		}
@@ -271,6 +368,13 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 				sent[value.SessionID] = 0
 				retryAfter[value.SessionID] = time.Now().Add(100 * time.Millisecond)
 				continue
+			}
+			select {
+			case <-heartbeat.C:
+				if err := beat(); err != nil {
+					return err
+				}
+			default:
 			}
 			value.Epoch = c.epoch
 			writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -304,4 +408,20 @@ func delegatedPrincipal(node string, tags []string, oauth string) (identity.Prin
 		tags = []string{"tag:ingress"}
 	}
 	return identity.FromPeer(node, tags, oauth)
+}
+
+// setUnstable records that the carrier has gone quiet, or has recovered, and reports the
+// change. It does nothing if c is no longer the active carrier.
+func (m *Manager) setUnstable(p *peerLink, c *carrier, unstable bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active != c || !c.committed || p.unstable == unstable {
+		return
+	}
+	p.unstable = unstable
+	state := "online"
+	if unstable {
+		state = "unstable"
+	}
+	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: state})
 }

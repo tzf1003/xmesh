@@ -410,7 +410,7 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         print("Tailnet retained after LAN recovery", flush=True)
         # A revoked Tailnet path may take the full recovery budget to time out.
         # Keep the lease valid for that interval after the short-TTL heartbeat check.
-        extended = call("backend.acquire", {"name": "exclusive", "ttl": "60s"})
+        extended = call("backend.acquire", {"name": "exclusive", "ttl": "120s"})
         assert (
             extended["token"] == lease["token"] and extended["owner"] == lease["owner"]
         ), extended
@@ -439,7 +439,7 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         wait_for(
             "LAN after Tailnet revocation",
             lambda: remote(a).get("active_path") == "lan",
-            25,
+            50,  # a silent carrier is dropped after 30 s without data, then LAN takes over
         )
         assert call("sys.info")["hostname"] == b
         after = call("pty.list")

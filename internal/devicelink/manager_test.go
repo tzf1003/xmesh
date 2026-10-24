@@ -49,7 +49,7 @@ func newTestNode(t *testing.T, name string) *testNode {
 	}
 	n := &testNode{id: id, trust: trust, directory: directory}
 	manager, err := NewManager(t.Context(), Options{
-		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, Heartbeat: 100 * time.Millisecond, PingTimeout: 100 * time.Millisecond,
+		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
 		Dial: func(ctx context.Context, target string, path device.Path) (*websocket.Conn, error) {
 			if path.Kind == device.Tailnet && n.dialGate != nil {
 				select {

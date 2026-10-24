@@ -12,6 +12,10 @@ func (n *Node) auditActivity(activity devicelink.Activity) {
 	if log == nil {
 		return
 	}
+	if activity.State == "unstable" {
+		// Instability is only shown on the panel; the audit trail records the drop itself.
+		return
+	}
 	event := "device_link_" + activity.State
 	tool := "device.link"
 	if activity.Path.Kind != "" {
