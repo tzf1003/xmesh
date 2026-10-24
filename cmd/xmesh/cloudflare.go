@@ -63,6 +63,9 @@ func (c *cloudflareCommon) store() cfadmin.Store {
 }
 
 func (c *cloudflareCommon) state() (*cfadmin.StateFile, error) {
+	if err := cfadmin.CheckProfile(c.profile); err != nil {
+		return nil, err
+	}
 	path := c.stateFile
 	if path == "" {
 		dir, err := os.UserConfigDir()
@@ -241,13 +244,19 @@ func cloudflareSetup(args []string, out io.Writer) error {
 			fmt.Fprintf(w, "并在 %s 写入隧道令牌与 Access 密钥（0600），更新 %s 的 mesh.cloudflare。加 --apply 执行。\n", secrets, *cfgPath)
 		})
 	}
+	tunnelFile, accessFile := filepath.Join(secrets, "tunnel-token"), filepath.Join(secrets, "access-secret")
+	// Prove the edited configuration loads before anything is created at Cloudflare: a disabled section can
+	// hold values that only fail once it is enabled.
+	rehearsal := cloudflareSection{Hostname: "rehearsal." + cred.Domain, AccessClientID: "rehearsal.access", AccessClientSecretFile: accessFile, TunnelTokenFile: tunnelFile}
+	if _, _, err := editedCloudflareConfig(*cfgPath, rehearsal); err != nil {
+		return err
+	}
 	ctx, cancel := ctx30()
 	defer cancel()
 	device, token, err := mesh.Setup(ctx, state, *name)
 	if err != nil {
 		return err
 	}
-	tunnelFile, accessFile := filepath.Join(secrets, "tunnel-token"), filepath.Join(secrets, "access-secret")
 	cf := cloudflareSection{Hostname: device.Hostname, AccessClientID: token.ClientID, AccessClientSecretFile: accessFile, TunnelTokenFile: tunnelFile}
 	if err := writeCloudflareFiles(*cfgPath, cf, device.TunnelToken, token.Secret); err != nil {
 		return fmt.Errorf("资源已创建但写本机文件失败，可用 xmesh cloudflare remove --name %s --apply 回收：%w", *name, err)
@@ -318,13 +327,26 @@ type cloudflareSection struct {
 // setCloudflareConfig edits the file as YAML nodes so comments and the other sections survive, and
 // writes it only when the result still loads.
 func setCloudflareConfig(path string, s cloudflareSection) error {
-	raw, err := os.ReadFile(path)
+	edited, mode, err := editedCloudflareConfig(path, s)
 	if err != nil {
 		return err
 	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, edited, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// editedCloudflareConfig returns the file with mesh.cloudflare set, after checking that it still loads.
+func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMode, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+		return nil, 0, errors.New("xmesh.yaml 不是有效的 YAML 映射")
 	}
 	mesh := childMapping(doc.Content[0], "mesh")
 	cf := childMapping(mesh, "cloudflare")
@@ -335,20 +357,16 @@ func setCloudflareConfig(path string, s cloudflareSection) error {
 	setScalar(cf, "tunnel_token_file", s.TunnelTokenFile, "!!str")
 	edited, err := yaml.Marshal(&doc)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	if _, err := config.Parse(edited); err != nil {
-		return fmt.Errorf("修改后的配置无效：%w", err)
+		return nil, 0, fmt.Errorf("修改后的配置无效：%w", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return edited, info.Mode().Perm(), nil
 }
 
 func childMapping(parent *yaml.Node, key string) *yaml.Node {

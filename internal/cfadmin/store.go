@@ -70,7 +70,8 @@ type Store interface {
 	Delete(profile string) error
 }
 
-func checkProfile(profile string) error {
+// CheckProfile rejects a profile name that could escape the directory it is used to name.
+func CheckProfile(profile string) error {
 	if profile == "" || strings.ContainsAny(profile, "/\\\x00\r\n") {
 		return fmt.Errorf("配置名 %q 无效", profile)
 	}
@@ -81,7 +82,7 @@ func checkProfile(profile string) error {
 type KeychainStore struct{}
 
 func (KeychainStore) Get(profile string) (Credential, error) {
-	if err := checkProfile(profile); err != nil {
+	if err := CheckProfile(profile); err != nil {
 		return Credential{}, err
 	}
 	s, err := keyring.Get(KeychainService, profile)
@@ -99,7 +100,7 @@ func (KeychainStore) Get(profile string) (Credential, error) {
 }
 
 func (KeychainStore) Put(profile string, c Credential) error {
-	if err := checkProfile(profile); err != nil {
+	if err := CheckProfile(profile); err != nil {
 		return err
 	}
 	if err := c.Validate(); err != nil {
@@ -113,7 +114,7 @@ func (KeychainStore) Put(profile string, c Credential) error {
 }
 
 func (KeychainStore) Delete(profile string) error {
-	if err := checkProfile(profile); err != nil {
+	if err := CheckProfile(profile); err != nil {
 		return err
 	}
 	if err := keyring.Delete(KeychainService, profile); err != nil && !errors.Is(err, keyring.ErrNotFound) {

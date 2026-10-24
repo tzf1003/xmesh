@@ -130,3 +130,27 @@ func TestCloudflareSetupRoutesToTheConfiguredListener(t *testing.T) {
 		t.Fatalf("listen was lost:\n%s", raw)
 	}
 }
+
+func TestCloudflareSetupRejectsUnloadableConfigBeforeCreatingAnything(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	body := "schema_version: 2\nnode:\n  name: laptop\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\n  cloudflare:\n    enabled: false\n    listen: not-an-address\nagent:\n  cwd_policy:\n    allow: []\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := cloudflareRun(append([]string{"setup", "--name", "laptop", "--config", cfg, "--apply"}, state...), &out, nil); err == nil {
+		t.Fatal("setup accepted a config that cannot load")
+	}
+	if len(fake.Things) != 0 {
+		t.Fatalf("created %v before failing", fake.Things)
+	}
+}
+
+func TestCloudflareRejectsProfileThatEscapesTheStateDirectory(t *testing.T) {
+	cloudflareFixture(t)
+	var out bytes.Buffer
+	if err := cloudflareRun([]string{"status", "--profile", "../../x"}, &out, nil); err == nil {
+		t.Fatal("profile with a path was accepted")
+	}
+}
