@@ -381,6 +381,12 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         assert call("session.echo")["pid"] == backend_pid
         time.sleep(9)
         assert call("exclusive.echo", {"_lease_token": lease["token"]})["pid"]
+        # The short-TTL heartbeat check is done. Large transfers over a forced DERP relay can hold the
+        # heartbeat back for longer than 8 seconds, so keep the lease valid for the rest of the run.
+        extended = call("backend.acquire", {"name": "exclusive", "ttl": "120s"})
+        assert (
+            extended["token"] == lease["token"] and extended["owner"] == lease["owner"]
+        ), extended
         final = call(
             "fs.upload",
             {
@@ -408,12 +414,6 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         )
         assert remote(a)["active_path"] == "tailnet", remote(a)
         print("Tailnet retained after LAN recovery", flush=True)
-        # A revoked Tailnet path may take the full recovery budget to time out.
-        # Keep the lease valid for that interval after the short-TTL heartbeat check.
-        extended = call("backend.acquire", {"name": "exclusive", "ttl": "120s"})
-        assert (
-            extended["token"] == lease["token"] and extended["owner"] == lease["owner"]
-        ), extended
         members = hscli("nodes", "list")
         target = next(
             (
