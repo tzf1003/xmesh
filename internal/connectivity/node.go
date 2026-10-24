@@ -121,6 +121,12 @@ func Open(ctx context.Context, c *config.Config, stateDir string) (*Node, error)
 	return open(ctx, c, stateDir, true)
 }
 
+// OpenPairingClient opens the node's identity, trust and pairing state without starting any network
+// path, so one command can pair with a peer before this device's own service has ever run.
+func OpenPairingClient(ctx context.Context, c *config.Config, stateDir string) (*Node, error) {
+	return open(ctx, c, stateDir, false)
+}
+
 func open(ctx context.Context, c *config.Config, stateDir string, supervise bool) (*Node, error) {
 	if c.SchemaVersion != 2 {
 		return nil, fmt.Errorf("设备连接需要 schema_version: 2，请转换配置并重新配对")
@@ -734,7 +740,15 @@ func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, lis
 	tlsConfig := n.pairing.ServerTLS()
 	if kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing {
 		// The tunnel is reachable by anyone holding the Access token, so only paired devices get through.
-		tlsConfig = n.trust.TLS(n.identity, "", true)
+		// Pairing is only reachable while a connection password is set (an invite is open).
+		strict, open := n.trust.TLS(n.identity, "", true), tlsConfig
+		tlsConfig = &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			if n.pairing.Status().Set {
+				// ServerTLS picks the pairing configuration per ALPN, which Go does not do for a returned config.
+				return open.GetConfigForClient(hello)
+			}
+			return strict, nil
+		}}
 	}
 	listener = tls.NewListener(listener, tlsConfig)
 	done := make(chan error, 1)

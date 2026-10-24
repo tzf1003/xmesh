@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tzf1003/xmesh/internal/cfadmin"
@@ -29,6 +31,9 @@ const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
   setup    为一台设备创建隧道并写好配置  --name 设备名  --config xmesh.yaml
            [--dir 目录，放隧道令牌与 Access 密钥，缺省在配置文件旁的 cloudflare/]  [--apply]
   remove   删除一台设备的隧道、DNS 与 Access 应用  --name 设备名  [--apply]
+  invite   邀请新设备加入：为它创建隧道并生成一次性加入码（15 分钟内有效），等它加入后关闭配对窗口
+           --name 新设备名  --config 本机 xmesh.yaml  [--node 节点 | --state-dir 目录]  [--apply]
+           对方在新设备上运行 xmesh join 加入码
 
 写入类命令默认只预览；加 --apply 才会调用 Cloudflare 并写文件。`
 
@@ -125,6 +130,8 @@ func cloudflareRun(args []string, out io.Writer, in io.Reader) error {
 		return cloudflareStatus(rest, out)
 	case "setup":
 		return cloudflareSetup(rest, out)
+	case "invite":
+		return cloudflareInvite(args[1:], out)
 	case "remove":
 		return cloudflareRemove(rest, out)
 	}
@@ -314,14 +321,57 @@ func writePrivate(path, content string) error {
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(content+"\n"), 0o600); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// addCloudflarePeer records a paired device's tunnel hostname in mesh.cloudflare.peers and touches nothing
+// else, so the node can dial it after its next start.
+func addCloudflarePeer(path, deviceID, hostname string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+	}
+	peers := childMapping(childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare"), "peers")
+	setScalar(peers, deviceID, hostname, "!!str")
+	edited, err := yaml.Marshal(&doc)
+	if err != nil {
+		return err
+	}
+	if _, err := config.Parse(edited); err != nil {
+		return fmt.Errorf("修改后的配置无效：%w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // cloudflareSection is what setup writes into mesh.cloudflare. Other keys the user set are kept.
 type cloudflareSection struct {
 	Hostname, AccessClientID, AccessClientSecretFile, TunnelTokenFile string
+	// Peers are merged into mesh.cloudflare.peers (paired device ID -> tunnel hostname).
+	Peers map[string]string
 }
 
 // setCloudflareConfig edits the file as YAML nodes so comments and the other sections survive, and
@@ -355,6 +405,12 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 	setScalar(cf, "access_client_id", s.AccessClientID, "!!str")
 	setScalar(cf, "access_client_secret_file", s.AccessClientSecretFile, "!!str")
 	setScalar(cf, "tunnel_token_file", s.TunnelTokenFile, "!!str")
+	if len(s.Peers) > 0 {
+		peers := childMapping(cf, "peers")
+		for _, id := range slices.Sorted(maps.Keys(s.Peers)) {
+			setScalar(peers, id, s.Peers[id], "!!str")
+		}
+	}
 	edited, err := yaml.Marshal(&doc)
 	if err != nil {
 		return nil, 0, err
