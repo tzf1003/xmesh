@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -320,5 +321,30 @@ func TestJoinKeepsExistingCloudflareCredentials(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(secret); string(got) != "keep\n" {
 		t.Fatal("existing secret was touched")
+	}
+}
+
+func TestCloudflareInviteFailsButKeepsTheDeviceWhenPeerCannotBeRecorded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only directories are not enforced the same way")
+	}
+	node := &fakeInviteNode{joinOn: true}
+	things, cfgPath, args := inviteFixture(t, node)
+	args[len(args)-1] = filepath.Join(t.TempDir(), "cf-state.json") // keep the state file writable
+	// The directory stops accepting new files, so the config rewrite cannot be staged.
+	if err := os.Chmod(filepath.Dir(cfgPath), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(cfgPath), 0o700) })
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	var out bytes.Buffer
+	err := cloudflareRun(append(args, "--apply"), &out, nil)
+	if err == nil || !strings.Contains(err.Error(), "peers") {
+		t.Fatalf("a missing peer entry was reported as success: %v", err)
+	}
+	if things() == 0 {
+		t.Fatal("the joined device's resources were removed")
 	}
 }

@@ -226,7 +226,8 @@ func cloudflareInvite(args []string, out io.Writer) (retErr error) {
 				if _, known := before[id]; !known && got == *name {
 					joined = true
 					if err := addCloudflarePeer(*cfgPath, id, dev.Hostname); err != nil {
-						fmt.Fprintf(os.Stderr, "警告：未能把 %s 写入本机的 mesh.cloudflare.peers（%v）；请手动添加 %s: %s\n", *name, err, id, dev.Hostname)
+						// The device did join and keeps its resources; only this node's address book is missing it.
+						return fmt.Errorf("设备 %s 已加入，但未能写入本机的 mesh.cloudflare.peers：%w\n请手动添加  %s: %s", *name, err, id, dev.Hostname)
 					}
 					if c.json {
 						return emit(out, true, map[string]any{"event": "joined", "device": *name, "device_id": id}, nil)
