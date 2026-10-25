@@ -587,3 +587,63 @@ func strictUnmarshal(b []byte, v any) error {
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }
+
+// CloudflareOffer is what a paired device sends so another can join its Cloudflare mesh: the
+// receiver's own tunnel and Access service token, and the sender's hostname. It never carries a
+// Cloudflare API token.
+type CloudflareOffer struct {
+	Hostname     string `json:"hostname"`
+	TunnelToken  string `json:"tunnel_token"`
+	AccessID     string `json:"access_id"`
+	AccessSecret string `json:"access_secret"`
+	PeerHostname string `json:"peer_hostname"`
+}
+
+// DeviceOffer is one connection method a paired device proposes to another.
+type DeviceOffer struct {
+	ID         string           `json:"id"`
+	Kind       string           `json:"kind"`
+	Cloudflare *CloudflareOffer `json:"cloudflare,omitempty"`
+}
+
+// OfferSendRequest delivers an offer to a paired device. The device applies nothing until its user accepts.
+type OfferSendRequest struct {
+	DeviceID string      `json:"device_id"`
+	Offer    DeviceOffer `json:"offer"`
+}
+
+// OfferCloudflareSummary is the part of a Cloudflare offer that is safe to show: no credentials.
+type OfferCloudflareSummary struct {
+	Hostname     string `json:"hostname"`
+	PeerHostname string `json:"peer_hostname"`
+}
+
+// OfferSummary is a received offer as the panel shows it. The sender is the device the connection
+// proved, and the credentials are never included.
+type OfferSummary struct {
+	ID         string                  `json:"id"`
+	Kind       string                  `json:"kind"`
+	FromID     string                  `json:"from_id"`
+	FromName   string                  `json:"from_name"`
+	ReceivedAt Time                    `json:"received_at"`
+	ExpiresAt  Time                    `json:"expires_at"`
+	Cloudflare *OfferCloudflareSummary `json:"cloudflare,omitempty"`
+}
+
+type OffersResponse struct {
+	Offers []OfferSummary `json:"offers"`
+}
+
+// OfferAcceptResponse reports an applied offer. RestartRequired is true while the running node still
+// has to restart to use it.
+type OfferAcceptResponse struct {
+	Kind            string   `json:"kind"`
+	RestartRequired bool     `json:"restart_required"`
+	ChangedPaths    []string `json:"changed_paths"`
+}
+
+// OfferSendResponse says how an offer reached the device: "delivered" into its inbox, or "queued"
+// here when it can only collect the offer over its own connection to this node.
+type OfferSendResponse struct {
+	Delivery string `json:"delivery"`
+}

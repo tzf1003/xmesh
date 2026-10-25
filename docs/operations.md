@@ -121,6 +121,24 @@ xmesh join xmesh-join-… --config xmesh.yaml
 
 新设备配置里的 `node.name` 必须与 `--name` 相同（邀请方靠它认出是谁加入）。加入码 15 分钟内有效、只能用一次，内含新设备自己的隧道令牌、网格 Access 凭据和一次性连接密码，按密钥对待，只通过你信任的渠道交给新设备（加入码本身就是信任的起点，被整个替换时新设备无从分辨）；它不含 Cloudflare API 令牌。已有设备会临时设置连接密码，新设备配对成功后立刻清除；到期或失败会清除密码并回收为新设备创建的 Cloudflare 资源；若新设备配对成功后才在本机写文件失败，邀请方已认为它加入了，需要在邀请方运行 `xmesh cloudflare remove --name 新设备名 --apply` 再重新邀请。邀请方会把新设备写入自己的 `mesh.cloudflare.peers`（重启后生效）。配对仍是逐对的：新设备只信任发出邀请的设备，其他设备需要各自再配对。加入后重启 xmesh 即可上线。
 
+### 把 Cloudflare 连接方式发给已配对的设备
+
+设备 B 没有接入 Cloudflare，但已经通过局域网、Tailnet 或别的方式和 A 配过对时，A 可以通过它们之间已有的加密连接，帮 B 也接入 Cloudflare，不需要加入码：
+
+```
+# A（xmesh 需正在运行，已 login 和 setup）
+xmesh cloudflare share --device phone --config xmesh.yaml          # 先预览
+xmesh cloudflare share --device phone --config xmesh.yaml --apply  # 为 phone 建隧道并下发
+
+# B：查看并确认（xmesh 需正在运行）
+xmesh control offers list
+xmesh control offers accept <编号>     # 或 reject
+```
+
+下发的内容只有 B 自己那条隧道的令牌、网格的 Access 服务令牌、B 的主机名和 A 的主机名，不含 Cloudflare API 令牌，也不会出现在 `offers list` 里。B 上的用户确认之前不会改任何文件；确认后凭据写进状态目录下的私有文件，`mesh.cloudflare` 写入主机名、凭据文件和 A 的地址，重启 xmesh 后 B 经自己的隧道上线，A 已把 B 写进自己的 `peers`（同样重启后生效）。A 和 B 因此都有自己的公网主机名，可以互相拨号。
+
+A 拨不通 B 时（例如 B 只拨出到 A），提议会留在 A，B 经自己到 A 的连接约一分钟内取走并确认，此时 `share` 输出“已留在本机”，隧道保留。收件箱最多 16 条（单个发送者 4 条），24 小时不处理就自动删除。B 已经配置了 Cloudflare，或 `mesh.cloudflare.listen` 不是默认的 `127.0.0.1:7434` 时不能接受。下发地址和凭据不建立任何信任：B 与其他设备之间仍须各自配对。
+
 ## Linux 网页管理界面
 
 Linux 没有托盘应用，用 `xmesh-webui` 在浏览器里提供与桌面端相同的面板。推荐用发布页的 `install-linux.sh`：它把内核和网页界面各装成一个 systemd 用户服务（`xmesh-<节点名>`、`xmesh-webui`），并在终端里协助设置工作目录、权限和管理密钥，见 [安装说明](agent/install.md#linux)。

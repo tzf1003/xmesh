@@ -93,6 +93,7 @@ flowchart LR
 | `POST /v2/drain`、`POST /v2/resume` | 排空（keep / kill）与恢复 | drain 已有；resume 新增 |
 | `GET/PUT /v2/config` | 读取当前生效配置；写入前经 `config.Parse` 校验，临时文件加重命名原子写，返回 diff 与 `restart_required` | 新增。保留 YAML 注释，使用 yaml.Node 往返 |
 | `GET/PUT/DELETE /v2/pair/password`、`GET /v2/pair/discovered`、`POST /v2/pair/connect` | LAN / Tailnet 统一连接密码配对与发现；口令只写不读，见 [14](../design/14-password-pairing.md) | 新增，底层是 `internal/device` 的 SPAKE2 配对 |
+| `POST/GET /v2/offers`、`POST /v2/offers/{offer_id}/accept`、`DELETE /v2/offers/{offer_id}` | 已配对设备之间下发连接方式（目前是 Cloudflare 隧道）；接收方用户确认后才应用，凭据不出现在列表里 | 新增，API 2.2 |
 | `GET /v2/ci`、`/v2/ci/accounts`、`/v2/ci/bindings`、`POST /v2/ci/import/inspect` | GitHub Actions 运行器托管（1.8）；GitHub 令牌只写不读，见 [15](../design/15-github-runner.md) | 新增，底层是 `internal/ci` |
 | `POST /v2/pair/export`、`POST /v2/pair/import` | 版本 2 设备公钥文档（高级用法）；导入必须带 UI 用户确认过的指纹 | 逻辑已有（`xmesh pair`），抽成库 |
 | `GET/POST/DELETE /v2/pats` | 列出、创建、轮转、撤销本机 Gateway PAT。令牌正文只在创建响应里出现一次，并直接写入 `0600` 文件，之后不可读回 | 新增 |

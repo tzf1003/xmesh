@@ -31,6 +31,7 @@ const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
   setup    为一台设备创建隧道并写好配置  --name 设备名  --config xmesh.yaml
            [--dir 目录，放隧道令牌与 Access 密钥，缺省在配置文件旁的 cloudflare/]  [--apply]
   remove   删除一台设备的隧道、DNS 与 Access 应用  --name 设备名  [--apply]
+  share    把 Cloudflare 连接方式发给已配对的设备：为它创建隧道，经已有的加密连接下发，对方确认后应用
   invite   邀请新设备加入：为它创建隧道并生成一次性加入码（15 分钟内有效），等它加入后关闭配对窗口
            --name 新设备名  --config 本机 xmesh.yaml  [--node 节点 | --state-dir 目录]  [--apply]
            对方在新设备上运行 xmesh join 加入码
@@ -132,6 +133,8 @@ func cloudflareRun(args []string, out io.Writer, in io.Reader) error {
 		return cloudflareSetup(rest, out)
 	case "invite":
 		return cloudflareInvite(args[1:], out)
+	case "share":
+		return cloudflareShare(args[1:], out)
 	case "remove":
 		return cloudflareRemove(rest, out)
 	}

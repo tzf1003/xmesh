@@ -52,6 +52,9 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
   pair export [--out 文件]        导出配对文档（高级用法，仅 lan 模式）
   pair import --file 文件 --fingerprint 指纹 [--tags tag:peer,tag:device]
                                    导入配对文档（高级用法）；指纹须是另行核对过的，导入后即时生效
+  offers list                     列出收到的连接方式提议（不含凭据）
+  offers accept 编号              接受提议：写入凭据与配置，重启 xmesh 后生效
+  offers reject 编号              拒绝并删除提议
   pats list                       列出 Gateway PAT（不含令牌）
   pats create --name 名字 --scope S[,S...]
                                    创建 PAT；令牌只在这条输出里出现一次
@@ -189,6 +192,8 @@ func controlCommand(args []string) error {
 		return controlConfig(ctx, flags, target, rest)
 	case "pair":
 		return controlPair(ctx, flags, target, rest)
+	case "offers":
+		return controlOffers(ctx, flags, target, rest)
 	case "pats":
 		return controlPats(ctx, flags, target, rest)
 	case "ingress":
