@@ -92,6 +92,13 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string, credentialF
       ];
     case "status":
       return ["mesh", "status", "--json", ...cred, ...node];
+    case "share.tailnet":
+      return ["mesh", "share", "--json", ...cred, `--device=${req.device}`, ...(req.user !== undefined ? [`--user=${req.user}`] : []), ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), "--apply"];
+    case "cloudflare.share":
+      // Cloudflare's token lives in the keychain, not in the panel's credential file.
+      return ["cloudflare", "share", "--json", `--device=${req.device}`, ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), "--apply"];
+    case "cloudflare.login":
+      return ["cloudflare", "login", "--json", `--account=${req.account}`, `--zone=${req.zone}`, `--domain=${req.domain}`, "--secret-file=-"];
     case "tags":
       return ["mesh", "tags", "--json", ...cred, `--device=${req.device}`, `--set=${req.tags.join(",")}`, ...(req.apply ? ["--apply"] : [])];
     case "onboard":
@@ -198,7 +205,7 @@ function firstLines(s: string, max = 600): string {
 export function meshError(run: MeshRun): ActionError {
   const text = firstLines(run.stderr) || `xmesh mesh exited with code ${run.code}`;
   if (run.missing) return { code: "unavailable", reason: "binary_missing", message: text };
-  if (text.includes("没有保存的凭据")) return { code: "no_credential", message: text };
+  if (text.includes("没有保存的凭据") || text.includes("还没有保存 Cloudflare 令牌")) return { code: "no_credential", message: text };
   if (text.includes("预览时的策略版本") || text.includes("meshadmin: policy changed since it was read")) return { code: "conflict", reason: "stale_version", message: text };
   // A read-only Tailscale OAuth credential is refused by the control plane with
   // a 403 that names the scope. That is a different problem from "not logged in".
@@ -247,7 +254,7 @@ export class MeshService {
         req = { ...req, target: { url: req.target.url, tokenFile: file } };
       }
       let input: string | undefined;
-      if (req.op === "login") input = req.secret;
+      if (req.op === "login" || req.op === "cloudflare.login") input = req.secret;
       if (req.op === "policy.document") input = JSON.stringify({ ...req.edit, ...(req.edit.regions !== undefined && { regions: req.edit.regions.map((r) => ({ id: r.id ?? 0, code: r.code, name: r.name, hostname: r.host, ipv4: r.ipv4, ipv6: r.ipv6, derp_port: r.derpPort, stun_port: r.stunPort, cert_name: r.certName })) }) });
       if (req.op === "policy.publish") input = JSON.stringify({ text: req.text });
       result = await this.run(buildMeshArgs(req, this.nodeConfig(), this.credentialFile()), input);
