@@ -27,6 +27,7 @@ export function Share({ peer, ctx }: { peer: Peer; ctx: PageContext }): JSX.Elem
   const [zone, setZone] = useState("");
   const [domain, setDomain] = useState("");
   const [token, setToken] = useState("");
+  const [user, setUser] = useState("");
   if (!peer.device_id || !ctx.can("pair")) return null;
   const device = peer.device_id;
   const name = peer.display_name || peer.name;
@@ -40,7 +41,7 @@ export function Share({ peer, ctx }: { peer: Peer; ctx: PageContext }): JSX.Elem
   const share = async (kind: Kind): Promise<void> => {
     setBusy(true);
     setErr(undefined);
-    const r = kind === "cloudflare" ? await getApi().mesh({ op: "cloudflare.share", device }) : await getApi().mesh({ op: "share.tailnet", device });
+    const r = kind === "cloudflare" ? await getApi().mesh({ op: "cloudflare.share", device }) : await getApi().mesh({ op: "share.tailnet", device, ...(user !== "" && { user }) });
     setBusy(false);
     if (r.ok) {
       setAsk(undefined);
@@ -93,9 +94,14 @@ export function Share({ peer, ctx }: { peer: Peer; ctx: PageContext }): JSX.Elem
             <p>{ask === "cloudflare"
               ? copy(`会用本机保存的 Cloudflare 令牌为 ${name} 创建隧道、DNS 名称和 Access 应用，再发给它。`, `Uses the Cloudflare token saved on this device to create a tunnel, DNS name and Access app for ${name}, then sends them.`)
               : copy(`会用本机保存的 Tailscale / Headscale 管理凭据为 ${name} 生成一个单次有效的 key（48 小时内有效），再发给它。没有管理凭据时会提示怎么办。`, `Uses the Tailscale / Headscale admin credential saved on this device to make a single-use key for ${name} (valid 48 hours), then sends it. If none is saved you will be told what to do.`)}</p>
+            {ask === "tailnet" && (
+              <Field label={copy("Headscale 用户（可选）", "Headscale user (optional)")} hint={copy("Headscale 有多个用户时必填；Tailscale 官方服务留空。", "Required when Headscale has several users; leave empty for Tailscale.")}>
+                <input value={user} onInput={(e) => setUser(e.currentTarget.value.trim())} data-testid="share-user" />
+              </Field>
+            )}
             {err && <Banner kind="danger" testid="device-share-error">{err.message}</Banner>}
           </>}
-          busy={busy}
+          busy={busy || (ask === "tailnet" && user !== "" && !parseMeshRequest({ op: "share.tailnet", device, user }).ok)}
           onCancel={() => { setAsk(undefined); setErr(undefined); }}
           onConfirm={() => void share(ask)}
         />
