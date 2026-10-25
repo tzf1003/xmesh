@@ -95,26 +95,29 @@ func (m *Manager) pathState(id string, path device.Path) (kindState, bool) {
 	return kindState{}, false
 }
 
-// smartOrder is the order to try paths when connecting: scored paths first, best score first, then
-// the rest in the configured order. With nothing scored yet that is just the configured order.
+// smartOrder is the order to try paths when connecting: healthy scored paths by score, then unmeasured
+// ones in the configured order, then paths that are failing. With nothing scored yet that is just the
+// configured order.
 func (m *Manager) smartOrder(id string, order []device.PathKind) []device.PathKind {
 	states := m.kindStates(id, true)
 	out := slices.Clone(order)
+	// Healthy scored paths first, then unmeasured ones, then paths measured to be failing.
+	class := func(st kindState) int {
+		switch {
+		case st.scored && !st.unhealthy:
+			return 0
+		case !st.scored:
+			return 1
+		}
+		return 2
+	}
 	slices.SortStableFunc(out, func(a, b device.PathKind) int {
 		sa, sb := states[a], states[b]
-		switch {
-		case sa.scored && sb.scored:
-			if sa.score < sb.score {
-				return -1
-			}
-			if sa.score > sb.score {
-				return 1
-			}
-			return 0
-		case sa.scored:
-			return -1
-		case sb.scored:
-			return 1
+		if ca, cb := class(sa), class(sb); ca != cb {
+			return cmp.Compare(ca, cb)
+		}
+		if sa.scored {
+			return cmp.Compare(sa.score, sb.score)
 		}
 		return 0
 	})
