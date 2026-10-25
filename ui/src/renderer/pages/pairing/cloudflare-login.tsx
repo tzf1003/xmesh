@@ -41,13 +41,18 @@ export function useCloudflareLogin(): { fields: JSX.Element; request: MeshReques
     if (!req.ok) return;
     setBusy(true);
     setErr(undefined);
-    const r = await getApi().mesh(req.value);
-    setBusy(false);
-    if (!r.ok) { setErr(r.error); return; }
-    const data = r.data as CloudflareDiscovery;
-    setFound(data);
-    const only = data.zones.length === 1 ? data.zones[0] : undefined;
-    if (only) { setZoneId(only.id); setDomain(`mesh.${only.name}`); }
+    try {
+      const r = await getApi().mesh(req.value);
+      if (!r.ok) { setErr(r.error); return; }
+      const data = r.data as CloudflareDiscovery;
+      setFound(data);
+      const only = data.zones.length === 1 ? data.zones[0] : undefined;
+      if (only) { setZoneId(only.id); setDomain(`mesh.${only.name}`); }
+    } catch (e) {
+      setErr({ code: "unavailable", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const choose = (id: string): void => {

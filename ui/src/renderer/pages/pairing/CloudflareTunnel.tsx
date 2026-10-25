@@ -35,50 +35,57 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
   const close = (): void => { setStep(undefined); setPlan(undefined); setErr(undefined); cf.reset(); };
   const nameRequest = parseMeshRequest({ op: "cloudflare.setup", name, apply: false });
 
-  const preview = async (): Promise<void> => {
-    if (!nameRequest.ok) return;
+  // A rejected call (no bridge, IPC failure) must not leave the buttons disabled.
+  const guarded = async (work: () => Promise<void>): Promise<void> => {
     setBusy(true);
     setErr(undefined);
+    try {
+      await work();
+    } catch (e) {
+      setErr({ code: "unavailable", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const preview = (): Promise<void> => guarded(async () => {
+    if (!nameRequest.ok) return;
     const r = await getApi().mesh(nameRequest.value);
-    setBusy(false);
     if (r.ok) { setPlan(r.data as CloudflareSetupResult); setStep("plan"); return; }
     if (r.error.code === "no_credential") { setStep("login"); return; }
     setErr(r.error);
-  };
+  });
 
-  const apply = async (): Promise<void> => {
-    setBusy(true);
-    setErr(undefined);
+  const apply = (): Promise<void> => guarded(async () => {
     const r = await getApi().mesh({ op: "cloudflare.setup", name, apply: true });
-    setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
     close();
     status.reload();
     ctx.toast(copy("隧道已创建。重启 xmesh 后生效（需要已安装 cloudflared）。", "Tunnel created. Restart xmesh to use it (cloudflared must be installed)."));
-  };
+  });
 
   const saveLogin = async (): Promise<void> => {
-    if (!cf.request) return;
-    setBusy(true);
-    setErr(undefined);
-    const r = await getApi().mesh(cf.request);
-    setBusy(false);
-    if (!r.ok) { setErr(r.error); return; }
+    let saved = false;
+    await guarded(async () => {
+      if (!cf.request) return;
+      const r = await getApi().mesh(cf.request);
+      if (!r.ok) { setErr(r.error); return; }
+      saved = true;
+    });
+    if (!saved) return;
     cf.reset();
     setStep("name");
     await preview();
   };
 
-  const remove = async (): Promise<void> => {
+  const remove = (): Promise<void> => guarded(async () => {
     if (!removing) return;
-    setBusy(true);
     const r = await getApi().mesh({ op: "cloudflare.remove", name: removing });
-    setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
     setRemoving(undefined);
     status.reload();
     ctx.toast(copy("已删除该设备在 Cloudflare 上的资源。", "The device's Cloudflare resources were deleted."));
-  };
+  });
 
   return (
     <section class="card" data-testid="cloudflare-tunnel">
