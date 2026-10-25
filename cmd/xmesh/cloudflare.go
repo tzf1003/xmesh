@@ -371,7 +371,9 @@ func cloudflareSetup(args []string, out io.Writer) error {
 	if err := writeCloudflareFiles(*cfgPath, cf, device.TunnelToken, token.Secret); err != nil {
 		return fmt.Errorf("资源已创建但写本机文件失败，可用 xmesh cloudflare remove --name %s --apply 回收：%w", *name, err)
 	}
-	cloudflaredPath, installNote := ensureCloudflared(context.Background(), secrets)
+	// The panel kills setup after its own budget, so the install here is bounded well inside it; the kernel
+	// retries with a longer deadline when it starts and finds no cloudflared.
+	cloudflaredPath, installNote := ensureCloudflared(context.Background(), secrets, 60*time.Second)
 	return emit(out, c.json, map[string]any{"hostname": device.Hostname, "tunnel_id": device.TunnelID, "config": *cfgPath, "cloudflared": cloudflaredPath, "cloudflared_note": installNote}, func(w io.Writer) {
 		fmt.Fprintf(w, "设备 %s 已就绪：%s\n重启 xmesh 后，内核会用 cloudflared（HTTP/2）连上隧道。\n%s\n", *name, device.Hostname, installNote)
 	})
@@ -380,12 +382,12 @@ func cloudflareSetup(args []string, out io.Writer) error {
 // ensureCloudflared makes sure the kernel can find cloudflared: an existing one is kept, otherwise the
 // official release is installed in <secrets>/bin. A failed install only produces a note; the tunnel
 // resources already exist and the user can install cloudflared by hand.
-func ensureCloudflared(ctx context.Context, secrets string) (path, note string) {
+func ensureCloudflared(ctx context.Context, secrets string, limit time.Duration) (path, note string) {
 	bin := filepath.Join(secrets, "bin")
 	if p, err := cfadmin.FindCloudflared("", bin); err == nil {
 		return p, "已找到 cloudflared：" + p
 	}
-	dl, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	dl, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	p, err := cfadmin.CloudflaredInstaller{API: cloudflaredAPI, HTTP: cloudflareHTTP}.Install(dl, bin)
 	if err != nil {
@@ -414,7 +416,7 @@ func cloudflareInstall(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	path, note := ensureCloudflared(context.Background(), secrets)
+	path, note := ensureCloudflared(context.Background(), secrets, 5*time.Minute)
 	if path == "" {
 		return errors.New(note)
 	}

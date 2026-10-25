@@ -222,6 +222,9 @@ func (s FallbackStore) file(profile string) (FileStore, error) {
 // a successful keychain write removes it.
 func (s FallbackStore) Get(profile string) (Credential, error) {
 	f, ferr := s.file(profile)
+	if ferr == nil && isTombstone(f.Path) {
+		return Credential{}, ErrNoCredential
+	}
 	if ferr == nil {
 		c, err := f.Get(profile)
 		if err == nil {
@@ -271,22 +274,45 @@ func (s FallbackStore) Put(profile string, c Credential) error {
 	return nil
 }
 
-// Delete removes the file and the keychain entry. A keychain that is unavailable cannot hold a credential
-// this store wrote, so it only fails the call when there was no file to remove.
+// Delete logs the profile out. When the keychain cannot be reached it may still hold an older credential
+// that would come back once it recovers, so a tombstone in the fallback file keeps the profile logged out
+// until the next successful login.
 func (s FallbackStore) Delete(profile string) error {
 	err := s.Primary.Delete(profile)
 	f, ferr := s.file(profile)
 	if ferr != nil {
 		return err
 	}
-	_, statErr := os.Stat(f.Path)
-	fileExisted := statErr == nil
-	derr := f.Delete(profile)
-	switch {
-	case derr != nil:
-		return derr
-	case err != nil && fileExisted:
-		return nil
+	if err == nil {
+		return f.Delete(profile)
 	}
-	return err
+	if terr := writeTombstone(f.Path); terr != nil {
+		return fmt.Errorf("%w；写入注销标记也失败：%v", err, terr)
+	}
+	return nil
+}
+
+type tombstone struct {
+	Deleted bool `json:"deleted"`
+}
+
+func writeTombstone(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(tombstone{Deleted: true})
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func isTombstone(path string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var t tombstone
+	return json.Unmarshal(raw, &t) == nil && t.Deleted
 }

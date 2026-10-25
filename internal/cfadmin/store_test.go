@@ -33,8 +33,8 @@ func TestFallbackStoreUsesFileWithoutKeychain(t *testing.T) {
 	if err := s.Delete("default"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "default.credential.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("file should be gone: %v", err)
+	if _, err := s.Get("default"); !errors.Is(err, ErrNoCredential) {
+		t.Fatalf("after logout: %v", err)
 	}
 }
 
@@ -122,5 +122,31 @@ func TestFallbackStoreLogoutWithoutKeychain(t *testing.T) {
 	}
 	if err := s.Delete("p"); err != nil {
 		t.Fatalf("logout that removed the file must succeed: %v", err)
+	}
+}
+
+func TestFallbackStoreLogoutDuringOutageStaysLoggedOut(t *testing.T) {
+	dir := t.TempDir()
+	kc := &flakyStore{}
+	s := FallbackStore{Primary: kc, Dir: dir}
+	if err := s.Put("p", testCred("old-keychain")); err != nil {
+		t.Fatal(err)
+	}
+	kc.down = true
+	if err := s.Put("p", testCred("file-token")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("p"); err != nil {
+		t.Fatalf("logout during an outage: %v", err)
+	}
+	kc.down = false
+	if _, err := s.Get("p"); !errors.Is(err, ErrNoCredential) {
+		t.Fatalf("the old keychain entry must not log the profile back in: %v", err)
+	}
+	if err := s.Put("p", testCred("fresh")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Get("p"); err != nil || got.Token != "fresh" {
+		t.Fatalf("login after logout: %v %v", got, err)
 	}
 }
