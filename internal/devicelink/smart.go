@@ -48,9 +48,10 @@ type kindState struct {
 	unhealthy bool
 }
 
-// kindStates scores each enabled path kind of a device from its recent probes. Paths that are
-// unreachable this instant still count: a path that keeps dropping is exactly the one to judge.
-func (m *Manager) kindStates(id string) map[device.PathKind]kindState {
+// kindStates scores each enabled path kind of a device from its recent probes. With reachableOnly
+// false, paths that are unreachable this instant still count: a path that keeps dropping is exactly the
+// one to judge. A path to move to must be reachable now, or the redial could not use it.
+func (m *Manager) kindStates(id string, reachableOnly bool) map[device.PathKind]kindState {
 	devices, _ := m.opts.Directory.Snapshot(time.Now())
 	states := map[device.PathKind]kindState{}
 	for _, d := range devices {
@@ -58,7 +59,7 @@ func (m *Manager) kindStates(id string) map[device.PathKind]kindState {
 			continue
 		}
 		for _, path := range d.Paths {
-			if m.rank(path.Kind) < 0 {
+			if m.rank(path.Kind) < 0 || (reachableOnly && !path.Reachable) {
 				continue
 			}
 			score, ok := device.Score(path.Kind, path.Quality)
@@ -73,10 +74,30 @@ func (m *Manager) kindStates(id string) map[device.PathKind]kindState {
 	return states
 }
 
+// pathState scores the address a carrier actually runs on, so a healthy sibling address of the same
+// kind cannot hide that the carrier's own address is failing.
+func (m *Manager) pathState(id string, path device.Path) (kindState, bool) {
+	devices, _ := m.opts.Directory.Snapshot(time.Now())
+	for _, d := range devices {
+		if d.DeviceID != id || d.IdentityConflict {
+			continue
+		}
+		for _, q := range d.Paths {
+			if q.Kind != path.Kind || q.Address != path.Address {
+				continue
+			}
+			if score, ok := device.Score(q.Kind, q.Quality); ok {
+				return kindState{score: score, scored: true, unhealthy: device.Unhealthy(q.Quality)}, true
+			}
+		}
+	}
+	return kindState{}, false
+}
+
 // smartOrder is the order to try paths when connecting: scored paths first, best score first, then
 // the rest in the configured order. With nothing scored yet that is just the configured order.
 func (m *Manager) smartOrder(id string, order []device.PathKind) []device.PathKind {
-	states := m.kindStates(id)
+	states := m.kindStates(id, true)
 	out := slices.Clone(order)
 	slices.SortStableFunc(out, func(a, b device.PathKind) int {
 		sa, sb := states[a], states[b]
@@ -147,12 +168,12 @@ func (m *Manager) reviewLocked(p *peerLink, now time.Time) (pathSwitch, bool) {
 		reset()
 		return pathSwitch{}, false
 	}
-	states := m.kindStates(p.id)
-	cur, ok := states[c.path.Kind]
+	cur, ok := m.pathState(p.id, c.path)
 	if !ok {
 		reset()
 		return pathSwitch{}, false
 	}
+	states := m.kindStates(p.id, true)
 	var best device.PathKind
 	var alt kindState
 	for _, kind := range m.pathOrder() {
