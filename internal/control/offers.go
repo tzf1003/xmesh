@@ -37,6 +37,9 @@ func offerView(o device.ReceivedOffer) v2.OfferSummary {
 	if o.Cloudflare != nil {
 		out.Cloudflare = &v2.OfferCloudflareSummary{Hostname: o.Cloudflare.Hostname, PeerHostname: o.Cloudflare.PeerHostname}
 	}
+	if o.Tailnet != nil {
+		out.Tailnet = &v2.OfferTailnetSummary{ControlURL: o.Tailnet.ControlURL, Ephemeral: o.Tailnet.Ephemeral}
+	}
 	return out
 }
 
@@ -57,6 +60,9 @@ func (s *Server) sendOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 	offer := device.Offer{ID: req.Offer.ID, Kind: req.Offer.Kind}
 	if c := req.Offer.Cloudflare; c != nil {
 		offer.Cloudflare = &device.CloudflareOffer{Hostname: c.Hostname, TunnelToken: c.TunnelToken, AccessID: c.AccessID, AccessSecret: c.AccessSecret, PeerHostname: c.PeerHostname}
+	}
+	if t := req.Offer.Tailnet; t != nil {
+		offer.Tailnet = &device.TailnetOffer{ControlURL: t.ControlURL, AuthKey: t.AuthKey, Ephemeral: t.Ephemeral}
 	}
 	if err := offer.Validate(); err != nil {
 		failWith(w, argError("offer", err.Error()))
@@ -149,10 +155,6 @@ func (s *Server) acceptOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 			_ = admin.PutOffer(context.WithoutCancel(r.Context()), offer)
 		}
 	}()
-	if offer.Kind != device.OfferCloudflare || offer.Cloudflare == nil {
-		failWith(w, newError(v2.ErrInvalidArgs, "不支持这种连接方式"))
-		return
-	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old, err := os.ReadFile(s.o.Store.Path())
@@ -160,42 +162,27 @@ func (s *Server) acceptOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
 		return
 	}
-	mesh, _ := parsedOf(old)["mesh"].(map[string]any)
-	current, _ := mesh["cloudflare"].(map[string]any)
-	for _, key := range []string{"hostname", "access_client_id", "access_client_secret_file", "tunnel_token_file"} {
-		if v, _ := current[key].(string); v != "" {
-			failWith(w, newError(v2.ErrConflict, "本设备已经配置了 Cloudflare，请先移除后再接受"))
-			return
-		}
-	}
-	if listen, _ := current["listen"].(string); listen != "" && listen != defaultTunnelListen {
-		failWith(w, newError(v2.ErrConflict, "本设备的 Cloudflare 监听地址不是默认值 "+defaultTunnelListen+"，下发的隧道无法转发过来"))
+	var edits []Edit
+	var written []string
+	var apiErr *v2.Error
+	switch {
+	case offer.Kind == device.OfferCloudflare && offer.Cloudflare != nil:
+		edits, written, apiErr = s.cloudflareOfferEdits(old, offer)
+	case offer.Kind == device.OfferTailnet && offer.Tailnet != nil:
+		edits, written, apiErr = s.tailscaleOfferEdits(old, offer)
+	default:
+		failWith(w, newError(v2.ErrInvalidArgs, "不支持这种连接方式"))
 		return
 	}
-	c := offer.Cloudflare
-	dir := filepath.Join(s.o.StateDir, "cloudflare")
-	tunnelFile, secretFile := filepath.Join(dir, "tunnel-"+id[:8]), filepath.Join(dir, "access-"+id[:8])
-	written := []string{}
 	cleanup := func() {
 		for _, f := range written {
 			_ = os.Remove(f)
 		}
 	}
-	for _, f := range []struct{ path, value string }{{tunnelFile, c.TunnelToken}, {secretFile, c.AccessSecret}} {
-		if err := createConfigAuthkey(f.path, f.value); err != nil {
-			cleanup()
-			failWith(w, newError(v2.ErrInternal, "无法保存 Cloudflare 凭据"))
-			return
-		}
-		written = append(written, f.path)
-	}
-	edits := []Edit{
-		{Path: "/mesh/cloudflare/enabled", Value: true},
-		{Path: "/mesh/cloudflare/hostname", Value: c.Hostname},
-		{Path: "/mesh/cloudflare/tunnel_token_file", Value: tunnelFile},
-		{Path: "/mesh/cloudflare/access_client_id", Value: c.AccessID},
-		{Path: "/mesh/cloudflare/access_client_secret_file", Value: secretFile},
-		{Path: "/mesh/cloudflare/peers/" + offer.FromID, Value: c.PeerHostname},
+	if apiErr != nil {
+		cleanup()
+		failWith(w, apiErr)
+		return
 	}
 	next, err := ApplyEdits(old, edits)
 	if err != nil {
@@ -228,4 +215,73 @@ func (s *Server) acceptOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 	}
 	slices.Sort(paths)
 	writeJSON(w, 200, v2.OfferAcceptResponse{Kind: offer.Kind, RestartRequired: restart, ChangedPaths: paths})
+}
+
+// cloudflareOfferEdits writes the device's own tunnel and Access credentials to private files and
+// returns the configuration edits that use them. written lists the files to remove if the edits fail.
+func (s *Server) cloudflareOfferEdits(old []byte, offer device.ReceivedOffer) (edits []Edit, written []string, e *v2.Error) {
+	mesh, _ := parsedOf(old)["mesh"].(map[string]any)
+	current, _ := mesh["cloudflare"].(map[string]any)
+	for _, key := range []string{"hostname", "access_client_id", "access_client_secret_file", "tunnel_token_file"} {
+		if v, _ := current[key].(string); v != "" {
+			return nil, nil, newError(v2.ErrConflict, "本设备已经配置了 Cloudflare，请先移除后再接受")
+		}
+	}
+	if listen, _ := current["listen"].(string); listen != "" && listen != defaultTunnelListen {
+		return nil, nil, newError(v2.ErrConflict, "本设备的 Cloudflare 监听地址不是默认值 "+defaultTunnelListen+"，下发的隧道无法转发过来")
+	}
+	c := offer.Cloudflare
+	dir := filepath.Join(s.o.StateDir, "cloudflare")
+	tunnelFile, secretFile := filepath.Join(dir, "tunnel-"+offer.ID[:8]), filepath.Join(dir, "access-"+offer.ID[:8])
+	for _, f := range []struct{ path, value string }{{tunnelFile, c.TunnelToken}, {secretFile, c.AccessSecret}} {
+		if err := createConfigAuthkey(f.path, f.value); err != nil {
+			return nil, written, newError(v2.ErrInternal, "无法保存 Cloudflare 凭据")
+		}
+		written = append(written, f.path)
+	}
+	return []Edit{
+		{Path: "/mesh/cloudflare/enabled", Value: true},
+		{Path: "/mesh/cloudflare/hostname", Value: c.Hostname},
+		{Path: "/mesh/cloudflare/tunnel_token_file", Value: tunnelFile},
+		{Path: "/mesh/cloudflare/access_client_id", Value: c.AccessID},
+		{Path: "/mesh/cloudflare/access_client_secret_file", Value: secretFile},
+		{Path: "/mesh/cloudflare/peers/" + offer.FromID, Value: c.PeerHostname},
+	}, written, nil
+}
+
+// tailscaleOfferEdits stores the pre-authorised key where tailnet auth keys live and returns the edits
+// that enable the tailnet with it. A device that already has a tailnet configured keeps it.
+func (s *Server) tailscaleOfferEdits(old []byte, offer device.ReceivedOffer) (edits []Edit, written []string, e *v2.Error) {
+	mesh, _ := parsedOf(old)["mesh"].(map[string]any)
+	current, _ := mesh["tailnet"].(map[string]any)
+	if on, _ := current["enabled"].(bool); on {
+		return nil, nil, newError(v2.ErrConflict, "本设备已经启用了 Tailnet，请先关闭后再接受")
+	}
+	for _, key := range []string{"authkey_file", "control_url"} {
+		if v, _ := current[key].(string); v != "" {
+			return nil, nil, newError(v2.ErrConflict, "本设备已经配置了 Tailnet，请先移除后再接受")
+		}
+	}
+	t := offer.Tailnet
+	// authkey-<uuid> is the name configAuthkeyPath accepts, so the panel can later replace this key.
+	id := offer.ID
+	file := filepath.Join(s.o.StateDir, "authkeys", "authkey-"+id[:8]+"-"+id[8:12]+"-"+id[12:16]+"-"+id[16:20]+"-"+id[20:32])
+	if err := createConfigAuthkey(file, t.AuthKey); err != nil {
+		return nil, nil, newError(v2.ErrInternal, "无法保存 Tailnet auth key")
+	}
+	controlURL := t.ControlURL
+	if controlURL == "" {
+		controlURL = config.DefaultControlURL
+	}
+	edits = []Edit{
+		{Path: "/mesh/tailnet/enabled", Value: true},
+		{Path: "/mesh/tailnet/control_url", Value: controlURL},
+		// A key replaces browser sign-in, which the schema refuses to combine with authkey_file.
+		{Path: "/mesh/tailnet/auth_method", Value: "authkey"},
+		{Path: "/mesh/tailnet/authkey_file", Value: file},
+	}
+	if t.Ephemeral {
+		edits = append(edits, Edit{Path: "/mesh/tailnet/ephemeral", Value: true})
+	}
+	return edits, []string{file}, nil
 }

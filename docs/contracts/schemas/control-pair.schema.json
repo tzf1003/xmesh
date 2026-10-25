@@ -426,25 +426,57 @@
         },
         "kind": {
           "enum": [
-            "cloudflare"
+            "cloudflare",
+            "tailnet"
           ]
         },
         "cloudflare": {
           "$ref": "#/$defs/CloudflareOffer"
+        },
+        "tailnet": {
+          "$ref": "#/$defs/TailnetOffer"
         }
       },
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "cloudflare"
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "cloudflare"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "cloudflare"
+            ],
+            "not": {
+              "required": [
+                "tailnet"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "tailnet"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "tailnet"
+            ],
+            "not": {
+              "required": [
+                "cloudflare"
+              ]
+            }
           }
         }
-      },
-      "then": {
-        "required": [
-          "cloudflare"
-        ]
-      }
+      ]
     },
     "OfferSendRequest": {
       "type": "object",
@@ -506,7 +538,8 @@
         },
         "kind": {
           "enum": [
-            "cloudflare"
+            "cloudflare",
+            "tailnet"
           ]
         },
         "from_id": {
@@ -523,6 +556,9 @@
         },
         "cloudflare": {
           "$ref": "#/$defs/OfferCloudflareSummary"
+        },
+        "tailnet": {
+          "$ref": "#/$defs/OfferTailnetSummary"
         }
       }
     },
@@ -553,7 +589,8 @@
       "properties": {
         "kind": {
           "enum": [
-            "cloudflare"
+            "cloudflare",
+            "tailnet"
           ]
         },
         "restart_required": {
@@ -581,6 +618,47 @@
             "delivered",
             "queued"
           ]
+        }
+      }
+    },
+    "TailnetOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "auth_key"
+      ],
+      "description": "接收设备加入发送者 tailnet 所需的预授权密钥。ControlURL 为空表示 Tailscale 官方服务，否则是 Headscale 地址。密钥自带的标签由控制面决定，与设备的 xmesh 标签无关。",
+      "properties": {
+        "control_url": {
+          "type": "string",
+          "maxLength": 255,
+          "pattern": "^https://[A-Za-z0-9.:\\[\\]-]+/?$",
+          "description": "Headscale 控制面地址；留空表示 Tailscale 官方服务。"
+        },
+        "auth_key": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 4096,
+          "pattern": "^[!-~]+$",
+          "description": "预授权密钥。"
+        },
+        "ephemeral": {
+          "type": "boolean",
+          "description": "是否把接收设备注册为临时节点。"
+        }
+      }
+    },
+    "OfferTailnetSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "control_url": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "控制面地址；省略表示 Tailscale 官方服务。"
+        },
+        "ephemeral": {
+          "type": "boolean"
         }
       }
     }

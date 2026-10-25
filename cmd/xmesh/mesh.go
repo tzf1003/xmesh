@@ -36,6 +36,9 @@ const meshUsage = `用法: xmesh mesh <子命令> [参数]
   tags     查看或修改设备 tag  --device ID  [--set tag:a,tag:b]  [--apply]
   authkey  创建预授权 key  --out 文件 [--tags tag:a,tag:b]  [--ttl 1h] [--reusable] [--ephemeral] [--user 用户]
   onboard  新设备接入：创建 key 写入 --authkey-file（0600），可选 --config xmesh.yaml --install
+  share    把 Tailscale 连接方式发给已配对设备  --device 名字或ID --config xmesh.yaml
+           [--authkey-file 文件 | --reuse-local-key] [--user 用户] [--tags ...] [--reusable] [--ephemeral] [--apply]
+           有管理凭据时自动生成 key，否则用你给的文件；对方手动接受后才生效
   policy   策略：--show | --snapshots | --rollback ID | --template personal|team|restricted --owner 属主
            [--apply] [--expect-version 版本]
            document 从标准输入解析或修改完整草稿；publish --expect-version 版本 [--apply --yes] 提交完整草稿
@@ -93,10 +96,20 @@ func (c *meshCommon) resolveCredentialFile() error {
 // actually answered (a read call falls back to the write credential), and
 // source says where the credential came from. Neither value carries the secret.
 func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, used meshadmin.Access, source string, err error) {
-	if err := c.resolveCredentialFile(); err != nil {
-		return nil, access, "file", err
-	}
 	var cred meshadmin.Credential
+	cred, used, source, err = c.credential(access)
+	if err != nil {
+		return nil, used, source, err
+	}
+	p, err = meshadmin.NewProvider(cred, used)
+	return p, used, source, err
+}
+
+// credential resolves the saved admin credential without building a client.
+func (c *meshCommon) credential(access meshadmin.Access) (cred meshadmin.Credential, used meshadmin.Access, source string, err error) {
+	if err := c.resolveCredentialFile(); err != nil {
+		return cred, access, "file", err
+	}
 	used, source = access, "keychain"
 	if c.credFile != "" {
 		cred, err = meshadmin.ReadCredentialFile(c.credFile)
@@ -106,7 +119,7 @@ func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, us
 		}
 		if err == nil && cred.Access != "" {
 			if access == meshadmin.AccessWrite && cred.Access == meshadmin.AccessRead {
-				return nil, access, source, fmt.Errorf("meshadmin: insufficient_scope: saved credential is read-only")
+				return cred, access, source, fmt.Errorf("meshadmin: insufficient_scope: saved credential is read-only")
 			}
 			used = cred.Access
 		}
@@ -115,12 +128,11 @@ func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, us
 	}
 	if err != nil {
 		if errors.Is(err, meshadmin.ErrNoCredential) {
-			return nil, used, source, fmt.Errorf("没有保存的凭据（profile %q）。先运行: xmesh mesh login --kind tailscale|headscale --url ... --access read|write", c.profile)
+			return cred, used, source, fmt.Errorf("没有保存的凭据（profile %q）。先运行: xmesh mesh login --kind tailscale|headscale --url ... --access read|write", c.profile)
 		}
-		return nil, used, source, err
+		return cred, used, source, err
 	}
-	p, err = meshadmin.NewProvider(cred, used)
-	return p, used, source, err
+	return cred, used, source, nil
 }
 
 func (c *meshCommon) snapshots(dir string) (meshadmin.SnapshotStore, error) {
@@ -153,6 +165,8 @@ func meshRun(args []string, out io.Writer, in io.Reader) error {
 		return meshAuthKey(rest, out)
 	case "onboard":
 		return meshOnboard(rest, out)
+	case "share":
+		return meshShare(rest, out)
 	case "policy":
 		return meshPolicy(rest, out, in)
 	case "matrix":
@@ -1259,4 +1273,26 @@ func derpSync(args []string, out io.Writer) error {
 	return emit(out, c.json, res, func(w io.Writer) {
 		fmt.Fprintf(w, "放行 %d 台设备（新增 %d，移除 %d）。已建立的中继连接要重连后才受影响。\n", res.Total, res.Added, res.Removed)
 	})
+}
+
+// keyGuidance tells the user where to make a pre-authorised key when this machine cannot.
+func keyGuidance(controlURL string) string {
+	if config.OfficialControlURL(controlURL) {
+		return "在 https://login.tailscale.com/admin/settings/keys 生成一个 auth key（建议单次使用、有效期 48 小时），保存到文件后用 --authkey-file 重新运行；" +
+			"或先运行 xmesh mesh login 保存管理凭据，这里就能自动生成。"
+	}
+	return "在你的 Headscale 服务器上运行  headscale preauthkeys create --user <用户> --expiration 48h  生成 key，保存到文件后用 --authkey-file 重新运行；" +
+		"或先运行 xmesh mesh login 保存管理凭据，这里就能自动生成。"
+}
+
+// sameControlPlane checks that an admin credential manages the control plane at controlURL, so a key
+// made through it is one the receiving device can use there.
+func sameControlPlane(cred meshadmin.Credential, controlURL string) bool {
+	switch cred.Kind {
+	case meshadmin.KindTailscale:
+		return config.OfficialControlURL(controlURL)
+	case meshadmin.KindHeadscale:
+		return !config.OfficialControlURL(controlURL) && strings.TrimSuffix(strings.ToLower(cred.URL), "/") == strings.TrimSuffix(strings.ToLower(controlURL), "/")
+	}
+	return false
 }

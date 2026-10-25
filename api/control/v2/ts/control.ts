@@ -1662,8 +1662,26 @@ export interface DeviceOffer {
    * 发送方生成的 128 位随机编号。
    */
   id: string;
-  kind: "cloudflare";
+  kind: "cloudflare" | "tailnet";
   cloudflare?: CloudflareOffer;
+  tailnet?: TailnetOffer;
+}
+/**
+ * 接收设备加入发送者 tailnet 所需的预授权密钥。ControlURL 为空表示 Tailscale 官方服务，否则是 Headscale 地址。密钥自带的标签由控制面决定，与设备的 xmesh 标签无关。
+ */
+export interface TailnetOffer {
+  /**
+   * Headscale 控制面地址；留空表示 Tailscale 官方服务。
+   */
+  control_url?: string;
+  /**
+   * 预授权密钥。
+   */
+  auth_key: string;
+  /**
+   * 是否把接收设备注册为临时节点。
+   */
+  ephemeral?: boolean;
 }
 /**
  * 把一条连接方式提议投递给已配对设备。
@@ -1687,12 +1705,20 @@ export interface OfferCloudflareSummary {
  */
 export interface OfferSummary {
   id: string;
-  kind: "cloudflare";
+  kind: "cloudflare" | "tailnet";
   from_id: DeviceId;
   from_name: NodeName;
   received_at: Timestamp;
   expires_at: Timestamp;
   cloudflare?: OfferCloudflareSummary;
+  tailnet?: OfferTailnetSummary;
+}
+export interface OfferTailnetSummary {
+  /**
+   * 控制面地址；省略表示 Tailscale 官方服务。
+   */
+  control_url?: string;
+  ephemeral?: boolean;
 }
 export interface OffersResponse {
   /**
@@ -1843,7 +1869,7 @@ export interface OffersResponse {
       ];
 }
 export interface OfferAcceptResponse {
-  kind: "cloudflare";
+  kind: "cloudflare" | "tailnet";
   /**
    * 为真时运行中的节点需要重启才会使用这条连接方式。
    */
@@ -1967,7 +1993,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "2.2" as const;
+export const CONTROL_API_VERSION = "2.3" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */

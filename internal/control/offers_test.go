@@ -229,3 +229,94 @@ func TestOfferSendValidatesAndDelivers(t *testing.T) {
 	admin.sendErr = context.DeadlineExceeded
 	apiError(t, f.do("POST", "/v2/offers", body, nil), v2.ErrUnavailable)
 }
+
+func tailscaleDeviceOffer(controlURL string) device.Offer {
+	return device.Offer{ID: device.NewOfferID(), Kind: device.OfferTailnet, Tailnet: &device.TailnetOffer{ControlURL: controlURL, AuthKey: "tskey-auth-0123456789abcdef"}}
+}
+
+func TestOfferAcceptEnablesTheTailnetWithAPrivateKeyFile(t *testing.T) {
+	admin := newFakeOffers(t)
+	offer := tailscaleDeviceOffer("https://headscale.example.com")
+	receive(t, admin, offer)
+	f := newFixtureConfig(t, offerConfig, func(o *Options) { o.Offers = admin })
+
+	r := f.ok("GET", "/v2/offers", nil, "OffersResponse")
+	if strings.Contains(string(r.Body), "tskey-auth") {
+		t.Fatalf("the list leaks the key: %s", r.Body)
+	}
+	var done v2.OfferAcceptResponse
+	decodeAs(t, f.ok("POST", "/v2/offers/"+offer.ID+"/accept", nil, "OfferAcceptResponse"), &done)
+	if done.Kind != "tailnet" || len(done.ChangedPaths) == 0 {
+		t.Fatalf("%+v", done)
+	}
+	raw, _ := os.ReadFile(f.path)
+	text := string(raw)
+	id := offer.ID
+	keyFile := filepath.Join(f.dir, "s", "authkeys", "authkey-"+id[:8]+"-"+id[8:12]+"-"+id[12:16]+"-"+id[16:20]+"-"+id[20:32])
+	for _, want := range []string{"# 节点配置", "control_url: https://headscale.example.com", "authkey_file: " + keyFile} {
+		if !strings.Contains(text, want) {
+			t.Errorf("config lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "tskey-auth") {
+		t.Errorf("the config holds the key:\n%s", text)
+	}
+	key, err := os.ReadFile(keyFile)
+	if err != nil || strings.TrimSpace(string(key)) != "tskey-auth-0123456789abcdef" {
+		t.Fatalf("%q %v", key, err)
+	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(keyFile); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%v %v", info, err)
+		}
+	}
+	if left, _ := admin.inbox.List(context.Background()); len(left) != 0 {
+		t.Fatalf("an applied offer stayed in the inbox: %+v", left)
+	}
+}
+
+func TestOfferAcceptRefusesAnAlreadyConfiguredTailnetAndKeepsTheOffer(t *testing.T) {
+	admin := newFakeOffers(t)
+	offer := tailscaleDeviceOffer("")
+	receive(t, admin, offer)
+	configured := strings.Replace(offerConfig, "mesh:\n", "mesh:\n  tailnet:\n    enabled: true\n    control_url: https://controlplane.tailscale.com\n    authkey_file: /somewhere/key\n", 1)
+	f := newFixtureConfig(t, configured, func(o *Options) { o.Offers = admin })
+	apiError(t, f.do("POST", "/v2/offers/"+offer.ID+"/accept", nil, nil), v2.ErrConflict)
+	if left, _ := admin.inbox.List(context.Background()); len(left) != 1 {
+		t.Fatalf("a refused accept must keep the offer: %+v", left)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(f.dir, "s", "authkeys")); len(entries) != 0 {
+		t.Fatalf("a key was written despite the refusal: %v", entries)
+	}
+	if raw, _ := os.ReadFile(f.path); string(raw) != configured {
+		t.Fatalf("the config changed:\n%s", raw)
+	}
+}
+
+func TestOfferSendCarriesTailnetOffers(t *testing.T) {
+	admin := newFakeOffers(t)
+	f := newFixtureConfig(t, offerConfig, func(o *Options) { o.Offers = admin })
+	offer := tailscaleDeviceOffer("")
+	body := v2.OfferSendRequest{DeviceID: offerSender, Offer: v2.DeviceOffer{ID: offer.ID, Kind: offer.Kind, Tailnet: &v2.TailnetOffer{AuthKey: offer.Tailnet.AuthKey}}}
+	f.ok("POST", "/v2/offers", body, "OfferSendResponse")
+	if len(admin.sent) != 1 || admin.sent[0].Tailnet == nil || admin.sent[0].Tailnet.AuthKey != offer.Tailnet.AuthKey {
+		t.Fatalf("%+v", admin.sent)
+	}
+	body.Offer.Tailnet = &v2.TailnetOffer{AuthKey: "short"}
+	apiError(t, f.do("POST", "/v2/offers", body, nil), v2.ErrInvalidArgs)
+	body.Offer.Tailnet = &v2.TailnetOffer{AuthKey: offer.Tailnet.AuthKey, ControlURL: "http://plain.example.com"}
+	apiError(t, f.do("POST", "/v2/offers", body, nil), v2.ErrInvalidArgs)
+}
+
+func TestOfferAcceptReplacesABrowserSignInThatIsSwitchedOff(t *testing.T) {
+	admin := newFakeOffers(t)
+	offer := tailscaleDeviceOffer("")
+	receive(t, admin, offer)
+	configured := strings.Replace(offerConfig, "mesh:\n", "mesh:\n  tailnet:\n    enabled: false\n    auth_method: browser\n", 1)
+	f := newFixtureConfig(t, configured, func(o *Options) { o.Offers = admin })
+	f.ok("POST", "/v2/offers/"+offer.ID+"/accept", nil, "OfferAcceptResponse")
+	raw, _ := os.ReadFile(f.path)
+	if !strings.Contains(string(raw), "auth_method: authkey") || strings.Contains(string(raw), "auth_method: browser") {
+		t.Fatalf("the sign-in method was not switched to the key:\n%s", raw)
+	}
+}

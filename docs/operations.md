@@ -139,6 +139,24 @@ xmesh control offers accept <编号>     # 或 reject
 
 A 拨不通 B 时（例如 B 只拨出到 A），提议会留在 A，B 经自己到 A 的连接约一分钟内取走并确认，此时 `share` 输出“已留在本机”，隧道保留。收件箱最多 16 条（单个发送者 4 条），24 小时不处理就自动删除。B 已经配置了 Cloudflare，或 `mesh.cloudflare.listen` 不是默认的 `127.0.0.1:7434` 时不能接受。下发地址和凭据不建立任何信任：B 与其他设备之间仍须各自配对。
 
+### 把 Tailscale 连接方式发给已配对的设备
+
+A 已经在 Tailscale 或 Headscale 的 tailnet 上，B 还没有，但两台已经通过别的方式配过对时，A 可以把加入 tailnet 的预授权 key 经同一条加密连接发给 B：
+
+```
+# A（xmesh 需正在运行，mesh.tailnet 已启用）
+xmesh mesh share --device phone --config xmesh.yaml          # 先预览
+xmesh mesh share --device phone --config xmesh.yaml --apply  # 生成 key 并下发
+
+# B：查看并确认
+xmesh control offers list
+xmesh control offers accept <编号>     # 或 reject
+```
+
+key 的来源按顺序是：已用 `xmesh mesh login` 保存了写权限的管理凭据时自动生成（默认单次使用、48 小时有效，覆盖“排队等对方来取”和“对方确认”两段各 24 小时；Headscale 服务器上有多个用户时加 `--user`，还可加 `--tags`、`--reusable`、`--ephemeral`）。保存的管理凭据必须就是本机所在控制面的那一个，否则不会用它，并提示原因；否则用 `--authkey-file` 指定的文件；再否则加 `--reuse-local-key` 复用本机 `mesh.tailnet.authkey_file` 里的 key（它必须是可重复使用的，否则 B 会注册失败）。三者都没有时命令不会发送，只会提示去哪里生成：Tailscale 是 `https://login.tailscale.com/admin/settings/keys`，Headscale 是 `headscale preauthkeys create --user <用户> --expiration 24h`。
+
+管理凭据不会发给 B，B 只拿到这一个 key。`--tags` 是 Tailscale 控制面的标签，和设备在 xmesh 里的角色标签互不相干。B 确认后，key 写进状态目录下的私有文件，`mesh.tailnet` 启用并指向 A 所在的控制面（认证方式改为 key）；B 已经启用或配置了 Tailnet 时不能接受，提议保留。其余行为（离线排队、收件箱上限、24 小时过期、不建立信任）与 Cloudflare 的下发相同。
+
 ## Linux 网页管理界面
 
 Linux 没有托盘应用，用 `xmesh-webui` 在浏览器里提供与桌面端相同的面板。推荐用发布页的 `install-linux.sh`：它把内核和网页界面各装成一个 systemd 用户服务（`xmesh-<节点名>`、`xmesh-webui`），并在终端里协助设置工作目录、权限和管理密钥，见 [安装说明](agent/install.md#linux)。
