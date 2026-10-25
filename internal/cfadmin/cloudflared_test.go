@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func TestInstallCloudflaredVerifiesDigest(t *testing.T) {
 	if got, _ := os.ReadFile(path); string(got) != string(body) {
 		t.Fatalf("content %q", got)
 	}
-	if info, _ := os.Stat(path); info.Mode().Perm() != 0o700 {
+	if info, _ := os.Stat(path); runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("mode %v", info.Mode())
 	}
 	entries, _ := os.ReadDir(dir)
