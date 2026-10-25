@@ -178,12 +178,12 @@ func (m *Manager) reviewLocked(p *peerLink, now time.Time) (pathSwitch, bool) {
 	var alt kindState
 	for _, kind := range m.pathOrder() {
 		st, ok := states[kind]
-		if kind == c.path.Kind || !ok || (best != "" && st.score >= alt.score) {
+		if kind == c.path.Kind || !ok || st.unhealthy || (best != "" && st.score >= alt.score) {
 			continue
 		}
 		best, alt = kind, st
 	}
-	if best == "" || alt.unhealthy {
+	if best == "" {
 		reset()
 		return pathSwitch{}, false
 	}
