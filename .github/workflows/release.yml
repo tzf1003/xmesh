@@ -175,8 +175,9 @@ jobs:
           DRAFT_TAG: ${{ vars.XMESH_RELEASE_DRAFT_TAG }}
         run: |
           sed "s/__TAG__/$GITHUB_REF_NAME/g" .github/release-notes/release.md > notes.md
+          # Every tag, beta and rc included, is a normal release marked Latest. The testing channel still
+          # governs signing and trust metadata above, not how GitHub labels the release.
           flags=(--latest)
-          if [ "${{ needs.verify.outputs.channel }}" = testing ]; then flags=(--prerelease --latest=false); fi
           if [ "$DRAFT_TAG" = "$GITHUB_REF_NAME" ]; then flags+=(--draft); fi
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${flags[@]}" --generate-notes \
             --title "$GITHUB_REF_NAME" --notes-file notes.md
