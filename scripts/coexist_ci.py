@@ -311,7 +311,9 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         assert first["active_path"] == "lan", first
         assert len(peers(a)) == 2, peers(a)
         token = (root / a / "state" / "pats" / "default.token").read_text().strip()
-        client = MCP(gateways[a], token)
+        # A 1 MiB upload or download over a forced DERP relay on a shared runner regularly takes longer than
+        # the default 15 seconds; the transfer itself is checked by its digest, not by how fast it ran.
+        client = MCP(gateways[a], token, timeout=120)
         prefix = b + "/"
         call = lambda name, args=None: client.call(prefix + name, args)
         wait_for(
