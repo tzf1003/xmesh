@@ -207,6 +207,53 @@
               "type": "null"
             }
           ]
+        },
+        "quality": {
+          "$ref": "#/$defs/PathQuality"
+        }
+      }
+    },
+    "PathQuality": {
+      "type": "object",
+      "description": "最近约 5 分钟的探测结果。延时是一次完整认证探测（建连、TLS、身份）的耗时，各路径之间可比，但高于单纯 ping。",
+      "additionalProperties": false,
+      "required": [
+        "samples",
+        "latency_ms",
+        "p90_ms",
+        "jitter_ms",
+        "loss",
+        "flaps"
+      ],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "成功探测耗时的中位数；没有成功探测为 0。"
+        },
+        "p90_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "jitter_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "p90 与中位数之差。"
+        },
+        "loss": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "窗口内探测失败的比例。"
+        },
+        "flaps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "窗口内成功之后紧接着失败的次数，用来识别随机阻断。"
         }
       }
     }

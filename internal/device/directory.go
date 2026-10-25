@@ -31,6 +31,10 @@ type Path struct {
 	VerifiedAt         time.Time `json:"verified_at"`
 	ExpiresAt          time.Time `json:"expires_at"`
 	Reachable          bool      `json:"reachable"`
+	// RTT is the measured time of the probe that produced this observation. It is input to
+	// Observe; Snapshot reports the windowed Quality instead.
+	RTT     time.Duration `json:"-"`
+	Quality Quality       `json:"quality"`
 }
 
 type Device struct {
@@ -59,6 +63,7 @@ type Directory struct {
 	self        string
 	providers   map[PathKind]providerState
 	paths       map[string]map[pathKey]Path
+	stats       map[string]map[pathKey]*pathStats
 	revision    uint64
 	subscribers map[uint64]chan uint64
 	next        uint64
@@ -69,7 +74,7 @@ type Directory struct {
 
 func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Directory {
 	ctx, cancel := context.WithCancel(ctx)
-	d := &Directory{trust: trust, self: self, providers: map[PathKind]providerState{}, paths: map[string]map[pathKey]Path{}, subscribers: map[uint64]chan uint64{}, cancel: cancel, done: make(chan struct{})}
+	d := &Directory{trust: trust, self: self, providers: map[PathKind]providerState{}, paths: map[string]map[pathKey]Path{}, stats: map[string]map[pathKey]*pathStats{}, subscribers: map[uint64]chan uint64{}, cancel: cancel, done: make(chan struct{})}
 	changed, unsubscribe := trust.Subscribe()
 	<-changed // The empty directory already reflects the initial trust snapshot.
 	go func() {
@@ -87,6 +92,12 @@ func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Director
 				for id := range d.paths {
 					if _, ok := trust.Find(id); !ok {
 						delete(d.paths, id)
+					}
+				}
+				// A device that never answered has history but no path, so revoke it separately.
+				for id := range d.stats {
+					if _, ok := trust.Find(id); !ok {
+						delete(d.stats, id)
 					}
 				}
 				d.notifyLocked()
@@ -121,6 +132,13 @@ func (d *Directory) SetProvider(kind PathKind, generation uint64, enabled bool) 
 		for key := range paths {
 			if key.kind == kind {
 				delete(paths, key)
+			}
+		}
+	}
+	for _, stats := range d.stats {
+		for key := range stats {
+			if key.kind == kind {
+				delete(stats, key)
 			}
 		}
 	}
@@ -169,9 +187,53 @@ func (d *Directory) Observe(cert *x509.Certificate, trustGeneration uint64, path
 		return ErrStalePath
 	}
 	path.Reachable = true
+	d.recordLocked(trust.Document.DeviceID, key, sample{at: path.VerifiedAt, ok: true, rtt: path.RTT})
 	paths[key] = path
 	d.notifyLocked()
 	return nil
+}
+
+// maxStatsPerDevice bounds the addresses one device can accumulate history for (a roaming laptop
+// meets many LAN addresses over a long-running process).
+const maxStatsPerDevice = 64
+
+// evictStatsLocked frees room for a new path: it drops histories that aged out of the window,
+// and if every one is still live, the one probed longest ago.
+func evictStatsLocked(byKey map[pathKey]*pathStats, now time.Time) {
+	var oldest pathKey
+	var oldestAt time.Time
+	for key, st := range byKey {
+		if st.quality(now).Samples == 0 {
+			delete(byKey, key)
+			continue
+		}
+		if at := st.last(); oldestAt.IsZero() || at.Before(oldestAt) {
+			oldest, oldestAt = key, at
+		}
+	}
+	if len(byKey) >= maxStatsPerDevice && !oldestAt.IsZero() {
+		delete(byKey, oldest)
+	}
+}
+
+func (d *Directory) recordLocked(id string, key pathKey, x sample) {
+	if _, ok := d.trust.Find(id); !ok {
+		return
+	}
+	byKey := d.stats[id]
+	if byKey == nil {
+		byKey = map[pathKey]*pathStats{}
+		d.stats[id] = byKey
+	}
+	st := byKey[key]
+	if st == nil {
+		if len(byKey) >= maxStatsPerDevice {
+			evictStatsLocked(byKey, x.at)
+		}
+		st = &pathStats{}
+		byKey[key] = st
+	}
+	st.add(x)
 }
 
 // Lost changes only one provider path. It neither revokes the device nor ends its sessions.
@@ -198,10 +260,13 @@ func (d *Directory) lost(id string, kind PathKind, address string, generation ui
 		return ErrStalePath
 	}
 	key := pathKey{kind, address}
+	if path, ok := d.paths[id][key]; ok && !started.IsZero() && path.VerifiedAt.After(started) {
+		return ErrStalePath
+	}
+	if !started.IsZero() {
+		d.recordLocked(id, key, sample{at: started})
+	}
 	if path, ok := d.paths[id][key]; ok && path.Reachable {
-		if !started.IsZero() && path.VerifiedAt.After(started) {
-			return ErrStalePath
-		}
 		path.Reachable = false
 		d.paths[id][key] = path
 		d.notifyLocked()
@@ -222,7 +287,23 @@ func (d *Directory) Snapshot(now time.Time) ([]Device, uint64) {
 		device := Device{DeviceID: id, Name: trust.Document.Name, Alias: trust.Alias, Tags: slices.Clone(trust.Tags), Paths: []Path{}}
 		for _, path := range d.paths[id] {
 			path.Reachable = path.Reachable && now.Before(path.ExpiresAt)
+			if st := d.stats[id][pathKey{path.Kind, path.Address}]; st != nil {
+				path.Quality = st.quality(now)
+			}
 			device.Paths = append(device.Paths, path)
+		}
+		// A path whose probes have only failed has no observation, but its loss is exactly what
+		// the user needs to see, so report it as unreachable rather than letting it vanish.
+		for key, st := range d.stats[id] {
+			if _, observed := d.paths[id][key]; observed {
+				continue
+			}
+			q := st.quality(now)
+			if q.Samples == 0 {
+				delete(d.stats[id], key)
+				continue
+			}
+			device.Paths = append(device.Paths, Path{Kind: key.kind, Address: key.address, Quality: q})
 		}
 		device.IdentityConflict = identityConflict(d.paths[id], now)
 		slices.SortFunc(device.Paths, comparePath)

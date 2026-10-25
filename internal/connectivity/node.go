@@ -61,7 +61,7 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 }
 
 // Tunnel probes cost a round trip through Cloudflare, so they are rarer and given more time than LAN ones.
-const cloudflareProbeEvery = 20 * time.Second
+const cloudflareProbeEvery = 30 * time.Second
 
 type Candidate struct {
 	Name       string
@@ -579,7 +579,7 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if json.NewDecoder(http.MaxBytesReader(nil, response.Body, 16<<10)).Decode(&body) != nil || body.Identity.Validate() != nil || body.Identity.DeviceID != c.DeviceID || body.BootID == "" {
 		return
 	}
-	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, ExpiresAt: started.Add(validFor)}) == nil
+	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: time.Since(started), ExpiresAt: started.Add(validFor)}) == nil
 }
 
 func (n *Node) Close() error {

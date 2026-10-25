@@ -209,6 +209,21 @@ type DevicePath struct {
 	Address    string `json:"address"`
 	Reachable  bool   `json:"reachable"`
 	VerifiedAt *Time  `json:"verified_at"`
+	// Quality is the last few minutes of probe results; omitted until the first probe finishes.
+	Quality *PathQuality `json:"quality,omitempty"`
+}
+
+// PathQuality summarises recent probes of one path. Latency is the time a full authenticated
+// probe takes (connect, TLS and identity), so it is comparable across paths but above a bare ping.
+type PathQuality struct {
+	Samples   int     `json:"samples"`
+	LatencyMs float64 `json:"latency_ms"`
+	P90Ms     float64 `json:"p90_ms"`
+	JitterMs  float64 `json:"jitter_ms"`
+	// Loss is the share of failed probes in the window, 0 to 1.
+	Loss float64 `json:"loss"`
+	// Flaps counts successes followed by a failure in the window.
+	Flaps int `json:"flaps"`
 }
 
 // PeerInfo is the gateway's background reading of one online device (CTR-CTL-05).

@@ -168,3 +168,117 @@ func TestFailedOldProcessEvidenceClearsIdentityConflict(t *testing.T) {
 		t.Fatal("failed old process kept device in conflict")
 	}
 }
+
+func TestDirectoryReportsPathQualityAcrossFlaps(t *testing.T) {
+	d, i, generation := directory(t)
+	address := "100.100.1.1:7433"
+	start := time.Now()
+	ok := func(at time.Time, rtt time.Duration) {
+		t.Helper()
+		path := observedPath(Tailnet, address, "boot-a")
+		path.VerifiedAt, path.ExpiresAt, path.RTT = at, at.Add(30*time.Second), rtt
+		if err := d.Observe(i.Certificate.Leaf, generation, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ok(start, 80*time.Millisecond)
+	if err := d.ProbeFailed(i.ID, Tailnet, address, 1, start.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	ok(start.Add(2*time.Second), 120*time.Millisecond)
+	devices, _ := d.Snapshot(start.Add(3 * time.Second))
+	q := devices[0].Paths[0].Quality
+	if q.Samples != 3 || q.Flaps != 1 || q.Loss < 0.33 || q.Loss > 0.34 || q.LatencyMs != 100 {
+		t.Fatalf("quality = %+v", q)
+	}
+	// Losing the provider resets the path's history with the path itself.
+	if err := d.SetProvider(Tailnet, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = d.Snapshot(start.Add(4 * time.Second))
+	if len(devices[0].Paths) != 0 {
+		t.Fatalf("paths kept: %+v", devices[0].Paths)
+	}
+	ok2 := observedPath(Tailnet, address, "boot-a")
+	ok2.ProviderGeneration = 2
+	if err := d.Observe(i.Certificate.Leaf, generation, ok2); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = d.Snapshot(time.Now())
+	if q := devices[0].Paths[0].Quality; q.Samples != 1 || q.Flaps != 0 {
+		t.Fatalf("history survived provider reset: %+v", q)
+	}
+}
+
+func TestDirectoryReportsPathThatNeverAnswered(t *testing.T) {
+	d, i, _ := directory(t)
+	address := "100.100.1.1:7433"
+	now := time.Now()
+	for n := range 3 {
+		if err := d.ProbeFailed(i.ID, Tailnet, address, 1, now.Add(time.Duration(n)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	devices, _ := d.Snapshot(now.Add(4 * time.Second))
+	if len(devices) != 1 || len(devices[0].Paths) != 1 {
+		t.Fatalf("blocked path hidden: %+v", devices)
+	}
+	path := devices[0].Paths[0]
+	if path.Reachable || path.Kind != Tailnet || path.Address != address || path.Quality.Samples != 3 || path.Quality.Loss != 1 {
+		t.Fatalf("path = %+v", path)
+	}
+	// Once its probes age out of the window the path is gone again.
+	devices, _ = d.Snapshot(now.Add(statsWindow + time.Minute))
+	if len(devices[0].Paths) != 0 {
+		t.Fatalf("stale failures kept: %+v", devices[0].Paths)
+	}
+}
+
+func TestDirectoryKeepsRecordingWhenManyAddressesWereSeen(t *testing.T) {
+	d, i, generation := directory(t)
+	start := time.Now()
+	for n := range maxStatsPerDevice + 10 {
+		path := observedPath(LAN, "192.168.1."+string(rune('A'+n%26))+string(rune('a'+n/26))+":7433", "boot-a")
+		path.VerifiedAt = start.Add(time.Duration(n) * time.Second)
+		path.ExpiresAt = path.VerifiedAt.Add(time.Minute)
+		if err := d.Observe(i.Certificate.Leaf, generation, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	devices, _ := d.Snapshot(start.Add(time.Duration(maxStatsPerDevice+10) * time.Second))
+	newest := "192.168.1." + string(rune('A'+(maxStatsPerDevice+9)%26)) + string(rune('a'+(maxStatsPerDevice+9)/26)) + ":7433"
+	for _, path := range devices[0].Paths {
+		if path.Address == newest {
+			if path.Quality.Samples != 1 {
+				t.Fatalf("newest path lost its quality: %+v", path)
+			}
+			return
+		}
+	}
+	t.Fatal("newest path missing")
+}
+
+func TestRevokedDeviceForgetsPathThatNeverAnswered(t *testing.T) {
+	d, i, _ := directory(t)
+	now := time.Now()
+	if err := d.ProbeFailed(i.ID, Tailnet, "100.100.1.1:7433", 1, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.trust.Revoke(t.Context(), i.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The revocation is applied by the directory's own goroutine.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		d.mu.Lock()
+		_, kept := d.stats[i.ID]
+		d.mu.Unlock()
+		if !kept {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("revoked device kept its probe history")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
