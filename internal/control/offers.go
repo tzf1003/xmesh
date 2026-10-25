@@ -276,6 +276,8 @@ func (s *Server) tailscaleOfferEdits(old []byte, offer device.ReceivedOffer) (ed
 	edits = []Edit{
 		{Path: "/mesh/tailnet/enabled", Value: true},
 		{Path: "/mesh/tailnet/control_url", Value: controlURL},
+		// A key replaces browser sign-in, which the schema refuses to combine with authkey_file.
+		{Path: "/mesh/tailnet/auth_method", Value: "authkey"},
 		{Path: "/mesh/tailnet/authkey_file", Value: file},
 	}
 	if t.Ephemeral {

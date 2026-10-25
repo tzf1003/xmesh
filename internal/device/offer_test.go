@@ -203,10 +203,13 @@ func TestTailscaleOfferValidation(t *testing.T) {
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	good.Tailscale.ControlURL = "https://headscale.example.com"
-	if err := good.Validate(); err != nil {
-		t.Fatal(err)
+	for _, ok := range []string{"https://headscale.example.com", "https://headscale.example.com/", "https://hs.example.com:8443"} {
+		good.Tailscale.ControlURL = ok
+		if err := good.Validate(); err != nil {
+			t.Fatalf("%s: %v", ok, err)
+		}
 	}
+	good.Tailscale.ControlURL = "https://headscale.example.com"
 	for name, mutate := range map[string]func(*Offer){
 		"missing body": func(o *Offer) { o.Tailscale = nil },
 		"short key":    func(o *Offer) { o.Tailscale.AuthKey = "short" },

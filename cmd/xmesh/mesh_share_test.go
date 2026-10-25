@@ -33,14 +33,14 @@ func newTailnetShare(t *testing.T, controlURL string, admin bool) *tailnetShare 
 	if err := os.WriteFile(s.cfg, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	oldNode, oldKey, oldAdmin := openShareNode, createShareKey, haveShareAdmin
+	oldNode, oldKey, oldAdmin := openShareNode, createShareKey, shareAdmin
 	openShareNode = func(string, string) (shareNode, error) { return s.node, nil }
 	createShareKey = func(_ *meshCommon, req meshadmin.AuthKeyRequest) (meshadmin.AuthKey, error) {
 		s.made = append(s.made, req)
 		return meshadmin.AuthKey{ID: "k1", Secret: "tskey-auth-GENERATED-0123456789"}, nil
 	}
-	haveShareAdmin = func(*meshCommon) bool { return s.admin }
-	t.Cleanup(func() { openShareNode, createShareKey, haveShareAdmin = oldNode, oldKey, oldAdmin })
+	shareAdmin = func(*meshCommon, string) (bool, string) { return s.admin, "" }
+	t.Cleanup(func() { openShareNode, createShareKey, shareAdmin = oldNode, oldKey, oldAdmin })
 	return s
 }
 
@@ -67,7 +67,7 @@ func TestMeshShareGeneratesAKeyThroughTheAdminConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.made) != 1 || s.made[0].Reusable || s.made[0].TTL.Hours() != 24 || len(s.made[0].Tags) != 1 || s.made[0].Tags[0] != "tag:friend" {
+	if len(s.made) != 1 || s.made[0].Reusable || s.made[0].TTL.Hours() != 48 || len(s.made[0].Tags) != 1 || s.made[0].Tags[0] != "tag:friend" {
 		t.Fatalf("%+v", s.made)
 	}
 	if len(s.node.sent) != 1 || s.node.sentTo[0] != shareDevice {
@@ -124,6 +124,36 @@ func TestMeshShareAsksForTheHeadscaleCommandWhenNothingCanMakeAKey(t *testing.T)
 	_, err := s.run("--apply")
 	if err == nil || !strings.Contains(err.Error(), "headscale preauthkeys create") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestMeshSharePassesTheHeadscaleUserAndTrimsTheControlURLSlash(t *testing.T) {
+	s := newTailnetShare(t, "https://headscale.example.com/", true)
+	if _, err := s.run("--apply", "--user", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if s.made[0].User != "alice" || s.node.sent[0].Tailscale.ControlURL != "https://headscale.example.com" {
+		t.Fatalf("%+v %+v", s.made[0], s.node.sent[0].Tailscale)
+	}
+}
+
+func TestAdminCredentialMustManageTheSameControlPlane(t *testing.T) {
+	hs := meshadmin.Credential{Kind: meshadmin.KindHeadscale, URL: "https://headscale.example.com"}
+	ts := meshadmin.Credential{Kind: meshadmin.KindTailscale}
+	for _, tc := range []struct {
+		cred meshadmin.Credential
+		url  string
+		want bool
+	}{
+		{hs, "https://headscale.example.com/", true},
+		{hs, "https://other.example.com", false},
+		{hs, "https://controlplane.tailscale.com", false},
+		{ts, "https://controlplane.tailscale.com", true},
+		{ts, "https://headscale.example.com", false},
+	} {
+		if got := sameControlPlane(tc.cred, tc.url); got != tc.want {
+			t.Errorf("%s vs %s: %v", tc.cred.Kind, tc.url, got)
+		}
 	}
 }
 

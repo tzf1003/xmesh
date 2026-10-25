@@ -307,3 +307,16 @@ func TestOfferSendCarriesTailscaleOffers(t *testing.T) {
 	body.Offer.Tailscale = &v2.TailscaleOffer{AuthKey: offer.Tailscale.AuthKey, ControlURL: "http://plain.example.com"}
 	apiError(t, f.do("POST", "/v2/offers", body, nil), v2.ErrInvalidArgs)
 }
+
+func TestOfferAcceptReplacesABrowserSignInThatIsSwitchedOff(t *testing.T) {
+	admin := newFakeOffers(t)
+	offer := tailscaleDeviceOffer("")
+	receive(t, admin, offer)
+	configured := strings.Replace(offerConfig, "mesh:\n", "mesh:\n  tailnet:\n    enabled: false\n    auth_method: browser\n", 1)
+	f := newFixtureConfig(t, configured, func(o *Options) { o.Offers = admin })
+	f.ok("POST", "/v2/offers/"+offer.ID+"/accept", nil, "OfferAcceptResponse")
+	raw, _ := os.ReadFile(f.path)
+	if !strings.Contains(string(raw), "auth_method: authkey") || strings.Contains(string(raw), "auth_method: browser") {
+		t.Fatalf("the sign-in method was not switched to the key:\n%s", raw)
+	}
+}

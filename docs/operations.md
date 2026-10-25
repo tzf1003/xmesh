@@ -153,9 +153,9 @@ xmesh control offers list
 xmesh control offers accept <编号>     # 或 reject
 ```
 
-key 的来源按顺序是：已用 `xmesh mesh login` 保存了写权限的管理凭据时自动生成（默认单次使用、24 小时有效，可加 `--tags`、`--reusable`、`--ephemeral`）；否则用 `--authkey-file` 指定的文件；再否则加 `--reuse-local-key` 复用本机 `mesh.tailnet.authkey_file` 里的 key（它必须是可重复使用的，否则 B 会注册失败）。三者都没有时命令不会发送，只会提示去哪里生成：Tailscale 是 `https://login.tailscale.com/admin/settings/keys`，Headscale 是 `headscale preauthkeys create --user <用户> --expiration 24h`。
+key 的来源按顺序是：已用 `xmesh mesh login` 保存了写权限的管理凭据时自动生成（默认单次使用、48 小时有效，覆盖“排队等对方来取”和“对方确认”两段各 24 小时；Headscale 服务器上有多个用户时加 `--user`，还可加 `--tags`、`--reusable`、`--ephemeral`）。保存的管理凭据必须就是本机所在控制面的那一个，否则不会用它，并提示原因；否则用 `--authkey-file` 指定的文件；再否则加 `--reuse-local-key` 复用本机 `mesh.tailnet.authkey_file` 里的 key（它必须是可重复使用的，否则 B 会注册失败）。三者都没有时命令不会发送，只会提示去哪里生成：Tailscale 是 `https://login.tailscale.com/admin/settings/keys`，Headscale 是 `headscale preauthkeys create --user <用户> --expiration 24h`。
 
-管理凭据不会发给 B，B 只拿到这一个 key。`--tags` 是 Tailscale 控制面的标签，和设备在 xmesh 里的角色标签互不相干。B 确认后，key 写进状态目录下的私有文件，`mesh.tailnet` 启用并指向 A 所在的控制面；B 已经启用或配置了 Tailnet 时不能接受，提议保留。其余行为（离线排队、收件箱上限、24 小时过期、不建立信任）与 Cloudflare 的下发相同。
+管理凭据不会发给 B，B 只拿到这一个 key。`--tags` 是 Tailscale 控制面的标签，和设备在 xmesh 里的角色标签互不相干。B 确认后，key 写进状态目录下的私有文件，`mesh.tailnet` 启用并指向 A 所在的控制面（认证方式改为 key）；B 已经启用或配置了 Tailnet 时不能接受，提议保留。其余行为（离线排队、收件箱上限、24 小时过期、不建立信任）与 Cloudflare 的下发相同。
 
 ## Linux 网页管理界面
 

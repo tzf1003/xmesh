@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,7 +144,7 @@ func (o Offer) Validate() error {
 func validControlURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && len(raw) <= 255 && u.Scheme == "https" && u.Host != "" && u.Hostname() != "" && u.User == nil &&
-		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == "" && raw == "https://"+u.Host
+		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == "" && strings.TrimSuffix(raw, "/") == "https://"+u.Host
 }
 
 // OfferInbox keeps received offers on disk until the user decides. They hold credentials, so the file

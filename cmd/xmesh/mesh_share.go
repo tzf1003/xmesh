@@ -18,9 +18,9 @@ import (
 	"github.com/tzf1003/xmesh/meshadmin"
 )
 
-// shareKeyTTL matches how long a delivered offer waits for its user, so a key queued for an offline
-// device is still valid when the device collects it.
-const shareKeyTTL = device.OfferTTL
+// shareKeyTTL covers both waits an offer can have: up to OfferTTL queued here for the device to
+// collect, then a fresh OfferTTL in its inbox for the user to accept.
+const shareKeyTTL = 2 * device.OfferTTL
 
 // createShareKey makes a pre-authorised key through the saved admin connection; tests replace it.
 var createShareKey = func(c *meshCommon, req meshadmin.AuthKeyRequest) (meshadmin.AuthKey, error) {
@@ -33,10 +33,29 @@ var createShareKey = func(c *meshCommon, req meshadmin.AuthKeyRequest) (meshadmi
 	return p.CreateAuthKey(ctx, req)
 }
 
-// haveShareAdmin reports whether a write-capable admin connection is saved, without calling the network.
-var haveShareAdmin = func(c *meshCommon) bool {
-	_, _, _, err := c.provider(meshadmin.AccessWrite)
-	return err == nil
+// shareAdmin reports whether a write-capable admin connection is saved for the same control plane
+// this node is on, without calling the network. note explains a saved connection that does not fit.
+var shareAdmin = func(c *meshCommon, controlURL string) (ok bool, note string) {
+	cred, _, _, err := c.credential(meshadmin.AccessWrite)
+	if err != nil {
+		return false, ""
+	}
+	if !sameControlPlane(cred, controlURL) {
+		return false, "已保存的管理凭据属于另一个控制面（" + string(cred.Kind) + "），不能用来给 " + controlURL + " 生成 key。"
+	}
+	return true, ""
+}
+
+// sameControlPlane checks that an admin credential manages the control plane at controlURL, so a key
+// made through it is one the receiving device can use there.
+func sameControlPlane(cred meshadmin.Credential, controlURL string) bool {
+	switch cred.Kind {
+	case meshadmin.KindTailscale:
+		return officialTailscale(controlURL)
+	case meshadmin.KindHeadscale:
+		return !officialTailscale(controlURL) && strings.TrimSuffix(strings.ToLower(cred.URL), "/") == strings.TrimSuffix(strings.ToLower(controlURL), "/")
+	}
+	return false
 }
 
 // officialTailscale reports whether a control URL is Tailscale's own service.
@@ -75,6 +94,7 @@ func meshShare(args []string, out io.Writer) error {
 	stateDir := fs.String("state-dir", "", "本机节点状态目录")
 	keyFile := fs.String("authkey-file", "", "自己生成的 auth key 文件（没有管理凭据时使用）")
 	reuseLocal := fs.Bool("reuse-local-key", false, "没有管理凭据时，复用本机 mesh.tailnet.authkey_file 里的 key（它必须是可重复使用的）")
+	user := fs.String("user", "", "Headscale 用户名（服务器上有多个用户时必填）")
 	tags := fs.String("tags", "", "自动生成 key 时附带的控制面标签（与设备的 xmesh 标签无关）")
 	reusable := fs.Bool("reusable", false, "自动生成的 key 可重复使用（默认只能用一次）")
 	ephemeral := fs.Bool("ephemeral", false, "让对方注册为临时节点")
@@ -93,7 +113,7 @@ func meshShare(args []string, out io.Writer) error {
 		return errors.New("本机还没有启用 Tailnet：先配置 mesh.tailnet 并接入，再把它分享给其他设备")
 	}
 	controlURL := cfg.Mesh.Tailnet.ControlURL
-	offerURL := controlURL
+	offerURL := strings.TrimSuffix(controlURL, "/")
 	if officialTailscale(controlURL) {
 		offerURL = ""
 	}
@@ -107,15 +127,16 @@ func meshShare(args []string, out io.Writer) error {
 
 	// Pick where the key comes from before touching anything.
 	source := ""
+	adminOK, adminNote := shareAdmin(&c, controlURL)
 	switch {
 	case *keyFile != "":
 		source = "file"
-	case haveShareAdmin(&c):
+	case adminOK:
 		source = "admin"
 	case *reuseLocal:
 		source = "local"
 	default:
-		return errors.New("没有管理凭据，也没有指定 key。" + keyGuidance(controlURL))
+		return errors.New("没有可用的管理凭据，也没有指定 key。" + adminNote + keyGuidance(controlURL))
 	}
 
 	sender, err := openShareNode(*node, *stateDir)
@@ -137,7 +158,7 @@ func meshShare(args []string, out io.Writer) error {
 		})
 	}
 
-	key, err := shareKey(&c, source, *keyFile, cfg, wantTags, *reusable, *ephemeral, name)
+	key, err := shareKey(&c, source, *keyFile, cfg, wantTags, *reusable, *ephemeral, *user, name)
 	if err != nil {
 		return err
 	}
@@ -158,10 +179,10 @@ func meshShare(args []string, out io.Writer) error {
 	})
 }
 
-func shareKey(c *meshCommon, source, keyFile string, cfg *config.Config, tags []string, reusable, ephemeral bool, deviceName string) (string, error) {
+func shareKey(c *meshCommon, source, keyFile string, cfg *config.Config, tags []string, reusable, ephemeral bool, user, deviceName string) (string, error) {
 	switch source {
 	case "admin":
-		k, err := createShareKey(c, meshadmin.AuthKeyRequest{Tags: tags, TTL: shareKeyTTL, Reusable: reusable, Ephemeral: ephemeral, Description: "xmesh share " + deviceName})
+		k, err := createShareKey(c, meshadmin.AuthKeyRequest{Tags: tags, TTL: shareKeyTTL, Reusable: reusable, Ephemeral: ephemeral, User: user, Description: "xmesh share " + deviceName})
 		if err != nil {
 			return "", fmt.Errorf("管理凭据没能生成 key：%w\n%s", err, keyGuidance(cfg.Mesh.Tailnet.ControlURL))
 		}

@@ -37,7 +37,7 @@ const meshUsage = `用法: xmesh mesh <子命令> [参数]
   authkey  创建预授权 key  --out 文件 [--tags tag:a,tag:b]  [--ttl 1h] [--reusable] [--ephemeral] [--user 用户]
   onboard  新设备接入：创建 key 写入 --authkey-file（0600），可选 --config xmesh.yaml --install
   share    把 Tailscale 连接方式发给已配对设备  --device 名字或ID --config xmesh.yaml
-           [--authkey-file 文件 | --reuse-local-key] [--tags ...] [--reusable] [--ephemeral] [--apply]
+           [--authkey-file 文件 | --reuse-local-key] [--user 用户] [--tags ...] [--reusable] [--ephemeral] [--apply]
            有管理凭据时自动生成 key，否则用你给的文件；对方手动接受后才生效
   policy   策略：--show | --snapshots | --rollback ID | --template personal|team|restricted --owner 属主
            [--apply] [--expect-version 版本]
@@ -96,10 +96,20 @@ func (c *meshCommon) resolveCredentialFile() error {
 // actually answered (a read call falls back to the write credential), and
 // source says where the credential came from. Neither value carries the secret.
 func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, used meshadmin.Access, source string, err error) {
-	if err := c.resolveCredentialFile(); err != nil {
-		return nil, access, "file", err
-	}
 	var cred meshadmin.Credential
+	cred, used, source, err = c.credential(access)
+	if err != nil {
+		return nil, used, source, err
+	}
+	p, err = meshadmin.NewProvider(cred, used)
+	return p, used, source, err
+}
+
+// credential resolves the saved admin credential without building a client.
+func (c *meshCommon) credential(access meshadmin.Access) (cred meshadmin.Credential, used meshadmin.Access, source string, err error) {
+	if err := c.resolveCredentialFile(); err != nil {
+		return cred, access, "file", err
+	}
 	used, source = access, "keychain"
 	if c.credFile != "" {
 		cred, err = meshadmin.ReadCredentialFile(c.credFile)
@@ -109,7 +119,7 @@ func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, us
 		}
 		if err == nil && cred.Access != "" {
 			if access == meshadmin.AccessWrite && cred.Access == meshadmin.AccessRead {
-				return nil, access, source, fmt.Errorf("meshadmin: insufficient_scope: saved credential is read-only")
+				return cred, access, source, fmt.Errorf("meshadmin: insufficient_scope: saved credential is read-only")
 			}
 			used = cred.Access
 		}
@@ -118,12 +128,11 @@ func (c *meshCommon) provider(access meshadmin.Access) (p meshadmin.Provider, us
 	}
 	if err != nil {
 		if errors.Is(err, meshadmin.ErrNoCredential) {
-			return nil, used, source, fmt.Errorf("没有保存的凭据（profile %q）。先运行: xmesh mesh login --kind tailscale|headscale --url ... --access read|write", c.profile)
+			return cred, used, source, fmt.Errorf("没有保存的凭据（profile %q）。先运行: xmesh mesh login --kind tailscale|headscale --url ... --access read|write", c.profile)
 		}
-		return nil, used, source, err
+		return cred, used, source, err
 	}
-	p, err = meshadmin.NewProvider(cred, used)
-	return p, used, source, err
+	return cred, used, source, nil
 }
 
 func (c *meshCommon) snapshots(dir string) (meshadmin.SnapshotStore, error) {
