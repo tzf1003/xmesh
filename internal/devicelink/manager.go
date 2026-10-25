@@ -43,6 +43,10 @@ type Options struct {
 	Heartbeat time.Duration
 	// DeadAfter ends a carrier that has received nothing for this long. Default 30s.
 	DeadAfter time.Duration
+	// PathOrder returns the paths to use, most preferred first, without the disabled ones. It is
+	// read on every connection attempt, so a change applies to the next one. Nil means LAN,
+	// Tailnet, then Cloudflare.
+	PathOrder func() []device.PathKind
 	// OnActivity runs under the device lock to retain transition order. It must not reenter Manager.
 	OnActivity func(Activity)
 }
@@ -369,7 +373,7 @@ func (m *Manager) candidates(id string) []device.Path {
 				return nil
 			}
 			paths := slices.Clone(d.Paths)
-			return slices.DeleteFunc(paths, func(p device.Path) bool { return !p.Reachable })
+			return slices.DeleteFunc(paths, func(p device.Path) bool { return !p.Reachable || m.rank(p.Kind) < 0 })
 		}
 	}
 	return nil
@@ -486,14 +490,58 @@ func (m *Manager) runPeer(p *peerLink) {
 }
 
 func (m *Manager) connect(p *peerLink) {
-	if m.preferLAN(m.ctx, p) {
-		return
+	for _, kind := range m.pathOrder() {
+		var connected bool
+		switch kind {
+		case device.LAN:
+			connected = m.preferLAN(m.ctx, p)
+		case device.Tailnet:
+			connected = m.connectPaths(m.ctx, p, m.candidates(p.id), device.Tailnet, 5*time.Second)
+		case device.Cloudflare:
+			// It works with no inbound address but adds latency, hence the longer budget.
+			connected = m.connectPaths(m.ctx, p, m.candidates(p.id), device.Cloudflare, 15*time.Second)
+		}
+		if connected {
+			return
+		}
 	}
-	if m.connectPaths(m.ctx, p, m.candidates(p.id), device.Tailnet, 5*time.Second) {
-		return
+}
+
+// pathOrder is the configured order of paths, or the default one.
+func (m *Manager) pathOrder() []device.PathKind {
+	if m.opts.PathOrder != nil {
+		return m.opts.PathOrder()
 	}
-	// Cloudflare is the path of last resort: it works with no inbound address but adds latency.
-	m.connectPaths(m.ctx, p, m.candidates(p.id), device.Cloudflare, 15*time.Second)
+	return []device.PathKind{device.LAN, device.Tailnet, device.Cloudflare}
+}
+
+// rank is the position of kind in the path order, or -1 when the path is disabled.
+func (m *Manager) rank(kind device.PathKind) int {
+	return slices.Index(m.pathOrder(), kind)
+}
+
+// Rebalance drops each carrier that is not on the most preferred path currently reachable for its
+// device, so a changed path order takes effect without waiting for the link to fail. The logical
+// sessions resume on the new carrier. A carrier on a disabled path is always dropped.
+func (m *Manager) Rebalance() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.peers {
+		p.mu.Lock()
+		if c := p.active; c != nil {
+			have := m.rank(c.path.Kind)
+			better := slices.ContainsFunc(m.candidates(p.id), func(path device.Path) bool {
+				r := m.rank(path.Kind)
+				return r >= 0 && (have < 0 || r < have)
+			})
+			if have < 0 || better {
+				c.cancel()
+				_ = c.conn.CloseNow()
+			}
+		}
+		p.signalLocked()
+		p.mu.Unlock()
+	}
 }
 
 // Give authenticated LAN discovery the same bounded opportunity for local opens
@@ -656,7 +704,10 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 	if !enabled || generation != path.ProviderGeneration {
 		return device.ErrStalePath
 	}
-	if !outgoing && path.Kind == device.Tailnet && m.preferLAN(ctx, p) {
+	if m.rank(path.Kind) < 0 {
+		return ErrUnavailable
+	}
+	if lan := m.rank(device.LAN); !outgoing && path.Kind == device.Tailnet && lan >= 0 && lan < m.rank(device.Tailnet) && m.preferLAN(ctx, p) {
 		return ErrUnavailable
 	}
 	if outgoing {

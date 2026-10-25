@@ -28,6 +28,7 @@ type testNode struct {
 	started      chan struct{}
 	release      chan struct{}
 	dialGate     <-chan struct{}
+	order        atomic.Pointer[[]device.PathKind]
 }
 
 func newTestNode(t *testing.T, name string) *testNode {
@@ -49,7 +50,7 @@ func newTestNode(t *testing.T, name string) *testNode {
 	}
 	n := &testNode{id: id, trust: trust, directory: directory}
 	manager, err := NewManager(t.Context(), Options{
-		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
+		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, PathOrder: n.pathOrder, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
 		Dial: func(ctx context.Context, target string, path device.Path) (*websocket.Conn, error) {
 			if path.Kind == device.Tailnet && n.dialGate != nil {
 				select {
@@ -95,6 +96,15 @@ func newTestNode(t *testing.T, name string) *testNode {
 	t.Cleanup(func() { _ = manager.Close(); directory.Close(); n.lan.Close(); n.tailnet.Close() })
 	return n
 }
+
+func (n *testNode) pathOrder() []device.PathKind {
+	if order := n.order.Load(); order != nil {
+		return *order
+	}
+	return []device.PathKind{device.LAN, device.Tailnet, device.Cloudflare}
+}
+
+func (n *testNode) setOrder(kinds ...device.PathKind) { n.order.Store(&kinds) }
 
 func pairTestNodes(t *testing.T, a, b *testNode) {
 	t.Helper()
@@ -560,5 +570,60 @@ func TestClosedSessionsReleaseSlotsAfterAcknowledgement(t *testing.T) {
 			case <-time.After(time.Millisecond):
 			}
 		}
+	}
+}
+
+func TestManagerFollowsConfiguredPathOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	for _, n := range []*testNode{a, b} {
+		n.setOrder(device.Tailnet, device.LAN)
+	}
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.Tailnet)
+}
+
+func TestManagerNeverUsesDisabledPath(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	for _, n := range []*testNode{a, b} {
+		n.setOrder(device.Tailnet)
+	}
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.Tailnet)
+	if paths := a.manager.candidates(b.id.ID); len(paths) != 1 || paths[0].Kind != device.Tailnet {
+		t.Fatalf("disabled LAN still offered: %+v", paths)
+	}
+}
+
+func TestManagerRebalanceMovesCarrierToNewPreferredPath(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	id := client.ID()
+	for _, n := range []*testNode{a, b} {
+		n.setOrder(device.Tailnet, device.LAN)
+		n.manager.Rebalance()
+	}
+	waitPath(t, a.manager, b.id.ID, device.Tailnet)
+	if client.ID() != id {
+		t.Fatal("session rebuilt by a path change")
+	}
+	// Already on the preferred path: another rebalance leaves the carrier alone.
+	epoch := a.manager.Activity(b.id.ID).Epoch
+	a.manager.Rebalance()
+	time.Sleep(300 * time.Millisecond)
+	if got := a.manager.Activity(b.id.ID); got.Path.Kind != device.Tailnet || got.Epoch != epoch {
+		t.Fatalf("settled carrier was dropped: %+v", got)
 	}
 }

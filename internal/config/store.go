@@ -69,6 +69,10 @@ func mergeRoles(startup, next []string) []string {
 // section nested below it, falls under RestartPaths. A pointer above a restart
 // section, such as an object added whole, counts too.
 func NeedsRestart(ptr string) bool {
+	// The path priority is read on every connection attempt, so it needs no restart.
+	if within(ptr, "/mesh/path_selection") {
+		return false
+	}
 	for _, p := range RestartPaths {
 		if within(ptr, p) || within(p, ptr) {
 			return true

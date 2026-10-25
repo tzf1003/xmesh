@@ -175,7 +175,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
 	n.directory = device.NewDirectory(ctx, trust, id.ID)
-	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
+	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, PathOrder: n.pathOrder, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
 		n.mu.Lock()
 		accept := n.accept
 		n.mu.Unlock()
@@ -223,13 +223,34 @@ func (n *Node) SetAgent(accept func(context.Context, identity.Principal, mcp.Tra
 }
 
 func (n *Node) SetAdmin(handler http.Handler) { n.mu.Lock(); n.admin = handler; n.mu.Unlock() }
-func (n *Node) Reconfigure(cfg config.Mesh)   { n.mu.Lock(); n.cfg = cfg; n.mu.Unlock() }
-func (n *Node) Identity() *device.Identity    { return n.identity }
-func (n *Node) Trust() *device.TrustStore     { return n.trust }
-func (n *Node) Pairing() *device.Pairing      { return n.pairing }
-func (n *Node) Offers() *device.OfferInbox    { return n.offers }
-func (n *Node) Directory() *device.Directory  { return n.directory }
-func (n *Node) Links() *devicelink.Manager    { return n.links }
+func (n *Node) Reconfigure(cfg config.Mesh) {
+	n.mu.Lock()
+	before := n.cfg.PathSelection.Order()
+	n.cfg = cfg
+	changed := !slices.Equal(before, cfg.PathSelection.Order())
+	n.mu.Unlock()
+	if changed && n.links != nil {
+		n.links.Rebalance()
+	}
+}
+
+// pathOrder is the configured path priority as path kinds.
+func (n *Node) pathOrder() []device.PathKind {
+	n.mu.Lock()
+	order := n.cfg.PathSelection.Order()
+	n.mu.Unlock()
+	kinds := make([]device.PathKind, len(order))
+	for i, kind := range order {
+		kinds[i] = device.PathKind(kind)
+	}
+	return kinds
+}
+func (n *Node) Identity() *device.Identity   { return n.identity }
+func (n *Node) Trust() *device.TrustStore    { return n.trust }
+func (n *Node) Pairing() *device.Pairing     { return n.pairing }
+func (n *Node) Offers() *device.OfferInbox   { return n.offers }
+func (n *Node) Directory() *device.Directory { return n.directory }
+func (n *Node) Links() *devicelink.Manager   { return n.links }
 
 type ProviderStatus struct {
 	Kind           device.PathKind

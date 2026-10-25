@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -60,8 +61,56 @@ type Mesh struct {
 		// Explicit selection also accepts a system Tailscale IPv4 address; use mdns: false.
 		Interface string `json:"interface"`
 	} `json:"lan"`
-	Tailnet    Tailnet    `json:"tailnet,omitempty"`
-	Cloudflare Cloudflare `json:"cloudflare,omitempty"`
+	Tailnet       Tailnet       `json:"tailnet,omitempty"`
+	Cloudflare    Cloudflare    `json:"cloudflare,omitempty"`
+	PathSelection PathSelection `json:"path_selection,omitempty"`
+}
+
+// PathKinds are the device paths, in the order xmesh tries them when nothing says otherwise.
+var PathKinds = []string{"lan", "tailnet", "cloudflare"}
+
+// PathSelection decides which path a device pair uses when several are reachable. In manual mode
+// the user's priority list is followed strictly: the first listed path that connects wins.
+type PathSelection struct {
+	// Mode is "manual", also the meaning of empty.
+	Mode string `json:"mode,omitempty"`
+	// Priority lists paths from most to least preferred. Paths left out follow in the default order.
+	Priority []string `json:"priority,omitempty"`
+	// Disabled paths are never dialed and never accepted for device links.
+	Disabled []string `json:"disabled,omitempty"`
+}
+
+// Order is the paths to use, most preferred first, without the disabled ones.
+func (p PathSelection) Order() []string {
+	out := make([]string, 0, len(PathKinds))
+	add := func(kind string) {
+		if !slices.Contains(out, kind) && !slices.Contains(p.Disabled, kind) {
+			out = append(out, kind)
+		}
+	}
+	for _, kind := range p.Priority {
+		add(kind)
+	}
+	for _, kind := range PathKinds {
+		add(kind)
+	}
+	return out
+}
+
+func (p PathSelection) valid() bool {
+	if p.Mode != "" && p.Mode != "manual" {
+		return false
+	}
+	for _, list := range [][]string{p.Priority, p.Disabled} {
+		seen := map[string]bool{}
+		for _, kind := range list {
+			if !slices.Contains(PathKinds, kind) || seen[kind] {
+				return false
+			}
+			seen[kind] = true
+		}
+	}
+	return true
 }
 
 // Cloudflare connects devices that have no public address through Cloudflare Tunnel. Every device
@@ -492,6 +541,9 @@ func (c *Config) Validate() error {
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 			return fail("/mesh/tailnet/control_url")
 		}
+	}
+	if c.SchemaVersion == 2 && !c.Mesh.PathSelection.valid() {
+		return fail("/mesh/path_selection: mode 只能是 manual，priority 与 disabled 只能是不重复的 lan、tailnet、cloudflare")
 	}
 	if cf := c.Mesh.Cloudflare; c.SchemaVersion == 2 && cf.Enabled {
 		if cf.Hostname != "" && !hostnamePattern.MatchString(cf.Hostname) {

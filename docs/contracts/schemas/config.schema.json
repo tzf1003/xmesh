@@ -127,6 +127,44 @@
             }
           }
         },
+        "path_selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "多条路径同时可用时，设备之间用哪一条。",
+          "properties": {
+            "mode": {
+              "enum": [
+                "manual"
+              ],
+              "default": "manual",
+              "description": "manual 严格按 priority 的顺序，第一条能连上的路径胜出。"
+            },
+            "priority": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "lan",
+                  "tailnet",
+                  "cloudflare"
+                ]
+              },
+              "description": "从最优先到最不优先。没有列出的路径按 lan、tailnet、cloudflare 的默认顺序排在后面。"
+            },
+            "disabled": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "lan",
+                  "tailnet",
+                  "cloudflare"
+                ]
+              },
+              "description": "不拨出、也不接受设备链路的路径。"
+            }
+          }
+        },
         "cloudflare": {
           "type": "object",
           "additionalProperties": false,

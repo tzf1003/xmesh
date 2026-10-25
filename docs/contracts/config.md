@@ -19,6 +19,7 @@
 | `mesh.tailnet.enabled = true` | `mesh.tailnet.control_url` 必须为 HTTPS；密钥登录需要 `authkey_file`，浏览器登录使用 `auth_method: browser` 并复用本机网络状态 |
 | `mesh.tailnet.ephemeral = true` | Tailnet 网络身份存于内存，每次进程启动重新入网。xmesh 设备公钥仍独立持久化 |
 | `mesh.cloudflare.enabled = true` | 经 Cloudflare Tunnel 互连，设备不需要公网地址。`hostname` 是本机隧道主机名，留空表示只拨出；`listen` 必须是回环地址（默认 `127.0.0.1:7434`），cloudflared 用 `tcp://` 规则转发到它；`access_client_id` 与 `access_client_secret_file`（绝对路径）须同时填写；`tunnel_token_file`（绝对路径）让内核自己运行 `cloudflared`（强制 `--protocol http2`，令牌经 `--token-file` 传入，需要 `hostname`），`cloudflared` 可指定可执行文件；`peers` 把已配对设备 ID 映射到它的隧道主机名。隧道只转发字节，设备身份仍由内层固定公钥的 mTLS 决定。默认只放行已配对设备；设置了连接密码（如 `xmesh cloudflare invite` 期间）才临时接受未配对设备配对，`allow_pairing: true` 则一直允许。局域网、Tailnet、Cloudflare 可任意组合同时启用：只启用一条时状态里的网络模式是 `lan`/`tailnet`/`cloudflare`，两条及以上是 `coexist`，全部关闭是 `offline`（局域网默认开启，仅用 Cloudflare 时须设 `mesh.lan.enabled: false`） |
+| `mesh.path_selection` | 多条路径同时可用时设备之间用哪一条。`mode` 目前只有 `manual`（缺省）：严格按 `priority`（`lan`、`tailnet`、`cloudflare` 的不重复子集，从最优先到最不优先）的顺序，第一条能连上的路径胜出，没有列出的路径按默认顺序排在后面；`disabled` 里的路径不拨出，也不接受该路径上的设备链路。修改后立即生效，已建立的连接若不在最优先的可达路径上会被断开并按新顺序重连（会话自动续传） |
 | `mesh.lan.enabled = true` | 开启局域网路径；`mdns` 缺省 true。可指定物理网卡；网卡暂不可用时该路径独立重试，其他路径与本机管理继续运行。两个 enabled 都为 true 即共存；网络开关热应用 |
 | `ingress.listen = funnel` | `mesh.tailnet.control_url` 必须是官方 Tailscale 控制面：`https://controlplane.tailscale.com` 或 `https://login.tailscale.com`（端口只能是 443，不含用户信息）。其他主机，包括 Headscale 和形似官方域名的后缀，一律拒绝启动。issuer 必须是 `ts.net` 源。禁止同时配置 `domain`、`tls`、`cert_file`、`key_file`。域名和证书由 Tailscale Funnel 提供，issuer 使用该节点的 `ts.net` 源 |
 | 本机首次配置 | 关闭 LAN 与 Tailnet 路径，以 `--local-only` 开放需认证的回环 Gateway；设备 Agent 仅供该 Gateway 内部调用 |
@@ -84,7 +85,7 @@
 | `node.name` | | 是 |
 | `node.roles`（`gateway`、`ingress` 的增减） | 是 | |
 | `node.roles`（`agent` 的增减） | | 是 |
-| `mesh.lan.*`、`mesh.tailnet.*`、`mesh.cloudflare.*`（版本 2） | 是 | |
+| `mesh.lan.*`、`mesh.tailnet.*`、`mesh.cloudflare.*`、`mesh.path_selection`（版本 2） | 是 | |
 | `schema_version` 与旧版 `mesh.*` | | 是 |
 | `gateway.listen`、`gateway.expose_backends` | 是 | |
 | `gateway.quota` | 是 | |
