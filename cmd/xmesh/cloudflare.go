@@ -32,8 +32,8 @@ const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
   discover 列出令牌可见的账号和域名（令牌读标准输入）
   logout   删除已保存的令牌
   status   显示本机创建过的设备资源
-  install  下载并校验官方 cloudflared，装到 xmesh.yaml 旁 cloudflare/bin（setup 会自动做）
-           [--config xmesh.yaml | --dir 目录]
+  install  下载并校验官方 cloudflared，装到密钥目录下的 bin/（缺省 xmesh.yaml 旁 cloudflare/bin，setup 会自动做）
+           [--config xmesh.yaml | --dir 密钥目录]
   setup    为一台设备创建隧道并写好配置  --name 设备名  --config xmesh.yaml
            [--dir 目录，放隧道令牌与 Access 密钥，缺省在配置文件旁的 cloudflare/]  [--apply]
   remove   删除一台设备的隧道、DNS 与 Access 应用  --name 设备名  [--apply]
@@ -400,7 +400,7 @@ func cloudflareInstall(args []string, out io.Writer) error {
 	var c cloudflareCommon
 	fs := flag.NewFlagSet("cloudflare install", flag.ContinueOnError)
 	c.register(fs)
-	dir := fs.String("dir", "", "放 cloudflared 的目录，缺省与 setup 一致：xmesh.yaml 旁 cloudflare/bin")
+	dir := fs.String("dir", "", "隧道令牌与密钥所在目录，cloudflared 装在其下的 bin/；缺省与 setup 一致：xmesh.yaml 旁 cloudflare/")
 	cfgPath := fs.String("config", "", "xmesh.yaml 路径，用来确定缺省目录")
 	if err := cloudflareFlags(fs, args); err != nil {
 		return err

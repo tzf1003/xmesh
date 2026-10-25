@@ -46,6 +46,9 @@ func (n *Node) runCloudflare(ctx context.Context, p *provider) error {
 		}
 		if err != nil {
 			_ = listener.Close()
+			if cfg.Cloudflared != "" {
+				return fmt.Errorf("找不到 mesh.cloudflare.cloudflared 指定的 cloudflared：%w", err)
+			}
 			return fmt.Errorf("找不到 cloudflared，自动安装也失败了，请手动安装或设置 mesh.cloudflare.cloudflared：%w", err)
 		}
 		go n.runCloudflared(ctx, binary, cfg.TunnelTokenFile)
