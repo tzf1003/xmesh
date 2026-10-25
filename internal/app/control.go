@@ -292,7 +292,11 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 					t := v2.At(path.VerifiedAt)
 					verified = &t
 				}
-				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified})
+				var quality *v2.PathQuality
+				if q := path.Quality; q.Samples > 0 {
+					quality = &v2.PathQuality{Samples: q.Samples, LatencyMs: q.LatencyMs, P90Ms: q.P90Ms, JitterMs: q.JitterMs, Loss: q.Loss, Flaps: q.Flaps}
+				}
+				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified, Quality: quality})
 				row.Addrs = append(row.Addrs, path.Address)
 			}
 		}

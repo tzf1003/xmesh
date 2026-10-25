@@ -168,3 +168,44 @@ func TestFailedOldProcessEvidenceClearsIdentityConflict(t *testing.T) {
 		t.Fatal("failed old process kept device in conflict")
 	}
 }
+
+func TestDirectoryReportsPathQualityAcrossFlaps(t *testing.T) {
+	d, i, generation := directory(t)
+	address := "100.100.1.1:7433"
+	start := time.Now()
+	ok := func(at time.Time, rtt time.Duration) {
+		t.Helper()
+		path := observedPath(Tailnet, address, "boot-a")
+		path.VerifiedAt, path.ExpiresAt, path.RTT = at, at.Add(30*time.Second), rtt
+		if err := d.Observe(i.Certificate.Leaf, generation, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ok(start, 80*time.Millisecond)
+	if err := d.ProbeFailed(i.ID, Tailnet, address, 1, start.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	ok(start.Add(2*time.Second), 120*time.Millisecond)
+	devices, _ := d.Snapshot(start.Add(3 * time.Second))
+	q := devices[0].Paths[0].Quality
+	if q.Samples != 3 || q.Flaps != 1 || q.Loss < 0.33 || q.Loss > 0.34 || q.LatencyMs != 80 {
+		t.Fatalf("quality = %+v", q)
+	}
+	// Losing the provider resets the path's history with the path itself.
+	if err := d.SetProvider(Tailnet, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = d.Snapshot(start.Add(4 * time.Second))
+	if len(devices[0].Paths) != 0 {
+		t.Fatalf("paths kept: %+v", devices[0].Paths)
+	}
+	ok2 := observedPath(Tailnet, address, "boot-a")
+	ok2.ProviderGeneration = 2
+	if err := d.Observe(i.Certificate.Leaf, generation, ok2); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = d.Snapshot(time.Now())
+	if q := devices[0].Paths[0].Quality; q.Samples != 1 || q.Flaps != 0 {
+		t.Fatalf("history survived provider reset: %+v", q)
+	}
+}

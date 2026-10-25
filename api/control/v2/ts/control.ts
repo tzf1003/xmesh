@@ -1175,6 +1175,30 @@ export interface DevicePath {
   address: string;
   reachable: boolean;
   verified_at: Timestamp | null;
+  quality?: PathQuality;
+}
+/**
+ * 最近约 5 分钟的探测结果。延时是一次完整认证探测（建连、TLS、身份）的耗时，各路径之间可比，但高于单纯 ping。
+ */
+export interface PathQuality {
+  samples: number;
+  /**
+   * 成功探测耗时的中位数；没有成功探测为 0。
+   */
+  latency_ms: number;
+  p90_ms: number;
+  /**
+   * p90 与中位数之差。
+   */
+  jitter_ms: number;
+  /**
+   * 窗口内探测失败的比例。
+   */
+  loss: number;
+  /**
+   * 窗口内成功之后紧接着失败的次数，用来识别随机阻断。
+   */
+  flaps: number;
 }
 export interface CallEventData {
   /**
