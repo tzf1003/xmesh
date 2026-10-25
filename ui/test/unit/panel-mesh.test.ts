@@ -43,6 +43,7 @@ test("every op is accepted in its documented shape", () => {
     { op: "share.tailnet", device: `dev-${"ab".repeat(32)}`, user: "alice" },
     { op: "cloudflare.share", device: "laptop" },
     { op: "cloudflare.status" },
+    { op: "cloudflare.discover", secret: "cf-token-123" },
     { op: "cloudflare.setup", name: "laptop", apply: false },
     { op: "cloudflare.remove", name: "laptop" },
     { op: "cloudflare.remove", name: "My Laptop" },
@@ -183,12 +184,15 @@ test("argv: fixed subcommands, --flag=value for every value, secrets only as fil
   assert.deepEqual(normalizeResult("cloudflare.setup", { device: "laptop", domain: "mesh.example.com", creates: ["a"] }), { applied: false, creates: ["a"], domain: "mesh.example.com" });
   assert.deepEqual(normalizeResult("cloudflare.setup", { hostname: "h.mesh.example.com", tunnel_id: "t", config: "c" }), { applied: true, creates: [], hostname: "h.mesh.example.com", tunnelId: "t" });
   assert.deepEqual(normalizeResult("cloudflare.status", { devices: { b: { hostname: "hb", tunnel_id: "tb" }, a: { hostname: "ha", tunnel_id: "ta" } }, service_token: true }), { devices: [{ name: "a", hostname: "ha", tunnelId: "ta" }, { name: "b", hostname: "hb", tunnelId: "tb" }], serviceToken: true });
+  const cfDiscover = buildMeshArgs({ op: "cloudflare.discover", secret: "cf-token-123" });
+  assert.deepEqual(cfDiscover, ["cloudflare", "discover", "--json", "--secret-file=-"]);
+  assert.deepEqual(normalizeResult("cloudflare.discover", { accounts: [{ id: "a1", name: "Me" }], zones: [{ id: "z1", name: "example.com", account_id: "a1" }, { id: "", name: "x" }] }), { accounts: [{ id: "a1", name: "Me" }], zones: [{ id: "z1", name: "example.com", accountId: "a1" }] });
   const cfLogin = buildMeshArgs({ op: "cloudflare.login", account: "a".repeat(32), zone: "b".repeat(32), domain: "mesh.example.com", secret: "cf-token-123" });
   assert.equal(cfLogin.some((a) => a.includes("cf-token-123")), false, "the token goes through stdin, never argv");
   assert.ok(cfLogin.includes("--secret-file=-"));
   // No value ever starts a flag of its own: all are glued to their flag name.
   for (const [req] of cases) {
-    for (const a of buildMeshArgs(req)) assert.ok(a.startsWith("--") || ["mesh", "status", "tags", "authkey", "policy", "matrix", "derp", "apply", "plan", "probe", "sync", "headscale", "share", "cloudflare", "login", "setup", "remove"].includes(a), a);
+    for (const a of buildMeshArgs(req)) assert.ok(a.startsWith("--") || ["mesh", "status", "tags", "authkey", "policy", "matrix", "derp", "apply", "plan", "probe", "sync", "headscale", "share", "cloudflare", "login", "setup", "remove", "discover"].includes(a), a);
   }
 });
 

@@ -14,13 +14,17 @@ var normalize = regexp.MustCompile(`^/(accounts|zones)/[^/]+`)
 
 // Fake is an in-memory Cloudflare: it records what exists and can be told to fail one route.
 type Fake struct {
-	mu       sync.Mutex
-	Things   map[string]string // kind/id -> detail
-	next     int
-	FailOn   string
-	Service  string // the service the last tunnel was routed to
-	Requests []string
-	Auth     []string
+	mu     sync.Mutex
+	Things map[string]string // kind/id -> detail
+	next   int
+	FailOn string
+	// AccountList and ZoneList answer GET /accounts and GET /zones; left nil, the call is refused as a
+	// token without the Read permission would be.
+	AccountList []map[string]any
+	ZoneList    []map[string]any
+	Service     string // the service the last tunnel was routed to
+	Requests    []string
+	Auth        []string
 }
 
 // New starts a fake API for account "acct" and zone "zone". The returned URL is its base URL.
@@ -53,6 +57,18 @@ func (f *Fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.FailOn != "" && strings.Contains(route, f.FailOn) {
 		reply(500, nil, "boom")
+		return
+	}
+	if route == "GET /accounts" || route == "GET /zones" {
+		list := f.AccountList
+		if route == "GET /zones" {
+			list = f.ZoneList
+		}
+		if list == nil {
+			reply(403, nil, "Authentication error")
+			return
+		}
+		reply(200, list)
 		return
 	}
 	var body map[string]any

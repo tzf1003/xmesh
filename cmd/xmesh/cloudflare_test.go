@@ -154,3 +154,65 @@ func TestCloudflareRejectsProfileThatEscapesTheStateDirectory(t *testing.T) {
 		t.Fatal("profile with a path was accepted")
 	}
 }
+
+func TestCloudflareLoginFindsAccountAndZoneFromTheDomain(t *testing.T) {
+	fake, _, _ := cloudflareFixture(t)
+	fake.AccountList = []map[string]any{{"id": cfAccount, "name": "Me"}}
+	fake.ZoneList = []map[string]any{
+		{"id": "11111111111111111111111111111111", "name": "other.org", "account": map[string]any{"id": cfAccount}},
+		{"id": cfZone, "name": "example.com", "account": map[string]any{"id": cfAccount}},
+	}
+	var out bytes.Buffer
+	if err := cloudflareRun([]string{"login", "--json", "--domain", "mesh.example.com"}, &out, strings.NewReader(cfToken+"\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), cfToken) {
+		t.Fatal("login printed the token")
+	}
+	cred, err := cloudflareStore.Get("default")
+	if err != nil || cred.AccountID != cfAccount || cred.ZoneID != cfZone || cred.Domain != "mesh.example.com" {
+		t.Fatalf("saved %v, %v", cred, err)
+	}
+}
+
+func TestCloudflareLoginFindsZoneEvenWhenAccountsCannotBeListed(t *testing.T) {
+	fake, _, _ := cloudflareFixture(t)
+	fake.ZoneList = []map[string]any{{"id": cfZone, "name": "example.com", "account": map[string]any{"id": cfAccount}}}
+	if err := cloudflareRun([]string{"login", "--domain", "mesh.example.com"}, &bytes.Buffer{}, strings.NewReader(cfToken+"\n")); err != nil {
+		t.Fatal(err)
+	}
+	cred, _ := cloudflareStore.Get("default")
+	if cred.AccountID != cfAccount || cred.ZoneID != cfZone {
+		t.Fatalf("saved %v", cred)
+	}
+}
+
+func TestCloudflareLoginExplainsWhyItCannotFindTheZone(t *testing.T) {
+	fake, _, _ := cloudflareFixture(t)
+	var out bytes.Buffer
+	err := cloudflareRun([]string{"login", "--domain", "mesh.example.com"}, &out, strings.NewReader(cfToken+"\n"))
+	if err == nil || !strings.Contains(err.Error(), "Read") || strings.Contains(err.Error(), cfToken) {
+		t.Fatalf("got %v", err)
+	}
+	if err := cloudflareRun([]string{"login"}, &out, strings.NewReader(cfToken+"\n")); err == nil || !strings.Contains(err.Error(), "--domain") {
+		t.Fatalf("without a domain: %v", err)
+	}
+	fake.ZoneList = []map[string]any{{"id": cfZone, "name": "other.org", "account": map[string]any{"id": cfAccount}}}
+	if err := cloudflareRun([]string{"login", "--domain", "mesh.example.com"}, &out, strings.NewReader(cfToken+"\n")); err == nil || !strings.Contains(err.Error(), "other.org") {
+		t.Fatalf("unrelated zones: %v", err)
+	}
+}
+
+func TestCloudflareDiscoverListsWhatTheTokenSees(t *testing.T) {
+	fake, _, _ := cloudflareFixture(t)
+	fake.AccountList = []map[string]any{{"id": cfAccount, "name": "Me"}}
+	fake.ZoneList = []map[string]any{{"id": cfZone, "name": "Example.com", "account": map[string]any{"id": cfAccount}}}
+	var out bytes.Buffer
+	if err := cloudflareRun([]string{"discover", "--json"}, &out, strings.NewReader(cfToken+"\n")); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"name":"example.com"`) || !strings.Contains(got, `"name":"Me"`) || !strings.Contains(got, cfZone) || strings.Contains(got, cfToken) {
+		t.Fatalf("got %s", got)
+	}
+}

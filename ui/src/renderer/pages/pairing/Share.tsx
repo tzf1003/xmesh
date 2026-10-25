@@ -4,7 +4,7 @@ import type { PageContext } from "../../app";
 import { getApi } from "../../api";
 import { Banner, Confirm, Field } from "../../components";
 import { useCopy } from "../../design-copy";
-import { PasswordInput } from "../../password-input";
+import { useCloudflareLogin } from "./cloudflare-login";
 import type { ActionError } from "../../../shared/ipc";
 import { parseMeshRequest } from "../../../shared/mesh";
 import type { Peer } from "../../../shared/control";
@@ -23,10 +23,7 @@ export function Share({ peer, ctx }: { peer: Peer; ctx: PageContext }): JSX.Elem
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError>();
   const [login, setLogin] = useState(false);
-  const [account, setAccount] = useState("");
-  const [zone, setZone] = useState("");
-  const [domain, setDomain] = useState("");
-  const [token, setToken] = useState("");
+  const cf = useCloudflareLogin();
   const [user, setUser] = useState("");
   if (!peer.device_id || !ctx.can("pair")) return null;
   const device = peer.device_id;
@@ -56,20 +53,17 @@ export function Share({ peer, ctx }: { peer: Peer; ctx: PageContext }): JSX.Elem
     setErr(r.error);
   };
 
-  const loginRequest = parseMeshRequest({ op: "cloudflare.login", account, zone, domain, secret: token });
   const saveLogin = async (): Promise<void> => {
-    if (!loginRequest.ok) return;
+    if (!cf.request) return;
     setBusy(true);
     setErr(undefined);
-    const request = loginRequest.value;
-    // The token leaves this page with the request, whatever the answer.
-    setToken("");
-    const r = await getApi().mesh(request);
+    const r = await getApi().mesh(cf.request);
     if (!r.ok) {
       setBusy(false);
       setErr(r.error);
       return;
     }
+    cf.reset();
     setLogin(false);
     await share("cloudflare");
   };
@@ -111,15 +105,12 @@ export function Share({ peer, ctx }: { peer: Peer; ctx: PageContext }): JSX.Elem
           title={copy("先保存 Cloudflare 令牌", "Save a Cloudflare token first")}
           confirmLabel={copy("保存并发送", "Save and send")}
           body={<>
-            <p class="hint">{copy("本机还没有保存 Cloudflare 令牌。令牌只存进本机系统钥匙串，不写进配置文件，也不会发给对方。需要权限：Account 的 Cloudflare Tunnel、Access: Apps and Policies、Access: Service Tokens（Edit），Zone 的 DNS（Edit）。", "No Cloudflare token is saved on this device. It goes only into the system keychain, never into the config file or to the other device. Required: Account Cloudflare Tunnel, Access Apps and Policies, Access Service Tokens (Edit), Zone DNS (Edit).")}</p>
-            <Field label={copy("账号 ID", "Account ID")}><input value={account} onInput={(e) => setAccount(e.currentTarget.value.trim())} data-testid="cf-account" /></Field>
-            <Field label={copy("区域 ID", "Zone ID")}><input value={zone} onInput={(e) => setZone(e.currentTarget.value.trim())} data-testid="cf-zone" /></Field>
-            <Field label={copy("设备主机名所用的域名", "Domain for device hostnames")}><input value={domain} placeholder="mesh.example.com" onInput={(e) => setDomain(e.currentTarget.value.trim())} data-testid="cf-domain" /></Field>
-            <Field label={copy("API 令牌", "API token")}><PasswordInput value={token} onInput={setToken} autocomplete="off" testid="cf-token" /></Field>
+            <p class="hint">{copy("本机还没有保存 Cloudflare 令牌。", "No Cloudflare token is saved on this device.")}</p>
+            {cf.fields}
             {err && <Banner kind="danger" testid="device-share-error">{err.message}</Banner>}
           </>}
-          busy={busy || !loginRequest.ok}
-          onCancel={() => { setLogin(false); setAsk(undefined); setToken(""); setErr(undefined); }}
+          busy={busy || !cf.request}
+          onCancel={() => { setLogin(false); setAsk(undefined); setErr(undefined); cf.reset(); }}
           onConfirm={() => void saveLogin()}
         />
       )}

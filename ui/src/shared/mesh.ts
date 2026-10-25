@@ -52,6 +52,7 @@ export type MeshRequest =
   | { op: "share.tailnet"; device: string; user?: string }
   | { op: "cloudflare.login"; account: string; zone: string; domain: string; secret: string }
   | { op: "cloudflare.share"; device: string }
+  | { op: "cloudflare.discover"; secret: string }
   | { op: "cloudflare.status" }
   | { op: "cloudflare.setup"; name: string; apply: boolean }
   | { op: "cloudflare.remove"; name: string }
@@ -77,6 +78,7 @@ export const MESH_OPS = [
   "share.tailnet",
   "cloudflare.login",
   "cloudflare.share",
+  "cloudflare.discover",
   "cloudflare.status",
   "cloudflare.setup",
   "cloudflare.remove",
@@ -290,6 +292,10 @@ export function parseMeshRequest(v: unknown): MeshParse {
       if (!onlyKeys(v, ["op", "device"])) return bad("keys");
       if (typeof v.device !== "string" || !DEVICE_ID.test(v.device)) return bad("device");
       return { ok: true, value: { op: "cloudflare.share", device: v.device } };
+    case "cloudflare.discover":
+      if (!onlyKeys(v, ["op", "secret"])) return bad("keys");
+      if (typeof v.secret !== "string" || !SECRET.test(v.secret)) return bad("secret");
+      return { ok: true, value: { op: "cloudflare.discover", secret: v.secret } };
     case "cloudflare.status":
       return onlyKeys(v, ["op"]) ? { ok: true, value: { op: "cloudflare.status" } } : bad("keys");
     case "cloudflare.setup":
@@ -522,6 +528,12 @@ export interface CloudflareSetupResult {
   tunnelId?: string;
 }
 
+/** What `xmesh cloudflare discover --json` reports: the accounts and domains a token can see. */
+export interface CloudflareDiscovery {
+  accounts: { id: string; name: string }[];
+  zones: { id: string; name: string; accountId: string }[];
+}
+
 export interface CloudflareStatus {
   devices: { name: string; hostname: string; tunnelId: string }[];
   serviceToken: boolean;
@@ -641,6 +653,7 @@ export interface MeshResults {
   "share.tailnet": MeshShareResult;
   "cloudflare.login": CloudflareLoginResult;
   "cloudflare.share": MeshShareResult;
+  "cloudflare.discover": CloudflareDiscovery;
   "cloudflare.status": CloudflareStatus;
   "cloudflare.setup": CloudflareSetupResult;
   "cloudflare.remove": { removed: string };
@@ -924,6 +937,15 @@ export function normalizeCloudflareSetup(v: unknown): CloudflareSetupResult {
   return { applied: false, creates, domain: str(r.domain) };
 }
 
+export function normalizeCloudflareDiscovery(v: unknown): CloudflareDiscovery {
+  const r = rec(v);
+  const list = (x: unknown): Record<string, unknown>[] => (Array.isArray(x) ? x.map(rec) : []);
+  return {
+    accounts: list(r.accounts).map((a) => ({ id: str(a.id), name: str(a.name) })).filter((a) => a.id !== ""),
+    zones: list(r.zones).map((z) => ({ id: str(z.id), name: str(z.name), accountId: str(z.account_id) })).filter((z) => z.id !== "" && z.name !== ""),
+  };
+}
+
 export function normalizeCloudflareStatus(v: unknown): CloudflareStatus {
   const r = rec(v);
   const devices = isRecord(r.devices) ? r.devices : {};
@@ -946,6 +968,8 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
         return normalizeShare(json);
       case "cloudflare.login":
         return normalizeCloudflareLogin(json);
+      case "cloudflare.discover":
+        return normalizeCloudflareDiscovery(json);
       case "cloudflare.status":
         return normalizeCloudflareStatus(json);
       case "cloudflare.setup":

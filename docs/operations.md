@@ -75,12 +75,13 @@ xmesh control pair connect --path lan --address https://100.100.1.20:7433 --pass
 
 ### 自动创建（推荐）
 
-桌面面板里：打开「设备」页，在 Cloudflare Tunnel 卡片点“为本机创建隧道”，没有保存令牌时先按提示填账号 ID、区域 ID、域名和令牌，预览后确认即可；同一张卡片也能删除已创建的隧道。下面是等价的命令行。
+桌面面板里：打开「设备」页，在 Cloudflare Tunnel 卡片点“为本机创建隧道”，没有保存令牌时先粘贴令牌，点“查找账号和域名”，选好域名并填主机名所用的域名（账号 ID 和区域 ID 自动获取；令牌缺少读取权限时可手动填 ID），预览后确认即可；同一张卡片也能删除已创建的隧道。下面是等价的命令行。
 
 先在 Cloudflare 创建一个专用 API 令牌，权限：Account 的 Cloudflare Tunnel（编辑）、Access: Apps and Policies（编辑）、Access: Service Tokens（编辑），Zone 的 DNS（编辑），资源范围限定到用于网格的那个域名。令牌只保存在系统钥匙串（或 `--credential-file`），不进 `xmesh.yaml`，内核不持有。
 
 ```bash
-echo "$TOKEN" | xmesh cloudflare login --account <账号ID> --zone <区域ID> --domain mesh.example.com
+echo "$TOKEN" | xmesh cloudflare login --domain mesh.example.com   # 账号 ID 和区域 ID 自动查找
+# 令牌没有 Account Settings / Zone 的 Read 权限时，手动给出：--account <账号ID> --zone <区域ID>
 xmesh cloudflare setup --name laptop --config xmesh.yaml            # 预览
 xmesh cloudflare setup --name laptop --config xmesh.yaml --apply    # 创建并写好配置
 ```

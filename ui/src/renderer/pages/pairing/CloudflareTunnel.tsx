@@ -5,7 +5,7 @@ import { getApi } from "../../api";
 import { Banner, Confirm, Field } from "../../components";
 import { useCopy } from "../../design-copy";
 import { useResource } from "../../hooks";
-import { PasswordInput } from "../../password-input";
+import { useCloudflareLogin } from "./cloudflare-login";
 import type { ActionError } from "../../../shared/ipc";
 import { parseMeshRequest } from "../../../shared/mesh";
 import type { CloudflareSetupResult } from "../../../shared/mesh";
@@ -26,16 +26,13 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ActionError>();
   const [removing, setRemoving] = useState<string>();
-  const [account, setAccount] = useState("");
-  const [zone, setZone] = useState("");
-  const [domain, setDomain] = useState("");
-  const [token, setToken] = useState("");
+  const cf = useCloudflareLogin();
   if (!ctx.can("pair")) return null;
   const res = status.resource;
   const data = res.state === "ready" ? res.data : res.state === "error" ? res.stale : undefined;
   const devices = data && "devices" in data ? data.devices : [];
 
-  const close = (): void => { setStep(undefined); setPlan(undefined); setErr(undefined); setToken(""); };
+  const close = (): void => { setStep(undefined); setPlan(undefined); setErr(undefined); cf.reset(); };
   const nameRequest = parseMeshRequest({ op: "cloudflare.setup", name, apply: false });
 
   const preview = async (): Promise<void> => {
@@ -60,17 +57,14 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
     ctx.toast(copy("隧道已创建。重启 xmesh 后生效（需要已安装 cloudflared）。", "Tunnel created. Restart xmesh to use it (cloudflared must be installed)."));
   };
 
-  const loginRequest = parseMeshRequest({ op: "cloudflare.login", account, zone, domain, secret: token });
   const saveLogin = async (): Promise<void> => {
-    if (!loginRequest.ok) return;
+    if (!cf.request) return;
     setBusy(true);
     setErr(undefined);
-    const request = loginRequest.value;
-    // The token leaves this page with the request, whatever the answer.
-    setToken("");
-    const r = await getApi().mesh(request);
+    const r = await getApi().mesh(cf.request);
     setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
+    cf.reset();
     setStep("name");
     await preview();
   };
@@ -142,14 +136,11 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
           title={copy("先保存 Cloudflare 令牌", "Save a Cloudflare token first")}
           confirmLabel={copy("保存并预览", "Save and preview")}
           body={<>
-            <p class="hint">{copy("本机还没有保存 Cloudflare 令牌。令牌只存进本机系统钥匙串，不写进配置文件。需要权限：Account 的 Cloudflare Tunnel、Access: Apps and Policies、Access: Service Tokens（Edit），Zone 的 DNS（Edit）。", "No Cloudflare token is saved on this device. It goes only into the system keychain, never into the config file. Required: Account Cloudflare Tunnel, Access Apps and Policies, Access Service Tokens (Edit), Zone DNS (Edit).")}</p>
-            <Field label={copy("账号 ID", "Account ID")}><input value={account} onInput={(e) => setAccount(e.currentTarget.value.trim())} data-testid="cf-account" /></Field>
-            <Field label={copy("区域 ID", "Zone ID")}><input value={zone} onInput={(e) => setZone(e.currentTarget.value.trim())} data-testid="cf-zone" /></Field>
-            <Field label={copy("设备主机名所用的域名", "Domain for device hostnames")}><input value={domain} placeholder="mesh.example.com" onInput={(e) => setDomain(e.currentTarget.value.trim())} data-testid="cf-domain" /></Field>
-            <Field label={copy("API 令牌", "API token")}><PasswordInput value={token} onInput={setToken} autocomplete="off" testid="cf-token" /></Field>
+            <p class="hint">{copy("本机还没有保存 Cloudflare 令牌。", "No Cloudflare token is saved on this device.")}</p>
+            {cf.fields}
             {err && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
           </>}
-          busy={busy || !loginRequest.ok}
+          busy={busy || !cf.request}
           onCancel={close}
           onConfirm={() => void saveLogin()}
         />
