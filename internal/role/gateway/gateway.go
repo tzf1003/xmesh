@@ -17,6 +17,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,12 @@ import (
 // toolsExpiry is how long a device may keep failing its refresh before its tool table is dropped.
 // It outlasts a few missed heartbeats so a flapping link does not empty the client's tool list.
 const toolsExpiry = 90 * time.Second
+
+// listWait bounds how long a session's tools/list waits for the first catalogue
+// of each other online device. Clients such as claude.ai read tools/list once
+// and do not act on tools/list_changed, so a list sent before the remote tables
+// arrive would hide those devices for the whole session.
+var listWait = 5 * time.Second
 
 type Principal struct {
 	ClientID     string
@@ -123,6 +130,9 @@ type view struct {
 	generation uint64
 	catalog    [32]byte
 	closed     bool
+	// listed holds the devices a tools/list has already waited for, so a slow
+	// device delays at most the first list of the session.
+	listed map[string]bool
 }
 
 func New(o Options) *Gateway {
@@ -346,7 +356,7 @@ func scopeKey(scopes []string) string {
 }
 func (g *Gateway) newView(p Principal) *view {
 	ctx, cancel := context.WithCancel(g.ctx)
-	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, leases: map[string]*leaseBeat{}, oauthAudit: oauthAuditID(p.OAuthSession), down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
+	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, leases: map[string]*leaseBeat{}, oauthAudit: oauthAuditID(p.OAuthSession), down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, listed: map[string]bool{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
 	v.server = mcp.NewServer(&mcp.Implementation{Name: "xmesh-gateway", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, r *mcp.InitializedRequest) { v.bind(r.Session) }})
 	for _, tool := range controlTools() {
 		name := tool.Name
@@ -409,6 +419,7 @@ func (g *Gateway) newView(p Principal) *view {
 					if device != "" && device != g.opts.LocalPeer.Name {
 						v.waitReady(ctx, device)
 					}
+					v.waitOthers(ctx, g.opts.LocalPeer.Name, device)
 				}
 			}
 			if method == "tools/call" {
@@ -632,6 +643,35 @@ func (v *view) waitReady(ctx context.Context, name string) {
 			completed = job
 		}
 	}
+}
+
+// waitOthers waits, together and for at most listWait, for the first catalogue
+// of every online device other than skip that no tools/list of this session
+// has waited for yet. A device still loading afterwards is announced through
+// tools/list_changed as before.
+func (v *view) waitOthers(ctx context.Context, skip ...string) {
+	devices, _ := v.g.snapshot()
+	pending := []string{}
+	v.mu.Lock()
+	for name, d := range devices {
+		if !d.online || v.listed[name] || slices.Contains(skip, name) {
+			continue
+		}
+		v.listed[name] = true
+		pending = append(pending, name)
+	}
+	v.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, listWait)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, name := range pending {
+		wg.Add(1)
+		go func() { defer wg.Done(); v.waitReady(ctx, name) }()
+	}
+	wg.Wait()
 }
 
 func (v *view) refreshPeer(ctx context.Context, name string, job *refreshJob, d *downstream) {

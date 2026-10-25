@@ -18,6 +18,8 @@ import (
 // conformance: CTR-GW-04
 func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	g, _ := fixture(t, false)
+	defer func(d time.Duration) { listWait = d }(listWait)
+	listWait = 300 * time.Millisecond
 	original := g.opts.Dial
 	started, stopped := make(chan struct{}), make(chan struct{})
 	var attempts atomic.Int32
@@ -43,9 +45,14 @@ func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	for range 3 {
+	for i := range 3 {
+		began := time.Now()
 		if _, err := client.ListTools(ctx, nil); err != nil {
 			t.Fatal("slow peer blocked catalogue", err)
+		}
+		// Only the first list of the session waits, and only for listWait.
+		if took := time.Since(began); i > 0 && took > listWait/2 {
+			t.Fatal("later tools/list waited for the slow peer again", took)
 		}
 		for _, name := range []string{"local/sys.info", "healthy/sys.info", "devices.list"} {
 			out, err := client.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: map[string]any{}})
@@ -204,5 +211,40 @@ func Test_PeerRetryBackoffAndReplacement(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("replacement inherited old peer backoff")
+	}
+}
+
+// conformance: CTR-GW-04
+// A client that reads tools/list once must see the tools of remote devices
+// whose catalogue arrives shortly after the session opens.
+func Test_FirstToolsListIncludesRemoteDevices(t *testing.T) {
+	g, _ := fixture(t, false)
+	original := g.opts.Dial
+	g.opts.Dial = func(ctx context.Context, peer mesh.Peer, p Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+		if peer.Name == "remote" {
+			select {
+			case <-time.After(300 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return original(ctx, peer, p, opts)
+	}
+	g.Update([]mesh.Peer{{ID: "remote", Name: "remote", Address: g.opts.LocalPeer.Address}})
+	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	list, err := client.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, tool := range list.Tools {
+		seen[tool.Name] = true
+	}
+	for _, want := range []string{"local/exec.run", "remote/exec.run"} {
+		if !seen[want] {
+			t.Fatalf("%s missing from the first tools/list", want)
+		}
 	}
 }
