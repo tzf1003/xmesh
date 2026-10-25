@@ -24,6 +24,8 @@ import type {
   PairDocument,
   PairExportResponse,
   PairImportResponse,
+  OfferAcceptResponse,
+  OffersResponse,
   PairTrustUpdateResponse,
   PairPasswordState,
   PatList,
@@ -92,6 +94,9 @@ export const CHANNELS = {
   connectPair: "xmesh:connect-pair",
   revokeDevice: "xmesh:revoke-device",
   setDeviceTags: "xmesh:set-device-tags",
+  listOffers: "xmesh:list-offers",
+  acceptOffer: "xmesh:accept-offer",
+  rejectOffer: "xmesh:reject-offer",
   queryAudit: "xmesh:query-audit",
   getRecentCalls: "xmesh:get-recent-calls",
   onboarding: "xmesh:onboarding",
@@ -359,6 +364,11 @@ export interface PanelApi {
   revokeDevice(deviceId: string): Promise<ActionResult>;
   /** Replaces the roles this node grants an already paired device. Local control channel only. */
   setDeviceTags(deviceId: string, tags: string[]): Promise<DataResult<PairTrustUpdateResponse>>;
+  /** Connection methods other paired devices have offered this node (summaries only, never credentials). */
+  listOffers(): Promise<DataResult<OffersResponse>>;
+  /** Applies an offer to this node's configuration. Only ever called from the user's own click. */
+  acceptOffer(offerId: string): Promise<DataResult<OfferAcceptResponse>>;
+  rejectOffer(offerId: string): Promise<ActionResult>;
   queryAudit(query: AuditQuery): Promise<DataResult<AuditResponse>>;
   getRecentCalls(): Promise<CallEventData[]>;
   onCalls(listener: (calls: CallEventData[]) => void): () => void;
@@ -428,6 +438,9 @@ export const PANEL_API_METHODS = [
   "connectPair",
   "revokeDevice",
   "setDeviceTags",
+  "listOffers",
+  "acceptOffer",
+  "rejectOffer",
   "queryAudit",
   "getRecentCalls",
   "onCalls",

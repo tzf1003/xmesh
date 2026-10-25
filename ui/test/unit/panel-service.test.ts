@@ -330,6 +330,25 @@ test("pair export, and import only with a matching fingerprint", async () => {
   assert.deepEqual(k.panel.imported, [{ name: "peer-2", tags: ["tag:device"] }]);
 });
 
+test("offers: list holds no credentials, accept and reject reach their routes", async () => {
+  const { k, service } = await setup();
+  const id = "ab".repeat(16);
+  const other = "cd".repeat(16);
+  const base = { from_id: `dev-${FP}`, from_name: "laptop", received_at: "2026-01-01T00:00:00Z", expires_at: "2026-01-02T00:00:00Z" };
+  k.panel.offers.push({ id, kind: "cloudflare", ...base, cloudflare: { hostname: "a.example.com", peer_hostname: "b.example.com" } }, { id: other, kind: "tailnet", ...base, tailnet: {} });
+  const list = await service.listOffers();
+  assert.ok(list.ok);
+  assert.equal(list.data.offers.length, 2);
+  const accepted = await service.acceptOffer(id);
+  assert.ok(accepted.ok);
+  assert.equal(accepted.data.kind, "cloudflare");
+  assert.ok(last(k, "POST", `/v2/offers/${id}/accept`));
+  assert.deepEqual(await service.rejectOffer(other), { ok: true });
+  assert.ok(last(k, "DELETE", `/v2/offers/${other}`));
+  const gone = await service.acceptOffer(id);
+  assert.ok(!gone.ok);
+});
+
 test("connection password: set, read back without the value, clear; connect to a discovered device", async () => {
   const { k, service } = await setup();
   const before = await service.getPairPassword();

@@ -105,6 +105,9 @@ export class PanelData {
   issuer: string | null = "https://win-dev-01.tail1234.ts.net";
   localPair: PairDocument = fixture<{ pair: PairDocument }>("PairExportResponse.ok").pair;
   imported: { name: string; tags: string[] }[] = [];
+  /** Offers other devices made this node; accepting or rejecting removes one. Summaries only, like the kernel's. */
+  offers: { id: string; kind: "cloudflare" | "tailnet"; from_id: string; from_name: string; received_at: string; expires_at: string; cloudflare?: { hostname: string; peer_hostname: string }; tailnet?: { control_url?: string } }[] = [];
+  acceptedOffers: string[] = [];
   /** This node's connection password, as far as the panel can tell: the fake keeps only the state. */
   pairPassword: PairPasswordState = { set: false, updated_at: null, failed_attempts: 0, locked_until: null };
   /** Unpaired devices the fake sees on the LAN. Connecting to one removes it from the list. */
@@ -192,6 +195,7 @@ export class PanelData {
     if (env && (method === "PATCH" || method === "DELETE")) return this.backendEnvRoute(method, decodeURIComponent(env[1]!), body);
     if (p.startsWith("/v2/ingress/")) return this.ingress(method, p, body);
     if (p.startsWith("/v2/pair/")) return this.pair(method, p, body);
+    if (p === "/v2/offers" || p.startsWith("/v2/offers/")) return this.offerRoute(method, p);
     if (p === "/v2/ci" || p.startsWith("/v2/ci/")) return this.ci.handle(method, p, u.searchParams, body);
     if (method === "GET" && p === "/v2/audit") return this.auditQuery(u.searchParams);
     return undefined;
@@ -493,6 +497,20 @@ export class PanelData {
       this.passwordRotations++;
       return ok({ rotated_at: iso() });
     }
+    return err(404, "not_found", "没有这个接口");
+  }
+
+  private offerRoute(method: string, p: string): RouteResult {
+    if (method === "GET" && p === "/v2/offers") return ok({ offers: this.offers });
+    const m = /^\/v2\/offers\/([0-9a-f]{32})(\/accept)?$/.exec(p);
+    const offer = m && this.offers.find((o) => o.id === m[1]);
+    if (!m || !offer) return err(404, "not_found", "没有这个提议");
+    this.offers = this.offers.filter((o) => o !== offer);
+    if (method === "POST" && m[2]) {
+      this.acceptedOffers.push(offer.id);
+      return ok({ kind: offer.kind, restart_required: true, changed_paths: ["/mesh"] });
+    }
+    if (method === "DELETE" && !m[2]) return { status: 204 };
     return err(404, "not_found", "没有这个接口");
   }
 
