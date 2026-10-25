@@ -229,6 +229,9 @@ export function createHandlers({ kernel, onboarding, transfers, playground, cont
     const picked = parseDeviceTags(tags);
     return typeof id === "string" && /^dev-[0-9a-f]{64}$/.test(id) && picked !== undefined ? service.setDeviceTags(id, picked) : bad("device tags");
   });
+  handle(CHANNELS.listOffers, () => service.listOffers());
+  handle(CHANNELS.acceptOffer, (id: unknown) => (typeof id === "string" && /^[0-9a-f]{32}$/.test(id) ? service.acceptOffer(id) : bad("offer id")));
+  handle(CHANNELS.rejectOffer, (id: unknown) => (typeof id === "string" && /^[0-9a-f]{32}$/.test(id) ? service.rejectOffer(id) : bad("offer id")));
   handle(CHANNELS.clearPairPassword, () => service.clearPairPassword());
   handle(CHANNELS.discoverPairs, () => service.discoverPairs());
   handle(CHANNELS.connectPair, (args: unknown) => {

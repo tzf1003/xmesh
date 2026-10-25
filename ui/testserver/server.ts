@@ -54,6 +54,7 @@ const PANEL_ROUTE_CAPS: [string, Capability][] = [
   ["/v2/pats", "pats"],
   ["/v2/ingress", "ingress"],
   ["/v2/pair", "pair"],
+  ["/v2/offers", "pair"],
   ["/v2/ci", "ci"],
   ["/v2/audit", "audit"],
 ];

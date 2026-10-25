@@ -27,6 +27,8 @@ import type {
   PairDiscoveredResponse,
   PairExportResponse,
   PairImportResponse,
+  OfferAcceptResponse,
+  OffersResponse,
   PairTrustUpdateResponse,
   PairPasswordState,
   PatList,
@@ -343,6 +345,18 @@ export class PanelService {
 
   setDeviceTags(deviceId: string, tags: string[]): Promise<DataResult<PairTrustUpdateResponse>> {
     return this.data("pair", (c) => c.call("PATCH", `/v2/pair/trust/${deviceId}`, { body: { tags } }));
+  }
+
+  listOffers(): Promise<DataResult<OffersResponse>> {
+    return this.data("pair", (c) => c.call("GET", "/v2/offers"));
+  }
+
+  acceptOffer(offerId: string): Promise<DataResult<OfferAcceptResponse>> {
+    return this.data("pair", (c) => c.call("POST", `/v2/offers/${offerId}/accept`));
+  }
+
+  rejectOffer(offerId: string): Promise<ActionResult> {
+    return this.action("pair", (c) => c.call("DELETE", `/v2/offers/${offerId}`));
   }
 
   clearPairPassword(): Promise<ActionResult> {
