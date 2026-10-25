@@ -92,6 +92,11 @@ func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Director
 				for id := range d.paths {
 					if _, ok := trust.Find(id); !ok {
 						delete(d.paths, id)
+					}
+				}
+				// A device that never answered has history but no path, so revoke it separately.
+				for id := range d.stats {
+					if _, ok := trust.Find(id); !ok {
 						delete(d.stats, id)
 					}
 				}

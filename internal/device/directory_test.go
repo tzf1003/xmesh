@@ -257,3 +257,28 @@ func TestDirectoryKeepsRecordingWhenManyAddressesWereSeen(t *testing.T) {
 	}
 	t.Fatal("newest path missing")
 }
+
+func TestRevokedDeviceForgetsPathThatNeverAnswered(t *testing.T) {
+	d, i, _ := directory(t)
+	now := time.Now()
+	if err := d.ProbeFailed(i.ID, Tailnet, "100.100.1.1:7433", 1, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.trust.Revoke(t.Context(), i.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The revocation is applied by the directory's own goroutine.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		d.mu.Lock()
+		_, kept := d.stats[i.ID]
+		d.mu.Unlock()
+		if !kept {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("revoked device kept its probe history")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
