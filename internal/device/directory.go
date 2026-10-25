@@ -264,6 +264,19 @@ func (d *Directory) Snapshot(now time.Time) ([]Device, uint64) {
 			}
 			device.Paths = append(device.Paths, path)
 		}
+		// A path whose probes have only failed has no observation, but its loss is exactly what
+		// the user needs to see, so report it as unreachable rather than letting it vanish.
+		for key, st := range d.stats[id] {
+			if _, observed := d.paths[id][key]; observed {
+				continue
+			}
+			q := st.quality(now)
+			if q.Samples == 0 {
+				delete(d.stats[id], key)
+				continue
+			}
+			device.Paths = append(device.Paths, Path{Kind: key.kind, Address: key.address, Quality: q})
+		}
 		device.IdentityConflict = identityConflict(d.paths[id], now)
 		slices.SortFunc(device.Paths, comparePath)
 		result = append(result, device)

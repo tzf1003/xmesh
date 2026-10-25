@@ -1,6 +1,7 @@
 package device
 
 import (
+	"math"
 	"slices"
 	"time"
 )
@@ -84,8 +85,9 @@ func (s *pathStats) quality(now time.Time) Quality {
 	return q
 }
 
-// percentile reads a sorted slice with nearest-rank rounding.
+// percentile reads a sorted slice by nearest rank: the ceiling of p*n, so a small window's p90
+// is never below the sample it should cover.
 func percentile(sorted []float64, p float64) float64 {
-	i := int(p*float64(len(sorted))+0.5) - 1
+	i := int(math.Ceil(p*float64(len(sorted)))) - 1
 	return sorted[min(max(i, 0), len(sorted)-1)]
 }

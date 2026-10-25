@@ -209,3 +209,27 @@ func TestDirectoryReportsPathQualityAcrossFlaps(t *testing.T) {
 		t.Fatalf("history survived provider reset: %+v", q)
 	}
 }
+
+func TestDirectoryReportsPathThatNeverAnswered(t *testing.T) {
+	d, i, _ := directory(t)
+	address := "100.100.1.1:7433"
+	now := time.Now()
+	for n := range 3 {
+		if err := d.ProbeFailed(i.ID, Tailnet, address, 1, now.Add(time.Duration(n)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	devices, _ := d.Snapshot(now.Add(4 * time.Second))
+	if len(devices) != 1 || len(devices[0].Paths) != 1 {
+		t.Fatalf("blocked path hidden: %+v", devices)
+	}
+	path := devices[0].Paths[0]
+	if path.Reachable || path.Kind != Tailnet || path.Address != address || path.Quality.Samples != 3 || path.Quality.Loss != 1 {
+		t.Fatalf("path = %+v", path)
+	}
+	// Once its probes age out of the window the path is gone again.
+	devices, _ = d.Snapshot(now.Add(statsWindow + time.Minute))
+	if len(devices[0].Paths) != 0 {
+		t.Fatalf("stale failures kept: %+v", devices[0].Paths)
+	}
+}

@@ -20,7 +20,7 @@ func TestPathStatsQuality(t *testing.T) {
 	if q.Samples != 10 || q.Loss != 0.3 || q.Flaps != 2 {
 		t.Fatalf("quality = %+v", q)
 	}
-	if q.LatencyMs != 50 || q.P90Ms != 60 && q.P90Ms != 200 || q.JitterMs != q.P90Ms-q.LatencyMs {
+	if q.LatencyMs != 50 || q.P90Ms != 200 || q.JitterMs != 150 {
 		t.Fatalf("latency = %+v", q)
 	}
 }
@@ -45,5 +45,12 @@ func TestPathStatsEmpty(t *testing.T) {
 	var s pathStats
 	if q := s.quality(time.Now()); q != (Quality{}) {
 		t.Fatalf("empty quality = %+v", q)
+	}
+}
+
+func TestPercentileNearestRankCeiling(t *testing.T) {
+	got := percentile([]float64{40, 40, 45, 50, 55, 60, 200}, 0.9)
+	if got != 200 {
+		t.Fatalf("p90 of seven = %v, want 200", got)
 	}
 }
