@@ -513,15 +513,16 @@ func (m *Manager) dialKind(ctx context.Context, p *peerLink, kind device.PathKin
 	return false
 }
 
-// yieldToPreferred gives the paths ranked above kind a chance to connect before an incoming connection
-// on kind is accepted, so a peer that dials a less preferred path first does not pin the device to it
-// (a carrier is sticky once committed). It reports true when one of them connected.
+// yieldToPreferred gives the LAN a chance to connect before an incoming connection on a less preferred
+// path is accepted, so a peer that dials the Tailnet first does not pin the device to it (a carrier is
+// sticky once committed). Only the LAN yields: it is quick to try, and a longer wait could outlast the
+// handshake deadline or deadlock two ends whose orders disagree. It reports true when the LAN connected.
 func (m *Manager) yieldToPreferred(ctx context.Context, p *peerLink, kind device.PathKind) bool {
 	for _, better := range m.pathOrder() {
 		if better == kind {
 			return false
 		}
-		if m.dialKind(ctx, p, better, 5*time.Second) {
+		if better == device.LAN && m.dialKind(ctx, p, better, 0) {
 			return true
 		}
 	}
