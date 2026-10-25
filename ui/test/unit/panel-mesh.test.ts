@@ -39,6 +39,10 @@ test("every op is accepted in its documented shape", () => {
     { op: "login", kind: "tailscale", access: "read", secret: "tskey-api-example" },
     { op: "login", kind: "headscale", access: "write", url: "https://headscale.example.com", secret: "hskey-example" },
     { op: "status" },
+    { op: "share.tailnet", device: "laptop" },
+    { op: "share.tailnet", device: `dev-${"ab".repeat(32)}`, user: "alice" },
+    { op: "cloudflare.share", device: "laptop" },
+    { op: "cloudflare.login", account: "a".repeat(32), zone: "b".repeat(32), domain: "mesh.example.com", secret: "cf-token-123" },
     { op: "tags", device: "n100", tags: ["tag:device"], apply: false },
     { op: "tags", device: "n100", tags: [], apply: true },
     { op: "onboard", tags: ["tag:device"], ttl: "1h", ephemeral: false, file: "/home/u/key.txt", overwrite: true },
@@ -67,6 +71,11 @@ test("requests are refused for stray keys, bad types and injection attempts", ()
   assert.equal(field(null), "op");
   assert.equal(field({ op: "shell" }), "op");
   assert.equal(field({ op: "status", extra: 1 }), "keys");
+  assert.equal(field({ op: "share.tailnet", device: "x;rm", }), "device");
+  assert.equal(field({ op: "share.tailnet", device: "x", key: "tskey" }), "keys");
+  assert.equal(field({ op: "cloudflare.share", device: "--apply" }), "device");
+  assert.equal(field({ op: "cloudflare.login", account: "short", zone: "b".repeat(32), domain: "mesh.example.com", secret: "t" }), "account");
+  assert.equal(field({ op: "cloudflare.login", account: "a".repeat(32), zone: "b".repeat(32), domain: "not a domain", secret: "t" }), "domain");
   assert.equal(field({ op: "tags", device: "n1", tags: ["tag:a"], apply: false, extra: 1 }), "keys");
   assert.equal(field({ op: "tags", device: "--apply", tags: [], apply: false }), "device");
   assert.equal(field({ op: "tags", device: "n1 --x", tags: [], apply: false }), "device");
@@ -159,9 +168,14 @@ test("argv: fixed subcommands, --flag=value for every value, secrets only as fil
   assert.deepEqual(buildMeshArgs({ op: "status" }, "/n/xmesh.yaml"), ["mesh", "status", "--json", "--node-config=/n/xmesh.yaml"]);
   assert.deepEqual(buildMeshArgs({ op: "matrix", mismatchOnly: false }, "/n/xmesh.yaml"), ["mesh", "matrix", "--json", "--node-config=/n/xmesh.yaml"]);
   assert.deepEqual(buildMeshArgs({ op: "policy.show" }, "/n/xmesh.yaml"), ["mesh", "policy", "--json", "--show"]);
+  assert.deepEqual(buildMeshArgs({ op: "share.tailnet", device: "laptop", user: "alice" }, "/n/xmesh.yaml", "/c.json"), ["mesh", "share", "--json", "--credential-file=/c.json", "--device=laptop", "--user=alice", "--config=/n/xmesh.yaml", "--apply"]);
+  assert.deepEqual(buildMeshArgs({ op: "cloudflare.share", device: "laptop" }, "/n/xmesh.yaml", "/c.json"), ["cloudflare", "share", "--json", "--device=laptop", "--config=/n/xmesh.yaml", "--apply"]);
+  const cfLogin = buildMeshArgs({ op: "cloudflare.login", account: "a".repeat(32), zone: "b".repeat(32), domain: "mesh.example.com", secret: "cf-token-123" });
+  assert.equal(cfLogin.some((a) => a.includes("cf-token-123")), false, "the token goes through stdin, never argv");
+  assert.ok(cfLogin.includes("--secret-file=-"));
   // No value ever starts a flag of its own: all are glued to their flag name.
   for (const [req] of cases) {
-    for (const a of buildMeshArgs(req)) assert.ok(a.startsWith("--") || ["mesh", "status", "tags", "authkey", "policy", "matrix", "derp", "apply", "plan", "probe", "sync", "headscale"].includes(a), a);
+    for (const a of buildMeshArgs(req)) assert.ok(a.startsWith("--") || ["mesh", "status", "tags", "authkey", "policy", "matrix", "derp", "apply", "plan", "probe", "sync", "headscale", "share", "cloudflare", "login"].includes(a), a);
   }
 });
 

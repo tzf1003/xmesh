@@ -49,6 +49,9 @@ export interface MeshPolicyDocument {
 export type MeshRequest =
   | { op: "login"; kind: MeshControlPlane; access: MeshAccess; url?: string; tailnet?: string; clientId?: string; secret: string }
   | { op: "status" }
+  | { op: "share.tailnet"; device: string; user?: string }
+  | { op: "cloudflare.login"; account: string; zone: string; domain: string; secret: string }
+  | { op: "cloudflare.share"; device: string }
   | { op: "tags"; device: string; tags: string[]; apply: boolean }
   | { op: "onboard"; tags: string[]; ttl: string; ephemeral: boolean; user?: string; file: string; overwrite: boolean }
   | { op: "policy.show" }
@@ -68,6 +71,9 @@ export type MeshOp = MeshRequest["op"];
 export const MESH_OPS = [
   "login",
   "status",
+  "share.tailnet",
+  "cloudflare.login",
+  "cloudflare.share",
   "tags",
   "onboard",
   "policy.show",
@@ -100,6 +106,8 @@ const IPV6 = /^[0-9A-Fa-f:.]{2,45}$/;
 const SECRET = /^[\x21-\x7e]{1,4096}$/;
 const TAILNET = /^[A-Za-z0-9-][A-Za-z0-9._@-]{0,127}$/;
 const CLIENT_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const CF_ID = /^[0-9a-f]{32}$/;
+const CF_DOMAIN = /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
 export const MESH_TAGS_MAX = 16;
 export const MESH_REGIONS_MAX = 8;
@@ -259,6 +267,27 @@ export function parseMeshRequest(v: unknown): MeshParse {
       }
       return { ok: true, value: out };
     }
+    case "share.tailnet": {
+      if (!onlyKeys(v, ["op", "device", "user"])) return bad("keys");
+      if (typeof v.device !== "string" || !DEVICE_ID.test(v.device)) return bad("device");
+      const out: MeshRequest = { op: "share.tailnet", device: v.device };
+      if (v.user !== undefined) {
+        if (typeof v.user !== "string" || !USER.test(v.user)) return bad("user");
+        out.user = v.user;
+      }
+      return { ok: true, value: out };
+    }
+    case "cloudflare.share":
+      if (!onlyKeys(v, ["op", "device"])) return bad("keys");
+      if (typeof v.device !== "string" || !DEVICE_ID.test(v.device)) return bad("device");
+      return { ok: true, value: { op: "cloudflare.share", device: v.device } };
+    case "cloudflare.login":
+      if (!onlyKeys(v, ["op", "account", "zone", "domain", "secret"])) return bad("keys");
+      if (typeof v.account !== "string" || !CF_ID.test(v.account)) return bad("account");
+      if (typeof v.zone !== "string" || !CF_ID.test(v.zone)) return bad("zone");
+      if (typeof v.domain !== "string" || v.domain.length > 253 || !CF_DOMAIN.test(v.domain)) return bad("domain");
+      if (typeof v.secret !== "string" || !SECRET.test(v.secret)) return bad("secret");
+      return { ok: true, value: { op: "cloudflare.login", account: v.account, zone: v.zone, domain: v.domain, secret: v.secret } };
     case "status":
     case "policy.show":
     case "policy.snapshots":
@@ -450,6 +479,19 @@ export interface MeshLoginResult {
   stored: boolean;
 }
 
+/** What `xmesh mesh share` and `xmesh cloudflare share` report: who got it and whether it arrived or is waiting for them. */
+export interface MeshShareResult {
+  device: string;
+  /** "delivered", or "queued" when the device must collect it itself. */
+  delivery: string;
+}
+
+/** What `xmesh cloudflare login --json` reports. The token is never part of it. */
+export interface CloudflareLoginResult {
+  saved: boolean;
+  domain: string;
+}
+
 export interface MeshKeyResult {
   id: string;
   expires?: string;
@@ -561,6 +603,9 @@ export interface MeshSync {
 export interface MeshResults {
   login: MeshLoginResult;
   status: MeshStatus;
+  "share.tailnet": MeshShareResult;
+  "cloudflare.login": CloudflareLoginResult;
+  "cloudflare.share": MeshShareResult;
   tags: MeshTagPlan;
   onboard: MeshKeyResult;
   "policy.show": MeshPolicy;
@@ -824,6 +869,16 @@ export function normalizeSync(v: unknown): MeshSync {
   return { added: num(r.added), removed: num(r.removed), total: num(r.total) };
 }
 
+export function normalizeShare(v: unknown): MeshShareResult {
+  const r = rec(v);
+  return { device: str(r.device), delivery: str(r.delivery) };
+}
+
+export function normalizeCloudflareLogin(v: unknown): CloudflareLoginResult {
+  const r = rec(v);
+  return { saved: bool(r.saved), domain: str(r.domain) };
+}
+
 /** Normalises the CLI's JSON for `op`. */
 export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshResults[O] {
   const out = ((): MeshResults[MeshOp] => {
@@ -832,6 +887,11 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
         return normalizeLogin(json);
       case "status":
         return normalizeStatus(json);
+      case "share.tailnet":
+      case "cloudflare.share":
+        return normalizeShare(json);
+      case "cloudflare.login":
+        return normalizeCloudflareLogin(json);
       case "tags":
         return normalizeTagPlan(json);
       case "onboard":
