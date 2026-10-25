@@ -113,6 +113,8 @@ const SECRET = /^[\x21-\x7e]{1,4096}$/;
 const TAILNET = /^[A-Za-z0-9-][A-Za-z0-9._@-]{0,127}$/;
 const CLIENT_ID = /^[A-Za-z0-9._-]{1,128}$/;
 const CF_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
+// Resources made from the CLI may carry any name; remove only has to find that state key again.
+const CF_EXISTING_NAME = /^[^\x00-\x1f\x7f]{1,128}$/;
 const CF_ID = /^[0-9a-f]{32}$/;
 const CF_DOMAIN = /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
@@ -297,7 +299,7 @@ export function parseMeshRequest(v: unknown): MeshParse {
       return { ok: true, value: { op: "cloudflare.setup", name: v.name, apply: v.apply } };
     case "cloudflare.remove":
       if (!onlyKeys(v, ["op", "name"])) return bad("keys");
-      if (typeof v.name !== "string" || !CF_NAME.test(v.name)) return bad("name");
+      if (typeof v.name !== "string" || !CF_EXISTING_NAME.test(v.name)) return bad("name");
       return { ok: true, value: { op: "cloudflare.remove", name: v.name } };
     case "cloudflare.login":
       if (!onlyKeys(v, ["op", "account", "zone", "domain", "secret"])) return bad("keys");

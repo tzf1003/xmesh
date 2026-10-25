@@ -45,6 +45,7 @@ test("every op is accepted in its documented shape", () => {
     { op: "cloudflare.status" },
     { op: "cloudflare.setup", name: "laptop", apply: false },
     { op: "cloudflare.remove", name: "laptop" },
+    { op: "cloudflare.remove", name: "My Laptop" },
     { op: "cloudflare.login", account: "a".repeat(32), zone: "b".repeat(32), domain: "mesh.example.com", secret: "cf-token-123" },
     { op: "tags", device: "n100", tags: ["tag:device"], apply: false },
     { op: "tags", device: "n100", tags: [], apply: true },
@@ -79,7 +80,7 @@ test("requests are refused for stray keys, bad types and injection attempts", ()
   assert.equal(field({ op: "cloudflare.share", device: "--apply" }), "device");
   assert.equal(field({ op: "cloudflare.setup", name: "--apply", apply: true }), "name");
   assert.equal(field({ op: "cloudflare.setup", name: "laptop" }), "apply");
-  assert.equal(field({ op: "cloudflare.remove", name: "a b" }), "name");
+  assert.equal(field({ op: "cloudflare.remove", name: "a\nb" }), "name");
   assert.equal(field({ op: "cloudflare.login", account: "short", zone: "b".repeat(32), domain: "mesh.example.com", secret: "t" }), "account");
   assert.equal(field({ op: "cloudflare.login", account: "a".repeat(32), zone: "b".repeat(32), domain: "not a domain", secret: "t" }), "domain");
   assert.equal(field({ op: "tags", device: "n1", tags: ["tag:a"], apply: false, extra: 1 }), "keys");
