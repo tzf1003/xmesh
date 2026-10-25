@@ -267,7 +267,8 @@ export interface AuditEvent {
     | "device_link_reconnecting"
     | "device_link_offline"
     | "device_link_revoked"
-    | "device_link_identity_conflict";
+    | "device_link_identity_conflict"
+    | "device_path_switch";
   /**
    * 调用经由哪条通道发生。缺省等于 mcp。control 表示本机控制通道（CTR-CTL-01），此时 caller 形如 control:<系统身份>，tool 是路由编号（如 control.config.put）。
    */
@@ -1199,6 +1200,10 @@ export interface PathQuality {
    * 窗口内成功之后紧接着失败的次数，用来识别随机阻断。
    */
   flaps: number;
+  /**
+   * 智能选路用来给这条路径排序的分数，越低越好；探测样本太少、还不能打分时省略。
+   */
+  score?: number;
 }
 export interface CallEventData {
   /**

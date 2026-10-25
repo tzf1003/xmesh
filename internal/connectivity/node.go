@@ -175,7 +175,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
 	n.directory = device.NewDirectory(ctx, trust, id.ID)
-	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, PathOrder: n.pathOrder, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
+	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, PathOrder: n.pathOrder, Smart: n.smartPaths, OnPathSwitch: n.auditPathSwitch, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
 		n.mu.Lock()
 		accept := n.accept
 		n.mu.Unlock()
@@ -225,13 +225,20 @@ func (n *Node) SetAgent(accept func(context.Context, identity.Principal, mcp.Tra
 func (n *Node) SetAdmin(handler http.Handler) { n.mu.Lock(); n.admin = handler; n.mu.Unlock() }
 func (n *Node) Reconfigure(cfg config.Mesh) {
 	n.mu.Lock()
-	before := n.cfg.PathSelection.Order()
+	before, smartBefore := n.cfg.PathSelection.Order(), n.cfg.PathSelection.Smart()
 	n.cfg = cfg
-	changed := !slices.Equal(before, cfg.PathSelection.Order())
+	changed := !slices.Equal(before, cfg.PathSelection.Order()) || smartBefore != cfg.PathSelection.Smart()
 	n.mu.Unlock()
 	if changed && n.links != nil {
 		n.links.Rebalance()
 	}
+}
+
+// smartPaths reports whether paths are chosen by measured quality.
+func (n *Node) smartPaths() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.cfg.PathSelection.Smart()
 }
 
 // pathOrder is the configured path priority as path kinds.

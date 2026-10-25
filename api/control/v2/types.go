@@ -224,6 +224,9 @@ type PathQuality struct {
 	Loss float64 `json:"loss"`
 	// Flaps counts successes followed by a failure in the window.
 	Flaps int `json:"flaps"`
+	// Score is what smart path selection ranks this path by, lower being better; omitted while the
+	// path has too few probes to be scored.
+	Score *float64 `json:"score,omitempty"`
 }
 
 // PeerInfo is the gateway's background reading of one online device (CTR-CTL-05).

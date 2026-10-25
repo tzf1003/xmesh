@@ -17,6 +17,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/connectivity"
 	"github.com/tzf1003/xmesh/internal/control"
 	"github.com/tzf1003/xmesh/internal/cwd"
+	"github.com/tzf1003/xmesh/internal/device"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/policy"
@@ -298,6 +299,9 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 				var quality *v2.PathQuality
 				if q := path.Quality; q.Samples > 0 {
 					quality = &v2.PathQuality{Samples: q.Samples, LatencyMs: q.LatencyMs, P90Ms: q.P90Ms, JitterMs: q.JitterMs, Loss: q.Loss, Flaps: q.Flaps}
+					if score, ok := device.Score(path.Kind, q); ok {
+						quality.Score = &score
+					}
 				}
 				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified, Quality: quality})
 				row.Addrs = append(row.Addrs, path.Address)

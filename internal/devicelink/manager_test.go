@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +30,8 @@ type testNode struct {
 	release      chan struct{}
 	dialGate     <-chan struct{}
 	order        atomic.Pointer[[]device.PathKind]
+	smart        atomic.Bool
+	switched     chan pathSwitch
 }
 
 func newTestNode(t *testing.T, name string) *testNode {
@@ -48,9 +51,9 @@ func newTestNode(t *testing.T, name string) *testNode {
 	if err := directory.SetProvider(device.Tailnet, 1, true); err != nil {
 		t.Fatal(err)
 	}
-	n := &testNode{id: id, trust: trust, directory: directory}
+	n := &testNode{id: id, trust: trust, directory: directory, switched: make(chan pathSwitch, 16)}
 	manager, err := NewManager(t.Context(), Options{
-		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, PathOrder: n.pathOrder, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
+		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, PathOrder: n.pathOrder, Smart: n.smart.Load, Switching: testSwitching, OnPathSwitch: n.onSwitch, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
 		Dial: func(ctx context.Context, target string, path device.Path) (*websocket.Conn, error) {
 			if path.Kind == device.Tailnet && n.dialGate != nil {
 				select {
@@ -95,6 +98,16 @@ func newTestNode(t *testing.T, name string) *testNode {
 	n.lan, n.tailnet = serve(device.LAN), serve(device.Tailnet)
 	t.Cleanup(func() { _ = manager.Close(); directory.Close(); n.lan.Close(); n.tailnet.Close() })
 	return n
+}
+
+// testSwitching makes smart mode react in milliseconds; a test may widen one knob and must restore it.
+var testSwitching = Switching{Every: 20 * time.Millisecond, Dwell: 100 * time.Millisecond, EmergencyDwell: 50 * time.Millisecond, Sustain: 200 * time.Millisecond}
+
+func (n *testNode) onSwitch(id string, from, to device.PathKind, reason string) {
+	select {
+	case n.switched <- pathSwitch{id: id, from: from, to: to, reason: reason}:
+	default:
+	}
 }
 
 func (n *testNode) pathOrder() []device.PathKind {
@@ -625,5 +638,150 @@ func TestManagerRebalanceMovesCarrierToNewPreferredPath(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if got := a.manager.Activity(b.id.ID); got.Path.Kind != device.Tailnet || got.Epoch != epoch {
 		t.Fatalf("settled carrier was dropped: %+v", got)
+	}
+}
+
+var fedUntil sync.Map
+
+// feed gives n's directory a window of probe results for the path to remote: rtts[i] > 0 is a probe
+// answered in that many milliseconds, 0 a probe that failed. The last result is always an answer so the
+// path ends reachable.
+func feed(t *testing.T, n, remote *testNode, kind device.PathKind, url string, rtts ...int) {
+	t.Helper()
+	trusted, _ := n.trust.Find(remote.id.ID)
+	// Probe times only move forward, and pairTestNodes already observed each path "now".
+	key := n.id.ID + url
+	start := time.Now()
+	if last, ok := fedUntil.Load(key); ok && last.(time.Time).After(start) {
+		start = last.(time.Time).Add(time.Millisecond)
+	}
+	defer func() { fedUntil.Store(key, start.Add(time.Duration(len(rtts))*time.Millisecond)) }()
+	for i, ms := range rtts {
+		at := start.Add(time.Duration(i) * time.Millisecond)
+		if ms == 0 {
+			if err := n.directory.ProbeFailed(remote.id.ID, kind, url, 1, at); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		path := device.Path{Kind: kind, Address: url, BootID: remote.manager.BootID(), ProviderGeneration: 1, VerifiedAt: at, ExpiresAt: time.Now().Add(time.Minute), RTT: time.Duration(ms) * time.Millisecond}
+		if err := n.directory.Observe(remote.id.Certificate.Leaf, trusted.Generation, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// feedBoth gives both ends the same view of the link, as two healthy nodes would measure it.
+func feedBoth(t *testing.T, a, b *testNode, kind device.PathKind, rtts ...int) {
+	t.Helper()
+	urls := func(n *testNode) string {
+		if kind == device.LAN {
+			return n.lan.URL
+		}
+		return n.tailnet.URL
+	}
+	feed(t, a, b, kind, urls(b), rtts...)
+	feed(t, b, a, kind, urls(a), rtts...)
+}
+
+func steady(ms, n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = ms
+	}
+	return out
+}
+
+func awaitSwitch(t *testing.T, n *testNode, from, to device.PathKind, reason string) {
+	t.Helper()
+	select {
+	case sw := <-n.switched:
+		if sw.from != from || sw.to != to || sw.reason != reason {
+			t.Fatalf("switch = %+v, want %s>%s (%s)", sw, from, to, reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no path switch")
+	}
+}
+
+func TestSmartModeConnectsOnTheBestScoredPath(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	a.smart.Store(true)
+	b.smart.Store(true)
+	pairTestNodes(t, a, b)
+	feedBoth(t, a, b, device.LAN, steady(400, 8)...)
+	feedBoth(t, a, b, device.Tailnet, steady(40, 8)...)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.Tailnet)
+}
+
+func TestSmartModeMovesALiveLinkOnlyWhenAnotherPathIsLastingBetter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	a.smart.Store(true)
+	b.smart.Store(true)
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN) // nothing measured yet: the configured order
+	id := client.ID()
+	// Close call: Tailnet is 10 ms faster, well inside the margin, so the link must stay.
+	feedBoth(t, a, b, device.LAN, steady(100, 8)...)
+	feedBoth(t, a, b, device.Tailnet, steady(90, 8)...)
+	time.Sleep(700 * time.Millisecond)
+	if got := a.manager.Activity(b.id.ID).Path.Kind; got != device.LAN {
+		t.Fatalf("moved to %s for a marginal gain", got)
+	}
+	select {
+	case sw := <-a.switched:
+		t.Fatalf("unexpected switch %+v", sw)
+	default:
+	}
+	// Now the LAN path turns slow: Tailnet is clearly and lastingly better.
+	feedBoth(t, a, b, device.LAN, steady(500, 30)...)
+	awaitSwitch(t, a, device.LAN, device.Tailnet, "better")
+	waitPath(t, a.manager, b.id.ID, device.Tailnet)
+	if client.ID() != id {
+		t.Fatal("session rebuilt by a path switch")
+	}
+}
+
+func TestSmartModeLeavesAFailingPathWithoutWaiting(t *testing.T) {
+	old := testSwitching
+	testSwitching.Sustain = time.Hour // only the failing-path rule can move the link in this test
+	t.Cleanup(func() { testSwitching = old })
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	a.smart.Store(true)
+	b.smart.Store(true)
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	// A random block: the LAN path answers, then drops, over and over.
+	feedBoth(t, a, b, device.LAN, 20, 0, 20, 0, 20, 0, 20, 0, 20, 0, 20)
+	feedBoth(t, a, b, device.Tailnet, steady(60, 10)...)
+	awaitSwitch(t, a, device.LAN, device.Tailnet, "unhealthy")
+	waitPath(t, a.manager, b.id.ID, device.Tailnet)
+}
+
+func TestManualModeIgnoresMeasuredQuality(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	client := openClient(t, ctx, a, b)
+	defer client.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	feedBoth(t, a, b, device.LAN, 20, 0, 20, 0, 20, 0, 20, 0, 20, 0, 20)
+	feedBoth(t, a, b, device.Tailnet, steady(60, 10)...)
+	time.Sleep(600 * time.Millisecond)
+	if got := a.manager.Activity(b.id.ID).Path.Kind; got != device.LAN {
+		t.Fatalf("manual mode left %s", got)
 	}
 }

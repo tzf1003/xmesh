@@ -254,6 +254,10 @@
           "type": "integer",
           "minimum": 0,
           "description": "窗口内成功之后紧接着失败的次数，用来识别随机阻断。"
+        },
+        "score": {
+          "type": "number",
+          "description": "智能选路用来给这条路径排序的分数，越低越好；探测样本太少、还不能打分时省略。"
         }
       }
     }

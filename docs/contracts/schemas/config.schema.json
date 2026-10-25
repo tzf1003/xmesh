@@ -134,10 +134,11 @@
           "properties": {
             "mode": {
               "enum": [
+                "smart",
                 "manual"
               ],
-              "default": "manual",
-              "description": "manual 严格按 priority 的顺序，第一条能连上的路径胜出。"
+              "default": "smart",
+              "description": "smart 根据实测的延时、丢包和断流选最稳的路径，只在另一条路径明显且持续更好、或当前路径出问题时才换，priority 用来在没有测量数据或分数接近时排序；manual 严格按 priority 的顺序，第一条能连上的路径胜出。"
             },
             "priority": {
               "type": "array",
