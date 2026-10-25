@@ -99,6 +99,7 @@ type Node struct {
 	identity       *device.Identity
 	trust          *device.TrustStore
 	pairing        *device.Pairing
+	offers         *device.OfferInbox
 	directory      *device.Directory
 	links          *devicelink.Manager
 	accept         func(context.Context, identity.Principal, mcp.Transport) error
@@ -158,9 +159,13 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	if err != nil {
 		return nil, err
 	}
+	offers, err := device.OpenOfferInbox(stateDir)
+	if err != nil {
+		return nil, err
+	}
 	parent := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
-	n := &Node{ctx: ctx, cancel: cancel, stateDir: stateDir, name: c.Node.Name, cfg: c.Mesh, identity: id, trust: trust, pairing: pairing, providers: map[device.PathKind]*provider{}, candidates: map[string]Candidate{}}
+	n := &Node{ctx: ctx, cancel: cancel, stateDir: stateDir, name: c.Node.Name, cfg: c.Mesh, identity: id, trust: trust, pairing: pairing, offers: offers, providers: map[device.PathKind]*provider{}, candidates: map[string]Candidate{}}
 	n.lock = lock
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
@@ -216,6 +221,7 @@ func (n *Node) Reconfigure(cfg config.Mesh)   { n.mu.Lock(); n.cfg = cfg; n.mu.U
 func (n *Node) Identity() *device.Identity    { return n.identity }
 func (n *Node) Trust() *device.TrustStore     { return n.trust }
 func (n *Node) Pairing() *device.Pairing      { return n.pairing }
+func (n *Node) Offers() *device.OfferInbox    { return n.offers }
 func (n *Node) Directory() *device.Directory  { return n.directory }
 func (n *Node) Links() *devicelink.Manager    { return n.links }
 
@@ -470,6 +476,7 @@ func (n *Node) handler(kind device.PathKind, generation uint64) http.Handler {
 			BootID   string          `json:"boot_id"`
 		}{n.identity.Document(n.name), n.links.BootID()})
 	})
+	mux.HandleFunc("POST "+device.OfferPath, n.receiveOffer)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "设备协议已升级，请更新 xmesh 并重新配对", 426)
 	})
