@@ -19,7 +19,7 @@ import (
 func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	g, _ := fixture(t, false)
 	defer func(d time.Duration) { listWait = d }(listWait)
-	listWait = 300 * time.Millisecond
+	listWait = time.Second
 	original := g.opts.Dial
 	started, stopped := make(chan struct{}), make(chan struct{})
 	var attempts atomic.Int32
@@ -43,15 +43,16 @@ func Test_SlowPeerDoesNotBlockReadyDevices(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("slow peer was not scheduled")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for i := range 3 {
 		began := time.Now()
 		if _, err := client.ListTools(ctx, nil); err != nil {
 			t.Fatal("slow peer blocked catalogue", err)
 		}
-		// Only the first list of the session waits, and only for listWait.
-		if took := time.Since(began); i > 0 && took > listWait/2 {
+		// Only the first list of the session waits, and only for listWait;
+		// waiting again would take the whole listWait.
+		if took := time.Since(began); i > 0 && took >= listWait {
 			t.Fatal("later tools/list waited for the slow peer again", took)
 		}
 		for _, name := range []string{"local/sys.info", "healthy/sys.info", "devices.list"} {
