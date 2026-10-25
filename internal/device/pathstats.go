@@ -78,11 +78,28 @@ func (s *pathStats) quality(now time.Time) Quality {
 	}
 	if len(rtts) > 0 {
 		slices.Sort(rtts)
-		q.LatencyMs = percentile(rtts, 0.5)
+		q.LatencyMs = median(rtts)
 		q.P90Ms = percentile(rtts, 0.9)
 		q.JitterMs = q.P90Ms - q.LatencyMs
 	}
 	return q
+}
+
+// median averages the middle pair of an even-sized sorted slice.
+func median(sorted []float64) float64 {
+	n := len(sorted)
+	if n%2 == 1 {
+		return sorted[n/2]
+	}
+	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
+
+// last is the time of the newest sample, or the zero time when there is none.
+func (s *pathStats) last() time.Time {
+	if len(s.samples) == 0 {
+		return time.Time{}
+	}
+	return s.samples[len(s.samples)-1].at
 }
 
 // percentile reads a sorted slice by nearest rank: the ceiling of p*n, so a small window's p90

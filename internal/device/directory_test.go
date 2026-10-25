@@ -188,7 +188,7 @@ func TestDirectoryReportsPathQualityAcrossFlaps(t *testing.T) {
 	ok(start.Add(2*time.Second), 120*time.Millisecond)
 	devices, _ := d.Snapshot(start.Add(3 * time.Second))
 	q := devices[0].Paths[0].Quality
-	if q.Samples != 3 || q.Flaps != 1 || q.Loss < 0.33 || q.Loss > 0.34 || q.LatencyMs != 80 {
+	if q.Samples != 3 || q.Flaps != 1 || q.Loss < 0.33 || q.Loss > 0.34 || q.LatencyMs != 100 {
 		t.Fatalf("quality = %+v", q)
 	}
 	// Losing the provider resets the path's history with the path itself.
@@ -232,4 +232,28 @@ func TestDirectoryReportsPathThatNeverAnswered(t *testing.T) {
 	if len(devices[0].Paths) != 0 {
 		t.Fatalf("stale failures kept: %+v", devices[0].Paths)
 	}
+}
+
+func TestDirectoryKeepsRecordingWhenManyAddressesWereSeen(t *testing.T) {
+	d, i, generation := directory(t)
+	start := time.Now()
+	for n := range maxStatsPerDevice + 10 {
+		path := observedPath(LAN, "192.168.1."+string(rune('A'+n%26))+string(rune('a'+n/26))+":7433", "boot-a")
+		path.VerifiedAt = start.Add(time.Duration(n) * time.Second)
+		path.ExpiresAt = path.VerifiedAt.Add(time.Minute)
+		if err := d.Observe(i.Certificate.Leaf, generation, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	devices, _ := d.Snapshot(start.Add(time.Duration(maxStatsPerDevice+10) * time.Second))
+	newest := "192.168.1." + string(rune('A'+(maxStatsPerDevice+9)%26)) + string(rune('a'+(maxStatsPerDevice+9)/26)) + ":7433"
+	for _, path := range devices[0].Paths {
+		if path.Address == newest {
+			if path.Quality.Samples != 1 {
+				t.Fatalf("newest path lost its quality: %+v", path)
+			}
+			return
+		}
+	}
+	t.Fatal("newest path missing")
 }

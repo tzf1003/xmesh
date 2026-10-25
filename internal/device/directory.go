@@ -188,6 +188,29 @@ func (d *Directory) Observe(cert *x509.Certificate, trustGeneration uint64, path
 	return nil
 }
 
+// maxStatsPerDevice bounds the addresses one device can accumulate history for (a roaming laptop
+// meets many LAN addresses over a long-running process).
+const maxStatsPerDevice = 64
+
+// evictStatsLocked frees room for a new path: it drops histories that aged out of the window,
+// and if every one is still live, the one probed longest ago.
+func evictStatsLocked(byKey map[pathKey]*pathStats, now time.Time) {
+	var oldest pathKey
+	var oldestAt time.Time
+	for key, st := range byKey {
+		if st.quality(now).Samples == 0 {
+			delete(byKey, key)
+			continue
+		}
+		if at := st.last(); oldestAt.IsZero() || at.Before(oldestAt) {
+			oldest, oldestAt = key, at
+		}
+	}
+	if len(byKey) >= maxStatsPerDevice && !oldestAt.IsZero() {
+		delete(byKey, oldest)
+	}
+}
+
 func (d *Directory) recordLocked(id string, key pathKey, x sample) {
 	if _, ok := d.trust.Find(id); !ok {
 		return
@@ -199,8 +222,8 @@ func (d *Directory) recordLocked(id string, key pathKey, x sample) {
 	}
 	st := byKey[key]
 	if st == nil {
-		if len(byKey) >= 64 {
-			return
+		if len(byKey) >= maxStatsPerDevice {
+			evictStatsLocked(byKey, x.at)
 		}
 		st = &pathStats{}
 		byKey[key] = st

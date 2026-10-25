@@ -54,3 +54,20 @@ func TestPercentileNearestRankCeiling(t *testing.T) {
 		t.Fatalf("p90 of seven = %v, want 200", got)
 	}
 }
+
+func TestMedianAveragesEvenWindow(t *testing.T) {
+	now := time.Now()
+	var s pathStats
+	s.add(sample{at: now, ok: true, rtt: 20 * time.Millisecond})
+	s.add(sample{at: now, ok: true, rtt: 100 * time.Millisecond})
+	if q := s.quality(now); q.LatencyMs != 60 {
+		t.Fatalf("median = %v, want 60", q.LatencyMs)
+	}
+	var o pathStats
+	for _, ms := range []int{10, 10, 10, 10, 10, 200} {
+		o.add(sample{at: now, ok: true, rtt: time.Duration(ms) * time.Millisecond})
+	}
+	if q := o.quality(now); q.P90Ms != 200 || q.LatencyMs != 10 {
+		t.Fatalf("outlier hidden: %+v", q)
+	}
+}
