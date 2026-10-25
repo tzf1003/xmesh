@@ -38,9 +38,9 @@ def address():
 
 
 class MCP:
-    def __init__(self, addr, token=None, host=None):
+    def __init__(self, addr, token=None, host=None, timeout=15):
         self.addr, self.session, self.counter = addr, None, 0
-        self.token, self.host = token, host
+        self.token, self.host, self.timeout = token, host, timeout
         self.request("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                     "clientInfo": {"name": "xmesh-smoke", "version": "1"}})
         self.request("notifications/initialized", {}, notification=True)
@@ -58,7 +58,7 @@ class MCP:
             headers["Authorization"] = "Bearer " + self.token
         if self.host:
             headers["Host"] = self.host
-        connection = http.client.HTTPConnection(self.addr, timeout=15)
+        connection = http.client.HTTPConnection(self.addr, timeout=self.timeout)
         try:
             connection.request("POST", "/mcp", json.dumps(body), headers)
             response = connection.getresponse()
@@ -85,7 +85,7 @@ class MCP:
     def close(self):
         if not self.session:
             return
-        connection = http.client.HTTPConnection(self.addr, timeout=15)
+        connection = http.client.HTTPConnection(self.addr, timeout=self.timeout)
         try:
             headers = {"Mcp-Session-Id": self.session, "MCP-Protocol-Version": "2025-11-25"}
             if self.token:
