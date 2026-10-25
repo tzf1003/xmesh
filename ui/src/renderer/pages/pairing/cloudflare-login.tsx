@@ -72,9 +72,9 @@ export function useCloudflareLogin(): { fields: JSX.Element; request: MeshReques
       <Field label={copy("API 令牌", "API token")}>
         <PasswordInput value={token} onInput={(v) => { setToken(v); setFound(undefined); setErr(undefined); }} autocomplete="off" testid="cf-token" />
       </Field>
-      {!manual && !found && (
+      {!manual && (
         <div class="row">
-          <button type="button" class="btn" disabled={busy || !parseMeshRequest({ op: "cloudflare.discover", secret: token }).ok} onClick={() => void discover()} data-testid="cf-discover">{busy ? copy("查找中…", "Looking…") : copy("查找账号和域名", "Find accounts and domains")}</button>
+          {!found && <button type="button" class="btn" disabled={busy || !parseMeshRequest({ op: "cloudflare.discover", secret: token }).ok} onClick={() => void discover()} data-testid="cf-discover">{busy ? copy("查找中…", "Looking…") : copy("查找账号和域名", "Find accounts and domains")}</button>}
           <button type="button" class="text-button" onClick={() => { setManual(true); setErr(undefined); }} data-testid="cf-manual">{copy("手动填写 ID", "Enter IDs by hand")}</button>
         </div>
       )}
