@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,41 +45,6 @@ var shareAdmin = func(c *meshCommon, controlURL string) (ok bool, note string) {
 	return true, ""
 }
 
-// sameControlPlane checks that an admin credential manages the control plane at controlURL, so a key
-// made through it is one the receiving device can use there.
-func sameControlPlane(cred meshadmin.Credential, controlURL string) bool {
-	switch cred.Kind {
-	case meshadmin.KindTailscale:
-		return officialTailscale(controlURL)
-	case meshadmin.KindHeadscale:
-		return !officialTailscale(controlURL) && strings.TrimSuffix(strings.ToLower(cred.URL), "/") == strings.TrimSuffix(strings.ToLower(controlURL), "/")
-	}
-	return false
-}
-
-// officialTailscale reports whether a control URL is Tailscale's own service.
-func officialTailscale(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return false
-	}
-	switch strings.ToLower(u.Hostname()) {
-	case "controlplane.tailscale.com", "login.tailscale.com":
-		return true
-	}
-	return false
-}
-
-// keyGuidance tells the user where to make a key when this machine cannot.
-func keyGuidance(controlURL string) string {
-	if officialTailscale(controlURL) {
-		return "在 https://login.tailscale.com/admin/settings/keys 生成一个 auth key（建议单次使用、有效期 24 小时），保存到文件后用 --authkey-file 重新运行；" +
-			"或先运行 xmesh mesh login 保存管理凭据，这里就能自动生成。"
-	}
-	return "在你的 Headscale 服务器上运行  headscale preauthkeys create --user <用户> --expiration 24h  生成 key，保存到文件后用 --authkey-file 重新运行；" +
-		"或先运行 xmesh mesh login 保存管理凭据，这里就能自动生成。"
-}
-
 // meshShare gives a paired device a way onto this node's tailnet: a pre-authorised key, made through
 // the saved admin connection when there is one, otherwise taken from a file the user provides. The
 // device applies it only after its user accepts. The admin credential never leaves this machine.
@@ -94,7 +58,7 @@ func meshShare(args []string, out io.Writer) error {
 	stateDir := fs.String("state-dir", "", "本机节点状态目录")
 	keyFile := fs.String("authkey-file", "", "自己生成的 auth key 文件（没有管理凭据时使用）")
 	reuseLocal := fs.Bool("reuse-local-key", false, "没有管理凭据时，复用本机 mesh.tailnet.authkey_file 里的 key（它必须是可重复使用的）")
-	user := fs.String("user", "", "Headscale 用户名（服务器上有多个用户时必填）")
+	user := fs.String("user", "", "自托管控制面的用户名（服务器上有多个用户时必填）")
 	tags := fs.String("tags", "", "自动生成 key 时附带的控制面标签（与设备的 xmesh 标签无关）")
 	reusable := fs.Bool("reusable", false, "自动生成的 key 可重复使用（默认只能用一次）")
 	ephemeral := fs.Bool("ephemeral", false, "让对方注册为临时节点")
@@ -114,7 +78,7 @@ func meshShare(args []string, out io.Writer) error {
 	}
 	controlURL := cfg.Mesh.Tailnet.ControlURL
 	offerURL := strings.TrimSuffix(controlURL, "/")
-	if officialTailscale(controlURL) {
+	if config.OfficialControlURL(controlURL) {
 		offerURL = ""
 	}
 	wantTags, err := meshadmin.CanonicalTags(splitTags(*tags))
@@ -164,7 +128,7 @@ func meshShare(args []string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	offer := v2.DeviceOffer{ID: device.NewOfferID(), Kind: device.OfferTailscale, Tailscale: &v2.TailscaleOffer{ControlURL: offerURL, AuthKey: key, Ephemeral: *ephemeral}}
+	offer := v2.DeviceOffer{ID: device.NewOfferID(), Kind: device.OfferTailnet, Tailnet: &v2.TailnetOffer{ControlURL: offerURL, AuthKey: key, Ephemeral: *ephemeral}}
 	delivery, err := sender.SendOffer(ctx, id, offer)
 	if err != nil {
 		return fmt.Errorf("没能把连接方式送到 %s（对方需要已配对）：%w", name, err)

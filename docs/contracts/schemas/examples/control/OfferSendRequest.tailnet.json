@@ -2,8 +2,8 @@
   "device_id": "dev-9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
   "offer": {
     "id": "fedcba9876543210fedcba9876543210",
-    "kind": "tailscale",
-    "tailscale": {
+    "kind": "tailnet",
+    "tailnet": {
       "control_url": "https://headscale.example.com",
       "auth_key": "hskey-auth-0123456789abcdef0123456789abcdef"
     }

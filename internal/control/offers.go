@@ -37,8 +37,8 @@ func offerView(o device.ReceivedOffer) v2.OfferSummary {
 	if o.Cloudflare != nil {
 		out.Cloudflare = &v2.OfferCloudflareSummary{Hostname: o.Cloudflare.Hostname, PeerHostname: o.Cloudflare.PeerHostname}
 	}
-	if o.Tailscale != nil {
-		out.Tailscale = &v2.OfferTailscaleSummary{ControlURL: o.Tailscale.ControlURL, Ephemeral: o.Tailscale.Ephemeral}
+	if o.Tailnet != nil {
+		out.Tailnet = &v2.OfferTailnetSummary{ControlURL: o.Tailnet.ControlURL, Ephemeral: o.Tailnet.Ephemeral}
 	}
 	return out
 }
@@ -61,8 +61,8 @@ func (s *Server) sendOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 	if c := req.Offer.Cloudflare; c != nil {
 		offer.Cloudflare = &device.CloudflareOffer{Hostname: c.Hostname, TunnelToken: c.TunnelToken, AccessID: c.AccessID, AccessSecret: c.AccessSecret, PeerHostname: c.PeerHostname}
 	}
-	if t := req.Offer.Tailscale; t != nil {
-		offer.Tailscale = &device.TailscaleOffer{ControlURL: t.ControlURL, AuthKey: t.AuthKey, Ephemeral: t.Ephemeral}
+	if t := req.Offer.Tailnet; t != nil {
+		offer.Tailnet = &device.TailnetOffer{ControlURL: t.ControlURL, AuthKey: t.AuthKey, Ephemeral: t.Ephemeral}
 	}
 	if err := offer.Validate(); err != nil {
 		failWith(w, argError("offer", err.Error()))
@@ -168,7 +168,7 @@ func (s *Server) acceptOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 	switch {
 	case offer.Kind == device.OfferCloudflare && offer.Cloudflare != nil:
 		edits, written, apiErr = s.cloudflareOfferEdits(old, offer)
-	case offer.Kind == device.OfferTailscale && offer.Tailscale != nil:
+	case offer.Kind == device.OfferTailnet && offer.Tailnet != nil:
 		edits, written, apiErr = s.tailscaleOfferEdits(old, offer)
 	default:
 		failWith(w, newError(v2.ErrInvalidArgs, "不支持这种连接方式"))
@@ -262,7 +262,7 @@ func (s *Server) tailscaleOfferEdits(old []byte, offer device.ReceivedOffer) (ed
 			return nil, nil, newError(v2.ErrConflict, "本设备已经配置了 Tailnet，请先移除后再接受")
 		}
 	}
-	t := offer.Tailscale
+	t := offer.Tailnet
 	// authkey-<uuid> is the name configAuthkeyPath accepts, so the panel can later replace this key.
 	id := offer.ID
 	file := filepath.Join(s.o.StateDir, "authkeys", "authkey-"+id[:8]+"-"+id[8:12]+"-"+id[12:16]+"-"+id[16:20]+"-"+id[20:32])

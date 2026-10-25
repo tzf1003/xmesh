@@ -427,14 +427,14 @@
         "kind": {
           "enum": [
             "cloudflare",
-            "tailscale"
+            "tailnet"
           ]
         },
         "cloudflare": {
           "$ref": "#/$defs/CloudflareOffer"
         },
-        "tailscale": {
-          "$ref": "#/$defs/TailscaleOffer"
+        "tailnet": {
+          "$ref": "#/$defs/TailnetOffer"
         }
       },
       "allOf": [
@@ -452,7 +452,7 @@
             ],
             "not": {
               "required": [
-                "tailscale"
+                "tailnet"
               ]
             }
           }
@@ -461,13 +461,13 @@
           "if": {
             "properties": {
               "kind": {
-                "const": "tailscale"
+                "const": "tailnet"
               }
             }
           },
           "then": {
             "required": [
-              "tailscale"
+              "tailnet"
             ],
             "not": {
               "required": [
@@ -539,7 +539,7 @@
         "kind": {
           "enum": [
             "cloudflare",
-            "tailscale"
+            "tailnet"
           ]
         },
         "from_id": {
@@ -557,8 +557,8 @@
         "cloudflare": {
           "$ref": "#/$defs/OfferCloudflareSummary"
         },
-        "tailscale": {
-          "$ref": "#/$defs/OfferTailscaleSummary"
+        "tailnet": {
+          "$ref": "#/$defs/OfferTailnetSummary"
         }
       }
     },
@@ -590,7 +590,7 @@
         "kind": {
           "enum": [
             "cloudflare",
-            "tailscale"
+            "tailnet"
           ]
         },
         "restart_required": {
@@ -621,7 +621,7 @@
         }
       }
     },
-    "TailscaleOffer": {
+    "TailnetOffer": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -648,7 +648,7 @@
         }
       }
     },
-    "OfferTailscaleSummary": {
+    "OfferTailnetSummary": {
       "type": "object",
       "additionalProperties": false,
       "properties": {

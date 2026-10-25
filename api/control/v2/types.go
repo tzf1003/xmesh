@@ -599,9 +599,9 @@ type CloudflareOffer struct {
 	PeerHostname string `json:"peer_hostname"`
 }
 
-// TailscaleOffer is a pre-authorised key for the sender's tailnet. ControlURL is empty for
+// TailnetOffer is a pre-authorised key for the sender's tailnet. ControlURL is empty for
 // Tailscale's own service. The key's tags belong to the control plane, not to the device's xmesh tags.
-type TailscaleOffer struct {
+type TailnetOffer struct {
 	ControlURL string `json:"control_url,omitempty"`
 	AuthKey    string `json:"auth_key"`
 	Ephemeral  bool   `json:"ephemeral,omitempty"`
@@ -612,7 +612,7 @@ type DeviceOffer struct {
 	ID         string           `json:"id"`
 	Kind       string           `json:"kind"`
 	Cloudflare *CloudflareOffer `json:"cloudflare,omitempty"`
-	Tailscale  *TailscaleOffer  `json:"tailscale,omitempty"`
+	Tailnet    *TailnetOffer    `json:"tailnet,omitempty"`
 }
 
 // OfferSendRequest delivers an offer to a paired device. The device applies nothing until its user accepts.
@@ -627,8 +627,8 @@ type OfferCloudflareSummary struct {
 	PeerHostname string `json:"peer_hostname"`
 }
 
-// OfferTailscaleSummary is the part of a Tailscale offer that is safe to show: no key.
-type OfferTailscaleSummary struct {
+// OfferTailnetSummary is the part of a Tailscale offer that is safe to show: no key.
+type OfferTailnetSummary struct {
 	ControlURL string `json:"control_url,omitempty"`
 	Ephemeral  bool   `json:"ephemeral,omitempty"`
 }
@@ -643,7 +643,7 @@ type OfferSummary struct {
 	ReceivedAt Time                    `json:"received_at"`
 	ExpiresAt  Time                    `json:"expires_at"`
 	Cloudflare *OfferCloudflareSummary `json:"cloudflare,omitempty"`
-	Tailscale  *OfferTailscaleSummary  `json:"tailscale,omitempty"`
+	Tailnet    *OfferTailnetSummary    `json:"tailnet,omitempty"`
 }
 
 type OffersResponse struct {

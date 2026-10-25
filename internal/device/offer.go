@@ -26,9 +26,9 @@ const OfferPath = "/mesh/v2/offer"
 // OfferCloudflare is the offer kind that joins the receiving device to the sender's Cloudflare mesh.
 const OfferCloudflare = "cloudflare"
 
-// OfferTailscale is the offer kind that joins the receiving device to the sender's tailnet with a
+// OfferTailnet is the offer kind that joins the receiving device to the sender's tailnet with a
 // pre-authorised key.
-const OfferTailscale = "tailscale"
+const OfferTailnet = "tailnet"
 
 const (
 	// OfferTTL is how long a received offer waits for the user before it is dropped.
@@ -65,10 +65,10 @@ type CloudflareOffer struct {
 	PeerHostname string `json:"peer_hostname"`
 }
 
-// TailscaleOffer carries a pre-authorised key for the sender's tailnet. ControlURL is empty for
-// Tailscale's own service and the Headscale address otherwise. The key's tags are the control plane's
+// TailnetOffer carries a pre-authorised key for the sender's tailnet. ControlURL is empty for
+// the vendor's hosted service and the self-hosted address otherwise. The key's tags are the control plane's
 // concern and are never the receiving device's xmesh tags.
-type TailscaleOffer struct {
+type TailnetOffer struct {
 	ControlURL string `json:"control_url,omitempty"`
 	AuthKey    string `json:"auth_key"`
 	Ephemeral  bool   `json:"ephemeral,omitempty"`
@@ -80,7 +80,7 @@ type Offer struct {
 	ID         string           `json:"id"`
 	Kind       string           `json:"kind"`
 	Cloudflare *CloudflareOffer `json:"cloudflare,omitempty"`
-	Tailscale  *TailscaleOffer  `json:"tailscale,omitempty"`
+	Tailnet    *TailnetOffer    `json:"tailnet,omitempty"`
 }
 
 // ReceivedOffer is an Offer in the inbox with the sender the receiver authenticated, not one the
@@ -129,8 +129,8 @@ func (o Offer) Validate() error {
 			!credential(c.TunnelToken) || !credential(c.AccessSecret) || !credential(c.AccessID) {
 			return ErrOfferInvalid
 		}
-	case OfferTailscale:
-		t := o.Tailscale
+	case OfferTailnet:
+		t := o.Tailnet
 		if t == nil || !credential(t.AuthKey) || (t.ControlURL != "" && !validControlURL(t.ControlURL)) {
 			return ErrOfferInvalid
 		}

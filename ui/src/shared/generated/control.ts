@@ -1663,14 +1663,14 @@ export interface DeviceOffer {
    * 发送方生成的 128 位随机编号。
    */
   id: string;
-  kind: "cloudflare" | "tailscale";
+  kind: "cloudflare" | "tailnet";
   cloudflare?: CloudflareOffer;
-  tailscale?: TailscaleOffer;
+  tailnet?: TailnetOffer;
 }
 /**
  * 接收设备加入发送者 tailnet 所需的预授权密钥。ControlURL 为空表示 Tailscale 官方服务，否则是 Headscale 地址。密钥自带的标签由控制面决定，与设备的 xmesh 标签无关。
  */
-export interface TailscaleOffer {
+export interface TailnetOffer {
   /**
    * Headscale 控制面地址；留空表示 Tailscale 官方服务。
    */
@@ -1706,15 +1706,15 @@ export interface OfferCloudflareSummary {
  */
 export interface OfferSummary {
   id: string;
-  kind: "cloudflare" | "tailscale";
+  kind: "cloudflare" | "tailnet";
   from_id: DeviceId;
   from_name: NodeName;
   received_at: Timestamp;
   expires_at: Timestamp;
   cloudflare?: OfferCloudflareSummary;
-  tailscale?: OfferTailscaleSummary;
+  tailnet?: OfferTailnetSummary;
 }
-export interface OfferTailscaleSummary {
+export interface OfferTailnetSummary {
   /**
    * 控制面地址；省略表示 Tailscale 官方服务。
    */
@@ -1870,7 +1870,7 @@ export interface OffersResponse {
       ];
 }
 export interface OfferAcceptResponse {
-  kind: "cloudflare" | "tailscale";
+  kind: "cloudflare" | "tailnet";
   /**
    * 为真时运行中的节点需要重启才会使用这条连接方式。
    */

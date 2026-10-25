@@ -231,7 +231,7 @@ func TestOfferSendValidatesAndDelivers(t *testing.T) {
 }
 
 func tailscaleDeviceOffer(controlURL string) device.Offer {
-	return device.Offer{ID: device.NewOfferID(), Kind: device.OfferTailscale, Tailscale: &device.TailscaleOffer{ControlURL: controlURL, AuthKey: "tskey-auth-0123456789abcdef"}}
+	return device.Offer{ID: device.NewOfferID(), Kind: device.OfferTailnet, Tailnet: &device.TailnetOffer{ControlURL: controlURL, AuthKey: "tskey-auth-0123456789abcdef"}}
 }
 
 func TestOfferAcceptEnablesTheTailnetWithAPrivateKeyFile(t *testing.T) {
@@ -246,7 +246,7 @@ func TestOfferAcceptEnablesTheTailnetWithAPrivateKeyFile(t *testing.T) {
 	}
 	var done v2.OfferAcceptResponse
 	decodeAs(t, f.ok("POST", "/v2/offers/"+offer.ID+"/accept", nil, "OfferAcceptResponse"), &done)
-	if done.Kind != "tailscale" || len(done.ChangedPaths) == 0 {
+	if done.Kind != "tailnet" || len(done.ChangedPaths) == 0 {
 		t.Fatalf("%+v", done)
 	}
 	raw, _ := os.ReadFile(f.path)
@@ -293,18 +293,18 @@ func TestOfferAcceptRefusesAnAlreadyConfiguredTailnetAndKeepsTheOffer(t *testing
 	}
 }
 
-func TestOfferSendCarriesTailscaleOffers(t *testing.T) {
+func TestOfferSendCarriesTailnetOffers(t *testing.T) {
 	admin := newFakeOffers(t)
 	f := newFixtureConfig(t, offerConfig, func(o *Options) { o.Offers = admin })
 	offer := tailscaleDeviceOffer("")
-	body := v2.OfferSendRequest{DeviceID: offerSender, Offer: v2.DeviceOffer{ID: offer.ID, Kind: offer.Kind, Tailscale: &v2.TailscaleOffer{AuthKey: offer.Tailscale.AuthKey}}}
+	body := v2.OfferSendRequest{DeviceID: offerSender, Offer: v2.DeviceOffer{ID: offer.ID, Kind: offer.Kind, Tailnet: &v2.TailnetOffer{AuthKey: offer.Tailnet.AuthKey}}}
 	f.ok("POST", "/v2/offers", body, "OfferSendResponse")
-	if len(admin.sent) != 1 || admin.sent[0].Tailscale == nil || admin.sent[0].Tailscale.AuthKey != offer.Tailscale.AuthKey {
+	if len(admin.sent) != 1 || admin.sent[0].Tailnet == nil || admin.sent[0].Tailnet.AuthKey != offer.Tailnet.AuthKey {
 		t.Fatalf("%+v", admin.sent)
 	}
-	body.Offer.Tailscale = &v2.TailscaleOffer{AuthKey: "short"}
+	body.Offer.Tailnet = &v2.TailnetOffer{AuthKey: "short"}
 	apiError(t, f.do("POST", "/v2/offers", body, nil), v2.ErrInvalidArgs)
-	body.Offer.Tailscale = &v2.TailscaleOffer{AuthKey: offer.Tailscale.AuthKey, ControlURL: "http://plain.example.com"}
+	body.Offer.Tailnet = &v2.TailnetOffer{AuthKey: offer.Tailnet.AuthKey, ControlURL: "http://plain.example.com"}
 	apiError(t, f.do("POST", "/v2/offers", body, nil), v2.ErrInvalidArgs)
 }
 

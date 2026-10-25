@@ -743,6 +743,13 @@ func Size(s string) (int, error) {
 // Anything else, including look-alike suffixes and self-hosted control planes, is refused.
 var officialControlHosts = map[string]bool{"controlplane.tailscale.com": true, "login.tailscale.com": true}
 
+// OfficialControlURL reports whether raw is the vendor's own hosted control plane, as opposed to a
+// self-hosted one. Only offers and admin tooling that must tell the two apart call it.
+func OfficialControlURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && officialControlURL(u)
+}
+
 func officialControlURL(u *url.URL) bool {
 	return u.Scheme == "https" && u.User == nil && officialControlHosts[strings.ToLower(u.Hostname())] && (u.Port() == "" || u.Port() == "443") && (u.Path == "" || u.Path == "/")
 }

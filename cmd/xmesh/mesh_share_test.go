@@ -74,10 +74,10 @@ func TestMeshShareGeneratesAKeyThroughTheAdminConnection(t *testing.T) {
 		t.Fatalf("%+v", s.node.sent)
 	}
 	o := s.node.sent[0]
-	if o.Kind != "tailscale" || o.Tailscale.AuthKey != "tskey-auth-GENERATED-0123456789" || o.Tailscale.ControlURL != "" {
-		t.Fatalf("%+v", o.Tailscale)
+	if o.Kind != "tailnet" || o.Tailnet.AuthKey != "tskey-auth-GENERATED-0123456789" || o.Tailnet.ControlURL != "" {
+		t.Fatalf("%+v", o.Tailnet)
 	}
-	if strings.Contains(out, o.Tailscale.AuthKey) {
+	if strings.Contains(out, o.Tailnet.AuthKey) {
 		t.Fatalf("the output shows the key: %s", out)
 	}
 }
@@ -87,7 +87,7 @@ func TestMeshShareKeepsAHeadscaleControlURL(t *testing.T) {
 	if _, err := s.run("--apply"); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.node.sent[0].Tailscale.ControlURL; got != "https://headscale.example.com" {
+	if got := s.node.sent[0].Tailnet.ControlURL; got != "https://headscale.example.com" {
 		t.Fatalf("%q", got)
 	}
 }
@@ -99,7 +99,7 @@ func TestMeshShareUsesAGivenKeyFileWithoutAdminAccess(t *testing.T) {
 	if _, err := s.run("--apply", "--authkey-file", given, "--ephemeral"); err != nil {
 		t.Fatal(err)
 	}
-	o := s.node.sent[0].Tailscale
+	o := s.node.sent[0].Tailnet
 	if len(s.made) != 0 || o.AuthKey != "tskey-auth-GIVEN-0123456789" || !o.Ephemeral {
 		t.Fatalf("%d keys, %+v", len(s.made), o)
 	}
@@ -114,8 +114,8 @@ func TestMeshShareReusesTheLocalKeyOnlyWhenAsked(t *testing.T) {
 	if _, err := s.run("--apply", "--reuse-local-key"); err != nil {
 		t.Fatal(err)
 	}
-	if s.node.sent[0].Tailscale.AuthKey != "tskey-auth-LOCAL-0123456789" {
-		t.Fatalf("%+v", s.node.sent[0].Tailscale)
+	if s.node.sent[0].Tailnet.AuthKey != "tskey-auth-LOCAL-0123456789" {
+		t.Fatalf("%+v", s.node.sent[0].Tailnet)
 	}
 }
 
@@ -132,8 +132,8 @@ func TestMeshSharePassesTheHeadscaleUserAndTrimsTheControlURLSlash(t *testing.T)
 	if _, err := s.run("--apply", "--user", "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if s.made[0].User != "alice" || s.node.sent[0].Tailscale.ControlURL != "https://headscale.example.com" {
-		t.Fatalf("%+v %+v", s.made[0], s.node.sent[0].Tailscale)
+	if s.made[0].User != "alice" || s.node.sent[0].Tailnet.ControlURL != "https://headscale.example.com" {
+		t.Fatalf("%+v %+v", s.made[0], s.node.sent[0].Tailnet)
 	}
 }
 

@@ -1274,3 +1274,25 @@ func derpSync(args []string, out io.Writer) error {
 		fmt.Fprintf(w, "放行 %d 台设备（新增 %d，移除 %d）。已建立的中继连接要重连后才受影响。\n", res.Total, res.Added, res.Removed)
 	})
 }
+
+// keyGuidance tells the user where to make a pre-authorised key when this machine cannot.
+func keyGuidance(controlURL string) string {
+	if config.OfficialControlURL(controlURL) {
+		return "在 https://login.tailscale.com/admin/settings/keys 生成一个 auth key（建议单次使用、有效期 48 小时），保存到文件后用 --authkey-file 重新运行；" +
+			"或先运行 xmesh mesh login 保存管理凭据，这里就能自动生成。"
+	}
+	return "在你的 Headscale 服务器上运行  headscale preauthkeys create --user <用户> --expiration 48h  生成 key，保存到文件后用 --authkey-file 重新运行；" +
+		"或先运行 xmesh mesh login 保存管理凭据，这里就能自动生成。"
+}
+
+// sameControlPlane checks that an admin credential manages the control plane at controlURL, so a key
+// made through it is one the receiving device can use there.
+func sameControlPlane(cred meshadmin.Credential, controlURL string) bool {
+	switch cred.Kind {
+	case meshadmin.KindTailscale:
+		return config.OfficialControlURL(controlURL)
+	case meshadmin.KindHeadscale:
+		return !config.OfficialControlURL(controlURL) && strings.TrimSuffix(strings.ToLower(cred.URL), "/") == strings.TrimSuffix(strings.ToLower(controlURL), "/")
+	}
+	return false
+}
