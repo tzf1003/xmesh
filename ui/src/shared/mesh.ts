@@ -537,6 +537,8 @@ export interface CloudflareDiscovery {
 export interface CloudflareStatus {
   devices: { name: string; hostname: string; tunnelId: string }[];
   serviceToken: boolean;
+  /** The tunnel hostname in this device's own configuration, which a shared tunnel sets without a creation record. */
+  configuredHostname: string;
 }
 
 export interface MeshKeyResult {
@@ -952,6 +954,7 @@ export function normalizeCloudflareStatus(v: unknown): CloudflareStatus {
   return {
     devices: Object.entries(devices).map(([name, d]) => ({ name, hostname: str(rec(d).hostname), tunnelId: str(rec(d).tunnel_id) })).sort((a, b) => a.name.localeCompare(b.name)),
     serviceToken: bool(r.service_token),
+    configuredHostname: str(r.configured_hostname),
   };
 }
 

@@ -257,6 +257,9 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 		self.TrustState = "self"
 		self.ConnectionState = "online"
 	}
+	if host := cfg.Mesh.Cloudflare.Hostname; host != "" {
+		self.Addrs = append(self.Addrs, cloudflareAddress(host))
+	}
 	goos, version := runtime.GOOS, Version
 	self.OS, self.Version = &goos, &version
 	out := []v2.Peer{self}
@@ -296,6 +299,7 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 				row.Addrs = append(row.Addrs, path.Address)
 			}
 		}
+		addConfiguredCloudflarePath(&row, cfg.Mesh.Cloudflare.Peers[p.ID])
 		switch {
 		case !p.Online:
 		case p.Direct:
@@ -320,6 +324,24 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+func cloudflareAddress(host string) string { return "https://" + host }
+
+// addConfiguredCloudflarePath lists a peer's configured Cloudflare tunnel hostname even before any probe
+// has reached it, so the address is visible while the tunnel is still being brought up.
+func addConfiguredCloudflarePath(row *v2.Peer, host string) {
+	if host == "" || row.DeviceID == "" {
+		return
+	}
+	address := cloudflareAddress(host)
+	for _, path := range row.Paths {
+		if path.Kind == "cloudflare" && path.Address == address {
+			return
+		}
+	}
+	row.Paths = append(row.Paths, v2.DevicePath{Kind: "cloudflare", Address: address})
+	row.Addrs = append(row.Addrs, address)
 }
 
 // deviceInfoView is the control view of one device's sys.info reading. A device nobody has read yet

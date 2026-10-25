@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tzf1003/xmesh/internal/cfadmin"
 	"github.com/tzf1003/xmesh/internal/config"
@@ -19,7 +21,7 @@ import (
 
 const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
 
-用 Cloudflare API 为设备创建隧道、DNS 名称和 Access 应用。API 令牌保存在系统钥匙串（或 --credential-file），
+用 Cloudflare API 为设备创建隧道、DNS 名称和 Access 应用。API 令牌保存在系统钥匙串；没有钥匙串的主机自动存到用户配置目录下的私有文件（或用 --credential-file 指定），
 不进 xmesh.yaml，内核不持有。通用参数: --profile 名称（默认 default）  --credential-file 文件  --json
 
 子命令:
@@ -30,6 +32,8 @@ const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
   discover 列出令牌可见的账号和域名（令牌读标准输入）
   logout   删除已保存的令牌
   status   显示本机创建过的设备资源
+  install  下载并校验官方 cloudflared，装到 xmesh.yaml 旁 cloudflare/bin（setup 会自动做）
+           [--config xmesh.yaml | --dir 目录]
   setup    为一台设备创建隧道并写好配置  --name 设备名  --config xmesh.yaml
            [--dir 目录，放隧道令牌与 Access 密钥，缺省在配置文件旁的 cloudflare/]  [--apply]
   remove   删除一台设备的隧道、DNS 与 Access 应用  --name 设备名  [--apply]
@@ -42,10 +46,22 @@ const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
 
 var (
 	// cloudflareStore and cloudflareAPI are replaced by tests.
-	cloudflareStore cfadmin.Store = cfadmin.KeychainStore{}
+	cloudflareStore cfadmin.Store = defaultCloudflareStore()
 	cloudflareAPI                 = ""
-	cloudflareHTTP  *http.Client
+	// cloudflaredAPI locates the cloudflared release; empty means the official one. Tests point it elsewhere.
+	cloudflaredAPI string
+	cloudflareHTTP *http.Client
 )
+
+// defaultCloudflareStore keeps the token in the system keychain and, on a host without one,
+// in a private file beside the per-device state.
+func defaultCloudflareStore() cfadmin.Store {
+	dir, _ := os.UserConfigDir()
+	if dir != "" {
+		dir = filepath.Join(dir, "xmesh", "cloudflare")
+	}
+	return cfadmin.FallbackStore{Primary: cfadmin.KeychainStore{}, Dir: dir}
+}
 
 func cloudflareCmd(args []string) error { return cloudflareRun(args, os.Stdout, os.Stdin) }
 
@@ -135,6 +151,8 @@ func cloudflareRun(args []string, out io.Writer, in io.Reader) error {
 		return cloudflareStatus(rest, out)
 	case "setup":
 		return cloudflareSetup(rest, out)
+	case "install":
+		return cloudflareInstall(rest, out)
 	case "invite":
 		return cloudflareInvite(args[1:], out)
 	case "share":
@@ -253,6 +271,7 @@ func cloudflareStatus(args []string, out io.Writer) error {
 	var c cloudflareCommon
 	fs := flag.NewFlagSet("cloudflare status", flag.ContinueOnError)
 	c.register(fs)
+	cfgPath := fs.String("config", "", "xmesh.yaml 路径；给出后同时报告本机配置里的隧道主机名")
 	if err := cloudflareFlags(fs, args); err != nil {
 		return err
 	}
@@ -264,7 +283,17 @@ func cloudflareStatus(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return emit(out, c.json, map[string]any{"devices": st.Devices, "service_token": st.ServiceToken != nil}, func(w io.Writer) {
+	// A device that accepted a shared tunnel has the hostname in its configuration, not in the state file.
+	configured := ""
+	if *cfgPath != "" {
+		if cfg, err := config.Load(*cfgPath); err == nil {
+			configured = cfg.Mesh.Cloudflare.Hostname
+		}
+	}
+	return emit(out, c.json, map[string]any{"devices": st.Devices, "service_token": st.ServiceToken != nil, "configured_hostname": configured}, func(w io.Writer) {
+		if configured != "" {
+			fmt.Fprintf(w, "本机配置使用的隧道主机名：%s\n", configured)
+		}
 		if len(st.Devices) == 0 {
 			fmt.Fprintln(w, "本机没有创建过设备资源")
 		}
@@ -342,9 +371,54 @@ func cloudflareSetup(args []string, out io.Writer) error {
 	if err := writeCloudflareFiles(*cfgPath, cf, device.TunnelToken, token.Secret); err != nil {
 		return fmt.Errorf("资源已创建但写本机文件失败，可用 xmesh cloudflare remove --name %s --apply 回收：%w", *name, err)
 	}
-	return emit(out, c.json, map[string]any{"hostname": device.Hostname, "tunnel_id": device.TunnelID, "config": *cfgPath}, func(w io.Writer) {
-		fmt.Fprintf(w, "设备 %s 已就绪：%s\n重启 xmesh 后，内核会用 cloudflared（HTTP/2）连上隧道；需要先安装 cloudflared。\n", *name, device.Hostname)
+	cloudflaredPath, installNote := ensureCloudflared(ctx, secrets)
+	return emit(out, c.json, map[string]any{"hostname": device.Hostname, "tunnel_id": device.TunnelID, "config": *cfgPath, "cloudflared": cloudflaredPath, "cloudflared_note": installNote}, func(w io.Writer) {
+		fmt.Fprintf(w, "设备 %s 已就绪：%s\n重启 xmesh 后，内核会用 cloudflared（HTTP/2）连上隧道。\n%s\n", *name, device.Hostname, installNote)
 	})
+}
+
+// ensureCloudflared makes sure the kernel can find cloudflared: an existing one is kept, otherwise the
+// official release is installed in <secrets>/bin. A failed install only produces a note; the tunnel
+// resources already exist and the user can install cloudflared by hand.
+func ensureCloudflared(ctx context.Context, secrets string) (path, note string) {
+	bin := filepath.Join(secrets, "bin")
+	if p, err := cfadmin.FindCloudflared("", bin); err == nil {
+		return p, "已找到 cloudflared：" + p
+	}
+	dl, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	p, err := cfadmin.CloudflaredInstaller{API: cloudflaredAPI, HTTP: cloudflareHTTP}.Install(dl, bin)
+	if err != nil {
+		return "", "没能自动安装 cloudflared（" + err.Error() + "），请手动安装，或运行 xmesh cloudflare install"
+	}
+	return p, "已自动安装 cloudflared 到 " + p
+}
+
+func cloudflareInstall(args []string, out io.Writer) error {
+	var c cloudflareCommon
+	fs := flag.NewFlagSet("cloudflare install", flag.ContinueOnError)
+	c.register(fs)
+	dir := fs.String("dir", "", "放 cloudflared 的目录，缺省与 setup 一致：xmesh.yaml 旁 cloudflare/bin")
+	cfgPath := fs.String("config", "", "xmesh.yaml 路径，用来确定缺省目录")
+	if err := cloudflareFlags(fs, args); err != nil {
+		return err
+	}
+	secrets := *dir
+	if secrets == "" {
+		if *cfgPath == "" {
+			return errors.New("需要 --config 或 --dir")
+		}
+		secrets = filepath.Join(filepath.Dir(*cfgPath), "cloudflare")
+	}
+	secrets, err := filepath.Abs(secrets)
+	if err != nil {
+		return err
+	}
+	path, note := ensureCloudflared(context.Background(), secrets)
+	if path == "" {
+		return errors.New(note)
+	}
+	return emit(out, c.json, map[string]any{"cloudflared": path}, func(w io.Writer) { fmt.Fprintln(w, note) })
 }
 
 func cloudflareRemove(args []string, out io.Writer) error {

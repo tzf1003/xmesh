@@ -31,6 +31,7 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
   const res = status.resource;
   const data = res.state === "ready" ? res.data : res.state === "error" ? res.stale : undefined;
   const devices = data && "devices" in data ? data.devices : [];
+  const configured = data && "configuredHostname" in data ? data.configuredHostname : "";
 
   const close = (): void => { setStep(undefined); setPlan(undefined); setErr(undefined); cf.reset(); };
   const nameRequest = parseMeshRequest({ op: "cloudflare.setup", name, apply: false });
@@ -61,7 +62,7 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
     if (!r.ok) { setErr(r.error); return; }
     close();
     status.reload();
-    ctx.toast(copy("隧道已创建。重启 xmesh 后生效（需要已安装 cloudflared）。", "Tunnel created. Restart xmesh to use it (cloudflared must be installed)."));
+    ctx.toast(copy("隧道已创建。重启 xmesh 后生效。", "Tunnel created. Restart xmesh to use it."));
   });
 
   const saveLogin = async (): Promise<void> => {
@@ -91,9 +92,12 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
     <section class="card" data-testid="cloudflare-tunnel">
       <h3>Cloudflare Tunnel</h3>
       <p class="hint">{copy(
-        "本机没有公网地址时，让 xmesh 通过 Cloudflare 为本机建一条隧道，别的设备就能经 Cloudflare 连到本机。需要先在本机安装 cloudflared。令牌只存在系统钥匙串里。",
-        "If this device has no public address, xmesh can create a Cloudflare tunnel for it so other devices reach it through Cloudflare. cloudflared must be installed. The token stays in the system keychain.",
+        "本机没有公网地址时，让 xmesh 通过 Cloudflare 为本机建一条隧道，别的设备就能经 Cloudflare 连到本机。没有安装 cloudflared 时 xmesh 会自动下载官方版本。令牌存在系统钥匙串里，没有钥匙串的主机会存到私有文件。",
+        "If this device has no public address, xmesh can create a Cloudflare tunnel for it so other devices reach it through Cloudflare. xmesh downloads the official cloudflared when it is missing. The token stays in the system keychain, or in a private file on hosts without one.",
       )}</p>
+      {configured !== "" && (
+        <p class="hint" data-testid="cloudflare-configured">{copy("本机使用的隧道主机名：", "This device's tunnel hostname: ")}<span class="mono">{configured}</span>{copy("（修改后需重启 xmesh 生效）", " (restart xmesh after changes)")}</p>
+      )}
       {devices.length > 0 && (
         <ul class="plain-list">
           {devices.map((d) => (

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 )
 
@@ -50,5 +51,22 @@ func Test_MergeReadings(t *testing.T) {
 	}
 	if len(mergeReadings()) != 0 {
 		t.Fatal("no gateways should give no readings")
+	}
+}
+
+func TestConfiguredCloudflarePathIsListedOnce(t *testing.T) {
+	row := v2.Peer{DeviceID: "dev-b", Addrs: []string{"https://192.168.1.2:7433"}}
+	addConfiguredCloudflarePath(&row, "b.example.com")
+	addConfiguredCloudflarePath(&row, "b.example.com")
+	if len(row.Paths) != 1 || row.Paths[0].Kind != "cloudflare" || row.Paths[0].Reachable || row.Paths[0].Address != "https://b.example.com" {
+		t.Fatalf("paths = %+v", row.Paths)
+	}
+	if len(row.Addrs) != 2 || row.Addrs[1] != "https://b.example.com" {
+		t.Fatalf("addrs = %v", row.Addrs)
+	}
+	none := v2.Peer{DeviceID: "dev-c"}
+	addConfiguredCloudflarePath(&none, "")
+	if len(none.Paths) != 0 {
+		t.Fatalf("empty host must add nothing: %+v", none.Paths)
 	}
 }

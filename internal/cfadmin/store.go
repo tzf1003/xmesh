@@ -195,3 +195,69 @@ func (s *MemoryStore) Put(profile string, c Credential) error {
 }
 
 func (s *MemoryStore) Delete(profile string) error { delete(s.m, profile); return nil }
+
+// FallbackStore uses the system keychain and falls back to a private file under Dir when the
+// host has none, such as a server without a desktop session.
+type FallbackStore struct {
+	Primary Store
+	// Dir holds one <profile>.credential.json per profile.
+	Dir string
+}
+
+func (s FallbackStore) file(profile string) (FileStore, error) {
+	if err := CheckProfile(profile); err != nil {
+		return FileStore{}, err
+	}
+	if s.Dir == "" {
+		return FileStore{}, errors.New("无法确定凭据文件目录")
+	}
+	return FileStore{Path: filepath.Join(s.Dir, profile+".credential.json")}, nil
+}
+
+func (s FallbackStore) Get(profile string) (Credential, error) {
+	c, err := s.Primary.Get(profile)
+	if err == nil {
+		return c, nil
+	}
+	f, ferr := s.file(profile)
+	if ferr != nil {
+		return Credential{}, err
+	}
+	if c, ferr = f.Get(profile); ferr == nil {
+		return c, nil
+	} else if !errors.Is(ferr, ErrNoCredential) {
+		return Credential{}, ferr
+	}
+	return Credential{}, err
+}
+
+func (s FallbackStore) Put(profile string, c Credential) error {
+	if err := CheckProfile(profile); err != nil {
+		return err
+	}
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	perr := s.Primary.Put(profile, c)
+	if perr == nil {
+		return nil
+	}
+	f, err := s.file(profile)
+	if err != nil {
+		return perr
+	}
+	if err := f.Put(profile, c); err != nil {
+		return fmt.Errorf("%w；改存凭据文件也失败：%v", perr, err)
+	}
+	return nil
+}
+
+func (s FallbackStore) Delete(profile string) error {
+	err := s.Primary.Delete(profile)
+	if f, ferr := s.file(profile); ferr == nil {
+		if derr := f.Delete(profile); derr != nil && err == nil {
+			err = derr
+		}
+	}
+	return err
+}
