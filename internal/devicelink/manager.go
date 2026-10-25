@@ -392,7 +392,11 @@ func (m *Manager) candidates(id string) []device.Path {
 				return nil
 			}
 			paths := slices.Clone(d.Paths)
-			return slices.DeleteFunc(paths, func(p device.Path) bool { return !p.Reachable || m.rank(p.Kind) < 0 })
+			paths = slices.DeleteFunc(paths, func(p device.Path) bool { return !p.Reachable || m.rank(p.Kind) < 0 })
+			if m.smart() {
+				sortByScore(paths)
+			}
+			return paths
 		}
 	}
 	return nil

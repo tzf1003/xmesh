@@ -1,6 +1,7 @@
 package devicelink
 
 import (
+	"cmp"
 	"slices"
 	"time"
 
@@ -212,4 +213,22 @@ func (m *Manager) reviewLocked(p *peerLink, now time.Time) (pathSwitch, bool) {
 		return move("better")
 	}
 	return pathSwitch{}, false
+}
+
+// sortByScore puts the best measured address of each kind first, so the address that made a kind win
+// is the one dialed. Unscored addresses keep their order, after the scored ones.
+func sortByScore(paths []device.Path) {
+	slices.SortStableFunc(paths, func(a, b device.Path) int {
+		sa, oka := device.Score(a.Kind, a.Quality)
+		sb, okb := device.Score(b.Kind, b.Quality)
+		switch {
+		case oka && okb:
+			return cmp.Compare(sa, sb)
+		case oka:
+			return -1
+		case okb:
+			return 1
+		}
+		return 0
+	})
 }
