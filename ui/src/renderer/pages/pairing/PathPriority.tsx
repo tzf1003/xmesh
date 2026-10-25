@@ -52,8 +52,12 @@ export function PathPriority({ ctx }: { ctx: PageContext }): JSX.Element | null 
     const next = [...order];
     [next[index], next[index + by]] = [next[index + by]!, next[index]!];
     setOrder(next);
+    ctx.applied(undefined);
   };
-  const toggle = (kind: Kind): void => setDisabled((cur) => (cur.includes(kind) ? cur.filter((k) => k !== kind) : [...cur, kind]));
+  const toggle = (kind: Kind): void => {
+    setDisabled((cur) => (cur.includes(kind) ? cur.filter((k) => k !== kind) : [...cur, kind]));
+    ctx.applied(undefined);
+  };
   const none = disabled.length === KINDS.length;
 
   const save = async (): Promise<void> => {
