@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,7 +40,8 @@ var (
 	ErrOfferFull    = errors.New("收到的连接方式提议过多，请先处理已有的")
 	ErrOfferUnknown = errors.New("没有这条连接方式提议")
 
-	offerID = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	offerID         = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
 )
 
 // CloudflareOffer carries what a device needs to join the sender's Cloudflare mesh: its own tunnel
@@ -99,8 +99,7 @@ func credential(s string) bool {
 }
 
 func validHostname(host string) bool {
-	u, err := url.Parse("https://" + host)
-	return err == nil && host != "" && u.Host == host && u.Hostname() == host && u.Port() == "" && u.User == nil && u.Path == "" && len(host) <= 253
+	return len(host) >= 1 && len(host) <= 253 && hostnamePattern.MatchString(host)
 }
 
 func (o Offer) Validate() error {
