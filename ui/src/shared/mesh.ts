@@ -526,6 +526,8 @@ export interface CloudflareSetupResult {
   creates: string[];
   hostname?: string;
   tunnelId?: string;
+  /** What happened to cloudflared: found, installed, or why the automatic install failed. */
+  cloudflaredNote?: string;
 }
 
 /** What `xmesh cloudflare discover --json` reports: the accounts and domains a token can see. */
@@ -537,6 +539,8 @@ export interface CloudflareDiscovery {
 export interface CloudflareStatus {
   devices: { name: string; hostname: string; tunnelId: string }[];
   serviceToken: boolean;
+  /** The tunnel hostname in this device's own configuration, which a shared tunnel sets without a creation record. */
+  configuredHostname: string;
 }
 
 export interface MeshKeyResult {
@@ -933,7 +937,7 @@ export function normalizeCloudflareLogin(v: unknown): CloudflareLoginResult {
 export function normalizeCloudflareSetup(v: unknown): CloudflareSetupResult {
   const r = rec(v);
   const creates = Array.isArray(r.creates) ? r.creates.filter((x): x is string => typeof x === "string") : [];
-  if (typeof r.hostname === "string") return { applied: true, creates, hostname: r.hostname, tunnelId: str(r.tunnel_id) };
+  if (typeof r.hostname === "string") return { applied: true, creates, hostname: r.hostname, tunnelId: str(r.tunnel_id), cloudflaredNote: str(r.cloudflared_note) };
   return { applied: false, creates, domain: str(r.domain) };
 }
 
@@ -952,6 +956,7 @@ export function normalizeCloudflareStatus(v: unknown): CloudflareStatus {
   return {
     devices: Object.entries(devices).map(([name, d]) => ({ name, hostname: str(rec(d).hostname), tunnelId: str(rec(d).tunnel_id) })).sort((a, b) => a.name.localeCompare(b.name)),
     serviceToken: bool(r.service_token),
+    configuredHostname: str(r.configured_hostname),
   };
 }
 

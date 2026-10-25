@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/tzf1003/xmesh/internal/cfadmin"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
@@ -34,14 +37,41 @@ func (n *Node) runCloudflare(ctx context.Context, p *provider) error {
 		return err
 	}
 	if cfg.TunnelTokenFile != "" {
-		binary, err := exec.LookPath(cmp.Or(cfg.Cloudflared, "cloudflared"))
+		binary, err := findCloudflared(cfg.Cloudflared, cfg.TunnelTokenFile)
+		if err != nil && cfg.Cloudflared == "" {
+			// Download the official release beside the tunnel token, checked against its published digest.
+			install, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			binary, err = cfadmin.CloudflaredInstaller{}.Install(install, filepath.Join(filepath.Dir(cfg.TunnelTokenFile), "bin"))
+			cancel()
+		}
 		if err != nil {
 			_ = listener.Close()
-			return errors.New("找不到 cloudflared，请安装或设置 mesh.cloudflare.cloudflared")
+			if cfg.Cloudflared != "" {
+				return fmt.Errorf("找不到 mesh.cloudflare.cloudflared 指定的 cloudflared：%w", err)
+			}
+			return fmt.Errorf("找不到 cloudflared，自动安装也失败了，请手动安装或设置 mesh.cloudflare.cloudflared：%w", err)
 		}
 		go n.runCloudflared(ctx, binary, cfg.TunnelTokenFile)
 	}
 	return n.serve(ctx, device.Cloudflare, p, listener, func(ctx context.Context) { <-ctx.Done() })
+}
+
+// findCloudflared prefers the configured or PATH cloudflared and then the copy xmesh installed in the
+// bin directory beside the tunnel token.
+func findCloudflared(configured, tokenFile string) (string, error) {
+	path, err := exec.LookPath(cmp.Or(configured, "cloudflared"))
+	if err == nil || configured != "" {
+		return path, err
+	}
+	name := "cloudflared"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	local := filepath.Join(filepath.Dir(tokenFile), "bin", name)
+	if info, statErr := os.Stat(local); statErr == nil && !info.IsDir() {
+		return local, nil
+	}
+	return "", err
 }
 
 // cloudflaredArgs forces HTTP/2 over TCP 443: QUIC over UDP is often blocked or throttled where devices

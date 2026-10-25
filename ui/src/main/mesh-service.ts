@@ -100,7 +100,7 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string, credentialF
     case "cloudflare.discover":
       return ["cloudflare", "discover", "--json", "--secret-file=-"];
     case "cloudflare.status":
-      return ["cloudflare", "status", "--json"];
+      return ["cloudflare", "status", "--json", ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`])];
     case "cloudflare.setup":
       return ["cloudflare", "setup", "--json", `--name=${req.name}`, ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), ...(req.apply ? ["--apply"] : [])];
     case "cloudflare.remove":

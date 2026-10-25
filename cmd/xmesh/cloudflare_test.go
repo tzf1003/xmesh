@@ -23,8 +23,8 @@ func cloudflareFixture(t *testing.T) (*cftest.Fake, string, []string) {
 	fake, url, done := cftest.New()
 	t.Cleanup(done)
 	old, oldAPI := cloudflareStore, cloudflareAPI
-	cloudflareStore, cloudflareAPI = &cfadmin.MemoryStore{}, url
-	t.Cleanup(func() { cloudflareStore, cloudflareAPI = old, oldAPI })
+	cloudflareStore, cloudflareAPI, cloudflaredAPI = &cfadmin.MemoryStore{}, url, "http://127.0.0.1:1/no-release"
+	t.Cleanup(func() { cloudflareStore, cloudflareAPI, cloudflaredAPI = old, oldAPI, "" })
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "xmesh.yaml")
 	body := "# my node\nschema_version: 2\nnode:\n  name: laptop\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\nagent:\n  cwd_policy:\n    allow: []\n"

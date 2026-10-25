@@ -1,6 +1,7 @@
 package cfadmin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,12 +9,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/tzf1003/xmesh/internal/filelock"
 	"github.com/zalando/go-keyring"
 )
 
 // ErrNoCredential means nothing is stored for the profile.
 var ErrNoCredential = errors.New("cfadmin: no stored Cloudflare credential")
+
+// errCorruptCredential marks a stored credential that cannot be parsed, as opposed to a keychain that
+// is simply unavailable.
+var errCorruptCredential = errors.New("cfadmin: corrupt stored credential")
 
 // KeychainService is the service name in the operating system's secret store.
 const KeychainService = "xmesh-cloudflare"
@@ -94,7 +101,7 @@ func (KeychainStore) Get(profile string) (Credential, error) {
 	}
 	var c Credential
 	if json.Unmarshal([]byte(s), &c) != nil {
-		return Credential{}, fmt.Errorf("钥匙串中 %q 的 Cloudflare 凭据已损坏", profile)
+		return Credential{}, fmt.Errorf("%w：钥匙串中 %q 的 Cloudflare 凭据已损坏", errCorruptCredential, profile)
 	}
 	return c, nil
 }
@@ -195,3 +202,160 @@ func (s *MemoryStore) Put(profile string, c Credential) error {
 }
 
 func (s *MemoryStore) Delete(profile string) error { delete(s.m, profile); return nil }
+
+// FallbackStore uses the system keychain and falls back to a private file under Dir when the
+// host has none, such as a server without a desktop session.
+type FallbackStore struct {
+	Primary Store
+	// Dir holds one <profile>.credential.json per profile.
+	Dir string
+}
+
+// lock serialises the keychain/file/tombstone steps of concurrent xmesh processes on one profile, so a
+// read that finishes an outage logout cannot delete a token another process has just saved. It is
+// best effort only when there is no usable directory; a lock that cannot be taken because another
+// process holds it aborts the operation instead of running unsynchronised.
+func (s FallbackStore) lock(profile string) (unlock func(), err error) {
+	if s.Dir == "" || CheckProfile(profile) != nil || os.MkdirAll(s.Dir, 0o700) != nil {
+		return func() {}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	f, err := filelock.Acquire(ctx, filepath.Join(s.Dir, profile+".lock"))
+	if err != nil {
+		return nil, fmt.Errorf("另一个 xmesh 进程正在操作 Cloudflare 凭据，请稍后重试：%w", err)
+	}
+	return func() { _ = f.Close() }, nil
+}
+
+func (s FallbackStore) file(profile string) (FileStore, error) {
+	if err := CheckProfile(profile); err != nil {
+		return FileStore{}, err
+	}
+	if s.Dir == "" {
+		return FileStore{}, errors.New("无法确定凭据文件目录")
+	}
+	return FileStore{Path: filepath.Join(s.Dir, profile+".credential.json")}, nil
+}
+
+// Get prefers the fallback file: it exists only while it is newer than anything in the keychain, because
+// a successful keychain write removes it.
+func (s FallbackStore) Get(profile string) (Credential, error) {
+	unlock, err := s.lock(profile)
+	if err != nil {
+		return Credential{}, err
+	}
+	defer unlock()
+	return s.get(profile)
+}
+
+func (s FallbackStore) get(profile string) (Credential, error) {
+	f, ferr := s.file(profile)
+	if ferr == nil && isTombstone(f.Path) {
+		// Finish the logout once the keychain is reachable again: delete the entry it may still hold.
+		if s.Primary.Delete(profile) == nil {
+			_ = f.Delete(profile)
+		}
+		return Credential{}, ErrNoCredential
+	}
+	if ferr == nil {
+		c, err := f.Get(profile)
+		if err == nil {
+			return c, nil
+		}
+		if !errors.Is(err, ErrNoCredential) {
+			return Credential{}, err
+		}
+	}
+	c, err := s.Primary.Get(profile)
+	switch {
+	case err == nil:
+		return c, nil
+	case errors.Is(err, errCorruptCredential):
+		return Credential{}, err
+	case errors.Is(err, ErrNoCredential):
+		return Credential{}, err
+	}
+	// The keychain is unavailable and no file was saved: nothing is stored yet, so a first login can proceed.
+	return Credential{}, fmt.Errorf("%w（系统钥匙串不可用：%v）", ErrNoCredential, err)
+}
+
+func (s FallbackStore) Put(profile string, c Credential) error {
+	unlock, err := s.lock(profile)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := CheckProfile(profile); err != nil {
+		return err
+	}
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	f, ferr := s.file(profile)
+	perr := s.Primary.Put(profile, c)
+	if perr == nil {
+		// A stale fallback file would win over the new keychain entry, so a failed removal is an error.
+		if ferr == nil {
+			if err := f.Delete(profile); err != nil {
+				return fmt.Errorf("已写入钥匙串，但未能删除旧的凭据文件 %s：%w", f.Path, err)
+			}
+		}
+		return nil
+	}
+	if ferr != nil {
+		return perr
+	}
+	if err := f.Put(profile, c); err != nil {
+		return fmt.Errorf("%w；改存凭据文件也失败：%v", perr, err)
+	}
+	return nil
+}
+
+// Delete logs the profile out. When the keychain cannot be reached it may still hold an older credential
+// that would come back once it recovers, so a tombstone in the fallback file keeps the profile logged out
+// until the next successful login.
+func (s FallbackStore) Delete(profile string) error {
+	unlock, lerr := s.lock(profile)
+	if lerr != nil {
+		return lerr
+	}
+	defer unlock()
+	err := s.Primary.Delete(profile)
+	f, ferr := s.file(profile)
+	if ferr != nil {
+		return err
+	}
+	if err == nil {
+		return f.Delete(profile)
+	}
+	if terr := writeTombstone(f.Path); terr != nil {
+		return fmt.Errorf("%w；写入注销标记也失败：%v", err, terr)
+	}
+	return nil
+}
+
+type tombstone struct {
+	Deleted bool `json:"deleted"`
+}
+
+func writeTombstone(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(tombstone{Deleted: true})
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func isTombstone(path string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var t tombstone
+	return json.Unmarshal(raw, &t) == nil && t.Deleted
+}
