@@ -1,6 +1,7 @@
 package devicelink
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -491,20 +492,40 @@ func (m *Manager) runPeer(p *peerLink) {
 
 func (m *Manager) connect(p *peerLink) {
 	for _, kind := range m.pathOrder() {
-		var connected bool
-		switch kind {
-		case device.LAN:
-			connected = m.preferLAN(m.ctx, p)
-		case device.Tailnet:
-			connected = m.connectPaths(m.ctx, p, m.candidates(p.id), device.Tailnet, 5*time.Second)
-		case device.Cloudflare:
-			// It works with no inbound address but adds latency, hence the longer budget.
-			connected = m.connectPaths(m.ctx, p, m.candidates(p.id), device.Cloudflare, 15*time.Second)
-		}
-		if connected {
+		if m.dialKind(m.ctx, p, kind, 0) {
 			return
 		}
 	}
+}
+
+// dialKind tries to open a carrier on one kind of path and reports whether the device now has one.
+// A zero budget takes the kind's own: LAN waits for discovery, Tailnet 5 seconds, and Cloudflare, which
+// works with no inbound address but adds latency, 15.
+func (m *Manager) dialKind(ctx context.Context, p *peerLink, kind device.PathKind, budget time.Duration) bool {
+	switch kind {
+	case device.LAN:
+		return m.preferLAN(ctx, p)
+	case device.Tailnet:
+		return m.connectPaths(ctx, p, m.candidates(p.id), kind, cmp.Or(budget, 5*time.Second))
+	case device.Cloudflare:
+		return m.connectPaths(ctx, p, m.candidates(p.id), kind, cmp.Or(budget, 15*time.Second))
+	}
+	return false
+}
+
+// yieldToPreferred gives the paths ranked above kind a chance to connect before an incoming connection
+// on kind is accepted, so a peer that dials a less preferred path first does not pin the device to it
+// (a carrier is sticky once committed). It reports true when one of them connected.
+func (m *Manager) yieldToPreferred(ctx context.Context, p *peerLink, kind device.PathKind) bool {
+	for _, better := range m.pathOrder() {
+		if better == kind {
+			return false
+		}
+		if m.dialKind(ctx, p, better, 5*time.Second) {
+			return true
+		}
+	}
+	return false
 }
 
 // pathOrder is the configured order of paths, or the default one.
@@ -707,7 +728,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 	if m.rank(path.Kind) < 0 {
 		return ErrUnavailable
 	}
-	if lan := m.rank(device.LAN); !outgoing && path.Kind == device.Tailnet && lan >= 0 && lan < m.rank(device.Tailnet) && m.preferLAN(ctx, p) {
+	if !outgoing && m.yieldToPreferred(ctx, p, path.Kind) {
 		return ErrUnavailable
 	}
 	if outgoing {
@@ -815,7 +836,7 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 	}
 	generation, enabled := m.opts.Directory.Provider(c.path.Kind)
 	_, trusted := m.opts.Trust.Find(p.id)
-	if p.closed || p.active != c || m.ctx.Err() != nil || m.stopping.Load() || !enabled || generation != c.path.ProviderGeneration || !trusted || m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+	if p.closed || p.active != c || m.ctx.Err() != nil || m.stopping.Load() || !enabled || generation != c.path.ProviderGeneration || m.rank(c.path.Kind) < 0 || !trusted || m.opts.Directory.IdentityConflict(p.id, time.Now()) {
 		c.cancel()
 		_ = c.conn.CloseNow()
 		if p.active == c {
