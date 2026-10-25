@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +24,10 @@ const OfferPath = "/mesh/v2/offer"
 
 // OfferCloudflare is the offer kind that joins the receiving device to the sender's Cloudflare mesh.
 const OfferCloudflare = "cloudflare"
+
+// OfferTailscale is the offer kind that joins the receiving device to the sender's tailnet with a
+// pre-authorised key.
+const OfferTailscale = "tailscale"
 
 const (
 	// OfferTTL is how long a received offer waits for the user before it is dropped.
@@ -59,12 +64,22 @@ type CloudflareOffer struct {
 	PeerHostname string `json:"peer_hostname"`
 }
 
+// TailscaleOffer carries a pre-authorised key for the sender's tailnet. ControlURL is empty for
+// Tailscale's own service and the Headscale address otherwise. The key's tags are the control plane's
+// concern and are never the receiving device's xmesh tags.
+type TailscaleOffer struct {
+	ControlURL string `json:"control_url,omitempty"`
+	AuthKey    string `json:"auth_key"`
+	Ephemeral  bool   `json:"ephemeral,omitempty"`
+}
+
 // Offer is one connection method a trusted device proposes to another. It grants no trust: the
 // receiver still pairs with each peer on its own, and only applies the offer after the user accepts.
 type Offer struct {
 	ID         string           `json:"id"`
 	Kind       string           `json:"kind"`
 	Cloudflare *CloudflareOffer `json:"cloudflare,omitempty"`
+	Tailscale  *TailscaleOffer  `json:"tailscale,omitempty"`
 }
 
 // ReceivedOffer is an Offer in the inbox with the sender the receiver authenticated, not one the
@@ -113,10 +128,22 @@ func (o Offer) Validate() error {
 			!credential(c.TunnelToken) || !credential(c.AccessSecret) || !credential(c.AccessID) {
 			return ErrOfferInvalid
 		}
+	case OfferTailscale:
+		t := o.Tailscale
+		if t == nil || !credential(t.AuthKey) || (t.ControlURL != "" && !validControlURL(t.ControlURL)) {
+			return ErrOfferInvalid
+		}
 	default:
 		return ErrOfferInvalid
 	}
 	return nil
+}
+
+// validControlURL accepts an https origin with no credentials, path, query or fragment.
+func validControlURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && len(raw) <= 255 && u.Scheme == "https" && u.Host != "" && u.Hostname() != "" && u.User == nil &&
+		(u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == "" && raw == "https://"+u.Host
 }
 
 // OfferInbox keeps received offers on disk until the user decides. They hold credentials, so the file

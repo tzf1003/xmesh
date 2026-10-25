@@ -197,3 +197,29 @@ func TestOfferOutboxQueuesCollectsAcksAndIsBounded(t *testing.T) {
 		t.Fatal("the unreadable outbox was overwritten")
 	}
 }
+
+func TestTailscaleOfferValidation(t *testing.T) {
+	good := Offer{ID: NewOfferID(), Kind: OfferTailscale, Tailscale: &TailscaleOffer{AuthKey: "tskey-auth-0123456789"}}
+	if err := good.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	good.Tailscale.ControlURL = "https://headscale.example.com"
+	if err := good.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*Offer){
+		"missing body": func(o *Offer) { o.Tailscale = nil },
+		"short key":    func(o *Offer) { o.Tailscale.AuthKey = "short" },
+		"spaced key":   func(o *Offer) { o.Tailscale.AuthKey = "has a space in it" },
+		"plain http":   func(o *Offer) { o.Tailscale.ControlURL = "http://headscale.example.com" },
+		"path":         func(o *Offer) { o.Tailscale.ControlURL = "https://headscale.example.com/x" },
+		"userinfo":     func(o *Offer) { o.Tailscale.ControlURL = "https://u:p@headscale.example.com" },
+		"query":        func(o *Offer) { o.Tailscale.ControlURL = "https://headscale.example.com?a=b" },
+	} {
+		o := Offer{ID: good.ID, Kind: OfferTailscale, Tailscale: &TailscaleOffer{AuthKey: good.Tailscale.AuthKey, ControlURL: good.Tailscale.ControlURL}}
+		mutate(&o)
+		if err := o.Validate(); !errors.Is(err, ErrOfferInvalid) {
+			t.Errorf("%s accepted: %v", name, err)
+		}
+	}
+}

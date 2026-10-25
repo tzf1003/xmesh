@@ -36,6 +36,9 @@ const meshUsage = `用法: xmesh mesh <子命令> [参数]
   tags     查看或修改设备 tag  --device ID  [--set tag:a,tag:b]  [--apply]
   authkey  创建预授权 key  --out 文件 [--tags tag:a,tag:b]  [--ttl 1h] [--reusable] [--ephemeral] [--user 用户]
   onboard  新设备接入：创建 key 写入 --authkey-file（0600），可选 --config xmesh.yaml --install
+  share    把 Tailscale 连接方式发给已配对设备  --device 名字或ID --config xmesh.yaml
+           [--authkey-file 文件 | --reuse-local-key] [--tags ...] [--reusable] [--ephemeral] [--apply]
+           有管理凭据时自动生成 key，否则用你给的文件；对方手动接受后才生效
   policy   策略：--show | --snapshots | --rollback ID | --template personal|team|restricted --owner 属主
            [--apply] [--expect-version 版本]
            document 从标准输入解析或修改完整草稿；publish --expect-version 版本 [--apply --yes] 提交完整草稿
@@ -153,6 +156,8 @@ func meshRun(args []string, out io.Writer, in io.Reader) error {
 		return meshAuthKey(rest, out)
 	case "onboard":
 		return meshOnboard(rest, out)
+	case "share":
+		return meshShare(rest, out)
 	case "policy":
 		return meshPolicy(rest, out, in)
 	case "matrix":
