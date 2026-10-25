@@ -162,9 +162,11 @@ func (b *OfferInbox) update(ctx context.Context, fn func(*offerFile) error) erro
 		return err
 	}
 	defer lock.Close()
+	// A file that cannot be read is an error, never an empty inbox: writing over it would destroy
+	// credentials the sender no longer has.
 	file, err := b.read()
 	if err != nil {
-		file = offerFile{Version: Version}
+		return err
 	}
 	now := b.now()
 	file.Offers = slices.DeleteFunc(file.Offers, func(o ReceivedOffer) bool { return !o.ExpiresAt.After(now) })
@@ -207,12 +209,17 @@ func (b *OfferInbox) Receive(ctx context.Context, from Trust, offer Offer) error
 func (b *OfferInbox) List(ctx context.Context) ([]ReceivedOffer, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	var out []ReceivedOffer
-	err := b.update(ctx, func(file *offerFile) error {
-		out = slices.Clone(file.Offers)
-		return nil
-	})
-	return out, err
+	file, err := b.read()
+	if err != nil {
+		return nil, err
+	}
+	now := b.now()
+	live := slices.DeleteFunc(slices.Clone(file.Offers), func(o ReceivedOffer) bool { return !o.ExpiresAt.After(now) })
+	if len(live) == len(file.Offers) {
+		return live, nil
+	}
+	// Only a readable file with expired offers is rewritten, so their credentials do not linger on disk.
+	return live, b.update(ctx, func(*offerFile) error { return nil })
 }
 
 // Take removes the offer and returns it, so one accept applies it at most once.

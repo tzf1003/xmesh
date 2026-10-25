@@ -46,20 +46,36 @@ func (n *Node) receiveOffer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// SendOffer delivers an offer to a paired device over any path currently verified for it. The device
-// stores it for its user to accept; a delivery says nothing about whether it will be applied.
-func (n *Node) SendOffer(ctx context.Context, id string, offer device.Offer) error {
+// OfferDelivery says how SendOffer got an offer to a device.
+type OfferDelivery string
+
+const (
+	// OfferDelivered means the device has the offer in its inbox.
+	OfferDelivered OfferDelivery = "delivered"
+	// OfferQueued means no path from here reaches the device, so the offer waits for the device to
+	// collect it over its own connection to this one.
+	OfferQueued OfferDelivery = "queued"
+)
+
+// refusedError is an answer from the device itself: it is reachable and said no, so queueing the offer
+// for it to collect would only be refused again.
+type refusedError struct{ error }
+
+// SendOffer delivers an offer to a paired device over any path currently verified for it. When none
+// is reachable from here, as when the device only dials out to this one, it queues the offer for the
+// device to collect over that connection. Either way the device applies nothing until its user accepts.
+func (n *Node) SendOffer(ctx context.Context, id string, offer device.Offer) (OfferDelivery, error) {
 	if err := offer.Validate(); err != nil {
-		return err
+		return "", err
 	}
 	if _, ok := n.trust.Find(id); !ok {
-		return device.ErrUntrusted
+		return "", device.ErrUntrusted
 	}
 	body, err := json.Marshal(offer)
 	if err != nil {
-		return err
+		return "", err
 	}
-	var last error = fmt.Errorf("设备 %s 当前没有可用的连接路径", id)
+	var last error = fmt.Errorf("设备 %s 当前没有可从本机拨通的连接路径", id)
 	devices, _ := n.directory.Snapshot(time.Now())
 	for _, d := range devices {
 		if d.DeviceID != id || d.IdentityConflict {
@@ -69,15 +85,161 @@ func (n *Node) SendOffer(ctx context.Context, id string, offer device.Offer) err
 			if !path.Reachable {
 				continue
 			}
-			if last = n.postOffer(ctx, id, path, body); last == nil {
-				return nil
+			if last = n.postOffer(ctx, id, path, device.OfferPath, body); last == nil {
+				return OfferDelivered, nil
+			}
+			var refused refusedError
+			if errors.As(last, &refused) {
+				return "", last
 			}
 		}
 	}
-	return last
+	if err := n.outbox.Queue(ctx, id, offer); err != nil {
+		return "", fmt.Errorf("%w；也无法留着等对方来取：%v", last, err)
+	}
+	return OfferQueued, nil
 }
 
-func (n *Node) postOffer(ctx context.Context, id string, path device.Path, body []byte) error {
+type collectResponse struct {
+	Offers []device.Offer `json:"offers"`
+}
+
+type ackRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// trustedCaller returns the paired, unrevoked device a request's client certificate proves.
+func (n *Node) trustedCaller(w http.ResponseWriter, r *http.Request) (device.Trust, bool) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) != 1 {
+		http.NotFound(w, r)
+		return device.Trust{}, false
+	}
+	from, err := n.trust.VerifyCertificate(r.TLS.PeerCertificates[0], "")
+	if err != nil || from.Revoked {
+		http.Error(w, "设备未配对", http.StatusForbidden)
+		return device.Trust{}, false
+	}
+	return from, true
+}
+
+// collectOffersHandler gives a paired device the offers waiting for it. They stay queued until it
+// acknowledges them, so a failed transfer is retried instead of lost.
+func (n *Node) collectOffersHandler(w http.ResponseWriter, r *http.Request) {
+	from, ok := n.trustedCaller(w, r)
+	if !ok {
+		return
+	}
+	pending, err := n.outbox.Pending(r.Context(), from.Document.DeviceID)
+	if err != nil {
+		http.Error(w, "无法读取待送达的连接方式", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(collectResponse{Offers: pending})
+}
+
+func (n *Node) ackOffersHandler(w http.ResponseWriter, r *http.Request) {
+	from, ok := n.trustedCaller(w, r)
+	if !ok {
+		return
+	}
+	var req ackRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil || len(req.IDs) > device.MaxOutbox {
+		http.Error(w, device.ErrOfferInvalid.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := n.outbox.Ack(r.Context(), from.Document.DeviceID, req.IDs); err != nil {
+		http.Error(w, "无法确认连接方式", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// offerCollectEvery is how often a node asks the devices it can dial for offers queued for it.
+var offerCollectEvery = 45 * time.Second
+
+// collectLoop fetches offers other devices could not push to this one.
+func (n *Node) collectLoop() {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-n.ctx.Done():
+			return
+		case <-timer.C:
+			n.collectOffers(n.ctx)
+			timer.Reset(offerCollectEvery)
+		}
+	}
+}
+
+// collectOffers asks each reachable paired device for offers queued for this one, stores them in the
+// inbox and then acknowledges them. Failures are retried on the next round.
+func (n *Node) collectOffers(ctx context.Context) {
+	devices, _ := n.directory.Snapshot(time.Now())
+	for _, d := range devices {
+		trusted, ok := n.trust.Find(d.DeviceID)
+		if !ok || trusted.Revoked || d.IdentityConflict {
+			continue
+		}
+		for _, path := range d.Paths {
+			if !path.Reachable {
+				continue
+			}
+			if n.collectFrom(ctx, trusted, path) {
+				break
+			}
+		}
+	}
+}
+
+func (n *Node) collectFrom(ctx context.Context, from device.Trust, path device.Path) bool {
+	id := from.Document.DeviceID
+	reply, err := n.postJSON(ctx, id, path, device.OfferPath+"/collect", struct{}{}, 1<<20)
+	if err != nil {
+		return false
+	}
+	var got collectResponse
+	if json.Unmarshal(reply, &got) != nil || len(got.Offers) > device.MaxOutbox {
+		return true
+	}
+	stored := []string{}
+	for _, offer := range got.Offers {
+		// An offer the inbox refuses is not acknowledged: the sender keeps it until it expires.
+		if n.offers.Receive(ctx, from, offer) == nil {
+			stored = append(stored, offer.ID)
+		}
+	}
+	if len(stored) > 0 {
+		_, _ = n.postJSON(ctx, id, path, device.OfferPath+"/ack", ackRequest{IDs: stored}, 0)
+	}
+	return true
+}
+
+func (n *Node) postJSON(ctx context.Context, id string, path device.Path, route string, body any, limit int64) ([]byte, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	var reply []byte
+	err = n.post(ctx, id, path, route, raw, func(r io.Reader) error {
+		if limit == 0 {
+			return nil
+		}
+		var readErr error
+		reply, readErr = io.ReadAll(io.LimitReader(r, limit))
+		return readErr
+	})
+	return reply, err
+}
+
+func (n *Node) postOffer(ctx context.Context, id string, path device.Path, route string, body []byte) error {
+	return n.post(ctx, id, path, route, body, nil)
+}
+
+// post sends body to a paired device's route over path. A status the device itself answered with is a
+// refusedError; anything else is a path failure.
+func (n *Node) post(ctx context.Context, id string, path device.Path, route string, body []byte, read func(io.Reader) error) error {
 	client, err := n.httpClient(path.Kind, id, false)
 	if err != nil {
 		return err
@@ -85,7 +247,7 @@ func (n *Node) postOffer(ctx context.Context, id string, path device.Path, body 
 	defer client.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(path.Address, "/")+device.OfferPath, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(path.Address, "/")+route, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -95,9 +257,12 @@ func (n *Node) postOffer(ctx context.Context, id string, path device.Path, body 
 		return err
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusNoContent {
+	if response.StatusCode == http.StatusNoContent || (response.StatusCode == http.StatusOK && read != nil) {
+		if read != nil {
+			return read(response.Body)
+		}
 		return nil
 	}
 	reason, _ := io.ReadAll(io.LimitReader(response.Body, 512))
-	return fmt.Errorf("对端拒绝了连接方式提议 (%d): %s", response.StatusCode, strings.TrimSpace(string(reason)))
+	return refusedError{fmt.Errorf("对端拒绝了请求 (%d): %s", response.StatusCode, strings.TrimSpace(string(reason)))}
 }

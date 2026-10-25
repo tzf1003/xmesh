@@ -36,6 +36,7 @@ type fakeOffers struct {
 	sent    []device.Offer
 	sentTo  []string
 	sendErr error
+	queue   bool
 }
 
 func newFakeOffers(t *testing.T) *fakeOffers {
@@ -47,14 +48,17 @@ func newFakeOffers(t *testing.T) *fakeOffers {
 	return &fakeOffers{inbox: inbox}
 }
 
-func (o *fakeOffers) SendOffer(_ context.Context, id string, offer device.Offer) error {
+func (o *fakeOffers) SendOffer(_ context.Context, id string, offer device.Offer) (string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.sendErr != nil {
-		return o.sendErr
+		return "", o.sendErr
 	}
 	o.sent, o.sentTo = append(o.sent, offer), append(o.sentTo, id)
-	return nil
+	if o.queue {
+		return "queued", nil
+	}
+	return "delivered", nil
 }
 func (o *fakeOffers) Offers(ctx context.Context) ([]device.ReceivedOffer, error) {
 	return o.inbox.List(ctx)
@@ -205,9 +209,18 @@ func TestOfferSendValidatesAndDelivers(t *testing.T) {
 	bad.Offer.Cloudflare = &v2.CloudflareOffer{Hostname: "x"}
 	apiError(t, f.do("POST", "/v2/offers", bad, nil), v2.ErrInvalidArgs)
 
-	if r := f.do("POST", "/v2/offers", body, nil); r.Status != 204 {
-		t.Fatalf("%d %s", r.Status, r.Body)
+	var sent v2.OfferSendResponse
+	decodeAs(t, f.ok("POST", "/v2/offers", body, "OfferSendResponse"), &sent)
+	if sent.Delivery != "delivered" {
+		t.Fatalf("%+v", sent)
 	}
+	admin.queue = true
+	decodeAs(t, f.ok("POST", "/v2/offers", body, "OfferSendResponse"), &sent)
+	if sent.Delivery != "queued" {
+		t.Fatalf("%+v", sent)
+	}
+	admin.queue = false
+	admin.sent, admin.sentTo = admin.sent[:1], admin.sentTo[:1]
 	if len(admin.sent) != 1 || admin.sentTo[0] != offerSender || admin.sent[0].Cloudflare.TunnelToken != "tunnel-token-value" {
 		t.Fatalf("%+v %v", admin.sent, admin.sentTo)
 	}

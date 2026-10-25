@@ -291,7 +291,7 @@ UI MCP `protocol_version: 1` 的 `.run`、`.script` 返回已知状态与 `run_i
 
 **连接方式提议（API 2.2）。** 已配对设备可以把一种连接方式提议给另一台设备，对方用户确认后才应用：
 
-- `POST /v2/offers` 接收 `{device_id, offer}`，经任一已验证的路径把提议送到该设备，返回 204。设备未配对返回 `not_found`，送不到返回 `unavailable`。`offer.kind` 目前只有 `cloudflare`，内容是接收设备自己的隧道令牌、Access 服务令牌、接收设备的隧道主机名和发送设备的主机名，不含 Cloudflare API Token。
+- `POST /v2/offers` 接收 `{device_id, offer}`，经任一已验证的路径把提议送到该设备，返回 `{delivery}`：`delivered` 表示已进入对方收件箱；`queued` 表示本机拨不通对方（例如对方只拨出到本机），提议留在本机，等对方经它自己的连接来取，对方在线时约一分钟内，取走并确认后才从本机删除，24 小时未取则过期，本机最多留 16 条（单个设备 4 条）。设备未配对返回 `not_found`；对方拒绝（例如收件箱已满）或排队也失败返回 `unavailable`。`offer.kind` 目前只有 `cloudflare`，内容是接收设备自己的隧道令牌、Access 服务令牌、接收设备的隧道主机名和发送设备的主机名，不含 Cloudflare API Token。
 - `GET /v2/offers` 列出本设备收到的提议：`id`、`kind`、`from_id`、`from_name`、`received_at`、`expires_at` 和不含凭据的摘要。发送者是连接证书证明的设备，不取自请求体。提议保存在私有收件箱里，总数 16、单个发送者 4、24 小时过期。
 - `POST /v2/offers/{offer_id}/accept` 应用提议：把隧道令牌和 Access 密钥写进状态目录下的私有文件，并把主机名、凭据文件路径以及发送设备的地址写入 `mesh.cloudflare`，返回 `{kind, restart_required, changed_paths}`。本设备已配置 Cloudflare，或 `mesh.cloudflare.listen` 不是默认的 `127.0.0.1:7434` 时返回 `conflict`，提议保留。应用失败时提议原样放回收件箱。
 - `DELETE /v2/offers/{offer_id}` 拒绝并删除提议，返回 204。

@@ -567,6 +567,22 @@
           }
         }
       }
+    },
+    "OfferSendResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivery"
+      ],
+      "description": "提议如何到达对方：delivered 已进入对方收件箱；queued 本机拨不通对方，已留在本机，等对方经它自己的连接来取。",
+      "properties": {
+        "delivery": {
+          "enum": [
+            "delivered",
+            "queued"
+          ]
+        }
+      }
     }
   }
 }

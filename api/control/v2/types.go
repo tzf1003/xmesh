@@ -641,3 +641,9 @@ type OfferAcceptResponse struct {
 	RestartRequired bool     `json:"restart_required"`
 	ChangedPaths    []string `json:"changed_paths"`
 }
+
+// OfferSendResponse says how an offer reached the device: "delivered" into its inbox, or "queued"
+// here when it can only collect the offer over its own connection to this node.
+type OfferSendResponse struct {
+	Delivery string `json:"delivery"`
+}

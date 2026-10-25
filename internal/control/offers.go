@@ -16,7 +16,9 @@ import (
 
 // OfferAdmin is the node's connection-method inbox and its way to deliver an offer to a paired device.
 type OfferAdmin interface {
-	SendOffer(ctx context.Context, deviceID string, offer device.Offer) error
+	// SendOffer returns "delivered" when the device has the offer, or "queued" when it can only
+	// collect it over its own connection to this node.
+	SendOffer(ctx context.Context, deviceID string, offer device.Offer) (string, error)
 	Offers(ctx context.Context) ([]device.ReceivedOffer, error)
 	TakeOffer(ctx context.Context, id string) (device.ReceivedOffer, error)
 	PutOffer(ctx context.Context, offer device.ReceivedOffer) error
@@ -60,13 +62,14 @@ func (s *Server) sendOffer(w http.ResponseWriter, r *http.Request, _ *call) {
 		failWith(w, argError("offer", err.Error()))
 		return
 	}
-	switch err := admin.SendOffer(r.Context(), req.DeviceID, offer); {
+	delivery, err := admin.SendOffer(r.Context(), req.DeviceID, offer)
+	switch {
 	case errors.Is(err, device.ErrUntrusted):
 		failWith(w, newError(v2.ErrNotFound, "该设备尚未配对"))
 	case err != nil:
 		failWith(w, newError(v2.ErrUnavailable, "无法把连接方式送达该设备："+oneLine(err.Error())))
 	default:
-		w.WriteHeader(204)
+		writeJSON(w, 200, v2.OfferSendResponse{Delivery: delivery})
 	}
 }
 

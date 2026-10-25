@@ -100,6 +100,7 @@ type Node struct {
 	trust          *device.TrustStore
 	pairing        *device.Pairing
 	offers         *device.OfferInbox
+	outbox         *device.OfferOutbox
 	directory      *device.Directory
 	links          *devicelink.Manager
 	accept         func(context.Context, identity.Principal, mcp.Transport) error
@@ -163,9 +164,13 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	if err != nil {
 		return nil, err
 	}
+	outbox, err := device.OpenOfferOutbox(stateDir)
+	if err != nil {
+		return nil, err
+	}
 	parent := ctx
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
-	n := &Node{ctx: ctx, cancel: cancel, stateDir: stateDir, name: c.Node.Name, cfg: c.Mesh, identity: id, trust: trust, pairing: pairing, offers: offers, providers: map[device.PathKind]*provider{}, candidates: map[string]Candidate{}}
+	n := &Node{ctx: ctx, cancel: cancel, stateDir: stateDir, name: c.Node.Name, cfg: c.Mesh, identity: id, trust: trust, pairing: pairing, offers: offers, outbox: outbox, providers: map[device.PathKind]*provider{}, candidates: map[string]Candidate{}}
 	n.lock = lock
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
@@ -190,6 +195,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	}
 	if supervise {
 		n.workers.Go(n.supervise)
+		n.workers.Go(n.collectLoop)
 		n.workers.Go(func() {
 			ticker := time.NewTicker(time.Hour)
 			defer ticker.Stop()
@@ -477,6 +483,8 @@ func (n *Node) handler(kind device.PathKind, generation uint64) http.Handler {
 		}{n.identity.Document(n.name), n.links.BootID()})
 	})
 	mux.HandleFunc("POST "+device.OfferPath, n.receiveOffer)
+	mux.HandleFunc("POST "+device.OfferPath+"/collect", n.collectOffersHandler)
+	mux.HandleFunc("POST "+device.OfferPath+"/ack", n.ackOffersHandler)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "设备协议已升级，请更新 xmesh 并重新配对", 426)
 	})

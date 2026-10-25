@@ -667,8 +667,8 @@
       "since": "2.2",
       "query": null,
       "body": "urn:xmesh:schema:control-pair:2#/$defs/OfferSendRequest",
-      "response": null,
-      "success": 204,
+      "response": "urn:xmesh:schema:control-pair:2#/$defs/OfferSendResponse",
+      "success": 200,
       "stream": false,
       "if_match": "none",
       "errors": [

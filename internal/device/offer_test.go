@@ -116,3 +116,84 @@ func TestOfferInboxDropsExpiredOffersAndKeepsTheFilePrivate(t *testing.T) {
 		t.Fatal("an expired offer's credentials stayed on disk")
 	}
 }
+
+func TestOfferInboxNeverOverwritesAFileItCannotRead(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	box, _ := OpenOfferInbox(dir)
+	if err := box.Receive(ctx, sender("a"), cloudflareOffer(NewOfferID())); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "identity-v2", "offers.json")
+	good, _ := os.ReadFile(file)
+	if err := os.WriteFile(file, []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := box.List(ctx); err == nil {
+		t.Fatal("a corrupt inbox listed as empty")
+	}
+	if err := box.Receive(ctx, sender("b"), cloudflareOffer(NewOfferID())); err == nil {
+		t.Fatal("a corrupt inbox accepted a new offer")
+	}
+	if raw, _ := os.ReadFile(file); string(raw) != "{ not json" {
+		t.Fatalf("the unreadable file was overwritten: %s", raw)
+	}
+	if err := os.WriteFile(file, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := box.List(ctx); err != nil || len(list) != 1 {
+		t.Fatalf("the restored inbox: %+v %v", list, err)
+	}
+}
+
+func TestOfferOutboxQueuesCollectsAcksAndIsBounded(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	out, err := OpenOfferOutbox(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer := cloudflareOffer(NewOfferID())
+	if err := out.Queue(ctx, "dev-b", offer); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Queue(ctx, "dev-b", offer); err != nil {
+		t.Fatalf("queueing the same offer again must replace it: %v", err)
+	}
+	if got, err := out.Pending(ctx, "dev-b"); err != nil || len(got) != 1 || got[0].ID != offer.ID {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got, _ := out.Pending(ctx, "dev-c"); len(got) != 0 {
+		t.Fatalf("another device collected the offer: %+v", got)
+	}
+	if err := out.Ack(ctx, "dev-c", []string{offer.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := out.Pending(ctx, "dev-b"); len(got) != 1 {
+		t.Fatal("another device's ack removed the offer")
+	}
+	if err := out.Ack(ctx, "dev-b", []string{offer.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := out.Pending(ctx, "dev-b"); len(got) != 0 {
+		t.Fatalf("an acknowledged offer stayed: %+v", got)
+	}
+	for i := 0; i < MaxOutboxPerDevice; i++ {
+		if err := out.Queue(ctx, "dev-b", cloudflareOffer(NewOfferID())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := out.Queue(ctx, "dev-b", cloudflareOffer(NewOfferID())); !errors.Is(err, ErrOfferFull) {
+		t.Fatalf("one device filled past its share: %v", err)
+	}
+	file := filepath.Join(dir, "identity-v2", "offers-out.json")
+	if err := os.WriteFile(file, []byte("{ nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Queue(ctx, "dev-c", cloudflareOffer(NewOfferID())); err == nil {
+		t.Fatal("an unreadable outbox accepted an offer")
+	}
+	if raw, _ := os.ReadFile(file); string(raw) != "{ nope" {
+		t.Fatal("the unreadable outbox was overwritten")
+	}
+}

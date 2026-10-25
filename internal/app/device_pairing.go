@@ -41,8 +41,9 @@ func (p devicePairing) PairWith(ctx context.Context, kind device.PathKind, addre
 // node's inbox.
 type deviceOffers struct{ node *connectivity.Node }
 
-func (o deviceOffers) SendOffer(ctx context.Context, id string, offer device.Offer) error {
-	return o.node.SendOffer(ctx, id, offer)
+func (o deviceOffers) SendOffer(ctx context.Context, id string, offer device.Offer) (string, error) {
+	delivery, err := o.node.SendOffer(ctx, id, offer)
+	return string(delivery), err
 }
 func (o deviceOffers) Offers(ctx context.Context) ([]device.ReceivedOffer, error) {
 	return o.node.Offers().List(ctx)

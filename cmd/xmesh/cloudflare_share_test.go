@@ -16,15 +16,19 @@ type fakeShareNode struct {
 	sent    []v2.DeviceOffer
 	sentTo  []string
 	err     error
+	queued  bool
 }
 
 func (f *fakeShareNode) Trusted() (map[string]string, error) { return f.trusted, nil }
-func (f *fakeShareNode) SendOffer(_ context.Context, id string, o v2.DeviceOffer) error {
+func (f *fakeShareNode) SendOffer(_ context.Context, id string, o v2.DeviceOffer) (string, error) {
 	if f.err != nil {
-		return f.err
+		return "", f.err
 	}
 	f.sent, f.sentTo = append(f.sent, o), append(f.sentTo, id)
-	return nil
+	if f.queued {
+		return "queued", nil
+	}
+	return "delivered", nil
 }
 
 var shareDevice = "dev-" + strings.Repeat("cd", 32)
@@ -112,5 +116,24 @@ func TestCloudflareShareNeedsAPairedDevice(t *testing.T) {
 	}
 	if id, _, err := resolveDevice(dup.trusted, shareDevice); err != nil || id != shareDevice {
 		t.Fatalf("%v %v", id, err)
+	}
+}
+
+func TestCloudflareShareKeepsTheTunnelWhenTheOfferIsQueuedForCollection(t *testing.T) {
+	node := &fakeShareNode{trusted: map[string]string{shareDevice: "phone"}, queued: true}
+	things, cfgPath, args := shareFixture(t, node)
+	var out bytes.Buffer
+	if err := cloudflareRun(append(args, "--apply"), &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if things() == 0 {
+		t.Fatal("a queued offer's tunnel was removed before the device could collect it")
+	}
+	if !strings.Contains(out.String(), "留在本机") {
+		t.Fatalf("the output does not say the offer is waiting: %s", out.String())
+	}
+	cfg, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(cfg), shareDevice) {
+		t.Fatalf("the device was not recorded as a peer:\n%s", cfg)
 	}
 }

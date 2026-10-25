@@ -1850,6 +1850,12 @@ export interface OfferAcceptResponse {
   restart_required: boolean;
   changed_paths: string[];
 }
+/**
+ * 提议如何到达对方：delivered 已进入对方收件箱；queued 本机拨不通对方，已留在本机，等对方经它自己的连接来取。
+ */
+export interface OfferSendResponse {
+  delivery: "delivered" | "queued";
+}
 export interface PatInfo {
   name: NodeName;
   /**
@@ -2699,8 +2705,8 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "since": "2.2",
     "query": null,
     "body": "OfferSendRequest",
-    "response": null,
-    "success": 204,
+    "response": "OfferSendResponse",
+    "success": 200,
     "stream": false,
     "if_match": "none",
     "errors": [
@@ -2859,7 +2865,7 @@ export interface ControlRouteTypes {
   "control.audit.list": { query: AuditQuery; body: undefined; response: AuditResponse };
   "control.pair.trust.update": { query: undefined; body: PairTrustUpdateRequest; response: PairTrustUpdateResponse };
   "control.pair.trust.delete": { query: undefined; body: undefined; response: undefined };
-  "control.offers.send": { query: undefined; body: OfferSendRequest; response: undefined };
+  "control.offers.send": { query: undefined; body: OfferSendRequest; response: OfferSendResponse };
   "control.offers.list": { query: undefined; body: undefined; response: OffersResponse };
   "control.offers.accept": { query: undefined; body: undefined; response: OfferAcceptResponse };
   "control.offers.reject": { query: undefined; body: undefined; response: undefined };

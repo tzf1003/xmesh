@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,7 +23,8 @@ import (
 type shareNode interface {
 	// Trusted maps the device IDs this node trusts to their names.
 	Trusted() (map[string]string, error)
-	SendOffer(ctx context.Context, deviceID string, offer v2.DeviceOffer) error
+	// SendOffer returns "delivered", or "queued" when the device must collect the offer itself.
+	SendOffer(ctx context.Context, deviceID string, offer v2.DeviceOffer) (string, error)
 }
 
 // openShareNode is replaced by tests.
@@ -34,12 +36,19 @@ var openShareNode = func(node, stateDir string) (shareNode, error) {
 	return n.(controlNode), nil
 }
 
-func (n controlNode) SendOffer(ctx context.Context, id string, offer v2.DeviceOffer) error {
+func (n controlNode) SendOffer(ctx context.Context, id string, offer v2.DeviceOffer) (string, error) {
 	r, err := n.client.Do(ctx, "POST", "/v2/offers", v2.OfferSendRequest{DeviceID: id, Offer: offer}, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return r.Error()
+	if err = r.Error(); err != nil {
+		return "", err
+	}
+	var res v2.OfferSendResponse
+	if err = json.Unmarshal(r.Body, &res); err != nil {
+		return "", err
+	}
+	return res.Delivery, nil
 }
 
 // resolveDevice finds a trusted device by its ID or, when exactly one has it, its name.
@@ -142,16 +151,22 @@ func cloudflareShare(args []string, out io.Writer) (retErr error) {
 	offer := v2.DeviceOffer{ID: device.NewOfferID(), Kind: device.OfferCloudflare, Cloudflare: &v2.CloudflareOffer{
 		Hostname: dev.Hostname, TunnelToken: dev.TunnelToken, AccessID: token.ClientID, AccessSecret: token.Secret, PeerHostname: cf.Hostname,
 	}}
-	if err := sender.SendOffer(ctx, id, offer); err != nil {
-		return fmt.Errorf("没能把连接方式送到 %s（对方需要在线，并且已配对）：%w", name, err)
+	delivery, err := sender.SendOffer(ctx, id, offer)
+	if err != nil {
+		return fmt.Errorf("没能把连接方式送到 %s（对方需要已配对）：%w", name, err)
 	}
 	delivered = true
 	if err := addCloudflarePeer(*cfgPath, id, dev.Hostname); err != nil {
 		// The offer is delivered and the tunnel exists; only this node's address book lacks the device.
 		return fmt.Errorf("已发给 %s，但未能写入本机的 mesh.cloudflare.peers：%w\n请手动添加  %s: %s", name, err, id, dev.Hostname)
 	}
-	return emit(out, c.json, map[string]any{"event": "shared", "device": name, "device_id": id, "hostname": dev.Hostname}, func(w io.Writer) {
-		fmt.Fprintf(w, "已把 Cloudflare 连接方式发给 %s，并把 %s 记进本机 mesh.cloudflare.peers（重启 xmesh 后生效）。\n在 %s 上运行 xmesh control offers list 查看，xmesh control offers accept <编号> 接受。\n", name, dev.Hostname, name)
+	return emit(out, c.json, map[string]any{"event": "shared", "device": name, "device_id": id, "hostname": dev.Hostname, "delivery": delivery}, func(w io.Writer) {
+		if delivery == "queued" {
+			fmt.Fprintf(w, "本机拨不通 %s，已把 Cloudflare 连接方式留在本机，等它经自己的连接来取（它在线时一分钟内）；%s 已记进本机 mesh.cloudflare.peers（重启 xmesh 后生效）。\n", name, dev.Hostname)
+		} else {
+			fmt.Fprintf(w, "已把 Cloudflare 连接方式发给 %s，并把 %s 记进本机 mesh.cloudflare.peers（重启 xmesh 后生效）。\n", name, dev.Hostname)
+		}
+		fmt.Fprintf(w, "在 %s 上运行 xmesh control offers list 查看，xmesh control offers accept <编号> 接受。\n", name)
 	})
 }
 
