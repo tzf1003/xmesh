@@ -32,6 +32,9 @@ type CloudflaredInstaller struct {
 	GOOS, GOARCH string
 }
 
+// cloudflaredDownloadPrefix is where the official release assets live; metadata pointing elsewhere is refused.
+const cloudflaredDownloadPrefix = "https://github.com/cloudflare/cloudflared/releases/download/"
+
 const cloudflaredLatest = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest"
 
 // CloudflaredBinaryName is the file name of the installed executable.
@@ -107,6 +110,9 @@ func (in CloudflaredInstaller) Install(ctx context.Context, dir string) (string,
 		if a.Name == name {
 			url, digest = a.URL, a.Digest
 		}
+	}
+	if in.API == "" && !strings.HasPrefix(url, cloudflaredDownloadPrefix) {
+		return "", fmt.Errorf("cloudflared 发布给出的下载地址不在官方仓库下，已拒绝：%s", url)
 	}
 	want, ok := strings.CutPrefix(digest, "sha256:")
 	if url == "" || !ok || len(want) != 64 {

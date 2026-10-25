@@ -526,6 +526,8 @@ export interface CloudflareSetupResult {
   creates: string[];
   hostname?: string;
   tunnelId?: string;
+  /** What happened to cloudflared: found, installed, or why the automatic install failed. */
+  cloudflaredNote?: string;
 }
 
 /** What `xmesh cloudflare discover --json` reports: the accounts and domains a token can see. */
@@ -935,7 +937,7 @@ export function normalizeCloudflareLogin(v: unknown): CloudflareLoginResult {
 export function normalizeCloudflareSetup(v: unknown): CloudflareSetupResult {
   const r = rec(v);
   const creates = Array.isArray(r.creates) ? r.creates.filter((x): x is string => typeof x === "string") : [];
-  if (typeof r.hostname === "string") return { applied: true, creates, hostname: r.hostname, tunnelId: str(r.tunnel_id) };
+  if (typeof r.hostname === "string") return { applied: true, creates, hostname: r.hostname, tunnelId: str(r.tunnel_id), cloudflaredNote: str(r.cloudflared_note) };
   return { applied: false, creates, domain: str(r.domain) };
 }
 

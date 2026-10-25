@@ -57,8 +57,8 @@ func (n *Node) runCloudflare(ctx context.Context, p *provider) error {
 // bin directory beside the tunnel token.
 func findCloudflared(configured, tokenFile string) (string, error) {
 	path, err := exec.LookPath(cmp.Or(configured, "cloudflared"))
-	if err == nil {
-		return path, nil
+	if err == nil || configured != "" {
+		return path, err
 	}
 	name := "cloudflared"
 	if runtime.GOOS == "windows" {

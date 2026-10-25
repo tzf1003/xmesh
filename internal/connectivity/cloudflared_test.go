@@ -50,3 +50,26 @@ func TestManagedCloudflaredStartsAndStopsWithTheProvider(t *testing.T) {
 		t.Fatal("cloudflared outlived its provider")
 	}
 }
+
+func TestFindCloudflaredHonoursExplicitPath(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "tunnel-token")
+	name := "cloudflared"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	local := filepath.Join(dir, "bin", name)
+	if err := os.MkdirAll(filepath.Dir(local), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if got, err := findCloudflared("", tokenFile); err != nil || got != local {
+		t.Fatalf("default lookup = %q, %v; want the installed copy", got, err)
+	}
+	if got, err := findCloudflared(filepath.Join(dir, "approved-cloudflared"), tokenFile); err == nil {
+		t.Fatalf("an explicit path that is gone must stay an error, got %q", got)
+	}
+}

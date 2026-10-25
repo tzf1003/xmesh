@@ -76,3 +76,26 @@ func TestInstallCloudflaredUnsupportedPlatform(t *testing.T) {
 		t.Fatal("expected an unsupported-platform error")
 	}
 }
+
+func TestInstallCloudflaredRefusesForeignDownloadHost(t *testing.T) {
+	body := []byte("x")
+	sum := sha256.Sum256(body)
+	srv := fakeRelease(t, "cloudflared-linux-amd64", body, "sha256:"+hex.EncodeToString(sum[:]))
+	// With the official release API the download must live under the official repository; the fake serves it
+	// from elsewhere, so a metadata swap like this is refused.
+	in := CloudflaredInstaller{GOOS: "linux", GOARCH: "amd64", HTTP: &http.Client{Transport: rewriteTo(srv.URL)}}
+	if _, err := in.Install(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "官方仓库") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// rewriteTo sends every request to the fake server, whatever host the installer asked for.
+type rewriteTo string
+
+func (r rewriteTo) RoundTrip(req *http.Request) (*http.Response, error) {
+	u, _ := http.NewRequest(req.Method, string(r)+"/release", nil)
+	if strings.HasSuffix(req.URL.Path, "/dl") {
+		u, _ = http.NewRequest(req.Method, string(r)+"/dl", nil)
+	}
+	return http.DefaultTransport.RoundTrip(u.WithContext(req.Context()))
+}

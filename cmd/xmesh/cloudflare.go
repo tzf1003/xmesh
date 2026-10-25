@@ -371,7 +371,7 @@ func cloudflareSetup(args []string, out io.Writer) error {
 	if err := writeCloudflareFiles(*cfgPath, cf, device.TunnelToken, token.Secret); err != nil {
 		return fmt.Errorf("资源已创建但写本机文件失败，可用 xmesh cloudflare remove --name %s --apply 回收：%w", *name, err)
 	}
-	cloudflaredPath, installNote := ensureCloudflared(ctx, secrets)
+	cloudflaredPath, installNote := ensureCloudflared(context.Background(), secrets)
 	return emit(out, c.json, map[string]any{"hostname": device.Hostname, "tunnel_id": device.TunnelID, "config": *cfgPath, "cloudflared": cloudflaredPath, "cloudflared_note": installNote}, func(w io.Writer) {
 		fmt.Fprintf(w, "设备 %s 已就绪：%s\n重启 xmesh 后，内核会用 cloudflared（HTTP/2）连上隧道。\n%s\n", *name, device.Hostname, installNote)
 	})

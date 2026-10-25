@@ -62,7 +62,8 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
     if (!r.ok) { setErr(r.error); return; }
     close();
     status.reload();
-    ctx.toast(copy("隧道已创建。重启 xmesh 后生效。", "Tunnel created. Restart xmesh to use it."));
+    const note = r.data.applied === false ? "" : (r.data as CloudflareSetupResult).cloudflaredNote ?? "";
+    ctx.toast(copy("隧道已创建。重启 xmesh 后生效。", "Tunnel created. Restart xmesh to use it.") + (note === "" ? "" : ` ${note}`));
   });
 
   const saveLogin = async (): Promise<void> => {

@@ -15,6 +15,10 @@ import (
 // ErrNoCredential means nothing is stored for the profile.
 var ErrNoCredential = errors.New("cfadmin: no stored Cloudflare credential")
 
+// errCorruptCredential marks a stored credential that cannot be parsed, as opposed to a keychain that
+// is simply unavailable.
+var errCorruptCredential = errors.New("cfadmin: corrupt stored credential")
+
 // KeychainService is the service name in the operating system's secret store.
 const KeychainService = "xmesh-cloudflare"
 
@@ -94,7 +98,7 @@ func (KeychainStore) Get(profile string) (Credential, error) {
 	}
 	var c Credential
 	if json.Unmarshal([]byte(s), &c) != nil {
-		return Credential{}, fmt.Errorf("钥匙串中 %q 的 Cloudflare 凭据已损坏", profile)
+		return Credential{}, fmt.Errorf("%w：钥匙串中 %q 的 Cloudflare 凭据已损坏", errCorruptCredential, profile)
 	}
 	return c, nil
 }
@@ -214,21 +218,30 @@ func (s FallbackStore) file(profile string) (FileStore, error) {
 	return FileStore{Path: filepath.Join(s.Dir, profile+".credential.json")}, nil
 }
 
+// Get prefers the fallback file: it exists only while it is newer than anything in the keychain, because
+// a successful keychain write removes it.
 func (s FallbackStore) Get(profile string) (Credential, error) {
-	c, err := s.Primary.Get(profile)
-	if err == nil {
-		return c, nil
-	}
 	f, ferr := s.file(profile)
-	if ferr != nil {
+	if ferr == nil {
+		c, err := f.Get(profile)
+		if err == nil {
+			return c, nil
+		}
+		if !errors.Is(err, ErrNoCredential) {
+			return Credential{}, err
+		}
+	}
+	c, err := s.Primary.Get(profile)
+	switch {
+	case err == nil:
+		return c, nil
+	case errors.Is(err, errCorruptCredential):
+		return Credential{}, err
+	case errors.Is(err, ErrNoCredential):
 		return Credential{}, err
 	}
-	if c, ferr = f.Get(profile); ferr == nil {
-		return c, nil
-	} else if !errors.Is(ferr, ErrNoCredential) {
-		return Credential{}, ferr
-	}
-	return Credential{}, err
+	// The keychain is unavailable and no file was saved: nothing is stored yet, so a first login can proceed.
+	return Credential{}, fmt.Errorf("%w（系统钥匙串不可用：%v）", ErrNoCredential, err)
 }
 
 func (s FallbackStore) Put(profile string, c Credential) error {
@@ -238,12 +251,18 @@ func (s FallbackStore) Put(profile string, c Credential) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	f, ferr := s.file(profile)
 	perr := s.Primary.Put(profile, c)
 	if perr == nil {
+		// A stale fallback file would win over the new keychain entry, so a failed removal is an error.
+		if ferr == nil {
+			if err := f.Delete(profile); err != nil {
+				return fmt.Errorf("已写入钥匙串，但未能删除旧的凭据文件 %s：%w", f.Path, err)
+			}
+		}
 		return nil
 	}
-	f, err := s.file(profile)
-	if err != nil {
+	if ferr != nil {
 		return perr
 	}
 	if err := f.Put(profile, c); err != nil {
@@ -252,12 +271,22 @@ func (s FallbackStore) Put(profile string, c Credential) error {
 	return nil
 }
 
+// Delete removes the file and the keychain entry. A keychain that is unavailable cannot hold a credential
+// this store wrote, so it only fails the call when there was no file to remove.
 func (s FallbackStore) Delete(profile string) error {
 	err := s.Primary.Delete(profile)
-	if f, ferr := s.file(profile); ferr == nil {
-		if derr := f.Delete(profile); derr != nil && err == nil {
-			err = derr
-		}
+	f, ferr := s.file(profile)
+	if ferr != nil {
+		return err
+	}
+	_, statErr := os.Stat(f.Path)
+	fileExisted := statErr == nil
+	derr := f.Delete(profile)
+	switch {
+	case derr != nil:
+		return derr
+	case err != nil && fileExisted:
+		return nil
 	}
 	return err
 }
