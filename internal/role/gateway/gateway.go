@@ -130,9 +130,11 @@ type view struct {
 	generation uint64
 	catalog    [32]byte
 	closed     bool
-	// listed holds the devices a tools/list has already waited for, so a slow
-	// device delays at most the first list of the session.
-	listed map[string]bool
+	// listed holds, per device, when tools/list stops waiting for its first
+	// catalogue. The deadline is set by the first list that sees the device, so
+	// concurrent or retried lists share one listWait and a slow device delays
+	// the session's lists only until then.
+	listed map[string]time.Time
 }
 
 func New(o Options) *Gateway {
@@ -356,7 +358,7 @@ func scopeKey(scopes []string) string {
 }
 func (g *Gateway) newView(p Principal) *view {
 	ctx, cancel := context.WithCancel(g.ctx)
-	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, leases: map[string]*leaseBeat{}, oauthAudit: oauthAuditID(p.OAuthSession), down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, listed: map[string]bool{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
+	v := &view{g: g, p: p, defaults: map[string]json.RawMessage{}, leases: map[string]*leaseBeat{}, oauthAudit: oauthAuditID(p.OAuthSession), down: map[string]*downstream{}, jobs: map[string]*refreshJob{}, listed: map[string]time.Time{}, ctx: ctx, cancel: cancel, closedDone: make(chan struct{})}
 	v.server = mcp.NewServer(&mcp.Implementation{Name: "xmesh-gateway", Version: "0.1.0"}, &mcp.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25", "2025-06-18"}, InitializedHandler: func(_ context.Context, r *mcp.InitializedRequest) { v.bind(r.Session) }})
 	for _, tool := range controlTools() {
 		name := tool.Name
@@ -645,31 +647,37 @@ func (v *view) waitReady(ctx context.Context, name string) {
 	}
 }
 
-// waitOthers waits, together and for at most listWait, for the first catalogue
-// of every online device other than skip that no tools/list of this session
-// has waited for yet. A device still loading afterwards is announced through
-// tools/list_changed as before.
+// waitOthers waits, together, for the first catalogue of every online device
+// other than skip, each until its listed deadline. A device still loading
+// afterwards is announced through tools/list_changed as before.
 func (v *view) waitOthers(ctx context.Context, skip ...string) {
 	devices, _ := v.g.snapshot()
-	pending := []string{}
+	now := time.Now()
+	pending := map[string]time.Time{}
 	v.mu.Lock()
 	for name, d := range devices {
-		if !d.online || v.listed[name] || slices.Contains(skip, name) {
+		if !d.online || slices.Contains(skip, name) {
 			continue
 		}
-		v.listed[name] = true
-		pending = append(pending, name)
+		deadline, seen := v.listed[name]
+		if !seen {
+			deadline = now.Add(listWait)
+			v.listed[name] = deadline
+		}
+		if now.Before(deadline) {
+			pending[name] = deadline
+		}
 	}
 	v.mu.Unlock()
-	if len(pending) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, listWait)
-	defer cancel()
 	var wg sync.WaitGroup
-	for _, name := range pending {
+	for name, deadline := range pending {
 		wg.Add(1)
-		go func() { defer wg.Done(); v.waitReady(ctx, name) }()
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithDeadline(ctx, deadline)
+			defer cancel()
+			v.waitReady(ctx, name)
+		}()
 	}
 	wg.Wait()
 }

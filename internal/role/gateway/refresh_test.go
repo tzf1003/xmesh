@@ -221,10 +221,16 @@ func Test_PeerRetryBackoffAndReplacement(t *testing.T) {
 func Test_FirstToolsListIncludesRemoteDevices(t *testing.T) {
 	g, _ := fixture(t, false)
 	original := g.opts.Dial
+	// The remote catalogue is held until the first list has started waiting
+	// for it, so the list cannot pass on a catalogue that was already there.
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
 	g.opts.Dial = func(ctx context.Context, peer mesh.Peer, p Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
 		if peer.Name == "remote" {
 			select {
-			case <-time.After(300 * time.Millisecond):
+			case <-release:
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
@@ -235,7 +241,23 @@ func Test_FirstToolsListIncludesRemoteDevices(t *testing.T) {
 	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
 	t.Cleanup(server.Close)
 	client := connect(t, server.URL+"/mcp")
-	list, err := client.ListTools(context.Background(), nil)
+	type result struct {
+		list *mcp.ListToolsResult
+		err  error
+	}
+	first := make(chan result, 1)
+	go func() {
+		list, err := client.ListTools(context.Background(), nil)
+		first <- result{list, err}
+	}()
+	for deadline := time.Now().Add(2 * time.Second); !listing(g, "remote"); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("first tools/list did not wait for the remote device")
+		}
+	}
+	unblock()
+	out := <-first
+	list, err := out.list, out.err
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,4 +270,80 @@ func Test_FirstToolsListIncludesRemoteDevices(t *testing.T) {
 			t.Fatalf("%s missing from the first tools/list", want)
 		}
 	}
+}
+
+// conformance: CTR-GW-04
+// A tools/list cancelled while waiting does not use up the wait: a retry in the
+// same session still waits for the remote catalogue.
+func Test_CancelledToolsListKeepsRemoteWait(t *testing.T) {
+	g, _ := fixture(t, false)
+	original := g.opts.Dial
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	g.opts.Dial = func(ctx context.Context, peer mesh.Peer, p Principal, opts mcpmux.Options) (*mcpmux.Bridge, error) {
+		if peer.Name == "remote" {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return original(ctx, peer, p, opts)
+	}
+	g.Update([]mesh.Peer{{ID: "remote", Name: "remote", Address: g.opts.LocalPeer.Address}})
+	server := httptest.NewServer(g.HTTP(func(*http.Request) (Principal, error) { return Principal{Local: true}, nil }))
+	t.Cleanup(server.Close)
+	client := connect(t, server.URL+"/mcp")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelled := make(chan struct{})
+	go func() { _, _ = client.ListTools(ctx, nil); close(cancelled) }()
+	for deadline := time.Now().Add(2 * time.Second); !listing(g, "remote"); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("first tools/list did not wait for the remote device")
+		}
+	}
+	cancel()
+	<-cancelled
+	retried := make(chan *mcp.ListToolsResult, 1)
+	go func() {
+		list, err := client.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Error(err)
+		}
+		retried <- list
+	}()
+	time.Sleep(100 * time.Millisecond)
+	unblock()
+	list := <-retried
+	if list == nil {
+		return
+	}
+	for _, tool := range list.Tools {
+		if tool.Name == "remote/exec.run" {
+			return
+		}
+	}
+	t.Fatal("retried tools/list returned before the remote catalogue")
+}
+
+// listing reports whether a tools/list of some session has started waiting for
+// the device.
+func listing(g *Gateway, device string) bool {
+	g.mu.Lock()
+	views := make([]*view, 0, len(g.views))
+	for v := range g.views {
+		views = append(views, v)
+	}
+	g.mu.Unlock()
+	for _, v := range views {
+		v.mu.Lock()
+		_, seen := v.listed[device]
+		v.mu.Unlock()
+		if seen {
+			return true
+		}
+	}
+	return false
 }
