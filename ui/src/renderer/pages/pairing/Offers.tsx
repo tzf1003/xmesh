@@ -20,8 +20,10 @@ export function Offers({ ctx }: { ctx: PageContext }): JSX.Element | null {
   const offers = useResource(() => getApi().listOffers(), [ctx.snapshot.selectedInstance], POLL_MS);
   const [pending, setPending] = useState<{ offer: OfferSummary; verb: "accept" | "reject" }>();
   const [busy, setBusy] = useState(false);
-  if (offers.resource.state !== "ready" || offers.resource.data.offers.length === 0) return null;
-  const list = offers.resource.data.offers as OfferSummary[];
+  const res = offers.resource;
+  const data = res.state === "ready" ? res.data : res.state === "error" ? res.stale : undefined;
+  if (!data || data.offers.length === 0) return null;
+  const list = data.offers as OfferSummary[];
 
   const label = (o: OfferSummary): string => (o.kind === "cloudflare" ? "Cloudflare" : "Tailscale / Headscale");
   const detail = (o: OfferSummary): string => {
