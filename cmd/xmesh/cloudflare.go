@@ -23,9 +23,11 @@ const cloudflareUsage = `用法: xmesh cloudflare <子命令> [参数]
 不进 xmesh.yaml，内核不持有。通用参数: --profile 名称（默认 default）  --credential-file 文件  --json
 
 子命令:
-  login    保存 API 令牌  --account 账号ID  --zone 区域ID  --domain 域名  [--secret-file 文件，缺省读标准输入]
+  login    保存 API 令牌  --domain 域名  [--account 账号ID --zone 区域ID，省略时根据令牌和域名自动查找]
+           [--secret-file 文件，缺省读标准输入]
            令牌需要权限：Account 的 Cloudflare Tunnel、Access: Apps and Policies、Access: Service Tokens（Edit），
-           Zone 的 DNS（Edit）。保存前会连接 Cloudflare 验证。
+           Zone 的 DNS（Edit）；自动查找还需要 Account Settings 与 Zone 的 Read。保存前会连接 Cloudflare 验证。
+  discover 列出令牌可见的账号和域名（令牌读标准输入）
   logout   删除已保存的令牌
   status   显示本机创建过的设备资源
   setup    为一台设备创建隧道并写好配置  --name 设备名  --config xmesh.yaml
@@ -127,6 +129,8 @@ func cloudflareRun(args []string, out io.Writer, in io.Reader) error {
 			return err
 		}
 		return c.store().Delete(c.profile)
+	case "discover":
+		return cloudflareDiscover(rest, out, in)
 	case "status":
 		return cloudflareStatus(rest, out)
 	case "setup":
@@ -158,6 +162,12 @@ func cloudflareLogin(args []string, out io.Writer, in io.Reader) error {
 		return err
 	}
 	cred := cfadmin.Credential{Token: token, AccountID: *account, ZoneID: *zone, Domain: *domain}
+	if cred.AccountID == "" || cred.ZoneID == "" {
+		// Look the IDs up from the token and the domain instead of making the user find them.
+		if err := fillCredentialIDs(&cred); err != nil {
+			return err
+		}
+	}
 	if err := cred.Validate(); err != nil {
 		return err
 	}
@@ -175,6 +185,67 @@ func cloudflareLogin(args []string, out io.Writer, in io.Reader) error {
 	}
 	return emit(out, c.json, map[string]any{"saved": true, "account": cred.AccountID, "domain": cred.Domain}, func(w io.Writer) {
 		fmt.Fprintf(w, "已保存 Cloudflare 令牌（账号 %s，域名 %s）\n", cred.AccountID, cred.Domain)
+	})
+}
+
+// fillCredentialIDs completes the account and zone IDs from what the token can see.
+func fillCredentialIDs(cred *cfadmin.Credential) error {
+	if cred.Domain == "" {
+		return errors.New("需要 --domain；账号 ID 和区域 ID 可以省略，会根据令牌和域名自动查找")
+	}
+	client := cred.Client()
+	client.BaseURL, client.HTTP = cloudflareAPI, cloudflareHTTP
+	ctx, cancel := ctx30()
+	defer cancel()
+	accounts, zones, err := client.Discover(ctx)
+	if err != nil {
+		return fmt.Errorf("无法自动查找账号和区域（令牌需要 Account Settings 与 Zone 的 Read 权限，或手动给出 --account 和 --zone）：%w", err)
+	}
+	account, zone, err := cfadmin.Resolve(accounts, zones, cred.AccountID, cred.Domain)
+	if err != nil {
+		return err
+	}
+	cred.AccountID, cred.ZoneID = account.ID, zone.ID
+	return nil
+}
+
+// cloudflareDiscover lists the accounts and domains a token can see; the token is read like login's.
+func cloudflareDiscover(args []string, out io.Writer, in io.Reader) error {
+	var c cloudflareCommon
+	fs := flag.NewFlagSet("cloudflare discover", flag.ContinueOnError)
+	c.register(fs)
+	secretFile := fs.String("secret-file", "", "API 令牌文件，- 表示标准输入；缺省时从标准输入读取")
+	if err := cloudflareFlags(fs, args); err != nil {
+		return err
+	}
+	token, err := readSecret(*secretFile, in, out)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(token) == "" || strings.ContainsAny(token, " \r\n\t") {
+		return errors.New("Cloudflare API 令牌为空或含空白")
+	}
+	client := (cfadmin.Credential{Token: token}).Client()
+	client.BaseURL, client.HTTP = cloudflareAPI, cloudflareHTTP
+	ctx, cancel := ctx30()
+	defer cancel()
+	accounts, zones, err := client.Discover(ctx)
+	if err != nil {
+		return fmt.Errorf("令牌验证失败：%w", err)
+	}
+	if accounts == nil {
+		accounts = []cfadmin.Account{}
+	}
+	if zones == nil {
+		zones = []cfadmin.Zone{}
+	}
+	return emit(out, c.json, map[string]any{"accounts": accounts, "zones": zones}, func(w io.Writer) {
+		for _, z := range zones {
+			fmt.Fprintf(w, "%s  区域 %s  账号 %s\n", z.Name, z.ID, z.AccountID)
+		}
+		if len(zones) == 0 {
+			fmt.Fprintln(w, "没有可见的域名")
+		}
 	})
 }
 

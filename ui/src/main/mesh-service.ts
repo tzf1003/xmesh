@@ -97,6 +97,14 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string, credentialF
     case "cloudflare.share":
       // Cloudflare's token lives in the keychain, not in the panel's credential file.
       return ["cloudflare", "share", "--json", `--device=${req.device}`, ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), "--apply"];
+    case "cloudflare.discover":
+      return ["cloudflare", "discover", "--json", "--secret-file=-"];
+    case "cloudflare.status":
+      return ["cloudflare", "status", "--json"];
+    case "cloudflare.setup":
+      return ["cloudflare", "setup", "--json", `--name=${req.name}`, ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), ...(req.apply ? ["--apply"] : [])];
+    case "cloudflare.remove":
+      return ["cloudflare", "remove", "--json", `--name=${req.name}`, "--apply"];
     case "cloudflare.login":
       return ["cloudflare", "login", "--json", `--account=${req.account}`, `--zone=${req.zone}`, `--domain=${req.domain}`, "--secret-file=-"];
     case "tags":
@@ -254,7 +262,7 @@ export class MeshService {
         req = { ...req, target: { url: req.target.url, tokenFile: file } };
       }
       let input: string | undefined;
-      if (req.op === "login" || req.op === "cloudflare.login") input = req.secret;
+      if (req.op === "login" || req.op === "cloudflare.login" || req.op === "cloudflare.discover") input = req.secret;
       if (req.op === "policy.document") input = JSON.stringify({ ...req.edit, ...(req.edit.regions !== undefined && { regions: req.edit.regions.map((r) => ({ id: r.id ?? 0, code: r.code, name: r.name, hostname: r.host, ipv4: r.ipv4, ipv6: r.ipv6, derp_port: r.derpPort, stun_port: r.stunPort, cert_name: r.certName })) }) });
       if (req.op === "policy.publish") input = JSON.stringify({ text: req.text });
       result = await this.run(buildMeshArgs(req, this.nodeConfig(), this.credentialFile()), input);
