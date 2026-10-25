@@ -1,0 +1,173 @@
+import type { JSX } from "preact";
+import { useState } from "preact/hooks";
+import type { PageContext } from "../../app";
+import { getApi } from "../../api";
+import { Banner, Confirm, Field } from "../../components";
+import { useCopy } from "../../design-copy";
+import { useResource } from "../../hooks";
+import { PasswordInput } from "../../password-input";
+import type { ActionError } from "../../../shared/ipc";
+import { parseMeshRequest } from "../../../shared/mesh";
+import type { CloudflareSetupResult } from "../../../shared/mesh";
+
+type Step = "name" | "plan" | "login";
+
+/**
+ * First-time Cloudflare Tunnel setup for this device. The work runs in the xmesh CLI with the API token
+ * saved in this machine's keychain: it creates the tunnel, DNS name and Access app, and writes the
+ * tunnel credentials next to the node's config file. The panel only ever sees the plan and the hostname.
+ */
+export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defaultName: string }): JSX.Element | null {
+  const copy = useCopy();
+  const status = useResource(() => getApi().mesh({ op: "cloudflare.status" }), [ctx.snapshot.selectedInstance]);
+  const [step, setStep] = useState<Step>();
+  const [name, setName] = useState(defaultName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63));
+  const [plan, setPlan] = useState<CloudflareSetupResult>();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<ActionError>();
+  const [removing, setRemoving] = useState<string>();
+  const [account, setAccount] = useState("");
+  const [zone, setZone] = useState("");
+  const [domain, setDomain] = useState("");
+  const [token, setToken] = useState("");
+  if (!ctx.can("pair")) return null;
+  const res = status.resource;
+  const data = res.state === "ready" ? res.data : res.state === "error" ? res.stale : undefined;
+  const devices = data && "devices" in data ? data.devices : [];
+
+  const close = (): void => { setStep(undefined); setPlan(undefined); setErr(undefined); setToken(""); };
+  const nameRequest = parseMeshRequest({ op: "cloudflare.setup", name, apply: false });
+
+  const preview = async (): Promise<void> => {
+    if (!nameRequest.ok) return;
+    setBusy(true);
+    setErr(undefined);
+    const r = await getApi().mesh(nameRequest.value);
+    setBusy(false);
+    if (r.ok) { setPlan(r.data as CloudflareSetupResult); setStep("plan"); return; }
+    if (r.error.code === "no_credential") { setStep("login"); return; }
+    setErr(r.error);
+  };
+
+  const apply = async (): Promise<void> => {
+    setBusy(true);
+    setErr(undefined);
+    const r = await getApi().mesh({ op: "cloudflare.setup", name, apply: true });
+    setBusy(false);
+    if (!r.ok) { setErr(r.error); return; }
+    close();
+    status.reload();
+    ctx.toast(copy("隧道已创建。重启 xmesh 后生效（需要已安装 cloudflared）。", "Tunnel created. Restart xmesh to use it (cloudflared must be installed)."));
+  };
+
+  const loginRequest = parseMeshRequest({ op: "cloudflare.login", account, zone, domain, secret: token });
+  const saveLogin = async (): Promise<void> => {
+    if (!loginRequest.ok) return;
+    setBusy(true);
+    setErr(undefined);
+    const request = loginRequest.value;
+    // The token leaves this page with the request, whatever the answer.
+    setToken("");
+    const r = await getApi().mesh(request);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error); return; }
+    setStep("name");
+    await preview();
+  };
+
+  const remove = async (): Promise<void> => {
+    if (!removing) return;
+    setBusy(true);
+    const r = await getApi().mesh({ op: "cloudflare.remove", name: removing });
+    setBusy(false);
+    if (!r.ok) { setErr(r.error); return; }
+    setRemoving(undefined);
+    status.reload();
+    ctx.toast(copy("已删除该设备在 Cloudflare 上的资源。", "The device's Cloudflare resources were deleted."));
+  };
+
+  return (
+    <section class="card" data-testid="cloudflare-tunnel">
+      <h3>Cloudflare Tunnel</h3>
+      <p class="hint">{copy(
+        "本机没有公网地址时，让 xmesh 通过 Cloudflare 为本机建一条隧道，别的设备就能经 Cloudflare 连到本机。需要先在本机安装 cloudflared。令牌只存在系统钥匙串里。",
+        "If this device has no public address, xmesh can create a Cloudflare tunnel for it so other devices reach it through Cloudflare. cloudflared must be installed. The token stays in the system keychain.",
+      )}</p>
+      {devices.length > 0 && (
+        <ul class="plain-list">
+          {devices.map((d) => (
+            <li key={d.name} data-testid={`cloudflare-device-${d.name}`}>
+              <strong>{d.name}</strong> <span class="mono">{d.hostname}</span>{" "}
+              <button type="button" class="btn danger" disabled={busy} onClick={() => { setErr(undefined); setRemoving(d.name); }} data-testid={`cloudflare-remove-${d.name}`}>{copy("删除", "Delete")}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div class="row">
+        <button type="button" class="btn" disabled={busy} onClick={() => { setErr(undefined); setStep("name"); }} data-testid="cloudflare-setup">{copy("为本机创建隧道", "Create a tunnel for this device")}</button>
+      </div>
+      {err && !step && !removing && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
+      {step === "name" && (
+        <Confirm
+          title={copy("为本机创建 Cloudflare 隧道", "Create a Cloudflare tunnel for this device")}
+          confirmLabel={copy("预览", "Preview")}
+          body={<>
+            <Field label={copy("设备名", "Device name")} hint={copy("用于主机名和资源名：字母、数字和连字符。", "Used in hostnames and resource names: letters, digits and hyphens.")}>
+              <input value={name} onInput={(e) => setName(e.currentTarget.value.trim())} data-testid="cloudflare-name" />
+            </Field>
+            {err && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
+          </>}
+          busy={busy || !nameRequest.ok}
+          onCancel={close}
+          onConfirm={() => void preview()}
+        />
+      )}
+      {step === "plan" && plan && (
+        <Confirm
+          title={copy("确认创建？", "Create these?")}
+          confirmLabel={copy("创建", "Create")}
+          body={<>
+            <p>{copy(`将为 ${name} 在 ${plan.domain ?? ""} 下创建：`, `Will create for ${name} under ${plan.domain ?? ""}:`)}</p>
+            <ul>{plan.creates.map((c) => <li key={c}>{c}</li>)}</ul>
+            <p class="hint">{copy("隧道令牌与 Access 密钥写入配置文件旁的 cloudflare 目录（仅本人可读），并更新配置。", "The tunnel token and Access secret are written, owner-only, to a cloudflare directory next to the config file, and the config is updated.")}</p>
+            {err && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
+          </>}
+          busy={busy}
+          onCancel={close}
+          onConfirm={() => void apply()}
+        />
+      )}
+      {step === "login" && (
+        <Confirm
+          title={copy("先保存 Cloudflare 令牌", "Save a Cloudflare token first")}
+          confirmLabel={copy("保存并预览", "Save and preview")}
+          body={<>
+            <p class="hint">{copy("本机还没有保存 Cloudflare 令牌。令牌只存进本机系统钥匙串，不写进配置文件。需要权限：Account 的 Cloudflare Tunnel、Access: Apps and Policies、Access: Service Tokens（Edit），Zone 的 DNS（Edit）。", "No Cloudflare token is saved on this device. It goes only into the system keychain, never into the config file. Required: Account Cloudflare Tunnel, Access Apps and Policies, Access Service Tokens (Edit), Zone DNS (Edit).")}</p>
+            <Field label={copy("账号 ID", "Account ID")}><input value={account} onInput={(e) => setAccount(e.currentTarget.value.trim())} data-testid="cf-account" /></Field>
+            <Field label={copy("区域 ID", "Zone ID")}><input value={zone} onInput={(e) => setZone(e.currentTarget.value.trim())} data-testid="cf-zone" /></Field>
+            <Field label={copy("设备主机名所用的域名", "Domain for device hostnames")}><input value={domain} placeholder="mesh.example.com" onInput={(e) => setDomain(e.currentTarget.value.trim())} data-testid="cf-domain" /></Field>
+            <Field label={copy("API 令牌", "API token")}><PasswordInput value={token} onInput={setToken} autocomplete="off" testid="cf-token" /></Field>
+            {err && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
+          </>}
+          busy={busy || !loginRequest.ok}
+          onCancel={close}
+          onConfirm={() => void saveLogin()}
+        />
+      )}
+      {removing && (
+        <Confirm
+          danger
+          title={copy("删除隧道资源？", "Delete the tunnel resources?")}
+          confirmLabel={copy("删除", "Delete")}
+          body={<>
+            <p>{copy(`会删除 ${removing} 在 Cloudflare 上的隧道、DNS 记录和 Access 应用；这是最后一台时还会删除网格服务令牌。本机配置文件不会被改动，需要的话自行关闭 mesh.cloudflare。`, `Deletes the tunnel, DNS record and Access app of ${removing}; the mesh service token goes too if it is the last device. The local config file is not changed; turn off mesh.cloudflare yourself if needed.`)}</p>
+            {err && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
+          </>}
+          busy={busy}
+          onCancel={() => { setRemoving(undefined); setErr(undefined); }}
+          onConfirm={() => void remove()}
+        />
+      )}
+    </section>
+  );
+}

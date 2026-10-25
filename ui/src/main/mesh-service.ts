@@ -97,6 +97,12 @@ export function buildMeshArgs(req: MeshRequest, nodeConfig?: string, credentialF
     case "cloudflare.share":
       // Cloudflare's token lives in the keychain, not in the panel's credential file.
       return ["cloudflare", "share", "--json", `--device=${req.device}`, ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), "--apply"];
+    case "cloudflare.status":
+      return ["cloudflare", "status", "--json"];
+    case "cloudflare.setup":
+      return ["cloudflare", "setup", "--json", `--name=${req.name}`, ...(nodeConfig === undefined ? [] : [`--config=${nodeConfig}`]), ...(req.apply ? ["--apply"] : [])];
+    case "cloudflare.remove":
+      return ["cloudflare", "remove", "--json", `--name=${req.name}`, "--apply"];
     case "cloudflare.login":
       return ["cloudflare", "login", "--json", `--account=${req.account}`, `--zone=${req.zone}`, `--domain=${req.domain}`, "--secret-file=-"];
     case "tags":

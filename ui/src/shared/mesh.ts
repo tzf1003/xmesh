@@ -52,6 +52,9 @@ export type MeshRequest =
   | { op: "share.tailnet"; device: string; user?: string }
   | { op: "cloudflare.login"; account: string; zone: string; domain: string; secret: string }
   | { op: "cloudflare.share"; device: string }
+  | { op: "cloudflare.status" }
+  | { op: "cloudflare.setup"; name: string; apply: boolean }
+  | { op: "cloudflare.remove"; name: string }
   | { op: "tags"; device: string; tags: string[]; apply: boolean }
   | { op: "onboard"; tags: string[]; ttl: string; ephemeral: boolean; user?: string; file: string; overwrite: boolean }
   | { op: "policy.show" }
@@ -74,6 +77,9 @@ export const MESH_OPS = [
   "share.tailnet",
   "cloudflare.login",
   "cloudflare.share",
+  "cloudflare.status",
+  "cloudflare.setup",
+  "cloudflare.remove",
   "tags",
   "onboard",
   "policy.show",
@@ -106,6 +112,7 @@ const IPV6 = /^[0-9A-Fa-f:.]{2,45}$/;
 const SECRET = /^[\x21-\x7e]{1,4096}$/;
 const TAILNET = /^[A-Za-z0-9-][A-Za-z0-9._@-]{0,127}$/;
 const CLIENT_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const CF_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/;
 const CF_ID = /^[0-9a-f]{32}$/;
 const CF_DOMAIN = /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
@@ -281,6 +288,17 @@ export function parseMeshRequest(v: unknown): MeshParse {
       if (!onlyKeys(v, ["op", "device"])) return bad("keys");
       if (typeof v.device !== "string" || !DEVICE_ID.test(v.device)) return bad("device");
       return { ok: true, value: { op: "cloudflare.share", device: v.device } };
+    case "cloudflare.status":
+      return onlyKeys(v, ["op"]) ? { ok: true, value: { op: "cloudflare.status" } } : bad("keys");
+    case "cloudflare.setup":
+      if (!onlyKeys(v, ["op", "name", "apply"])) return bad("keys");
+      if (typeof v.name !== "string" || !CF_NAME.test(v.name)) return bad("name");
+      if (typeof v.apply !== "boolean") return bad("apply");
+      return { ok: true, value: { op: "cloudflare.setup", name: v.name, apply: v.apply } };
+    case "cloudflare.remove":
+      if (!onlyKeys(v, ["op", "name"])) return bad("keys");
+      if (typeof v.name !== "string" || !CF_NAME.test(v.name)) return bad("name");
+      return { ok: true, value: { op: "cloudflare.remove", name: v.name } };
     case "cloudflare.login":
       if (!onlyKeys(v, ["op", "account", "zone", "domain", "secret"])) return bad("keys");
       if (typeof v.account !== "string" || !CF_ID.test(v.account)) return bad("account");
@@ -492,6 +510,21 @@ export interface CloudflareLoginResult {
   domain: string;
 }
 
+/** What `xmesh cloudflare setup --json` reports: the plan without --apply, the created device with it. */
+export interface CloudflareSetupResult {
+  applied: boolean;
+  /** The domain the plan would create under; only in a plan. */
+  domain?: string;
+  creates: string[];
+  hostname?: string;
+  tunnelId?: string;
+}
+
+export interface CloudflareStatus {
+  devices: { name: string; hostname: string; tunnelId: string }[];
+  serviceToken: boolean;
+}
+
 export interface MeshKeyResult {
   id: string;
   expires?: string;
@@ -606,6 +639,9 @@ export interface MeshResults {
   "share.tailnet": MeshShareResult;
   "cloudflare.login": CloudflareLoginResult;
   "cloudflare.share": MeshShareResult;
+  "cloudflare.status": CloudflareStatus;
+  "cloudflare.setup": CloudflareSetupResult;
+  "cloudflare.remove": { removed: string };
   tags: MeshTagPlan;
   onboard: MeshKeyResult;
   "policy.show": MeshPolicy;
@@ -879,6 +915,22 @@ export function normalizeCloudflareLogin(v: unknown): CloudflareLoginResult {
   return { saved: bool(r.saved), domain: str(r.domain) };
 }
 
+export function normalizeCloudflareSetup(v: unknown): CloudflareSetupResult {
+  const r = rec(v);
+  const creates = Array.isArray(r.creates) ? r.creates.filter((x): x is string => typeof x === "string") : [];
+  if (typeof r.hostname === "string") return { applied: true, creates, hostname: r.hostname, tunnelId: str(r.tunnel_id) };
+  return { applied: false, creates, domain: str(r.domain) };
+}
+
+export function normalizeCloudflareStatus(v: unknown): CloudflareStatus {
+  const r = rec(v);
+  const devices = isRecord(r.devices) ? r.devices : {};
+  return {
+    devices: Object.entries(devices).map(([name, d]) => ({ name, hostname: str(rec(d).hostname), tunnelId: str(rec(d).tunnel_id) })).sort((a, b) => a.name.localeCompare(b.name)),
+    serviceToken: bool(r.service_token),
+  };
+}
+
 /** Normalises the CLI's JSON for `op`. */
 export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshResults[O] {
   const out = ((): MeshResults[MeshOp] => {
@@ -892,6 +944,12 @@ export function normalizeResult<O extends MeshOp>(op: O, json: unknown): MeshRes
         return normalizeShare(json);
       case "cloudflare.login":
         return normalizeCloudflareLogin(json);
+      case "cloudflare.status":
+        return normalizeCloudflareStatus(json);
+      case "cloudflare.setup":
+        return normalizeCloudflareSetup(json);
+      case "cloudflare.remove":
+        return { removed: str(rec(json).removed) };
       case "tags":
         return normalizeTagPlan(json);
       case "onboard":
