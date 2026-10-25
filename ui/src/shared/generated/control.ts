@@ -1630,6 +1630,227 @@ export interface PairConnectResponse {
   device_id: DeviceId;
   path: "lan" | "tailnet" | "cloudflare";
 }
+/**
+ * 对端加入发送者的 Cloudflare 网格所需的内容：对端自己的隧道与 Access 服务令牌，以及发送者的主机名。不含 Cloudflare API Token。
+ */
+export interface CloudflareOffer {
+  /**
+   * 接收设备自己那条隧道的公网主机名。
+   */
+  hostname: string;
+  /**
+   * 运行接收设备 cloudflared 的隧道令牌。
+   */
+  tunnel_token: string;
+  /**
+   * Access 服务令牌的 Client ID，用于拨号其他设备。
+   */
+  access_id: string;
+  /**
+   * Access 服务令牌的 Client Secret。
+   */
+  access_secret: string;
+  /**
+   * 发送设备的隧道主机名，接收设备把它记作发送设备的地址。
+   */
+  peer_hostname: string;
+}
+/**
+ * 已配对设备向另一台设备提议的一种连接方式。接收设备的用户确认前不会应用。
+ */
+export interface DeviceOffer {
+  /**
+   * 发送方生成的 128 位随机编号。
+   */
+  id: string;
+  kind: "cloudflare";
+  cloudflare?: CloudflareOffer;
+}
+/**
+ * 把一条连接方式提议投递给已配对设备。
+ */
+export interface OfferSendRequest {
+  device_id: DeviceId;
+  offer: DeviceOffer;
+}
+export interface OfferCloudflareSummary {
+  /**
+   * 本设备将使用的隧道主机名。
+   */
+  hostname: string;
+  /**
+   * 发送设备的隧道主机名。
+   */
+  peer_hostname: string;
+}
+/**
+ * 收到的连接方式提议。发送者是连接验证出的设备，不含任何凭据。
+ */
+export interface OfferSummary {
+  id: string;
+  kind: "cloudflare";
+  from_id: DeviceId;
+  from_name: NodeName;
+  received_at: Timestamp;
+  expires_at: Timestamp;
+  cloudflare?: OfferCloudflareSummary;
+}
+export interface OffersResponse {
+  /**
+   * @maxItems 16
+   */
+  offers:
+    | []
+    | [OfferSummary]
+    | [OfferSummary, OfferSummary]
+    | [OfferSummary, OfferSummary, OfferSummary]
+    | [OfferSummary, OfferSummary, OfferSummary, OfferSummary]
+    | [OfferSummary, OfferSummary, OfferSummary, OfferSummary, OfferSummary]
+    | [OfferSummary, OfferSummary, OfferSummary, OfferSummary, OfferSummary, OfferSummary]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ]
+    | [
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary,
+        OfferSummary
+      ];
+}
+export interface OfferAcceptResponse {
+  kind: "cloudflare";
+  /**
+   * 为真时运行中的节点需要重启才会使用这条连接方式。
+   */
+  restart_required: boolean;
+  changed_paths: string[];
+}
 export interface PatInfo {
   name: NodeName;
   /**
@@ -1741,7 +1962,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "2.1" as const;
+export const CONTROL_API_VERSION = "2.2" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -2472,6 +2693,80 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.offers.send",
+    "method": "POST",
+    "path": "/v2/offers",
+    "capability": "pair",
+    "since": "2.2",
+    "query": null,
+    "body": "OfferSendRequest",
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "unavailable",
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.offers.list",
+    "method": "GET",
+    "path": "/v2/offers",
+    "capability": "pair",
+    "since": "2.2",
+    "query": null,
+    "body": null,
+    "response": "OffersResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.offers.accept",
+    "method": "POST",
+    "path": "/v2/offers/{offer_id}/accept",
+    "capability": "pair",
+    "since": "2.2",
+    "query": null,
+    "body": null,
+    "response": "OfferAcceptResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "conflict",
+      "config_invalid",
+      "internal",
+      "unsupported_mode"
+    ]
+  },
+  {
+    "id": "control.offers.reject",
+    "method": "DELETE",
+    "path": "/v2/offers/{offer_id}",
+    "capability": "pair",
+    "since": "2.2",
+    "query": null,
+    "body": null,
+    "response": null,
+    "success": 204,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found",
+      "unsupported_mode"
+    ]
+  },
+  {
     "id": "control.computer.get",
     "method": "GET",
     "path": "/v2/computer",
@@ -2565,6 +2860,10 @@ export interface ControlRouteTypes {
   "control.audit.list": { query: AuditQuery; body: undefined; response: AuditResponse };
   "control.pair.trust.update": { query: undefined; body: PairTrustUpdateRequest; response: PairTrustUpdateResponse };
   "control.pair.trust.delete": { query: undefined; body: undefined; response: undefined };
+  "control.offers.send": { query: undefined; body: OfferSendRequest; response: undefined };
+  "control.offers.list": { query: undefined; body: undefined; response: OffersResponse };
+  "control.offers.accept": { query: undefined; body: undefined; response: OfferAcceptResponse };
+  "control.offers.reject": { query: undefined; body: undefined; response: undefined };
   "control.computer.get": { query: undefined; body: undefined; response: ComputerState };
   "control.computer.pause": { query: undefined; body: ComputerPauseRequest; response: ComputerState };
   "control.computer.revoke": { query: undefined; body: ComputerRevokeRequest; response: ComputerState };
