@@ -143,6 +143,9 @@ func TestFallbackStoreLogoutDuringOutageStaysLoggedOut(t *testing.T) {
 	if _, err := s.Get("p"); !errors.Is(err, ErrNoCredential) {
 		t.Fatalf("the old keychain entry must not log the profile back in: %v", err)
 	}
+	if _, err := kc.MemoryStore.Get("p"); err == nil {
+		t.Fatal("the recovered keychain's old entry should have been deleted to finish the logout")
+	}
 	if err := s.Put("p", testCred("fresh")); err != nil {
 		t.Fatal(err)
 	}

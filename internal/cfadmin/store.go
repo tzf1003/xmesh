@@ -223,6 +223,10 @@ func (s FallbackStore) file(profile string) (FileStore, error) {
 func (s FallbackStore) Get(profile string) (Credential, error) {
 	f, ferr := s.file(profile)
 	if ferr == nil && isTombstone(f.Path) {
+		// Finish the logout once the keychain is reachable again: delete the entry it may still hold.
+		if s.Primary.Delete(profile) == nil {
+			_ = f.Delete(profile)
+		}
 		return Credential{}, ErrNoCredential
 	}
 	if ferr == nil {
