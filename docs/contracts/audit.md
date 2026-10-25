@@ -33,7 +33,7 @@ MCP 接收层为每次调用写入执行编号、开始时间与层级，`pty.re
 | 字段 | 规则 |
 | --- | --- |
 | `time` | RFC3339，毫秒，UTC |
-| `event` | `tool_call`、`task_complete`、`task_untracked`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`progress_unrouted`、`audit_dropped`、`control_call`、`device_link_online`、`device_link_reconnecting`、`device_link_offline`、`device_link_revoked`、`device_link_identity_conflict` |
+| `event` | `tool_call`、`task_complete`、`task_untracked`、`pty_open`、`pty_close`、`pty_transfer`、`pty_signal`、`pty_write`、`pty_io`、`authz_deny`、`policy_reload_failed`、`progress_unrouted`、`audit_dropped`、`control_call`、`device_link_online`、`device_link_reconnecting`、`device_link_offline`、`device_link_revoked`、`device_link_identity_conflict`、`device_path_switch` |
 | `actor` | 可选，`mcp`（缺省）或 `control`。`control` 表示本机控制通道（[CTR-CTL-02](control.md#ctr-ctl-02)），此时 `event` 为 `control_call`，`caller` 形如 `control:uid-1000`，`tool` 是路由编号，见 [RUL-17](rulings.md#rul-17) |
 | `caller` | `caller_id`。Gateway 与入口写入本节点的网络身份加到目标 Agent 的下游会话，与该 Agent 自己审计里的 `caller` 一致；Gateway 自己的工具（`devices.list` 等）和还没有下游会话的调用，填本节点身份加上游 MCP 会话 |
 | `oauth_client` | 预注册名或动态 `client_id`，由入口及接受该身份的 Agent 记录 |
@@ -52,7 +52,7 @@ MCP 接收层为每次调用写入执行编号、开始时间与层级，`pty.re
 
 `progress_unrouted` 记录一条被丢弃的进度通知（[CTR-MUX-02](mcpmux.md#ctr-mux-02)）：`tool` 为 `notifications/progress`，`device` 是发出通知的节点，不含参数或 token。同一条下游连接每秒最多记一条，以免异常后端刷满磁盘。
 
-设备链路状态变更写 `device_link_*` 事件，`device` 为持久设备 ID，`tool` 为 `device.link.lan`、`device.link.tailnet` 或 `device.link`。它们只记录状态和路径类型，用于关联首次连接、路径恢复、信任撤销及身份冲突。
+设备链路状态变更写 `device_link_*` 事件，`device` 为持久设备 ID，`tool` 为 `device.link.lan`、`device.link.tailnet` 或 `device.link`。它们只记录状态和路径类型，用于关联首次连接、路径恢复、信任撤销及身份冲突。智能选路把一条连接换到另一条路径时写 `device_path_switch`，`tool` 形如 `device.link.tailnet>cloudflare:unhealthy`（原路径、新路径、原因：`unhealthy` 表示原路径开始丢包或断流，`better` 表示另一条路径明显且持续更好）。
 
 ### args_digest 允许的内容
 

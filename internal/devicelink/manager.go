@@ -48,6 +48,14 @@ type Options struct {
 	// read on every connection attempt, so a change applies to the next one. Nil means LAN,
 	// Tailnet, then Cloudflare.
 	PathOrder func() []device.PathKind
+	// Smart reports whether paths are chosen by measured quality (loss, drops, latency) rather than
+	// by PathOrder alone. PathOrder still lists the enabled paths and breaks ties. Read on each decision.
+	Smart func() bool
+	// Switching tunes how smart mode moves a live carrier; zero fields take the defaults.
+	Switching Switching
+	// OnPathSwitch runs, outside any lock, after smart mode drops a carrier for a better path. It must
+	// not reenter Manager.
+	OnPathSwitch func(deviceID string, from, to device.PathKind, reason string)
 	// OnActivity runs under the device lock to retain transition order. It must not reenter Manager.
 	OnActivity func(Activity)
 }
@@ -92,6 +100,9 @@ type carrier struct {
 	path      device.Path
 	cancel    context.CancelFunc
 	committed bool
+	// outgoing is true on the end that dialed; only that end decides to move the carrier.
+	outgoing bool
+	started  time.Time
 	// seen is the unix-nano time of the last inbound frame or pong.
 	seen atomic.Int64
 }
@@ -120,7 +131,10 @@ type peerLink struct {
 	unstable     bool
 	revoked      bool
 	failures     map[string]pathFailure
-	workers      sync.WaitGroup
+	// betterKind has beaten the active path since betterSince; smart mode moves only after it holds.
+	betterKind  device.PathKind
+	betterSince time.Time
+	workers     sync.WaitGroup
 }
 
 // Manager owns one physical carrier for each device pair and isolated logical sessions on it.
@@ -153,8 +167,12 @@ func NewManager(ctx context.Context, opts Options) (*Manager, error) {
 	if opts.DeadAfter <= 0 {
 		opts.DeadAfter = 30 * time.Second
 	}
+	opts.Switching = opts.Switching.withDefaults()
 	ctx, cancel := context.WithCancel(ctx)
 	m := &Manager{opts: opts, ctx: ctx, cancel: cancel, peers: map[string]*peerLink{}, budget: NewBudget(0)}
+	if opts.Smart != nil {
+		m.workers.Go(m.reviewLoop)
+	}
 	changed, stop := opts.Trust.Subscribe()
 	m.workers.Go(func() {
 		defer stop()
@@ -374,7 +392,11 @@ func (m *Manager) candidates(id string) []device.Path {
 				return nil
 			}
 			paths := slices.Clone(d.Paths)
-			return slices.DeleteFunc(paths, func(p device.Path) bool { return !p.Reachable || m.rank(p.Kind) < 0 })
+			paths = slices.DeleteFunc(paths, func(p device.Path) bool { return !p.Reachable || m.rank(p.Kind) < 0 })
+			if m.smart() {
+				sortByScore(paths)
+			}
+			return paths
 		}
 	}
 	return nil
@@ -491,7 +513,11 @@ func (m *Manager) runPeer(p *peerLink) {
 }
 
 func (m *Manager) connect(p *peerLink) {
-	for _, kind := range m.pathOrder() {
+	order := m.pathOrder()
+	if m.smart() {
+		order = m.smartOrder(p.id, order)
+	}
+	for _, kind := range order {
 		if m.dialKind(m.ctx, p, kind, 0) {
 			return
 		}
@@ -544,7 +570,8 @@ func (m *Manager) rank(kind device.PathKind) int {
 
 // Rebalance drops each carrier that is not on the most preferred path currently reachable for its
 // device, so a changed path order takes effect without waiting for the link to fail. The logical
-// sessions resume on the new carrier. A carrier on a disabled path is always dropped.
+// sessions resume on the new carrier. A carrier on a disabled path is always dropped. In smart mode
+// only that last rule applies: the review loop judges the rest by measured quality.
 func (m *Manager) Rebalance() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -556,7 +583,7 @@ func (m *Manager) Rebalance() {
 				r := m.rank(path.Kind)
 				return r >= 0 && (have < 0 || r < have)
 			})
-			if have < 0 || better {
+			if have < 0 || (better && !m.smart()) {
 				c.cancel()
 				_ = c.conn.CloseNow()
 			}
@@ -729,7 +756,8 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 	if m.rank(path.Kind) < 0 {
 		return ErrUnavailable
 	}
-	if !outgoing && m.yieldToPreferred(ctx, p, path.Kind) {
+	// In smart mode the dialing end chose this path from its measurements, so it is not second-guessed.
+	if !outgoing && !m.smart() && m.yieldToPreferred(ctx, p, path.Kind) {
 		return ErrUnavailable
 	}
 	if outgoing {
@@ -767,7 +795,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		commit = frame{Type: "commit", Epoch: p.epoch, ConnectionID: hello.ConnectionID, BootID: m.opts.BootID}
 		// Reserve the arbitration slot through its confirmation, blocking concurrent candidates.
 		carrierCtx, cancel := context.WithCancel(m.ctx)
-		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel}
+		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now()}
 		p.active = c
 		p.mu.Unlock()
 		if err = writeFrame(ctx, conn, commit); err == nil {
@@ -801,7 +829,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		return ErrUnavailable
 	}
 	carrierCtx, cancel := context.WithCancel(m.ctx)
-	c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel}
+	c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now()}
 	p.active = c
 	p.epoch = commit.Epoch
 	p.mu.Unlock()

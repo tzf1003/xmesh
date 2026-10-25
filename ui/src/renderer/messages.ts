@@ -10,7 +10,7 @@ import { kernelEn, kernelZh } from "./kernel-messages";
 
 export const zh = {
   ...kernelZh,
-  "device.preferLan": "连接时优先局域网，断线后自动尝试其他路径；已建立的连接保持当前路径。",
+  "device.preferLan": "连接时按路径选择设置挑选路径，断线后自动尝试其他路径；智能模式下已建立的连接也会在另一条路径明显更稳时自动切换。",
   "mode.coexist": "多条连接路径共存",
   "mode.offline": "设备网络已关闭",
   "device.path": "连接路径",
@@ -22,6 +22,7 @@ export const zh = {
   "device.latencyMs": "{n} 毫秒",
   "device.lossPct": "丢包 {n}%",
   "device.flaps": "断流 {n} 次",
+  "device.score": "评分 {n}",
   "device.stability.good": "稳定",
   "device.stability.fair": "一般",
   "device.stability.bad": "不稳定",
@@ -1084,6 +1085,7 @@ export const en: Record<Key, string> = {
   "device.latencyMs": "{n} ms",
   "device.lossPct": "{n}% loss",
   "device.flaps": "{n} drops",
+  "device.score": "score {n}",
   "device.stability.good": "Stable",
   "device.stability.fair": "Fair",
   "device.stability.bad": "Unstable",
@@ -1095,7 +1097,7 @@ export const en: Record<Key, string> = {
   "device.tagsCancel": "Cancel",
   "device.tagsSaved": "Permission groups updated; new sessions use them immediately",
   "device.tagsNarrowHint": "Removing a group ends this device's current sessions; adding groups does not interrupt them.",
-  "device.preferLan": "Prefer LAN when connecting; try another path after a disconnect. Established connections keep their current path.",
+  "device.preferLan": "Pick a path per the path selection setting when connecting and try another after a disconnect. In smart mode an established connection also moves when another path is clearly more stable.",
   "mode.coexist": "Multiple paths coexist",
   "mode.offline": "Device networking disabled",
 

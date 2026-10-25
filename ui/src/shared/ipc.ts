@@ -836,6 +836,7 @@ const AUDIT_EVENTS = [
   "device_link_offline",
   "device_link_revoked",
   "device_link_identity_conflict",
+  "device_path_switch",
 ] as const;
 
 export function parseAuditQuery(v: unknown): AuditQuery | undefined {

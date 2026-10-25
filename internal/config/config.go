@@ -70,15 +70,21 @@ type Mesh struct {
 var PathKinds = []string{"lan", "tailnet", "cloudflare"}
 
 // PathSelection decides which path a device pair uses when several are reachable. In manual mode
-// the user's priority list is followed strictly: the first listed path that connects wins.
+// the user's priority list is followed strictly: the first listed path that connects wins. In smart
+// mode xmesh measures each path (latency, loss, drops) and uses the steadiest one, moving a live link
+// only when another path is clearly and lastingly better; the priority list then breaks ties and
+// orders paths that have no measurements yet.
 type PathSelection struct {
-	// Mode is "manual", also the meaning of empty.
+	// Mode is "smart" (also the meaning of empty) or "manual".
 	Mode string `json:"mode,omitempty"`
 	// Priority lists paths from most to least preferred. Paths left out follow in the default order.
 	Priority []string `json:"priority,omitempty"`
 	// Disabled paths are never dialed and never accepted for device links.
 	Disabled []string `json:"disabled,omitempty"`
 }
+
+// Smart reports whether paths are chosen by measured quality.
+func (p PathSelection) Smart() bool { return p.Mode == "" || p.Mode == "smart" }
 
 // Order is the paths to use, most preferred first, without the disabled ones.
 func (p PathSelection) Order() []string {
@@ -98,7 +104,7 @@ func (p PathSelection) Order() []string {
 }
 
 func (p PathSelection) valid() bool {
-	if p.Mode != "" && p.Mode != "manual" {
+	if p.Mode != "" && p.Mode != "manual" && p.Mode != "smart" {
 		return false
 	}
 	for _, list := range [][]string{p.Priority, p.Disabled} {

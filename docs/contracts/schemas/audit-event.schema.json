@@ -28,7 +28,8 @@
         "device_link_reconnecting",
         "device_link_offline",
         "device_link_revoked",
-        "device_link_identity_conflict"
+        "device_link_identity_conflict",
+        "device_path_switch"
       ]
     },
     "actor": {

@@ -30,6 +30,7 @@ func TestPathSelectionValidation(t *testing.T) {
 		sel  map[string]any
 		fail bool
 	}{
+		"smart":           {map[string]any{"mode": "smart", "disabled": []string{"tailnet"}}, false},
 		"manual":          {map[string]any{"mode": "manual", "priority": []string{"cloudflare", "lan"}, "disabled": []string{"tailnet"}}, false},
 		"empty":           {map[string]any{}, false},
 		"unknown mode":    {map[string]any{"mode": "fastest"}, true},
@@ -57,5 +58,13 @@ func TestPathSelectionNeedsNoRestart(t *testing.T) {
 	}
 	if !NeedsRestart("/mesh") {
 		t.Error("replacing the whole mesh section still needs a restart")
+	}
+}
+
+func TestPathSelectionDefaultsToSmart(t *testing.T) {
+	for mode, want := range map[string]bool{"": true, "smart": true, "manual": false} {
+		if got := (PathSelection{Mode: mode}).Smart(); got != want {
+			t.Errorf("mode %q: smart = %v", mode, got)
+		}
 	}
 }
