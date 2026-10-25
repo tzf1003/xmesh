@@ -1,5 +1,5 @@
 {
-  "api_version": "2.1",
+  "api_version": "2.2",
   "routes": [
     {
       "id": "control.status.get",
@@ -657,6 +657,80 @@
         "invalid_args",
         "not_found",
         "internal"
+      ]
+    },
+    {
+      "id": "control.offers.send",
+      "method": "POST",
+      "path": "/v2/offers",
+      "capability": "pair",
+      "since": "2.2",
+      "query": null,
+      "body": "urn:xmesh:schema:control-pair:2#/$defs/OfferSendRequest",
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "unavailable",
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.offers.list",
+      "method": "GET",
+      "path": "/v2/offers",
+      "capability": "pair",
+      "since": "2.2",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pair:2#/$defs/OffersResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.offers.accept",
+      "method": "POST",
+      "path": "/v2/offers/{offer_id}/accept",
+      "capability": "pair",
+      "since": "2.2",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-pair:2#/$defs/OfferAcceptResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "conflict",
+        "config_invalid",
+        "internal",
+        "unsupported_mode"
+      ]
+    },
+    {
+      "id": "control.offers.reject",
+      "method": "DELETE",
+      "path": "/v2/offers/{offer_id}",
+      "capability": "pair",
+      "since": "2.2",
+      "query": null,
+      "body": null,
+      "response": null,
+      "success": 204,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found",
+        "unsupported_mode"
       ]
     },
     {

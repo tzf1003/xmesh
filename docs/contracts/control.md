@@ -289,6 +289,15 @@ UI MCP `protocol_version: 1` 的 `.run`、`.script` 返回已知状态与 `run_i
 
 `DELETE /v2/pair/trust/{device_id}` 撤销设备信任，返回 204。全部连接路径使用同一撤销记录，现有逻辑会话结束；撤销前启动的迟到配对事务不能恢复信任。移除 Tailnet 网络授权不改变 xmesh 的设备信任。
 
+**连接方式提议（API 2.2）。** 已配对设备可以把一种连接方式提议给另一台设备，对方用户确认后才应用：
+
+- `POST /v2/offers` 接收 `{device_id, offer}`，经任一已验证的路径把提议送到该设备，返回 204。设备未配对返回 `not_found`，送不到返回 `unavailable`。`offer.kind` 目前只有 `cloudflare`，内容是接收设备自己的隧道令牌、Access 服务令牌、接收设备的隧道主机名和发送设备的主机名，不含 Cloudflare API Token。
+- `GET /v2/offers` 列出本设备收到的提议：`id`、`kind`、`from_id`、`from_name`、`received_at`、`expires_at` 和不含凭据的摘要。发送者是连接证书证明的设备，不取自请求体。提议保存在私有收件箱里，总数 16、单个发送者 4、24 小时过期。
+- `POST /v2/offers/{offer_id}/accept` 应用提议：把隧道令牌和 Access 密钥写进状态目录下的私有文件，并把主机名、凭据文件路径以及发送设备的地址写入 `mesh.cloudflare`，返回 `{kind, restart_required, changed_paths}`。本设备已配置 Cloudflare，或 `mesh.cloudflare.listen` 不是默认的 `127.0.0.1:7434` 时返回 `conflict`，提议保留。应用失败时提议原样放回收件箱。
+- `DELETE /v2/offers/{offer_id}` 拒绝并删除提议，返回 204。
+
+收到提议不改变任何信任：对端的地址和凭据只解决“能找到并能进门”，两台设备之间仍须各自配对。
+
 密码管理和公钥文档操作与网络模式解耦。未启动设备配对服务时，密码与主动连接路由返回 `unavailable`。
 
 ## CTR-CTL-09

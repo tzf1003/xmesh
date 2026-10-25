@@ -1,0 +1,9 @@
+{
+  "kind": "cloudflare",
+  "restart_required": true,
+  "changed_paths": [
+    "/mesh/cloudflare/access_client_id",
+    "/mesh/cloudflare/enabled",
+    "/mesh/cloudflare/hostname"
+  ]
+}

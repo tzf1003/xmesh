@@ -1,0 +1,14 @@
+{
+  "device_id": "dev-9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
+  "offer": {
+    "id": "0123456789abcdef0123456789abcdef",
+    "kind": "cloudflare",
+    "cloudflare": {
+      "hostname": "xmesh-phone-1a2b.mesh.example.com",
+      "tunnel_token": "eyJhIjoiMDEyMzQ1Njc4OWFiY2RlZiIsInQiOiJleGFtcGxlIn0",
+      "access_id": "0123456789abcdef.access",
+      "access_secret": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "peer_hostname": "xmesh-laptop-3c4d.mesh.example.com"
+    }
+  }
+}

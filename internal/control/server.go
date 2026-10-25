@@ -50,7 +50,9 @@ type Options struct {
 	// runs, for a node whose ingress comes and goes with the configuration.
 	IngressNow func() IngressAdmin
 	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
-	Pairing        PairingAdmin
+	Pairing PairingAdmin
+	// Offers serves the connection-method routes; nil answers them with unavailable.
+	Offers         OfferAdmin
 	DeviceIdentity *device.Identity
 	DeviceTrust    *device.TrustStore
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
@@ -335,6 +337,10 @@ func (s *Server) table() map[string]handler {
 		"control.pair.connect":           s.connectPair,
 		"control.pair.trust.update":      s.updateDeviceTrust,
 		"control.pair.trust.delete":      s.deleteDeviceTrust,
+		"control.offers.send":            s.sendOffer,
+		"control.offers.list":            s.listOffers,
+		"control.offers.accept":          s.acceptOffer,
+		"control.offers.reject":          s.rejectOffer,
 		"control.pats.list":              s.listPats,
 		"control.pats.create":            s.createPat,
 		"control.pats.rotate":            s.rotatePat,

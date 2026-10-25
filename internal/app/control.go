@@ -61,6 +61,7 @@ func startControl(d controlDeps) (stop func()) {
 	options := control.Options{Host: &controlHost{d: d, firewall: newFirewallWatch()}, Store: d.store, Version: Version, StateDir: d.stateDir, AuditDir: d.auditDir, Listen: control.ListenOptions{AllowSIDs: d.allowSIDs}, Audit: d.log, Pairing: d.pairing}
 	if node, ok := d.network.(*connectivity.Node); ok {
 		options.Pairing = devicePairing{node: node}
+		options.Offers = deviceOffers{node: node}
 		options.DeviceIdentity = node.Identity()
 		options.DeviceTrust = node.Trust()
 	}

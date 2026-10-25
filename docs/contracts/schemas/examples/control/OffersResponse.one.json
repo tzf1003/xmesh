@@ -1,0 +1,16 @@
+{
+  "offers": [
+    {
+      "id": "0123456789abcdef0123456789abcdef",
+      "kind": "cloudflare",
+      "from_id": "dev-9408457aefd071cec127c1f98539930861ad1ba94c940db975c972c09fc68b68",
+      "from_name": "laptop",
+      "received_at": "2026-10-25T04:30:00.000Z",
+      "expires_at": "2026-10-26T04:30:00.000Z",
+      "cloudflare": {
+        "hostname": "xmesh-phone-1a2b.mesh.example.com",
+        "peer_hostname": "xmesh-laptop-3c4d.mesh.example.com"
+      }
+    }
+  ]
+}

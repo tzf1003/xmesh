@@ -360,6 +360,213 @@
           ]
         }
       }
+    },
+    "CloudflareOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname",
+        "tunnel_token",
+        "access_id",
+        "access_secret",
+        "peer_hostname"
+      ],
+      "description": "对端加入发送者的 Cloudflare 网格所需的内容：对端自己的隧道与 Access 服务令牌，以及发送者的主机名。不含 Cloudflare API Token。",
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$",
+          "description": "接收设备自己那条隧道的公网主机名。"
+        },
+        "tunnel_token": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 4096,
+          "pattern": "^[!-~]+$",
+          "description": "运行接收设备 cloudflared 的隧道令牌。"
+        },
+        "access_id": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 4096,
+          "pattern": "^[!-~]+$",
+          "description": "Access 服务令牌的 Client ID，用于拨号其他设备。"
+        },
+        "access_secret": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 4096,
+          "pattern": "^[!-~]+$",
+          "description": "Access 服务令牌的 Client Secret。"
+        },
+        "peer_hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$",
+          "description": "发送设备的隧道主机名，接收设备把它记作发送设备的地址。"
+        }
+      }
+    },
+    "DeviceOffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "description": "已配对设备向另一台设备提议的一种连接方式。接收设备的用户确认前不会应用。",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "发送方生成的 128 位随机编号。"
+        },
+        "kind": {
+          "enum": [
+            "cloudflare"
+          ]
+        },
+        "cloudflare": {
+          "$ref": "#/$defs/CloudflareOffer"
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "cloudflare"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cloudflare"
+        ]
+      }
+    },
+    "OfferSendRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "offer"
+      ],
+      "description": "把一条连接方式提议投递给已配对设备。",
+      "properties": {
+        "device_id": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DeviceId"
+        },
+        "offer": {
+          "$ref": "#/$defs/DeviceOffer"
+        }
+      }
+    },
+    "OfferCloudflareSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostname",
+        "peer_hostname"
+      ],
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$",
+          "description": "本设备将使用的隧道主机名。"
+        },
+        "peer_hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9.-]+$",
+          "description": "发送设备的隧道主机名。"
+        }
+      }
+    },
+    "OfferSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "from_id",
+        "from_name",
+        "received_at",
+        "expires_at"
+      ],
+      "description": "收到的连接方式提议。发送者是连接验证出的设备，不含任何凭据。",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "kind": {
+          "enum": [
+            "cloudflare"
+          ]
+        },
+        "from_id": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/DeviceId"
+        },
+        "from_name": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/NodeName"
+        },
+        "received_at": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+        },
+        "expires_at": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+        },
+        "cloudflare": {
+          "$ref": "#/$defs/OfferCloudflareSummary"
+        }
+      }
+    },
+    "OffersResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "offers"
+      ],
+      "properties": {
+        "offers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OfferSummary"
+          },
+          "maxItems": 16
+        }
+      }
+    },
+    "OfferAcceptResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "restart_required",
+        "changed_paths"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "cloudflare"
+          ]
+        },
+        "restart_required": {
+          "type": "boolean",
+          "description": "为真时运行中的节点需要重启才会使用这条连接方式。"
+        },
+        "changed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

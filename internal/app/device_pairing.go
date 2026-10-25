@@ -36,3 +36,20 @@ func (p devicePairing) PairWith(ctx context.Context, kind device.PathKind, addre
 	trusted, _ := p.node.Trust().Find(doc.DeviceID)
 	return trusted, nil
 }
+
+// deviceOffers lets the control API deliver connection-method offers to paired devices and read the
+// node's inbox.
+type deviceOffers struct{ node *connectivity.Node }
+
+func (o deviceOffers) SendOffer(ctx context.Context, id string, offer device.Offer) error {
+	return o.node.SendOffer(ctx, id, offer)
+}
+func (o deviceOffers) Offers(ctx context.Context) ([]device.ReceivedOffer, error) {
+	return o.node.Offers().List(ctx)
+}
+func (o deviceOffers) TakeOffer(ctx context.Context, id string) (device.ReceivedOffer, error) {
+	return o.node.Offers().Take(ctx, id)
+}
+func (o deviceOffers) PutOffer(ctx context.Context, offer device.ReceivedOffer) error {
+	return o.node.Offers().Put(ctx, offer)
+}

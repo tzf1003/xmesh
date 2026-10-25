@@ -46,6 +46,9 @@ var typeFor = map[string]func() any{
 	"PairPasswordRequest":     func() any { return new(v2.PairPasswordRequest) },
 	"PairPasswordState":       func() any { return new(v2.PairPasswordState) },
 	"PairDiscoveredResponse":  func() any { return new(v2.PairDiscoveredResponse) },
+	"OfferSendRequest":        func() any { return new(v2.OfferSendRequest) },
+	"OffersResponse":          func() any { return new(v2.OffersResponse) },
+	"OfferAcceptResponse":     func() any { return new(v2.OfferAcceptResponse) },
 	"PairConnectRequest":      func() any { return new(v2.PairConnectRequest) },
 	"PairConnectResponse":     func() any { return new(v2.PairConnectResponse) },
 	"PatList":                 func() any { return new(v2.PatList) },
@@ -346,8 +349,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v2.APIVersion != "2.1" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 2.1", v2.APIVersion)
+	if v2.APIVersion != "2.2" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 2.2", v2.APIVersion)
 	}
 }
 
