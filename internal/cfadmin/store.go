@@ -213,18 +213,19 @@ type FallbackStore struct {
 
 // lock serialises the keychain/file/tombstone steps of concurrent xmesh processes on one profile, so a
 // read that finishes an outage logout cannot delete a token another process has just saved. It is
-// best effort: without a usable directory the store works unlocked.
-func (s FallbackStore) lock(profile string) (unlock func()) {
+// best effort only when there is no usable directory; a lock that cannot be taken because another
+// process holds it aborts the operation instead of running unsynchronised.
+func (s FallbackStore) lock(profile string) (unlock func(), err error) {
 	if s.Dir == "" || CheckProfile(profile) != nil || os.MkdirAll(s.Dir, 0o700) != nil {
-		return func() {}
+		return func() {}, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	f, err := filelock.Acquire(ctx, filepath.Join(s.Dir, profile+".lock"))
 	if err != nil {
-		return func() {}
+		return nil, fmt.Errorf("另一个 xmesh 进程正在操作 Cloudflare 凭据，请稍后重试：%w", err)
 	}
-	return func() { _ = f.Close() }
+	return func() { _ = f.Close() }, nil
 }
 
 func (s FallbackStore) file(profile string) (FileStore, error) {
@@ -240,7 +241,11 @@ func (s FallbackStore) file(profile string) (FileStore, error) {
 // Get prefers the fallback file: it exists only while it is newer than anything in the keychain, because
 // a successful keychain write removes it.
 func (s FallbackStore) Get(profile string) (Credential, error) {
-	defer s.lock(profile)()
+	unlock, err := s.lock(profile)
+	if err != nil {
+		return Credential{}, err
+	}
+	defer unlock()
 	return s.get(profile)
 }
 
@@ -276,7 +281,11 @@ func (s FallbackStore) get(profile string) (Credential, error) {
 }
 
 func (s FallbackStore) Put(profile string, c Credential) error {
-	defer s.lock(profile)()
+	unlock, err := s.lock(profile)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if err := CheckProfile(profile); err != nil {
 		return err
 	}
@@ -307,7 +316,11 @@ func (s FallbackStore) Put(profile string, c Credential) error {
 // that would come back once it recovers, so a tombstone in the fallback file keeps the profile logged out
 // until the next successful login.
 func (s FallbackStore) Delete(profile string) error {
-	defer s.lock(profile)()
+	unlock, lerr := s.lock(profile)
+	if lerr != nil {
+		return lerr
+	}
+	defer unlock()
 	err := s.Primary.Delete(profile)
 	f, ferr := s.file(profile)
 	if ferr != nil {
