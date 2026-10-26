@@ -94,8 +94,8 @@ export function useCloudflareLogin(): { fields: JSX.Element; request: MeshReques
                 <input value={domain} onInput={(e) => setDomain(e.currentTarget.value.trim().toLowerCase())} data-testid="cf-domain" />
               </Field>
             )}
-            {picked && domain.endsWith(`.${picked.name}`) && domain.slice(0, -picked.name.length - 1).includes(".") && (
-              <Banner kind="warn" testid="cf-deep-domain">{copy(`${domain} 比 ${picked.name} 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败，建议直接填 ${picked.name}。`, `${domain} is several levels below ${picked.name}. Cloudflare's universal certificate covers one level only, so connections may fail at the TLS handshake; use ${picked.name} instead.`)}</Banner>
+            {picked && domain !== "" && domain !== picked.name && (
+              <Banner kind="warn" testid="cf-deep-domain">{copy(`设备主机名会在 ${domain} 之下再加一级，比 ${picked.name} 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败，建议直接填 ${picked.name}。`, `Device hostnames get one more label under ${domain}, which is several levels below ${picked.name}. Cloudflare's universal certificate covers one level only, so connections may fail at the TLS handshake; use ${picked.name} instead.`)}</Banner>
             )}
           </>
       )}

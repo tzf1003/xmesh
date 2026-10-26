@@ -224,8 +224,8 @@ func fillCredentialIDs(cred *cfadmin.Credential) error {
 		return err
 	}
 	cred.AccountID, cred.ZoneID = account.ID, zone.ID
-	if sub := strings.TrimSuffix(cred.Domain, "."+zone.Name); sub != cred.Domain && strings.Contains(sub, ".") {
-		fmt.Fprintf(os.Stderr, "警告：%s 比区域 %s 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败；建议改用 %s 或 %s。\n", cred.Domain, zone.Name, zone.Name, sub[strings.LastIndex(sub, ".")+1:]+"."+zone.Name)
+	if cred.Domain != zone.Name {
+		fmt.Fprintf(os.Stderr, "警告：设备主机名会在 %s 之下再加一级，比区域 %s 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败；建议直接用 %s。\n", cred.Domain, zone.Name, zone.Name)
 	}
 	return nil
 }
