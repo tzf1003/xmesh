@@ -168,10 +168,12 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
         case "text":
             guard let text=action.text, !text.isEmpty, text.utf8.count<=65536 else {return 1}
             if try xmeshAccessibilityText(pid:action.pid,window:action.window,text:text){break}
+            try xmeshRequireKeyWindowWhenFrontmost(action)
             try SkyKeyboardDispatcher.typeText(target: SkyKeyboardTarget(windowID: action.window, pid: action.pid), text: text)
         case "key":
             guard let keys=action.keys, !keys.isEmpty, keys.count<=8 else{return 1}
             if try xmeshAccessibilitySelectAll(pid:action.pid,window:action.window,keys:keys){break}
+            try xmeshRequireKeyWindowWhenFrontmost(action)
             let normalized=keys.map { key -> String in
                 switch key.lowercased() {case "delete":return "forwarddelete";case "space":return "space";default:return key}
             }.joined(separator:"+")
@@ -193,6 +195,13 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
       catch BridgeStop.targetChanged {return 4}
       catch BridgeStop.keyboardTargetUnfocused {return 5}
       catch { return 2 }
+}
+
+// A frontmost target app takes PID-addressed keys in its key window, which may
+// be another window of the same app. Refuse instead of typing into it.
+private func xmeshRequireKeyWindowWhenFrontmost(_ action:Action)throws{
+    guard xmeshFrontmostPID()==action.pid else{return}
+    guard xmeshFocusedWindowIsTarget(pid:action.pid,window:action.window) else{throw BridgeStop.keyboardTargetUnfocused}
 }
 
 private func currentWindowInfo()->[[String:Any]]{
