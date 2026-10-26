@@ -11,7 +11,7 @@ import { useT } from "../i18n";
 import { Icon } from "../icons";
 import { formatTime } from "../lib/format";
 import {
-  MAX_SOURCES, REFRESH_INTERVALS, durationSeconds, SCAN_INTERVALS, blankSource, parseIps, policyProblem, policyValue, readPolicy, samePolicy,
+  MAX_SOURCES, MAX_SOURCE_IPS, REFRESH_INTERVALS, durationSeconds, SCAN_INTERVALS, blankSource, parseIps, policyProblem, policyValue, readPolicy, samePolicy,
   type PeerMode, type Policy, type Source, type SourceType,
 } from "../lib/preferred-ip";
 import { applySaved } from "../lib/reload";
@@ -60,6 +60,7 @@ function PreferredIpPage({ ctx }: { ctx: PageContext }): JSX.Element {
     url: c("订阅地址必须以 https:// 开头。", "A subscription address must start with https://."),
     file: c("文件来源要填写绝对路径。", "A file source needs an absolute path."),
     peer: c("按设备设为固定时，要为它填写地址。", "A device set to fixed needs addresses."),
+    ips: c(`一个来源最多 ${MAX_SOURCE_IPS} 个地址，导入的多余地址已丢弃。`, `A source holds at most ${MAX_SOURCE_IPS} addresses; extra imported ones were dropped.`),
     sources: c(`来源最多 ${MAX_SOURCES} 个。`, `At most ${MAX_SOURCES} sources.`),
   };
 
@@ -111,8 +112,8 @@ function PreferredIpPage({ ctx }: { ctx: PageContext }): JSX.Element {
     {importing && draft && <ImportDialog c={c} onClose={() => setImporting(false)} onImport={(ips) => {
       edit((p) => {
         const mine = p.sources.findIndex((s) => s.type === "manual" && s.name === IMPORT_NAME);
-        if (mine >= 0) return { ...p, sources: p.sources.map((s, i) => (i === mine ? { ...s, ips: [...new Set([...s.ips, ...ips])] } : s)) };
-        return { ...p, sources: [...p.sources, { ...blankSource("manual"), name: IMPORT_NAME, ips }] };
+        if (mine >= 0) return { ...p, sources: p.sources.map((s, i) => (i === mine ? { ...s, ips: [...new Set([...s.ips, ...ips])].slice(0, MAX_SOURCE_IPS) } : s)) };
+        return { ...p, sources: [...p.sources, { ...blankSource("manual"), name: IMPORT_NAME, ips: ips.slice(0, MAX_SOURCE_IPS) }] };
       });
       setImporting(false);
       setTab("pool");

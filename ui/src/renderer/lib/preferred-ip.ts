@@ -46,6 +46,8 @@ export const DEFAULT_REFRESH = "12h";
 export const SCAN_INTERVALS = ["1h", "3h", "6h", "12h", "24h", "72h", "168h"] as const;
 export const REFRESH_INTERVALS = ["1h", "6h", "12h", "24h", "72h", "168h"] as const;
 export const MAX_SOURCES = 8;
+/** Most addresses one manual source (or fixed list) may hold. */
+export const MAX_SOURCE_IPS = 64;
 
 export const defaultPolicy = (): Policy => ({
   enabled: true,
@@ -177,11 +179,12 @@ export function parseIps(input: string): string[] {
 }
 
 /** What a draft cannot be saved with, as a message key the page shows; undefined when it is fine. */
-export function policyProblem(p: Policy): "fixed" | "url" | "file" | "peer" | "sources" | undefined {
+export function policyProblem(p: Policy): "fixed" | "url" | "file" | "peer" | "sources" | "ips" | undefined {
   if (p.mode === "fixed" && p.fixedIps.length === 0) return "fixed";
   if (p.sources.length > MAX_SOURCES) return "sources";
   for (const s of p.sources) {
     if (s.type === "url" && !/^https:\/\/[^/\s@]+/.test(s.url)) return "url";
+    if (s.type === "manual" && s.ips.length > MAX_SOURCE_IPS) return "ips";
     if (s.type === "file" && s.path.trim() === "") return "file";
   }
   for (const o of Object.values(p.peers)) if (o.mode === "fixed" && o.ips.length === 0) return "peer";
