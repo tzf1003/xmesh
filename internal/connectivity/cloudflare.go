@@ -147,10 +147,20 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 	if outer := n.cloudflareOuter; outer != nil {
 		return dialTunnel(ctx, outer, address, header, tlsConfig)
 	}
-	// Each preferred address gets a whole attempt (TCP, TLS, Access, WebSocket and the inner handshake), because
+	// Each preferred address gets a whole attempt (TCP, TLS, Access, WebSocket and the inner handshake) of at most 4 seconds, because
 	// an address that accepts TCP can still fail later; the normal DNS address is the last attempt.
+	// The preferred phase is bounded to part of the caller's deadline so a stale list cannot starve the DNS attempt.
+	budget := 20 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = time.Until(deadline) * 6 / 10
+	}
+	phase, stop := context.WithTimeout(ctx, budget)
+	defer stop()
 	for _, a := range preferredAddrs(cfg) {
-		try, cancel := context.WithTimeout(ctx, 8*time.Second)
+		if phase.Err() != nil {
+			break
+		}
+		try, cancel := context.WithTimeout(phase, 4*time.Second)
 		client := tunnelClient(cfpreferred.Pin(a))
 		conn, err := dialTunnel(try, client, address, header, tlsConfig)
 		client.CloseIdleConnections()
