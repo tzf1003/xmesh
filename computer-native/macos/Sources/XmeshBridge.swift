@@ -199,7 +199,18 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
     } catch BridgeStop.userIntervention {return 3}
       catch BridgeStop.targetChanged {return 4}
       catch BridgeStop.keyboardTargetUnfocused {return 5}
-      catch { return 2 }
+      catch { return xmeshFailureStatus(error) }
+}
+
+// Distinguishes the failures that used to collapse into the generic status 2.
+private func xmeshFailureStatus(_ error:Error)->Int32{
+    guard let error=error as? ComputerUseError else{return 2}
+    switch error {
+    case .message(let value) where value=="accessibility_action_failed":return 7
+    case .message(let value) where value.hasPrefix("click_method 'sky_click' is unavailable"):return 9
+    case .stateUnavailable(let value) where value=="session_cancelled":return 8
+    default:return 2
+    }
 }
 
 // A frontmost target app takes PID-addressed keys in its key window, which may

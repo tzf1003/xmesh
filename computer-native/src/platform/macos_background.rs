@@ -326,6 +326,9 @@ pub fn execute(
         4 => Err("execution_target_changed"),
         5 => Err("background_action_unsupported"),
         6 => Err("focus_changed"),
+        7 => Err("accessibility_action_failed"),
+        8 => Err("session_cancelled"),
+        9 => Err("sky_click_unavailable"),
         _ => Err("input_failed"),
     }
 }
