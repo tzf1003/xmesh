@@ -202,7 +202,7 @@ function PoolTable({ c, entries }: { c: Copy; entries: PreferredIPEntry[] }): JS
     <tbody>{entries.map((e) => <tr key={e.ip} data-testid={`pip-row-${e.ip}`}>
       <td class="mono">{e.ip}</td>
       <td>{c(...SOURCE_LABEL[e.source])}</td>
-      <td data-testid={`pip-colo-${e.ip}`}>{e.colo === "" ? <span class="hint">—</span> : <>{e.colo} <span class="hint">{regionLabel(c, e.region)}</span></>}</td>
+      <td data-testid={`pip-colo-${e.ip}`}>{!e.colo ? <span class="hint">—</span> : <>{e.colo} <span class="hint">{regionLabel(c, e.region)}</span></>}</td>
       <td>{status(e)}{e.status === "cooling" && e.cooldown_until && <span class="hint"> {c(`至 ${formatTime(e.cooldown_until)}`, `until ${formatTime(e.cooldown_until)}`)}</span>}{e.failures > 0 && e.status !== "cooling" && <span class="hint"> {c(`失败 ${e.failures} 次`, `${e.failures} failed`)}</span>}</td>
       <td>{e.latency_ms === null ? "—" : `${e.latency_ms} ms`}</td>
       <td>{e.loss_percent === null ? "—" : `${e.loss_percent}%`}</td>
@@ -346,16 +346,16 @@ function RegionSettings({ c, draft, state, writable, edit }: { c: Copy; draft: P
       <label class="field"><span>{c("其他机房代码（三个字母，如 HKG、NRT，空格或逗号分隔）", "Other colo codes (three letters such as HKG, NRT; space or comma separated)")}</span>
         <input class="mono" value={typed} placeholder="HKG NRT" disabled={!writable} onInput={(e) => setTyped(e.currentTarget.value)} onBlur={addCodes} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCodes(); } }} data-testid="pip-region-codes" /></label>
     </div>}
-    {scan && scan.regions.length > 0 && <div data-testid="pip-region-stats">
+    {scan && (scan.regions ?? []).length > 0 && <div data-testid="pip-region-stats">
       <h4>{c("上次测速的地区分布", "Regions in the last scan")}</h4>
       <div class="table-wrap"><table>
         <thead><tr><th scope="col">{c("地区", "Region")}</th><th scope="col">{c("机房", "Colos")}</th><th scope="col">{c("地址数", "Addresses")}</th><th scope="col">{c("最低延时", "Best latency")}</th></tr></thead>
-        <tbody>{scan.regions.map((g) => <tr key={g.key} data-testid={`pip-region-row-${g.key}`}>
-          <td>{regionLabel(c, g.key)}{scan.chosen.includes(g.key) && <> <Badge kind="ok">{c("已保留", "Kept")}</Badge></>}</td>
+        <tbody>{(scan.regions ?? []).map((g) => <tr key={g.key} data-testid={`pip-region-row-${g.key}`}>
+          <td>{regionLabel(c, g.key)}{(scan.chosen ?? []).includes(g.key) && <> <Badge kind="ok">{c("已保留", "Kept")}</Badge></>}</td>
           <td class="mono">{g.colos.join(" ")}</td><td>{g.count}</td><td>{g.best_ms} ms</td>
         </tr>)}</tbody>
       </table></div>
-      {scan.unidentified > 0 && <p class="hint">{c(`另有 ${scan.unidentified} 个地址读不到机房。`, `${scan.unidentified} more addresses had no readable colo.`)}</p>}
+      {(scan.unidentified ?? 0) > 0 && <p class="hint">{c(`另有 ${scan.unidentified} 个地址读不到机房。`, `${scan.unidentified} more addresses had no readable colo.`)}</p>}
     </div>}
   </div>;
 }

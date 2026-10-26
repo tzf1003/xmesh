@@ -2,6 +2,7 @@ package connectivity
 
 import (
 	"context"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -342,5 +343,27 @@ func TestPoolEntriesShowColo(t *testing.T) {
 	st := p.state(cfg)
 	if st.Pool[0].Colo != "HKG" || st.Pool[0].Region != "hk" { // learned from its /24
 		t.Fatalf("%+v", st.Pool[0])
+	}
+}
+
+func TestPickRegionKeyIsNotAColoCode(t *testing.T) {
+	// "sea" is Southeast Asia; SEA is Seattle.
+	if regionWanted([]string{"sea"}, "SEA") || !regionWanted([]string{"sea"}, "BKK") {
+		t.Fatal("a region key must not match a colo code")
+	}
+	if !regionWanted([]string{"SEA"}, "sea") || regionWanted([]string{"SEA"}, "BKK") {
+		t.Fatal("an upper-case entry is a colo code")
+	}
+}
+
+func TestSamplingSkipsCachedIPv6WhenDisabled(t *testing.T) {
+	p := newPreferredPool("")
+	p.st.Nets = map[string]string{"2606:4700:1::/48": "HKG"}
+	p.st.Scan.Chosen = []string{"hk"}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, a := range p.sampleAddrs(config.PreferredScan{Sample: 40, RegionMode: "auto", RegionCount: 2}, rng) {
+		if a.Is6() {
+			t.Fatal(a)
+		}
 	}
 }

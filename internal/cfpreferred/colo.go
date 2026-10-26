@@ -65,12 +65,17 @@ func RegionName(key string) string {
 
 // ValidRegion reports whether s is a group key or a three-letter colo code.
 func ValidRegion(s string) bool {
+	return IsRegionKey(s) || ValidColo(s)
+}
+
+// IsRegionKey reports whether s is exactly one of the group keys.
+func IsRegionKey(s string) bool {
 	for _, r := range Regions {
 		if r.Key == s {
 			return true
 		}
 	}
-	return ValidColo(s)
+	return false
 }
 
 // ValidColo reports whether s looks like a colo code: three ASCII letters.

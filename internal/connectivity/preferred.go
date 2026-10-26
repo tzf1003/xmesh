@@ -480,6 +480,9 @@ func (p *preferredPool) sampleAddrs(scan config.PreferredScan, rng *rand.Rand) [
 	p.mu.Lock()
 	var near []string
 	for net, colo := range p.st.Nets {
+		if !scan.IPv6 && strings.Contains(net, ":") {
+			continue
+		}
 		if scan.RegionMode == "pick" && regionWanted(scan.Regions, colo) ||
 			scan.RegionMode == "auto" && slices.Contains(p.st.Scan.Chosen, cfpreferred.RegionOf(colo)) {
 			near = append(near, net)
@@ -503,11 +506,25 @@ func (p *preferredPool) sampleAddrs(scan config.PreferredScan, rng *rand.Rand) [
 	return out
 }
 
-// regionWanted reports whether colo is covered by a pick list of region keys and colo codes.
+// regionWanted reports whether colo is covered by a pick list. An entry that is a region key (lower case,
+// such as "sea") names that region and never a colo, so "sea" does not match Seattle's SEA; any other entry is
+// a colo code, compared case-insensitively.
 func regionWanted(list []string, colo string) bool {
 	colo = strings.ToUpper(colo)
-	return colo != "" && (slices.ContainsFunc(list, func(w string) bool { return strings.EqualFold(w, colo) }) ||
-		slices.Contains(list, cfpreferred.RegionOf(colo)))
+	if colo == "" {
+		return false
+	}
+	region := cfpreferred.RegionOf(colo)
+	for _, w := range list {
+		if cfpreferred.IsRegionKey(w) {
+			if w == region {
+				return true
+			}
+		} else if strings.EqualFold(w, colo) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *preferredPool) finishScan(ctx context.Context, host string, tested int, results []cfpreferred.Result, scan config.PreferredScan, pool []member) {
