@@ -812,7 +812,7 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         {
             error = Some("human_intervention");
         }
-        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"cancelled"|"human_intervention"|"focus_changed"|"execution_target_changed")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
+        let result = json!({"action_id":q.action_id,"state":match error{Some("input_failed"|"accessibility_action_failed"|"session_cancelled"|"cancelled"|"human_intervention"|"focus_changed"|"execution_target_changed")=>"unknown",Some(_)=>"failed",None=>"executed"},"executed":executed,"error":error});
         cache.insert(q.action_id.clone(), (payload, result.clone()));
         runtime.reply(id, result);
     }

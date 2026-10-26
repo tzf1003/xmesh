@@ -45,7 +45,7 @@ import AppKit
         precondition(xmeshBackgroundDispatch(nil,0,nil,nil)==1)
         let request=Data("{\"type\":\"click\",\"pid\":42,\"window\":4,\"originX\":0,\"originY\":0,\"width\":100,\"height\":80,\"x\":10,\"y\":10}".utf8)
         let cancelled=request.withUnsafeBytes{buffer in xmeshBackgroundDispatch(buffer.bindMemory(to:UInt8.self).baseAddress,request.count,{_,_ in false},nil)}
-        precondition(cancelled==2)
+        precondition(cancelled==8)
         let target=try JSONDecoder().decode(Action.self,from:request)
         let matching:[[String:Any]]=[[kCGWindowNumber as String:NSNumber(value:4),kCGWindowOwnerPID as String:NSNumber(value:42),kCGWindowBounds as String:CGRect(x:0,y:0,width:100,height:80).dictionaryRepresentation]]
         precondition(targetMatchesWindow(target,matching))
