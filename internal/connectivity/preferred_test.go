@@ -7,12 +7,15 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tzf1003/xmesh/internal/cfpreferred"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/device"
 )
 
 func addrs(t *testing.T, in []netip.Addr) string {
@@ -193,5 +196,71 @@ func TestInspectClassifiesLines(t *testing.T) {
 	}
 	if len(r.Accepted) != 1 || r.Accepted[0] != "104.16.0.2" || r.Items[3].Line != 5 {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestProviderIgnoresPreferredSettings(t *testing.T) {
+	a := config.Mesh{Cloudflare: config.Cloudflare{Enabled: true, Hostname: "mac.example.com"}}
+	b := a
+	b.Cloudflare.PreferredIPs = []string{"104.16.0.1"}
+	b.Cloudflare.PreferredIP = &config.PreferredIP{Scan: &config.PreferredScan{Enabled: true}}
+	if !providerSame(a, b, device.Cloudflare) {
+		t.Fatal("a preferred-address change must not rebuild the Cloudflare path")
+	}
+	b.Cloudflare.Hostname = "other.example.com"
+	if providerSame(a, b, device.Cloudflare) {
+		t.Fatal("a hostname change still rebuilds it")
+	}
+}
+
+func TestLossCountsAgainstLowLatency(t *testing.T) {
+	p := newPreferredPool("")
+	p.st.Scan.Results = []scanRow{{IP: "104.16.0.1", LatencyMS: 40, Loss: 66}, {IP: "104.16.0.2", LatencyMS: 100, Loss: 0}}
+	cfg := config.Cloudflare{PreferredIPs: []string{"104.16.0.1", "104.16.0.2"}}
+	if got := addrs(t, p.dialOrder(cfg, "smart", nil)); got != "104.16.0.2,104.16.0.1" {
+		t.Fatal(got)
+	}
+}
+
+func TestSecondScanKeepsAndReplacesScanAddresses(t *testing.T) {
+	p := newPreferredPool("")
+	id := "dev-" + strings.Repeat("a", 64)
+	cfg := config.Cloudflare{Peers: map[string]string{id: "win.example.com"}, PreferredIP: &config.PreferredIP{Scan: &config.PreferredScan{Enabled: true, Sample: 10, Keep: 2}}}
+	p.st.Scan.Results = []scanRow{{IP: "104.16.0.1", LatencyMS: 50, Keep: true}, {IP: "104.16.0.2", LatencyMS: 60, Keep: true}}
+	var tested []netip.Addr
+	p.scanFn = func(_ context.Context, a []netip.Addr, _ string) []cfpreferred.Result {
+		tested = a
+		return []cfpreferred.Result{
+			{Addr: netip.MustParseAddr("104.16.0.1"), Sent: 3, Latency: 30 * time.Millisecond},
+			{Addr: netip.MustParseAddr("172.64.0.5"), Sent: 3, Latency: 40 * time.Millisecond},
+			{Addr: netip.MustParseAddr("104.16.0.2"), Sent: 3, Latency: 90 * time.Millisecond},
+		}
+	}
+	if err := p.startScan(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 400 && p.state(cfg).Scan.Running; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !slices.Contains(tested, netip.MustParseAddr("104.16.0.1")) || !slices.Contains(tested, netip.MustParseAddr("104.16.0.2")) {
+		t.Fatal("kept scan addresses must be measured again")
+	}
+	var kept []string
+	for _, m := range p.members(cfg) {
+		kept = append(kept, m.addr.String())
+	}
+	if strings.Join(kept, ",") != "104.16.0.1,172.64.0.5" {
+		t.Fatal("the two fastest compete for the kept slots:", kept)
+	}
+}
+
+func TestInspectStopsAtPoolCapacity(t *testing.T) {
+	var lines []string
+	for i := range 70 {
+		lines = append(lines, "104.16.1."+strconv.Itoa(i+1))
+	}
+	r := newPreferredPool("").inspect(config.Cloudflare{}, strings.Join(lines, "\n"))
+	if len(r.Accepted) != cfpreferred.MaxList || r.Items[69].Status != "rejected" {
+		t.Fatal(len(r.Accepted), r.Items[69])
 	}
 }

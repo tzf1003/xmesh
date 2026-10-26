@@ -248,6 +248,11 @@ func (p *preferredPool) dialOrder(cfg config.Cloudflare, mode string, fixed []st
 			continue
 		}
 		lat, ok := p.latency(m.addr)
+		for _, r := range p.st.Scan.Results {
+			if r.IP == m.addr.String() {
+				lat += time.Duration(r.Loss) * 10 * time.Millisecond // 66% loss costs as much as 660 ms
+			}
+		}
 		if s := p.stats[m.addr]; s != nil {
 			lat += time.Duration(s.fails) * 500 * time.Millisecond
 		}
@@ -437,7 +442,7 @@ func (p *preferredPool) startScan(ctx context.Context, cfg config.Cloudflare) er
 			sampled[a] = true
 		}
 		for _, m := range pool { // re-measure what is already pooled so the ranking stays honest
-			if !sampled[m.addr] && m.source != "scan" {
+			if !sampled[m.addr] {
 				addrs = append(addrs, m.addr)
 			}
 		}
@@ -463,9 +468,12 @@ func (p *preferredPool) finishScan(ctx context.Context, host string, tested int,
 		p.save()
 		return
 	}
+	// Addresses other sources already supply are only measured; scan-sourced ones compete for the kept slots again.
 	pooled := map[netip.Addr]bool{}
 	for _, m := range pool {
-		pooled[m.addr] = true
+		if m.source != "scan" {
+			pooled[m.addr] = true
+		}
 	}
 	kept := 0
 	for _, r := range results {
@@ -636,6 +644,8 @@ func (p *preferredPool) inspect(cfg config.Cloudflare, text string) v2.Preferred
 			item.Status, item.Note = "rejected", err.Error()
 		case have[a] || seen[a]:
 			item.IP, item.Status, item.Note = a.String(), "existing", "已在池中或重复"
+		case len(have)+len(out.Accepted) >= cfpreferred.MaxList:
+			item.IP, item.Status, item.Note = a.String(), "rejected", fmt.Sprintf("池已满，最多 %d 个", cfpreferred.MaxList)
 		default:
 			seen[a] = true
 			item.IP, item.Status = a.String(), "new"
@@ -647,6 +657,17 @@ func (p *preferredPool) inspect(cfg config.Cloudflare, text string) v2.Preferred
 		}
 	}
 	return out
+}
+
+// configured reports whether a connection in this mode has preferred addresses to try at all, cooling or not.
+func (p *preferredPool) configured(cfg config.Cloudflare, mode string, fixed []string) bool {
+	switch mode {
+	case "fixed":
+		return len(parseAddrs(fixed)) > 0
+	case "smart":
+		return len(p.members(cfg)) > 0
+	}
+	return false
 }
 
 // ---- node glue ----

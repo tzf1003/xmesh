@@ -164,7 +164,7 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 				pool.failed(a, cfg.PreferredFailThreshold(), cfg.PreferredCooldown())
 			}
 		}
-		if tried && cfg.PreferredIP != nil && cfg.PreferredIP.NoDNSFallback {
+		if cfg.PreferredIP != nil && cfg.PreferredIP.NoDNSFallback && (tried || pool.configured(cfg, mode, fixed)) {
 			return nil, errors.New("所有优选 IP 都连不上（已设置不回退 DNS 地址）")
 		}
 	}

@@ -55,7 +55,11 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 	case device.Tailnet:
 		return reflect.DeepEqual(old.Tailnet, cfg.Tailnet)
 	case device.Cloudflare:
-		return reflect.DeepEqual(old.Cloudflare, cfg.Cloudflare)
+		// Preferred addresses and their policy are read on every dial, so changing them must not rebuild the path.
+		a, b := old.Cloudflare, cfg.Cloudflare
+		a.PreferredIP, a.PreferredIPs, a.PreferredIPsFile = nil, nil, ""
+		b.PreferredIP, b.PreferredIPs, b.PreferredIPsFile = nil, nil, ""
+		return reflect.DeepEqual(a, b)
 	}
 	return reflect.DeepEqual(old.LAN, cfg.LAN)
 }
