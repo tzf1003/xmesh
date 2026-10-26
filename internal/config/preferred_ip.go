@@ -223,7 +223,7 @@ func (p *PreferredIP) validate() (string, bool) {
 		return at + "/cooldown: 1 分钟到 24 小时", false
 	}
 	if p.FailThreshold < 0 || p.FailThreshold > 20 {
-		return at + "/fail_threshold: 1 到 20", false
+		return at + "/fail_threshold: 0 到 20（0 表示默认）", false
 	}
 	if len(p.Sources) > MaxPreferredSources {
 		return fmt.Sprintf("%s/sources: 最多 %d 个来源", at, MaxPreferredSources), false

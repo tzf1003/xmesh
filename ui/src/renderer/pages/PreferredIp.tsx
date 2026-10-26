@@ -110,6 +110,9 @@ function PreferredIpPage({ ctx }: { ctx: PageContext }): JSX.Element {
       </>}
     </>}</ResourceView>
     {importing && draft && <ImportDialog c={c} onClose={() => setImporting(false)} onImport={(ips) => {
+      const kept = draft.sources.find((s) => s.type === "manual" && s.name === IMPORT_NAME)?.ips ?? [];
+      const extra = new Set([...kept, ...ips]).size - MAX_SOURCE_IPS;
+      if (extra > 0) ctx.toast(c(`一个来源最多 ${MAX_SOURCE_IPS} 个地址，多余的 ${extra} 个已丢弃。`, `A source holds at most ${MAX_SOURCE_IPS} addresses; ${extra} extra were dropped.`), true);
       edit((p) => {
         const mine = p.sources.findIndex((s) => s.type === "manual" && s.name === IMPORT_NAME);
         if (mine >= 0) return { ...p, sources: p.sources.map((s, i) => (i === mine ? { ...s, ips: [...new Set([...s.ips, ...ips])].slice(0, MAX_SOURCE_IPS) } : s)) };
