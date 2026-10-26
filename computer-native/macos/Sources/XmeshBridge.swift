@@ -12,6 +12,9 @@ private var sessionContext: UnsafeMutableRawPointer?
 private var releasingInput = false
 private var sessionTargetPID: pid_t?
 private var sessionTarget: Action?
+// Set once the PID-addressed keyboard fallback is chosen; every later delivery
+// boundary then rechecks that the target stays the app's key window.
+private var keyboardFallback = false
 private let bridgeLock = NSLock()
 private enum BridgeStop: Error { case userIntervention, targetChanged, keyboardTargetUnfocused }
 
@@ -35,6 +38,8 @@ func requireUsableComputerUseSession() throws {
         // Human takeover is explicit (the panel's takeover button).
         false
     })
+    if keyboardFallback,!releasingInput,let target=sessionTarget,xmeshFrontmostPID()==target.pid,
+       !xmeshFocusedWindowIsTarget(pid:target.pid,window:target.window){throw BridgeStop.keyboardTargetUnfocused}
 }
 
 func xmeshReleaseInput(_ operation:()->Void){
@@ -142,7 +147,7 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
     defer { bridgeLock.unlock() }
     sessionCheck = check
     sessionContext = context
-    defer { sessionCheck = nil; sessionContext = nil; releasingInput = false; sessionTargetPID = nil;sessionTarget=nil }
+    defer { sessionCheck = nil; sessionContext = nil; releasingInput = false; sessionTargetPID = nil;sessionTarget=nil;keyboardFallback=false }
     do {
         let action = try JSONDecoder().decode(Action.self, from: Data(bytes: bytes, count: count))
         sessionTargetPID=action.pid
@@ -202,6 +207,7 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
 private func xmeshRequireKeyWindowWhenFrontmost(_ action:Action)throws{
     guard xmeshFrontmostPID()==action.pid else{return}
     guard xmeshFocusedWindowIsTarget(pid:action.pid,window:action.window) else{throw BridgeStop.keyboardTargetUnfocused}
+    keyboardFallback=true
 }
 
 private func currentWindowInfo()->[[String:Any]]{
