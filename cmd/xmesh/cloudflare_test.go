@@ -339,3 +339,21 @@ func TestDropStaleSecretsKeepsFilesTheConfigStillReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudflareRemoveStillCleansTheConfigWhenOnlyTheServiceTokenDeleteFails(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	fake.FailOn = "DELETE /accounts/acct/access/service_tokens"
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err == nil {
+		t.Fatal("remove reported success although the service token delete failed")
+	}
+	raw, _ := os.ReadFile(cfg)
+	if strings.Contains(string(raw), "hostname:") {
+		t.Errorf("the config still points at the deleted tunnel:\n%s", raw)
+	}
+}

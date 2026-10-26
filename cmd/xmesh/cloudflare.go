@@ -426,6 +426,11 @@ func cloudflareInstall(args []string, out io.Writer) error {
 	return emit(out, c.json, map[string]any{"cloudflared": path}, func(w io.Writer) { fmt.Fprintln(w, note) })
 }
 
+func hasDevice(st cfadmin.State, name string) bool {
+	_, ok := st.Devices[name]
+	return ok
+}
+
 func cloudflareRemove(args []string, out io.Writer) error {
 	var c cloudflareCommon
 	fs := flag.NewFlagSet("cloudflare remove", flag.ContinueOnError)
@@ -465,8 +470,13 @@ func cloudflareRemove(args []string, out io.Writer) error {
 	}
 	ctx, cancel := ctx30()
 	defer cancel()
-	if err := mesh.Remove(ctx, state, *name); err != nil {
-		return err
+	removeErr := mesh.Remove(ctx, state, *name)
+	if removeErr != nil {
+		// Remove drops the record once the device's own resources are gone and can still fail afterwards, on
+		// the shared service token. Then the tunnel is gone and the local entry must go with it.
+		if st, err := state.Load(); err != nil || hasDevice(st, *name) {
+			return removeErr
+		}
 	}
 	if *cfgPath != "" && hostname != "" {
 		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
@@ -477,6 +487,9 @@ func cloudflareRemove(args []string, out io.Writer) error {
 		if err := dropStaleCloudflareSecrets(*cfgPath); err != nil {
 			fmt.Fprintf(os.Stderr, "警告：没能删除旧的隧道密钥文件，之后加入新隧道前请手动删除 %s 下的 tunnel-token 与 access-secret：%v\n", filepath.Join(filepath.Dir(*cfgPath), "cloudflare"), err)
 		}
+	}
+	if removeErr != nil {
+		return removeErr
 	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
 }
