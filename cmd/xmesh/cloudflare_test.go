@@ -309,3 +309,30 @@ func TestCloudflareRemoveLeavesSecretsOutsideTheConfigDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestDropStaleSecretsKeepsFilesTheConfigStillReferences(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "xmesh.yaml")
+	secrets := filepath.Join(dir, "cloudflare")
+	if err := os.MkdirAll(secrets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if err := os.WriteFile(filepath.Join(secrets, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := "schema_version: 2\nnode:\n  name: laptop\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\n  cloudflare:\n    enabled: true\n    hostname: xmesh-other-abcdef.example.com\n    access_client_id: cid.access\n    access_client_secret_file: " + filepath.Join(secrets, "access-secret") + "\n    tunnel_token_file: " + filepath.Join(secrets, "tunnel-token") + "\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := dropStaleCloudflareSecrets("xmesh.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if _, err := os.Stat(filepath.Join(secrets, f)); err != nil {
+			t.Errorf("%s is still referenced but was deleted: %v", f, err)
+		}
+	}
+}

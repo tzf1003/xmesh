@@ -651,6 +651,10 @@ func clearCloudflareConfig(path, hostname string) error {
 // join refuses to write over them. Only those two fixed names in that one directory are touched, so a
 // path the user pointed somewhere else is never deleted.
 func dropStaleCloudflareSecrets(path string) error {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -663,7 +667,11 @@ func dropStaleCloudflareSecrets(path string) error {
 	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
 	for i := 0; i+1 < len(cf.Content); i += 2 {
 		if k := cf.Content[i].Value; k == "access_client_secret_file" || k == "tunnel_token_file" {
-			referenced[filepath.Clean(cf.Content[i+1].Value)] = true
+			ref := cf.Content[i+1].Value
+			if !filepath.IsAbs(ref) {
+				ref = filepath.Join(filepath.Dir(path), ref)
+			}
+			referenced[filepath.Clean(ref)] = true
 		}
 	}
 	dir := filepath.Join(filepath.Dir(path), "cloudflare")
