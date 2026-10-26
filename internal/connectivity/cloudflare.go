@@ -122,7 +122,8 @@ func preferredAddrs(cfg config.Cloudflare) []netip.Addr {
 			out = append(out, list...)
 		}
 	}
-	return slices.Compact(out)
+	seen := map[netip.Addr]bool{}
+	return slices.DeleteFunc(out, func(a netip.Addr) bool { dup := seen[a]; seen[a] = true; return dup })
 }
 
 // dialCloudflare opens a WebSocket to a peer's tunnel hostname, presents the Access service token, and
@@ -143,15 +144,40 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 		header.Set("CF-Access-Client-Id", cfg.AccessClientID)
 		header.Set("CF-Access-Client-Secret", strings.TrimSpace(string(secret)))
 	}
-	outer := n.cloudflareOuter
-	if outer == nil {
-		outer = &http.Client{Transport: &http.Transport{
-			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}},
-			TLSHandshakeTimeout: 10 * time.Second,
-			DialContext:         cfpreferred.Dialer(preferredAddrs(cfg), nil),
-		}}
-		defer outer.CloseIdleConnections()
+	if outer := n.cloudflareOuter; outer != nil {
+		return dialTunnel(ctx, outer, address, header, tlsConfig)
 	}
+	// Each preferred address gets a whole attempt (TCP, TLS, Access, WebSocket and the inner handshake), because
+	// an address that accepts TCP can still fail later; the normal DNS address is the last attempt.
+	for _, a := range preferredAddrs(cfg) {
+		try, cancel := context.WithTimeout(ctx, 8*time.Second)
+		client := tunnelClient(cfpreferred.Pin(a))
+		conn, err := dialTunnel(try, client, address, header, tlsConfig)
+		client.CloseIdleConnections()
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	client := tunnelClient(nil)
+	defer client.CloseIdleConnections()
+	return dialTunnel(ctx, client, address, header, tlsConfig)
+}
+
+func tunnelClient(dial func(ctx context.Context, network, address string) (net.Conn, error)) *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}},
+		TLSHandshakeTimeout: 10 * time.Second,
+		DialContext:         dial,
+	}}
+}
+
+// dialTunnel opens the WebSocket through outer, presents the Access headers and runs the pinned mTLS inside it.
+// The WebSocket belongs to the returned connection, not to ctx.
+func dialTunnel(ctx context.Context, outer *http.Client, address string, header http.Header, tlsConfig *tls.Config) (net.Conn, error) {
 	ws, _, err := websocket.Dial(ctx, "wss://"+address, &websocket.DialOptions{HTTPClient: outer, HTTPHeader: header})
 	if err != nil {
 		return nil, err

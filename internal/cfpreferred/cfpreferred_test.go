@@ -42,32 +42,33 @@ func TestSampleStaysInsideRanges(t *testing.T) {
 	}
 }
 
-func TestDialerPrefersAddressesThenFallsBack(t *testing.T) {
-	var dialed []string
-	base := func(_ context.Context, _, address string) (net.Conn, error) {
-		dialed = append(dialed, address)
-		if strings.HasPrefix(address, "104.16.0.2:") || address == "edge.example.com:443" {
-			c, _ := net.Pipe()
-			return c, nil
-		}
-		return nil, net.UnknownNetworkError("down")
+func TestParseListHeaderAfterComments(t *testing.T) {
+	list, err := ParseList(strings.NewReader("# generated\n\nIP 地址,已发送\n104.16.1.1,4\n"))
+	if err != nil || len(list) != 1 {
+		t.Fatal(list, err)
 	}
-	addrs := []netip.Addr{netip.MustParseAddr("104.16.0.1"), netip.MustParseAddr("104.16.0.2")}
-	if _, err := Dialer(addrs, base)(t.Context(), "tcp", "edge.example.com:443"); err != nil {
+	if _, err := ParseList(strings.NewReader("104.16.1.1\nIP 地址,已发送\n")); err == nil {
+		t.Fatal("a non-address line after the first must be rejected")
+	}
+}
+
+func TestParseListRejectsOversizedInput(t *testing.T) {
+	big := strings.Repeat("# padding padding padding padding\n", 40000) + "8.8.8.8\n"
+	if _, err := ParseList(strings.NewReader(big)); err == nil {
+		t.Fatal("a truncated list must be rejected, not partially imported")
+	}
+}
+
+func TestPinDialsOnlyTheAddress(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(dialed, ",") != "104.16.0.1:443,104.16.0.2:443" {
-		t.Fatal(dialed)
-	}
-	dialed = nil
-	if _, err := Dialer(addrs[:1], base)(t.Context(), "tcp", "edge.example.com:443"); err != nil {
+	defer l.Close()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	c, err := Pin(netip.MustParseAddr("127.0.0.1"))(context.Background(), "tcp", "unresolvable.invalid:"+port)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(dialed, ",") != "104.16.0.1:443,edge.example.com:443" {
-		t.Fatal("did not fall back to the normal address:", dialed)
-	}
-	dialed = nil
-	if _, err := Dialer(nil, base)(t.Context(), "tcp", "edge.example.com:443"); err != nil || len(dialed) != 1 {
-		t.Fatal(dialed, err)
-	}
+	c.Close()
 }

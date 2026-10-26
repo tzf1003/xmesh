@@ -69,7 +69,10 @@ func Parse(s string) (netip.Addr, error) {
 func ParseList(r io.Reader) ([]netip.Addr, error) {
 	var out []netip.Addr
 	seen := map[netip.Addr]bool{}
-	sc := bufio.NewScanner(io.LimitReader(r, 1<<20))
+	const limit = 1 << 20
+	lr := &io.LimitedReader{R: r, N: limit + 1}
+	sc := bufio.NewScanner(lr)
+	first := true
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -77,8 +80,10 @@ func ParseList(r io.Reader) ([]netip.Addr, error) {
 		}
 		field, _, csv := strings.Cut(line, ",")
 		field = strings.TrimSpace(field)
-		if n == 1 && csv && !looksLikeIP(field) {
-			continue // CSV header
+		isFirst := first
+		first = false
+		if isFirst && csv && !looksLikeIP(field) {
+			continue // CSV header: the first line with content, after any blank lines or comments
 		}
 		a, err := Parse(field)
 		if err != nil {
@@ -92,6 +97,9 @@ func ParseList(r io.Reader) ([]netip.Addr, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
+	if lr.N <= 0 {
+		return nil, errors.New("列表超过 1 MiB")
+	}
 	if len(out) > MaxList {
 		out = out[:MaxList]
 	}
@@ -100,30 +108,15 @@ func ParseList(r io.Reader) ([]netip.Addr, error) {
 
 func looksLikeIP(s string) bool { _, err := netip.ParseAddr(s); return err == nil }
 
-// Dialer returns a dial function that connects to the given addresses in order instead of resolving the
-// host, falling back to the normal dialer when every address fails. addrs may be empty, which dials normally.
-func Dialer(addrs []netip.Addr, base func(ctx context.Context, network, address string) (net.Conn, error)) func(ctx context.Context, network, address string) (net.Conn, error) {
-	if base == nil {
-		base = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
-	}
+// Pin returns a dial function that connects to addr on the requested port instead of resolving the host.
+func Pin(addr netip.Addr) func(ctx context.Context, network, address string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 10 * time.Second}
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		_, port, err := net.SplitHostPort(address)
-		if err != nil || len(addrs) == 0 {
-			return base(ctx, network, address)
+		if err != nil {
+			return nil, err
 		}
-		for _, a := range addrs {
-			// A short per-address budget so a dead preferred address does not eat the whole dial deadline.
-			try, cancel := context.WithTimeout(ctx, 4*time.Second)
-			c, err := base(try, network, net.JoinHostPort(a.String(), port))
-			cancel()
-			if err == nil {
-				return c, nil
-			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-		}
-		return base(ctx, network, address)
+		return d.DialContext(ctx, network, net.JoinHostPort(addr.String(), port))
 	}
 }
 

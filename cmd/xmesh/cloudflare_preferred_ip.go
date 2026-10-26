@@ -86,6 +86,11 @@ func cloudflarePreferredIP(args []string, out io.Writer, in io.Reader) error {
 		return fmt.Errorf("列表里没有地址")
 	}
 	if *outPath == "" {
+		if *importPath != "" {
+			for _, a := range list {
+				fmt.Fprintln(out, a)
+			}
+		}
 		return nil
 	}
 	var buf bytes.Buffer
