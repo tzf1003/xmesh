@@ -123,7 +123,8 @@ func preferredAddrs(cfg config.Cloudflare) []netip.Addr {
 		}
 	}
 	seen := map[netip.Addr]bool{}
-	return slices.DeleteFunc(out, func(a netip.Addr) bool { dup := seen[a]; seen[a] = true; return dup })
+	out = slices.DeleteFunc(out, func(a netip.Addr) bool { dup := seen[a]; seen[a] = true; return dup })
+	return out[:min(len(out), cfpreferred.MaxList)]
 }
 
 // dialCloudflare opens a WebSocket to a peer's tunnel hostname, presents the Access service token, and
