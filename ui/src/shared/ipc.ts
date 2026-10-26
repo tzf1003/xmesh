@@ -384,7 +384,7 @@ export interface PanelApi {
   /** GitHub Actions runner hosting (CTR-CTL-15). Tokens go in the request once and never come back. */
   ci<R extends CiRequest>(request: R): Promise<DataResult<CiResultFor<R>>>;
   computer(request: ComputerRequest): Promise<DataResult<ComputerResult>>;
-  /** Cloudflare preferred edge addresses (API 2.4): the pool and its scores, run a scan or a refresh, check pasted text. Settings are written through patchConfig. */
+  /** Cloudflare preferred edge addresses (API 2.4，2.5 加机房）: the pool and its scores, run a scan or a refresh, check pasted text. Settings are written through patchConfig. */
   preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>>;
 }
 

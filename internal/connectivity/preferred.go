@@ -67,7 +67,13 @@ type peerUse struct {
 type preferredFile struct {
 	Scan scanRecord           `json:"scan"`
 	URLs map[string]urlRecord `json:"urls,omitempty"`
+	// Nets remembers which colo a network (cfpreferred.NetKey) landed in, so later scans can look near the
+	// good ones and the pool can label addresses a scan did not reach this time.
+	Nets map[string]string `json:"nets,omitempty"`
 }
+
+// maxNets bounds how many networks are remembered.
+const maxNets = 4096
 
 type scanRecord struct {
 	At      time.Time `json:"at"`
@@ -75,6 +81,17 @@ type scanRecord struct {
 	Sample  int       `json:"sample,omitempty"`
 	Error   string    `json:"error,omitempty"`
 	Results []scanRow `json:"results,omitempty"`
+	// Chosen are the region keys or colo codes this scan kept addresses from; empty when it did not filter.
+	Chosen       []string     `json:"chosen,omitempty"`
+	Unidentified int          `json:"unidentified,omitempty"`
+	Regions      []scanRegion `json:"regions,omitempty"`
+}
+
+type scanRegion struct {
+	Key    string   `json:"key"`
+	Count  int      `json:"count"`
+	BestMS int      `json:"best_ms"`
+	Colos  []string `json:"colos,omitempty"`
 }
 
 type scanRow struct {
@@ -82,6 +99,7 @@ type scanRow struct {
 	LatencyMS int    `json:"latency_ms"`
 	Loss      int    `json:"loss"`
 	Keep      bool   `json:"keep,omitempty"`
+	Colo      string `json:"colo,omitempty"`
 }
 
 type urlRecord struct {
@@ -436,7 +454,7 @@ func (p *preferredPool) startScan(ctx context.Context, cfg config.Cloudflare) er
 	pool := p.members(cfg)
 	go func() {
 		rng := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 7))
-		addrs := cfpreferred.Sample(scan.Sample, scan.IPv6, rng)
+		addrs := p.sampleAddrs(scan, rng)
 		sampled := map[netip.Addr]bool{}
 		for _, a := range addrs {
 			sampled[a] = true
@@ -447,23 +465,99 @@ func (p *preferredPool) startScan(ctx context.Context, cfg config.Cloudflare) er
 			}
 		}
 		results := p.scanFn(ctx, addrs, host)
-		p.finishScan(ctx, host, len(addrs), results, scan.Keep, pool)
+		p.finishScan(ctx, host, len(addrs), results, scan, pool)
 	}()
 	return nil
 }
 
-func (p *preferredPool) finishScan(ctx context.Context, host string, tested int, results []cfpreferred.Result, keep int, pool []member) {
+// sampleAddrs draws the addresses to test. When the scan is limited to some regions and an earlier scan
+// found networks that landed there, half the sample comes from those networks: anycast keeps a whole /24 in
+// one colo, so neighbours of a near address are likelier to be near than a random address is.
+func (p *preferredPool) sampleAddrs(scan config.PreferredScan, rng *rand.Rand) []netip.Addr {
+	if scan.RegionMode == "none" {
+		return cfpreferred.Sample(scan.Sample, scan.IPv6, rng)
+	}
+	p.mu.Lock()
+	var near []string
+	for net, colo := range p.st.Nets {
+		if !scan.IPv6 && strings.Contains(net, ":") {
+			continue
+		}
+		if scan.RegionMode == "pick" && regionWanted(scan.Regions, colo) ||
+			scan.RegionMode == "auto" && slices.Contains(p.st.Scan.Chosen, cfpreferred.RegionOf(colo)) {
+			near = append(near, net)
+		}
+	}
+	p.mu.Unlock()
+	slices.Sort(near) // map order must not decide what the random draw sees
+	if len(near) == 0 {
+		return cfpreferred.Sample(scan.Sample, scan.IPv6, rng)
+	}
+	out := cfpreferred.SampleNets(near, scan.Sample/2, rng)
+	seen := map[netip.Addr]bool{}
+	for _, a := range out {
+		seen[a] = true
+	}
+	for _, a := range cfpreferred.Sample(scan.Sample-len(out), scan.IPv6, rng) {
+		if !seen[a] {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// regionWanted reports whether colo is covered by a pick list. An entry that is a region key (lower case,
+// such as "sea") names that region and never a colo, so "sea" does not match Seattle's SEA; any other entry is
+// a colo code, compared case-insensitively.
+func regionWanted(list []string, colo string) bool {
+	colo = strings.ToUpper(colo)
+	if colo == "" {
+		return false
+	}
+	region := cfpreferred.RegionOf(colo)
+	for _, w := range list {
+		if cfpreferred.IsRegionKey(w) {
+			if w == region {
+				return true
+			}
+		} else if strings.EqualFold(w, colo) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *preferredPool) finishScan(ctx context.Context, host string, tested int, results []cfpreferred.Result, scan config.PreferredScan, pool []member) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.scanning = false
 	rec := scanRecord{At: p.now(), Host: host, Sample: tested}
 	if ctx.Err() != nil {
-		rec = p.st.Scan // interrupted: keep the previous result
-		return
+		return // interrupted: keep the previous result
 	}
 	if len(results) == 0 {
 		rec.Error = "没有任何地址握手成功：检查主机名与本机网络"
-		rec.Results = p.st.Scan.Results
+		rec.Results, rec.Chosen, rec.Regions, rec.Unidentified = p.st.Scan.Results, p.st.Scan.Chosen, p.st.Scan.Regions, p.st.Scan.Unidentified
+		p.st.Scan = rec
+		p.save()
+		return
+	}
+	p.rememberNets(results)
+	rec.Regions, rec.Unidentified = regionStats(results)
+	allow, chosen := regionFilter(scan, rec.Regions)
+	// Skip the filter when no colo could be read at all: nothing to filter on.
+	if len(rec.Regions) == 0 {
+		allow, chosen = nil, nil
+	}
+	if scan.RegionMode == "pick" && allow != nil { // only what this scan actually found and kept
+		chosen = slices.DeleteFunc(slices.Clone(chosen), func(w string) bool {
+			return !slices.ContainsFunc(results, func(r cfpreferred.Result) bool { return regionWanted([]string{w}, r.Colo) })
+		})
+	}
+	rec.Chosen = chosen
+	if allow != nil && !slices.ContainsFunc(results, func(r cfpreferred.Result) bool { return allow(r.Colo) }) {
+		rec.Error = "指定的地区这次没有测到可用地址，保留上次的结果（下表是这次测到的地区分布）；可放宽地区或增大采样数"
+		rec.Results, rec.Chosen = p.st.Scan.Results, p.st.Scan.Chosen
 		p.st.Scan = rec
 		p.save()
 		return
@@ -477,8 +571,8 @@ func (p *preferredPool) finishScan(ctx context.Context, host string, tested int,
 	}
 	kept := 0
 	for _, r := range results {
-		row := scanRow{IP: r.Addr.String(), LatencyMS: int(r.Latency.Milliseconds()), Loss: int(r.LossRate()*100 + 0.5)}
-		if kept < keep && !pooled[r.Addr] {
+		row := scanRow{IP: r.Addr.String(), LatencyMS: int(r.Latency.Milliseconds()), Loss: int(r.LossRate()*100 + 0.5), Colo: r.Colo}
+		if kept < scan.Keep && !pooled[r.Addr] && (allow == nil || allow(r.Colo)) {
 			row.Keep = true
 			kept++
 		} else if !pooled[r.Addr] {
@@ -488,6 +582,90 @@ func (p *preferredPool) finishScan(ctx context.Context, host string, tested int,
 	}
 	p.st.Scan = rec
 	p.save()
+}
+
+// regionFilter turns the scan's region settings into a predicate on a colo code (nil: keep everything) and
+// the region keys or colo codes it admits. stats are the regions the scan saw, fastest first.
+func regionFilter(scan config.PreferredScan, stats []scanRegion) (func(colo string) bool, []string) {
+	switch scan.RegionMode {
+	case "none":
+		return nil, nil
+	case "pick":
+		list := slices.Clone(scan.Regions)
+		return func(colo string) bool { return regionWanted(list, colo) }, list
+	}
+	var chosen []string
+	for _, r := range stats {
+		if len(chosen) < scan.RegionCount {
+			chosen = append(chosen, r.Key)
+		}
+	}
+	return func(colo string) bool { return colo != "" && slices.Contains(chosen, cfpreferred.RegionOf(colo)) }, chosen
+}
+
+// regionStats groups the answering addresses by region, fastest region first, and counts those whose colo
+// could not be read.
+func regionStats(results []cfpreferred.Result) ([]scanRegion, int) {
+	byKey := map[string]*scanRegion{}
+	unknown := 0
+	for _, r := range results {
+		key := cfpreferred.RegionOf(r.Colo)
+		if key == "" {
+			unknown++
+			continue
+		}
+		g := byKey[key]
+		ms := int(r.Latency.Milliseconds())
+		if g == nil {
+			g = &scanRegion{Key: key, BestMS: ms}
+			byKey[key] = g
+		}
+		g.Count++
+		g.BestMS = min(g.BestMS, ms)
+		if !slices.Contains(g.Colos, r.Colo) {
+			g.Colos = append(g.Colos, r.Colo)
+		}
+	}
+	out := make([]scanRegion, 0, len(byKey))
+	for _, g := range byKey {
+		slices.Sort(g.Colos)
+		out = append(out, *g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].BestMS != out[j].BestMS {
+			return out[i].BestMS < out[j].BestMS
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out, unknown
+}
+
+// rememberNets records the colo each answering network landed in; the caller holds p.mu.
+func (p *preferredPool) rememberNets(results []cfpreferred.Result) {
+	if p.st.Nets == nil {
+		p.st.Nets = map[string]string{}
+	}
+	for _, r := range results {
+		if r.Colo != "" {
+			p.st.Nets[cfpreferred.NetKey(r.Addr)] = r.Colo
+		}
+	}
+	for len(p.st.Nets) > maxNets { // drop arbitrary entries; the next scan relearns them
+		for k := range p.st.Nets {
+			delete(p.st.Nets, k)
+			break
+		}
+	}
+}
+
+// coloOf is the colo last seen for an address: its own scan row, else its network's.
+func (p *preferredPool) coloOf(a netip.Addr) string {
+	for _, r := range p.st.Scan.Results {
+		if r.IP == a.String() && r.Colo != "" {
+			return r.Colo
+		}
+	}
+	return p.st.Nets[cfpreferred.NetKey(a)]
 }
 
 // ---- view ----
@@ -548,6 +726,8 @@ func (p *preferredPool) state(cfg config.Cloudflare) v2.PreferredIPState {
 				e.Status, e.CooldownUntil = "cooling", at(s.cooldown)
 			}
 		}
+		e.Colo = p.coloOf(m.addr)
+		e.Region = cfpreferred.RegionOf(e.Colo)
 		out.Pool = append(out.Pool, e)
 	}
 	count := map[string]int{}
@@ -593,6 +773,10 @@ func (p *preferredPool) state(cfg config.Cloudflare) v2.PreferredIPState {
 		if r.Keep {
 			scan.Kept++
 		}
+	}
+	scan.Regions, scan.Chosen, scan.Unidentified = []v2.PreferredIPRegion{}, append([]string{}, p.st.Scan.Chosen...), p.st.Scan.Unidentified
+	for _, g := range p.st.Scan.Regions {
+		scan.Regions = append(scan.Regions, v2.PreferredIPRegion{Key: g.Key, Name: cfpreferred.RegionName(g.Key), Count: g.Count, BestMS: g.BestMS, Colos: append([]string{}, g.Colos...)})
 	}
 	out.Scan = scan
 	ids := make([]string, 0, len(cfg.Peers))

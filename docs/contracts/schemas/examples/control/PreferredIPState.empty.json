@@ -13,7 +13,10 @@
     "last_at": null,
     "next_at": null,
     "kept": 0,
-    "error": ""
+    "error": "",
+    "regions": [],
+    "chosen": [],
+    "unidentified": 0
   },
   "peers": []
 }

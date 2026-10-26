@@ -11,8 +11,8 @@ import { useT } from "../i18n";
 import { Icon } from "../icons";
 import { formatTime } from "../lib/format";
 import {
-  MAX_SOURCES, MAX_SOURCE_IPS, REFRESH_INTERVALS, durationSeconds, SCAN_INTERVALS, blankSource, parseIps, policyProblem, policyValue, readPolicy, samePolicy,
-  type PeerMode, type Policy, type Source, type SourceType,
+  MAX_REGION_COUNT, MAX_SOURCES, MAX_SOURCE_IPS, REGIONS, REFRESH_INTERVALS, durationSeconds, SCAN_INTERVALS, blankSource, parseIps, policyProblem, policyValue, readPolicy, samePolicy,
+  type PeerMode, type Policy, type RegionMode, type Source, type SourceType,
 } from "../lib/preferred-ip";
 import { applySaved } from "../lib/reload";
 
@@ -61,6 +61,7 @@ function PreferredIpPage({ ctx }: { ctx: PageContext }): JSX.Element {
     file: c("文件来源要填写绝对路径。", "A file source needs an absolute path."),
     peer: c("按设备设为固定时，要为它填写地址。", "A device set to fixed needs addresses."),
     ips: c(`一个来源最多 ${MAX_SOURCE_IPS} 个地址，导入的多余地址已丢弃。`, `A source holds at most ${MAX_SOURCE_IPS} addresses; extra imported ones were dropped.`),
+    region: c("指定地区模式至少要选一个地区或填一个机房代码。", "Pick-regions mode needs at least one region or colo code."),
     sources: c(`来源最多 ${MAX_SOURCES} 个。`, `At most ${MAX_SOURCES} sources.`),
   };
 
@@ -192,13 +193,16 @@ function Overview({ c, draft, state, writable, busy, edit, run }: ActionProps): 
   </>;
 }
 
+const regionLabel = (c: Copy, key: string): string => { const r = REGIONS.find((x) => x.key === key); return r ? c(r.zh, r.en) : key; };
+
 function PoolTable({ c, entries }: { c: Copy; entries: PreferredIPEntry[] }): JSX.Element {
   const status = (e: PreferredIPEntry): JSX.Element => e.status === "ok" ? <Badge kind="ok">{c("可用", "Healthy")}</Badge> : e.status === "cooling" ? <Badge kind="warn">{c("冷却中", "Cooling")}</Badge> : <Badge>{c("未测", "Untested")}</Badge>;
   return <div class="table-wrap"><table data-testid="pip-pool-table">
-    <thead><tr><th scope="col">IP</th><th scope="col">{c("来源", "Source")}</th><th scope="col">{c("状态", "Status")}</th><th scope="col">{c("延时", "Latency")}</th><th scope="col">{c("丢包", "Loss")}</th><th scope="col">{c("最近使用", "Last used")}</th></tr></thead>
+    <thead><tr><th scope="col">IP</th><th scope="col">{c("来源", "Source")}</th><th scope="col">{c("机房（地区）", "Colo (region)")}</th><th scope="col">{c("状态", "Status")}</th><th scope="col">{c("延时", "Latency")}</th><th scope="col">{c("丢包", "Loss")}</th><th scope="col">{c("最近使用", "Last used")}</th></tr></thead>
     <tbody>{entries.map((e) => <tr key={e.ip} data-testid={`pip-row-${e.ip}`}>
       <td class="mono">{e.ip}</td>
       <td>{c(...SOURCE_LABEL[e.source])}</td>
+      <td data-testid={`pip-colo-${e.ip}`}>{!e.colo ? <span class="hint">—</span> : <>{e.colo} <span class="hint">{regionLabel(c, e.region)}</span></>}</td>
       <td>{status(e)}{e.status === "cooling" && e.cooldown_until && <span class="hint"> {c(`至 ${formatTime(e.cooldown_until)}`, `until ${formatTime(e.cooldown_until)}`)}</span>}{e.failures > 0 && e.status !== "cooling" && <span class="hint"> {c(`失败 ${e.failures} 次`, `${e.failures} failed`)}</span>}</td>
       <td>{e.latency_ms === null ? "—" : `${e.latency_ms} ms`}</td>
       <td>{e.loss_percent === null ? "—" : `${e.loss_percent}%`}</td>
@@ -303,9 +307,57 @@ function PoolTab({ c, draft, state, writable, busy, edit, run, openImport }: Act
         <label class="field"><span>{c("留下最好的", "Keep best")}</span><input type="number" min={1} max={64} value={draft.scan.keep} disabled={!writable} onInput={(e) => { const n = Number(e.currentTarget.value); edit((p) => ({ ...p, scan: { ...p.scan, keep: Number.isFinite(n) ? Math.min(64, Math.max(1, Math.trunc(n))) : p.scan.keep } })); }} data-testid="pip-keep" /></label>
         <label class="field"><span>{c("测速主机名（可空）", "Test hostname (optional)")}</span><input class="mono" value={draft.scan.host} placeholder={state?.scan.host || "xmesh-….example.com"} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value.trim(); edit((p) => ({ ...p, scan: { ...p.scan, host: v } })); }} data-testid="pip-scan-host" /></label>
       </div>
+      <RegionSettings c={c} draft={draft} state={state} writable={writable} edit={edit} />
       <Switch checked={draft.scan.ipv6} disabled={!writable} onChange={(v) => edit((p) => ({ ...p, scan: { ...p.scan, ipv6: v } }))} label={c("同时抽样 IPv6 地址", "Also sample IPv6")} hint={c("本机要有 IPv6 出口才有意义。", "Only useful when this machine has IPv6 connectivity.")} />
     </section>
   </>;
+}
+
+function RegionSettings({ c, draft, state, writable, edit }: { c: Copy; draft: Policy; state: PreferredIPState | undefined; writable: boolean; edit: ActionProps["edit"] }): JSX.Element {
+  const sc = draft.scan;
+  const [typed, setTyped] = useState("");
+  const setScan = (next: Partial<Policy["scan"]>): void => edit((p) => ({ ...p, scan: { ...p.scan, ...next } }));
+  const toggle = (key: string): void => setScan({ regions: sc.regions.includes(key) ? sc.regions.filter((r) => r !== key) : [...sc.regions, key] });
+  const known = new Set(REGIONS.map((r) => r.key));
+  const codes = sc.regions.filter((r) => !known.has(r));
+  const addCodes = (): void => {
+    const add = typed.split(/[\s,;]+/).map((x) => x.toUpperCase()).filter((x) => /^[A-Z]{3}$/.test(x) && !sc.regions.includes(x));
+    if (add.length > 0) setScan({ regions: [...sc.regions, ...add] });
+    setTyped("");
+  };
+  const modes: [RegionMode, string, string, string, string][] = [
+    ["none", "不限制", "Any", "留下最快的，不管在哪个机房。", "Keep the fastest wherever they are."],
+    ["auto", "自动（推荐）", "Automatic (recommended)", "测速后只留延时最低的几个地区。", "After a scan, keep only the lowest-latency regions."],
+    ["pick", "指定地区", "Pick regions", "只留你选的地区或机房。", "Keep only the regions or colos you pick."],
+  ];
+  const scan = state?.scan;
+  return <div data-testid="pip-regions">
+    <h3>{c("机房与地区", "Data centres and regions")}</h3>
+    <p class="hint">{c("同一个地址在不同网络会落到不同机房；落到远处的机房延时很高。只作用于测速自己加入的地址，手动、文件和订阅的地址不会被删。", "The same address lands in different data centres from different networks, and far ones are slow. This only affects addresses the scan added; manual, file and subscription addresses are never removed.")}</p>
+    <fieldset class="stack">
+      {modes.map(([mode, zh, en, hzh, hen]) => <label class="check" key={mode}><input type="radio" name="pip-region-mode" checked={sc.regionMode === mode} disabled={!writable} onChange={() => setScan({ regionMode: mode })} data-testid={`pip-region-mode-${mode}`} /><span><strong>{c(zh, en)}</strong><span class="hint"> {c(hzh, hen)}</span></span></label>)}
+    </fieldset>
+    {sc.regionMode === "auto" && <label class="field pip-inline"><span>{c("保留最快的地区数", "Fastest regions to keep")}</span><input type="number" min={1} max={MAX_REGION_COUNT} value={sc.regionCount} disabled={!writable} onInput={(e) => { const n = Number(e.currentTarget.value); setScan({ regionCount: Number.isFinite(n) ? Math.min(MAX_REGION_COUNT, Math.max(1, Math.trunc(n))) : sc.regionCount }); }} data-testid="pip-region-count" /></label>}
+    {sc.regionMode === "pick" && <div class="stack">
+      <div class="pip-chips" role="group" aria-label={c("地区", "Regions")}>
+        {REGIONS.map((r) => <button type="button" key={r.key} class={`btn${sc.regions.includes(r.key) ? " primary" : ""}`} aria-pressed={sc.regions.includes(r.key)} disabled={!writable} onClick={() => toggle(r.key)} data-testid={`pip-region-${r.key}`}>{c(r.zh, r.en)}</button>)}
+        {codes.map((code) => <button type="button" key={code} class="btn primary" aria-pressed={true} disabled={!writable} onClick={() => toggle(code)} title={c("点击移除", "Click to remove")} data-testid={`pip-region-${code}`}>{code} ×</button>)}
+      </div>
+      <label class="field"><span>{c("其他机房代码（三个字母，如 HKG、NRT，空格或逗号分隔）", "Other colo codes (three letters such as HKG, NRT; space or comma separated)")}</span>
+        <input class="mono" value={typed} placeholder="HKG NRT" disabled={!writable} onInput={(e) => setTyped(e.currentTarget.value)} onBlur={addCodes} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCodes(); } }} data-testid="pip-region-codes" /></label>
+    </div>}
+    {scan && (scan.regions ?? []).length > 0 && <div data-testid="pip-region-stats">
+      <h4>{c("上次测速的地区分布", "Regions in the last scan")}</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">{c("地区", "Region")}</th><th scope="col">{c("机房", "Colos")}</th><th scope="col">{c("地址数", "Addresses")}</th><th scope="col">{c("最低延时", "Best latency")}</th></tr></thead>
+        <tbody>{(scan.regions ?? []).map((g) => <tr key={g.key} data-testid={`pip-region-row-${g.key}`}>
+          <td>{regionLabel(c, g.key)}{(scan.chosen ?? []).includes(g.key) && <> <Badge kind="ok">{c("已保留", "Kept")}</Badge></>}</td>
+          <td class="mono">{g.colos.join(" ")}</td><td>{g.count}</td><td>{g.best_ms} ms</td>
+        </tr>)}</tbody>
+      </table></div>
+      {(scan.unidentified ?? 0) > 0 && <p class="hint">{c(`另有 ${scan.unidentified} 个地址读不到机房。`, `${scan.unidentified} more addresses had no readable colo.`)}</p>}
+    </div>}
+  </div>;
 }
 
 function ImportDialog({ c, onClose, onImport }: { c: Copy; onClose(): void; onImport(ips: string[]): void }): JSX.Element {

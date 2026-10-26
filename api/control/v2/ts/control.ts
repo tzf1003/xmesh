@@ -1956,6 +1956,14 @@ export interface PreferredIPEntry {
   failures: number;
   cooldown_until: Timestamp | null;
   last_used_at: Timestamp | null;
+  /**
+   * 2.5 起。最近一次测速看到的 Cloudflare 机房（IATA 三字母代码），未读到为空串。
+   */
+  colo: string;
+  /**
+   * 2.5 起。机房所属地区：hk、jp、kr、sg、sea、us-w、us-e、eu、other；colo 为空时为空串。
+   */
+  region: string;
 }
 /**
  * index 为 -1 表示旧的 preferred_ips / preferred_ips_file 字段。
@@ -1979,6 +1987,25 @@ export interface PreferredIPScanState {
   next_at: Timestamp | null;
   kept: number;
   error: string;
+  /**
+   * 2.5 起。上次测速里应答地址按地区的分布，最快的地区在前。
+   */
+  regions: PreferredIPRegion[];
+  /**
+   * 2.5 起。上次测速保留地址的地区键或机房代码；没做地区筛选时为空。
+   */
+  chosen: string[];
+  /**
+   * 2.5 起。应答但读不到机房的地址数。
+   */
+  unidentified: number;
+}
+export interface PreferredIPRegion {
+  key: string;
+  name: string;
+  count: number;
+  best_ms: number;
+  colos: string[];
 }
 /**
  * current 为空表示最近一次连接走了 DNS 地址或尚未连接。
@@ -2101,7 +2128,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "2.4" as const;
+export const CONTROL_API_VERSION = "2.5" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */

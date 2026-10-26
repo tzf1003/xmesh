@@ -1,5 +1,5 @@
 {
-  "api_version": "2.4",
+  "api_version": "2.5",
   "routes": [
     {
       "id": "control.status.get",

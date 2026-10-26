@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xmesh:schema:control-preferred-ip:2",
   "title": "Cloudflare 优选 IP",
-  "description": "API 2.4 起。池与测速状态只读；来源、策略与按设备覆盖写在 mesh.cloudflare.preferred_ip，经 PATCH /v2/config 修改。",
+  "description": "API 2.4 起（2.5 加机房与地区）。池与测速状态只读；来源、策略与按设备覆盖写在 mesh.cloudflare.preferred_ip，经 PATCH /v2/config 修改。",
   "$defs": {
     "PreferredIPEntry": {
       "type": "object",
@@ -15,7 +15,9 @@
         "loss_percent",
         "failures",
         "cooldown_until",
-        "last_used_at"
+        "last_used_at",
+        "colo",
+        "region"
       ],
       "properties": {
         "ip": {
@@ -82,6 +84,14 @@
               "type": "null"
             }
           ]
+        },
+        "colo": {
+          "type": "string",
+          "description": "2.5 起。最近一次测速看到的 Cloudflare 机房（IATA 三字母代码），未读到为空串。"
+        },
+        "region": {
+          "type": "string",
+          "description": "2.5 起。机房所属地区：hk、jp、kr、sg、sea、us-w、us-e、eu、other；colo 为空时为空串。"
         }
       }
     },
@@ -148,7 +158,10 @@
         "last_at",
         "next_at",
         "kept",
-        "error"
+        "error",
+        "regions",
+        "chosen",
+        "unidentified"
       ],
       "properties": {
         "enabled": {
@@ -200,6 +213,25 @@
         },
         "error": {
           "type": "string"
+        },
+        "regions": {
+          "type": "array",
+          "description": "2.5 起。上次测速里应答地址按地区的分布，最快的地区在前。",
+          "items": {
+            "$ref": "#/$defs/PreferredIPRegion"
+          }
+        },
+        "chosen": {
+          "type": "array",
+          "description": "2.5 起。上次测速保留地址的地区键或机房代码；没做地区筛选时为空。",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unidentified": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "2.5 起。应答但读不到机房的地址数。"
         }
       }
     },
@@ -383,6 +415,39 @@
         }
       },
       "description": "accepted 是去重后可以导入的新地址。"
+    },
+    "PreferredIPRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "name",
+        "count",
+        "best_ms",
+        "colos"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "best_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "colos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

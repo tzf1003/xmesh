@@ -35,12 +35,14 @@ export interface FakeCloudflare {
     fixed_ips?: string[];
     no_dns_fallback?: boolean;
     sources?: { type: string; disabled?: boolean; name?: string; ips?: string[]; path?: string; url?: string }[];
-    scan?: { enabled?: boolean; interval?: string; sample?: number; keep?: number; host?: string };
+    scan?: { enabled?: boolean; interval?: string; sample?: number; keep?: number; host?: string; region_mode?: string; region_count?: number; regions?: string[] };
     peers?: Record<string, { mode?: string; ips?: string[] }>;
   };
 }
 
 const iso = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, ".000Z");
+
+const COLOS: Record<string, [string, string]> = { "104.18.32.77": ["HKG", "hk"], "172.64.153.21": ["NRT", "jp"], "162.159.136.5": ["LAX", "us-w"] };
 
 export class PreferredFake {
   private scanAt: Date | undefined;
@@ -60,7 +62,7 @@ export class PreferredFake {
       seen.add(ip);
       const cooling = this.cooling.has(ip);
       const measured = source === "scan";
-      pool.push({ ip, source, status: cooling ? "cooling" : measured ? "ok" : "untested", latency_ms: measured ? 120 + pool.length * 20 : null, loss_percent: measured ? 0 : null, failures: cooling ? 3 : 0, cooldown_until: cooling ? iso(new Date(Date.now() + 1800_000)) : null, last_used_at: null });
+      pool.push({ ip, source, status: cooling ? "cooling" : measured ? "ok" : "untested", latency_ms: measured ? 120 + pool.length * 20 : null, loss_percent: measured ? 0 : null, failures: cooling ? 3 : 0, cooldown_until: cooling ? iso(new Date(Date.now() + 1800_000)) : null, last_used_at: null, colo: this.scanAt ? COLOS[ip]?.[0] ?? "" : "", region: this.scanAt ? COLOS[ip]?.[1] ?? "" : "" });
     };
     for (const ip of cf.preferred_ips ?? []) add(ip, "manual");
     const sources = pp.sources ?? [];
@@ -88,7 +90,9 @@ export class PreferredFake {
     const interval = pp.scan?.interval ?? "6h";
     return {
       enabled: pp.enabled !== false, mode: pp.mode ?? "smart", no_dns_fallback: pp.no_dns_fallback === true, pool, sources: rows,
-      scan: { enabled: pp.scan?.enabled === true, running: false, sample: pp.scan?.sample ?? 200, host: pp.scan?.host ?? Object.values(cf.peers ?? {}).sort()[0] ?? "", started_at: null, last_at: this.scanAt ? iso(this.scanAt) : null, next_at: this.scanAt && pp.scan?.enabled ? iso(new Date(this.scanAt.getTime() + (interval.endsWith("m") ? 60_000 : 3600_000) * parseInt(interval, 10))) : null, kept: this.scanAt && pp.scan?.enabled ? Math.min(3, pp.scan.keep ?? 8) : 0, error: this.scanError },
+      scan: { enabled: pp.scan?.enabled === true, running: false, sample: pp.scan?.sample ?? 200, host: pp.scan?.host ?? Object.values(cf.peers ?? {}).sort()[0] ?? "", started_at: null, last_at: this.scanAt ? iso(this.scanAt) : null, next_at: this.scanAt && pp.scan?.enabled ? iso(new Date(this.scanAt.getTime() + (interval.endsWith("m") ? 60_000 : 3600_000) * parseInt(interval, 10))) : null, kept: this.scanAt && pp.scan?.enabled ? Math.min(3, pp.scan.keep ?? 8) : 0, error: this.scanError,
+        regions: this.scanAt ? [{ key: "hk", name: "港澳台", count: 9, best_ms: 120, colos: ["HKG"] }, { key: "jp", name: "日本", count: 6, best_ms: 140, colos: ["KIX", "NRT"] }, { key: "us-w", name: "美西", count: 4, best_ms: 180, colos: ["LAX"] }] : [],
+        chosen: this.scanAt ? ["hk", "jp"] : [], unidentified: this.scanAt ? 2 : 0 },
       peers,
     };
   }

@@ -2,6 +2,7 @@ package cfpreferred
 
 import (
 	"context"
+	"io"
 	"math/rand/v2"
 	"net"
 	"net/netip"
@@ -71,4 +72,50 @@ func TestPinDialsOnlyTheAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Close()
+}
+
+func TestRegionOf(t *testing.T) {
+	for colo, want := range map[string]string{"hkg": "hk", "NRT": "jp", "LAX": "us-w", "FRA": "eu", "ZZZ": RegionOther, "": ""} {
+		if got := RegionOf(colo); got != want {
+			t.Errorf("%q: %q, want %q", colo, got, want)
+		}
+	}
+	if !ValidRegion("us-e") || !ValidRegion("hkg") || ValidRegion("hongkong") || ValidRegion("h1g") {
+		t.Fatal("ValidRegion")
+	}
+}
+
+func TestSampleNetsStaysInNets(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, a := range SampleNets([]string{"104.16.9.0/24", "8.8.8.0/24", "bad"}, 20, rng) {
+		if NetKey(a) != "104.16.9.0/24" {
+			t.Fatal(a)
+		}
+	}
+	if SampleNets(nil, 5, rng) != nil {
+		t.Fatal("no nets, no addresses")
+	}
+}
+
+func TestReadColo(t *testing.T) {
+	read := func(resp string) string {
+		c, s := net.Pipe()
+		go func() {
+			buf := make([]byte, 512)
+			s.Read(buf)
+			io.WriteString(s, resp)
+			s.Close()
+		}()
+		defer c.Close()
+		return readColo(context.Background(), c, "x.example.com")
+	}
+	if got := read("HTTP/1.1 200 OK\r\nContent-Length: 26\r\n\r\nfl=1\nip=1.1.1.1\ncolo=hkg\n"); got != "HKG" {
+		t.Fatal(got)
+	}
+	if got := read("HTTP/1.1 403 Forbidden\r\nCf-Ray: 8c3f1a2b3c4d5e6f-NRT\r\nContent-Length: 0\r\n\r\n"); got != "NRT" {
+		t.Fatal(got)
+	}
+	if got := read("garbage"); got != "" {
+		t.Fatal(got)
+	}
 }

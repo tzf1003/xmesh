@@ -264,7 +264,10 @@
                     "sample": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 200, "description": "每次抽样的地址数。0 或省略表示使用默认值 200。" },
                     "keep": { "type": "integer", "minimum": 0, "maximum": 64, "default": 8, "description": "测速后留下的地址数。0 或省略表示使用默认值 8。" },
                     "ipv6": { "type": "boolean" },
-                    "host": { "type": "string", "description": "测速用的隧道主机名，缺省取第一个对端的。" }
+                    "host": { "type": "string", "description": "测速用的隧道主机名，缺省取第一个对端的。" },
+                    "region_mode": { "enum": ["auto", "none", "pick"], "default": "auto", "description": "测速留下哪些机房的地址（只管测速自己加的）：auto 留延时最低的 region_count 个地区，pick 只留 regions，none 不限。" },
+                    "region_count": { "type": "integer", "minimum": 0, "maximum": 6, "default": 2, "description": "auto 模式留几个地区。0 或省略表示 2。" },
+                    "regions": { "type": "array", "maxItems": 40, "items": { "type": "string" }, "description": "pick 模式的地区键（hk、jp、kr、sg、sea、us-w、us-e、eu、other）或三字母机房代码。" }
                   }
                 },
                 "peers": {

@@ -21,7 +21,30 @@ export interface ScanSettings {
   keep: number;
   ipv6: boolean;
   host: string;
+  /** Which data centres a scan keeps addresses from: the fastest regions, only the picked ones, or any. */
+  regionMode: RegionMode;
+  /** How many regions "auto" keeps. */
+  regionCount: number;
+  /** Region keys or three-letter colo codes for "pick". */
+  regions: string[];
 }
+
+export type RegionMode = "auto" | "none" | "pick";
+
+/** Cloudflare data centres grouped for picking; the kernel owns the colo table and sends the key on each address. */
+export const REGIONS: readonly { key: string; zh: string; en: string }[] = [
+  { key: "hk", zh: "港澳台", en: "HK / Macau / Taiwan" },
+  { key: "jp", zh: "日本", en: "Japan" },
+  { key: "kr", zh: "韩国", en: "Korea" },
+  { key: "sg", zh: "新加坡", en: "Singapore" },
+  { key: "sea", zh: "东南亚", en: "Southeast Asia" },
+  { key: "us-w", zh: "美西", en: "US West" },
+  { key: "us-e", zh: "美东", en: "US East" },
+  { key: "eu", zh: "欧洲", en: "Europe" },
+  { key: "other", zh: "其他地区", en: "Other" },
+];
+export const DEFAULT_REGION_COUNT = 2;
+export const MAX_REGION_COUNT = 6;
 
 export interface PeerPolicy {
   mode: PeerMode;
@@ -58,7 +81,7 @@ export const defaultPolicy = (): Policy => ({
   cooldown: "30m",
   noDnsFallback: false,
   sources: [],
-  scan: { enabled: false, interval: "6h", sample: 200, keep: 8, ipv6: false, host: "" },
+  scan: { enabled: false, interval: "6h", sample: 200, keep: 8, ipv6: false, host: "", regionMode: "auto", regionCount: DEFAULT_REGION_COUNT, regions: [] },
   peers: {},
 });
 
@@ -119,7 +142,7 @@ export function readPolicy(parsed: unknown): Loaded {
       url: text(s.url),
       refresh: text(s.refresh, DEFAULT_REFRESH),
     })),
-    scan: { enabled: scan.enabled === true, interval: text(scan.interval, d.scan.interval), sample: int(scan.sample, 0) > 0 ? int(scan.sample, 0) : d.scan.sample, keep: int(scan.keep, 0) > 0 ? int(scan.keep, 0) : d.scan.keep, ipv6: scan.ipv6 === true, host: text(scan.host) },
+    scan: { enabled: scan.enabled === true, interval: text(scan.interval, d.scan.interval), sample: int(scan.sample, 0) > 0 ? int(scan.sample, 0) : d.scan.sample, keep: int(scan.keep, 0) > 0 ? int(scan.keep, 0) : d.scan.keep, ipv6: scan.ipv6 === true, host: text(scan.host), regionMode: scan.region_mode === "none" || scan.region_mode === "pick" ? scan.region_mode : "auto", regionCount: Math.min(MAX_REGION_COUNT, Math.max(1, int(scan.region_count, 0) || DEFAULT_REGION_COUNT)), regions: strings(scan.regions) },
     peers: {},
   };
   if (isObject(pp.peers)) {
@@ -154,7 +177,7 @@ export function policyValue(p: Policy): Record<string, unknown> {
     }));
   }
   const sc = p.scan;
-  if (sc.enabled || sc.host !== "" || sc.ipv6 || sc.interval !== d.scan.interval || sc.sample !== d.scan.sample || sc.keep !== d.scan.keep) {
+  if (sc.enabled || sc.host !== "" || sc.ipv6 || sc.interval !== d.scan.interval || sc.sample !== d.scan.sample || sc.keep !== d.scan.keep || sc.regionMode !== "auto" || sc.regionCount !== DEFAULT_REGION_COUNT) {
     out.scan = {
       enabled: sc.enabled,
       ...(sc.interval !== d.scan.interval && { interval: sc.interval }),
@@ -162,6 +185,9 @@ export function policyValue(p: Policy): Record<string, unknown> {
       ...(sc.keep !== d.scan.keep && { keep: sc.keep }),
       ...(sc.ipv6 && { ipv6: true }),
       ...(sc.host !== "" && { host: sc.host }),
+      ...(sc.regionMode !== "auto" && { region_mode: sc.regionMode }),
+      ...(sc.regionCount !== DEFAULT_REGION_COUNT && { region_count: sc.regionCount }),
+      ...(sc.regionMode === "pick" && sc.regions.length > 0 && { regions: sc.regions }),
     };
   }
   const peers = Object.entries(p.peers).filter(([, o]) => o.mode !== "default");
@@ -179,8 +205,9 @@ export function parseIps(input: string): string[] {
 }
 
 /** What a draft cannot be saved with, as a message key the page shows; undefined when it is fine. */
-export function policyProblem(p: Policy): "fixed" | "url" | "file" | "peer" | "sources" | "ips" | undefined {
+export function policyProblem(p: Policy): "fixed" | "url" | "file" | "peer" | "sources" | "ips" | "region" | undefined {
   if (p.mode === "fixed" && p.fixedIps.length === 0) return "fixed";
+  if (p.scan.regionMode === "pick" && p.scan.regions.length === 0) return "region";
   if (p.sources.length > MAX_SOURCES) return "sources";
   for (const s of p.sources) {
     if (s.type === "url" && !/^https:\/\/[^/\s@]+/.test(s.url)) return "url";

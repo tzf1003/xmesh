@@ -420,10 +420,12 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 类型、路由和模式见 `control-computer.schema.json` 与 `control-routes.json`。远程桌面工具及执行器协议见 [Computer](computer.md)。
 
-## Cloudflare 优选 IP（API 2.4）
+## Cloudflare 优选 IP（API 2.4，2.5 加机房与地区）
 
 `GET /v2/preferred-ip`（能力 `config.read`）返回优选地址池：每个地址的来源（manual、file、url、scan）、状态（ok、untested、cooling）、延时、丢包与连续失败次数；各来源的条数、订阅最近一次抓取时间与错误；定时测速的状态（是否在跑、上次与下次时间）；以及每台已配对设备的接入方式与最近一次连接用的地址。`POST /v2/preferred-ip/run`（能力 `config.write`）接受 `{ "task": "scan" | "refresh" }`：`scan` 在后台开始测速并立即返回，`refresh` 抓取所有订阅来源，完成后返回；两者都返回最新状态。`POST /v2/preferred-ip/inspect`（能力 `config.read`）只检查粘贴的文本（每行一个地址，或 CloudflareSpeedTest 的 result.csv），逐行报告 new、existing 或 rejected，不改变任何状态。
 
 来源、默认接入方式、定时测速与按设备覆盖都写在 `mesh.cloudflare.preferred_ip`，经 `PATCH /v2/config` 修改，立即生效，不需要重启。订阅地址只能是 https，默认不配置，由用户手动添加；设备会按 `refresh` 间隔访问它。只收落在 Cloudflare 公布 IP 段内的地址，其余行忽略；返回里只显示订阅地址的主机名，不含路径和查询参数。
+
+**机房与地区（API 2.5）。** 测速握手成功后再发一次 `GET /cdn-cgi/trace` 读出应答的机房（失败时取 `cf-ray` 后缀）。`PreferredIPEntry` 增加 `colo`、`region`；`PreferredIPScanState` 增加 `regions`（按地区的分布，最快在前）、`chosen`（保留地址所属的地区或机房代码）与 `unidentified`。`scan.region_mode` 默认 `auto`：只留延时最低的 `region_count` 个地区；`pick` 只留 `regions`；`none` 不限。该规则只作用于测速自己加入的地址；一次测速读不到任何机房时不筛选，`pick` 无结果时保留上次结果并给出 `error`。
 
 类型与路由见 `control-preferred-ip.schema.json` 与 `control-routes.json`。

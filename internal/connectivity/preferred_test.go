@@ -2,6 +2,7 @@ package connectivity
 
 import (
 	"context"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -262,5 +263,113 @@ func TestInspectStopsAtPoolCapacity(t *testing.T) {
 	r := newPreferredPool("").inspect(config.Cloudflare{}, strings.Join(lines, "\n"))
 	if len(r.Accepted) != cfpreferred.MaxList || r.Items[69].Status != "rejected" {
 		t.Fatal(len(r.Accepted), r.Items[69])
+	}
+}
+
+func scanResults() []cfpreferred.Result {
+	r := func(ip, colo string, ms int) cfpreferred.Result {
+		return cfpreferred.Result{Addr: netip.MustParseAddr(ip), Sent: 3, Latency: time.Duration(ms) * time.Millisecond, Colo: colo}
+	}
+	return []cfpreferred.Result{
+		r("104.16.1.1", "HKG", 40), r("104.16.2.1", "NRT", 60), r("104.16.3.1", "LAX", 180),
+		r("104.16.4.1", "FRA", 300), r("104.16.5.1", "", 310),
+	}
+}
+
+func finish(p *preferredPool, scan config.PreferredScan) []string {
+	p.scanning = true
+	p.finishScan(context.Background(), "win.example.com", 5, scanResults(), scan.Effective(), nil)
+	var kept []string
+	for _, r := range p.st.Scan.Results {
+		if r.Keep {
+			kept = append(kept, r.Colo)
+		}
+	}
+	return kept
+}
+
+func TestScanAutoKeepsFastestRegions(t *testing.T) {
+	p := newPreferredPool("")
+	got := finish(p, config.PreferredScan{Keep: 8})
+	if strings.Join(got, " ") != "HKG NRT" || strings.Join(p.st.Scan.Chosen, " ") != "hk jp" {
+		t.Fatalf("%v %v", got, p.st.Scan.Chosen)
+	}
+	if p.st.Scan.Unidentified != 1 || len(p.st.Scan.Regions) != 4 || p.st.Scan.Regions[0].Key != "hk" {
+		t.Fatalf("%+v", p.st.Scan)
+	}
+	if p.st.Nets["104.16.1.0/24"] != "HKG" {
+		t.Fatal(p.st.Nets)
+	}
+}
+
+func TestScanPickAndNone(t *testing.T) {
+	p := newPreferredPool("")
+	if got := finish(p, config.PreferredScan{Keep: 8, RegionMode: "pick", Regions: []string{"eu", "lax"}}); strings.Join(got, " ") != "LAX FRA" {
+		t.Fatal(got)
+	}
+	if got := finish(p, config.PreferredScan{Keep: 8, RegionMode: "none"}); len(got) != 5 {
+		t.Fatal(got)
+	}
+	if p2 := newPreferredPool(""); true {
+		finish(p2, config.PreferredScan{Keep: 8, RegionMode: "pick", Regions: []string{"hk", "kr"}})
+		if strings.Join(p2.st.Scan.Chosen, " ") != "hk" {
+			t.Fatal("chosen must only list what the scan found:", p2.st.Scan.Chosen)
+		}
+	}
+	// Nothing matches: the previous results stay and an error says why.
+	before := p.st.Scan.Results
+	if got := finish(p, config.PreferredScan{Keep: 8, RegionMode: "pick", Regions: []string{"kr"}}); len(got) != 5 || p.st.Scan.Error == "" || len(p.st.Scan.Results) != len(before) {
+		t.Fatalf("%v %+v", got, p.st.Scan)
+	}
+}
+
+func TestScanWithoutAnyColoDoesNotFilter(t *testing.T) {
+	p := newPreferredPool("")
+	p.scanning = true
+	res := scanResults()
+	for i := range res {
+		res[i].Colo = ""
+	}
+	p.finishScan(context.Background(), "h", 5, res, config.PreferredScan{Keep: 3}.Effective(), nil)
+	n := 0
+	for _, r := range p.st.Scan.Results {
+		if r.Keep {
+			n++
+		}
+	}
+	if n != 3 || p.st.Scan.Error != "" {
+		t.Fatalf("%d %+v", n, p.st.Scan)
+	}
+}
+
+func TestPoolEntriesShowColo(t *testing.T) {
+	p := newPreferredPool("")
+	finish(p, config.PreferredScan{Keep: 8})
+	cfg := config.Cloudflare{PreferredIPs: []string{"104.16.1.77"}, PreferredIP: &config.PreferredIP{Scan: &config.PreferredScan{Enabled: true}}}
+	st := p.state(cfg)
+	if st.Pool[0].Colo != "HKG" || st.Pool[0].Region != "hk" { // learned from its /24
+		t.Fatalf("%+v", st.Pool[0])
+	}
+}
+
+func TestPickRegionKeyIsNotAColoCode(t *testing.T) {
+	// "sea" is Southeast Asia; SEA is Seattle.
+	if regionWanted([]string{"sea"}, "SEA") || !regionWanted([]string{"sea"}, "BKK") {
+		t.Fatal("a region key must not match a colo code")
+	}
+	if !regionWanted([]string{"SEA"}, "sea") || regionWanted([]string{"SEA"}, "BKK") {
+		t.Fatal("an upper-case entry is a colo code")
+	}
+}
+
+func TestSamplingSkipsCachedIPv6WhenDisabled(t *testing.T) {
+	p := newPreferredPool("")
+	p.st.Nets = map[string]string{"2606:4700:1::/48": "HKG"}
+	p.st.Scan.Chosen = []string{"hk"}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, a := range p.sampleAddrs(config.PreferredScan{Sample: 40, RegionMode: "auto", RegionCount: 2}, rng) {
+		if a.Is6() {
+			t.Fatal(a)
+		}
 	}
 }

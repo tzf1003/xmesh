@@ -23,6 +23,10 @@ type PreferredIPEntry struct {
 	Failures      int   `json:"failures"`
 	CooldownUntil *Time `json:"cooldown_until"`
 	LastUsedAt    *Time `json:"last_used_at"`
+	// Colo is the Cloudflare data centre (IATA code) the last scan saw this address land in and Region its
+	// group key; both are empty until a scan has read them.
+	Colo   string `json:"colo"`
+	Region string `json:"region"`
 }
 
 // PreferredIPSourceState reports one configured source. Index is its position in
@@ -48,6 +52,22 @@ type PreferredIPScanState struct {
 	NextAt    *Time  `json:"next_at"`
 	Kept      int    `json:"kept"`
 	Error     string `json:"error"`
+	// Regions is where the last scan's answering addresses landed, fastest region first; Chosen is the
+	// region keys or colo codes the scan kept addresses from (empty when it did not filter), and
+	// Unidentified counts answering addresses whose colo could not be read.
+	Regions      []PreferredIPRegion `json:"regions"`
+	Chosen       []string            `json:"chosen"`
+	Unidentified int                 `json:"unidentified"`
+}
+
+// PreferredIPRegion is one group of colos in the last scan: how many addresses landed there, the best
+// latency among them, and which colos they were.
+type PreferredIPRegion struct {
+	Key    string   `json:"key"`
+	Name   string   `json:"name"`
+	Count  int      `json:"count"`
+	BestMS int      `json:"best_ms"`
+	Colos  []string `json:"colos"`
 }
 
 // PreferredIPPeerState is how one configured peer is dialed. Mode is smart, fixed or off; Current is the
