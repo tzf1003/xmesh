@@ -146,6 +146,7 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 			if phase.Err() != nil {
 				break
 			}
+			alone := !tried // the first attempt had the whole phase to itself
 			tried = true
 			started := time.Now()
 			try, cancel := context.WithTimeout(phase, cfg.PreferredAttemptTimeout())
@@ -160,7 +161,9 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if phase.Err() == nil { // an attempt cut short by the phase budget says nothing about the address
+			// An attempt cut short by the phase budget says nothing about the address, unless it had the whole
+			// budget to itself: then it is the one that is stalling, and must not stay first in line.
+			if phase.Err() == nil || alone {
 				pool.failed(a, cfg.PreferredFailThreshold(), cfg.PreferredCooldown())
 			}
 		}
