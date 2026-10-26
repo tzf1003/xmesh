@@ -590,7 +590,8 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 
 // clearCloudflareConfig drops the tunnel this device runs from mesh.cloudflare once its resources are
 // gone, so a later offer is not refused for a tunnel that no longer exists. It leaves the file alone when
-// the configured hostname is a different one, and keeps the peers the device has learned.
+// the configured hostname is a different one, and keeps the peers the device has learned. The secret
+// files the section pointed at are deleted with it.
 func clearCloudflareConfig(path, hostname string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -610,10 +611,14 @@ func clearCloudflareConfig(path, hostname string) error {
 	if configured != hostname {
 		return nil
 	}
+	var secrets []string
 	kept := cf.Content[:0]
 	for i := 0; i+1 < len(cf.Content); i += 2 {
 		switch cf.Content[i].Value {
-		case "hostname", "access_client_id", "access_client_secret_file", "tunnel_token_file":
+		case "access_client_secret_file", "tunnel_token_file":
+			secrets = append(secrets, cf.Content[i+1].Value)
+			continue
+		case "hostname", "access_client_id":
 			continue
 		case "enabled":
 			cf.Content[i+1].Value, cf.Content[i+1].Tag = "false", "!!bool"
@@ -636,7 +641,18 @@ func clearCloudflareConfig(path, hostname string) error {
 	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	// The files belonged to the tunnel just removed; leaving them would make a later join refuse to write.
+	for _, f := range secrets {
+		if f != "" {
+			if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func childMapping(parent *yaml.Node, key string) *yaml.Node {

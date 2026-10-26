@@ -228,6 +228,11 @@ func TestCloudflareRemoveClearsTheConfiguredTunnel(t *testing.T) {
 	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
 		t.Fatal(err)
 	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if _, err := os.Stat(filepath.Join(filepath.Dir(cfg), "cloudflare", f)); !os.IsNotExist(err) {
+			t.Errorf("%s was left behind: %v", f, err)
+		}
+	}
 	raw, _ := os.ReadFile(cfg)
 	text := string(raw)
 	for _, gone := range []string{"hostname:", "access_client_id", "access_client_secret_file", "tunnel_token_file"} {
