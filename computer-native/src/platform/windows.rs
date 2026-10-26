@@ -55,6 +55,8 @@ extern "system" {
     fn CallNextHookEx(hook: *mut c_void, code: i32, wparam: usize, lparam: isize) -> isize;
     fn UnhookWindowsHookEx(hook: *mut c_void) -> i32;
     fn GetMessageW(message: *mut Message, window: *mut c_void, min: u32, max: u32) -> i32;
+    fn GetPhysicalCursorPos(point: *mut Point) -> i32;
+    fn SetPhysicalCursorPos(x: i32, y: i32) -> i32;
 }
 #[link(name = "kernel32")]
 extern "system" {
@@ -63,6 +65,12 @@ extern "system" {
     fn GetModuleHandleW(name: *const u16) -> *mut c_void;
 }
 
+#[repr(C)]
+#[derive(Default)]
+struct Point {
+    x: i32,
+    y: i32,
+}
 #[repr(C)]
 struct Message {
     window: *mut c_void,
@@ -221,12 +229,36 @@ pub fn move_mouse_absolute(x: i32, y: i32) -> Result<(), &'static str> {
                 },
             },
         };
-        if SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) == 1 {
-            Ok(())
-        } else {
-            Err("input_failed")
+        if SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) != 1 {
+            return Err("input_failed");
         }
+        // SendInput only reports that the event entered the input queue. KVM and
+        // remote-control tools can park the cursor and drop injected motion, so
+        // confirm the position and fall back to moving the cursor directly.
+        if cursor_reaches(x, y) {
+            return Ok(());
+        }
+        if SetPhysicalCursorPos(x, y) != 0 && cursor_reaches(x, y) {
+            return Ok(());
+        }
+        Err("input_failed")
     }
+}
+
+fn cursor_reaches(x: i32, y: i32) -> bool {
+    // The raw input thread applies queued motion asynchronously; normalized
+    // absolute coordinates can also round by one physical pixel.
+    for _ in 0..10 {
+        let mut point = Point::default();
+        if unsafe { GetPhysicalCursorPos(&mut point) } != 0
+            && (point.x - x).abs() <= 1
+            && (point.y - y).abs() <= 1
+        {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    false
 }
 pub fn displays() -> Vec<Display> {
     let mut out = vec![];
