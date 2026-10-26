@@ -1948,6 +1948,85 @@ export interface PatSecret {
 export interface PeersResponse {
   peers: Peer[];
 }
+export interface PreferredIPEntry {
+  ip: string;
+  source: "manual" | "file" | "url" | "scan";
+  status: "ok" | "untested" | "cooling";
+  latency_ms: number | null;
+  loss_percent: number | null;
+  failures: number;
+  cooldown_until: Timestamp | null;
+  last_used_at: Timestamp | null;
+}
+/**
+ * index 为 -1 表示旧的 preferred_ips / preferred_ips_file 字段。
+ */
+export interface PreferredIPSourceState {
+  index: number;
+  type: "manual" | "file" | "url" | "scan";
+  name: string;
+  disabled: boolean;
+  count: number;
+  fetched_at: Timestamp | null;
+  error: string;
+}
+export interface PreferredIPScanState {
+  enabled: boolean;
+  running: boolean;
+  sample: number;
+  host: string;
+  started_at: Timestamp | null;
+  last_at: Timestamp | null;
+  next_at: Timestamp | null;
+  kept: number;
+  error: string;
+}
+/**
+ * current 为空表示最近一次连接走了 DNS 地址或尚未连接。
+ */
+export interface PreferredIPPeerState {
+  device_id: string;
+  hostname: string;
+  mode: "smart" | "fixed" | "off";
+  override: boolean;
+  ips: string[];
+  current: string;
+  last_at: Timestamp | null;
+}
+/**
+ * GET /v2/preferred-ip 与 POST /v2/preferred-ip/run 的响应。池、评分与来源状态；改设置走 PATCH /v2/config。
+ */
+export interface PreferredIPState {
+  enabled: boolean;
+  mode: "smart" | "fixed";
+  no_dns_fallback: boolean;
+  pool: PreferredIPEntry[];
+  sources: PreferredIPSourceState[];
+  scan: PreferredIPScanState;
+  peers: PreferredIPPeerState[];
+}
+/**
+ * scan 在后台开始测速，立即返回；refresh 抓取所有订阅来源，完成后返回。
+ */
+export interface PreferredIPRunRequest {
+  task: "scan" | "refresh";
+}
+export interface PreferredIPInspectRequest {
+  text: string;
+}
+export interface PreferredIPInspectItem {
+  line: number;
+  ip: string;
+  status: "new" | "existing" | "rejected";
+  note: string;
+}
+/**
+ * accepted 是去重后可以导入的新地址。
+ */
+export interface PreferredIPInspectResponse {
+  items: PreferredIPInspectItem[];
+  accepted: string[];
+}
 export interface ToolExecution {
   id: string;
   caller: string;
@@ -2023,7 +2102,7 @@ export interface IngressInfo1 {
   issuer: string | null;
 }
 
-export const CONTROL_API_VERSION = "2.3" as const;
+export const CONTROL_API_VERSION = "2.4" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -2876,6 +2955,48 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
       "invalid_args",
       "unavailable"
     ]
+  },
+  {
+    "id": "control.preferredip.get",
+    "method": "GET",
+    "path": "/v2/preferred-ip",
+    "capability": "config.read",
+    "since": "2.4",
+    "query": null,
+    "body": null,
+    "response": "PreferredIPState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
+  },
+  {
+    "id": "control.preferredip.run",
+    "method": "POST",
+    "path": "/v2/preferred-ip/run",
+    "capability": "config.write",
+    "since": "2.4",
+    "query": null,
+    "body": "PreferredIPRunRequest",
+    "response": "PreferredIPState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
+  },
+  {
+    "id": "control.preferredip.inspect",
+    "method": "POST",
+    "path": "/v2/preferred-ip/inspect",
+    "capability": "config.read",
+    "since": "2.4",
+    "query": null,
+    "body": "PreferredIPInspectRequest",
+    "response": "PreferredIPInspectResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
   }
 ];
 
@@ -2928,4 +3049,7 @@ export interface ControlRouteTypes {
   "control.computer.get": { query: undefined; body: undefined; response: ComputerState };
   "control.computer.pause": { query: undefined; body: ComputerPauseRequest; response: ComputerState };
   "control.computer.revoke": { query: undefined; body: ComputerRevokeRequest; response: ComputerState };
+  "control.preferredip.get": { query: undefined; body: undefined; response: PreferredIPState };
+  "control.preferredip.run": { query: undefined; body: PreferredIPRunRequest; response: PreferredIPState };
+  "control.preferredip.inspect": { query: undefined; body: PreferredIPInspectRequest; response: PreferredIPInspectResponse };
 }

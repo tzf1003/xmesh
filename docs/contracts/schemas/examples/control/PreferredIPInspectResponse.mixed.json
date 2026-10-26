@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "line": 1,
+      "ip": "104.18.32.77",
+      "status": "new",
+      "note": ""
+    },
+    {
+      "line": 2,
+      "ip": "8.8.8.8",
+      "status": "rejected",
+      "note": "8.8.8.8 不在 Cloudflare 公布的 IP 段内"
+    }
+  ],
+  "accepted": [
+    "104.18.32.77"
+  ]
+}

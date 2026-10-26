@@ -13,14 +13,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/tzf1003/xmesh/internal/cfadmin"
 	"github.com/tzf1003/xmesh/internal/cfpreferred"
-	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
@@ -105,28 +103,6 @@ func (n *Node) runCloudflared(ctx context.Context, binary, tokenFile string) {
 	}
 }
 
-// preferredAddrs is the configured preferred edge addresses followed by those in the list file. The file is
-// read on every dial so a refreshed scan takes effect without a restart; an unreadable or invalid file is
-// ignored, because the dial still falls back to the normal address.
-func preferredAddrs(cfg config.Cloudflare) []netip.Addr {
-	var out []netip.Addr
-	for _, s := range cfg.PreferredIPs {
-		if a, err := cfpreferred.Parse(s); err == nil {
-			out = append(out, a)
-		}
-	}
-	if cfg.PreferredIPsFile != "" {
-		if f, err := os.Open(cfg.PreferredIPsFile); err == nil {
-			list, _ := cfpreferred.ParseList(f)
-			_ = f.Close()
-			out = append(out, list...)
-		}
-	}
-	seen := map[netip.Addr]bool{}
-	out = slices.DeleteFunc(out, func(a netip.Addr) bool { dup := seen[a]; seen[a] = true; return dup })
-	return out[:min(len(out), cfpreferred.MaxList)]
-}
-
 // dialCloudflare opens a WebSocket to a peer's tunnel hostname, presents the Access service token, and
 // runs the pinned mTLS handshake inside it. The WebSocket belongs to the returned connection, not to ctx.
 func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tls.Config) (net.Conn, error) {
@@ -148,34 +124,58 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 	if outer := n.cloudflareOuter; outer != nil {
 		return dialTunnel(ctx, outer, address, header, tlsConfig)
 	}
-	// Each preferred address gets a whole attempt (TCP, TLS, Access, WebSocket and the inner handshake) of at most 4 seconds, because
-	// an address that accepts TCP can still fail later; the normal DNS address is the last attempt.
-	// The preferred phase is bounded to part of the caller's deadline so a stale list cannot starve the DNS attempt.
-	budget := 20 * time.Second
-	if deadline, ok := ctx.Deadline(); ok {
-		budget = time.Until(deadline) * 6 / 10
+	// Each preferred address gets a whole attempt (TCP, TLS, Access, WebSocket and the inner handshake), because
+	// an address that accepts TCP can still fail later; the normal DNS address is the last attempt unless
+	// no_dns_fallback is set. The preferred phase is bounded to part of the caller's deadline so a stale list
+	// cannot starve the DNS attempt.
+	host, _, splitErr := net.SplitHostPort(address)
+	if splitErr != nil {
+		host = address
 	}
-	phase, stop := context.WithTimeout(ctx, budget)
-	defer stop()
-	for _, a := range preferredAddrs(cfg) {
-		if phase.Err() != nil {
-			break
+	pool := n.preferredPool()
+	mode, fixed := cfg.PeerMode(cfg.PeerForHost(host))
+	tried := false
+	if mode != "off" {
+		budget := 20 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			budget = time.Until(deadline) * 6 / 10
 		}
-		try, cancel := context.WithTimeout(phase, 4*time.Second)
-		client := tunnelClient(cfpreferred.Pin(a))
-		conn, err := dialTunnel(try, client, address, header, tlsConfig)
-		client.CloseIdleConnections()
-		cancel()
-		if err == nil {
-			return conn, nil
+		phase, stop := context.WithTimeout(ctx, budget)
+		defer stop()
+		for _, a := range pool.dialOrder(cfg, mode, fixed) {
+			if phase.Err() != nil {
+				break
+			}
+			tried = true
+			started := time.Now()
+			try, cancel := context.WithTimeout(phase, cfg.PreferredAttemptTimeout())
+			client := tunnelClient(cfpreferred.Pin(a))
+			conn, err := dialTunnel(try, client, address, header, tlsConfig)
+			client.CloseIdleConnections()
+			cancel()
+			if err == nil {
+				pool.succeeded(host, a, time.Since(started))
+				return conn, nil
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if phase.Err() == nil { // an attempt cut short by the phase budget says nothing about the address
+				pool.failed(a, cfg.PreferredFailThreshold(), cfg.PreferredCooldown())
+			}
 		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if tried && cfg.PreferredIP != nil && cfg.PreferredIP.NoDNSFallback {
+			return nil, errors.New("所有优选 IP 都连不上（已设置不回退 DNS 地址）")
 		}
 	}
 	client := tunnelClient(nil)
 	defer client.CloseIdleConnections()
-	return dialTunnel(ctx, client, address, header, tlsConfig)
+	started := time.Now()
+	conn, err := dialTunnel(ctx, client, address, header, tlsConfig)
+	if err == nil {
+		pool.succeeded(host, netip.Addr{}, time.Since(started))
+	}
+	return conn, err
 }
 
 func tunnelClient(dial func(ctx context.Context, network, address string) (net.Conn, error)) *http.Client {

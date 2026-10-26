@@ -63,6 +63,7 @@ func startControl(d controlDeps) (stop func()) {
 	if node, ok := d.network.(*connectivity.Node); ok {
 		options.Pairing = devicePairing{node: node}
 		options.Offers = deviceOffers{node: node}
+		options.Preferred = node
 		options.DeviceIdentity = node.Identity()
 		options.DeviceTrust = node.Trust()
 	}

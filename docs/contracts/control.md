@@ -15,6 +15,7 @@
 | [schemas/control-drain.schema.json](schemas/control-drain.schema.json) | drain 与 resume |
 | [schemas/control-config.schema.json](schemas/control-config.schema.json) | 配置读写 |
 | [schemas/control-ci.schema.json](schemas/control-ci.schema.json) | GitHub Actions 运行器托管 |
+| [schemas/control-preferred-ip.schema.json](schemas/control-preferred-ip.schema.json) | Cloudflare 优选 IP 池 |
 | [schemas/control-pair.schema.json](schemas/control-pair.schema.json)、[control-pats](schemas/control-pats.schema.json)、[control-ingress](schemas/control-ingress.schema.json)、[control-audit](schemas/control-audit.schema.json) | 配对、PAT、入口、审计 |
 | [schemas/control-backends.schema.json](schemas/control-backends.schema.json) | stdio 后端的环境变量 |
 | [schemas/control-routes.json](schemas/control-routes.json) | 路由表：方法、路径、能力、请求与响应类型、错误码 |
@@ -418,3 +419,11 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 能力 `computer` 表示节点持有 Computer Manager。`GET /v2/computer` 返回开启 / 暂停状态、系统权限和显示器信息以及本机所有桌面会话；该视图省略控制租约 token、截图和输入正文。`POST /v2/computer/pause` 接受 `{ "paused": true|false }`，暂停立即撤销所有会话与排队输入；恢复允许调用方重新获取租约。`POST /v2/computer/revoke` 接受 `{ "session_id": "cs-…" }`，关闭指定会话。两条写路由返回当前状态，均经本机控制通道身份校验并记录元数据审计。
 
 类型、路由和模式见 `control-computer.schema.json` 与 `control-routes.json`。远程桌面工具及执行器协议见 [Computer](computer.md)。
+
+## Cloudflare 优选 IP（API 2.4）
+
+`GET /v2/preferred-ip`（能力 `config.read`）返回优选地址池：每个地址的来源（manual、file、url、scan）、状态（ok、untested、cooling）、延时、丢包与连续失败次数；各来源的条数、订阅最近一次抓取时间与错误；定时测速的状态（是否在跑、上次与下次时间）；以及每台已配对设备的接入方式与最近一次连接用的地址。`POST /v2/preferred-ip/run`（能力 `config.write`）接受 `{ "task": "scan" | "refresh" }`：`scan` 在后台开始测速并立即返回，`refresh` 抓取所有订阅来源，完成后返回；两者都返回最新状态。`POST /v2/preferred-ip/inspect`（能力 `config.read`）只检查粘贴的文本（每行一个地址，或 CloudflareSpeedTest 的 result.csv），逐行报告 new、existing 或 rejected，不改变任何状态。
+
+来源、默认接入方式、定时测速与按设备覆盖都写在 `mesh.cloudflare.preferred_ip`，经 `PATCH /v2/config` 修改，立即生效，不需要重启。订阅地址只能是 https，默认不配置，由用户手动添加；设备会按 `refresh` 间隔访问它。只收落在 Cloudflare 公布 IP 段内的地址，其余行忽略；返回里只显示订阅地址的主机名，不含路径和查询参数。
+
+类型与路由见 `control-preferred-ip.schema.json` 与 `control-routes.json`。

@@ -73,6 +73,10 @@ func NeedsRestart(ptr string) bool {
 	if within(ptr, "/mesh/path_selection") {
 		return false
 	}
+	// Preferred addresses are read on every Cloudflare dial and by the scheduler, so edits apply live.
+	if within(ptr, "/mesh/cloudflare/preferred_ip") || within(ptr, "/mesh/cloudflare/preferred_ips") || within(ptr, "/mesh/cloudflare/preferred_ips_file") {
+		return false
+	}
 	for _, p := range RestartPaths {
 		if within(ptr, p) || within(p, ptr) {
 			return true

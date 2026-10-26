@@ -117,6 +117,8 @@ type Node struct {
 	auditLog       atomic.Pointer[audit.Logger]
 	// cloudflareOuter replaces the HTTP client that opens the tunnel WebSocket; tests point it at a fake edge.
 	cloudflareOuter *http.Client
+	// preferred is the Cloudflare preferred-address pool, created on first use.
+	preferred *preferredPool
 }
 
 func Open(ctx context.Context, c *config.Config, stateDir string) (*Node, error) {
@@ -196,6 +198,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	if supervise {
 		n.workers.Go(n.supervise)
 		n.workers.Go(n.collectLoop)
+		n.workers.Go(func() { n.runPreferred(n.ctx) })
 		n.workers.Go(func() {
 			ticker := time.NewTicker(time.Hour)
 			defer ticker.Stop()

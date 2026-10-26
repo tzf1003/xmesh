@@ -52,7 +52,9 @@ type Options struct {
 	// Pairing serves the connection-password routes; nil unless the node runs the LAN network.
 	Pairing PairingAdmin
 	// Offers serves the connection-method routes; nil answers them with unavailable.
-	Offers         OfferAdmin
+	Offers OfferAdmin
+	// Preferred serves the Cloudflare preferred-address routes; nil answers them with unavailable.
+	Preferred      PreferredAdmin
 	DeviceIdentity *device.Identity
 	DeviceTrust    *device.TrustStore
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
@@ -313,20 +315,23 @@ func (rt route) match(method, path string) bool {
 // capability the kernel does not declare answers not_implemented without reaching its handler.
 func (s *Server) table() map[string]handler {
 	return map[string]handler{
-		"control.computer.get":    s.getComputer,
-		"control.computer.pause":  s.pauseComputer,
-		"control.computer.revoke": s.revokeComputer,
-		"control.status.get":      s.status,
-		"control.events.stream":   func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
-		"control.peers.list":      s.listPeers,
-		"control.sessions.list":   s.sessions,
-		"control.drain.start":     s.startDrain,
-		"control.drain.resume":    s.resume,
-		"control.config.get":      s.getConfig,
-		"control.config.put":      s.putConfig,
-		"control.config.reload":   s.reloadConfig,
-		"control.config.patch":    s.patchConfig,
-		"control.audit.list":      s.auditList,
+		"control.preferredip.get":     s.getPreferredIP,
+		"control.preferredip.run":     s.runPreferredIP,
+		"control.preferredip.inspect": s.inspectPreferredIP,
+		"control.computer.get":        s.getComputer,
+		"control.computer.pause":      s.pauseComputer,
+		"control.computer.revoke":     s.revokeComputer,
+		"control.status.get":          s.status,
+		"control.events.stream":       func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
+		"control.peers.list":          s.listPeers,
+		"control.sessions.list":       s.sessions,
+		"control.drain.start":         s.startDrain,
+		"control.drain.resume":        s.resume,
+		"control.config.get":          s.getConfig,
+		"control.config.put":          s.putConfig,
+		"control.config.reload":       s.reloadConfig,
+		"control.config.patch":        s.patchConfig,
+		"control.audit.list":          s.auditList,
 
 		"control.pair.export":            s.pairExport,
 		"control.pair.import":            s.pairImport,

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -185,22 +186,30 @@ func TestCloudflarePathCarriesDeviceLinkThroughTunnel(t *testing.T) {
 	}
 }
 
+func poolAddrs(cfg config.Cloudflare) []netip.Addr {
+	var out []netip.Addr
+	for _, m := range newPreferredPool("").members(cfg) {
+		out = append(out, m.addr)
+	}
+	return out
+}
+
 func TestPreferredAddrsReadFileEachTime(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "ips")
 	cfg := config.Cloudflare{PreferredIPs: []string{"104.16.0.1"}, PreferredIPsFile: file}
-	if got := preferredAddrs(cfg); len(got) != 1 {
+	if got := poolAddrs(cfg); len(got) != 1 {
 		t.Fatal("missing file must be ignored:", got)
 	}
 	if err := os.WriteFile(file, []byte("# list\n104.16.0.1\n172.64.0.9\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got := preferredAddrs(cfg); len(got) != 2 || got[1].String() != "172.64.0.9" {
+	if got := poolAddrs(cfg); len(got) != 2 || got[1].String() != "172.64.0.9" {
 		t.Fatal(got)
 	}
 	if err := os.WriteFile(file, []byte("8.8.8.8\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got := preferredAddrs(cfg); len(got) != 1 {
+	if got := poolAddrs(cfg); len(got) != 1 {
 		t.Fatal("a list with a foreign address must be rejected whole:", got)
 	}
 }
