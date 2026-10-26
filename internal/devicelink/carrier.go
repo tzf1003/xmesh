@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/tzf1003/xmesh/internal/device"
 	"github.com/tzf1003/xmesh/internal/identity"
+	"slices"
 	"sync/atomic"
 	"time"
 )
@@ -406,6 +407,11 @@ func delegatedPrincipal(node string, tags []string, oauth string) (identity.Prin
 			return identity.Principal{}, device.ErrUntrusted
 		}
 		tags = []string{"tag:ingress"}
+	} else {
+		// A device that carries tag:ingress also makes calls of its own (device info reads, catalogue
+		// refreshes) with no OAuth client. Those run with its other tags; the ingress role only
+		// applies to a session that names a client.
+		tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool { return tag == "tag:ingress" })
 	}
 	return identity.FromPeer(node, tags, oauth)
 }

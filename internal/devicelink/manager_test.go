@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -540,7 +541,8 @@ func TestDelegatedPrincipalMatrix(t *testing.T) {
 		{[]string{"tag:peer"}, "claimed", false},
 		{[]string{"tag:admin", "tag:device"}, "claimed", false},
 		{[]string{"tag:ingress", "tag:peer", "tag:admin"}, "client-1", true},
-		{[]string{"tag:ingress"}, "", false},
+		{[]string{"tag:ingress"}, "", true},
+		{[]string{"tag:ingress", "tag:peer"}, "", true},
 	} {
 		p, err := delegatedPrincipal("device", item.tags, item.oauth)
 		if (err == nil) != item.ok {
@@ -548,6 +550,9 @@ func TestDelegatedPrincipalMatrix(t *testing.T) {
 		}
 		if item.ok && item.oauth != "" && (p.OAuthClient != item.oauth || !reflect.DeepEqual(p.Tags, []string{"tag:ingress"})) {
 			t.Fatal(item, p)
+		}
+		if item.ok && item.oauth == "" && (p.OAuthClient != "" || slices.Contains(p.Tags, "tag:ingress")) {
+			t.Fatal("session without an OAuth client kept the ingress role", item, p)
 		}
 	}
 }

@@ -20,7 +20,7 @@ caller_id = node_id + "/" + mcp_session_id
 
 - `node_id` 是对端的 Tailscale 稳定节点 ID（WhoIs 的 Node.ID），不是 MagicDNS 主机名。主机名会变，节点 ID 用来做 owner。
 - `mcp_session_id` 是 Streamable HTTP 的 `Mcp-Session-Id`。没有会话头的初始化请求使用 `init` 这个字面量，且不能持有 PTY 或租约。
-- 经公网入口转发时，Agent 看到的 `node_id` 是入口节点的节点 ID，`mcp_session_id` 是入口与该上游 OAuth 会话对应的下游 MCP 会话。入口必须为每个上游 OAuth 会话使用独立的下游 MCP 会话，使不同云端会话不会共享 owner。入口在每条下游 MCP 请求上带请求头 `X-Xmesh-Oauth-Client`，值是 OAuth `client_id`。Agent 只在对端 tag 含 `tag:ingress` 时采信这个头，并记在该 MCP 会话上；tag 是 ingress 但头缺失时拒绝会话，错误码 `unauthenticated`。其他 tag 送来的这个头忽略。审计在入口侧另记 `oauth_client`。
+- 经公网入口转发时，Agent 看到的 `node_id` 是入口节点的节点 ID，`mcp_session_id` 是入口与该上游 OAuth 会话对应的下游 MCP 会话。入口必须为每个上游 OAuth 会话使用独立的下游 MCP 会话，使不同云端会话不会共享 owner。入口在每条下游 MCP 请求上带请求头 `X-Xmesh-Oauth-Client`，值是 OAuth `client_id`。Agent 只在对端 tag 含 `tag:ingress` 时采信这个头，并记在该 MCP 会话上；tag 是 ingress 但头缺失时拒绝会话，错误码 `unauthenticated`。其他 tag 送来的这个头忽略。例外：设备链路（devicelink）上，信任记录含 `tag:ingress` 的设备自己发起、不带 OAuth client 的会话（设备信息读取、目录刷新）不拒绝，而是去掉 `tag:ingress`，只按其余标签授权；带 OAuth client 的会话仍只获得 `tag:ingress`。HTTP 路径不变。审计在入口侧另记 `oauth_client`。
 
 本机 Claude Code / Codex CLI → 本机 Gateway（每个请求都要令牌，来源与 Host 按 [CTR-GW-07](gateway.md#ctr-gw-07)）→ 本机 Agent 这条路，在本节点已经有 tailnet 身份之后，`node_id` 用本节点自己的 Tailscale 稳定节点 ID，不用字面量 `local`。Gateway 与 Agent 同进程转发时，Agent 从本进程的 tsnet 身份读取这个 ID，不依赖对 `127.0.0.1` 做 WhoIs。不同的本机 MCP 会话仍靠 `mcp_session_id` 区分，所以两份本机对话不会共享 PTY owner 或租约。
 

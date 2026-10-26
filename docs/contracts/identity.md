@@ -16,7 +16,7 @@ Agent 只从传输层推导 `caller_id`：
 
 - 远端 `device_id` 来自双方公钥配对后的 mTLS 身份验证，在 LAN 与 Tailnet 路径上相同。网络地址、WhoIs、控制面节点 ID 和网络 tags 只描述路径。联网节点到自身的环回使用本设备 ID，`--local` 开发模式使用保留身份 `local`。
 - `logical_session_id` 由设备会话服务生成。物理链路断线或换路时保留同一个 MCP 实例与逻辑会话标识。
-- 经入口的会话另记 `oauth_client`。只有本地信任记录授予 `tag:ingress` 的设备可以提供该身份；内部链路把它绑定到被认证的逻辑会话，外部 HTTP 入口从 OAuth 授权推导。
+- 经入口的会话另记 `oauth_client`。只有本地信任记录授予 `tag:ingress` 的设备可以提供该身份；内部链路把它绑定到被认证的逻辑会话，外部 HTTP 入口从 OAuth 授权推导。同一设备不带 OAuth client 发起的内部链路会话不携带入口身份，按其余标签授权。
 
 工具参数里如果出现 `caller_id`、`owner` 或 `node_id`，一律忽略，不得覆盖传输层身份。唯一的例外是 `pty.transfer` 的 `to_caller`：那是目标身份，不是调用方身份，而且目标必须是 Agent 已经见过的、尚未过期的 `caller_id`，或者与调用方具有相同 `node_id` 的会话。禁止把会话转给任意字符串，以免成为伪造 owner 的入口。
 
