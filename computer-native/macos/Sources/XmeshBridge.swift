@@ -30,8 +30,10 @@ func requireUsableComputerUseSession() throws {
         let windows=currentWindowInfo()
         return skyKeyWindowMatchesTarget(windowInfo:windows,windowID:target.window,pid:target.pid) && targetMatchesWindow(target,windows)
     },intervention:{
-        guard let target=sessionTargetPID else{return false}
-        return xmeshFrontmostPID()==target
+        // Background events are posted to the target pid and never move the
+        // user's pointer, so the target being frontmost is not interference.
+        // Human takeover is explicit (the panel's takeover button).
+        false
     })
 }
 
@@ -149,8 +151,6 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
               [action.originX, action.originY, action.width, action.height].allSatisfy(\.isFinite)
         else { return 1 }
         try requireUsableComputerUseSession()
-        let before = frontmostPID()
-        guard before != nil, before != action.pid else { return 3 }
         let windowInfo = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
         guard skyKeyWindowMatchesTarget(windowInfo: windowInfo, windowID: action.window, pid: action.pid) else { return 4 }
         switch action.type {
@@ -188,11 +188,6 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
             try withTargetFocus(action) { try dispatchPointer(action) }
         default:return 5
         }
-        // A user may switch between unrelated apps while this action runs.
-        // Only activation of the controlled app is an interference boundary;
-        // another foreground app is normal concurrent user activity.
-        guard let after=frontmostPID() else{return 6}
-        guard after != action.pid else {return 6}
         return 0
     } catch BridgeStop.userIntervention {return 3}
       catch BridgeStop.targetChanged {return 4}
