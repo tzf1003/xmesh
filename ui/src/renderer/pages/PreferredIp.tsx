@@ -11,7 +11,7 @@ import { useT } from "../i18n";
 import { Icon } from "../icons";
 import { formatTime } from "../lib/format";
 import {
-  MAX_SOURCES, REFRESH_INTERVALS, SCAN_INTERVALS, blankSource, parseIps, policyProblem, policyValue, readPolicy, samePolicy,
+  MAX_SOURCES, REFRESH_INTERVALS, durationSeconds, SCAN_INTERVALS, blankSource, parseIps, policyProblem, policyValue, readPolicy, samePolicy,
   type PeerMode, type Policy, type Source, type SourceType,
 } from "../lib/preferred-ip";
 import { applySaved } from "../lib/reload";
@@ -70,7 +70,7 @@ function PreferredIpPage({ ctx }: { ctx: PageContext }): JSX.Element {
       const r = await getApi().patchConfig({ edits: [{ path: "/mesh/cloudflare/preferred_ip", value: policyValue(draft) }], etag: cfgData.etag, dryRun: false });
       if (!r.ok) { ctx.toast(r.error.message, true); return; }
       ctx.applied(await applySaved(r.data.restart_required));
-      ctx.toast(c("优选 IP 设置已保存，立即生效。", "Preferred-IP settings saved and applied."));
+      ctx.toast(c("优选 IP 设置已保存，对新连接立即生效。", "Preferred-IP settings saved; new connections use them at once."));
       config.reload();
       pool.reload();
     } finally { setBusy(false); }
@@ -215,7 +215,7 @@ function Access({ c, draft, state, loaded, writable, edit }: PanelProps): JSX.El
         <label class="check"><input type="radio" name="pip-mode" checked={draft.mode === "fixed"} disabled={!writable} onChange={() => edit((p) => ({ ...p, mode: "fixed" }))} data-testid="pip-mode-fixed" /><span><strong>{c("固定", "Fixed")}</strong><span class="hint">{c("只尝试下面指定的地址，按填写顺序，不看评分，也不冷却。", "Only try the addresses below, in order. No scoring and no cooldown.")}</span></span></label>
       </fieldset>
       {draft.mode === "fixed" && <label class="field"><span>{c("固定地址（每行一个）", "Fixed addresses (one per line)")}</span>
-        <textarea rows={3} class="mono" value={draft.fixedIps.join("\n")} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, fixedIps: parseIps(v) })); }} data-testid="pip-fixed-ips" /></label>}
+        <IpBox rows={3} value={draft.fixedIps} disabled={!writable} onChange={(ips) => edit((p) => ({ ...p, fixedIps: ips }))} testid="pip-fixed-ips" /></label>}
     </section>
     <section class="card" data-testid="pip-peers">
       <h2>{c("按设备覆盖", "Per-device override")}</h2>
@@ -231,7 +231,7 @@ function Access({ c, draft, state, loaded, writable, edit }: PanelProps): JSX.El
               <td><strong>{loaded.peers[id]}</strong><div class="hint mono">{id.slice(0, 16)}…</div></td>
               <td><select value={o.mode} disabled={!writable} onChange={(e) => set({ mode: e.currentTarget.value as PeerMode })} aria-label={c("接入方式", "Access")} data-testid={`pip-peer-mode-${id.slice(0, 12)}`}>
                 <option value="default">{c("跟随默认", "Follow default")}</option><option value="smart">{c("智能", "Smart")}</option><option value="fixed">{c("固定", "Fixed")}</option><option value="off">{c("不用优选（走 DNS）", "Off (use DNS)")}</option></select></td>
-              <td>{o.mode === "fixed" ? <input class="mono" value={o.ips.join(", ")} disabled={!writable} onInput={(e) => set({ ips: parseIps(e.currentTarget.value) })} aria-label={c("固定地址", "Fixed addresses")} /> : <span class="hint">—</span>}</td>
+              <td>{o.mode === "fixed" ? <IpBox value={o.ips} disabled={!writable} onChange={(ips) => set({ ips })} label={c("固定地址", "Fixed addresses")} /> : <span class="hint">—</span>}</td>
               <td>{l?.last_at ? <><span class="mono">{l.current || c("DNS 地址", "DNS address")}</span><div class="hint">{formatTime(l.last_at)}</div></> : <span class="hint">—</span>}</td>
             </tr>;
           })}</tbody></table></div>}
@@ -240,9 +240,9 @@ function Access({ c, draft, state, loaded, writable, edit }: PanelProps): JSX.El
       <h2>{c("轮换与故障切换", "Failover")}</h2>
       <p class="hint">{c("每个地址完整尝试一遍（TCP、TLS、Access、WebSocket 和设备间握手）；失败就换下一个，所有优选地址都失败才回退 DNS 地址。", "Each address gets a full attempt (TCP, TLS, Access, WebSocket and the device handshake); on failure the next one is tried, and only when all fail does the DNS address get its turn.")}</p>
       <div class="pip-fields">
-        <label class="field"><span>{c("单个地址的尝试时限（秒）", "Time limit per address (seconds)")}</span><input type="number" min={1} max={30} value={draft.attemptSeconds} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, attemptSeconds: number(v, 1, 30, p.attemptSeconds) })); }} data-testid="pip-attempt" /></label>
+        <label class="field"><span>{c("单个地址的尝试时限（秒）", "Time limit per address (seconds)")}</span><input type="number" min={1} max={30} value={Math.round((durationSeconds(draft.attemptTimeout) ?? 4) * 10) / 10} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, attemptTimeout: `${number(v, 1, 30, 4)}s` })); }} data-testid="pip-attempt" /></label>
         <label class="field"><span>{c("连续失败几次进入冷却", "Failures before cooldown")}</span><input type="number" min={1} max={20} value={draft.failThreshold} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, failThreshold: number(v, 1, 20, p.failThreshold) })); }} data-testid="pip-threshold" /></label>
-        <label class="field"><span>{c("冷却时长（分钟）", "Cooldown (minutes)")}</span><input type="number" min={1} max={1440} value={draft.cooldownMinutes} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, cooldownMinutes: number(v, 1, 1440, p.cooldownMinutes) })); }} data-testid="pip-cooldown" /></label>
+        <label class="field"><span>{c("冷却时长（分钟）", "Cooldown (minutes)")}</span><input type="number" min={1} max={1440} value={Math.round(((durationSeconds(draft.cooldown) ?? 1800) / 60) * 10) / 10} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, cooldown: `${number(v, 1, 1440, 30)}m` })); }} data-testid="pip-cooldown" /></label>
       </div>
       <Switch checked={draft.noDnsFallback} disabled={!writable} onChange={(v) => edit((p) => ({ ...p, noDnsFallback: v }))} testid="pip-no-dns"
         label={c("优选地址全部失败时不回退 DNS 地址", "Do not fall back to the DNS address")}
@@ -274,7 +274,7 @@ function PoolTab({ c, draft, state, writable, busy, edit, run, openImport }: Act
           <div class="grow">
             <div class="row"><input class="pip-name" value={s.name} placeholder={s.type === "manual" ? c("手动地址", "Manual addresses") : s.type === "file" ? c("本地文件", "Local file") : c("订阅", "Subscription")} disabled={!writable} onInput={(e) => update(i, { name: e.currentTarget.value })} aria-label={c("来源名称", "Source name")} />
               <Badge>{c(...SOURCE_LABEL[s.type])}</Badge>{l && !s.disabled && <Badge kind={l.error ? "warn" : "ok"}>{c(`${l.count} 个`, `${l.count}`)}</Badge>}</div>
-            {s.type === "manual" && <textarea rows={2} class="mono" value={s.ips.join("\n")} placeholder="104.18.32.77" disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; update(i, { ips: parseIps(v) }); }} aria-label={c("地址", "Addresses")} />}
+            {s.type === "manual" && <IpBox rows={2} value={s.ips} placeholder="104.18.32.77" disabled={!writable} onChange={(ips) => update(i, { ips })} label={c("地址", "Addresses")} />}
             {s.type === "file" && <input class="mono" value={s.path} placeholder="/path/to/result.csv" disabled={!writable} onInput={(e) => update(i, { path: e.currentTarget.value })} aria-label={c("文件路径", "File path")} />}
             {s.type === "url" && <div class="row"><input class="mono grow" value={s.url} placeholder="https://" disabled={!writable} onInput={(e) => update(i, { url: e.currentTarget.value.trim() })} aria-label={c("订阅地址", "Subscription address")} data-testid={`pip-source-url-${i}`} />
               <label class="field pip-inline"><span>{c("每", "Every")}</span><select value={s.refresh} disabled={!writable} onChange={(e) => update(i, { refresh: e.currentTarget.value })}>{withCurrent(REFRESH_INTERVALS, s.refresh).map((v) => <option value={v} key={v}>{intervalLabel(v, c)}</option>)}</select></label></div>}
@@ -359,4 +359,14 @@ function intervalLabel(v: string, c: Copy): string {
   const n = Number(h[1]);
   if (n % 24 === 0) return c(`${n / 24} 天`, `${n / 24} d`);
   return c(`${n} 小时`, `${n} h`);
+}
+
+/** An address list typed by hand: the text stays as typed, so a separator is not eaten before the next address. */
+function IpBox({ value, onChange, rows, placeholder, disabled, label, testid }: { value: string[]; onChange(ips: string[]): void; rows?: number; placeholder?: string; disabled?: boolean; label?: string; testid?: string }): JSX.Element {
+  const [text, setText] = useState(value.join(rows ? "\n" : ", "));
+  useEffect(() => { if (parseIps(text).join() !== value.join()) setText(value.join(rows ? "\n" : ", ")); }, [value.join()]);
+  const input = (v: string): void => { setText(v); onChange(parseIps(v)); };
+  return rows
+    ? <textarea rows={rows} class="mono" value={text} placeholder={placeholder} disabled={disabled} onInput={(e) => input(e.currentTarget.value)} aria-label={label} data-testid={testid} />
+    : <input class="mono" value={text} placeholder={placeholder} disabled={disabled} onInput={(e) => input(e.currentTarget.value)} aria-label={label} data-testid={testid} />;
 }

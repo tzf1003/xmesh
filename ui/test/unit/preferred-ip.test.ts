@@ -55,8 +55,8 @@ test("a full configuration round-trips through the draft", () => {
   assert.deepEqual(policyValue(loaded.policy), value);
   assert.deepEqual(loaded.legacyIps, ["104.16.0.9"]);
   assert.equal(loaded.peers[ID], "win.link.example.com");
-  assert.equal(loaded.policy.cooldownMinutes, 45);
-  assert.equal(loaded.policy.attemptSeconds, 6);
+  assert.equal(loaded.policy.cooldown, "45m");
+  assert.equal(loaded.policy.attemptTimeout, "6s");
 });
 
 test("peers that follow the default are not written, and unknown values fall back", () => {
@@ -65,7 +65,7 @@ test("peers that follow the default are not written, and unknown values fall bac
   assert.deepEqual(policyValue(p), {});
   const loaded = readPolicy({ schema_version: 2, mesh: { cloudflare: { preferred_ip: { mode: "round-robin", attempt_timeout: "x", sources: [{ type: "dns" }], peers: { [ID]: { mode: "weird" } } } } } });
   assert.equal(loaded.policy.mode, "smart");
-  assert.equal(loaded.policy.attemptSeconds, 4);
+  assert.equal(loaded.policy.attemptTimeout, "4s");
   assert.equal(loaded.policy.sources[0]?.type, "manual");
   assert.equal(loaded.policy.peers[ID]?.mode, "default");
 });
@@ -100,4 +100,17 @@ test("what cannot be saved is named", () => {
   p.peers = {};
   p.sources = Array.from({ length: 9 }, () => blankSource("manual"));
   assert.equal(policyProblem(p), "sources");
+});
+
+test("durations written by hand survive a save that does not touch them", () => {
+  const loaded = readPolicy({ schema_version: 2, mesh: { cloudflare: { preferred_ip: { attempt_timeout: "1500ms", cooldown: "90s" } } } });
+  assert.equal(durationSeconds("1500ms"), 1.5);
+  const out = policyValue(loaded.policy);
+  assert.equal(out.attempt_timeout, "1500ms");
+  assert.equal(out.cooldown, "90s");
+});
+
+test("addresses typed one at a time stay separate", () => {
+  assert.deepEqual(parseIps("104.16.0.1\n104.16.0.2"), ["104.16.0.1", "104.16.0.2"]);
+  assert.deepEqual(parseIps("104.16.0.1, 104.16.0.2 "), ["104.16.0.1", "104.16.0.2"]);
 });

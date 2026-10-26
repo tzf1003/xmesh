@@ -32,9 +32,10 @@ export interface Policy {
   enabled: boolean;
   mode: "smart" | "fixed";
   fixedIps: string[];
-  attemptSeconds: number;
+  /** Go durations as written in the configuration, kept so a save does not reformat what the user did not touch. */
+  attemptTimeout: string;
   failThreshold: number;
-  cooldownMinutes: number;
+  cooldown: string;
   noDnsFallback: boolean;
   sources: Source[];
   scan: ScanSettings;
@@ -50,9 +51,9 @@ export const defaultPolicy = (): Policy => ({
   enabled: true,
   mode: "smart",
   fixedIps: [],
-  attemptSeconds: 4,
+  attemptTimeout: "4s",
   failThreshold: 3,
-  cooldownMinutes: 30,
+  cooldown: "30m",
   noDnsFallback: false,
   sources: [],
   scan: { enabled: false, interval: "6h", sample: 200, keep: 8, ipv6: false, host: "" },
@@ -68,11 +69,11 @@ const int = (v: unknown, fallback: number): number => (typeof v === "number" && 
 
 /** "30m", "4s", "1h30m" to seconds; undefined when it is not a duration. */
 export function durationSeconds(value: string): number | undefined {
-  const re = /(\d+(?:\.\d+)?)(h|m|s)/g;
+  const re = /(\d+(?:\.\d+)?)(ms|h|m|s)/g;
   let total = 0;
   let used = 0;
   for (const m of value.matchAll(re)) {
-    total += Number(m[1]) * { h: 3600, m: 60, s: 1 }[m[2] as "h" | "m" | "s"];
+    total += Number(m[1]) * { h: 3600, m: 60, s: 1, ms: 0.001 }[m[2] as "h" | "m" | "s" | "ms"];
     used += m[0].length;
   }
   return used > 0 && used === value.length ? total : undefined;
@@ -103,9 +104,9 @@ export function readPolicy(parsed: unknown): Loaded {
     enabled: pp.enabled !== false,
     mode: pp.mode === "fixed" ? "fixed" : "smart",
     fixedIps: strings(pp.fixed_ips),
-    attemptSeconds: durationSeconds(text(pp.attempt_timeout)) ?? d.attemptSeconds,
+    attemptTimeout: durationSeconds(text(pp.attempt_timeout)) !== undefined ? text(pp.attempt_timeout) : d.attemptTimeout,
     failThreshold: int(pp.fail_threshold, 0) > 0 ? int(pp.fail_threshold, 0) : d.failThreshold,
-    cooldownMinutes: Math.round((durationSeconds(text(pp.cooldown)) ?? d.cooldownMinutes * 60) / 60),
+    cooldown: durationSeconds(text(pp.cooldown)) !== undefined ? text(pp.cooldown) : d.cooldown,
     noDnsFallback: pp.no_dns_fallback === true,
     sources: (Array.isArray(pp.sources) ? pp.sources : []).filter(isObject).map((s) => ({
       type: s.type === "file" || s.type === "url" ? s.type : "manual",
@@ -136,9 +137,9 @@ export function policyValue(p: Policy): Record<string, unknown> {
   if (!p.enabled) out.enabled = false;
   if (p.mode === "fixed") out.mode = "fixed";
   if (p.fixedIps.length) out.fixed_ips = p.fixedIps;
-  if (p.attemptSeconds !== d.attemptSeconds) out.attempt_timeout = `${p.attemptSeconds}s`;
+  if (p.attemptTimeout !== d.attemptTimeout) out.attempt_timeout = p.attemptTimeout;
   if (p.failThreshold !== d.failThreshold) out.fail_threshold = p.failThreshold;
-  if (p.cooldownMinutes !== d.cooldownMinutes) out.cooldown = `${p.cooldownMinutes}m`;
+  if (p.cooldown !== d.cooldown) out.cooldown = p.cooldown;
   if (p.noDnsFallback) out.no_dns_fallback = true;
   if (p.sources.length) {
     out.sources = p.sources.map((s) => ({

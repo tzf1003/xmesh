@@ -440,7 +440,7 @@ export class PanelService {
   preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>> {
     switch (request.op) {
       case "get": return this.data("config.read", (c) => c.call("GET", "/v2/preferred-ip"));
-      case "run": return this.data("config.write", (c) => c.call("POST", "/v2/preferred-ip/run", { body: { task: request.task } }));
+      case "run": return this.data("config.write", (c) => c.call("POST", "/v2/preferred-ip/run", { body: { task: request.task }, timeoutMs: 95_000 }));
       case "inspect": return this.data("config.read", (c) => c.call("POST", "/v2/preferred-ip/inspect", { body: { text: request.text } }));
     }
   }
