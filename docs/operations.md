@@ -86,7 +86,7 @@ xmesh cloudflare setup --name laptop --config xmesh.yaml            # 预览
 xmesh cloudflare setup --name laptop --config xmesh.yaml --apply    # 创建并写好配置
 ```
 
-`setup` 为这台设备创建远程配置的隧道（转发 `tcp://127.0.0.1:7434`）、代理 CNAME、只放行网格服务令牌的 Access 应用；同一网格的所有设备共用一个服务令牌（首台设备时创建，记录在本机状态文件里）。隧道令牌与 Access 密钥写入配置文件旁 `cloudflare/` 下的 0600 文件，`mesh.cloudflare` 同时写好 `tunnel_token_file`，内核启动后自己运行 `cloudflared tunnel --no-autoupdate --protocol http2 run --token-file …`，没有装 `cloudflared` 时，`setup` 与内核启动会自动下载官方发布版（按发布页公布的 SHA-256 校验）到配置文件旁 `cloudflare/bin/`，也可以单独运行 `xmesh cloudflare install --config xmesh.yaml`。主机没有系统钥匙串（如无桌面的 Linux 服务器）时，Cloudflare 令牌自动改存到用户配置目录 `xmesh/cloudflare/<配置名>.credential.json`（0600）。设备页的地址列表会显示已配置的 Tunnel 主机名，哪怕隧道还没连通。`xmesh cloudflare remove --name laptop --apply` 删除这台设备的全部资源，最后一台删完时一并删除网格服务令牌。
+`setup` 为这台设备创建远程配置的隧道（转发 `tcp://127.0.0.1:7434`）、代理 CNAME、只放行服务令牌的 Access 应用（策略为"账号内任意有效服务令牌"，信任由内层固定证书 mTLS 决定，所以各设备各自创建隧道也能互通）；同一份状态文件下的设备共用一个服务令牌（首台设备时创建，记录在本机状态文件里）。隧道令牌与 Access 密钥写入配置文件旁 `cloudflare/` 下的 0600 文件，`mesh.cloudflare` 同时写好 `tunnel_token_file`，内核启动后自己运行 `cloudflared tunnel --no-autoupdate --protocol http2 run --token-file …`，没有装 `cloudflared` 时，`setup` 与内核启动会自动下载官方发布版（按发布页公布的 SHA-256 校验）到配置文件旁 `cloudflare/bin/`，也可以单独运行 `xmesh cloudflare install --config xmesh.yaml`。主机没有系统钥匙串（如无桌面的 Linux 服务器）时，Cloudflare 令牌自动改存到用户配置目录 `xmesh/cloudflare/<配置名>.credential.json`（0600）。设备页的地址列表会显示已配置的 Tunnel 主机名，哪怕隧道还没连通。`xmesh cloudflare remove --name laptop --apply` 删除这台设备的全部资源，最后一台删完时一并删除网格服务令牌；加 `--config xmesh.yaml` 时，若删除的正是该配置里在用的隧道，还会清掉 `mesh.cloudflare` 的主机名、令牌与 Access 项并删除对应密钥文件，`enabled` 置为 false。
 
 国内网络强制 HTTP/2（走 TCP 443/7844）是写死的，不是选项；隧道连边缘的 7844 端口须可达。
 

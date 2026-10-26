@@ -115,7 +115,7 @@ func (m *Mesh) ProvisionDevice(ctx context.Context, name, tokenID string) (d Dev
 	if d.AppID, err = m.Client.CreateAccessApp(ctx, resource, d.Hostname); err != nil {
 		return d, err
 	}
-	if d.PolicyID, err = m.Client.AllowServiceToken(ctx, d.AppID, resource+"-mesh", tokenID); err != nil {
+	if d.PolicyID, err = m.Client.AllowServiceToken(ctx, d.AppID, resource+"-mesh"); err != nil {
 		return d, err
 	}
 	return d, nil

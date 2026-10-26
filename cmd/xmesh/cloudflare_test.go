@@ -216,3 +216,144 @@ func TestCloudflareDiscoverListsWhatTheTokenSees(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestCloudflareRemoveClearsTheConfiguredTunnel(t *testing.T) {
+	_, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if _, err := os.Stat(filepath.Join(filepath.Dir(cfg), "cloudflare", f)); !os.IsNotExist(err) {
+			t.Errorf("%s was left behind: %v", f, err)
+		}
+	}
+	raw, _ := os.ReadFile(cfg)
+	text := string(raw)
+	for _, gone := range []string{"hostname:", "access_client_id", "access_client_secret_file", "tunnel_token_file"} {
+		if strings.Contains(text, gone) {
+			t.Errorf("config still has %q:\n%s", gone, text)
+		}
+	}
+	if !strings.Contains(text, "enabled: false") || !strings.Contains(text, "# my node") {
+		t.Errorf("config lost its other content:\n%s", text)
+	}
+}
+
+func TestClearCloudflareConfigLeavesAnotherTunnelAlone(t *testing.T) {
+	_, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	if err := cloudflareRun(append([]string{"setup", "--name", "laptop", "--config", cfg, "--apply"}, state...), &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(cfg)
+	if err := checkClearCloudflareConfig(cfg, "xmesh-other-abcdef.mesh.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearCloudflareConfig(cfg, "xmesh-other-abcdef.mesh.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(cfg)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("config changed:\n%s", after)
+	}
+}
+
+func TestCloudflareRemoveKeepsTheRecordWhenLocalCleanupFails(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	good, _ := os.ReadFile(cfg)
+	if err := os.WriteFile(cfg, []byte("- not a mapping\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err == nil {
+		t.Fatal("remove succeeded with an unusable config")
+	}
+	if len(fake.Things) == 0 {
+		t.Fatal("Cloudflare resources were deleted before the local cleanup worked")
+	}
+	if err := os.WriteFile(cfg, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if len(fake.Things) != 0 {
+		t.Fatalf("left behind %v", fake.Things)
+	}
+}
+
+func TestCloudflareRemoveLeavesSecretsOutsideTheConfigDirectory(t *testing.T) {
+	_, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	shared := t.TempDir()
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--dir", shared, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if _, err := os.Stat(filepath.Join(shared, f)); err != nil {
+			t.Errorf("%s outside the config directory was deleted: %v", f, err)
+		}
+	}
+}
+
+func TestDropStaleSecretsKeepsFilesTheConfigStillReferences(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "xmesh.yaml")
+	secrets := filepath.Join(dir, "cloudflare")
+	if err := os.MkdirAll(secrets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if err := os.WriteFile(filepath.Join(secrets, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := "schema_version: 2\nnode:\n  name: laptop\n  roles: [agent]\nmesh:\n  lan:\n    enabled: false\n  cloudflare:\n    enabled: true\n    hostname: xmesh-other-abcdef.example.com\n    access_client_id: cid.access\n    access_client_secret_file: " + filepath.Join(secrets, "access-secret") + "\n    tunnel_token_file: " + filepath.Join(secrets, "tunnel-token") + "\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := dropStaleCloudflareSecrets("xmesh.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if _, err := os.Stat(filepath.Join(secrets, f)); err != nil {
+			t.Errorf("%s is still referenced but was deleted: %v", f, err)
+		}
+	}
+}
+
+func TestCloudflareRemoveStillCleansTheConfigWhenOnlyTheServiceTokenDeleteFails(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	fake.FailOn = "DELETE /accounts/acct/access/service_tokens"
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err == nil {
+		t.Fatal("remove reported success although the service token delete failed")
+	}
+	raw, _ := os.ReadFile(cfg)
+	if strings.Contains(string(raw), "hostname:") {
+		t.Errorf("the config still points at the deleted tunnel:\n%s", raw)
+	}
+}

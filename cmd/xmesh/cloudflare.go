@@ -169,7 +169,7 @@ func cloudflareLogin(args []string, out io.Writer, in io.Reader) error {
 	c.register(fs)
 	account := fs.String("account", "", "Cloudflare 账号 ID")
 	zone := fs.String("zone", "", "域名所在区域的 ID")
-	domain := fs.String("domain", "", "设备主机名所用的域名，例如 mesh.example.com")
+	domain := fs.String("domain", "", "设备主机名所用的域名，建议直接用区域本身，例如 example.com；多级子域（如 mesh.example.com）常常没有边缘证书，连接会在 TLS 握手时失败")
 	secretFile := fs.String("secret-file", "", "API 令牌文件，- 表示标准输入；缺省时从标准输入读取")
 	noVerify := fs.Bool("no-verify", false, "保存前不连接 Cloudflare 验证")
 	if err := cloudflareFlags(fs, args); err != nil {
@@ -224,6 +224,9 @@ func fillCredentialIDs(cred *cfadmin.Credential) error {
 		return err
 	}
 	cred.AccountID, cred.ZoneID = account.ID, zone.ID
+	if cred.Domain != zone.Name {
+		fmt.Fprintf(os.Stderr, "警告：设备主机名会在 %s 之下再加一级，比区域 %s 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败；建议直接用 %s。\n", cred.Domain, zone.Name, zone.Name)
+	}
 	return nil
 }
 
@@ -423,11 +426,17 @@ func cloudflareInstall(args []string, out io.Writer) error {
 	return emit(out, c.json, map[string]any{"cloudflared": path}, func(w io.Writer) { fmt.Fprintln(w, note) })
 }
 
+func hasDevice(st cfadmin.State, name string) bool {
+	_, ok := st.Devices[name]
+	return ok
+}
+
 func cloudflareRemove(args []string, out io.Writer) error {
 	var c cloudflareCommon
 	fs := flag.NewFlagSet("cloudflare remove", flag.ContinueOnError)
 	c.register(fs)
 	name := fs.String("name", "", "设备名")
+	cfgPath := fs.String("config", "", "xmesh.yaml 路径；删除的正是本机在用的隧道时，一并清掉其中的 mesh.cloudflare")
 	apply := fs.Bool("apply", false, "确认删除")
 	if err := cloudflareFlags(fs, args); err != nil {
 		return err
@@ -447,10 +456,40 @@ func cloudflareRemove(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "将删除设备 %s 的隧道、DNS 记录与 Access 应用（最后一台还会删除网格服务令牌）。加 --apply 执行。\n", *name)
 		return nil
 	}
+	hostname := ""
+	if st, err := state.Load(); err == nil {
+		hostname = st.Devices[*name].Hostname
+	}
+	// The edit is checked first, so an unreadable or unwritable file stops the command while the device
+	// record and the Cloudflare resources are still there to retry. It is made only after the resources are
+	// deleted, on the file as it is then, so a failed delete never switches off a tunnel that still exists.
+	if *cfgPath != "" && hostname != "" {
+		if err := checkClearCloudflareConfig(*cfgPath, hostname); err != nil {
+			return fmt.Errorf("准备清理本机配置失败，Cloudflare 资源尚未删除，可修复后重试：%w", err)
+		}
+	}
 	ctx, cancel := ctx30()
 	defer cancel()
-	if err := mesh.Remove(ctx, state, *name); err != nil {
-		return err
+	removeErr := mesh.Remove(ctx, state, *name)
+	if removeErr != nil {
+		// Remove drops the record once the device's own resources are gone and can still fail afterwards, on
+		// the shared service token. Then the tunnel is gone and the local entry must go with it.
+		if st, err := state.Load(); err != nil || hasDevice(st, *name) {
+			return removeErr
+		}
+	}
+	if *cfgPath != "" && hostname != "" {
+		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
+			return fmt.Errorf("Cloudflare 资源已删除，但没能写入本机配置，请手动删除 %s 中 mesh.cloudflare 的 hostname 等项：%w", *cfgPath, err)
+		}
+	}
+	if *cfgPath != "" {
+		if err := dropStaleCloudflareSecrets(*cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "警告：没能删除旧的隧道密钥文件，之后加入新隧道前请手动删除 %s 下的 tunnel-token 与 access-secret：%v\n", filepath.Join(filepath.Dir(*cfgPath), "cloudflare"), err)
+		}
+	}
+	if removeErr != nil {
+		return removeErr
 	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
 }
@@ -573,6 +612,133 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 		return nil, 0, err
 	}
 	return edited, info.Mode().Perm(), nil
+}
+
+// clearedCloudflareConfig returns the file without the tunnel this device runs (mesh.cloudflare's
+// hostname, tunnel token and Access client entries, with enabled off) when the configured hostname is the
+// given one; matched is false, and nothing else is returned, when it is a different tunnel. The peers the
+// device has learned and the rest of the file are kept.
+func clearedCloudflareConfig(path, hostname string) (edited []byte, mode os.FileMode, matched bool, err error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, 0, false, errors.New("xmesh.yaml 不是有效的 YAML 映射")
+	}
+	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
+	configured := ""
+	for i := 0; i+1 < len(cf.Content); i += 2 {
+		if cf.Content[i].Value == "hostname" {
+			configured = cf.Content[i+1].Value
+		}
+	}
+	if configured != hostname {
+		return nil, 0, false, nil
+	}
+	kept := cf.Content[:0]
+	for i := 0; i+1 < len(cf.Content); i += 2 {
+		switch cf.Content[i].Value {
+		case "hostname", "access_client_id", "access_client_secret_file", "tunnel_token_file":
+			continue
+		case "enabled":
+			cf.Content[i+1].Value, cf.Content[i+1].Tag = "false", "!!bool"
+		}
+		kept = append(kept, cf.Content[i], cf.Content[i+1])
+	}
+	cf.Content = kept
+	if edited, err = yaml.Marshal(&doc); err != nil {
+		return nil, 0, false, err
+	}
+	if _, err := config.Parse(edited); err != nil {
+		return nil, 0, false, fmt.Errorf("修改后的配置无效：%w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return edited, info.Mode().Perm(), true, nil
+}
+
+// checkClearCloudflareConfig proves the edit can be made, without making it: the file loads and the
+// directory takes a new file. remove runs it before deleting anything at Cloudflare.
+func checkClearCloudflareConfig(path, hostname string) error {
+	edited, mode, matched, err := clearedCloudflareConfig(path, hostname)
+	if err != nil || !matched {
+		return err
+	}
+	// A unique name: setup stages its own edit at path+".tmp" and must not meet this probe.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".probe-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(edited); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// clearCloudflareConfig makes the edit on the file as it is now, so peers a share or invite added while
+// the Cloudflare calls were running are kept.
+func clearCloudflareConfig(path, hostname string) error {
+	edited, mode, matched, err := clearedCloudflareConfig(path, hostname)
+	if err != nil || !matched {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, edited, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// dropStaleCloudflareSecrets deletes the tunnel token and Access secret that setup and join leave in the
+// cloudflare directory beside the configuration, once the configuration no longer points at them. A later
+// join refuses to write over them. Only those two fixed names in that one directory are touched, so a
+// path the user pointed somewhere else is never deleted.
+func dropStaleCloudflareSecrets(path string) error {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+	}
+	referenced := map[string]bool{}
+	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
+	for i := 0; i+1 < len(cf.Content); i += 2 {
+		if k := cf.Content[i].Value; k == "access_client_secret_file" || k == "tunnel_token_file" {
+			ref := cf.Content[i+1].Value
+			if !filepath.IsAbs(ref) {
+				ref = filepath.Join(filepath.Dir(path), ref)
+			}
+			referenced[filepath.Clean(ref)] = true
+		}
+	}
+	dir := filepath.Join(filepath.Dir(path), "cloudflare")
+	var first error
+	for _, name := range []string{"tunnel-token", "access-secret"} {
+		file := filepath.Join(dir, name)
+		if referenced[file] {
+			continue
+		}
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func childMapping(parent *yaml.Node, key string) *yaml.Node {

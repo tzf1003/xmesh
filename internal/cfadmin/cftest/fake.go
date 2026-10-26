@@ -113,8 +113,7 @@ func (f *Fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.Things["app/"+id] = body["domain"].(string)
 		reply(200, map[string]any{"id": id})
 	case strings.HasPrefix(p, "/access/apps/") && strings.HasSuffix(p, "/policies"):
-		include := body["include"].([]any)[0].(map[string]any)["service_token"].(map[string]any)
-		if body["decision"] != "non_identity" || include["token_id"] == "" {
+		if _, ok := body["include"].([]any)[0].(map[string]any)["any_valid_service_token"]; !ok || body["decision"] != "non_identity" {
 			reply(400, nil, "bad policy")
 			return
 		}
