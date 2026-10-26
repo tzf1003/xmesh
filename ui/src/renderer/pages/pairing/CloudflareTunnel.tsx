@@ -163,7 +163,7 @@ export function CloudflareTunnel({ ctx, defaultName }: { ctx: PageContext; defau
           title={copy("删除隧道资源？", "Delete the tunnel resources?")}
           confirmLabel={copy("删除", "Delete")}
           body={<>
-            <p>{copy(`会删除 ${removing} 在 Cloudflare 上的隧道、DNS 记录和 Access 应用；这是最后一台时还会删除网格服务令牌。如果删除的正是本机在用的隧道，还会清掉配置文件里的 mesh.cloudflare 与对应的密钥文件，重启 xmesh 后生效。`, `Deletes the tunnel, DNS record and Access app of ${removing}; the mesh service token goes too if it is the last device. If it is the tunnel this device runs, mesh.cloudflare and its secret files are removed too; restart xmesh for it to take effect.`)}</p>
+            <p>{copy(`会删除 ${removing} 在 Cloudflare 上的隧道、DNS 记录和 Access 应用；这是最后一台时还会删除网格服务令牌。如果删除的正是本机在用的隧道，还会清掉配置文件 mesh.cloudflare 里对应的主机名与密钥引用（其他字段与对等设备保留），并删除配置目录旁 cloudflare 文件夹中不再被引用的密钥文件；放在别处的密钥文件不会删除。重启 xmesh 后生效。`, `Deletes the tunnel, DNS record and Access app of ${removing}; the mesh service token goes too if it is the last device. If it is the tunnel this device runs, its hostname and secret references are cleared from mesh.cloudflare (other fields and peers are kept) and unreferenced secret files in the cloudflare folder beside the config are deleted; secret files stored elsewhere are left alone. Restart xmesh for it to take effect.`)}</p>
             {err && <Banner kind="danger" testid="cloudflare-error">{err.message}</Banner>}
           </>}
           busy={busy}

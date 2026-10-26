@@ -47,7 +47,7 @@ export function useCloudflareLogin(): { fields: JSX.Element; request: MeshReques
       const data = r.data as CloudflareDiscovery;
       setFound(data);
       const only = data.zones.length === 1 ? data.zones[0] : undefined;
-      if (only) { setZoneId(only.id); setDomain(`mesh.${only.name}`); }
+      if (only) { setZoneId(only.id); setDomain(only.name); }
     } catch (e) {
       setErr({ code: "unavailable", message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -58,7 +58,7 @@ export function useCloudflareLogin(): { fields: JSX.Element; request: MeshReques
   const choose = (id: string): void => {
     setZoneId(id);
     const z = found?.zones.find((x) => x.id === id);
-    if (z) setDomain(`mesh.${z.name}`);
+    if (z) setDomain(z.name);
   };
 
   const accountName = (id: string): string => found?.accounts.find((a) => a.id === id)?.name || id.slice(0, 8);

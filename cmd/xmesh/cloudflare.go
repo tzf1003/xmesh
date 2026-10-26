@@ -668,11 +668,21 @@ func checkClearCloudflareConfig(path, hostname string) error {
 	if err != nil || !matched {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, edited, mode); err != nil {
+	// A unique name: setup stages its own edit at path+".tmp" and must not meet this probe.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".probe-*")
+	if err != nil {
 		return err
 	}
-	return os.Remove(tmp)
+	defer os.Remove(f.Name())
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(edited); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // clearCloudflareConfig makes the edit on the file as it is now, so peers a share or invite added while
