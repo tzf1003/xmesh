@@ -261,3 +261,32 @@ func TestClearCloudflareConfigLeavesAnotherTunnelAlone(t *testing.T) {
 		t.Fatalf("config changed:\n%s", after)
 	}
 }
+
+func TestCloudflareRemoveKeepsTheRecordWhenLocalCleanupFails(t *testing.T) {
+	fake, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	good, _ := os.ReadFile(cfg)
+	if err := os.WriteFile(cfg, []byte("- not a mapping\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err == nil {
+		t.Fatal("remove succeeded with an unusable config")
+	}
+	if len(fake.Things) == 0 {
+		t.Fatal("Cloudflare resources were deleted before the local cleanup worked")
+	}
+	if err := os.WriteFile(cfg, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if len(fake.Things) != 0 {
+		t.Fatalf("left behind %v", fake.Things)
+	}
+}

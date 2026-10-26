@@ -455,15 +455,17 @@ func cloudflareRemove(args []string, out io.Writer) error {
 	if st, err := state.Load(); err == nil {
 		hostname = st.Devices[*name].Hostname
 	}
+	// The local file goes first: it is idempotent, and if it fails nothing is lost, since the device record
+	// stays for a retry. Cleaning it after Remove would leave a retry with no record to find the hostname.
+	if *cfgPath != "" && hostname != "" {
+		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
+			return fmt.Errorf("清理本机配置失败，Cloudflare 资源尚未删除，可修复后重试：%w", err)
+		}
+	}
 	ctx, cancel := ctx30()
 	defer cancel()
 	if err := mesh.Remove(ctx, state, *name); err != nil {
 		return err
-	}
-	if *cfgPath != "" && hostname != "" {
-		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
-			return fmt.Errorf("Cloudflare 资源已删除，但清理本机配置失败：%w", err)
-		}
 	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
 }
