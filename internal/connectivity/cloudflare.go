@@ -8,15 +8,19 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/tzf1003/xmesh/internal/cfadmin"
+	"github.com/tzf1003/xmesh/internal/cfpreferred"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
@@ -101,6 +105,28 @@ func (n *Node) runCloudflared(ctx context.Context, binary, tokenFile string) {
 	}
 }
 
+// preferredAddrs is the configured preferred edge addresses followed by those in the list file. The file is
+// read on every dial so a refreshed scan takes effect without a restart; an unreadable or invalid file is
+// ignored, because the dial still falls back to the normal address.
+func preferredAddrs(cfg config.Cloudflare) []netip.Addr {
+	var out []netip.Addr
+	for _, s := range cfg.PreferredIPs {
+		if a, err := cfpreferred.Parse(s); err == nil {
+			out = append(out, a)
+		}
+	}
+	if cfg.PreferredIPsFile != "" {
+		if f, err := os.Open(cfg.PreferredIPsFile); err == nil {
+			list, _ := cfpreferred.ParseList(f)
+			_ = f.Close()
+			out = append(out, list...)
+		}
+	}
+	seen := map[netip.Addr]bool{}
+	out = slices.DeleteFunc(out, func(a netip.Addr) bool { dup := seen[a]; seen[a] = true; return dup })
+	return out[:min(len(out), cfpreferred.MaxList)]
+}
+
 // dialCloudflare opens a WebSocket to a peer's tunnel hostname, presents the Access service token, and
 // runs the pinned mTLS handshake inside it. The WebSocket belongs to the returned connection, not to ctx.
 func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tls.Config) (net.Conn, error) {
@@ -119,11 +145,50 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 		header.Set("CF-Access-Client-Id", cfg.AccessClientID)
 		header.Set("CF-Access-Client-Secret", strings.TrimSpace(string(secret)))
 	}
-	outer := n.cloudflareOuter
-	if outer == nil {
-		outer = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}, TLSHandshakeTimeout: 10 * time.Second}}
-		defer outer.CloseIdleConnections()
+	if outer := n.cloudflareOuter; outer != nil {
+		return dialTunnel(ctx, outer, address, header, tlsConfig)
 	}
+	// Each preferred address gets a whole attempt (TCP, TLS, Access, WebSocket and the inner handshake) of at most 4 seconds, because
+	// an address that accepts TCP can still fail later; the normal DNS address is the last attempt.
+	// The preferred phase is bounded to part of the caller's deadline so a stale list cannot starve the DNS attempt.
+	budget := 20 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = time.Until(deadline) * 6 / 10
+	}
+	phase, stop := context.WithTimeout(ctx, budget)
+	defer stop()
+	for _, a := range preferredAddrs(cfg) {
+		if phase.Err() != nil {
+			break
+		}
+		try, cancel := context.WithTimeout(phase, 4*time.Second)
+		client := tunnelClient(cfpreferred.Pin(a))
+		conn, err := dialTunnel(try, client, address, header, tlsConfig)
+		client.CloseIdleConnections()
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	client := tunnelClient(nil)
+	defer client.CloseIdleConnections()
+	return dialTunnel(ctx, client, address, header, tlsConfig)
+}
+
+func tunnelClient(dial func(ctx context.Context, network, address string) (net.Conn, error)) *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}},
+		TLSHandshakeTimeout: 10 * time.Second,
+		DialContext:         dial,
+	}}
+}
+
+// dialTunnel opens the WebSocket through outer, presents the Access headers and runs the pinned mTLS inside it.
+// The WebSocket belongs to the returned connection, not to ctx.
+func dialTunnel(ctx context.Context, outer *http.Client, address string, header http.Header, tlsConfig *tls.Config) (net.Conn, error) {
 	ws, _, err := websocket.Dial(ctx, "wss://"+address, &websocket.DialOptions{HTTPClient: outer, HTTPHeader: header})
 	if err != nil {
 		return nil, err

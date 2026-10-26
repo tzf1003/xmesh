@@ -215,6 +215,16 @@
               },
               "description": "已配对设备的 ID 到隧道主机名。"
             },
+            "preferred_ips": {
+              "type": "array",
+              "maxItems": 64,
+              "items": { "type": "string" },
+              "description": "拨出到对端隧道主机名时优先连接的 Cloudflare 边缘 IP，按顺序尝试，全部失败才用 DNS 解析的地址。必须在 Cloudflare 公布的 IP 段内；SNI、Host 与 Access 令牌不变。"
+            },
+            "preferred_ips_file": {
+              "type": "string",
+              "description": "优选 IP 列表文件的绝对路径（每行一个地址，或 CloudflareSpeedTest 的 result.csv），每次拨号时读取，排在 preferred_ips 之后。"
+            },
             "allow_pairing": {
               "type": "boolean",
               "default": false,
