@@ -55,7 +55,11 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 	case device.Tailnet:
 		return reflect.DeepEqual(old.Tailnet, cfg.Tailnet)
 	case device.Cloudflare:
-		return reflect.DeepEqual(old.Cloudflare, cfg.Cloudflare)
+		// Preferred addresses and their policy are read on every dial, so changing them must not rebuild the path.
+		a, b := old.Cloudflare, cfg.Cloudflare
+		a.PreferredIP, a.PreferredIPs, a.PreferredIPsFile = nil, nil, ""
+		b.PreferredIP, b.PreferredIPs, b.PreferredIPsFile = nil, nil, ""
+		return reflect.DeepEqual(a, b)
 	}
 	return reflect.DeepEqual(old.LAN, cfg.LAN)
 }
@@ -117,6 +121,8 @@ type Node struct {
 	auditLog       atomic.Pointer[audit.Logger]
 	// cloudflareOuter replaces the HTTP client that opens the tunnel WebSocket; tests point it at a fake edge.
 	cloudflareOuter *http.Client
+	// preferred is the Cloudflare preferred-address pool, created on first use.
+	preferred *preferredPool
 }
 
 func Open(ctx context.Context, c *config.Config, stateDir string) (*Node, error) {
@@ -196,6 +202,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	if supervise {
 		n.workers.Go(n.supervise)
 		n.workers.Go(n.collectLoop)
+		n.workers.Go(func() { n.runPreferred(n.ctx) })
 		n.workers.Go(func() {
 			ticker := time.NewTicker(time.Hour)
 			defer ticker.Stop()

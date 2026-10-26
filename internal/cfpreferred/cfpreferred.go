@@ -67,7 +67,26 @@ func Parse(s string) (netip.Addr, error) {
 // duplicates are dropped, order is kept. A line that is not a Cloudflare address is an error rather than
 // being skipped, so a poisoned list is rejected whole.
 func ParseList(r io.Reader) ([]netip.Addr, error) {
+	out, _, err := parseList(r, true)
+	return out, err
+}
+
+// ParseLines is ParseList for third-party lists: lines that are not Cloudflare addresses are skipped and
+// reported (line number, text, reason) instead of rejecting the whole list.
+func ParseLines(r io.Reader) ([]netip.Addr, []Reject, error) {
+	return parseList(r, false)
+}
+
+// Reject is one line ParseLines did not accept.
+type Reject struct {
+	Line int
+	Text string
+	Err  error
+}
+
+func parseList(r io.Reader, strict bool) ([]netip.Addr, []Reject, error) {
 	var out []netip.Addr
+	var rejects []Reject
 	seen := map[netip.Addr]bool{}
 	const limit = 1 << 20
 	lr := &io.LimitedReader{R: r, N: limit + 1}
@@ -87,7 +106,11 @@ func ParseList(r io.Reader) ([]netip.Addr, error) {
 		}
 		a, err := Parse(field)
 		if err != nil {
-			return nil, fmt.Errorf("第 %d 行: %w", n, err)
+			if strict {
+				return nil, nil, fmt.Errorf("第 %d 行: %w", n, err)
+			}
+			rejects = append(rejects, Reject{Line: n, Text: field, Err: err})
+			continue
 		}
 		if !seen[a] {
 			seen[a] = true
@@ -95,15 +118,15 @@ func ParseList(r io.Reader) ([]netip.Addr, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if lr.N <= 0 {
-		return nil, errors.New("列表超过 1 MiB")
+		return nil, nil, errors.New("列表超过 1 MiB")
 	}
 	if len(out) > MaxList {
 		out = out[:MaxList]
 	}
-	return out, nil
+	return out, rejects, nil
 }
 
 func looksLikeIP(s string) bool { _, err := netip.ParseAddr(s); return err == nil }

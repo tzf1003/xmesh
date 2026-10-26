@@ -37,6 +37,7 @@ import type { UpdatePrefs } from "./update";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { CiRequest, CiResultFor } from "./ci";
 import type { ComputerRequest, ComputerResult } from "./computer";
+import type { PreferredIpRequest, PreferredIpResultFor } from "./preferred-ip";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { TransferRequest, TransferReply } from "./transfers";
 import type { PlaygroundApi } from "./playground";
@@ -106,6 +107,7 @@ export const CHANNELS = {
   mesh: "xmesh:mesh",
   ci: "xmesh:ci",
   computer: "xmesh:computer",
+  preferredIp: "xmesh:preferred-ip",
   playground: "xmesh:playground",
   transfers: "xmesh:transfers",
 } as const;
@@ -382,6 +384,8 @@ export interface PanelApi {
   /** GitHub Actions runner hosting (CTR-CTL-15). Tokens go in the request once and never come back. */
   ci<R extends CiRequest>(request: R): Promise<DataResult<CiResultFor<R>>>;
   computer(request: ComputerRequest): Promise<DataResult<ComputerResult>>;
+  /** Cloudflare preferred edge addresses (API 2.4): the pool and its scores, run a scan or a refresh, check pasted text. Settings are written through patchConfig. */
+  preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -451,6 +455,7 @@ export const PANEL_API_METHODS = [
   "mesh",
   "ci",
   "computer",
+  "preferredIp",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";

@@ -148,6 +148,8 @@ type Cloudflare struct {
 	// PreferredIPsFile is an absolute path to a list of preferred addresses (one per line, or a
 	// CloudflareSpeedTest result.csv), read again on each dial and tried after PreferredIPs.
 	PreferredIPsFile string `json:"preferred_ips_file,omitempty"`
+	// PreferredIP is the full preferred-address policy: sources, scheduled scan, mode and per-device overrides.
+	PreferredIP *PreferredIP `json:"preferred_ip,omitempty"`
 	// AllowPairing lets an unpaired device run the connection-password pairing through the tunnel.
 	// It is off by default because anyone holding the Access token could otherwise lock pairing.
 	AllowPairing bool `json:"allow_pairing,omitempty"`
@@ -590,6 +592,9 @@ func (c *Config) Validate() error {
 		}
 		if cf.PreferredIPsFile != "" && !filepath.IsAbs(cf.PreferredIPsFile) {
 			return fail("/mesh/cloudflare/preferred_ips_file: 须为绝对路径")
+		}
+		if ptr, ok := cf.PreferredIP.validate(); !ok {
+			return fail(ptr)
 		}
 		hosts := map[string]bool{}
 		for id, host := range cf.Peers {

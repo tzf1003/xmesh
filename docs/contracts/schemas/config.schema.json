@@ -225,6 +225,62 @@
               "type": "string",
               "description": "优选 IP 列表文件的绝对路径（每行一个地址，或 CloudflareSpeedTest 的 result.csv），每次拨号时读取，排在 preferred_ips 之后。"
             },
+            "preferred_ip": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "优选 IP 策略：来源、定时测速、默认接入方式与按设备覆盖。可热更新，无需重启。",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true, "description": "总开关；关闭后所有连接走 DNS 地址，池与设置保留。" },
+                "mode": { "enum": ["smart", "fixed"], "default": "smart", "description": "smart 按评分从好到差尝试池内地址；fixed 只尝试 fixed_ips。" },
+                "fixed_ips": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+                "attempt_timeout": { "type": "string", "default": "4s", "description": "单个地址完整尝试的时限，1s 到 30s。" },
+                "fail_threshold": { "type": "integer", "minimum": 0, "maximum": 20, "default": 3, "description": "连续失败这么多次的地址进入冷却。0 或省略表示使用默认值 3。" },
+                "cooldown": { "type": "string", "default": "30m", "description": "冷却时长，1m 到 24h。" },
+                "no_dns_fallback": { "type": "boolean", "default": false, "description": "所有优选地址失败后不再尝试 DNS 地址。" },
+                "sources": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["type"],
+                    "properties": {
+                      "type": { "enum": ["manual", "file", "url"] },
+                      "disabled": { "type": "boolean" },
+                      "name": { "type": "string", "maxLength": 64 },
+                      "ips": { "type": "array", "maxItems": 64, "items": { "type": "string" } },
+                      "path": { "type": "string", "description": "file 来源：绝对路径。" },
+                      "url": { "type": "string", "maxLength": 2048, "description": "url 来源：https 订阅地址，设备会定期访问。" },
+                      "refresh": { "type": "string", "default": "12h", "description": "url 来源的刷新间隔，5m 到 168h。" }
+                    }
+                  }
+                },
+                "scan": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "interval": { "type": "string", "default": "6h", "description": "10m 到 168h。" },
+                    "sample": { "type": "integer", "minimum": 0, "maximum": 2000, "default": 200, "description": "每次抽样的地址数。0 或省略表示使用默认值 200。" },
+                    "keep": { "type": "integer", "minimum": 0, "maximum": 64, "default": 8, "description": "测速后留下的地址数。0 或省略表示使用默认值 8。" },
+                    "ipv6": { "type": "boolean" },
+                    "host": { "type": "string", "description": "测速用的隧道主机名，缺省取第一个对端的。" }
+                  }
+                },
+                "peers": {
+                  "type": "object",
+                  "propertyNames": { "pattern": "^dev-[0-9a-f]{64}$" },
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "mode": { "enum": ["default", "smart", "fixed", "off"] },
+                      "ips": { "type": "array", "maxItems": 64, "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            },
             "allow_pairing": {
               "type": "boolean",
               "default": false,

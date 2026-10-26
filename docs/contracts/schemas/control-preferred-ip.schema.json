@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-preferred-ip:2",
+  "title": "Cloudflare 优选 IP",
+  "description": "API 2.4 起。池与测速状态只读；来源、策略与按设备覆盖写在 mesh.cloudflare.preferred_ip，经 PATCH /v2/config 修改。",
+  "$defs": {
+    "PreferredIPEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ip",
+        "source",
+        "status",
+        "latency_ms",
+        "loss_percent",
+        "failures",
+        "cooldown_until",
+        "last_used_at"
+      ],
+      "properties": {
+        "ip": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "manual",
+            "file",
+            "url",
+            "scan"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "untested",
+            "cooling"
+          ]
+        },
+        "latency_ms": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loss_percent": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cooldown_until": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_used_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PreferredIPSourceState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "type",
+        "name",
+        "disabled",
+        "count",
+        "fetched_at",
+        "error"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "type": {
+          "enum": [
+            "manual",
+            "file",
+            "url",
+            "scan"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fetched_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "description": "index 为 -1 表示旧的 preferred_ips / preferred_ips_file 字段。"
+    },
+    "PreferredIPScanState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "running",
+        "sample",
+        "host",
+        "started_at",
+        "last_at",
+        "next_at",
+        "kept",
+        "error"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "sample": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "host": {
+          "type": "string"
+        },
+        "started_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kept": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "PreferredIPPeerState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id",
+        "hostname",
+        "mode",
+        "override",
+        "ips",
+        "current",
+        "last_at"
+      ],
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "smart",
+            "fixed",
+            "off"
+          ]
+        },
+        "override": {
+          "type": "boolean"
+        },
+        "ips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "current": {
+          "type": "string"
+        },
+        "last_at": {
+          "oneOf": [
+            {
+              "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "current 为空表示最近一次连接走了 DNS 地址或尚未连接。"
+    },
+    "PreferredIPState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "mode",
+        "no_dns_fallback",
+        "pool",
+        "sources",
+        "scan",
+        "peers"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "enum": [
+            "smart",
+            "fixed"
+          ]
+        },
+        "no_dns_fallback": {
+          "type": "boolean"
+        },
+        "pool": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreferredIPEntry"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreferredIPSourceState"
+          }
+        },
+        "scan": {
+          "$ref": "#/$defs/PreferredIPScanState"
+        },
+        "peers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreferredIPPeerState"
+          }
+        }
+      },
+      "description": "GET /v2/preferred-ip 与 POST /v2/preferred-ip/run 的响应。池、评分与来源状态；改设置走 PATCH /v2/config。"
+    },
+    "PreferredIPRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "enum": [
+            "scan",
+            "refresh"
+          ]
+        }
+      },
+      "description": "scan 在后台开始测速，立即返回；refresh 抓取所有订阅来源，完成后返回。"
+    },
+    "PreferredIPInspectRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 32768
+        }
+      }
+    },
+    "PreferredIPInspectItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line",
+        "ip",
+        "status",
+        "note"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ip": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "new",
+            "existing",
+            "rejected"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "PreferredIPInspectResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "accepted"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PreferredIPInspectItem"
+          }
+        },
+        "accepted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "accepted 是去重后可以导入的新地址。"
+    }
+  }
+}

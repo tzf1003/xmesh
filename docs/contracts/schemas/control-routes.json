@@ -1,5 +1,5 @@
 {
-  "api_version": "2.3",
+  "api_version": "2.4",
   "routes": [
     {
       "id": "control.status.get",
@@ -782,6 +782,48 @@
         "invalid_args",
         "unavailable"
       ]
+    },
+    {
+      "id": "control.preferredip.get",
+      "method": "GET",
+      "path": "/v2/preferred-ip",
+      "capability": "config.read",
+      "since": "2.4",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.preferredip.run",
+      "method": "POST",
+      "path": "/v2/preferred-ip/run",
+      "capability": "config.write",
+      "since": "2.4",
+      "query": null,
+      "body": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPRunRequest",
+      "response": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPState",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.preferredip.inspect",
+      "method": "POST",
+      "path": "/v2/preferred-ip/inspect",
+      "capability": "config.read",
+      "since": "2.4",
+      "query": null,
+      "body": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPInspectRequest",
+      "response": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPInspectResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
     }
   ]
 }

@@ -99,6 +99,7 @@ const api: PanelApi = {
   mesh: (request) => invoke("xmesh:mesh", request),
   ci: (request) => invoke("xmesh:ci", request),
   computer: (request) => invoke("xmesh:computer", request),
+  preferredIp: (request) => invoke("xmesh:preferred-ip", request),
 };
 
 contextBridge.exposeInMainWorld("xmesh", Object.freeze(api));

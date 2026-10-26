@@ -164,13 +164,13 @@ export class ControlClient {
    * Any other Control API route. The caller names the method and path, so only
    * main-process code with fixed paths may use it (see panel-service.ts).
    */
-  async call(method: string, path: string, opts: { body?: unknown; ifMatch?: string } = {}): Promise<unknown> {
+  async call(method: string, path: string, opts: { body?: unknown; ifMatch?: string; timeoutMs?: number } = {}): Promise<unknown> {
     const headers: Record<string, string> = opts.ifMatch === undefined ? {} : { "If-Match": `"${opts.ifMatch}"` };
-    return (await this.json(method, path, opts.body, headers)).body;
+    return (await this.json(method, path, opts.body, headers, opts.timeoutMs)).body;
   }
 
-  private async json(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<Reply> {
-    const reply = await this.request(method, path, body, extra);
+  private async json(method: string, path: string, body?: unknown, extra: Record<string, string> = {}, timeoutMs?: number): Promise<Reply> {
+    const reply = await this.request(method, path, body, extra, timeoutMs);
     const version = headerValue(reply.headers, VERSION_HEADER);
     if (!isSupportedApiVersion(version)) throw new VersionMismatchError(version, this.kernelVersion);
     if (reply.status >= 400) {
@@ -195,7 +195,7 @@ export class ControlClient {
     return reply;
   }
 
-  private request(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<Reply> {
+  private request(method: string, path: string, body?: unknown, extra: Record<string, string> = {}, timeoutMs?: number): Promise<Reply> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
       const headers: Record<string, string | number> = { Accept: "application/json", Host: HOST, ...extra };
@@ -220,7 +220,7 @@ export class ControlClient {
           resolve({ status: res.statusCode ?? 0, headers: res.headers, body: parsed });
         });
       });
-      req.setTimeout(this.timeoutMs, () => req.destroy(new Error("control request timed out")));
+      req.setTimeout(timeoutMs ?? this.timeoutMs, () => req.destroy(new Error("control request timed out")));
       req.on("error", reject);
       if (payload !== undefined) req.write(payload);
       req.end();

@@ -27,6 +27,7 @@ import type {
 import type { ConfigReloadResponse } from "../src/shared/ipc";
 import { isAccessEntry, isGatewayHost, isListen, listenPort, listenScope } from "../src/shared/gateway";
 import { CiFake } from "./ci-routes";
+import { PreferredFake, type FakeCloudflare } from "./preferred-ip";
 import { fixture } from "./fixtures";
 
 // The panel's data routes for the fake kernel: config, PATs, ingress, pairing,
@@ -89,6 +90,10 @@ function writeTokenFile(file: string, token: string): void {
 }
 
 export class PanelData {
+  readonly preferred = new PreferredFake();
+  private cloudflare(): FakeCloudflare {
+    try { return ((parse(this.diskContent) as { mesh?: { cloudflare?: FakeCloudflare } } | null)?.mesh?.cloudflare ?? {}); } catch { return {}; }
+  }
   computer: ComputerState = { enabled: true, paused: false, info: { protocol_version: 1, available: true, state: "ready", desktop_id: "desktop", desktop_epoch: "epoch", layout_version: "layout", capabilities: ["screenshot", "pointer", "keyboard", "text"], displays: [{ id: "main", name: "Main display", x: 0, y: 0, width: 1920, height: 1080, scale: 1, rotation: 0 }] }, sessions: [] };
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
   private diskContent: string;
@@ -183,6 +188,17 @@ export class PanelData {
       if (typeof req?.session_id !== "string") return err(400, "invalid_args", "session_id required", { field: "session_id" });
       this.computer.sessions = this.computer.sessions.filter((s) => s.session_id !== req.session_id);
       return ok(this.computer);
+    }
+    if (p === "/v2/preferred-ip" && method === "GET") return ok(this.preferred.state(this.cloudflare()));
+    if (p === "/v2/preferred-ip/run" && method === "POST") {
+      const task = (body as { task?: unknown } | null)?.task;
+      if (task !== "scan" && task !== "refresh") return err(400, "invalid_args", "task must be scan or refresh", { field: "task" });
+      return ok(this.preferred.run(this.cloudflare(), task));
+    }
+    if (p === "/v2/preferred-ip/inspect" && method === "POST") {
+      const text = (body as { text?: unknown } | null)?.text;
+      if (typeof text !== "string") return err(400, "invalid_args", "text required", { field: "text" });
+      return ok(this.preferred.inspect(this.cloudflare(), text));
     }
     if (method === "GET" && p === "/v2/sessions") return ok(this.sessions);
     if (method === "GET" && p === "/v2/config") return this.getConfig();

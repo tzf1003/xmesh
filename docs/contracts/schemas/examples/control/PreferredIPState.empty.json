@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "mode": "smart",
+  "no_dns_fallback": false,
+  "pool": [],
+  "sources": [],
+  "scan": {
+    "enabled": false,
+    "running": false,
+    "sample": 200,
+    "host": "",
+    "started_at": null,
+    "last_at": null,
+    "next_at": null,
+    "kept": 0,
+    "error": ""
+  },
+  "peers": []
+}
