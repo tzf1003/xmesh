@@ -730,7 +730,7 @@ func (m *Manager) execute(s *ownedSession, op *operation, r ActRequest, frame *F
 		// session too so a fresh controller can acquire usable authority.
 		m.invalidate(s.ID)
 	}
-	if result.Error == "human_intervention" || result.Error == "focus_changed" {
+	if result.Error == "human_intervention" {
 		m.Pause(true)
 	}
 	if err != nil || (result.State != "executed" && result.State != "failed" && result.State != "unknown") {

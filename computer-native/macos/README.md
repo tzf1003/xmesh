@@ -43,8 +43,9 @@ system libraries; no separate upstream runtime installation is required.
 
 The backend binds a session to an executor-issued application window identity.
 Independent-window screenshots use ScreenCaptureKit. The input bridge checks the
-lease, target process lifetime, window ownership and foreground state. A user
-working in the target application prevents background dispatch. It returns an
+lease, target process lifetime and window ownership. The target application
+being frontmost does not block background dispatch, but keyboard fallback input
+is refused unless the target stays that application's key window. It returns an
 error when required private symbols or an action are unsupported and does not
 select global cursor delivery.
 

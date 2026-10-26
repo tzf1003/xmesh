@@ -38,6 +38,12 @@ func xmeshAccessibilityKeyboardTarget(pid:pid_t,window:CGWindowID)->Bool{
     return ownedByWindow(focused,pid:pid,window:window)
 }
 
+// True when the app's focused (key) window is the session's target window.
+func xmeshFocusedWindowIsTarget(pid:pid_t,window:CGWindowID)->Bool{
+    guard let focused=elementAttribute(AXUIElementCreateApplication(pid),kAXFocusedWindowAttribute) else{return false}
+    return ownedByWindow(focused,pid:pid,window:window)
+}
+
 // Frame extraction adapts computer-use-mcp Core/AX.swift. Window-scoped
 // containment/priority selection adapts open-computer-use's bestElement and
 // AccessibilitySnapshot traversal at the pinned revision in upstream.json.
