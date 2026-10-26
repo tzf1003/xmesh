@@ -253,9 +253,11 @@ func TestClearCloudflareConfigLeavesAnotherTunnelAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(cfg)
-	staged, err := prepareClearCloudflareConfig(cfg, "xmesh-other-abcdef.mesh.example.com")
-	if err != nil || staged != "" {
-		t.Fatalf("staged %q, %v", staged, err)
+	if err := checkClearCloudflareConfig(cfg, "xmesh-other-abcdef.mesh.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearCloudflareConfig(cfg, "xmesh-other-abcdef.mesh.example.com"); err != nil {
+		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(cfg)
 	if !bytes.Equal(before, after) {

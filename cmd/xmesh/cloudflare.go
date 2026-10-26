@@ -455,26 +455,21 @@ func cloudflareRemove(args []string, out io.Writer) error {
 	if st, err := state.Load(); err == nil {
 		hostname = st.Devices[*name].Hostname
 	}
-	// The edited configuration is staged and checked first, so an unreadable or unwritable file stops the
-	// command while the device record and the Cloudflare resources are still there to retry. It only goes
-	// live once the resources are deleted, so a failed delete never switches off a tunnel that still exists.
-	staged := ""
+	// The edit is checked first, so an unreadable or unwritable file stops the command while the device
+	// record and the Cloudflare resources are still there to retry. It is made only after the resources are
+	// deleted, on the file as it is then, so a failed delete never switches off a tunnel that still exists.
 	if *cfgPath != "" && hostname != "" {
-		var err error
-		if staged, err = prepareClearCloudflareConfig(*cfgPath, hostname); err != nil {
+		if err := checkClearCloudflareConfig(*cfgPath, hostname); err != nil {
 			return fmt.Errorf("准备清理本机配置失败，Cloudflare 资源尚未删除，可修复后重试：%w", err)
 		}
 	}
 	ctx, cancel := ctx30()
 	defer cancel()
 	if err := mesh.Remove(ctx, state, *name); err != nil {
-		if staged != "" {
-			_ = os.Remove(staged)
-		}
 		return err
 	}
-	if staged != "" {
-		if err := os.Rename(staged, *cfgPath); err != nil {
+	if *cfgPath != "" && hostname != "" {
+		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
 			return fmt.Errorf("Cloudflare 资源已删除，但没能写入本机配置，请手动删除 %s 中 mesh.cloudflare 的 hostname 等项：%w", *cfgPath, err)
 		}
 	}
@@ -606,17 +601,18 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 	return edited, info.Mode().Perm(), nil
 }
 
-// prepareClearCloudflareConfig stages, beside the configuration, a copy without the tunnel this device
-// runs, for the caller to rename into place once the resources are gone, so a later offer is not refused for a tunnel that no longer exists. It leaves the file alone when
-// the configured hostname is a different one, and keeps the peers the device has learned.
-func prepareClearCloudflareConfig(path, hostname string) (staged string, err error) {
+// clearedCloudflareConfig returns the file without the tunnel this device runs (mesh.cloudflare's
+// hostname, tunnel token and Access client entries, with enabled off) when the configured hostname is the
+// given one; matched is false, and nothing else is returned, when it is a different tunnel. The peers the
+// device has learned and the rest of the file are kept.
+func clearedCloudflareConfig(path, hostname string) (edited []byte, mode os.FileMode, matched bool, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return nil, 0, false, err
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return "", errors.New("xmesh.yaml 不是有效的 YAML 映射")
+		return nil, 0, false, errors.New("xmesh.yaml 不是有效的 YAML 映射")
 	}
 	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
 	configured := ""
@@ -626,7 +622,7 @@ func prepareClearCloudflareConfig(path, hostname string) (staged string, err err
 		}
 	}
 	if configured != hostname {
-		return "", nil
+		return nil, 0, false, nil
 	}
 	kept := cf.Content[:0]
 	for i := 0; i+1 < len(cf.Content); i += 2 {
@@ -639,22 +635,45 @@ func prepareClearCloudflareConfig(path, hostname string) (staged string, err err
 		kept = append(kept, cf.Content[i], cf.Content[i+1])
 	}
 	cf.Content = kept
-	edited, err := yaml.Marshal(&doc)
-	if err != nil {
-		return "", err
+	if edited, err = yaml.Marshal(&doc); err != nil {
+		return nil, 0, false, err
 	}
 	if _, err := config.Parse(edited); err != nil {
-		return "", fmt.Errorf("修改后的配置无效：%w", err)
+		return nil, 0, false, fmt.Errorf("修改后的配置无效：%w", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", err
+		return nil, 0, false, err
+	}
+	return edited, info.Mode().Perm(), true, nil
+}
+
+// checkClearCloudflareConfig proves the edit can be made, without making it: the file loads and the
+// directory takes a new file. remove runs it before deleting anything at Cloudflare.
+func checkClearCloudflareConfig(path, hostname string) error {
+	edited, mode, matched, err := clearedCloudflareConfig(path, hostname)
+	if err != nil || !matched {
+		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
-		return "", err
+	if err := os.WriteFile(tmp, edited, mode); err != nil {
+		return err
 	}
-	return tmp, nil
+	return os.Remove(tmp)
+}
+
+// clearCloudflareConfig makes the edit on the file as it is now, so peers a share or invite added while
+// the Cloudflare calls were running are kept.
+func clearCloudflareConfig(path, hostname string) error {
+	edited, mode, matched, err := clearedCloudflareConfig(path, hostname)
+	if err != nil || !matched {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, edited, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // dropStaleCloudflareSecrets deletes the tunnel token and Access secret that setup and join leave in the
