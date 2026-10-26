@@ -169,7 +169,7 @@ func cloudflareLogin(args []string, out io.Writer, in io.Reader) error {
 	c.register(fs)
 	account := fs.String("account", "", "Cloudflare 账号 ID")
 	zone := fs.String("zone", "", "域名所在区域的 ID")
-	domain := fs.String("domain", "", "设备主机名所用的域名，例如 mesh.example.com")
+	domain := fs.String("domain", "", "设备主机名所用的域名，建议直接用区域本身，例如 example.com；多级子域（如 mesh.example.com）常常没有边缘证书，连接会在 TLS 握手时失败")
 	secretFile := fs.String("secret-file", "", "API 令牌文件，- 表示标准输入；缺省时从标准输入读取")
 	noVerify := fs.Bool("no-verify", false, "保存前不连接 Cloudflare 验证")
 	if err := cloudflareFlags(fs, args); err != nil {
@@ -224,6 +224,9 @@ func fillCredentialIDs(cred *cfadmin.Credential) error {
 		return err
 	}
 	cred.AccountID, cred.ZoneID = account.ID, zone.ID
+	if sub := strings.TrimSuffix(cred.Domain, "."+zone.Name); sub != cred.Domain && strings.Contains(sub, ".") {
+		fmt.Fprintf(os.Stderr, "警告：%s 比区域 %s 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败；建议改用 %s 或 %s。\n", cred.Domain, zone.Name, zone.Name, sub[strings.LastIndex(sub, ".")+1:]+"."+zone.Name)
+	}
 	return nil
 }
 
@@ -428,6 +431,7 @@ func cloudflareRemove(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("cloudflare remove", flag.ContinueOnError)
 	c.register(fs)
 	name := fs.String("name", "", "设备名")
+	cfgPath := fs.String("config", "", "xmesh.yaml 路径；删除的正是本机在用的隧道时，一并清掉其中的 mesh.cloudflare")
 	apply := fs.Bool("apply", false, "确认删除")
 	if err := cloudflareFlags(fs, args); err != nil {
 		return err
@@ -447,10 +451,19 @@ func cloudflareRemove(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "将删除设备 %s 的隧道、DNS 记录与 Access 应用（最后一台还会删除网格服务令牌）。加 --apply 执行。\n", *name)
 		return nil
 	}
+	hostname := ""
+	if st, err := state.Load(); err == nil {
+		hostname = st.Devices[*name].Hostname
+	}
 	ctx, cancel := ctx30()
 	defer cancel()
 	if err := mesh.Remove(ctx, state, *name); err != nil {
 		return err
+	}
+	if *cfgPath != "" && hostname != "" {
+		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
+			return fmt.Errorf("Cloudflare 资源已删除，但清理本机配置失败：%w", err)
+		}
 	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
 }
@@ -573,6 +586,57 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 		return nil, 0, err
 	}
 	return edited, info.Mode().Perm(), nil
+}
+
+// clearCloudflareConfig drops the tunnel this device runs from mesh.cloudflare once its resources are
+// gone, so a later offer is not refused for a tunnel that no longer exists. It leaves the file alone when
+// the configured hostname is a different one, and keeps the peers the device has learned.
+func clearCloudflareConfig(path, hostname string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+	}
+	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
+	configured := ""
+	for i := 0; i+1 < len(cf.Content); i += 2 {
+		if cf.Content[i].Value == "hostname" {
+			configured = cf.Content[i+1].Value
+		}
+	}
+	if configured != hostname {
+		return nil
+	}
+	kept := cf.Content[:0]
+	for i := 0; i+1 < len(cf.Content); i += 2 {
+		switch cf.Content[i].Value {
+		case "hostname", "access_client_id", "access_client_secret_file", "tunnel_token_file":
+			continue
+		case "enabled":
+			cf.Content[i+1].Value, cf.Content[i+1].Tag = "false", "!!bool"
+		}
+		kept = append(kept, cf.Content[i], cf.Content[i+1])
+	}
+	cf.Content = kept
+	edited, err := yaml.Marshal(&doc)
+	if err != nil {
+		return err
+	}
+	if _, err := config.Parse(edited); err != nil {
+		return fmt.Errorf("修改后的配置无效：%w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func childMapping(parent *yaml.Node, key string) *yaml.Node {

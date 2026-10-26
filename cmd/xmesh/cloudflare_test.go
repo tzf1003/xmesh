@@ -216,3 +216,43 @@ func TestCloudflareDiscoverListsWhatTheTokenSees(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestCloudflareRemoveClearsTheConfiguredTunnel(t *testing.T) {
+	_, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(cfg)
+	text := string(raw)
+	for _, gone := range []string{"hostname:", "access_client_id", "access_client_secret_file", "tunnel_token_file"} {
+		if strings.Contains(text, gone) {
+			t.Errorf("config still has %q:\n%s", gone, text)
+		}
+	}
+	if !strings.Contains(text, "enabled: false") || !strings.Contains(text, "# my node") {
+		t.Errorf("config lost its other content:\n%s", text)
+	}
+}
+
+func TestClearCloudflareConfigLeavesAnotherTunnelAlone(t *testing.T) {
+	_, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	if err := cloudflareRun(append([]string{"setup", "--name", "laptop", "--config", cfg, "--apply"}, state...), &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(cfg)
+	if err := clearCloudflareConfig(cfg, "xmesh-other-abcdef.mesh.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(cfg)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("config changed:\n%s", after)
+	}
+}

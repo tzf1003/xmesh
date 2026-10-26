@@ -202,15 +202,16 @@ func (c *Client) DeleteAccessApp(ctx context.Context, id string) error {
 	return c.do(ctx, "DELETE", c.account("/access/apps/"+id), nil, nil)
 }
 
-// AllowServiceToken lets exactly one service token through the application. Access is only a gate:
-// the inner pinned mTLS decides which devices are trusted.
-func (c *Client) AllowServiceToken(ctx context.Context, appID, name, tokenID string) (string, error) {
+// AllowServiceToken lets any valid service token of the account through the application. Access is only
+// a gate: the inner pinned mTLS decides which devices are trusted. Admitting every token, not one,
+// keeps devices that were set up separately, each with its own token, able to reach each other.
+func (c *Client) AllowServiceToken(ctx context.Context, appID, name string) (string, error) {
 	var out struct {
 		ID string `json:"id"`
 	}
 	err := c.do(ctx, "POST", c.account("/access/apps/"+appID+"/policies"), map[string]any{
 		"name": name, "decision": "non_identity",
-		"include": []map[string]any{{"service_token": map[string]any{"token_id": tokenID}}},
+		"include": []map[string]any{{"any_valid_service_token": map[string]any{}}},
 	}, &out)
 	return out.ID, err
 }

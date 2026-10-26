@@ -94,13 +94,16 @@ export function useCloudflareLogin(): { fields: JSX.Element; request: MeshReques
                 <input value={domain} onInput={(e) => setDomain(e.currentTarget.value.trim().toLowerCase())} data-testid="cf-domain" />
               </Field>
             )}
+            {picked && domain.endsWith(`.${picked.name}`) && domain.slice(0, -picked.name.length - 1).includes(".") && (
+              <Banner kind="warn" testid="cf-deep-domain">{copy(`${domain} 比 ${picked.name} 深了多级。Cloudflare 的通用证书只覆盖一级子域，经它连接可能在 TLS 握手时失败，建议直接填 ${picked.name}。`, `${domain} is several levels below ${picked.name}. Cloudflare's universal certificate covers one level only, so connections may fail at the TLS handshake; use ${picked.name} instead.`)}</Banner>
+            )}
           </>
       )}
       {manual && (
         <>
           <Field label={copy("账号 ID", "Account ID")}><input value={account} onInput={(e) => setAccount(e.currentTarget.value.trim())} data-testid="cf-account" /></Field>
           <Field label={copy("区域 ID", "Zone ID")}><input value={zone} onInput={(e) => setZone(e.currentTarget.value.trim())} data-testid="cf-zone" /></Field>
-          <Field label={copy("设备主机名所用的域名", "Domain for device hostnames")}><input value={domain} placeholder="mesh.example.com" onInput={(e) => setDomain(e.currentTarget.value.trim().toLowerCase())} data-testid="cf-domain" /></Field>
+          <Field label={copy("设备主机名所用的域名", "Domain for device hostnames")}><input value={domain} placeholder="example.com" onInput={(e) => setDomain(e.currentTarget.value.trim().toLowerCase())} data-testid="cf-domain" /></Field>
           <button type="button" class="text-button" onClick={() => { setManual(false); setErr(undefined); }}>{copy("改为自动查找", "Look them up instead")}</button>
         </>
       )}
