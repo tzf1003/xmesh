@@ -205,9 +205,10 @@ public func xmeshBackgroundDispatch(_ bytes: UnsafePointer<UInt8>?, _ count: Int
 // A frontmost target app takes PID-addressed keys in its key window, which may
 // be another window of the same app. Refuse instead of typing into it.
 private func xmeshRequireKeyWindowWhenFrontmost(_ action:Action)throws{
+    // Armed for every fallback so a later activation of the app is caught too.
+    keyboardFallback=true
     guard xmeshFrontmostPID()==action.pid else{return}
     guard xmeshFocusedWindowIsTarget(pid:action.pid,window:action.window) else{throw BridgeStop.keyboardTargetUnfocused}
-    keyboardFallback=true
 }
 
 private func currentWindowInfo()->[[String:Any]]{
