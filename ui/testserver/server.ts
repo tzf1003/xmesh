@@ -49,6 +49,7 @@ const RING = 1024;
 /** Panel route prefixes and the capability that gates each (PUT and PATCH /v2/config need config.write instead). */
 const PANEL_ROUTE_CAPS: [string, Capability][] = [
   ["/v2/computer", "computer"],
+  ["/v2/preferred-ip", "config.read"],
   ["/v2/config", "config.read"],
   ["/v2/backends", "config.write"],
   ["/v2/pats", "pats"],
@@ -383,7 +384,7 @@ export class FakeKernel {
       return;
     }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
-    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v2/config" ? "config.write" : cap[1])) {
+    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v2/config" || url.split("?")[0] === "/v2/preferred-ip/run" ? "config.write" : cap[1])) {
       const request = body as { content?: string; dry_run?: boolean; authkey?: string } | null;
       if (method === "PUT" && url === "/v2/config" && request?.authkey !== undefined) {
         const preview = this.panel.handle(method, url, { ...request, dry_run: true }, ifMatch);

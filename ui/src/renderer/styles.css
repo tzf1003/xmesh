@@ -524,3 +524,30 @@ progress.download { width: 100%; height: 6px; accent-color: var(--accent); }
 .computer-preview-frame { margin: 0; overflow: hidden; }
 .computer-preview-frame img { display: block; width: 100%; height: auto; max-height: 60vh; object-fit: contain; background: var(--surface); border-radius: 8px; }
 .computer-preview-frame figcaption { margin-top: 8px; }
+
+/* Preferred Cloudflare IPs */
+.pip > .card, .pip > .banner { margin-bottom: var(--section-gap); }
+.pip .execution-tabs { margin-bottom: var(--section-gap); }
+.pip h2 { margin: 0 0 8px; font-size: 14px; }
+.pip-master { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.pip-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pip-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: var(--section-gap); }
+.pip-stats .stat .value.pip-small { font-size: 14px; line-height: 30px; }
+.pip .check > span { display: flex; flex-direction: column; gap: 2px; }
+.pip label.field.pip-inline { flex-direction: row; align-items: center; gap: 8px; }
+.pip-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+.pip-source { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--border-2); }
+.pip-source > .icon { width: 18px; height: 18px; margin-top: 6px; color: var(--muted); flex: none; }
+.pip-source textarea, .pip-source input.mono { width: 100%; margin-top: 6px; }
+.pip-name { min-width: 160px; }
+.pip-add { margin-top: 12px; }
+.pip-error { color: var(--warn); }
+.pip-paste { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+.pip-lines { max-height: 220px; overflow: auto; margin: 8px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.pip-line { display: flex; justify-content: space-between; gap: 12px; padding: 5px 10px; border-top: 1px solid var(--border-2); }
+.pip-line:first-child { border-top: 0; }
+.pip-line.rejected { background: var(--danger-bg); }
+.pip-line.rejected .hint { color: var(--danger); }
+.pip-savebar { position: sticky; bottom: 12px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: var(--shadow-pop); }
+.pip-savebar > span { margin-right: auto; font-weight: 500; }
+@media (max-width: 700px) { .pip-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

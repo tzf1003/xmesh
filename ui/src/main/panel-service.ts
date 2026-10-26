@@ -11,6 +11,7 @@ import { configYaml, parseDocument } from "./yaml";
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
 import type { ComputerRequest, ComputerResult } from "../shared/computer";
+import type { PreferredIpRequest, PreferredIpResultFor } from "../shared/preferred-ip";
 import type {
   AuditQuery,
   AuditResponse,
@@ -434,6 +435,14 @@ export class PanelService {
         case "revoke": return client.call("POST", "/v2/computer/revoke", { body: { session_id: request.session_id } });
       }
     });
+  }
+
+  preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>> {
+    switch (request.op) {
+      case "get": return this.data("config.read", (c) => c.call("GET", "/v2/preferred-ip"));
+      case "run": return this.data("config.write", (c) => c.call("POST", "/v2/preferred-ip/run", { body: { task: request.task } }));
+      case "inspect": return this.data("config.read", (c) => c.call("POST", "/v2/preferred-ip/inspect", { body: { text: request.text } }));
+    }
   }
 
   queryAudit(q: AuditQuery): Promise<DataResult<AuditResponse>> {
