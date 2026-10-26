@@ -207,6 +207,7 @@ function PoolTable({ c, entries }: { c: Copy; entries: PreferredIPEntry[] }): JS
 function Access({ c, draft, state, loaded, writable, edit }: PanelProps): JSX.Element {
   const ids = Object.keys(loaded.peers).sort();
   const live = new Map((state?.peers ?? []).map((p) => [p.device_id, p]));
+  const decimal = (v: string, min: number, max: number, fallback: number): number => { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n * 100) / 100)) : fallback; };
   const number = (v: string, min: number, max: number, fallback: number): number => { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.trunc(n))) : fallback; };
   return <>
     <section class="card" data-testid="pip-default-mode">
@@ -241,9 +242,9 @@ function Access({ c, draft, state, loaded, writable, edit }: PanelProps): JSX.El
       <h2>{c("轮换与故障切换", "Failover")}</h2>
       <p class="hint">{c("每个地址完整尝试一遍（TCP、TLS、Access、WebSocket 和设备间握手）；失败就换下一个，所有优选地址都失败才回退 DNS 地址。", "Each address gets a full attempt (TCP, TLS, Access, WebSocket and the device handshake); on failure the next one is tried, and only when all fail does the DNS address get its turn.")}</p>
       <div class="pip-fields">
-        <label class="field"><span>{c("单个地址的尝试时限（秒）", "Time limit per address (seconds)")}</span><input type="number" min={1} max={30} value={Math.round((durationSeconds(draft.attemptTimeout) ?? 4) * 10) / 10} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, attemptTimeout: `${number(v, 1, 30, 4)}s` })); }} data-testid="pip-attempt" /></label>
+        <label class="field"><span>{c("单个地址的尝试时限（秒）", "Time limit per address (seconds)")}</span><input type="number" step="any" min={1} max={30} value={Math.round((durationSeconds(draft.attemptTimeout) ?? 4) * 10) / 10} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, attemptTimeout: `${decimal(v, 1, 30, 4)}s` })); }} data-testid="pip-attempt" /></label>
         <label class="field"><span>{c("连续失败几次进入冷却", "Failures before cooldown")}</span><input type="number" min={1} max={20} value={draft.failThreshold} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, failThreshold: number(v, 1, 20, p.failThreshold) })); }} data-testid="pip-threshold" /></label>
-        <label class="field"><span>{c("冷却时长（分钟）", "Cooldown (minutes)")}</span><input type="number" min={1} max={1440} value={Math.round(((durationSeconds(draft.cooldown) ?? 1800) / 60) * 10) / 10} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, cooldown: `${number(v, 1, 1440, 30)}m` })); }} data-testid="pip-cooldown" /></label>
+        <label class="field"><span>{c("冷却时长（分钟）", "Cooldown (minutes)")}</span><input type="number" step="any" min={1} max={1440} value={Math.round(((durationSeconds(draft.cooldown) ?? 1800) / 60) * 10) / 10} disabled={!writable} onInput={(e) => { const v = e.currentTarget.value; edit((p) => ({ ...p, cooldown: `${decimal(v, 1, 1440, 30)}m` })); }} data-testid="pip-cooldown" /></label>
       </div>
       <Switch checked={draft.noDnsFallback} disabled={!writable} onChange={(v) => edit((p) => ({ ...p, noDnsFallback: v }))} testid="pip-no-dns"
         label={c("优选地址全部失败时不回退 DNS 地址", "Do not fall back to the DNS address")}
