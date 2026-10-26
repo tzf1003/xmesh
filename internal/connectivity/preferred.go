@@ -549,9 +549,14 @@ func (p *preferredPool) finishScan(ctx context.Context, host string, tested int,
 	if len(rec.Regions) == 0 {
 		allow, chosen = nil, nil
 	}
+	if scan.RegionMode == "pick" && allow != nil { // only what this scan actually found and kept
+		chosen = slices.DeleteFunc(slices.Clone(chosen), func(w string) bool {
+			return !slices.ContainsFunc(results, func(r cfpreferred.Result) bool { return regionWanted([]string{w}, r.Colo) })
+		})
+	}
 	rec.Chosen = chosen
 	if allow != nil && !slices.ContainsFunc(results, func(r cfpreferred.Result) bool { return allow(r.Colo) }) {
-		rec.Error = "指定的地区这次没有测到可用地址，保留上次的结果；可放宽地区或增大采样数"
+		rec.Error = "指定的地区这次没有测到可用地址，保留上次的结果（下表是这次测到的地区分布）；可放宽地区或增大采样数"
 		rec.Results, rec.Chosen = p.st.Scan.Results, p.st.Scan.Chosen
 		p.st.Scan = rec
 		p.save()

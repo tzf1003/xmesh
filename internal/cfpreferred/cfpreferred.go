@@ -258,8 +258,9 @@ func Scan(ctx context.Context, addrs []netip.Addr, serverName string, tries, par
 const coloProbe = 2 * time.Second
 
 // handshake times one TLS handshake. When wantColo is set it then asks the edge which data centre it is; the
-// probe is not part of the time, and a failed probe only leaves the colo empty.
+// probe is not part of the time and has its own budget, so a slow handshake does not starve it, and a failed probe only leaves the colo empty.
 func handshake(ctx context.Context, a netip.Addr, serverName string, timeout time.Duration, wantColo bool) (time.Duration, string, error) {
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
@@ -279,7 +280,7 @@ func handshake(ctx context.Context, a netip.Addr, serverName string, timeout tim
 	if !wantColo {
 		return d, "", nil
 	}
-	return d, readColo(ctx, conn, serverName), nil
+	return d, readColo(parent, conn, serverName), nil
 }
 
 // readColo asks the edge on an established connection which data centre this is: the colo= line of

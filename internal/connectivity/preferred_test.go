@@ -310,6 +310,12 @@ func TestScanPickAndNone(t *testing.T) {
 	if got := finish(p, config.PreferredScan{Keep: 8, RegionMode: "none"}); len(got) != 5 {
 		t.Fatal(got)
 	}
+	if p2 := newPreferredPool(""); true {
+		finish(p2, config.PreferredScan{Keep: 8, RegionMode: "pick", Regions: []string{"hk", "kr"}})
+		if strings.Join(p2.st.Scan.Chosen, " ") != "hk" {
+			t.Fatal("chosen must only list what the scan found:", p2.st.Scan.Chosen)
+		}
+	}
 	// Nothing matches: the previous results stay and an error says why.
 	before := p.st.Scan.Results
 	if got := finish(p, config.PreferredScan{Keep: 8, RegionMode: "pick", Regions: []string{"kr"}}); len(got) != 5 || p.st.Scan.Error == "" || len(p.st.Scan.Results) != len(before) {
