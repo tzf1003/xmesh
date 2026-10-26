@@ -478,6 +478,11 @@ func cloudflareRemove(args []string, out io.Writer) error {
 			return fmt.Errorf("Cloudflare 资源已删除，但没能写入本机配置，请手动删除 %s 中 mesh.cloudflare 的 hostname 等项：%w", *cfgPath, err)
 		}
 	}
+	if *cfgPath != "" {
+		if err := dropStaleCloudflareSecrets(*cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "警告：没能删除旧的隧道密钥文件，之后加入新隧道前请手动删除 %s 下的 tunnel-token 与 access-secret：%v\n", filepath.Join(filepath.Dir(*cfgPath), "cloudflare"), err)
+		}
+	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
 }
 
