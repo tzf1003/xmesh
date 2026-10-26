@@ -467,6 +467,11 @@ func cloudflareRemove(args []string, out io.Writer) error {
 	if err := mesh.Remove(ctx, state, *name); err != nil {
 		return err
 	}
+	if *cfgPath != "" {
+		if err := dropStaleCloudflareSecrets(*cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "警告：没能删除旧的隧道密钥文件，之后加入新隧道前请手动删除 %s 下的 tunnel-token 与 access-secret：%v\n", filepath.Join(filepath.Dir(*cfgPath), "cloudflare"), err)
+		}
+	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
 }
 
@@ -592,8 +597,7 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 
 // clearCloudflareConfig drops the tunnel this device runs from mesh.cloudflare once its resources are
 // gone, so a later offer is not refused for a tunnel that no longer exists. It leaves the file alone when
-// the configured hostname is a different one, and keeps the peers the device has learned. The secret
-// files the section pointed at are deleted with it.
+// the configured hostname is a different one, and keeps the peers the device has learned.
 func clearCloudflareConfig(path, hostname string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -613,14 +617,10 @@ func clearCloudflareConfig(path, hostname string) error {
 	if configured != hostname {
 		return nil
 	}
-	var secrets []string
 	kept := cf.Content[:0]
 	for i := 0; i+1 < len(cf.Content); i += 2 {
 		switch cf.Content[i].Value {
-		case "access_client_secret_file", "tunnel_token_file":
-			secrets = append(secrets, cf.Content[i+1].Value)
-			continue
-		case "hostname", "access_client_id":
+		case "hostname", "access_client_id", "access_client_secret_file", "tunnel_token_file":
 			continue
 		case "enabled":
 			cf.Content[i+1].Value, cf.Content[i+1].Tag = "false", "!!bool"
@@ -643,18 +643,41 @@ func clearCloudflareConfig(path, hostname string) error {
 	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	return os.Rename(tmp, path)
+}
+
+// dropStaleCloudflareSecrets deletes the tunnel token and Access secret that setup and join leave in the
+// cloudflare directory beside the configuration, once the configuration no longer points at them. A later
+// join refuses to write over them. Only those two fixed names in that one directory are touched, so a
+// path the user pointed somewhere else is never deleted.
+func dropStaleCloudflareSecrets(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
 		return err
 	}
-	// The files belonged to the tunnel just removed; leaving them would make a later join refuse to write.
-	for _, f := range secrets {
-		if f != "" {
-			if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+	}
+	referenced := map[string]bool{}
+	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
+	for i := 0; i+1 < len(cf.Content); i += 2 {
+		if k := cf.Content[i].Value; k == "access_client_secret_file" || k == "tunnel_token_file" {
+			referenced[filepath.Clean(cf.Content[i+1].Value)] = true
 		}
 	}
-	return nil
+	dir := filepath.Join(filepath.Dir(path), "cloudflare")
+	var first error
+	for _, name := range []string{"tunnel-token", "access-secret"} {
+		file := filepath.Join(dir, name)
+		if referenced[file] {
+			continue
+		}
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func childMapping(parent *yaml.Node, key string) *yaml.Node {

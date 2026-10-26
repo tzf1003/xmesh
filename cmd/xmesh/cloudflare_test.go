@@ -290,3 +290,22 @@ func TestCloudflareRemoveKeepsTheRecordWhenLocalCleanupFails(t *testing.T) {
 		t.Fatalf("left behind %v", fake.Things)
 	}
 }
+
+func TestCloudflareRemoveLeavesSecretsOutsideTheConfigDirectory(t *testing.T) {
+	_, cfg, state := cloudflareFixture(t)
+	cloudflareLogin_(t)
+	var out bytes.Buffer
+	run := func(args ...string) error { out.Reset(); return cloudflareRun(append(args, state...), &out, nil) }
+	shared := t.TempDir()
+	if err := run("setup", "--name", "laptop", "--config", cfg, "--dir", shared, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("remove", "--name", "laptop", "--config", cfg, "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"tunnel-token", "access-secret"} {
+		if _, err := os.Stat(filepath.Join(shared, f)); err != nil {
+			t.Errorf("%s outside the config directory was deleted: %v", f, err)
+		}
+	}
+}
