@@ -47,7 +47,7 @@ test("a full configuration round-trips through the draft", () => {
       { type: "file", disabled: true, path: "/etc/xmesh/ips.csv" },
       { type: "url", url: "https://example.com/ips.txt", refresh: "6h" },
     ],
-    scan: { enabled: true, interval: "12h", sample: 300, keep: 4, ipv6: true, host: "win.link.example.com" },
+    scan: { enabled: true, interval: "12h", sample: 300, keep: 4, ipv6: true, host: "win.link.example.com", region_mode: "pick", region_count: 3, regions: ["hk", "NRT"] },
     peers: { [ID]: { mode: "fixed", ips: ["172.64.0.9"] } },
   };
   const cfg = { schema_version: 2, mesh: { cloudflare: { enabled: true, peers: { [ID]: "win.link.example.com" }, preferred_ips: ["104.16.0.9"], preferred_ip: value } } };
@@ -113,4 +113,22 @@ test("durations written by hand survive a save that does not touch them", () => 
 test("addresses typed one at a time stay separate", () => {
   assert.deepEqual(parseIps("104.16.0.1\n104.16.0.2"), ["104.16.0.1", "104.16.0.2"]);
   assert.deepEqual(parseIps("104.16.0.1, 104.16.0.2 "), ["104.16.0.1", "104.16.0.2"]);
+});
+
+test("the speed test region setting defaults to automatic with two regions and is only written when changed", () => {
+  const p = defaultPolicy();
+  assert.equal(p.scan.regionMode, "auto");
+  assert.equal(p.scan.regionCount, 2);
+  assert.deepEqual(policyValue(p), {});
+  const loaded = readPolicy({ schema_version: 2, mesh: { cloudflare: { preferred_ip: { scan: { enabled: true, region_mode: "weird", region_count: 99 } } } } });
+  assert.equal(loaded.policy.scan.regionMode, "auto");
+  assert.equal(loaded.policy.scan.regionCount, 6);
+  const none = defaultPolicy();
+  none.scan.regionMode = "none";
+  assert.deepEqual(policyValue(none), { scan: { enabled: false, region_mode: "none" } });
+  const pick = defaultPolicy();
+  pick.scan.regionMode = "pick";
+  assert.equal(policyProblem(pick), "region");
+  pick.scan.regions = ["eu"];
+  assert.equal(policyProblem(pick), undefined);
 });

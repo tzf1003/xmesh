@@ -11,7 +11,9 @@
       "loss_percent": 0,
       "failures": 0,
       "cooldown_until": null,
-      "last_used_at": "2026-10-26T08:00:00.000Z"
+      "last_used_at": "2026-10-26T08:00:00.000Z",
+      "colo": "HKG",
+      "region": "hk"
     },
     {
       "ip": "172.64.153.21",
@@ -21,7 +23,9 @@
       "loss_percent": 3,
       "failures": 1,
       "cooldown_until": null,
-      "last_used_at": null
+      "last_used_at": null,
+      "colo": "NRT",
+      "region": "jp"
     },
     {
       "ip": "162.159.136.5",
@@ -31,7 +35,9 @@
       "loss_percent": null,
       "failures": 0,
       "cooldown_until": null,
-      "last_used_at": null
+      "last_used_at": null,
+      "colo": "",
+      "region": ""
     },
     {
       "ip": "104.19.205.88",
@@ -41,7 +47,9 @@
       "loss_percent": null,
       "failures": 2,
       "cooldown_until": "2026-10-26T08:30:00.000Z",
-      "last_used_at": null
+      "last_used_at": null,
+      "colo": "SJC",
+      "region": "us-w"
     }
   ],
   "sources": [
@@ -82,7 +90,33 @@
     "last_at": "2026-10-26T02:00:00.000Z",
     "next_at": "2026-10-26T08:00:00.000Z",
     "kept": 8,
-    "error": ""
+    "error": "",
+    "regions": [
+      {
+        "key": "hk",
+        "name": "港澳台",
+        "count": 9,
+        "best_ms": 182,
+        "colos": [
+          "HKG"
+        ]
+      },
+      {
+        "key": "jp",
+        "name": "日本",
+        "count": 6,
+        "best_ms": 240,
+        "colos": [
+          "NRT",
+          "KIX"
+        ]
+      }
+    ],
+    "chosen": [
+      "hk",
+      "jp"
+    ],
+    "unidentified": 2
   },
   "peers": [
     {

@@ -354,7 +354,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v2.APIVersion != "2.4" {
+	if v2.APIVersion != "2.5" {
 		t.Errorf("APIVersion = %s; the schemas and route table are version 2.2", v2.APIVersion)
 	}
 }

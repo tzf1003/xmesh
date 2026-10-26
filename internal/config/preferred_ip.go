@@ -57,6 +57,13 @@ type PreferredScan struct {
 	IPv6     bool   `json:"ipv6,omitempty"`
 	// Host is the tunnel hostname the handshake test uses; empty means the first configured peer's.
 	Host string `json:"host,omitempty"`
+	// RegionMode decides which data centres a scan may keep addresses from: "auto" (also when empty) keeps
+	// the RegionCount regions that answered fastest, "pick" keeps only Regions, "none" keeps the fastest
+	// addresses wherever they landed. It only applies to addresses the scan itself added.
+	RegionMode  string `json:"region_mode,omitempty"`
+	RegionCount int    `json:"region_count,omitempty"`
+	// Regions are region keys (hk, jp, kr, sg, sea, us-w, us-e, eu, other) or three-letter colo codes.
+	Regions []string `json:"regions,omitempty"`
 }
 
 // PreferredPeer is one device's override: "default" (or empty) follows the global mode, "smart" and "fixed"
@@ -74,6 +81,8 @@ const (
 	DefaultPreferredScanEvery = 6 * time.Hour
 	DefaultPreferredSample    = 200
 	DefaultPreferredKeep      = 8
+	DefaultPreferredRegions   = 2
+	MaxPreferredRegions       = 6
 	MaxPreferredSources       = 8
 )
 
@@ -164,6 +173,12 @@ func (s PreferredScan) Effective() PreferredScan {
 	}
 	if s.Keep < 1 {
 		s.Keep = DefaultPreferredKeep
+	}
+	if s.RegionMode == "" {
+		s.RegionMode = "auto"
+	}
+	if s.RegionCount < 1 {
+		s.RegionCount = DefaultPreferredRegions
 	}
 	return s
 }
@@ -266,6 +281,23 @@ func (p *PreferredIP) validate() (string, bool) {
 		}
 		if sc.Host != "" && !hostnamePattern.MatchString(sc.Host) {
 			return at + "/scan/host", false
+		}
+		if !slices.Contains([]string{"", "auto", "none", "pick"}, sc.RegionMode) {
+			return at + "/scan/region_mode: 只能是 auto、none 或 pick", false
+		}
+		if sc.RegionCount < 0 || sc.RegionCount > MaxPreferredRegions {
+			return fmt.Sprintf("%s/scan/region_count: 1 到 %d（0 表示默认）", at, MaxPreferredRegions), false
+		}
+		if len(sc.Regions) > 40 {
+			return at + "/scan/regions: 最多 40 项", false
+		}
+		for _, r := range sc.Regions {
+			if !cfpreferred.ValidRegion(r) {
+				return at + "/scan/regions: " + r + " 不是地区或三字母机房代码", false
+			}
+		}
+		if sc.RegionMode == "pick" && len(sc.Regions) == 0 {
+			return at + "/scan/regions: 指定地区模式至少要选一项", false
 		}
 	}
 	if len(p.Peers) > 64 {

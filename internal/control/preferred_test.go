@@ -11,7 +11,8 @@ import (
 type fakePreferred struct{ ran []string }
 
 func (f *fakePreferred) PreferredState() v2.PreferredIPState {
-	return v2.PreferredIPState{Enabled: true, Mode: "smart", Pool: []v2.PreferredIPEntry{}, Sources: []v2.PreferredIPSourceState{}, Peers: []v2.PreferredIPPeerState{}}
+	return v2.PreferredIPState{Enabled: true, Mode: "smart", Pool: []v2.PreferredIPEntry{}, Sources: []v2.PreferredIPSourceState{}, Peers: []v2.PreferredIPPeerState{},
+		Scan: v2.PreferredIPScanState{Regions: []v2.PreferredIPRegion{}, Chosen: []string{}}}
 }
 func (f *fakePreferred) PreferredInspect(text string) v2.PreferredIPInspectResponse {
 	return v2.PreferredIPInspectResponse{Items: []v2.PreferredIPInspectItem{{Line: 1, IP: text, Status: "rejected", Note: "no"}}, Accepted: []string{}}

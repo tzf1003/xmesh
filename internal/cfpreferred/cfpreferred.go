@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net"
+	"net/http"
 	"net/netip"
 	"sort"
 	"strings"
@@ -149,6 +150,7 @@ type Result struct {
 	Sent    int
 	Lost    int
 	Latency time.Duration // mean TLS handshake time over the successful attempts
+	Colo    string        // Cloudflare data centre that answered (IATA code); empty when it could not be read
 }
 
 // LossRate is the fraction of attempts that failed.
@@ -180,7 +182,7 @@ func Sample(n int, v6 bool, rng *rand.Rand) []netip.Addr {
 	return out
 }
 
-func randomIn(p netip.Prefix, rng *rand.Rand) netip.Addr {
+func randomIn(p netip.Prefix, rng interface{ IntN(int) int }) netip.Addr {
 	b := p.Masked().Addr().AsSlice()
 	for i := p.Bits(); i < len(b)*8; i++ {
 		if rng.IntN(2) == 1 {
@@ -220,10 +222,13 @@ func Scan(ctx context.Context, addrs []netip.Addr, serverName string, tries, par
 					return
 				}
 				r.Sent++
-				d, err := handshake(ctx, a, serverName, timeout)
+				d, colo, err := handshake(ctx, a, serverName, timeout, r.Colo == "")
 				if err != nil {
 					r.Lost++
 					continue
+				}
+				if colo != "" {
+					r.Colo = colo
 				}
 				total += d
 			}
@@ -249,21 +254,62 @@ func Scan(ctx context.Context, addrs []netip.Addr, serverName string, tries, par
 	return out
 }
 
-func handshake(ctx context.Context, a netip.Addr, serverName string, timeout time.Duration) (time.Duration, error) {
+// coloProbe bounds the extra request that reads which data centre answered.
+const coloProbe = 2 * time.Second
+
+// handshake times one TLS handshake. When wantColo is set it then asks the edge which data centre it is; the
+// probe is not part of the time, and a failed probe only leaves the colo empty.
+func handshake(ctx context.Context, a netip.Addr, serverName string, timeout time.Duration, wantColo bool) (time.Duration, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
 	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(a.String(), "443"))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer raw.Close()
 	conn := tls.Client(raw, &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}})
 	if err := conn.HandshakeContext(ctx); err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	if len(conn.ConnectionState().PeerCertificates) == 0 {
-		return 0, errors.New("no certificate")
+		return 0, "", errors.New("no certificate")
 	}
-	return time.Since(start), nil
+	d := time.Since(start)
+	if !wantColo {
+		return d, "", nil
+	}
+	return d, readColo(ctx, conn, serverName), nil
+}
+
+// readColo asks the edge on an established connection which data centre this is: the colo= line of
+// /cdn-cgi/trace, else the airport suffix of the cf-ray header. "" when neither can be read.
+func readColo(ctx context.Context, conn net.Conn, host string) string {
+	deadline := time.Now().Add(coloProbe)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	_ = conn.SetDeadline(deadline)
+	req := "GET /cdn-cgi/trace HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: xmesh\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+	if _, err := io.WriteString(conn, req); err != nil {
+		return ""
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		sc := bufio.NewScanner(io.LimitReader(resp.Body, 4<<10))
+		for sc.Scan() {
+			if v, ok := strings.CutPrefix(sc.Text(), "colo="); ok && ValidColo(strings.TrimSpace(v)) {
+				return strings.ToUpper(strings.TrimSpace(v))
+			}
+		}
+	}
+	// cf-ray looks like 8c3f1a2b3c4d5e6f-HKG
+	if _, c, ok := strings.Cut(resp.Header.Get("Cf-Ray"), "-"); ok && ValidColo(c) {
+		return strings.ToUpper(c)
+	}
+	return ""
 }

@@ -69,6 +69,39 @@ test("the preferred IP page saves sources, a scan schedule and a per-device over
   } finally { await h.close(); }
 });
 
+test("the speed test region defaults to automatic, can be limited to picked regions and colo codes, and the pool shows colos", async () => {
+  const h = await launch({ kernel: { capabilities: CAPS } });
+  try {
+    h.kernel.panel.setContent(config());
+    const page = await h.openPanel();
+    await navigate(page, "preferredip");
+    await page.getByTestId("pip-scan-enabled").check();
+    await page.getByTestId("pip-tab-pool").click();
+    await expect(page.getByTestId("pip-region-mode-auto")).toBeChecked();
+    await expect(page.getByTestId("pip-region-count")).toHaveValue("2");
+
+    await page.getByTestId("pip-region-mode-pick").check();
+    await expect(page.getByTestId("pip-problem")).toContainText("至少");
+    await expect(page.getByTestId("pip-save")).toBeDisabled();
+    await page.getByTestId("pip-region-hk").click();
+    await page.getByTestId("pip-region-codes").fill("nrt, x1 hongkong");
+    await page.getByTestId("pip-region-codes").blur();
+    await expect(page.getByTestId("pip-region-NRT")).toBeVisible();
+    await expect(page.getByTestId("pip-problem")).toHaveCount(0);
+    await page.getByTestId("pip-save").click();
+    await expect(page.getByTestId("pip-savebar")).toHaveCount(0);
+    const saved = JSON.parse(h.kernel.panel.content) as { mesh: { cloudflare: { preferred_ip: Record<string, unknown> } } };
+    expect(saved.mesh.cloudflare.preferred_ip.scan).toEqual({ enabled: true, region_mode: "pick", regions: ["hk", "NRT"] });
+
+    await page.getByTestId("pip-tab-overview").click();
+    await page.getByTestId("pip-scan-now").click();
+    await expect(page.getByTestId("pip-colo-104.18.32.77")).toContainText("HKG");
+    await page.getByTestId("pip-tab-pool").click();
+    await expect(page.getByTestId("pip-region-row-hk")).toContainText("已保留");
+    await expect(page.getByTestId("pip-region-row-us-w")).not.toContainText("已保留");
+  } finally { await h.close(); }
+});
+
 test("importing a list checks each line first and adds the new addresses as a manual source", async () => {
   const h = await launch({ kernel: { capabilities: CAPS } });
   try {
