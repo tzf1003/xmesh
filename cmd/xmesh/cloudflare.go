@@ -455,21 +455,27 @@ func cloudflareRemove(args []string, out io.Writer) error {
 	if st, err := state.Load(); err == nil {
 		hostname = st.Devices[*name].Hostname
 	}
-	// The local file goes first: it is idempotent, and if it fails nothing is lost, since the device record
-	// stays for a retry. Cleaning it after Remove would leave a retry with no record to find the hostname.
+	// The edited configuration is staged and checked first, so an unreadable or unwritable file stops the
+	// command while the device record and the Cloudflare resources are still there to retry. It only goes
+	// live once the resources are deleted, so a failed delete never switches off a tunnel that still exists.
+	staged := ""
 	if *cfgPath != "" && hostname != "" {
-		if err := clearCloudflareConfig(*cfgPath, hostname); err != nil {
-			return fmt.Errorf("清理本机配置失败，Cloudflare 资源尚未删除，可修复后重试：%w", err)
+		var err error
+		if staged, err = prepareClearCloudflareConfig(*cfgPath, hostname); err != nil {
+			return fmt.Errorf("准备清理本机配置失败，Cloudflare 资源尚未删除，可修复后重试：%w", err)
 		}
 	}
 	ctx, cancel := ctx30()
 	defer cancel()
 	if err := mesh.Remove(ctx, state, *name); err != nil {
+		if staged != "" {
+			_ = os.Remove(staged)
+		}
 		return err
 	}
-	if *cfgPath != "" {
-		if err := dropStaleCloudflareSecrets(*cfgPath); err != nil {
-			fmt.Fprintf(os.Stderr, "警告：没能删除旧的隧道密钥文件，之后加入新隧道前请手动删除 %s 下的 tunnel-token 与 access-secret：%v\n", filepath.Join(filepath.Dir(*cfgPath), "cloudflare"), err)
+	if staged != "" {
+		if err := os.Rename(staged, *cfgPath); err != nil {
+			return fmt.Errorf("Cloudflare 资源已删除，但没能写入本机配置，请手动删除 %s 中 mesh.cloudflare 的 hostname 等项：%w", *cfgPath, err)
 		}
 	}
 	return emit(out, c.json, map[string]any{"removed": *name}, func(w io.Writer) { fmt.Fprintf(w, "已删除设备 %s 的 Cloudflare 资源\n", *name) })
@@ -595,17 +601,17 @@ func editedCloudflareConfig(path string, s cloudflareSection) ([]byte, os.FileMo
 	return edited, info.Mode().Perm(), nil
 }
 
-// clearCloudflareConfig drops the tunnel this device runs from mesh.cloudflare once its resources are
-// gone, so a later offer is not refused for a tunnel that no longer exists. It leaves the file alone when
+// prepareClearCloudflareConfig stages, beside the configuration, a copy without the tunnel this device
+// runs, for the caller to rename into place once the resources are gone, so a later offer is not refused for a tunnel that no longer exists. It leaves the file alone when
 // the configured hostname is a different one, and keeps the peers the device has learned.
-func clearCloudflareConfig(path, hostname string) error {
+func prepareClearCloudflareConfig(path, hostname string) (staged string, err error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return errors.New("xmesh.yaml 不是有效的 YAML 映射")
+		return "", errors.New("xmesh.yaml 不是有效的 YAML 映射")
 	}
 	cf := childMapping(childMapping(doc.Content[0], "mesh"), "cloudflare")
 	configured := ""
@@ -615,7 +621,7 @@ func clearCloudflareConfig(path, hostname string) error {
 		}
 	}
 	if configured != hostname {
-		return nil
+		return "", nil
 	}
 	kept := cf.Content[:0]
 	for i := 0; i+1 < len(cf.Content); i += 2 {
@@ -630,20 +636,20 @@ func clearCloudflareConfig(path, hostname string) error {
 	cf.Content = kept
 	edited, err := yaml.Marshal(&doc)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err := config.Parse(edited); err != nil {
-		return fmt.Errorf("修改后的配置无效：%w", err)
+		return "", fmt.Errorf("修改后的配置无效：%w", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, edited, info.Mode().Perm()); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(tmp, path)
+	return tmp, nil
 }
 
 // dropStaleCloudflareSecrets deletes the tunnel token and Access secret that setup and join leave in the
