@@ -19,6 +19,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
+	"github.com/tzf1003/xmesh/internal/cfpreferred"
 	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"go.yaml.in/yaml/v3"
@@ -140,6 +141,13 @@ type Cloudflare struct {
 	Cloudflared string `json:"cloudflared,omitempty"`
 	// Peers maps a paired device ID to its tunnel hostname.
 	Peers map[string]string `json:"peers,omitempty"`
+	// PreferredIPs are Cloudflare edge addresses dialed, in order, instead of what DNS returns for a peer's
+	// tunnel hostname; they must lie inside Cloudflare's published ranges. SNI, Host and the Access token
+	// stay the hostname's, and when every address fails the normal address is tried.
+	PreferredIPs []string `json:"preferred_ips,omitempty"`
+	// PreferredIPsFile is an absolute path to a list of preferred addresses (one per line, or a
+	// CloudflareSpeedTest result.csv), read again on each dial and tried after PreferredIPs.
+	PreferredIPsFile string `json:"preferred_ips_file,omitempty"`
 	// AllowPairing lets an unpaired device run the connection-password pairing through the tunnel.
 	// It is off by default because anyone holding the Access token could otherwise lock pairing.
 	AllowPairing bool `json:"allow_pairing,omitempty"`
@@ -571,6 +579,17 @@ func (c *Config) Validate() error {
 		}
 		if cf.Cloudflared != "" && (cf.TunnelTokenFile == "" || strings.ContainsAny(cf.Cloudflared, "\x00\r\n")) {
 			return fail("/mesh/cloudflare/cloudflared: 只在 tunnel_token_file 时使用")
+		}
+		if len(cf.PreferredIPs) > cfpreferred.MaxList {
+			return fail("/mesh/cloudflare/preferred_ips: 最多 64 个地址")
+		}
+		for _, ip := range cf.PreferredIPs {
+			if _, err := cfpreferred.Parse(ip); err != nil {
+				return fail("/mesh/cloudflare/preferred_ips: " + err.Error())
+			}
+		}
+		if cf.PreferredIPsFile != "" && !filepath.IsAbs(cf.PreferredIPsFile) {
+			return fail("/mesh/cloudflare/preferred_ips_file: 须为绝对路径")
 		}
 		hosts := map[string]bool{}
 		for id, host := range cf.Peers {

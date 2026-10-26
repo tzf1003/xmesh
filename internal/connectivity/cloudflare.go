@@ -8,15 +8,19 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/tzf1003/xmesh/internal/cfadmin"
+	"github.com/tzf1003/xmesh/internal/cfpreferred"
+	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
@@ -101,6 +105,26 @@ func (n *Node) runCloudflared(ctx context.Context, binary, tokenFile string) {
 	}
 }
 
+// preferredAddrs is the configured preferred edge addresses followed by those in the list file. The file is
+// read on every dial so a refreshed scan takes effect without a restart; an unreadable or invalid file is
+// ignored, because the dial still falls back to the normal address.
+func preferredAddrs(cfg config.Cloudflare) []netip.Addr {
+	var out []netip.Addr
+	for _, s := range cfg.PreferredIPs {
+		if a, err := cfpreferred.Parse(s); err == nil {
+			out = append(out, a)
+		}
+	}
+	if cfg.PreferredIPsFile != "" {
+		if f, err := os.Open(cfg.PreferredIPsFile); err == nil {
+			list, _ := cfpreferred.ParseList(f)
+			_ = f.Close()
+			out = append(out, list...)
+		}
+	}
+	return slices.Compact(out)
+}
+
 // dialCloudflare opens a WebSocket to a peer's tunnel hostname, presents the Access service token, and
 // runs the pinned mTLS handshake inside it. The WebSocket belongs to the returned connection, not to ctx.
 func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tls.Config) (net.Conn, error) {
@@ -121,7 +145,11 @@ func (n *Node) dialCloudflare(ctx context.Context, address string, tlsConfig *tl
 	}
 	outer := n.cloudflareOuter
 	if outer == nil {
-		outer = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}}, TLSHandshakeTimeout: 10 * time.Second}}
+		outer = &http.Client{Transport: &http.Transport{
+			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}},
+			TLSHandshakeTimeout: 10 * time.Second,
+			DialContext:         cfpreferred.Dialer(preferredAddrs(cfg), nil),
+		}}
 		defer outer.CloseIdleConnections()
 	}
 	ws, _, err := websocket.Dial(ctx, "wss://"+address, &websocket.DialOptions{HTTPClient: outer, HTTPHeader: header})

@@ -28,6 +28,9 @@ func TestCloudflareValidation(t *testing.T) {
 		"token file needs hostname":    {map[string]any{"enabled": true, "tunnel_token_file": filepath.Join(t.TempDir(), "token")}, true},
 		"relative token file":          {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "tunnel_token_file": "token"}, true},
 		"binary without token file":    {map[string]any{"enabled": true, "hostname": "mac.link.example.com", "cloudflared": "cloudflared"}, true},
+		"preferred ips":                {map[string]any{"enabled": true, "preferred_ips": []string{"104.16.1.1", "2606:4700::1"}, "preferred_ips_file": filepath.Join(t.TempDir(), "ips")}, false},
+		"foreign preferred ip":         {map[string]any{"enabled": true, "preferred_ips": []string{"8.8.8.8"}}, true},
+		"relative preferred ips file":  {map[string]any{"enabled": true, "preferred_ips_file": "ips.txt"}, true},
 		"bad peer id":                  {map[string]any{"enabled": true, "peers": map[string]string{"win": "win.link.example.com"}}, true},
 		"schema applies when disabled": {map[string]any{"enabled": false, "hostname": "not a host"}, true},
 	}
