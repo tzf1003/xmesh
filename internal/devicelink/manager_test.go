@@ -624,8 +624,12 @@ func TestManagerRebalanceMovesCarrierToNewPreferredPath(t *testing.T) {
 	defer client.Close()
 	waitPath(t, a.manager, b.id.ID, device.LAN)
 	id := client.ID()
+	// Both ends change order before either drops its carrier: a peer still preferring the LAN would
+	// yield to it (see yieldToPreferred) and win the redial back onto the old path.
 	for _, n := range []*testNode{a, b} {
 		n.setOrder(device.Tailnet, device.LAN)
+	}
+	for _, n := range []*testNode{a, b} {
 		n.manager.Rebalance()
 	}
 	waitPath(t, a.manager, b.id.ID, device.Tailnet)

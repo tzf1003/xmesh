@@ -11,12 +11,12 @@ func TestPathSelectionOrder(t *testing.T) {
 		sel  PathSelection
 		want []string
 	}{
-		"default":                   {PathSelection{}, []string{"lan", "tailnet", "cloudflare"}},
-		"listed first":              {PathSelection{Priority: []string{"cloudflare", "lan"}}, []string{"cloudflare", "lan", "tailnet"}},
-		"unlisted keep their order": {PathSelection{Priority: []string{"tailnet"}}, []string{"tailnet", "lan", "cloudflare"}},
-		"disabled dropped":          {PathSelection{Priority: []string{"cloudflare"}, Disabled: []string{"tailnet"}}, []string{"cloudflare", "lan"}},
-		"disabled listed":           {PathSelection{Priority: []string{"tailnet", "lan"}, Disabled: []string{"tailnet"}}, []string{"lan", "cloudflare"}},
-		"all disabled":              {PathSelection{Disabled: []string{"lan", "tailnet", "cloudflare"}}, []string{}},
+		"default":                   {PathSelection{}, []string{"lan", "tailnet", "direct", "cloudflare"}},
+		"listed first":              {PathSelection{Priority: []string{"cloudflare", "lan"}}, []string{"cloudflare", "lan", "tailnet", "direct"}},
+		"unlisted keep their order": {PathSelection{Priority: []string{"tailnet"}}, []string{"tailnet", "lan", "direct", "cloudflare"}},
+		"disabled dropped":          {PathSelection{Priority: []string{"cloudflare"}, Disabled: []string{"tailnet", "direct"}}, []string{"cloudflare", "lan"}},
+		"disabled listed":           {PathSelection{Priority: []string{"tailnet", "lan"}, Disabled: []string{"tailnet", "direct"}}, []string{"lan", "cloudflare"}},
+		"all disabled":              {PathSelection{Disabled: []string{"lan", "tailnet", "direct", "cloudflare"}}, []string{}},
 	}
 	for name, c := range cases {
 		if got := c.sel.Order(); !slices.Equal(got, c.want) {

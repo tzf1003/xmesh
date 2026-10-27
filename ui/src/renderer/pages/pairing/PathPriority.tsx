@@ -8,9 +8,9 @@ import { useResource } from "../../hooks";
 import { useT } from "../../i18n";
 import { applySaved } from "../../lib/reload";
 
-type Kind = "lan" | "tailnet" | "cloudflare";
-const KINDS: Kind[] = ["lan", "tailnet", "cloudflare"];
-const LABEL = { lan: "mode.lan", tailnet: "mode.tailnet", cloudflare: "mode.cloudflare" } as const;
+type Kind = "lan" | "tailnet" | "direct" | "cloudflare";
+const KINDS: Kind[] = ["lan", "tailnet", "direct", "cloudflare"];
+const LABEL = { lan: "mode.lan", tailnet: "mode.tailnet", direct: "mode.direct", cloudflare: "mode.cloudflare" } as const;
 
 const isKind = (v: unknown): v is Kind => KINDS.includes(v as Kind);
 

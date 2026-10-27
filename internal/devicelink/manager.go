@@ -649,7 +649,7 @@ func (m *Manager) connect(p *peerLink, plan dialPlan) {
 }
 
 // dialKind tries to open a carrier on one kind of path and reports whether the dial has done its work.
-// A zero budget takes the kind's own: LAN waits for discovery, Tailnet 5 seconds, and Cloudflare, which
+// A zero budget takes the kind's own: LAN waits for discovery, Tailnet 5 seconds, a direct address 8, and Cloudflare, which
 // works with no inbound address but adds latency, 15.
 func (m *Manager) dialKind(ctx context.Context, p *peerLink, kind device.PathKind, budget time.Duration, plan dialPlan) bool {
 	switch kind {
@@ -657,6 +657,8 @@ func (m *Manager) dialKind(ctx context.Context, p *peerLink, kind device.PathKin
 		return m.preferLAN(ctx, p, plan)
 	case device.Tailnet:
 		return m.connectPaths(ctx, p, m.candidates(p.id), kind, cmp.Or(budget, 5*time.Second), plan)
+	case device.Direct:
+		return m.connectPaths(ctx, p, m.candidates(p.id), kind, cmp.Or(budget, 8*time.Second), plan)
 	case device.Cloudflare:
 		return m.connectPaths(ctx, p, m.candidates(p.id), kind, cmp.Or(budget, 15*time.Second), plan)
 	}
@@ -668,7 +670,7 @@ func (m *Manager) pathOrder() []device.PathKind {
 	if m.opts.PathOrder != nil {
 		return m.opts.PathOrder()
 	}
-	return []device.PathKind{device.LAN, device.Tailnet, device.Cloudflare}
+	return []device.PathKind{device.LAN, device.Tailnet, device.Direct, device.Cloudflare}
 }
 
 // rank is the position of kind in the path order, or -1 when the path is disabled.
