@@ -1155,7 +1155,7 @@ export interface Peer {
   display_name?: string;
   trust_state?: "self" | "paired" | "identity_conflict";
   paths?: DevicePath[];
-  active_path?: "lan" | "tailnet" | "cloudflare";
+  active_path?: "lan" | "tailnet" | "direct" | "cloudflare";
   connection_state?: "online" | "unstable" | "reconnecting" | "offline" | "identity_conflict";
 }
 /**
@@ -1172,7 +1172,7 @@ export interface PeerInfo {
   error: string | null;
 }
 export interface DevicePath {
-  kind: "lan" | "tailnet" | "cloudflare";
+  kind: "lan" | "tailnet" | "direct" | "cloudflare";
   address: string;
   reachable: boolean;
   verified_at: Timestamp | null;
@@ -1347,7 +1347,7 @@ export interface ControlInfo {
   capabilities: Capability[];
 }
 export interface NetworkIdentity {
-  mode: "local" | "lan" | "tailnet" | "cloudflare" | "coexist" | "offline";
+  mode: "local" | "lan" | "tailnet" | "direct" | "cloudflare" | "coexist" | "offline";
   node_id: string;
   tags: Tag[];
 }
@@ -1648,7 +1648,7 @@ export interface PairConnectRequest {
    */
   fingerprint?: string;
   password: PairPassword;
-  path?: "lan" | "tailnet" | "cloudflare";
+  path?: "lan" | "tailnet" | "direct" | "cloudflare";
 }
 export interface PairConnectResponse {
   name: NodeName;
@@ -1656,7 +1656,7 @@ export interface PairConnectResponse {
   address: PairAddress;
   tags: Tag[];
   device_id: DeviceId;
-  path: "lan" | "tailnet" | "cloudflare";
+  path: "lan" | "tailnet" | "direct" | "cloudflare";
 }
 /**
  * 对端加入发送者的 Cloudflare 网格所需的内容：对端自己的隧道与 Access 服务令牌，以及发送者的主机名。不含 Cloudflare API Token。

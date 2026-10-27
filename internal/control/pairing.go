@@ -99,11 +99,19 @@ func (s *Server) listPairDiscovered(w http.ResponseWriter, r *http.Request, _ *c
 	writeJSON(w, 200, v2.PairDiscoveredResponse{Devices: found})
 }
 
-func pairEndpoint(address string) (string, error) {
+// pairDefaultPort is the port a bare host is paired on: each path listens on its own.
+func pairDefaultPort(kind device.PathKind) string {
+	if kind == device.Direct {
+		return "7435"
+	}
+	return "7433"
+}
+
+func pairEndpoint(address string, kind device.PathKind) (string, error) {
 	address = strings.TrimSpace(address)
 	if !strings.Contains(address, "://") {
 		if _, _, err := net.SplitHostPort(address); err != nil {
-			address = net.JoinHostPort(strings.Trim(address, "[]"), "7433")
+			address = net.JoinHostPort(strings.Trim(address, "[]"), pairDefaultPort(kind))
 		}
 		address = "https://" + address
 	}
@@ -162,7 +170,7 @@ func (s *Server) connectPair(w http.ResponseWriter, r *http.Request, _ *call) {
 			return
 		}
 	}
-	endpoint, err := pairEndpoint(address)
+	endpoint, err := pairEndpoint(address, kind)
 	if err != nil {
 		failWith(w, argError("address", err.Error()))
 		return
