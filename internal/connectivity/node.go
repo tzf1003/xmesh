@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"os"
@@ -617,13 +618,21 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", c.Address+identityPath, nil)
+	// Latency is the request/response round trip on the finished connection, left out of connect and TLS,
+	// so it reads like a heartbeat ping and a probed path compares fairly with the active one.
+	var ready time.Time
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { ready = time.Now() }}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), "GET", c.Address+identityPath, nil)
 	if err != nil {
 		return
 	}
 	response, err := client.Do(req)
 	if err != nil {
 		return
+	}
+	rtt := time.Since(started)
+	if !ready.IsZero() {
+		rtt = time.Since(ready)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 || response.TLS == nil || len(response.TLS.PeerCertificates) != 1 {
@@ -636,7 +645,7 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if json.NewDecoder(http.MaxBytesReader(nil, response.Body, 16<<10)).Decode(&body) != nil || body.Identity.Validate() != nil || body.Identity.DeviceID != c.DeviceID || body.BootID == "" {
 		return
 	}
-	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: time.Since(started), ExpiresAt: started.Add(validFor)}) == nil
+	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: rtt, ExpiresAt: started.Add(validFor)}) == nil
 }
 
 func (n *Node) Close() error {

@@ -228,8 +228,8 @@ type PeerPathQuality struct {
 }
 
 // PathQuality summarises recent measurements of one path: probes, and the heartbeat of the carrier that
-// runs on it. A probe's latency covers a full authenticated exchange (connect, TLS and identity), a
-// heartbeat's only a round trip, so the active path reads lower than the same path probed.
+// runs on it. Latency is one request/response round trip on an established connection in both cases,
+// so the active path and the probed ones compare directly.
 type PathQuality struct {
 	Samples   int     `json:"samples"`
 	LatencyMs float64 `json:"latency_ms"`
