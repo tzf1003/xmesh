@@ -254,6 +254,9 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			if l := p.sessions[value.SessionID]; l != nil && l.attachedEpoch == c.epoch && l.err == nil && !l.session.Closed() {
 				err = l.session.Acknowledge(value.Ack)
 			}
+		case "quality":
+			// Display only: a malformed or oversized report is dropped, not a reason to end the link.
+			m.opts.Directory.SetPeerQuality(p.id, time.Now(), value.Quality)
 		case "wait":
 			err = p.queueLocked(frame{Type: "retry-local", SessionID: value.SessionID, Sequence: value.Sequence})
 		case "close":
@@ -307,13 +310,19 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 				defer pinging.Store(false)
 				ping, cancel := context.WithTimeout(ctx, m.opts.DeadAfter)
 				defer cancel()
-				if c.conn.Ping(ping) == nil {
+				start := time.Now()
+				err := c.conn.Ping(ping)
+				if err == nil {
 					c.seen.Store(time.Now().UnixNano())
 				}
+				m.recordHeartbeat(ctx, p, c, start, err)
 			}()
 		}
 		return nil
 	}
+	qualityTick := time.NewTicker(m.opts.QualityEvery)
+	defer qualityTick.Stop()
+	qualityDue := c.peerQuality
 	sent := map[string]uint64{}
 	announced := map[string]bool{}
 	resuming := map[string]bool{}
@@ -327,8 +336,17 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 			if err := beat(); err != nil {
 				return err
 			}
+		case <-qualityTick.C:
+			qualityDue = c.peerQuality
 		case <-ticker.C:
 		case <-p.wake:
+		}
+		var report *frame
+		if qualityDue {
+			qualityDue = false
+			if items := m.opts.Directory.LocalQuality(p.id, time.Now()); len(items) > 0 {
+				report = &frame{Type: "quality", Quality: items}
+			}
 		}
 		p.mu.Lock()
 		if p.active != c || p.closed {
@@ -337,6 +355,9 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 		}
 		out := p.control
 		p.control = nil
+		if report != nil {
+			out = append(out, *report)
+		}
 		for _, l := range p.pending {
 			if l.err == nil && !announced[l.openID] {
 				out = append(out, frame{Type: "open", OpenID: l.openID, OAuthClient: l.oauth})
@@ -414,6 +435,15 @@ func delegatedPrincipal(node string, tags []string, oauth string) (identity.Prin
 		tags = slices.DeleteFunc(slices.Clone(tags), func(tag string) bool { return tag == "tag:ingress" })
 	}
 	return identity.FromPeer(node, tags, oauth)
+}
+
+// recordHeartbeat feeds a ping's round trip into the history of the path this end dialed. A carrier that
+// was closed under the ping says nothing about the path, so only a failure on a live carrier counts as loss.
+func (m *Manager) recordHeartbeat(ctx context.Context, p *peerLink, c *carrier, start time.Time, err error) {
+	if !c.outgoing || (err != nil && ctx.Err() != nil) {
+		return
+	}
+	_ = m.opts.Directory.RecordLink(p.id, c.path.Kind, c.path.Address, c.path.ProviderGeneration, start, err == nil, time.Since(start))
 }
 
 // setUnstable records that the carrier has gone quiet, or has recovered, and reports the

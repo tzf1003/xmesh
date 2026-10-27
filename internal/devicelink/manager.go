@@ -56,6 +56,8 @@ type Options struct {
 	// OnPathSwitch runs, outside any lock, after smart mode drops a carrier for a better path. It must
 	// not reenter Manager.
 	OnPathSwitch func(deviceID string, from, to device.PathKind, reason string)
+	// QualityEvery is how often this end tells the device how well the paths it dials are measured. Default 15s.
+	QualityEvery time.Duration
 	// OnActivity runs under the device lock to retain transition order. It must not reenter Manager.
 	OnActivity func(Activity)
 }
@@ -78,7 +80,15 @@ type frame struct {
 	Part  uint32 `json:"part,omitempty"`
 	Parts uint32 `json:"parts,omitempty"`
 	Error string `json:"error,omitempty"`
+	// Caps are the optional features a hello announces; an end only uses a feature the other announced,
+	// so a peer that predates one never sees its frames.
+	Caps []string `json:"caps,omitempty"`
+	// Quality carries a "quality" frame: the sender's measurements of the paths it dials. Display only.
+	Quality []device.KindQuality `json:"quality,omitempty"`
 }
+
+// capPathQuality announces that an end sends and accepts "quality" frames.
+const capPathQuality = "path-quality-v1"
 
 type logical struct {
 	session              *Session
@@ -103,6 +113,8 @@ type carrier struct {
 	// outgoing is true on the end that dialed; only that end decides to move the carrier.
 	outgoing bool
 	started  time.Time
+	// peerQuality is true when the other end announced capPathQuality.
+	peerQuality bool
 	// seen is the unix-nano time of the last inbound frame or pong.
 	seen atomic.Int64
 }
@@ -167,6 +179,9 @@ func NewManager(ctx context.Context, opts Options) (*Manager, error) {
 	if opts.DeadAfter <= 0 {
 		opts.DeadAfter = 30 * time.Second
 	}
+	if opts.QualityEvery <= 0 {
+		opts.QualityEvery = 15 * time.Second
+	}
 	opts.Switching = opts.Switching.withDefaults()
 	ctx, cancel := context.WithCancel(ctx)
 	m := &Manager{opts: opts, ctx: ctx, cancel: cancel, peers: map[string]*peerLink{}, budget: NewBudget(0)}
@@ -198,6 +213,23 @@ type Activity struct {
 	Path     device.Path
 	Epoch    uint64
 	State    string
+	// Outgoing is true when this end dialed the active carrier.
+	Outgoing bool
+}
+
+// CarriesPath reports whether a healthy carrier this end dialed runs on exactly this path. Its heartbeat
+// already measures the path, so probing it again would only add traffic.
+func (m *Manager) CarriesPath(id string, kind device.PathKind, address string) bool {
+	m.mu.Lock()
+	p := m.peers[id]
+	m.mu.Unlock()
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.active
+	return c != nil && c.committed && c.outgoing && !p.unstable && c.path.Kind == kind && c.path.Address == address
 }
 
 func (m *Manager) Activity(id string) Activity {
@@ -217,7 +249,7 @@ func (m *Manager) Activity(id string) Activity {
 		if p.unstable {
 			state = "unstable"
 		}
-		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: state}
+		return Activity{DeviceID: id, Path: p.active.path, Epoch: p.active.epoch, State: state, Outgoing: p.active.outgoing}
 	}
 	if !p.disconnected.IsZero() && time.Since(p.disconnected) < m.opts.RecoveryWindow {
 		for _, l := range p.pending {
@@ -765,7 +797,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 	if outgoing {
 		conn.SetReadLimit((MaxFrameBytes * 4 / 3) + 4096)
 	}
-	hello := frame{Type: "hello", DeviceID: m.opts.Identity.ID, BootID: m.opts.BootID, ConnectionID: rand.Text()}
+	hello := frame{Type: "hello", DeviceID: m.opts.Identity.ID, BootID: m.opts.BootID, ConnectionID: rand.Text(), Caps: []string{capPathQuality}}
 	var remote frame
 	var err error
 	if outgoing {
@@ -797,7 +829,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		commit = frame{Type: "commit", Epoch: p.epoch, ConnectionID: hello.ConnectionID, BootID: m.opts.BootID}
 		// Reserve the arbitration slot through its confirmation, blocking concurrent candidates.
 		carrierCtx, cancel := context.WithCancel(m.ctx)
-		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now()}
+		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality)}
 		p.active = c
 		p.mu.Unlock()
 		if err = writeFrame(ctx, conn, commit); err == nil {
@@ -831,7 +863,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		return ErrUnavailable
 	}
 	carrierCtx, cancel := context.WithCancel(m.ctx)
-	c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now()}
+	c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality)}
 	p.active = c
 	p.epoch = commit.Epoch
 	p.mu.Unlock()

@@ -127,6 +127,44 @@
             "offline",
             "identity_conflict"
           ]
+        },
+        "active_direction": {
+          "enum": [
+            "outgoing",
+            "incoming"
+          ],
+          "description": "当前连接由哪一端拨出：outgoing 是本机拨出，incoming 是对端拨出。没有活动连接时省略。"
+        },
+        "peer_paths": {
+          "type": "array",
+          "description": "对端自己报告的、它拨向本机的各类路径质量，仅用于显示；约每 15 秒更新，超过 1 分钟未更新即省略。对端版本较旧时省略。",
+          "items": {
+            "": "#//PeerPathQuality"
+          }
+        }
+      }
+    },
+    "PeerPathQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "quality",
+        "received_at"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "lan",
+            "tailnet",
+            "cloudflare"
+          ]
+        },
+        "quality": {
+          "": "#//PathQuality"
+        },
+        "received_at": {
+          "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp"
         }
       }
     },
@@ -210,6 +248,10 @@
             }
           ]
         },
+        "direction": {
+          "const": "outgoing",
+          "description": "这条路径由本机拨出并由本机测量。"
+        },
         "quality": {
           "$ref": "#/$defs/PathQuality"
         }
@@ -217,7 +259,7 @@
     },
     "PathQuality": {
       "type": "object",
-      "description": "最近约 5 分钟的探测结果。延时是一次完整认证探测（建连、TLS、身份）的耗时，各路径之间可比，但高于单纯 ping。",
+      "description": "最近约 5 分钟的测量结果，来自探测和承载连接的心跳。延时都是已建立连接上一次请求/响应的往返时间（探测不含建连与 TLS），因此正在使用的路径与其余路径可以直接比较。",
       "additionalProperties": false,
       "required": [
         "samples",
