@@ -271,6 +271,13 @@ func (s *Session) Next(sequence uint64) (Packet, bool) {
 	return Packet{}, false
 }
 
+// Idle reports that nothing is waiting for an acknowledgment or for the application to read.
+func (s *Session) Idle() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.outgoing) == 0 && len(s.incoming) == 0
+}
+
 func (s *Session) Received() uint64 { s.mu.Lock(); defer s.mu.Unlock(); return s.received }
 
 func (s *Session) Closed() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.closed }
