@@ -470,7 +470,7 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
         assert any(
             (
                 e["event"] == "device_link_online"
-                and e["tool"] == "device.link.tailnet"
+                and e["tool"] == "device.link.tailnet.out"
                 for e in audit
             )
         ), audit
