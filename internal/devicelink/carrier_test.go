@@ -56,7 +56,8 @@ func TestAssemblerRejectsBrokenSequences(t *testing.T) {
 }
 
 func TestManagerCarriesLargeMessagesWithoutPingTimeout(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	// Nine megabytes through the race detector takes about ten seconds; a loaded runner needs more.
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 	a, b := newTestNode(t, "a"), newTestNode(t, "b")
 	pairTestNodes(t, a, b)

@@ -54,7 +54,7 @@ func newTestNode(t *testing.T, name string, tune ...func(*Options)) *testNode {
 	}
 	n := &testNode{id: id, trust: trust, directory: directory, switched: make(chan pathSwitch, 16)}
 	options := Options{
-		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, MigrateIdle: 100 * time.Millisecond, PathOrder: n.pathOrder, Smart: n.smart.Load, Switching: testSwitching, OnPathSwitch: n.onSwitch, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
+		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, MigrateIdle: 100 * time.Millisecond, SuspectAfter: 500 * time.Millisecond, PathOrder: n.pathOrder, Smart: n.smart.Load, Switching: testSwitching, OnPathSwitch: n.onSwitch, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
 		Dial: func(ctx context.Context, target string, path device.Path) (*websocket.Conn, error) {
 			if path.Kind == device.Tailnet && n.dialGate != nil {
 				select {
