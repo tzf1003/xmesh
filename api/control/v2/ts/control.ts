@@ -1157,6 +1157,16 @@ export interface Peer {
   paths?: DevicePath[];
   active_path?: "lan" | "tailnet" | "cloudflare";
   connection_state?: "online" | "unstable" | "reconnecting" | "offline" | "identity_conflict";
+  /**
+   * 当前连接由哪一端拨出：outgoing 是本机拨出，incoming 是对端拨出。没有活动连接时省略。
+   */
+  active_direction?: "outgoing" | "incoming";
+  /**
+   * 对端自己报告的、它拨向本机的各类路径质量，仅用于显示；约每 15 秒更新，超过 1 分钟未更新即省略。对端版本较旧时省略。
+   */
+  peer_paths?: {
+    [k: string]: unknown | undefined;
+  }[];
 }
 /**
  * 网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。
@@ -1176,10 +1186,14 @@ export interface DevicePath {
   address: string;
   reachable: boolean;
   verified_at: Timestamp | null;
+  /**
+   * 这条路径由本机拨出并由本机测量。
+   */
+  direction?: "outgoing";
   quality?: PathQuality;
 }
 /**
- * 最近约 5 分钟的探测结果。延时是一次完整认证探测（建连、TLS、身份）的耗时，各路径之间可比，但高于单纯 ping。
+ * 最近约 5 分钟的测量结果，来自探测和承载连接的心跳。探测延时是一次完整认证探测（建连、TLS、身份）的耗时，心跳延时只是一个往返，所以正在使用的路径读数会低于同一路径的探测读数。
  */
 export interface PathQuality {
   samples: number;
@@ -1943,6 +1957,13 @@ export interface PatSecret {
    * 令牌正文。之后任何接口都读不回。UI 只在内存里展示一次，不写入日志、事件或磁盘。
    */
   token: string;
+}
+export interface PeerPathQuality {
+  kind: "lan" | "tailnet" | "cloudflare";
+  quality: {
+    [k: string]: unknown | undefined;
+  };
+  received_at: Timestamp;
 }
 export interface PeersResponse {
   peers: Peer[];

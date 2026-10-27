@@ -282,3 +282,66 @@ func TestRevokedDeviceForgetsPathThatNeverAnswered(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestDirectoryRecordsHeartbeatOnlyOnKnownPathAndKeepsItAlive(t *testing.T) {
+	d, i, generation := directory(t)
+	address := "192.168.1.4:7433"
+	start := time.Now()
+	if err := d.RecordLink(i.ID, LAN, address, 1, start, true, time.Millisecond); !errors.Is(err, ErrStalePath) {
+		t.Fatalf("heartbeat introduced a path: %v", err)
+	}
+	path := observedPath(LAN, address, "boot-a")
+	path.VerifiedAt, path.ExpiresAt, path.RTT = start, start.Add(30*time.Second), 40*time.Millisecond
+	if err := d.Observe(i.Certificate.Leaf, generation, path); err != nil {
+		t.Fatal(err)
+	}
+	for n := 1; n <= 4; n++ {
+		if err := d.RecordLink(i.ID, LAN, address, 1, start.Add(time.Duration(n)*10*time.Second), true, 10*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No probe since the first one, yet the path is still reachable 45s later and the heartbeats count.
+	devices, _ := d.Snapshot(start.Add(45 * time.Second))
+	got := devices[0].Paths[0]
+	if !got.Reachable || got.Quality.Samples != 5 || got.Quality.LatencyMs != 10 || got.Direction != DirectionOutgoing {
+		t.Fatalf("path = %+v", got)
+	}
+	if err := d.RecordLink(i.ID, LAN, address, 1, start.Add(50*time.Second), false, 0); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = d.Snapshot(start.Add(51 * time.Second))
+	if q := devices[0].Paths[0].Quality; q.Samples != 6 || q.Flaps != 1 {
+		t.Fatalf("failed heartbeat not recorded: %+v", q)
+	}
+	if err := d.RecordLink(i.ID, LAN, address, 2, start, true, 0); !errors.Is(err, ErrStalePath) {
+		t.Fatalf("stale generation accepted: %v", err)
+	}
+}
+
+func TestDirectoryPeerQualityIsBoundedAndExpires(t *testing.T) {
+	d, i, generation := directory(t)
+	if err := d.Observe(i.Certificate.Leaf, generation, observedPath(LAN, "192.168.1.4:7433", "boot-a")); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	good := Quality{Samples: 20, LatencyMs: 12, P90Ms: 15, JitterMs: 3, Loss: 0.05, Flaps: 1}
+	d.SetPeerQuality(i.ID, now, []KindQuality{
+		{Kind: LAN, Quality: good},
+		{Kind: LAN, Quality: Quality{Samples: 1}},              // duplicate kind
+		{Kind: "bogus", Quality: good},                         // unknown kind
+		{Kind: Tailnet, Quality: Quality{Samples: 1, Loss: 2}}, // impossible loss
+	})
+	devices, _ := d.Snapshot(now.Add(time.Second))
+	if got := devices[0].PeerQuality; len(got) != 1 || got[0].Kind != LAN || got[0].Quality != good || !got[0].ReceivedAt.Equal(now) {
+		t.Fatalf("peer quality = %+v", got)
+	}
+	devices, _ = d.Snapshot(now.Add(PeerQualityTTL + time.Second))
+	if len(devices[0].PeerQuality) != 0 {
+		t.Fatalf("stale report shown: %+v", devices[0].PeerQuality)
+	}
+	// What this end reports is the best-measured address of each kind.
+	local := d.LocalQuality(i.ID, now)
+	if len(local) != 1 || local[0].Kind != LAN || local[0].Quality.Samples != 1 {
+		t.Fatalf("local quality = %+v", local)
+	}
+}

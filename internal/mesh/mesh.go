@@ -24,7 +24,11 @@ type Peer struct {
 	Paths           []device.Path   `json:"paths,omitempty"`
 	ActivePath      device.PathKind `json:"active_path,omitempty"`
 	ConnectionState string          `json:"connection_state,omitempty"`
-	DisplayName     string          `json:"display_name,omitempty"`
+	// ActiveDirection says which end dialed the active connection: "outgoing" or "incoming".
+	ActiveDirection string `json:"active_direction,omitempty"`
+	// PeerQuality is the device's own report of the paths it dials to this end, for display.
+	PeerQuality []device.PeerQuality `json:"peer_quality,omitempty"`
+	DisplayName string               `json:"display_name,omitempty"`
 }
 type Network interface {
 	Listen(context.Context) (net.Listener, error)
