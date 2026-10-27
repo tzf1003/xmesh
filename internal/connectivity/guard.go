@@ -43,12 +43,20 @@ func newDirectGuard(cfg config.Direct, now func() time.Time) *directGuard {
 	g := &directGuard{now: now, maxTotal: cfg.PreauthLimit(), sources: map[netip.Addr]*guardSource{}, conns: map[net.Conn]netip.Addr{}}
 	for _, entry := range cfg.AllowIPs {
 		if prefix, err := netip.ParsePrefix(entry); err == nil {
-			g.allow = append(g.allow, prefix.Masked())
+			g.allow = append(g.allow, unmapPrefix(prefix).Masked())
 		} else if addr, err := netip.ParseAddr(entry); err == nil {
 			g.allow = append(g.allow, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
 		}
 	}
 	return g
+}
+
+// unmapPrefix turns an IPv4-mapped IPv6 prefix (::ffff:a.b.c.d/n, n >= 96) into the IPv4 prefix, matching sourceAddr.
+func unmapPrefix(p netip.Prefix) netip.Prefix {
+	if p.Addr().Is4In6() && p.Bits() >= 96 {
+		return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+	}
+	return p
 }
 
 func (g *directGuard) listener(l net.Listener) net.Listener { return &guardListener{Listener: l, g: g} }

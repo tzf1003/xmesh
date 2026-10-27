@@ -37,6 +37,15 @@ func TestDirectGuardAllowList(t *testing.T) {
 	}
 }
 
+func TestDirectGuardAllowListMappedPrefix(t *testing.T) {
+	g := newDirectGuard(config.Direct{AllowIPs: []string{"::ffff:192.0.2.1/128", "::ffff:198.51.100.0/120"}}, time.Now)
+	for ip, want := range map[string]bool{"192.0.2.1": true, "192.0.2.2": false, "198.51.100.77": true, "198.51.101.1": false} {
+		if got := g.admit(conn(ip)); got != want {
+			t.Fatalf("%s: admit = %v, want %v", ip, got, want)
+		}
+	}
+}
+
 func TestDirectGuardCapsPreauthAndBacksOffFailures(t *testing.T) {
 	now := time.Unix(1000, 0)
 	g := newDirectGuard(config.Direct{MaxPreauth: 3}, func() time.Time { return now })

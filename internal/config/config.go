@@ -136,7 +136,7 @@ type Direct struct {
 	AllowPairing bool `json:"allow_pairing,omitempty"`
 	// AllowIPs, when set, restricts the public port to these source IPs or CIDR ranges; others are dropped before TLS.
 	AllowIPs []string `json:"allow_ips,omitempty"`
-	// MaxPreauth caps connections that have not finished the TLS handshake and sent a request. Default 64.
+	// MaxPreauth caps connections that have not finished the TLS handshake and sent a request. Zero or omitted means the default, 64.
 	MaxPreauth int `json:"max_preauth,omitempty"`
 }
 
