@@ -18,6 +18,8 @@ const (
 	Tailnet PathKind = "tailnet"
 	// Cloudflare reaches a device through its own Cloudflare Tunnel hostname; it needs no inbound address.
 	Cloudflare PathKind = "cloudflare"
+	// Direct reaches a device on a public address it listens on itself, with no third party in between.
+	Direct PathKind = "direct"
 )
 
 var ErrStalePath = errors.New("连接路径版本已过期")
@@ -128,7 +130,7 @@ func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Director
 }
 
 // Valid reports whether k is a path kind this runtime knows.
-func (k PathKind) Valid() bool { return k == LAN || k == Tailnet || k == Cloudflare }
+func (k PathKind) Valid() bool { return k == LAN || k == Tailnet || k == Direct || k == Cloudflare }
 
 func (d *Directory) SetProvider(kind PathKind, generation uint64, enabled bool) error {
 	if !kind.Valid() || generation == 0 {

@@ -23,11 +23,13 @@ const (
 )
 
 // kindBias breaks near-ties toward the path that adds no third party: LAN is almost always right,
-// Cloudflare adds latency and costs traffic through the user's account.
+// a direct public address is next best, Cloudflare adds latency and costs traffic through the user's account.
 func kindBias(kind PathKind) float64 {
 	switch kind {
 	case LAN:
 		return -50
+	case Direct:
+		return -10
 	case Cloudflare:
 		return 30
 	}

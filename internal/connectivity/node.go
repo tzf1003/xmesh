@@ -38,12 +38,14 @@ import (
 const serviceType = "_xmesh-v2._tcp"
 const identityPath = "/mesh/v2/identity"
 
-var pathKinds = []device.PathKind{device.LAN, device.Tailnet, device.Cloudflare}
+var pathKinds = []device.PathKind{device.LAN, device.Tailnet, device.Direct, device.Cloudflare}
 
 func providerEnabled(cfg config.Mesh, kind device.PathKind) bool {
 	switch kind {
 	case device.Tailnet:
 		return cfg.TailnetEnabled()
+	case device.Direct:
+		return cfg.DirectEnabled()
 	case device.Cloudflare:
 		return cfg.CloudflareEnabled()
 	}
@@ -55,6 +57,12 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 	switch kind {
 	case device.Tailnet:
 		return reflect.DeepEqual(old.Tailnet, cfg.Tailnet)
+	case device.Direct:
+		// Peers and the advertised address are read on every use, so changing them must not rebuild the listener.
+		a, b := old.Direct, cfg.Direct
+		a.Peers, a.Advertise = nil, ""
+		b.Peers, b.Advertise = nil, ""
+		return reflect.DeepEqual(a, b)
 	case device.Cloudflare:
 		// Preferred addresses and their policy are read on every dial, so changing them must not rebuild the path.
 		a, b := old.Cloudflare, cfg.Cloudflare
@@ -68,6 +76,12 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 // Tunnel probes cost a round trip through Cloudflare, so they are rarer and given more time than LAN ones.
 const cloudflareProbeEvery = 30 * time.Second
 
+// A public address is probed over the internet, so it is tried less often and given longer than the LAN.
+const (
+	directProbeEvery  = 15 * time.Second
+	directProbeBudget = 5 * time.Second
+)
+
 // lanProbeEvery is how often a path that is not carrying the link is probed. The carrier's heartbeat
 // measures the active path, so probes only keep the alternatives' quality current.
 const lanProbeEvery = 12 * time.Second
@@ -75,8 +89,11 @@ const lanProbeEvery = 12 * time.Second
 // probeGap is the least time between two probes of one candidate. Cloudflare candidates are paced by
 // supervise itself, so they need no gap here.
 func probeGap(kind device.PathKind) time.Duration {
-	if kind == device.LAN || kind == device.Tailnet {
+	switch kind {
+	case device.LAN, device.Tailnet:
 		return lanProbeEvery
+	case device.Direct:
+		return directProbeEvery
 	}
 	return 0
 }
@@ -458,6 +475,17 @@ func (n *Node) Candidates() []Candidate {
 			result = append(result, Candidate{Name: trusted.Document.Name, DeviceID: trusted.Document.DeviceID, Kind: hint.Kind, Address: hint.Address, Generation: generation})
 		}
 	}
+	if generation, enabled := n.directory.Provider(device.Direct); enabled {
+		for id, hostport := range n.cfg.Direct.Peers {
+			address := "https://" + hostport
+			key := string(device.Direct) + "|" + address
+			if seen[key] || id == n.identity.ID {
+				continue
+			}
+			seen[key] = true
+			result = append(result, Candidate{DeviceID: id, Kind: device.Direct, Address: address, Generation: generation})
+		}
+	}
 	if generation, enabled := n.directory.Provider(device.Cloudflare); enabled {
 		for id, host := range n.cfg.Cloudflare.Peers {
 			address := "https://" + host
@@ -613,8 +641,11 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	}
 	defer client.CloseIdleConnections()
 	budget, validFor := 2*time.Second, 30*time.Second
-	if c.Kind == device.Cloudflare {
+	switch c.Kind {
+	case device.Cloudflare:
 		budget, validFor = 10*time.Second, 2*cloudflareProbeEvery
+	case device.Direct:
+		budget, validFor = directProbeBudget, 2*directProbeEvery
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -774,6 +805,8 @@ func (n *Node) runProvider(ctx context.Context, kind device.PathKind, p *provide
 		switch kind {
 		case device.LAN:
 			err = n.runLAN(ctx, p)
+		case device.Direct:
+			err = n.runDirect(ctx, p)
 		case device.Cloudflare:
 			err = n.runCloudflare(ctx, p)
 		default:
@@ -819,8 +852,9 @@ func (n *Node) retireProvider(kind device.PathKind, p *provider) {
 func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, listener net.Listener, discovery func(context.Context)) error {
 	server := &http.Server{Handler: n.handler(kind, p.generation), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	tlsConfig := n.pairing.ServerTLS()
-	if kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing {
-		// The tunnel is reachable by anyone holding the Access token, so only paired devices get through.
+	if (kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing) || (kind == device.Direct && !p.cfg.Direct.AllowPairing) {
+		// The tunnel is reachable by anyone holding the Access token, and a direct port by anyone on the
+		// internet, so only paired devices get through.
 		// Pairing is only reachable while a connection password is set (an invite is open).
 		strict, open := n.trust.TLS(n.identity, "", true), tlsConfig
 		tlsConfig = &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
