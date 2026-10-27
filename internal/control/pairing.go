@@ -137,7 +137,7 @@ func (s *Server) connectPair(w http.ResponseWriter, r *http.Request, _ *call) {
 		kind = device.LAN
 	}
 	if !kind.Valid() {
-		failWith(w, argError("path", "连接路径须为 lan、tailnet 或 cloudflare"))
+		failWith(w, argError("path", "连接路径须为 lan、tailnet、direct 或 cloudflare"))
 		return
 	}
 	address := strings.TrimSpace(req.Address)

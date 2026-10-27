@@ -147,10 +147,11 @@
                 "enum": [
                   "lan",
                   "tailnet",
+                  "direct",
                   "cloudflare"
                 ]
               },
-              "description": "从最优先到最不优先。没有列出的路径按 lan、tailnet、cloudflare 的默认顺序排在后面。"
+              "description": "从最优先到最不优先。没有列出的路径按 lan、tailnet、direct、cloudflare 的默认顺序排在后面。"
             },
             "disabled": {
               "type": "array",
@@ -159,10 +160,48 @@
                 "enum": [
                   "lan",
                   "tailnet",
+                  "direct",
                   "cloudflare"
                 ]
               },
               "description": "不拨出、也不接受设备链路的路径。"
+            }
+          }
+        },
+        "direct": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "直连：本机在公网地址上监听，对端直接拨过来，不经第三方。监听端口只接受已配对设备（严格 mTLS）；未配对设备只在邀请期间才能到达配对。默认关闭。",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "listen": {
+              "type": "string",
+              "default": "0.0.0.0:7435",
+              "description": "公网监听地址，主机:端口。"
+            },
+            "advertise": {
+              "type": "string",
+              "minLength": 1,
+              "description": "对端拨入本机用的公网地址或域名，主机:端口；只用于显示与分享，不会被监听。"
+            },
+            "peers": {
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^dev-[0-9a-f]{64}$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "已配对设备的 ID 到它的直连地址（主机:端口）。"
+            },
+            "allow_pairing": {
+              "type": "boolean",
+              "default": false,
+              "description": "为 true 时公网端口始终开放配对；默认只在邀请（连接密码）期间开放。"
             }
           }
         },
