@@ -371,6 +371,13 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 				peer.ActiveDirection = device.DirectionOutgoing
 			}
 		}
+		for _, l := range n.links.Links(d.DeviceID) {
+			direction := device.DirectionIncoming
+			if l.Outgoing {
+				direction = device.DirectionOutgoing
+			}
+			peer.Links = append(peer.Links, mesh.Link{Kind: l.Path.Kind, Address: l.Path.Address, Direction: direction, Draining: l.Draining, Suspect: l.Suspect, Sessions: l.Sessions, Since: l.Since})
+		}
 		if a.Path.Kind == device.Tailnet {
 			route := routes[pathHost(a.Path.Address)]
 			peer.Direct, peer.Relay, peer.OS = route.direct, route.relay, route.os

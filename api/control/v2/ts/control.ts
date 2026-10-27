@@ -1164,9 +1164,11 @@ export interface Peer {
   /**
    * 对端自己报告的、它拨向本机的各类路径质量，仅用于显示；约每 15 秒更新，超过 1 分钟未更新即省略。对端版本较旧时省略。
    */
-  peer_paths?: {
-    [k: string]: unknown | undefined;
-  }[];
+  peer_paths?: PeerPathQuality[];
+  /**
+   * 到该设备的在线连接，每个拨出方向最多一条，本机拨出的排在前面。没有连接时省略。
+   */
+  links?: PeerLink[];
 }
 /**
  * 网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。
@@ -1218,6 +1220,32 @@ export interface PathQuality {
    * 智能选路用来给这条路径排序的分数，越低越好；探测样本太少、还不能打分时省略。
    */
   score?: number;
+}
+export interface PeerPathQuality {
+  kind: "lan" | "tailnet" | "direct" | "cloudflare";
+  quality: PathQuality;
+  received_at: Timestamp;
+}
+export interface PeerLink {
+  kind: "lan" | "tailnet" | "direct" | "cloudflare";
+  address: string;
+  /**
+   * 哪一端拨出：outgoing 是本机拨出（本机为客户端），incoming 是对端拨出（本机为服务端）。
+   */
+  direction: "outgoing" | "incoming";
+  /**
+   * 该连接即将关闭，因为同一方向的新连接已接替。
+   */
+  draining?: boolean;
+  /**
+   * 该连接已有一段时间没有数据，新会话优先走另一条。
+   */
+  suspect?: boolean;
+  /**
+   * 当前绑在这条连接上的逻辑会话数。
+   */
+  sessions: number;
+  since: Timestamp;
 }
 export interface CallEventData {
   /**
@@ -1957,13 +1985,6 @@ export interface PatSecret {
    * 令牌正文。之后任何接口都读不回。UI 只在内存里展示一次，不写入日志、事件或磁盘。
    */
   token: string;
-}
-export interface PeerPathQuality {
-  kind: "lan" | "tailnet" | "cloudflare";
-  quality: {
-    [k: string]: unknown | undefined;
-  };
-  received_at: Timestamp;
 }
 export interface PeersResponse {
   peers: Peer[];
