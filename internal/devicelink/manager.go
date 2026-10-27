@@ -117,6 +117,8 @@ type carrier struct {
 	peerQuality bool
 	// seen is the unix-nano time of the last inbound frame or pong.
 	seen atomic.Int64
+	// done is closed once the carrier's worker has finished with the connection.
+	done chan struct{}
 }
 
 type pathFailure struct {
@@ -827,7 +829,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		commit = frame{Type: "commit", Epoch: p.epoch, ConnectionID: hello.ConnectionID, BootID: m.opts.BootID}
 		// Reserve the arbitration slot through its confirmation, blocking concurrent candidates.
 		carrierCtx, cancel := context.WithCancel(m.ctx)
-		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality)}
+		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality), done: make(chan struct{})}
 		p.active = c
 		p.mu.Unlock()
 		if err = writeFrame(ctx, conn, commit); err == nil {
@@ -861,7 +863,7 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		return ErrUnavailable
 	}
 	carrierCtx, cancel := context.WithCancel(m.ctx)
-	c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality)}
+	c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality), done: make(chan struct{})}
 	p.active = c
 	p.epoch = commit.Epoch
 	p.mu.Unlock()
@@ -936,6 +938,7 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 }
 
 func (m *Manager) serveCarrier(ctx context.Context, p *peerLink, c *carrier) {
+	defer close(c.done)
 	defer func() {
 		c.cancel()
 		_ = c.conn.CloseNow()
@@ -1012,6 +1015,14 @@ func (m *Manager) Close() error {
 		notifications.Go(func() { _ = writeFrame(ctx, c.conn, frame{Type: "shutdown", Epoch: c.epoch}) })
 	}
 	notifications.Wait()
+	// Closing the socket while the peer's frames are still unread makes the kernel reset the connection,
+	// which can discard the notice. The peer hangs up on receiving it, so wait for that.
+	for _, c := range active {
+		select {
+		case <-c.done:
+		case <-ctx.Done():
+		}
+	}
 	stop()
 	m.mu.Lock()
 	m.cancel()

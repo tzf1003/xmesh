@@ -74,7 +74,9 @@ func Test_INV05_RejectionsLeaveNoSideEffects(t *testing.T) {
 		// Terminal input is processed in order: once this marker is echoed back, every
 		// earlier line that reached the shell has been executed.
 		tool(t, owner, "pty.write", map[string]any{"session_id": id, "data": "printf 'FENCE_%s\\n' " + label + "\n"})
-		cursor = readTerminalUntil(t, owner, id, cursor, regexp.MustCompile("(?m)^FENCE_"+label+"\r?$"))
+		// The echoed command spells the marker "FENCE_%s", so only the output matches. It is not anchored
+		// at the line start: a prompt ("# ") can land in front of it.
+		cursor = readTerminalUntil(t, owner, id, cursor, regexp.MustCompile("(?m)FENCE_"+label+"\r?$"))
 	}
 	fence("SETUP")
 	grant := tool(t, owner, "backend.acquire", map[string]any{"name": "locked", "ttl": "5m"})
