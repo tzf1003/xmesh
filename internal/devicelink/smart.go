@@ -165,10 +165,13 @@ func (m *Manager) review(now time.Time) {
 	}
 }
 
+// reviewLocked decides whether the carrier this end dialed should move. A replacement is dialed while the
+// old carrier keeps serving, and the move is reported when it commits. A peer that keeps one carrier per
+// pair cannot take a second, so its carrier is closed and redialed, and the move is reported at once.
 func (m *Manager) reviewLocked(p *peerLink, now time.Time) (pathSwitch, bool) {
-	c := p.active
+	c, _ := p.slotLocked(true)
 	reset := func() { p.betterKind, p.betterSince = "", time.Time{} }
-	if c == nil || !c.committed || !c.outgoing {
+	if c == nil || p.handoff != nil {
 		reset()
 		return pathSwitch{}, false
 	}
@@ -194,9 +197,14 @@ func (m *Manager) reviewLocked(p *peerLink, now time.Time) (pathSwitch, bool) {
 	lived := now.Sub(c.started)
 	move := func(reason string) (pathSwitch, bool) {
 		reset()
-		c.cancel()
-		_ = c.conn.CloseNow()
-		return pathSwitch{id: p.id, from: c.path.Kind, to: best, reason: reason}, true
+		if p.legacy {
+			c.cancel()
+			_ = c.conn.CloseNow()
+			return pathSwitch{id: p.id, from: c.path.Kind, to: best, reason: reason}, true
+		}
+		p.handoff = &handoff{from: c, to: best, reason: reason}
+		p.signalLocked()
+		return pathSwitch{}, false
 	}
 	if cur.unhealthy && alt.score < cur.score {
 		if lived >= m.opts.Switching.EmergencyDwell {
