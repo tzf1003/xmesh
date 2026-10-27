@@ -77,6 +77,18 @@ Funnel 公网入口仍需控制面允许 Funnel 与 HTTPS，具体授权对象�
 
 隧道可由 `xmesh cloudflare` 经 Cloudflare API 创建（`internal/cfadmin`）：每台设备一条远程配置的隧道、一条代理 CNAME、一个只放行网格服务令牌的 Access 应用，同网格设备共用一个服务令牌。API 令牌只存在运行命令的机器的系统钥匙串或 0600 文件里，内核不持有，内核只收到隧道令牌文件的路径。配置了 `tunnel_token_file` 时内核自己运行 `cloudflared tunnel --no-autoupdate --protocol http2 run --token-file …`（HTTP/2 写死，令牌不出现在进程参数里），退出后按 1 秒起翻倍到 1 分钟的间隔重启；cloudflared 的输出被丢弃，因为它会回显连接器信息。
 
+## 直连路径
+
+`direct` 路径让设备在自己的公网地址（`mesh.direct.listen`，默认 `0.0.0.0:7435`）上监听，对端按 `mesh.direct.peers` 或配对时填写的地址直接拨入，不经第三方，默认关闭。它与其他路径一样走固定公钥 mTLS 和 `/mesh/v2/link`；监听端口默认只放行已配对设备（握手要求客户端证书），未配对设备只在被连接端设置了连接密码期间（邀请）或显式 `allow_pairing` 时才能到达配对。路径偏置 −10，探测每 15 秒一次。
+
+公网端口在认证前由 `connectivity/guard.go` 加固：
+
+- 来源白名单：`allow_ips` 非空时，不在名单内的来源在 TLS 之前即被关闭。
+- 预认证并发上限：尚未完成握手并发出请求的连接总数不超过 `max_preauth`（默认 64），单个来源最多 8 条；握手和读请求头合计有 10 秒期限。
+- 按来源退避：连接没发出请求就关闭（握手失败、慢速占用）算一次失败，该来源在 1、2、4…秒（上限 1 分钟）内的新连接被直接关闭；发出一次请求即清零。10 分钟没有活动的来源记录被丢弃。
+
+这些限制只作用于直连监听，不影响 LAN、Tailnet 与 Cloudflare；已认证后的连接不受预认证限额占用。
+
 ## 逻辑会话
 
 内部节点通信使用 `/mesh/v2/link`，子协议为 `xmesh-link-v2`。
@@ -102,6 +114,7 @@ Funnel 公网入口仍需控制面允许 Funnel 与 HTTPS，具体授权对象�
 | LAN / Tailnet 同时发现、同一地址换设备 | 按已验证公钥合并；探测任务包含设备 ID；连接提示不授予信任 | `device/directory_test.go`、`connectivity/node_test.go`、`device/hints_test.go` |
 | Tailnet 先出现、LAN 稍晚发现 | 首次拨号和入站仲裁共享 LAN 的有限发现机会 | `devicelink/manager_test.go` |
 | 双向同时拨号、多逻辑会话一起重连 | 每端各提交自己的槽；同槽新连接提交后旧连接排空；旧 epoch 不承载消息；一槽断开另一槽继续承载；借用与迁回；无响应连接提前替换 | `devicelink/manager_test.go`、`devicelink/slots_test.go` |
+| 公网直连端口被扫描、慢速占用握手或猜测配对 | 白名单、预认证并发上限与按来源失败退避，均在认证前生效 | `connectivity/guard_test.go` |
 | provider 关闭、失败重试、旧握手或旧发现迟到 | 关闭时立即撤销旧 provider 代次，提交时再次校验；其余网络独立运行 | `connectivity/node_test.go`、`device/directory_test.go` |
 | 配对确认与密码轮换、设备撤销交错 | 同一事务内验证密码版本与设备信任版本；确认回执绑定当前信任 | `device/pairing_concurrency_test.go` |
 | 同一公钥对应多个进程 | 发现、拨号、激活与业务接收均检查冲突；结束原会话 | `device/directory_test.go`、`devicelink/manager_test.go` |

@@ -198,6 +198,20 @@
               },
               "description": "已配对设备的 ID 到它的直连地址（主机:端口）。"
             },
+            "allow_ips": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "非空时，公网监听端口只接受这些来源 IP 或 CIDR 网段，其余连接在 TLS 之前即被关闭。"
+            },
+            "max_preauth": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 64,
+              "description": "尚未完成 TLS 握手并发出请求的连接数上限；单个来源 IP 另限 8 条。"
+            },
             "allow_pairing": {
               "type": "boolean",
               "default": false,
