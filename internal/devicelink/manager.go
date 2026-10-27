@@ -190,6 +190,8 @@ type peerLink struct {
 	closed       bool
 	conflicted   bool
 	revoked      bool
+	// latestBoot is the boot ID in the newest hello; a handshake that ends with another one is from a dead run.
+	latestBoot string
 	// legacy is true when the peer's hello lacked capDualSlot, so a device pair keeps one carrier.
 	legacy   bool
 	handoff  *handoff
@@ -892,6 +894,10 @@ func (m *Manager) handshake(ctx context.Context, p *peerLink, conn *websocket.Co
 		return device.ErrUntrusted
 	}
 	dual := slices.Contains(remote.Caps, capDualSlot)
+	// Hellos arrive in the order the peer ran, so a handshake of an older run that finishes late is stale.
+	p.mu.Lock()
+	p.latestBoot = remote.BootID
+	p.mu.Unlock()
 	newCarrier := func(commit frame, cancel context.CancelFunc) *carrier {
 		c := &carrier{conn: conn, epoch: commit.Epoch, id: commit.ConnectionID, path: path, cancel: cancel, outgoing: outgoing, started: time.Now(), peerQuality: slices.Contains(remote.Caps, capPathQuality)}
 		c.busyAt = c.started
@@ -983,6 +989,9 @@ func (m *Manager) activate(p *peerLink, c *carrier, ctx context.Context, boot st
 	generation, enabled := m.opts.Directory.Provider(c.path.Kind)
 	_, trusted := m.opts.Trust.Find(p.id)
 	if p.closed || !p.hasLocked(c) || m.ctx.Err() != nil || m.stopping.Load() || !enabled || generation != c.path.ProviderGeneration || m.rank(c.path.Kind) < 0 || !trusted || m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+		return drop(ErrUnavailable)
+	}
+	if p.latestBoot != boot {
 		return drop(ErrUnavailable)
 	}
 	if p.boot != "" && p.boot != boot {
