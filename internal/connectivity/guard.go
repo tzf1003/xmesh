@@ -15,6 +15,7 @@ const (
 	guardBackoffBase  = time.Second
 	guardBackoffMax   = time.Minute
 	guardForget       = 10 * time.Minute
+	guardSweep        = time.Minute
 )
 
 // directGuard protects the public direct port before a peer has authenticated: an optional source allow list,
@@ -24,10 +25,11 @@ type directGuard struct {
 	allow    []netip.Prefix
 	maxTotal int
 
-	mu      sync.Mutex
-	total   int
-	sources map[netip.Addr]*guardSource
-	conns   map[net.Conn]netip.Addr
+	mu        sync.Mutex
+	total     int
+	nextSweep time.Time
+	sources   map[netip.Addr]*guardSource
+	conns     map[net.Conn]netip.Addr
 }
 
 type guardSource struct {
@@ -99,13 +101,16 @@ func (g *directGuard) admit(conn net.Conn) bool {
 	now := g.now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.forgetLocked(now)
+	g.sweepLocked(now)
+	if g.total >= g.maxTotal {
+		return false
+	}
 	s := g.sources[addr]
 	if s == nil {
 		s = &guardSource{}
 		g.sources[addr] = s
 	}
-	if now.Before(s.blockedTo) || s.pending >= guardPerIPPreauth || g.total >= g.maxTotal {
+	if now.Before(s.blockedTo) || s.pending >= guardPerIPPreauth {
 		return false
 	}
 	s.pending++
@@ -141,7 +146,12 @@ func (g *directGuard) connState(conn net.Conn, state http.ConnState) {
 	s.failures, s.blockedTo = 0, time.Time{}
 }
 
-func (g *directGuard) forgetLocked(now time.Time) {
+// sweepLocked drops idle source records at most once per guardSweep, so admission does not scan them every time.
+func (g *directGuard) sweepLocked(now time.Time) {
+	if now.Before(g.nextSweep) {
+		return
+	}
+	g.nextSweep = now.Add(guardSweep)
 	for addr, s := range g.sources {
 		if s.pending == 0 && now.Sub(s.last) > guardForget {
 			delete(g.sources, addr)
