@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"os"
@@ -67,6 +68,19 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 // Tunnel probes cost a round trip through Cloudflare, so they are rarer and given more time than LAN ones.
 const cloudflareProbeEvery = 30 * time.Second
 
+// lanProbeEvery is how often a path that is not carrying the link is probed. The carrier's heartbeat
+// measures the active path, so probes only keep the alternatives' quality current.
+const lanProbeEvery = 12 * time.Second
+
+// probeGap is the least time between two probes of one candidate. Cloudflare candidates are paced by
+// supervise itself, so they need no gap here.
+func probeGap(kind device.PathKind) time.Duration {
+	if kind == device.LAN || kind == device.Tailnet {
+		return lanProbeEvery
+	}
+	return 0
+}
+
 type Candidate struct {
 	Name       string
 	DeviceID   string
@@ -118,7 +132,9 @@ type Node struct {
 	lock           *os.File
 	probes         chan Candidate
 	probing        map[string]bool
-	auditLog       atomic.Pointer[audit.Logger]
+	// lastProbe is when each candidate was last queued for a probe, to hold backup paths to probeGap.
+	lastProbe map[string]time.Time
+	auditLog  atomic.Pointer[audit.Logger]
 	// cloudflareOuter replaces the HTTP client that opens the tunnel WebSocket; tests point it at a fake edge.
 	cloudflareOuter *http.Client
 	// preferred is the Cloudflare preferred-address pool, created on first use.
@@ -180,6 +196,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	n.lock = lock
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
+	n.lastProbe = map[string]time.Time{}
 	n.directory = device.NewDirectory(ctx, trust, id.ID)
 	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, PathOrder: n.pathOrder, Smart: n.smartPaths, OnPathSwitch: n.auditPathSwitch, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
 		n.mu.Lock()
@@ -330,7 +347,13 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 			online = false
 			a.State = "identity_conflict"
 		}
-		peer := mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name}
+		peer := mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name, PeerQuality: d.PeerQuality}
+		if a.Path.Kind != "" {
+			peer.ActiveDirection = device.DirectionIncoming
+			if a.Outgoing {
+				peer.ActiveDirection = device.DirectionOutgoing
+			}
+		}
 		if a.Path.Kind == device.Tailnet {
 			route := routes[pathHost(a.Path.Address)]
 			peer.Direct, peer.Relay, peer.OS = route.direct, route.relay, route.os
@@ -595,13 +618,21 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", c.Address+identityPath, nil)
+	// Latency is the request/response round trip on the finished connection, left out of connect and TLS,
+	// so it reads like a heartbeat ping and a probed path compares fairly with the active one.
+	var ready time.Time
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { ready = time.Now() }}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), "GET", c.Address+identityPath, nil)
 	if err != nil {
 		return
 	}
 	response, err := client.Do(req)
 	if err != nil {
 		return
+	}
+	rtt := time.Since(started)
+	if !ready.IsZero() {
+		rtt = time.Since(ready)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 || response.TLS == nil || len(response.TLS.PeerCertificates) != 1 {
@@ -614,7 +645,7 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if json.NewDecoder(http.MaxBytesReader(nil, response.Body, 16<<10)).Decode(&body) != nil || body.Identity.Validate() != nil || body.Identity.DeviceID != c.DeviceID || body.BootID == "" {
 		return
 	}
-	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: time.Since(started), ExpiresAt: started.Add(validFor)}) == nil
+	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: rtt, ExpiresAt: started.Add(validFor)}) == nil
 }
 
 func (n *Node) Close() error {
@@ -906,8 +937,13 @@ func (n *Node) browseLAN(ctx context.Context, p *provider, generation uint64, if
 	next:
 		// Explicitly paired addresses remain candidates when multicast discovery is disabled.
 		for _, c := range n.Candidates() {
-			if c.Kind == device.LAN && c.Generation == generation {
-				n.probe(ctx, c)
+			if c.Kind == device.LAN && c.Generation == generation && !n.carriesLink(c) {
+				n.mu.Lock()
+				due := n.probeDueLocked(c, time.Now())
+				n.mu.Unlock()
+				if due {
+					n.probe(ctx, c)
+				}
 			}
 		}
 	}
@@ -922,17 +958,41 @@ func (n *Node) recordCandidate(ctx context.Context, c Candidate) {
 	n.enqueueProbe(c)
 }
 
+// carriesLink reports whether the candidate is the path a live carrier this end dialed runs on. Its
+// heartbeat measures that path, so a probe would only repeat it.
+func (n *Node) carriesLink(c Candidate) bool {
+	return c.DeviceID != "" && n.links != nil && n.links.CarriesPath(c.DeviceID, c.Kind, c.Address)
+}
+
+// probeDueLocked reports whether the candidate has waited out its gap since it was last queued, and if
+// so records now as that time. The caller holds n.mu.
+func (n *Node) probeDueLocked(c Candidate, now time.Time) bool {
+	key := probeKey(c)
+	if last, ok := n.lastProbe[key]; ok && now.Sub(last) < probeGap(c.Kind) {
+		return false
+	}
+	if len(n.lastProbe) >= 4096 {
+		clear(n.lastProbe)
+	}
+	n.lastProbe[key] = now
+	return true
+}
+
 func (n *Node) enqueueProbe(c Candidate) {
+	if n.carriesLink(c) {
+		return
+	}
 	key := probeKey(c)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.closed || n.probing[key] {
+	if n.closed || n.probing[key] || !n.probeDueLocked(c, time.Now()) {
 		return
 	}
 	select {
 	case n.probes <- c:
 		n.probing[key] = true
 	default:
+		delete(n.lastProbe, key)
 	}
 }
 

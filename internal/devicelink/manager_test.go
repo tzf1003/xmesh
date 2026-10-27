@@ -790,3 +790,79 @@ func TestManualModeIgnoresMeasuredQuality(t *testing.T) {
 		t.Fatalf("manual mode left %s", got)
 	}
 }
+
+func TestHeartbeatMeasuresActivePathAndPeersExchangeQuality(t *testing.T) {
+	ctx := t.Context()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	a.setOrder(device.LAN)
+	b.setOrder(device.LAN)
+	// Whichever end dials, only the dialing end owns the path history. Open from a: a dials.
+	session := openClient(t, ctx, a, b)
+	defer session.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	if got := a.manager.Activity(b.id.ID); !got.Outgoing {
+		t.Fatalf("a did not dial: %+v", got)
+	}
+	if !a.manager.CarriesPath(b.id.ID, device.LAN, b.lan.URL) || b.manager.CarriesPath(a.id.ID, device.LAN, a.lan.URL) {
+		t.Fatal("only the dialing end carries the path")
+	}
+	// The pairing probe left one sample; heartbeats every 100ms add to it with no probe at all.
+	until := time.Now().Add(3 * time.Second)
+	var q device.Quality
+	for time.Now().Before(until) {
+		devices, _ := a.directory.Snapshot(time.Now())
+		for _, p := range devices[0].Paths {
+			if p.Kind == device.LAN && p.Address == b.lan.URL {
+				q = p.Quality
+			}
+		}
+		if q.Samples >= 5 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if q.Samples < 5 || q.Loss != 0 {
+		t.Fatalf("heartbeat not recorded on active path: %+v", q)
+	}
+	// b did not dial, so its heartbeats add nothing to its own paths.
+	devices, _ := b.directory.Snapshot(time.Now())
+	for _, p := range devices[0].Paths {
+		if p.Quality.Samples > 1 {
+			t.Fatalf("incoming carrier recorded heartbeats: %+v", p)
+		}
+	}
+}
+
+func TestQualitySummaryReachesPeerForDisplayOnly(t *testing.T) {
+	ctx := t.Context()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	for _, n := range []*testNode{a, b} {
+		n.manager.opts.QualityEvery = 20 * time.Millisecond
+	}
+	pairTestNodes(t, a, b)
+	a.setOrder(device.LAN)
+	b.setOrder(device.LAN)
+	feed(t, a, b, device.LAN, b.lan.URL, steady(25, 8)...)
+	session := openClient(t, ctx, a, b)
+	defer session.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	until := time.Now().Add(3 * time.Second)
+	for time.Now().Before(until) {
+		devices, _ := b.directory.Snapshot(time.Now())
+		if got := devices[0].PeerQuality; len(got) > 0 {
+			if got[0].Kind != device.LAN || got[0].Quality.Samples < 8 {
+				t.Fatalf("peer quality = %+v", got)
+			}
+			// It is only displayed: b's own paths are untouched by what a reported.
+			for _, p := range devices[0].Paths {
+				if p.Kind == device.LAN && p.Quality.Samples > 1 {
+					t.Fatalf("report leaked into own measurements: %+v", p)
+				}
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("b never received a's quality summary")
+}

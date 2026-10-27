@@ -461,3 +461,32 @@ func TestDeviceDrainUsesCallerDeadlineForResponse(t *testing.T) {
 		t.Fatal("caller deadline ignored")
 	}
 }
+
+func TestBackupPathsAreProbedAtTheLowerRate(t *testing.T) {
+	n := &Node{lastProbe: map[string]time.Time{}}
+	now := time.Now()
+	lan := Candidate{DeviceID: "dev-a", Kind: device.LAN, Address: "https://192.168.1.4:7433"}
+	other := Candidate{DeviceID: "dev-a", Kind: device.Tailnet, Address: "https://100.64.0.1:7433"}
+	tunnel := Candidate{DeviceID: "dev-a", Kind: device.Cloudflare, Address: "https://a.example.com"}
+	due := func(c Candidate, at time.Time) bool {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		return n.probeDueLocked(c, at)
+	}
+	if !due(lan, now) || !due(other, now) {
+		t.Fatal("first probe of a candidate must run at once")
+	}
+	// supervise asks every 2s; only one request in lanProbeEvery gets through.
+	for i := 1; i < 6; i++ {
+		if due(lan, now.Add(time.Duration(i)*2*time.Second)) {
+			t.Fatalf("probed again after %ds", i*2)
+		}
+	}
+	if !due(lan, now.Add(lanProbeEvery)) {
+		t.Fatal("probe not due after the gap")
+	}
+	// Cloudflare is paced by supervise, not by the gap.
+	if !due(tunnel, now) || !due(tunnel, now.Add(time.Millisecond)) {
+		t.Fatal("tunnel probes must not be gapped here")
+	}
+}

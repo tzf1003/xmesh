@@ -291,6 +291,10 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 			}
 			row.ActivePath = string(p.ActivePath)
 			row.ConnectionState = p.ConnectionState
+			row.ActiveDirection = p.ActiveDirection
+			for _, q := range p.PeerQuality {
+				row.PeerPaths = append(row.PeerPaths, v2.PeerPathQuality{Kind: string(q.Kind), Quality: pathQuality(q.Kind, q.Quality), ReceivedAt: v2.At(q.ReceivedAt)})
+			}
 			for _, path := range p.Paths {
 				var verified *v2.Time
 				if !path.VerifiedAt.IsZero() {
@@ -298,13 +302,11 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 					verified = &t
 				}
 				var quality *v2.PathQuality
-				if q := path.Quality; q.Samples > 0 {
-					quality = &v2.PathQuality{Samples: q.Samples, LatencyMs: q.LatencyMs, P90Ms: q.P90Ms, JitterMs: q.JitterMs, Loss: q.Loss, Flaps: q.Flaps}
-					if score, ok := device.Score(path.Kind, q); ok {
-						quality.Score = &score
-					}
+				if path.Quality.Samples > 0 {
+					q := pathQuality(path.Kind, path.Quality)
+					quality = &q
 				}
-				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified, Quality: quality})
+				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified, Direction: path.Direction, Quality: quality})
 				row.Addrs = append(row.Addrs, path.Address)
 			}
 		}
@@ -333,6 +335,14 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+func pathQuality(kind device.PathKind, q device.Quality) v2.PathQuality {
+	out := v2.PathQuality{Samples: q.Samples, LatencyMs: q.LatencyMs, P90Ms: q.P90Ms, JitterMs: q.JitterMs, Loss: q.Loss, Flaps: q.Flaps}
+	if score, ok := device.Score(kind, q); ok {
+		out.Score = &score
+	}
+	return out
 }
 
 func cloudflareAddress(host string) string { return "https://" + host }
