@@ -191,18 +191,20 @@ type Peer struct {
 	// ActiveDirection is which end dialed the active connection: "outgoing" (本机拨出) or "incoming" (对端拨出).
 	ActiveDirection string `json:"active_direction,omitempty"`
 	// PeerPaths is the device's own report of the paths it dials to this node, for display only.
-	PeerPaths  []PeerPathQuality `json:"peer_paths,omitempty"`
-	Name       string            `json:"name"`
-	Self       bool              `json:"self"`
-	NodeID     string            `json:"node_id"`
-	Tags       []string          `json:"tags"`
-	Online     bool              `json:"online"`
-	Connection string            `json:"connection"`
-	DERPRegion *string           `json:"derp_region"`
-	Addrs      []string          `json:"addrs"`
-	LastSeen   *Time             `json:"last_seen"`
-	OS         *string           `json:"os"`
-	Version    *string           `json:"version"`
+	PeerPaths []PeerPathQuality `json:"peer_paths,omitempty"`
+	// Links lists the live connections to the device, at most one per dialing end, the one this node dialed first.
+	Links      []PeerLink `json:"links,omitempty"`
+	Name       string     `json:"name"`
+	Self       bool       `json:"self"`
+	NodeID     string     `json:"node_id"`
+	Tags       []string   `json:"tags"`
+	Online     bool       `json:"online"`
+	Connection string     `json:"connection"`
+	DERPRegion *string    `json:"derp_region"`
+	Addrs      []string   `json:"addrs"`
+	LastSeen   *Time      `json:"last_seen"`
+	OS         *string    `json:"os"`
+	Version    *string    `json:"version"`
 	// Info is what the gateway has read from the device's sys.info. Absent on this node, on offline
 	// devices and on a node without a gateway.
 	Info *PeerInfo `json:"info,omitempty"`
@@ -217,6 +219,20 @@ type DevicePath struct {
 	Direction string `json:"direction,omitempty"`
 	// Quality is the last few minutes of probe results; omitted until the first probe finishes.
 	Quality *PathQuality `json:"quality,omitempty"`
+}
+
+// PeerLink is one live connection to a device. Direction says which end dialed it: "outgoing" means this
+// node is the client (本机拨出), "incoming" that it is the server (对端拨出).
+type PeerLink struct {
+	Kind      string `json:"kind"`
+	Address   string `json:"address"`
+	Direction string `json:"direction"`
+	// Draining marks a connection about to close because a newer one replaced it.
+	Draining bool `json:"draining,omitempty"`
+	// Suspect marks a connection that has gone quiet; new sessions prefer the other one.
+	Suspect  bool `json:"suspect,omitempty"`
+	Sessions int  `json:"sessions"`
+	Since    Time `json:"since"`
 }
 
 // PeerPathQuality is how the device measured one kind of path it dials to this node (对端拨出).
