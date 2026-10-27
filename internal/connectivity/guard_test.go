@@ -1,6 +1,14 @@
 package connectivity
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"testing"
@@ -63,4 +71,52 @@ func TestDirectGuardPerSourceLimit(t *testing.T) {
 	if g.admit(conn("9.9.9.9")) {
 		t.Fatal("one source must not exceed its pre-auth share")
 	}
+}
+
+// The guard must key connections on what http.Server reports to ConnState, which is the TLS-wrapped conn.
+func TestDirectGuardSettlesConnectionsOverTLSListener(t *testing.T) {
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newDirectGuard(config.Direct{MaxPreauth: 2}, time.Now)
+	cert := selfSignedCert(t)
+	l := g.listener(tls.NewListener(raw, &tls.Config{Certificates: []tls.Certificate{cert}}))
+	server := &http.Server{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), ConnState: g.connState}
+	go func() { _ = server.Serve(l) }()
+	defer server.Close()
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, DisableKeepAlives: true}}
+	for i := 0; i < 5; i++ {
+		resp, err := client.Get("https://" + raw.Addr().String())
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		resp.Body.Close()
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.total != 0 || len(g.conns) != 0 {
+		t.Fatalf("slots leaked after settled requests: total=%d conns=%d", g.total, len(g.conns))
+	}
+}
+
+func selfSignedCert(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "guard"}, NotAfter: time.Now().Add(time.Hour)}, &x509.Certificate{}, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert
 }

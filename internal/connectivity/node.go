@@ -851,11 +851,6 @@ func (n *Node) retireProvider(kind device.PathKind, p *provider) {
 
 func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, listener net.Listener, discovery func(context.Context)) error {
 	server := &http.Server{Handler: n.handler(kind, p.generation), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	if kind == device.Direct {
-		guard := newDirectGuard(p.cfg.Direct, time.Now)
-		listener = guard.listener(listener)
-		server.ConnState = guard.connState
-	}
 	tlsConfig := n.pairing.ServerTLS()
 	if (kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing) || (kind == device.Direct && !p.cfg.Direct.AllowPairing) {
 		// The tunnel is reachable by anyone holding the Access token, and a direct port by anyone on the
@@ -871,6 +866,12 @@ func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, lis
 		}}
 	}
 	listener = tls.NewListener(listener, tlsConfig)
+	if kind == device.Direct {
+		// Wrap the TLS listener so ConnState sees the same *tls.Conn that Accept admitted.
+		guard := newDirectGuard(p.cfg.Direct, time.Now)
+		listener = guard.listener(listener)
+		server.ConnState = guard.connState
+	}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	n.mu.Lock()
