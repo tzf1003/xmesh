@@ -111,7 +111,7 @@ Funnel 公网入口仍需控制面允许 Funnel 与 HTTPS，具体授权对象�
 | 恢复期限到达时仍有拨号在途 | 独立执行期限清理，拒绝迟到的激活结果 | `devicelink/manager_test.go` |
 | drain/resume、热配置与停机交错 | 管理动作按代次串行；停机等待工作协程退出；资源归属保持设备逻辑会话 | `app/control_test.go`、`connectivity/resources_test.go` |
 
-连接、恢复、离线、设备信任撤销与身份冲突写入 `device_link_*` 审计事件。记录包含设备 ID 和路径类型，可与逻辑会话的工具审计关联。
+连接、恢复、离线、设备信任撤销与身份冲突写入 `device_link_*` 审计事件。记录包含设备 ID、路径类型和拨出方向（工具名形如 `device.link.lan.out`，`out` 是本机拨出，`in` 是对端拨出），可与逻辑会话的工具审计关联。
 
 ## 接口与验收
 
