@@ -144,13 +144,15 @@ test("cookie and origin parsing", () => {
   const req = (h: Record<string, string>) => ({ headers: h }) as unknown as http.IncomingMessage;
   assert.equal(sameOrigin(req({ host: "h:1" }), false), true);
   assert.equal(sameOrigin(req({ host: "h:1", origin: "http://h:1" }), false), true);
-  assert.equal(sameOrigin(req({ host: "h:1", origin: "https://h:1" }), false), false);
-  assert.equal(sameOrigin(req({ host: "h:1", origin: "https://h:1" }), true), true);
-  assert.equal(sameOrigin(req({ host: "h:1", origin: "http://evil" }), false), false);
+  // No allow-list: any Origin passes; only a present Sec-Fetch-Site must be same-origin.
+  assert.equal(sameOrigin(req({ host: "h:1", origin: "https://h:1" }), false), true);
+  assert.equal(sameOrigin(req({ host: "h:1", origin: "http://evil" }), false), true);
+  assert.equal(sameOrigin(req({ host: "h:1", origin: "https://h:1" }), true, ["https://x"]), true);
+  assert.equal(sameOrigin(req({ host: "h:1", origin: "https://h:1" }), false, ["https://x"]), false);
+  assert.equal(sameOrigin(req({ host: "h:1", origin: "http://evil" }), false, ["https://x"]), false);
   assert.equal(sameOrigin(req({ host: "h:1", "sec-fetch-site": "cross-site" }), false), false);
   // A reverse proxy: the backend is plain HTTP but the browser's origin is the public https one.
   const proxied = { host: "h", origin: "https://h:8088", "sec-fetch-site": "same-origin" };
-  assert.equal(sameOrigin(req(proxied), false), false);
   assert.equal(sameOrigin(req(proxied), false, ["https://h:8088"]), true);
   assert.equal(sameOrigin(req({ ...proxied, origin: "https://evil" }), false, ["https://h:8088"]), false);
   assert.equal(sameOrigin(req({ ...proxied, "sec-fetch-site": "cross-site" }), false, ["https://h:8088"]), false);

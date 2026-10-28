@@ -50,7 +50,7 @@ export interface WebServerOptions {
   publicRoot: string;
   /** Served over TLS: the cookie gets `Secure` (so does any https entry of `allowedOrigins`). */
   secure: boolean;
-  /** Extra browser origins (`https://panel.example.com`) accepted on state-changing requests, for a reverse proxy. */
+  /** Browser origins (`https://panel.example.com`) accepted on state-changing requests, besides scheme://Host. Empty: any Origin is accepted. */
   allowedOrigins?: readonly string[];
   sessions?: Sessions;
   limiter?: LoginLimiter;
@@ -95,12 +95,14 @@ export function parseCookies(header: string | undefined): Map<string, string> {
   return out;
 }
 
-/** Whether a state-changing request comes from the panel's own page. */
+/** Whether a state-changing request comes from the panel's own page. With `allowed` set, `Origin` must be listed there or equal scheme://Host. */
 export function sameOrigin(req: IncomingMessage, secure: boolean, allowed: readonly string[] = []): boolean {
   const site = req.headers["sec-fetch-site"];
   if (site !== undefined && site !== "same-origin") return false;
   const origin = req.headers.origin;
   if (origin === undefined) return true;
+  // Nothing configured: any Origin is accepted (the custom request header, Sec-Fetch-Site and SameSite=Strict still apply).
+  if (allowed.length === 0) return true;
   // Behind a reverse proxy the browser's origin is the public one, not scheme://Host of this listener.
   if (allowed.includes(origin)) return true;
   const host = req.headers.host;
