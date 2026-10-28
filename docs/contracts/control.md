@@ -169,7 +169,7 @@ data: {"id":"9f3c21aa.42","seq":42,"time":"2026-10-16T15:30:00.123Z","type":"pee
 
 ### GET /v2/peers
 
-新版设备以 `device_id` 合并，`name` 是稳定本地别名，`display_name` 是显示名称；`paths` 分别报告路径地址、可达性和验证时间，`active_path` 与 `connection_state` 报告当前链路；`connection_state` 为 `unstable` 表示链路在线但已有一段时间没有收到数据，尚未断开。自连、本地开发模式和尚未探测的字段按模式规定省略。
+新版设备以 `device_id` 合并，`name` 是稳定本地别名，`display_name` 是显示名称；`paths` 分别报告路径地址、可达性和验证时间，`active_path` 与 `connection_state` 报告当前链路；`connection_state` 为 `unstable` 表示链路在线但已有一段时间没有收到数据，尚未断开。`active_direction` 标出当前连接由哪一端拨出（`outgoing` 本机拨出 / `incoming` 对端拨出）；每条路径的 `direction` 恒为 `outgoing`，表示该质量由本机拨出并测量；`peer_paths` 是对端自己报告的、它拨向本机的各类路径质量，仅用于显示，约 15 秒更新一次，超过 1 分钟未更新即省略，对端版本较旧时一直省略。`links` 列出到该设备的在线连接（每个拨出方向最多一条，本机拨出的在前）：`direction` 为 `outgoing` 表示本机是客户端、`incoming` 表示本机是服务端，另有 `draining`、`suspect`、`sessions`（绑在该连接上的会话数）和 `since`；没有连接时省略。正在使用的路径由连接心跳测量，其余路径由低频探测测量。自连、本地开发模式和尚未探测的字段按模式规定省略。
 
 响应 `PeersResponse`。`self` 为真的恰有一项（本机）。`connection` 是 `direct`、`derp`、`unknown`（离线或尚未探测）、`local`（本机自己）。数据来自 mesh 层，不触发任何工具调用。
 

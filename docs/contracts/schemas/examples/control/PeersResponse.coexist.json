@@ -47,6 +47,23 @@
       "trust_state": "paired",
       "active_path": "lan",
       "connection_state": "online",
+      "active_direction": "outgoing",
+      "links": [
+        {
+          "kind": "lan",
+          "address": "https://192.168.1.20:7433",
+          "direction": "outgoing",
+          "sessions": 2,
+          "since": "2026-10-19T10:00:00.000Z"
+        },
+        {
+          "kind": "tailnet",
+          "address": "https://100.100.1.20:7433",
+          "direction": "incoming",
+          "sessions": 0,
+          "since": "2026-10-19T10:01:00.000Z"
+        }
+      ],
       "paths": [
         {
           "kind": "lan",

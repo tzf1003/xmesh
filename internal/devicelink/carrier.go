@@ -79,11 +79,12 @@ func splitData(sid string, packet Packet) []frame {
 	return out
 }
 
-func (p *peerLink) queueLocked(value frame) error {
-	if len(p.control) >= maxControlFrames {
+// queueLocked schedules a control frame on one carrier: replies go back where the request came from.
+func (p *peerLink) queueLocked(c *carrier, value frame) error {
+	if len(c.control) >= maxControlFrames {
 		return ErrBackpressure
 	}
-	p.control = append(p.control, value)
+	c.control = append(c.control, value)
 	p.signalLocked()
 	return nil
 }
@@ -100,11 +101,12 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			return ErrSequence
 		}
 		p.mu.Lock()
-		if p.active != c || p.closed {
+		if !p.hasLocked(c) || p.closed {
 			p.mu.Unlock()
 			return ErrUnavailable
 		}
-		if m.opts.Directory.IdentityConflict(p.id, time.Now()) {
+		now := time.Now()
+		if m.opts.Directory.IdentityConflict(p.id, now) {
 			p.mu.Unlock()
 			return ErrIdentityConflict
 		}
@@ -137,7 +139,7 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			}
 			principal, e := delegatedPrincipal(p.id, trusted.Tags, value.OAuthClient)
 			if e != nil {
-				err = p.queueLocked(frame{Type: "rejected", OpenID: value.OpenID, Error: "unauthorized"})
+				err = p.queueLocked(c, frame{Type: "rejected", OpenID: value.OpenID, Error: "unauthorized"})
 				break
 			}
 			if l := p.opens[value.OpenID]; l != nil {
@@ -145,32 +147,40 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 					err = ErrSequence
 					break
 				}
-				l.attachedEpoch = c.epoch
+				if value.Sequence != 0 && value.Sequence < l.gen {
+					break
+				}
+				l.gen = value.Sequence
+				l.attached = c
 				l.detachedAt = time.Time{}
-				err = p.queueLocked(frame{Type: "opened", OpenID: l.openID, SessionID: l.session.id, Token: l.token, Ack: l.session.Received()})
+				err = p.queueLocked(c, frame{Type: "opened", OpenID: l.openID, SessionID: l.session.id, Token: l.token, Ack: l.session.Received(), Sequence: value.Sequence})
 				break
 			}
 			if len(p.sessions) >= maxLogicalSessions || m.opts.Accept == nil {
-				err = p.queueLocked(frame{Type: "rejected", OpenID: value.OpenID, Error: "agent_unavailable"})
+				err = p.queueLocked(c, frame{Type: "rejected", OpenID: value.OpenID, Error: "agent_unavailable"})
 				break
 			}
 			id, token := rand.Text(), rand.Text()+rand.Text()
 			s := NewSession(id, m.budget)
-			l := &logical{session: s, openID: value.OpenID, token: token, oauth: value.OAuthClient, incoming: true, ready: true, changed: make(chan struct{}), trustGeneration: trusted.Generation, attachedEpoch: c.epoch}
+			l := &logical{session: s, openID: value.OpenID, token: token, oauth: value.OAuthClient, incoming: true, ready: true, changed: make(chan struct{}), trustGeneration: trusted.Generation, attached: c, gen: value.Sequence, active: now}
 			if e := m.opts.Accept(m.ctx, principal, s); e != nil {
 				_ = s.Close()
-				err = p.queueLocked(frame{Type: "rejected", OpenID: value.OpenID, Error: "agent_unavailable"})
+				err = p.queueLocked(c, frame{Type: "rejected", OpenID: value.OpenID, Error: "agent_unavailable"})
 				break
 			}
 			p.sessions[id], p.opens[l.openID] = l, l
-			err = p.queueLocked(frame{Type: "opened", OpenID: l.openID, SessionID: id, Token: token})
+			err = p.queueLocked(c, frame{Type: "opened", OpenID: l.openID, SessionID: id, Token: token, Sequence: value.Sequence})
 		case "opened":
 			l := p.pending[value.OpenID]
 			if l == nil {
 				if existing := p.sessions[value.SessionID]; existing != nil && !existing.incoming && existing.openID == value.OpenID && tokenEqual(existing.token, value.Token) {
 					break
 				}
-				err = p.queueLocked(frame{Type: "close", SessionID: value.SessionID, Token: value.Token})
+				err = p.queueLocked(c, frame{Type: "close", SessionID: value.SessionID, Token: value.Token})
+				break
+			}
+			if value.Sequence != 0 && value.Sequence != l.gen {
+				// The answer to an earlier open that was repeated on another carrier.
 				break
 			}
 			if value.SessionID == "" || len(value.SessionID) > 128 || len(value.Token) < 32 || len(value.Token) > 256 {
@@ -186,7 +196,7 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 				l.token = value.Token
 				p.sessions[value.SessionID] = l
 			}
-			l.ready, l.attachedEpoch = true, c.epoch
+			l.ready, l.attached, l.active = true, c, now
 			delete(p.pending, value.OpenID)
 			close(l.changed)
 			l.changed = make(chan struct{})
@@ -199,39 +209,55 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 		case "resume":
 			l := p.sessions[value.SessionID]
 			if _, e := delegatedPrincipal(p.id, trusted.Tags, value.OAuthClient); e != nil {
-				err = p.queueLocked(frame{Type: "ended", SessionID: value.SessionID, Error: "resume_rejected"})
+				err = p.queueLocked(c, frame{Type: "ended", SessionID: value.SessionID, Error: "resume_rejected"})
 				break
 			}
 			if l == nil || !l.incoming || l.err != nil || l.session.Closed() || !tokenEqual(l.token, value.Token) || l.oauth != value.OAuthClient || l.trustGeneration != trusted.Generation {
-				err = p.queueLocked(frame{Type: "ended", SessionID: value.SessionID, Error: "resume_rejected"})
+				err = p.queueLocked(c, frame{Type: "ended", SessionID: value.SessionID, Error: "resume_rejected"})
+				break
+			}
+			if value.Sequence != 0 && value.Sequence < l.gen {
 				break
 			}
 			if err = l.session.Acknowledge(value.Ack); err != nil {
 				break
 			}
-			l.attachedEpoch = c.epoch
+			l.gen = value.Sequence
+			l.attached = c
 			l.detachedAt = time.Time{}
-			err = p.queueLocked(frame{Type: "resumed", SessionID: value.SessionID, Ack: l.session.Received()})
+			err = p.queueLocked(c, frame{Type: "resumed", SessionID: value.SessionID, Ack: l.session.Received(), Sequence: value.Sequence})
 		case "resumed":
 			l := p.sessions[value.SessionID]
-			if l == nil || l.incoming || l.err != nil {
+			if l == nil || l.err != nil {
+				// Closed here while the resume was on its way.
+				break
+			}
+			if l.incoming {
 				err = ErrSequence
 				break
 			}
+			if value.Sequence != 0 && value.Sequence != l.gen {
+				break
+			}
 			if err = l.session.Acknowledge(value.Ack); err != nil {
 				break
 			}
-			l.attachedEpoch = c.epoch
+			l.attached = c
 		case "data":
 			l := p.sessions[value.SessionID]
 			if l == nil {
-				err = p.queueLocked(frame{Type: "ended", SessionID: value.SessionID, Error: "session_closed"})
+				err = p.queueLocked(c, frame{Type: "ended", SessionID: value.SessionID, Error: "session_closed"})
 				break
 			}
-			if l.attachedEpoch != c.epoch || l.trustGeneration != trusted.Generation {
+			if l.trustGeneration != trusted.Generation {
 				err = ErrSequence
 				break
 			}
+			if l.attached != c {
+				// It crossed a move to another carrier, which resends whatever was not acknowledged.
+				break
+			}
+			l.active, c.busyAt = now, now
 			payload, complete, e := join.add(value)
 			if e != nil {
 				err = e
@@ -242,20 +268,24 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 			}
 			ack, e := l.session.Receive(Packet{Sequence: value.Sequence, Payload: payload})
 			if errors.Is(e, ErrBackpressure) {
-				err = p.queueLocked(frame{Type: "wait", SessionID: value.SessionID, Sequence: value.Sequence})
+				err = p.queueLocked(c, frame{Type: "wait", SessionID: value.SessionID, Sequence: value.Sequence})
 				break
 			}
 			if e != nil {
-				err = p.queueLocked(frame{Type: "ended", SessionID: value.SessionID, Error: "session_closed"})
+				err = p.queueLocked(c, frame{Type: "ended", SessionID: value.SessionID, Error: "session_closed"})
 				break
 			}
-			err = p.queueLocked(frame{Type: "ack", SessionID: value.SessionID, Ack: ack})
+			err = p.queueLocked(c, frame{Type: "ack", SessionID: value.SessionID, Ack: ack})
 		case "ack":
-			if l := p.sessions[value.SessionID]; l != nil && l.attachedEpoch == c.epoch && l.err == nil && !l.session.Closed() {
+			if l := p.sessions[value.SessionID]; l != nil && l.attached == c && l.err == nil && !l.session.Closed() {
+				l.active, c.busyAt = now, now
 				err = l.session.Acknowledge(value.Ack)
 			}
+		case "quality":
+			// Display only: a malformed or oversized report is dropped, not a reason to end the link.
+			m.opts.Directory.SetPeerQuality(p.id, time.Now(), value.Quality)
 		case "wait":
-			err = p.queueLocked(frame{Type: "retry-local", SessionID: value.SessionID, Sequence: value.Sequence})
+			err = p.queueLocked(c, frame{Type: "retry-local", SessionID: value.SessionID, Sequence: value.Sequence})
 		case "close":
 			if l := p.sessions[value.SessionID]; l != nil {
 				if !tokenEqual(l.token, value.Token) {
@@ -266,7 +296,7 @@ func (m *Manager) readCarrier(ctx context.Context, p *peerLink, c *carrier) erro
 				delete(p.sessions, value.SessionID)
 				delete(p.opens, l.openID)
 			}
-			err = p.queueLocked(frame{Type: "closed", SessionID: value.SessionID})
+			err = p.queueLocked(c, frame{Type: "closed", SessionID: value.SessionID})
 		case "closed", "ended":
 			if l := p.sessions[value.SessionID]; l != nil {
 				closeLogical(l, ErrUnavailable)
@@ -300,6 +330,13 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 		}
 		// Show the panel a warning well before the link is given up.
 		m.setUnstable(p, c, silent >= m.opts.DeadAfter/3)
+		// Sessions leave a carrier that has missed several beats while another one is healthy, and a
+		// replacement is dialed, long before the silent one is given up.
+		if suspect := silent >= m.opts.SuspectAfter; c.suspect.Swap(suspect) != suspect {
+			p.mu.Lock()
+			p.signalLocked()
+			p.mu.Unlock()
+		}
 		// A pong only proves liveness. It is awaited off the write path, because a
 		// slow peer must not stall data and a late pong is not a failure by itself.
 		if pinging.CompareAndSwap(false, true) {
@@ -307,16 +344,20 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 				defer pinging.Store(false)
 				ping, cancel := context.WithTimeout(ctx, m.opts.DeadAfter)
 				defer cancel()
-				if c.conn.Ping(ping) == nil {
+				start := time.Now()
+				err := c.conn.Ping(ping)
+				if err == nil {
 					c.seen.Store(time.Now().UnixNano())
 				}
+				m.recordHeartbeat(ctx, p, c, start, err)
 			}()
 		}
 		return nil
 	}
+	qualityTick := time.NewTicker(m.opts.QualityEvery)
+	defer qualityTick.Stop()
+	qualityDue := c.peerQuality
 	sent := map[string]uint64{}
-	announced := map[string]bool{}
-	resuming := map[string]bool{}
 	closing := map[string]bool{}
 	retryAfter := map[string]time.Time{}
 	for {
@@ -327,40 +368,64 @@ func (m *Manager) writeCarrier(ctx context.Context, p *peerLink, c *carrier) err
 			if err := beat(); err != nil {
 				return err
 			}
+		case <-qualityTick.C:
+			qualityDue = c.peerQuality
 		case <-ticker.C:
 		case <-p.wake:
 		}
+		var report *frame
+		if qualityDue {
+			qualityDue = false
+			// One carrier tells the peer; the report is the same on both.
+			p.mu.Lock()
+			lead := p.primaryLocked() == c
+			p.mu.Unlock()
+			if items := m.opts.Directory.LocalQuality(p.id, time.Now()); lead && len(items) > 0 {
+				report = &frame{Type: "quality", Quality: items}
+			}
+		}
 		p.mu.Lock()
-		if p.active != c || p.closed {
+		if !p.hasLocked(c) || p.closed {
 			p.mu.Unlock()
 			return ErrUnavailable
 		}
-		out := p.control
-		p.control = nil
+		now := time.Now()
+		out := c.control
+		c.control = nil
+		if report != nil {
+			out = append(out, *report)
+		}
 		for _, l := range p.pending {
-			if l.err == nil && !announced[l.openID] {
-				out = append(out, frame{Type: "open", OpenID: l.openID, OAuthClient: l.oauth})
-				announced[l.openID] = true
+			// An open is repeated only when the carrier it went out on is gone or has gone quiet.
+			outstanding := l.openOn != nil && p.hasLocked(l.openOn) && !l.openOn.suspect.Load()
+			if l.err == nil && l.openOn != c && !outstanding && m.desiredLocked(p, l, now) == c {
+				l.gen++
+				l.openOn = c
+				out = append(out, frame{Type: "open", OpenID: l.openID, OAuthClient: l.oauth, Sequence: l.gen})
 			}
 		}
 		for sid, l := range p.sessions {
 			if l.err != nil || l.session.Closed() {
-				if !closing[sid] {
+				if !closing[sid] && m.desiredLocked(p, l, now) == c {
 					out = append(out, frame{Type: "close", SessionID: sid, Token: l.token})
 					closing[sid] = true
 				}
 				continue
 			}
-			if l.attachedEpoch != c.epoch {
-				if !l.incoming && !resuming[sid] {
-					out = append(out, frame{Type: "resume", SessionID: sid, Token: l.token, OAuthClient: l.oauth, Ack: l.session.Received()})
-					resuming[sid] = true
+			if l.attached != c {
+				// What was sent here belongs to an earlier attachment and is resent if it comes back.
+				delete(sent, sid)
+				if !l.incoming && l.resumeOn != c && m.desiredLocked(p, l, now) == c {
+					l.gen++
+					l.resumeOn = c
+					out = append(out, frame{Type: "resume", SessionID: sid, Token: l.token, OAuthClient: l.oauth, Ack: l.session.Received(), Sequence: l.gen})
 				}
 				continue
 			}
-			if packet, ok := l.session.Next(0); ok && packet.Sequence != sent[sid] && !time.Now().Before(retryAfter[sid]) {
+			if packet, ok := l.session.Next(0); ok && packet.Sequence != sent[sid] && !now.Before(retryAfter[sid]) {
 				out = append(out, splitData(sid, packet)...)
 				sent[sid] = packet.Sequence
+				l.active, c.busyAt = now, now
 			}
 		}
 		p.mu.Unlock()
@@ -416,18 +481,25 @@ func delegatedPrincipal(node string, tags []string, oauth string) (identity.Prin
 	return identity.FromPeer(node, tags, oauth)
 }
 
+// recordHeartbeat feeds a ping's round trip into the history of the path this end dialed. A carrier that
+// was closed under the ping says nothing about the path, so only a failure on a live carrier counts as loss.
+func (m *Manager) recordHeartbeat(ctx context.Context, p *peerLink, c *carrier, start time.Time, err error) {
+	if !c.outgoing || (err != nil && ctx.Err() != nil) {
+		return
+	}
+	_ = m.opts.Directory.RecordLink(p.id, c.path.Kind, c.path.Address, c.path.ProviderGeneration, start, err == nil, time.Since(start))
+}
+
 // setUnstable records that the carrier has gone quiet, or has recovered, and reports the
-// change. It does nothing if c is no longer the active carrier.
+// change when it is the device's primary link. It does nothing if c has been closed.
 func (m *Manager) setUnstable(p *peerLink, c *carrier, unstable bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.active != c || !c.committed || p.unstable == unstable {
+	if !p.hasLocked(c) || !c.committed || c.unstable == unstable {
 		return
 	}
-	p.unstable = unstable
-	state := "online"
-	if unstable {
-		state = "unstable"
+	c.unstable = unstable
+	if p.primaryLocked() == c {
+		m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: c.state(), Outgoing: c.outgoing})
 	}
-	m.activity(Activity{DeviceID: p.id, Path: c.path, Epoch: c.epoch, State: state})
 }

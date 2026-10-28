@@ -63,12 +63,13 @@ type Mesh struct {
 		Interface string `json:"interface"`
 	} `json:"lan"`
 	Tailnet       Tailnet       `json:"tailnet,omitempty"`
+	Direct        Direct        `json:"direct,omitempty"`
 	Cloudflare    Cloudflare    `json:"cloudflare,omitempty"`
 	PathSelection PathSelection `json:"path_selection,omitempty"`
 }
 
 // PathKinds are the device paths, in the order xmesh tries them when nothing says otherwise.
-var PathKinds = []string{"lan", "tailnet", "cloudflare"}
+var PathKinds = []string{"lan", "tailnet", "direct", "cloudflare"}
 
 // PathSelection decides which path a device pair uses when several are reachable. In manual mode
 // the user's priority list is followed strictly: the first listed path that connects wins. In smart
@@ -118,6 +119,51 @@ func (p PathSelection) valid() bool {
 		}
 	}
 	return true
+}
+
+// Direct connects devices over a public address one of them listens on, with no third party. The listener
+// accepts only paired devices (strict mTLS); an unpaired device can reach pairing on it only while an
+// invite is open, or always when AllowPairing is set. It is off by default because it exposes a port.
+type Direct struct {
+	Enabled bool `json:"enabled"`
+	// Listen is the address the public listener binds. Default 0.0.0.0:7435.
+	Listen string `json:"listen,omitempty"`
+	// Advertise is the public host:port peers dial to reach this device; it is shown and shared, never bound.
+	Advertise string `json:"advertise,omitempty"`
+	// Peers maps a paired device ID to the host:port it listens on.
+	Peers map[string]string `json:"peers,omitempty"`
+	// AllowPairing keeps pairing open on the public port. Off, pairing is reachable only during an invite.
+	AllowPairing bool `json:"allow_pairing,omitempty"`
+	// AllowIPs, when set, restricts the public port to these source IPs or CIDR ranges; others are dropped before TLS.
+	AllowIPs []string `json:"allow_ips,omitempty"`
+	// MaxPreauth caps connections that have not finished the TLS handshake and sent a request. Zero or omitted means the default, 64.
+	MaxPreauth int `json:"max_preauth,omitempty"`
+}
+
+// PreauthLimit is the cap on connections that have not authenticated yet.
+func (d Direct) PreauthLimit() int {
+	if d.MaxPreauth <= 0 {
+		return 64
+	}
+	return d.MaxPreauth
+}
+
+// ListenAddr is the address of the public listener.
+func (d Direct) ListenAddr() string {
+	if d.Listen == "" {
+		return "0.0.0.0:7435"
+	}
+	return d.Listen
+}
+
+// validHostPort reports whether s is a host:port with a plain hostname or IP address.
+func validHostPort(s string) bool {
+	host, port, err := net.SplitHostPort(s)
+	if err != nil || host == "" || strings.ContainsAny(host, "/@?# ") {
+		return false
+	}
+	n, perr := strconv.Atoi(port)
+	return perr == nil && n >= 1 && n <= 65535
 }
 
 // Cloudflare connects devices that have no public address through Cloudflare Tunnel. Every device
@@ -173,13 +219,14 @@ type Tailnet struct {
 
 func (m Mesh) LANEnabled() bool        { return m.LAN.Enabled == nil || *m.LAN.Enabled }
 func (m Mesh) TailnetEnabled() bool    { return m.Tailnet.Enabled }
+func (m Mesh) DirectEnabled() bool     { return m.Direct.Enabled }
 func (m Mesh) CloudflareEnabled() bool { return m.Cloudflare.Enabled }
 
 // NetworkMode names the enabled device paths: one provider by its own name, any two or more as
-// "coexist" (LAN, Tailnet and Cloudflare may run in every combination).
+// "coexist" (LAN, Tailnet, Direct and Cloudflare may run in every combination).
 func (m Mesh) NetworkMode() string {
 	enabled := 0
-	for _, on := range []bool{m.LANEnabled(), m.TailnetEnabled(), m.CloudflareEnabled()} {
+	for _, on := range []bool{m.LANEnabled(), m.TailnetEnabled(), m.DirectEnabled(), m.CloudflareEnabled()} {
 		if on {
 			enabled++
 		}
@@ -189,6 +236,8 @@ func (m Mesh) NetworkMode() string {
 		return "coexist"
 	case m.TailnetEnabled():
 		return "tailnet"
+	case m.DirectEnabled():
+		return "direct"
 	case m.CloudflareEnabled():
 		return "cloudflare"
 	case m.LANEnabled():
@@ -559,7 +608,30 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.SchemaVersion == 2 && !c.Mesh.PathSelection.valid() {
-		return fail("/mesh/path_selection: mode 只能是 manual，priority 与 disabled 只能是不重复的 lan、tailnet、cloudflare")
+		return fail("/mesh/path_selection: mode 只能是 manual，priority 与 disabled 只能是不重复的 lan、tailnet、direct、cloudflare")
+	}
+	if d := c.Mesh.Direct; c.SchemaVersion == 2 && d.Enabled {
+		if !validHostPort(d.ListenAddr()) {
+			return fail("/mesh/direct/listen: 必须是 主机:端口")
+		}
+		if d.Advertise != "" && !validHostPort(d.Advertise) {
+			return fail("/mesh/direct/advertise: 必须是 主机:端口")
+		}
+		if d.MaxPreauth < 0 {
+			return fail("/mesh/direct/max_preauth: 不能为负数")
+		}
+		for _, entry := range d.AllowIPs {
+			if _, _, err := net.ParseCIDR(entry); err != nil && net.ParseIP(entry) == nil {
+				return fail("/mesh/direct/allow_ips: 必须是 IP 地址或 CIDR 网段")
+			}
+		}
+		addrs := map[string]bool{}
+		for id, addr := range d.Peers {
+			if !devicePattern.MatchString(id) || !validHostPort(addr) || addrs[strings.ToLower(addr)] {
+				return fail("/mesh/direct/peers: 设备 ID 与 主机:端口 须有效，且地址不能重复")
+			}
+			addrs[strings.ToLower(addr)] = true
+		}
 	}
 	if cf := c.Mesh.Cloudflare; c.SchemaVersion == 2 && cf.Enabled {
 		if cf.Hostname != "" && !hostnamePattern.MatchString(cf.Hostname) {

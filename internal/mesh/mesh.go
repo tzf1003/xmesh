@@ -7,6 +7,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/identity"
 	"net"
 	"net/http"
+	"time"
 )
 
 const AgentPort = 7433
@@ -24,7 +25,27 @@ type Peer struct {
 	Paths           []device.Path   `json:"paths,omitempty"`
 	ActivePath      device.PathKind `json:"active_path,omitempty"`
 	ConnectionState string          `json:"connection_state,omitempty"`
-	DisplayName     string          `json:"display_name,omitempty"`
+	// ActiveDirection says which end dialed the active connection: "outgoing" or "incoming".
+	ActiveDirection string `json:"active_direction,omitempty"`
+	// PeerQuality is the device's own report of the paths it dials to this end, for display.
+	PeerQuality []device.PeerQuality `json:"peer_quality,omitempty"`
+	// Links lists the carriers to the device, the one this end dialed first.
+	Links       []Link `json:"links,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// Link is one carrier to a device and the path it runs on.
+type Link struct {
+	Kind    device.PathKind `json:"kind"`
+	Address string          `json:"address"`
+	// Direction says which end dialed it: "outgoing" (this end is the client) or "incoming" (the server).
+	Direction string `json:"direction"`
+	// Draining marks a carrier about to close because a newer one took its slot.
+	Draining bool `json:"draining,omitempty"`
+	// Suspect marks a carrier that has gone quiet; its sessions prefer another carrier.
+	Suspect  bool      `json:"suspect,omitempty"`
+	Sessions int       `json:"sessions"`
+	Since    time.Time `json:"since"`
 }
 type Network interface {
 	Listen(context.Context) (net.Listener, error)

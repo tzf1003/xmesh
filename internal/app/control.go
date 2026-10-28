@@ -262,6 +262,9 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 	if host := cfg.Mesh.Cloudflare.Hostname; host != "" {
 		self.Addrs = append(self.Addrs, cloudflareAddress(host))
 	}
+	if cfg.Mesh.Direct.Enabled && cfg.Mesh.Direct.Advertise != "" {
+		self.Addrs = append(self.Addrs, "https://"+cfg.Mesh.Direct.Advertise)
+	}
 	goos, version := runtime.GOOS, Version
 	self.OS, self.Version = &goos, &version
 	out := []v2.Peer{self}
@@ -291,6 +294,10 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 			}
 			row.ActivePath = string(p.ActivePath)
 			row.ConnectionState = p.ConnectionState
+			row.ActiveDirection = p.ActiveDirection
+			for _, q := range p.PeerQuality {
+				row.PeerPaths = append(row.PeerPaths, v2.PeerPathQuality{Kind: string(q.Kind), Quality: pathQuality(q.Kind, q.Quality), ReceivedAt: v2.At(q.ReceivedAt)})
+			}
 			for _, path := range p.Paths {
 				var verified *v2.Time
 				if !path.VerifiedAt.IsZero() {
@@ -298,16 +305,15 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 					verified = &t
 				}
 				var quality *v2.PathQuality
-				if q := path.Quality; q.Samples > 0 {
-					quality = &v2.PathQuality{Samples: q.Samples, LatencyMs: q.LatencyMs, P90Ms: q.P90Ms, JitterMs: q.JitterMs, Loss: q.Loss, Flaps: q.Flaps}
-					if score, ok := device.Score(path.Kind, q); ok {
-						quality.Score = &score
-					}
+				if path.Quality.Samples > 0 {
+					q := pathQuality(path.Kind, path.Quality)
+					quality = &q
 				}
-				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified, Quality: quality})
+				row.Paths = append(row.Paths, v2.DevicePath{Kind: string(path.Kind), Address: path.Address, Reachable: path.Reachable, VerifiedAt: verified, Direction: path.Direction, Quality: quality})
 				row.Addrs = append(row.Addrs, path.Address)
 			}
 		}
+		addConfiguredPath(&row, "direct", directAddress(cfg.Mesh.Direct.Peers[p.ID]))
 		addConfiguredCloudflarePath(&row, cfg.Mesh.Cloudflare.Peers[p.ID])
 		switch {
 		case !p.Online:
@@ -335,21 +341,42 @@ func (h *controlHost) Peers(ctx context.Context) ([]v2.Peer, error) {
 	return out, nil
 }
 
+func pathQuality(kind device.PathKind, q device.Quality) v2.PathQuality {
+	out := v2.PathQuality{Samples: q.Samples, LatencyMs: q.LatencyMs, P90Ms: q.P90Ms, JitterMs: q.JitterMs, Loss: q.Loss, Flaps: q.Flaps}
+	if score, ok := device.Score(kind, q); ok {
+		out.Score = &score
+	}
+	return out
+}
+
 func cloudflareAddress(host string) string { return "https://" + host }
 
-// addConfiguredCloudflarePath lists a peer's configured Cloudflare tunnel hostname even before any probe
-// has reached it, so the address is visible while the tunnel is still being brought up.
+// addConfiguredCloudflarePath lists a peer's configured Cloudflare tunnel hostname.
 func addConfiguredCloudflarePath(row *v2.Peer, host string) {
-	if host == "" || row.DeviceID == "" {
+	if host != "" {
+		addConfiguredPath(row, "cloudflare", cloudflareAddress(host))
+	}
+}
+
+func directAddress(hostport string) string {
+	if hostport == "" {
+		return ""
+	}
+	return "https://" + hostport
+}
+
+// addConfiguredPath lists a peer's configured address of one kind even before any probe has reached it,
+// so the address is visible while the path is still being brought up.
+func addConfiguredPath(row *v2.Peer, kind, address string) {
+	if address == "" || row.DeviceID == "" {
 		return
 	}
-	address := cloudflareAddress(host)
 	for _, path := range row.Paths {
-		if path.Kind == "cloudflare" && path.Address == address {
+		if path.Kind == kind && path.Address == address {
 			return
 		}
 	}
-	row.Paths = append(row.Paths, v2.DevicePath{Kind: "cloudflare", Address: address})
+	row.Paths = append(row.Paths, v2.DevicePath{Kind: kind, Address: address})
 	row.Addrs = append(row.Addrs, address)
 }
 

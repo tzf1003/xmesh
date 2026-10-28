@@ -1156,8 +1156,20 @@ export interface Peer {
   display_name?: string;
   trust_state?: "self" | "paired" | "identity_conflict";
   paths?: DevicePath[];
-  active_path?: "lan" | "tailnet" | "cloudflare";
+  active_path?: "lan" | "tailnet" | "direct" | "cloudflare";
   connection_state?: "online" | "unstable" | "reconnecting" | "offline" | "identity_conflict";
+  /**
+   * 当前连接由哪一端拨出：outgoing 是本机拨出，incoming 是对端拨出。没有活动连接时省略。
+   */
+  active_direction?: "outgoing" | "incoming";
+  /**
+   * 对端自己报告的、它拨向本机的各类路径质量，仅用于显示；约每 15 秒更新，超过 1 分钟未更新即省略。对端版本较旧时省略。
+   */
+  peer_paths?: PeerPathQuality[];
+  /**
+   * 到该设备的在线连接，每个拨出方向最多一条，本机拨出的排在前面。没有连接时省略。
+   */
+  links?: PeerLink[];
 }
 /**
  * 网关对该设备 sys.info 的后台读取结果（1.1 起）。本节点自己、离线设备、没有网关角色的节点上省略。
@@ -1173,14 +1185,18 @@ export interface PeerInfo {
   error: string | null;
 }
 export interface DevicePath {
-  kind: "lan" | "tailnet" | "cloudflare";
+  kind: "lan" | "tailnet" | "direct" | "cloudflare";
   address: string;
   reachable: boolean;
   verified_at: Timestamp | null;
+  /**
+   * 这条路径由本机拨出并由本机测量。
+   */
+  direction?: "outgoing";
   quality?: PathQuality;
 }
 /**
- * 最近约 5 分钟的探测结果。延时是一次完整认证探测（建连、TLS、身份）的耗时，各路径之间可比，但高于单纯 ping。
+ * 最近约 5 分钟的测量结果，来自探测和承载连接的心跳。延时都是已建立连接上一次请求/响应的往返时间（探测不含建连与 TLS），因此正在使用的路径与其余路径可以直接比较。
  */
 export interface PathQuality {
   samples: number;
@@ -1205,6 +1221,32 @@ export interface PathQuality {
    * 智能选路用来给这条路径排序的分数，越低越好；探测样本太少、还不能打分时省略。
    */
   score?: number;
+}
+export interface PeerPathQuality {
+  kind: "lan" | "tailnet" | "direct" | "cloudflare";
+  quality: PathQuality;
+  received_at: Timestamp;
+}
+export interface PeerLink {
+  kind: "lan" | "tailnet" | "direct" | "cloudflare";
+  address: string;
+  /**
+   * 哪一端拨出：outgoing 是本机拨出（本机为客户端），incoming 是对端拨出（本机为服务端）。
+   */
+  direction: "outgoing" | "incoming";
+  /**
+   * 该连接即将关闭，因为同一方向的新连接已接替。
+   */
+  draining?: boolean;
+  /**
+   * 该连接已有一段时间没有数据，新会话优先走另一条。
+   */
+  suspect?: boolean;
+  /**
+   * 当前绑在这条连接上的逻辑会话数。
+   */
+  sessions: number;
+  since: Timestamp;
 }
 export interface CallEventData {
   /**
@@ -1348,7 +1390,7 @@ export interface ControlInfo {
   capabilities: Capability[];
 }
 export interface NetworkIdentity {
-  mode: "local" | "lan" | "tailnet" | "cloudflare" | "coexist" | "offline";
+  mode: "local" | "lan" | "tailnet" | "direct" | "cloudflare" | "coexist" | "offline";
   node_id: string;
   tags: Tag[];
 }
@@ -1649,7 +1691,7 @@ export interface PairConnectRequest {
    */
   fingerprint?: string;
   password: PairPassword;
-  path?: "lan" | "tailnet" | "cloudflare";
+  path?: "lan" | "tailnet" | "direct" | "cloudflare";
 }
 export interface PairConnectResponse {
   name: NodeName;
@@ -1657,7 +1699,7 @@ export interface PairConnectResponse {
   address: PairAddress;
   tags: Tag[];
   device_id: DeviceId;
-  path: "lan" | "tailnet" | "cloudflare";
+  path: "lan" | "tailnet" | "direct" | "cloudflare";
 }
 /**
  * 对端加入发送者的 Cloudflare 网格所需的内容：对端自己的隧道与 Access 服务令牌，以及发送者的主机名。不含 Cloudflare API Token。

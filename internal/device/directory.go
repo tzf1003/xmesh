@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,8 @@ const (
 	Tailnet PathKind = "tailnet"
 	// Cloudflare reaches a device through its own Cloudflare Tunnel hostname; it needs no inbound address.
 	Cloudflare PathKind = "cloudflare"
+	// Direct reaches a device on a public address it listens on itself, with no third party in between.
+	Direct PathKind = "direct"
 )
 
 var ErrStalePath = errors.New("连接路径版本已过期")
@@ -35,7 +38,16 @@ type Path struct {
 	// Observe; Snapshot reports the windowed Quality instead.
 	RTT     time.Duration `json:"-"`
 	Quality Quality       `json:"quality"`
+	// Direction says which end measured Quality. Every path in the directory is one this end dials,
+	// so Snapshot always reports DirectionOutgoing.
+	Direction string `json:"direction,omitempty"`
 }
+
+// DirectionOutgoing marks a measurement of a path this end dials ("本机拨出").
+const DirectionOutgoing = "outgoing"
+
+// DirectionIncoming marks a connection the peer dialed to this end ("对端拨出").
+const DirectionIncoming = "incoming"
 
 type Device struct {
 	DeviceID         string   `json:"device_id"`
@@ -44,6 +56,9 @@ type Device struct {
 	Tags             []string `json:"tags"`
 	Paths            []Path   `json:"paths"`
 	IdentityConflict bool     `json:"identity_conflict"`
+	// PeerQuality is what the device last reported about the paths it dials to this end, for display
+	// only. Reports older than PeerQualityTTL are left out.
+	PeerQuality []PeerQuality `json:"peer_quality"`
 }
 
 type pathKey struct {
@@ -64,6 +79,7 @@ type Directory struct {
 	providers   map[PathKind]providerState
 	paths       map[string]map[pathKey]Path
 	stats       map[string]map[pathKey]*pathStats
+	peerQuality map[string]peerReport
 	revision    uint64
 	subscribers map[uint64]chan uint64
 	next        uint64
@@ -74,7 +90,7 @@ type Directory struct {
 
 func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Directory {
 	ctx, cancel := context.WithCancel(ctx)
-	d := &Directory{trust: trust, self: self, providers: map[PathKind]providerState{}, paths: map[string]map[pathKey]Path{}, stats: map[string]map[pathKey]*pathStats{}, subscribers: map[uint64]chan uint64{}, cancel: cancel, done: make(chan struct{})}
+	d := &Directory{trust: trust, self: self, providers: map[PathKind]providerState{}, paths: map[string]map[pathKey]Path{}, stats: map[string]map[pathKey]*pathStats{}, peerQuality: map[string]peerReport{}, subscribers: map[uint64]chan uint64{}, cancel: cancel, done: make(chan struct{})}
 	changed, unsubscribe := trust.Subscribe()
 	<-changed // The empty directory already reflects the initial trust snapshot.
 	go func() {
@@ -100,6 +116,11 @@ func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Director
 						delete(d.stats, id)
 					}
 				}
+				for id := range d.peerQuality {
+					if _, ok := trust.Find(id); !ok {
+						delete(d.peerQuality, id)
+					}
+				}
 				d.notifyLocked()
 				d.mu.Unlock()
 			}
@@ -109,7 +130,7 @@ func NewDirectory(ctx context.Context, trust *TrustStore, self string) *Director
 }
 
 // Valid reports whether k is a path kind this runtime knows.
-func (k PathKind) Valid() bool { return k == LAN || k == Tailnet || k == Cloudflare }
+func (k PathKind) Valid() bool { return k == LAN || k == Tailnet || k == Direct || k == Cloudflare }
 
 func (d *Directory) SetProvider(kind PathKind, generation uint64, enabled bool) error {
 	if !kind.Valid() || generation == 0 {
@@ -236,6 +257,35 @@ func (d *Directory) recordLocked(id string, key pathKey, x sample) {
 	st.add(x)
 }
 
+// RecordLink adds one heartbeat result of a live carrier this end dialed to the path's history, so the
+// active path is measured by the link it carries instead of by extra probes. A success also keeps the
+// path's observation alive for as long as its last probe had granted. Only a path the directory already
+// knows is recorded: a heartbeat never introduces one.
+func (d *Directory) RecordLink(id string, kind PathKind, address string, generation uint64, at time.Time, ok bool, rtt time.Duration) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return context.Canceled
+	}
+	provider := d.providers[kind]
+	if !provider.enabled || provider.generation != generation {
+		return ErrStalePath
+	}
+	key := pathKey{kind, address}
+	path, observed := d.paths[id][key]
+	if !observed && d.stats[id][key] == nil {
+		return ErrStalePath
+	}
+	if ok && observed {
+		if span := path.ExpiresAt.Sub(path.VerifiedAt); span > 0 && at.Add(span).After(path.ExpiresAt) {
+			path.ExpiresAt = at.Add(span)
+			d.paths[id][key] = path
+		}
+	}
+	d.recordLocked(id, key, sample{at: at, ok: ok, rtt: rtt})
+	return nil
+}
+
 // Lost changes only one provider path. It neither revokes the device nor ends its sessions.
 func (d *Directory) Lost(id string, kind PathKind, address string, generation uint64) error {
 	return d.lost(id, kind, address, generation, time.Time{})
@@ -284,8 +334,14 @@ func (d *Directory) Snapshot(now time.Time) ([]Device, uint64) {
 		if id == d.self {
 			continue
 		}
-		device := Device{DeviceID: id, Name: trust.Document.Name, Alias: trust.Alias, Tags: slices.Clone(trust.Tags), Paths: []Path{}}
+		device := Device{DeviceID: id, Name: trust.Document.Name, Alias: trust.Alias, Tags: slices.Clone(trust.Tags), Paths: []Path{}, PeerQuality: []PeerQuality{}}
+		if report, ok := d.peerQuality[id]; ok && now.Sub(report.at) <= PeerQualityTTL {
+			for _, item := range report.items {
+				device.PeerQuality = append(device.PeerQuality, PeerQuality{Kind: item.Kind, Quality: item.Quality, ReceivedAt: report.at})
+			}
+		}
 		for _, path := range d.paths[id] {
+			path.Direction = DirectionOutgoing
 			path.Reachable = path.Reachable && now.Before(path.ExpiresAt)
 			if st := d.stats[id][pathKey{path.Kind, path.Address}]; st != nil {
 				path.Quality = st.quality(now)
@@ -303,7 +359,7 @@ func (d *Directory) Snapshot(now time.Time) ([]Device, uint64) {
 				delete(d.stats[id], key)
 				continue
 			}
-			device.Paths = append(device.Paths, Path{Kind: key.kind, Address: key.address, Quality: q})
+			device.Paths = append(device.Paths, Path{Kind: key.kind, Address: key.address, Quality: q, Direction: DirectionOutgoing})
 		}
 		device.IdentityConflict = identityConflict(d.paths[id], now)
 		slices.SortFunc(device.Paths, comparePath)
@@ -398,4 +454,85 @@ func (d *Directory) Close() {
 		close(ch)
 		delete(d.subscribers, id)
 	}
+}
+
+// PeerQualityTTL is how long a peer's quality report stays displayed; the peer sends one every 15s.
+const PeerQualityTTL = 60 * time.Second
+
+// maxPeerQualityKinds bounds a report; there are only a few path kinds.
+const maxPeerQualityKinds = 8
+
+// KindQuality is one path kind's quality as measured by the end that dials it.
+type KindQuality struct {
+	Kind    PathKind `json:"kind"`
+	Quality Quality  `json:"quality"`
+}
+
+// PeerQuality is a KindQuality that the peer reported, with when it arrived.
+type PeerQuality struct {
+	Kind       PathKind  `json:"kind"`
+	Quality    Quality   `json:"quality"`
+	ReceivedAt time.Time `json:"received_at"`
+}
+
+type peerReport struct {
+	at    time.Time
+	items []KindQuality
+}
+
+// LocalQuality summarises the paths this end dials to the device, one entry per kind: the address with
+// the most samples in its window. It is what this end tells the device about its own measurements.
+func (d *Directory) LocalQuality(id string, now time.Time) []KindQuality {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	best := map[PathKind]Quality{}
+	for key, st := range d.stats[id] {
+		q := st.quality(now)
+		if q.Samples == 0 {
+			continue
+		}
+		if cur, ok := best[key.kind]; !ok || q.Samples > cur.Samples {
+			best[key.kind] = q
+		}
+	}
+	out := make([]KindQuality, 0, len(best))
+	for kind, q := range best {
+		out = append(out, KindQuality{Kind: kind, Quality: q})
+	}
+	slices.SortFunc(out, func(a, b KindQuality) int { return strings.Compare(string(a.Kind), string(b.Kind)) })
+	return out
+}
+
+// SetPeerQuality keeps the device's latest report for display. The report comes from the peer, so it
+// is checked and bounded; it never influences path selection.
+func (d *Directory) SetPeerQuality(id string, at time.Time, items []KindQuality) {
+	clean := make([]KindQuality, 0, len(items))
+	seen := map[PathKind]bool{}
+	for _, item := range items {
+		q := item.Quality
+		if !item.Kind.Valid() || seen[item.Kind] || len(clean) >= maxPeerQualityKinds || !finiteNonNegative(q.LatencyMs, q.P90Ms, q.JitterMs, q.Loss) || q.Loss > 1 || q.Samples < 0 || q.Samples > statsMaxSamples || q.Flaps < 0 || q.Flaps > statsMaxSamples {
+			continue
+		}
+		seen[item.Kind] = true
+		clean = append(clean, item)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed {
+		return
+	}
+	if _, ok := d.trust.Find(id); !ok {
+		return
+	}
+	d.peerQuality[id] = peerReport{at: at, items: clean}
+	d.notifyLocked()
+}
+
+func finiteNonNegative(values ...float64) bool {
+	for _, v := range values {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return false
+		}
+	}
+	return true
 }

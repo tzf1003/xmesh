@@ -35,7 +35,7 @@ type testNode struct {
 	switched     chan pathSwitch
 }
 
-func newTestNode(t *testing.T, name string) *testNode {
+func newTestNode(t *testing.T, name string, tune ...func(*Options)) *testNode {
 	t.Helper()
 	id, err := device.NewIdentity()
 	if err != nil {
@@ -53,8 +53,8 @@ func newTestNode(t *testing.T, name string) *testNode {
 		t.Fatal(err)
 	}
 	n := &testNode{id: id, trust: trust, directory: directory, switched: make(chan pathSwitch, 16)}
-	manager, err := NewManager(t.Context(), Options{
-		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, PathOrder: n.pathOrder, Smart: n.smart.Load, Switching: testSwitching, OnPathSwitch: n.onSwitch, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
+	options := Options{
+		Identity: id, Trust: trust, Directory: directory, BootID: name + "-boot", RecoveryWindow: 2 * time.Second, MigrateIdle: 100 * time.Millisecond, SuspectAfter: 500 * time.Millisecond, PathOrder: n.pathOrder, Smart: n.smart.Load, Switching: testSwitching, OnPathSwitch: n.onSwitch, Heartbeat: 100 * time.Millisecond, DeadAfter: time.Second,
 		Dial: func(ctx context.Context, target string, path device.Path) (*websocket.Conn, error) {
 			if path.Kind == device.Tailnet && n.dialGate != nil {
 				select {
@@ -85,7 +85,11 @@ func newTestNode(t *testing.T, name string) *testNode {
 			_, err := server.Connect(ctx, &Transport{Session: s}, nil)
 			return err
 		},
-	})
+	}
+	for _, f := range tune {
+		f(&options)
+	}
+	manager, err := NewManager(t.Context(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,39 +228,30 @@ func TestManagerLANFirstAndStableSessionAcrossTailnetFailover(t *testing.T) {
 	}
 }
 
-func TestManagerConcurrentBidirectionalOpenUsesOneCarrier(t *testing.T) {
+func TestManagerConcurrentBidirectionalOpenGivesEachEndItsOwnCarrier(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	a, b := newTestNode(t, "a"), newTestNode(t, "b")
 	pairTestNodes(t, a, b)
-	done := make(chan error, 2)
+	done := make(chan *mcp.ClientSession, 2)
 	for _, nodes := range [][2]*testNode{{a, b}, {b, a}} {
-		go func() {
-			transport, err := nodes[0].manager.Open(ctx, nodes[1].id.ID, "")
-			if err == nil {
-				client := mcp.NewClient(&mcp.Implementation{Name: "upstream", Version: "2"}, nil)
-				var session *mcp.ClientSession
-				session, err = client.Connect(ctx, transport, &mcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
-				if session != nil {
-					defer session.Close()
-				}
-			}
-			done <- err
-		}()
+		go func() { done <- openClient(t, ctx, nodes[0], nodes[1]) }()
 	}
 	for range 2 {
 		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatal(err)
-			}
+		case session := <-done:
+			defer session.Close()
 		case <-ctx.Done():
 			t.Fatal("bidirectional open blocked")
 		}
 	}
-	aa, ba := a.manager.Activity(b.id.ID), b.manager.Activity(a.id.ID)
-	if aa.State != "online" || ba.State != "online" || aa.Epoch != ba.Epoch {
-		t.Fatal("different committed carriers", aa, ba)
+	for _, n := range []*testNode{a, b} {
+		peer := map[*testNode]*testNode{a: b, b: a}[n]
+		waitLinks(t, n.manager, peer.id.ID, 2)
+		links := n.manager.Links(peer.id.ID)
+		if !links[0].Outgoing || links[1].Outgoing || links[0].Epoch == links[1].Epoch {
+			t.Fatalf("want one carrier dialed by each end: %+v", links)
+		}
 	}
 }
 
@@ -426,7 +421,7 @@ func TestClosedOfflineSessionNotifiesRemoteAfterReconnect(t *testing.T) {
 	}
 	pa, _ := a.manager.peer(b.id.ID)
 	pb, _ := b.manager.peer(a.id.ID)
-	wait(func() bool { pa.mu.Lock(); defer pa.mu.Unlock(); return pa.active == nil })
+	wait(func() bool { pa.mu.Lock(); defer pa.mu.Unlock(); return len(pa.cars) == 0 })
 	if err := transport.Session.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +470,7 @@ func TestUnattachedIncomingSessionExpiresWithHealthyCarrier(t *testing.T) {
 	pa.mu.Unlock()
 	pb.mu.Lock()
 	remote := pb.sessions[transport.Session.id]
-	remote.attachedEpoch = 0
+	remote.attached = nil
 	remote.detachedAt = time.Now().Add(-3 * time.Second)
 	pb.signalLocked()
 	pb.mu.Unlock()
@@ -629,8 +624,12 @@ func TestManagerRebalanceMovesCarrierToNewPreferredPath(t *testing.T) {
 	defer client.Close()
 	waitPath(t, a.manager, b.id.ID, device.LAN)
 	id := client.ID()
+	// Both ends change order before either drops its carrier: a peer still preferring the LAN would
+	// yield to it (see yieldToPreferred) and win the redial back onto the old path.
 	for _, n := range []*testNode{a, b} {
 		n.setOrder(device.Tailnet, device.LAN)
+	}
+	for _, n := range []*testNode{a, b} {
 		n.manager.Rebalance()
 	}
 	waitPath(t, a.manager, b.id.ID, device.Tailnet)
@@ -789,4 +788,94 @@ func TestManualModeIgnoresMeasuredQuality(t *testing.T) {
 	if got := a.manager.Activity(b.id.ID).Path.Kind; got != device.LAN {
 		t.Fatalf("manual mode left %s", got)
 	}
+}
+
+func TestHeartbeatMeasuresActivePathAndPeersExchangeQuality(t *testing.T) {
+	ctx := t.Context()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	pairTestNodes(t, a, b)
+	a.setOrder(device.LAN)
+	b.setOrder(device.LAN)
+	// Whichever end dials, only the dialing end owns the path history. Open from a: a dials.
+	session := openClient(t, ctx, a, b)
+	defer session.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	if got := a.manager.Activity(b.id.ID); !got.Outgoing {
+		t.Fatalf("a did not dial: %+v", got)
+	}
+	if !a.manager.CarriesPath(b.id.ID, device.LAN, b.lan.URL) || b.manager.CarriesPath(a.id.ID, device.LAN, a.lan.URL) {
+		t.Fatal("only the dialing end carries the path")
+	}
+	// The pairing probe left one sample; heartbeats every 100ms add to it with no probe at all.
+	until := time.Now().Add(3 * time.Second)
+	var q device.Quality
+	for time.Now().Before(until) {
+		devices, _ := a.directory.Snapshot(time.Now())
+		for _, p := range devices[0].Paths {
+			if p.Kind == device.LAN && p.Address == b.lan.URL {
+				q = p.Quality
+			}
+		}
+		if q.Samples >= 5 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if q.Samples < 5 || q.Loss != 0 {
+		t.Fatalf("heartbeat not recorded on active path: %+v", q)
+	}
+	// b did not dial, so its heartbeats add nothing to its own paths.
+	devices, _ := b.directory.Snapshot(time.Now())
+	for _, p := range devices[0].Paths {
+		if p.Quality.Samples > 1 {
+			t.Fatalf("incoming carrier recorded heartbeats: %+v", p)
+		}
+	}
+}
+
+func TestQualitySummaryReachesPeerForDisplayOnly(t *testing.T) {
+	ctx := t.Context()
+	a, b := newTestNode(t, "a"), newTestNode(t, "b")
+	for _, n := range []*testNode{a, b} {
+		n.manager.opts.QualityEvery = 20 * time.Millisecond
+	}
+	pairTestNodes(t, a, b)
+	a.setOrder(device.LAN)
+	b.setOrder(device.LAN)
+	feed(t, a, b, device.LAN, b.lan.URL, steady(25, 8)...)
+	session := openClient(t, ctx, a, b)
+	defer session.Close()
+	waitPath(t, a.manager, b.id.ID, device.LAN)
+	until := time.Now().Add(3 * time.Second)
+	for time.Now().Before(until) {
+		devices, _ := b.directory.Snapshot(time.Now())
+		if got := devices[0].PeerQuality; len(got) > 0 {
+			if got[0].Kind != device.LAN || got[0].Quality.Samples < 8 {
+				t.Fatalf("peer quality = %+v", got)
+			}
+			// It is only displayed: b's own paths are untouched by what a reported.
+			for _, p := range devices[0].Paths {
+				if p.Kind == device.LAN && p.Quality.Samples > 1 {
+					t.Fatalf("report leaked into own measurements: %+v", p)
+				}
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("b never received a's quality summary")
+}
+
+// waitLinks waits until the device has exactly n committed carriers.
+func waitLinks(t *testing.T, m *Manager, id string, n int) []Link {
+	t.Helper()
+	until := time.Now().Add(4 * time.Second)
+	for time.Now().Before(until) {
+		if links := m.Links(id); len(links) == n {
+			return links
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("want %d carriers, have %+v", n, m.Links(id))
+	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"os"
@@ -37,12 +38,14 @@ import (
 const serviceType = "_xmesh-v2._tcp"
 const identityPath = "/mesh/v2/identity"
 
-var pathKinds = []device.PathKind{device.LAN, device.Tailnet, device.Cloudflare}
+var pathKinds = []device.PathKind{device.LAN, device.Tailnet, device.Direct, device.Cloudflare}
 
 func providerEnabled(cfg config.Mesh, kind device.PathKind) bool {
 	switch kind {
 	case device.Tailnet:
 		return cfg.TailnetEnabled()
+	case device.Direct:
+		return cfg.DirectEnabled()
 	case device.Cloudflare:
 		return cfg.CloudflareEnabled()
 	}
@@ -54,6 +57,12 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 	switch kind {
 	case device.Tailnet:
 		return reflect.DeepEqual(old.Tailnet, cfg.Tailnet)
+	case device.Direct:
+		// Peers and the advertised address are read on every use, so changing them must not rebuild the listener.
+		a, b := old.Direct, cfg.Direct
+		a.Peers, a.Advertise = nil, ""
+		b.Peers, b.Advertise = nil, ""
+		return reflect.DeepEqual(a, b)
 	case device.Cloudflare:
 		// Preferred addresses and their policy are read on every dial, so changing them must not rebuild the path.
 		a, b := old.Cloudflare, cfg.Cloudflare
@@ -66,6 +75,28 @@ func providerSame(old, cfg config.Mesh, kind device.PathKind) bool {
 
 // Tunnel probes cost a round trip through Cloudflare, so they are rarer and given more time than LAN ones.
 const cloudflareProbeEvery = 30 * time.Second
+
+// A public address is probed over the internet, so it is tried less often and given longer than the LAN.
+const (
+	directProbeEvery  = 15 * time.Second
+	directProbeBudget = 5 * time.Second
+)
+
+// lanProbeEvery is how often a path that is not carrying the link is probed. The carrier's heartbeat
+// measures the active path, so probes only keep the alternatives' quality current.
+const lanProbeEvery = 12 * time.Second
+
+// probeGap is the least time between two probes of one candidate. Cloudflare candidates are paced by
+// supervise itself, so they need no gap here.
+func probeGap(kind device.PathKind) time.Duration {
+	switch kind {
+	case device.LAN, device.Tailnet:
+		return lanProbeEvery
+	case device.Direct:
+		return directProbeEvery
+	}
+	return 0
+}
 
 type Candidate struct {
 	Name       string
@@ -118,7 +149,9 @@ type Node struct {
 	lock           *os.File
 	probes         chan Candidate
 	probing        map[string]bool
-	auditLog       atomic.Pointer[audit.Logger]
+	// lastProbe is when each candidate was last queued for a probe, to hold backup paths to probeGap.
+	lastProbe map[string]time.Time
+	auditLog  atomic.Pointer[audit.Logger]
 	// cloudflareOuter replaces the HTTP client that opens the tunnel WebSocket; tests point it at a fake edge.
 	cloudflareOuter *http.Client
 	// preferred is the Cloudflare preferred-address pool, created on first use.
@@ -180,6 +213,7 @@ func open(ctx context.Context, c *config.Config, stateDir string, supervise bool
 	n.lock = lock
 	n.probes = make(chan Candidate, 128)
 	n.probing = map[string]bool{}
+	n.lastProbe = map[string]time.Time{}
 	n.directory = device.NewDirectory(ctx, trust, id.ID)
 	links, err := devicelink.NewManager(ctx, devicelink.Options{Identity: id, Trust: trust, Directory: n.directory, Dial: n.dialLink, PathOrder: n.pathOrder, Smart: n.smartPaths, OnPathSwitch: n.auditPathSwitch, OnActivity: n.auditActivity, Accept: func(ctx context.Context, p identity.Principal, s *devicelink.Session) error {
 		n.mu.Lock()
@@ -330,7 +364,20 @@ func (n *Node) Peers(context.Context) ([]mesh.Peer, error) {
 			online = false
 			a.State = "identity_conflict"
 		}
-		peer := mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name}
+		peer := mesh.Peer{ID: d.DeviceID, Name: aliases[d.DeviceID], Address: "device://" + d.DeviceID, Tags: slices.Clone(d.Tags), Online: online && !d.IdentityConflict, Direct: a.Path.Kind == device.LAN, Fingerprint: d.DeviceID, Paths: d.Paths, ActivePath: a.Path.Kind, ConnectionState: a.State, DisplayName: d.Name, PeerQuality: d.PeerQuality}
+		if a.Path.Kind != "" {
+			peer.ActiveDirection = device.DirectionIncoming
+			if a.Outgoing {
+				peer.ActiveDirection = device.DirectionOutgoing
+			}
+		}
+		for _, l := range n.links.Links(d.DeviceID) {
+			direction := device.DirectionIncoming
+			if l.Outgoing {
+				direction = device.DirectionOutgoing
+			}
+			peer.Links = append(peer.Links, mesh.Link{Kind: l.Path.Kind, Address: l.Path.Address, Direction: direction, Draining: l.Draining, Suspect: l.Suspect, Sessions: l.Sessions, Since: l.Since})
+		}
 		if a.Path.Kind == device.Tailnet {
 			route := routes[pathHost(a.Path.Address)]
 			peer.Direct, peer.Relay, peer.OS = route.direct, route.relay, route.os
@@ -433,6 +480,17 @@ func (n *Node) Candidates() []Candidate {
 			key := string(hint.Kind) + "|" + hint.Address
 			seen[key] = true
 			result = append(result, Candidate{Name: trusted.Document.Name, DeviceID: trusted.Document.DeviceID, Kind: hint.Kind, Address: hint.Address, Generation: generation})
+		}
+	}
+	if generation, enabled := n.directory.Provider(device.Direct); enabled {
+		for id, hostport := range n.cfg.Direct.Peers {
+			address := "https://" + hostport
+			key := string(device.Direct) + "|" + address
+			if seen[key] || id == n.identity.ID {
+				continue
+			}
+			seen[key] = true
+			result = append(result, Candidate{DeviceID: id, Kind: device.Direct, Address: address, Generation: generation})
 		}
 	}
 	if generation, enabled := n.directory.Provider(device.Cloudflare); enabled {
@@ -590,18 +648,29 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	}
 	defer client.CloseIdleConnections()
 	budget, validFor := 2*time.Second, 30*time.Second
-	if c.Kind == device.Cloudflare {
+	switch c.Kind {
+	case device.Cloudflare:
 		budget, validFor = 10*time.Second, 2*cloudflareProbeEvery
+	case device.Direct:
+		budget, validFor = directProbeBudget, 2*directProbeEvery
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", c.Address+identityPath, nil)
+	// Latency is the request/response round trip on the finished connection, left out of connect and TLS,
+	// so it reads like a heartbeat ping and a probed path compares fairly with the active one.
+	var ready time.Time
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { ready = time.Now() }}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), "GET", c.Address+identityPath, nil)
 	if err != nil {
 		return
 	}
 	response, err := client.Do(req)
 	if err != nil {
 		return
+	}
+	rtt := time.Since(started)
+	if !ready.IsZero() {
+		rtt = time.Since(ready)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 || response.TLS == nil || len(response.TLS.PeerCertificates) != 1 {
@@ -614,7 +683,7 @@ func (n *Node) probe(ctx context.Context, c Candidate) {
 	if json.NewDecoder(http.MaxBytesReader(nil, response.Body, 16<<10)).Decode(&body) != nil || body.Identity.Validate() != nil || body.Identity.DeviceID != c.DeviceID || body.BootID == "" {
 		return
 	}
-	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: time.Since(started), ExpiresAt: started.Add(validFor)}) == nil
+	verified = n.directory.Observe(response.TLS.PeerCertificates[0], trusted.Generation, device.Path{Kind: c.Kind, Address: c.Address, ProviderGeneration: c.Generation, BootID: body.BootID, VerifiedAt: started, RTT: rtt, ExpiresAt: started.Add(validFor)}) == nil
 }
 
 func (n *Node) Close() error {
@@ -743,6 +812,8 @@ func (n *Node) runProvider(ctx context.Context, kind device.PathKind, p *provide
 		switch kind {
 		case device.LAN:
 			err = n.runLAN(ctx, p)
+		case device.Direct:
+			err = n.runDirect(ctx, p)
 		case device.Cloudflare:
 			err = n.runCloudflare(ctx, p)
 		default:
@@ -788,8 +859,9 @@ func (n *Node) retireProvider(kind device.PathKind, p *provider) {
 func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, listener net.Listener, discovery func(context.Context)) error {
 	server := &http.Server{Handler: n.handler(kind, p.generation), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	tlsConfig := n.pairing.ServerTLS()
-	if kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing {
-		// The tunnel is reachable by anyone holding the Access token, so only paired devices get through.
+	if (kind == device.Cloudflare && !p.cfg.Cloudflare.AllowPairing) || (kind == device.Direct && !p.cfg.Direct.AllowPairing) {
+		// The tunnel is reachable by anyone holding the Access token, and a direct port by anyone on the
+		// internet, so only paired devices get through.
 		// Pairing is only reachable while a connection password is set (an invite is open).
 		strict, open := n.trust.TLS(n.identity, "", true), tlsConfig
 		tlsConfig = &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
@@ -801,6 +873,12 @@ func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, lis
 		}}
 	}
 	listener = tls.NewListener(listener, tlsConfig)
+	if kind == device.Direct {
+		// Wrap the TLS listener so ConnState sees the same *tls.Conn that Accept admitted.
+		guard := newDirectGuard(p.cfg.Direct, time.Now)
+		listener = guard.listener(listener)
+		server.ConnState = guard.connState
+	}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	n.mu.Lock()
@@ -906,8 +984,13 @@ func (n *Node) browseLAN(ctx context.Context, p *provider, generation uint64, if
 	next:
 		// Explicitly paired addresses remain candidates when multicast discovery is disabled.
 		for _, c := range n.Candidates() {
-			if c.Kind == device.LAN && c.Generation == generation {
-				n.probe(ctx, c)
+			if c.Kind == device.LAN && c.Generation == generation && !n.carriesLink(c) {
+				n.mu.Lock()
+				due := n.probeDueLocked(c, time.Now())
+				n.mu.Unlock()
+				if due {
+					n.probe(ctx, c)
+				}
 			}
 		}
 	}
@@ -922,17 +1005,41 @@ func (n *Node) recordCandidate(ctx context.Context, c Candidate) {
 	n.enqueueProbe(c)
 }
 
+// carriesLink reports whether the candidate is the path a live carrier this end dialed runs on. Its
+// heartbeat measures that path, so a probe would only repeat it.
+func (n *Node) carriesLink(c Candidate) bool {
+	return c.DeviceID != "" && n.links != nil && n.links.CarriesPath(c.DeviceID, c.Kind, c.Address)
+}
+
+// probeDueLocked reports whether the candidate has waited out its gap since it was last queued, and if
+// so records now as that time. The caller holds n.mu.
+func (n *Node) probeDueLocked(c Candidate, now time.Time) bool {
+	key := probeKey(c)
+	if last, ok := n.lastProbe[key]; ok && now.Sub(last) < probeGap(c.Kind) {
+		return false
+	}
+	if len(n.lastProbe) >= 4096 {
+		clear(n.lastProbe)
+	}
+	n.lastProbe[key] = now
+	return true
+}
+
 func (n *Node) enqueueProbe(c Candidate) {
+	if n.carriesLink(c) {
+		return
+	}
 	key := probeKey(c)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.closed || n.probing[key] {
+	if n.closed || n.probing[key] || !n.probeDueLocked(c, time.Now()) {
 		return
 	}
 	select {
 	case n.probes <- c:
 		n.probing[key] = true
 	default:
+		delete(n.lastProbe, key)
 	}
 }
 
