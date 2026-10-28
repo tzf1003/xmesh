@@ -66,6 +66,7 @@ export function parseListen(v: string): { host: string; port: number } | undefin
 
 /** Flags and the env list as exact `scheme://host[:port]` origins; anything else is an error, not a silent no-op. */
 export function parseAllowedOrigins(flags: string[] | undefined, envList: string | undefined): string[] {
+  if ((flags ?? []).some((f) => f.trim() === "")) throw new Error("--allowed-origin needs a value");
   const raw = [...(flags ?? []), ...(envList ?? "").split(",")].map((s) => s.trim()).filter((s) => s !== "");
   return [...new Set(raw.map((v) => {
     let u: URL;

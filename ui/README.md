@@ -221,7 +221,7 @@ node xmesh-webui/xmesh-webui.js --rotate-key        # 更换密钥（旧会话�
 | --- | --- |
 | `--listen ADDR` | 监听地址，默认 `127.0.0.1:7480`（环境变量 `XMESH_WEBUI_LISTEN`）；`:7480` 表示所有地址 |
 | `--tls-cert FILE --tls-key FILE` | 以 HTTPS 提供，Cookie 带 `Secure`；监听非本机地址时请使用 |
-| `--allowed-origin ORIGIN` | 反向代理对外的来源，如 `https://panel.example.com:8088`（可重复；环境变量 `XMESH_WEBUI_ALLOWED_ORIGINS`，逗号分隔）。面板对登录等 POST 要求 `Origin` 等于 `scheme://Host`，经 TLS 终止的反代访问时浏览器发的是 `https://…` 而后端是 HTTP，需用它放行；反代须保留带端口的 `Host`（nginx 用 `$http_host`，不要用 `$host`） |
+| `--allowed-origin ORIGIN` | 反向代理对外的来源，如 `https://panel.example.com:8088`（可重复；环境变量 `XMESH_WEBUI_ALLOWED_ORIGINS`，逗号分隔）。面板对登录等 POST 要求 `Origin` 等于 `scheme://Host`，经 TLS 终止的反代访问时浏览器发的是 `https://…` 而后端是 HTTP，需用它放行（含 `https://` 来源时登录 Cookie 同时带 `Secure`）；反代须保留带端口的 `Host`（nginx 用 `$http_host`，不要用 `$host`） |
 | `--data-dir DIR` | 面板偏好与密钥文件所在目录，默认 `$XDG_CONFIG_HOME/xmesh-webui`（`XMESH_WEBUI_DATA_DIR`） |
 | `--key-file FILE` | 密钥文件，默认 `<data-dir>/webui.key`（`XMESH_WEBUI_KEY_FILE`）；手写的密钥至少 16 个字符，文件必须是 `0600` |
 | `--lang zh\|en` | 未保存偏好时的面板语言 |
