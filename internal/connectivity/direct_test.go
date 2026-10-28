@@ -94,8 +94,15 @@ func TestDirectPathCarriesDeviceLinkAndGuardsPairing(t *testing.T) {
 	if _, err := c.PairWith(ctx, device.Direct, address, "wrong horse battery", b.identity.ID); err == nil {
 		t.Fatal("pairing succeeded with the wrong password")
 	}
-	if _, err := c.PairWith(ctx, device.Direct, address, "correct horse battery", b.identity.ID); err != nil {
-		t.Fatal("pairing failed while an invite was open:", err)
+	// The earlier refused handshake put this source in the guard's short backoff; wait it out.
+	var pairErr error
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+		if _, pairErr = c.PairWith(ctx, device.Direct, address, "correct horse battery", b.identity.ID); pairErr == nil {
+			break
+		}
+	}
+	if pairErr != nil {
+		t.Fatal("pairing failed while an invite was open:", pairErr)
 	}
 	if _, ok := b.trust.Find(c.identity.ID); !ok {
 		t.Fatal("the paired device is not trusted")

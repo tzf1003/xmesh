@@ -134,6 +134,18 @@ type Direct struct {
 	Peers map[string]string `json:"peers,omitempty"`
 	// AllowPairing keeps pairing open on the public port. Off, pairing is reachable only during an invite.
 	AllowPairing bool `json:"allow_pairing,omitempty"`
+	// AllowIPs, when set, restricts the public port to these source IPs or CIDR ranges; others are dropped before TLS.
+	AllowIPs []string `json:"allow_ips,omitempty"`
+	// MaxPreauth caps connections that have not finished the TLS handshake and sent a request. Zero or omitted means the default, 64.
+	MaxPreauth int `json:"max_preauth,omitempty"`
+}
+
+// PreauthLimit is the cap on connections that have not authenticated yet.
+func (d Direct) PreauthLimit() int {
+	if d.MaxPreauth <= 0 {
+		return 64
+	}
+	return d.MaxPreauth
 }
 
 // ListenAddr is the address of the public listener.
@@ -604,6 +616,14 @@ func (c *Config) Validate() error {
 		}
 		if d.Advertise != "" && !validHostPort(d.Advertise) {
 			return fail("/mesh/direct/advertise: 必须是 主机:端口")
+		}
+		if d.MaxPreauth < 0 {
+			return fail("/mesh/direct/max_preauth: 不能为负数")
+		}
+		for _, entry := range d.AllowIPs {
+			if _, _, err := net.ParseCIDR(entry); err != nil && net.ParseIP(entry) == nil {
+				return fail("/mesh/direct/allow_ips: 必须是 IP 地址或 CIDR 网段")
+			}
 		}
 		addrs := map[string]bool{}
 		for id, addr := range d.Peers {

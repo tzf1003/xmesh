@@ -873,6 +873,12 @@ func (n *Node) serve(ctx context.Context, kind device.PathKind, p *provider, lis
 		}}
 	}
 	listener = tls.NewListener(listener, tlsConfig)
+	if kind == device.Direct {
+		// Wrap the TLS listener so ConnState sees the same *tls.Conn that Accept admitted.
+		guard := newDirectGuard(p.cfg.Direct, time.Now)
+		listener = guard.listener(listener)
+		server.ConnState = guard.connState
+	}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	n.mu.Lock()
