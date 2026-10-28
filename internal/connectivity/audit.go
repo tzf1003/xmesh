@@ -18,15 +18,25 @@ func (n *Node) auditActivity(activity devicelink.Activity) {
 		return
 	}
 	event := "device_link_" + activity.State
+	_ = log.Event(event, n.identity.ID+"/connectivity", "", activity.DeviceID, linkTool(activity))
+}
+
+// linkTool names the link in the audit trail: the path and which end dialed it, "out" when this end did.
+func linkTool(activity devicelink.Activity) string {
 	tool := "device.link"
-	if activity.Path.Kind != "" {
-		tool += "." + string(activity.Path.Kind)
+	if activity.Path.Kind == "" {
+		return tool
 	}
-	_ = log.Event(event, n.identity.ID+"/connectivity", "", activity.DeviceID, tool)
+	direction := "in"
+	if activity.Outgoing {
+		direction = "out"
+	}
+	return tool + "." + string(activity.Path.Kind) + "." + direction
 }
 
 // auditPathSwitch records smart mode moving a link, with why: "better" for a lasting improvement and
-// "unhealthy" for a path that started losing probes.
+// "unhealthy" for a path that started losing probes. Only the end that dialed a link moves it, so a switch
+// always concerns a link this end dialed.
 func (n *Node) auditPathSwitch(deviceID string, from, to device.PathKind, reason string) {
 	log := n.auditLog.Load()
 	if log == nil {
