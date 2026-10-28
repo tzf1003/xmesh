@@ -162,7 +162,7 @@ class FakeController extends EventEmitter {
   snapshot = EMPTY_SNAPSHOT;
 }
 
-async function startServer(key: string): Promise<{ base: string; close: () => Promise<void>; bridge: WebBridge; server: WebServer; calls: unknown[][] }> {
+async function startServer(key: string, allowedOrigins: string[] = []): Promise<{ base: string; close: () => Promise<void>; bridge: WebBridge; server: WebServer; calls: unknown[][] }> {
   const pub = tmp();
   fs.writeFileSync(path.join(pub, "index.html"), "<html><meta content=\"__XMESH_STYLE_NONCE__\"></html>");
   fs.writeFileSync(path.join(pub, "web.js"), "1");
@@ -175,7 +175,7 @@ async function startServer(key: string): Promise<{ base: string; close: () => Pr
     [CHANNELS.pickPath, async () => ({ ok: true, data: { path: (await bridge.pickPath("workspace")) ?? null } })],
     [CHANNELS.drain, (...args) => { calls.push(args); throw new Error("boom"); }],
   ]);
-  server = new WebServer({ key: () => key, handlers, controller: new FakeController(), bridge, publicRoot: pub, secure: false, pingMs: 60_000 });
+  server = new WebServer({ key: () => key, handlers, controller: new FakeController(), bridge, publicRoot: pub, secure: false, allowedOrigins, pingMs: 60_000 });
   const listener = http.createServer(server.handle);
   await new Promise<void>((r) => listener.listen(0, "127.0.0.1", r));
   const { port } = listener.address() as AddressInfo;
@@ -208,7 +208,7 @@ async function login(base: string, key: string): Promise<string> {
 
 test("web server: static files, login, calls with effects, and logout", async () => {
   const key = generateKey();
-  const s = await startServer(key);
+  const s = await startServer(key, ["http://allowed.example"]);
   try {
     const page = await fetch(`${s.base}/`);
     assert.equal(page.status, 200);
