@@ -106,6 +106,10 @@ test("listen addresses and options", () => {
   assert.equal(o.port, 9000);
   assert.equal(o.keyFile, path.resolve("/srv/x/webui.key"));
   assert.throws(() => parseWebArgs(["--tls-cert", "a.pem"], {}), /together/);
+  assert.deepEqual(parseWebArgs(["--allowed-origin", "https://P.example.com:8088/"], { XMESH_WEBUI_ALLOWED_ORIGINS: "http://a, https://p.example.com:8088" }).allowedOrigins, ["https://p.example.com:8088", "http://a"]);
+  assert.deepEqual(parseWebArgs([], {}).allowedOrigins, []);
+  assert.throws(() => parseWebArgs(["--allowed-origin", ""], {}), /needs a value/);
+  assert.throws(() => parseWebArgs(["--allowed-origin", "https://h/path"], {}), /scheme:\/\/host/);
   assert.throws(() => parseWebArgs(["--listen", "nope"], {}), /host:port/);
   assert.throws(() => parseWebArgs(["--bogus"], {}));
 });
@@ -144,6 +148,12 @@ test("cookie and origin parsing", () => {
   assert.equal(sameOrigin(req({ host: "h:1", origin: "https://h:1" }), true), true);
   assert.equal(sameOrigin(req({ host: "h:1", origin: "http://evil" }), false), false);
   assert.equal(sameOrigin(req({ host: "h:1", "sec-fetch-site": "cross-site" }), false), false);
+  // A reverse proxy: the backend is plain HTTP but the browser's origin is the public https one.
+  const proxied = { host: "h", origin: "https://h:8088", "sec-fetch-site": "same-origin" };
+  assert.equal(sameOrigin(req(proxied), false), false);
+  assert.equal(sameOrigin(req(proxied), false, ["https://h:8088"]), true);
+  assert.equal(sameOrigin(req({ ...proxied, origin: "https://evil" }), false, ["https://h:8088"]), false);
+  assert.equal(sameOrigin(req({ ...proxied, "sec-fetch-site": "cross-site" }), false, ["https://h:8088"]), false);
 });
 
 class FakeController extends EventEmitter {
@@ -172,6 +182,15 @@ async function startServer(key: string): Promise<{ base: string; close: () => Pr
     close: async () => { server!.close(); listener.closeAllConnections(); await new Promise<void>((r) => listener.close(() => r())); },
   };
 }
+
+test("the session cookie is Secure for TLS and for https allowed origins only", () => {
+  const cookie = (secure: boolean, allowedOrigins: string[]) =>
+    (new WebServer({ key: () => "k", handlers: new Map(), controller: new FakeController(), bridge: new WebBridge(() => false, 10), publicRoot: tmp(), secure, allowedOrigins }) as unknown as { cookie(v: string, m: number): string }).cookie("v", 1);
+  assert.doesNotMatch(cookie(false, []), /Secure/);
+  assert.doesNotMatch(cookie(false, ["http://h"]), /Secure/);
+  assert.match(cookie(false, ["https://h"]), /; Secure/);
+  assert.match(cookie(true, []), /; Secure/);
+});
 
 const json = { "Content-Type": "application/json", [WEB_REQUEST_HEADER]: "1" };
 

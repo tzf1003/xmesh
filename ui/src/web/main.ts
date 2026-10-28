@@ -47,6 +47,8 @@ export interface WebOptions {
   keyFile: string;
   tlsCert?: string;
   tlsKey?: string;
+  /** Public origins a reverse proxy serves the panel under. */
+  allowedOrigins: string[];
   rotateKey: boolean;
   printKey: boolean;
   lang?: string;
@@ -62,6 +64,20 @@ export function parseListen(v: string): { host: string; port: number } | undefin
   return { host, port };
 }
 
+/** Flags and the env list as exact `scheme://host[:port]` origins; anything else is an error, not a silent no-op. */
+export function parseAllowedOrigins(flags: string[] | undefined, envList: string | undefined): string[] {
+  if ((flags ?? []).some((f) => f.trim() === "")) throw new Error("--allowed-origin needs a value");
+  const raw = [...(flags ?? []), ...(envList ?? "").split(",")].map((s) => s.trim()).filter((s) => s !== "");
+  return [...new Set(raw.map((v) => {
+    let u: URL;
+    try { u = new URL(v); } catch { throw new Error(`--allowed-origin must be scheme://host[:port]: ${v}`); }
+    if ((u.protocol !== "http:" && u.protocol !== "https:") || u.origin !== v.replace(/\/+$/, "").toLowerCase()) {
+      throw new Error(`--allowed-origin must be scheme://host[:port]: ${v}`);
+    }
+    return u.origin;
+  }))];
+}
+
 export function isLoopback(host: string): boolean {
   return host === "localhost" || host === "::1" || /^127\./.test(host);
 }
@@ -75,12 +91,15 @@ function usage(): string {
     "  --key-file FILE    management key file, 0600 (default <data-dir>/webui.key)",
     "  --tls-cert FILE    serve HTTPS with this certificate chain (PEM)",
     "  --tls-key FILE     private key for --tls-cert (PEM)",
+    "  --allowed-origin O browser origin to accept behind a reverse proxy, e.g. https://panel.example.com:8088",
+    "                     (repeatable; env XMESH_WEBUI_ALLOWED_ORIGINS, comma separated)",
     "  --rotate-key       replace the management key, print the new one, and continue",
     "  --print-key        print the management key and exit",
     "  --lang zh|en       panel language when nothing is saved (env XMESH_UI_LANG)",
     "",
     "systemd user service (run as the user that runs the xmesh kernel):",
     "  xmesh-webui install [--listen ADDR] [--tls-cert F --tls-key F] [--data-dir D] [--key-file F]",
+    "                      [--allowed-origin O]",
     "                      [--key-stdin | --rotate-key] [--xmesh-bin PATH] [--lang zh|en]",
     "                      [--insecure] [--no-start] [--linger] [--print]",
     "  xmesh-webui uninstall [--purge]",
@@ -97,6 +116,7 @@ export function parseWebArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       "key-file": { type: "string" },
       "tls-cert": { type: "string" },
       "tls-key": { type: "string" },
+      "allowed-origin": { type: "string", multiple: true },
       "rotate-key": { type: "boolean" },
       "print-key": { type: "boolean" },
       lang: { type: "string" },
@@ -116,6 +136,7 @@ export function parseWebArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     dataDir,
     keyFile: path.resolve(values["key-file"] ?? env.XMESH_WEBUI_KEY_FILE ?? path.join(dataDir, "webui.key")),
     ...(values["tls-cert"] !== undefined && { tlsCert: values["tls-cert"], tlsKey: values["tls-key"] }),
+    allowedOrigins: parseAllowedOrigins(values["allowed-origin"], env.XMESH_WEBUI_ALLOWED_ORIGINS),
     rotateKey: values["rotate-key"] === true,
     printKey: values["print-key"] === true,
     ...((values.lang ?? env.XMESH_UI_LANG) !== undefined && { lang: values.lang ?? env.XMESH_UI_LANG }),
@@ -283,7 +304,7 @@ export async function startWeb(opts: WebOptions): Promise<{ close: () => Promise
   });
 
   const secure = opts.tlsCert !== undefined;
-  server = new WebServer({ key: () => key, handlers, controller, bridge, publicRoot: publicRoot(), secure, log });
+  server = new WebServer({ key: () => key, handlers, controller, bridge, publicRoot: publicRoot(), secure, allowedOrigins: opts.allowedOrigins, log });
   const listener = secure
     ? https.createServer({ cert: fs.readFileSync(opts.tlsCert!), key: fs.readFileSync(opts.tlsKey!) }, server.handle)
     : http.createServer(server.handle);
@@ -347,7 +368,7 @@ export function runServiceCommand(cmd: "install" | "uninstall", argv: string[], 
     strict: true,
     options: {
       listen: { type: "string" }, "data-dir": { type: "string" }, "key-file": { type: "string" },
-      "tls-cert": { type: "string" }, "tls-key": { type: "string" }, "xmesh-bin": { type: "string" }, lang: { type: "string" },
+      "tls-cert": { type: "string" }, "tls-key": { type: "string" }, "allowed-origin": { type: "string", multiple: true }, "xmesh-bin": { type: "string" }, lang: { type: "string" },
       "key-stdin": { type: "boolean" }, "rotate-key": { type: "boolean" }, insecure: { type: "boolean" },
       "no-start": { type: "boolean" }, linger: { type: "boolean" }, print: { type: "boolean" }, purge: { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -369,12 +390,14 @@ export function runServiceCommand(cmd: "install" | "uninstall", argv: string[], 
     if (!parseListen(listen)) throw new Error("--listen must be host:port");
     if (values["key-stdin"] && values["rotate-key"]) throw new Error("--key-stdin and --rotate-key exclude each other");
     const lang = values.lang ?? env.XMESH_UI_LANG;
+    const allowedOrigins = parseAllowedOrigins(values["allowed-origin"], env.XMESH_WEBUI_ALLOWED_ORIGINS);
     const xmeshBin = values["xmesh-bin"] ?? findXmesh(env);
     if (xmeshBin === undefined) deps.out("警告：PATH 中找不到 xmesh，面板的重启、停止等操作会不可用；可用 --xmesh-bin 指定。");
     const result = installService({
       node: process.execPath, script, listen, dataDir, keyFile,
       ...(values["tls-cert"] !== undefined && { tlsCert: values["tls-cert"] }),
       ...(values["tls-key"] !== undefined && { tlsKey: values["tls-key"] }),
+      ...(allowedOrigins.length > 0 && { allowedOrigins }),
       ...(xmeshBin !== undefined && { xmeshBin: path.resolve(xmeshBin) }),
       ...(lang !== undefined && { lang }),
       ...(values["key-stdin"] && { key: stdinLine() }),

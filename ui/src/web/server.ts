@@ -48,8 +48,10 @@ export interface WebServerOptions {
   bridge: WebBridge;
   /** dist/web: index.html, web.js and the renderer bundle. */
   publicRoot: string;
-  /** Served over TLS: the cookie gets `Secure`. */
+  /** Served over TLS: the cookie gets `Secure` (so does any https entry of `allowedOrigins`). */
   secure: boolean;
+  /** Extra browser origins (`https://panel.example.com`) accepted on state-changing requests, for a reverse proxy. */
+  allowedOrigins?: readonly string[];
   sessions?: Sessions;
   limiter?: LoginLimiter;
   /** SSE keep-alive; also how often an ended session is noticed on an open stream. */
@@ -94,11 +96,13 @@ export function parseCookies(header: string | undefined): Map<string, string> {
 }
 
 /** Whether a state-changing request comes from the panel's own page. */
-export function sameOrigin(req: IncomingMessage, secure: boolean): boolean {
+export function sameOrigin(req: IncomingMessage, secure: boolean, allowed: readonly string[] = []): boolean {
   const site = req.headers["sec-fetch-site"];
   if (site !== undefined && site !== "same-origin") return false;
   const origin = req.headers.origin;
   if (origin === undefined) return true;
+  // Behind a reverse proxy the browser's origin is the public one, not scheme://Host of this listener.
+  if (allowed.includes(origin)) return true;
   const host = req.headers.host;
   return host !== undefined && origin === `${secure ? "https" : "http"}://${host}`;
 }
@@ -241,7 +245,7 @@ export class WebServer {
   }
 
   private cookie(value: string, maxAge: number): string {
-    return `${WEB_SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${this.opts.secure ? "; Secure" : ""}`;
+    return `${WEB_SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${this.opts.secure || this.opts.allowedOrigins?.some((o) => o.startsWith("https:")) ? "; Secure" : ""}`;
   }
 
   private async route(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -265,7 +269,7 @@ export class WebServer {
     }
 
     if (req.method !== "POST") throw new HttpError(405, "method not allowed");
-    if (req.headers[WEB_REQUEST_HEADER] !== "1" || !sameOrigin(req, this.opts.secure)) throw new HttpError(403, "cross-origin request refused");
+    if (req.headers[WEB_REQUEST_HEADER] !== "1" || !sameOrigin(req, this.opts.secure, this.opts.allowedOrigins)) throw new HttpError(403, "cross-origin request refused");
     if (!/^application\/json\b/.test(req.headers["content-type"] ?? "")) throw new HttpError(415, "JSON required");
 
     if (p === WEB_PATHS.login) return this.login(req, res);
