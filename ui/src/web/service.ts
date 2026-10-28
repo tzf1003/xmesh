@@ -22,6 +22,7 @@ export interface UnitOptions {
   keyFile: string;
   tlsCert?: string;
   tlsKey?: string;
+  allowedOrigins?: string[];
   /** The `xmesh` CLI the panel shells out to; a user service has only a short PATH. */
   xmeshBin?: string;
   lang?: string;
@@ -42,6 +43,7 @@ export function renderUnit(o: UnitOptions): string {
   }
   const args = [o.node, o.script, "--listen", o.listen, "--data-dir", o.dataDir, "--key-file", o.keyFile];
   if (o.tlsCert !== undefined) args.push("--tls-cert", o.tlsCert, "--tls-key", o.tlsKey ?? "");
+  for (const origin of o.allowedOrigins ?? []) args.push("--allowed-origin", origin);
   if (o.lang !== undefined) args.push("--lang", o.lang);
   const lines = [
     "# Written by `xmesh-webui install`; run it again to change these settings.",
