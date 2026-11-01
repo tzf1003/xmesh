@@ -57,6 +57,27 @@ macOS 执行器现在报告 `default_interaction: background`。控制会话省�
 
 将该策略从关闭改为启用会立即回收已有控制租约；调用方重新打开控制会话后绑定当前输入基线。本机状态读取完成桌面状态复核后才列出会话，因此同一次响应反映权限撤销及本机输入暂停。
 
+## 桌面引擎（实验性）
+
+Host 可按设备在两种执行器之间切换，Go 管理层（会话、租约、fencing、幂等、scope、审计）与本机 IPC 协议 v1 不变：
+
+| 引擎 | 说明 |
+| --- | --- |
+| `native`（默认） | 内置 Rust 执行器 `computer-native` |
+| `agent-desktop` | 由 Host 监督固定版本的 [agent-desktop](https://github.com/vercel-labs/agent-desktop) CLI 子进程，经适配器翻译 info / capture / execute / release |
+
+选择顺序：`xmesh computer host --engine`，其次 Host 状态目录中的 `engine` 文件，最后是 `native`。`xmesh computer engine [native|agent-desktop]` 读取或写入该文件，随后重启 Host 生效；回退只需写回 `native`。`--agent-desktop` 指定二进制的绝对路径，缺省为 xmesh 可执行文件旁（macOS 优先 `xmesh-computer.app/Contents/MacOS/`，使辅助功能授权记在 xmesh 名下）。
+
+适配器行为：
+
+- 截图：`list-displays` 与 `screenshot --screen`，由适配器按 `region`、`max_width` 裁剪缩放；桌面代次为适配器实例标识，布局版本由显示器几何推导，变化后旧 frame 失效（`stale_frame`）。
+- 前台输入：坐标动作用 `--headed mouse-click / mouse-move / mouse-wheel / drag`，按键用 `press`，与原生前台交互一样共用系统指针和焦点。无 ref 的 `text` 只接受基础 ASCII（逐字 `press`），其余在派发前以 `text_requires_ref` 拒绝；中文与 IME 等待 ref 输入工具。
+- 失败归类：agent-desktop 的 `disposition.delivery` 为 `not_delivered` 才报 failed，其余、运行器出错和取消均报 unknown。
+- **macOS 后台回退**：agent-desktop 没有按进程投递的坐标输入。引擎为 `agent-desktop` 时 Host 仍同时启动原生执行器，后台会话（含 `info.targets`、`default_interaction: background` 与 `background:*` 能力、后台截图与输入）全部由它承担，桌面代次与布局版本也取自它，前台画面与之保持一致。原生执行器启动失败时只剩前台。Windows / Linux 没有回退，后台申请报 `background_unsupported`。
+- 切换引擎后 macOS 需要为 agent-desktop 另行授予辅助功能 / 屏幕录制，`xmesh computer host --authorize` 会同时请求两者。
+- 本机输入监测（`pause_on_user_input`）仍由原生执行器提供；单独使用 agent-desktop 时 `user_input_monitor` 为 false，启用该策略的控制申请返回 permission_required。
+- `computer.snapshot` / `computer.ref_act` 与契约 v2 尚未实现。
+
 ## 本机执行器通道
 
 `xmesh computer host` 在图形用户会话中运行，使用用户专用 Unix socket 或 Windows 命名管道接入目标内核，并通过匿名继承管道监督 Rust 原生执行器。此 host 不承载 Agent / Gateway / Ingress，也不接入 mesh。Windows SYSTEM 内核通过配置的用户 SID 管道连接图形会话。
