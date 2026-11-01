@@ -107,6 +107,29 @@ func (v *view) control(ctx context.Context, name string, raw json.RawMessage) *m
 				}
 				sort.Strings(backends)
 				row["backends"] = backends
+				info := []map[string]any{}
+				if list, ok := d.info["backends"].([]any); ok {
+					for _, item := range list {
+						b, ok := item.(map[string]any)
+						bname, _ := b["name"].(string)
+						if !ok || bname == "" {
+							continue
+						}
+						count := 0
+						for _, tool := range d.tools {
+							if toolGroup(tool.Name) == bname && v.allowed(name, tool.Name, "") {
+								count++
+							}
+						}
+						entry := map[string]any{"name": bname, "policy": b["policy"], "favorite": b["favorite"] == true, "tools": count}
+						if desc, _ := b["desc"].(string); desc != "" {
+							entry["desc"] = desc
+						}
+						info = append(info, entry)
+					}
+				}
+				sort.Slice(info, func(i, j int) bool { return info[i]["name"].(string) < info[j]["name"].(string) })
+				row["backend_info"] = info
 				groups := map[string]int{}
 				for _, tool := range d.tools {
 					if v.allowed(name, tool.Name, "") {

@@ -10,7 +10,7 @@
 
 | 工具 | 参数 | 返回 |
 | --- | --- | --- |
-| `sys.info` | 无 | `os`、`arch`、`hostname`、`home`、`path_sep`、`shells[]`、`workspaces[]`（别名、路径、描述）、`backends[]`（名称、策略、状态）、`limits`（exec/pty 配额） |
+| `sys.info` | 无 | `os`、`arch`、`hostname`、`home`、`path_sep`、`shells[]`、`workspaces[]`（别名、路径、描述）、`backends[]`（名称、策略、状态、favorite，配置了 `desc` 时含说明）、`limits`（exec/pty 配额） |
 
 ## exec（非交互）
 

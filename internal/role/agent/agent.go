@@ -608,7 +608,11 @@ func (a *Agent) info(c *config.Config, caller identity.Caller, r *cwd.Resolver) 
 	states := a.Backends.States()
 	for name, b := range c.Agent.Backends {
 		if Allowed(c, caller, "", name) {
-			backends = append(backends, map[string]any{"name": name, "policy": b.Policy, "favorite": b.Favorite, "state": states[name]})
+			entry := map[string]any{"name": name, "policy": b.Policy, "favorite": b.Favorite, "state": states[name]}
+			if b.Desc != "" {
+				entry["desc"] = b.Desc
+			}
+			backends = append(backends, entry)
 		}
 	}
 	shell, _ := pty.DefaultShell(c.Agent.PTY.DefaultShell)

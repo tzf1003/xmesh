@@ -32,6 +32,7 @@
 | `gateway.listed_groups` | 工具组名数组，缺省 `[fs, exec, pty, sys]`。`unified` 下常驻列表的组；组名是工具名第一个 `.` 之前的部分，用户后端的组名是后端名，`favorite: true` 的后端才可加入候选 |
 | `gateway.pinned_tools` | 工具名数组，缺省空。`compact` 下与 Gateway 自有工具一起列出的工具 |
 | `gateway.max_listed_tools` | 正整数，缺省 40。`unified` 常驻工具总数上限（含 Gateway 自有工具）；额外的 `favorite` 后端组按工具数从小到大加入，总数不超过上限为止 |
+| `agent.backends.*.desc` | 可选字符串，最长 200 个字符。后端的一句话说明，出现在 `sys.info` 的 `backends[]` 与 Gateway `devices.list` 的 `backend_info` 中，省略时不输出 |
 | 后端名 | 不得与内置组名 `fs`、`exec`、`pty`、`sys`、`backend`、`computer` 同名，否则拒绝启动，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
 | `agent.quota`、`gateway.quota` | 可选对象，字段 `calls_per_hour`（正整数，缺省 10000）、`max_concurrent`（正整数，缺省 64）、`max_call_duration`（Go duration，缺省 `10m`）。`agent.exec.default_timeout` 不得超过 `agent.quota.max_call_duration`，见 [CON-SEC-10](../constraints/security.md#con-sec-10) |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
