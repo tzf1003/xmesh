@@ -88,7 +88,8 @@ function main() {
     for (const file of ["package.json", "package-lock.json"]) fs.copyFileSync(path.join(here, file), path.join(prefix, file));
     fs.copyFileSync(path.join(here, "bin", "xmesh-agent-browser.mjs"), path.join(prefix, "bin", "xmesh-agent-browser.mjs"));
     const [node, npm] = npmCommand();
-    run(node, [...npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", prefix]);
+    // Run in the prefix itself: npm 11 rejects `ci --prefix DIR` from another directory as out of sync with the lock file.
+    run(node, [...npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: prefix });
   }
 
   const binary = resolveBinary(path.join(prefix, "bin"));
