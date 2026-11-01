@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -114,6 +115,57 @@ class Launcher(unittest.TestCase):
         self.assertEqual([c["rest"] for c in closes], [["--all"], ["--all"]])
         self.assertEqual([c["namespace"] for c in closes], [s["namespace"] for s in starts])
         self.assertEqual(list((self.tmp / "tmp").iterdir()), [], "policy directory was not removed")
+
+    def test_sweeps_namespaces_of_dead_launchers_only(self):
+        spaces = self.tmp / ".agent-browser" / "namespaces"
+        dead = self.free_pid()
+        for name in (f"xmesh-{dead}-deadbeef", f"xmesh-{os.getpid()}-cafef00d", "other-user-ns"):
+            (spaces / name).mkdir(parents=True)
+        stale_tmp = self.tmp / "tmp" / f"xmesh-ab-{dead}-abc"
+        stale_tmp.mkdir()
+        done = self.run_launcher(env={"AGENT_BROWSER_ALLOWED_DOMAINS": "example.com"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        closed = [r["namespace"] for r in self.records() if r.get("command") == "close"]
+        self.assertIn(f"xmesh-{dead}-deadbeef", closed)
+        self.assertNotIn(f"xmesh-{os.getpid()}-cafef00d", closed)
+        self.assertNotIn("other-user-ns", closed)
+        self.assertFalse((spaces / f"xmesh-{dead}-deadbeef").exists())
+        self.assertTrue((spaces / f"xmesh-{os.getpid()}-cafef00d").exists())
+        self.assertTrue((spaces / "other-user-ns").exists())
+        self.assertFalse(stale_tmp.exists())
+
+    def test_killed_launcher_is_swept_by_next_launch(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("AGENT_BROWSER_", "BROWSER_BACKEND_"))}
+        env.update(BROWSER_BACKEND_BIN=str(self.stub), STUB_LOG=str(self.log), BROWSER_BACKEND_TMP=str(self.tmp / "tmp"),
+                   HOME=str(self.tmp), AGENT_BROWSER_ALLOWED_DOMAINS="example.com")
+        first = subprocess.Popen(["node", str(LAUNCHER)], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        deadline = time.monotonic() + 10
+        while not [r for r in self.records() if r.get("command") == "mcp"]:
+            self.assertLess(time.monotonic(), deadline, "launcher did not start")
+            time.sleep(0.05)
+        namespace = [r for r in self.records() if r.get("command") == "mcp"][0]["namespace"]
+        spaces = self.tmp / ".agent-browser" / "namespaces"
+        (spaces / namespace).mkdir(parents=True)  # what the real daemon creates
+        first.kill()
+        first.wait()
+        first.stdin.close()
+        first.stdout.close()
+        self.run_launcher(env={"AGENT_BROWSER_ALLOWED_DOMAINS": "example.com"})
+        closed = [r["namespace"] for r in self.records() if r.get("command") == "close"]
+        self.assertIn(namespace, closed)
+        self.assertFalse((spaces / namespace).exists())
+
+    @staticmethod
+    def free_pid():
+        pid = 400000
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return pid
+            except PermissionError:
+                pass
+            pid += 1
 
 
 if __name__ == "__main__":

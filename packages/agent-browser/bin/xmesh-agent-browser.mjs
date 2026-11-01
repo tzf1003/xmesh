@@ -102,15 +102,74 @@ function isMusl() {
   }
 }
 
+const NAMESPACE_PATTERN = /^xmesh-(\d+)-[0-9a-f]{8}$/;
+const TMP_PATTERN = /^xmesh-ab-(\d+)-/;
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone else.
+    return error.code === "EPERM";
+  }
+}
+
+// A launcher killed with SIGKILL (or a crashed machine) cannot clean up, so its daemon and Chrome
+// stay until the daemon's idle timeout. Every launcher therefore sweeps the namespaces left by
+// launchers that no longer exist, at start and once a minute. A namespace is only touched when
+// its embedded launcher pid is dead; a reused pid leaves it alone until the idle timeout.
+export function sweepStale({ binary, env, home = os.homedir(), tmp = process.env.BROWSER_BACKEND_TMP || os.tmpdir(), alive = pidAlive }) {
+  const swept = [];
+  const namespaces = path.join(home, ".agent-browser", "namespaces");
+  let names = [];
+  try {
+    names = fs.readdirSync(namespaces);
+  } catch {
+    // No namespaces yet.
+  }
+  for (const name of names) {
+    const match = NAMESPACE_PATTERN.exec(name);
+    if (!match || alive(Number(match[1]))) continue;
+    spawnSync(binary, ["close", "--all"], {
+      env: { ...env, AGENT_BROWSER_NAMESPACE: name, AGENT_BROWSER_SESSION: name },
+      stdio: "ignore", timeout: 8000, windowsHide: true,
+    });
+    fs.rmSync(path.join(namespaces, name), { recursive: true, force: true });
+    swept.push(name);
+  }
+  try {
+    for (const name of fs.readdirSync(tmp)) {
+      const match = TMP_PATTERN.exec(name);
+      if (match && !alive(Number(match[1]))) fs.rmSync(path.join(tmp, name), { recursive: true, force: true });
+    }
+  } catch {
+    // Temporary directory not readable; nothing to sweep.
+  }
+  return swept;
+}
+
 function main() {
   const tools = parseArgs(process.argv.slice(2));
   const namespace = `xmesh-${process.pid}-${randomBytes(4).toString("hex")}`;
-  const dir = fs.mkdtempSync(path.join(process.env.BROWSER_BACKEND_TMP || os.tmpdir(), "xmesh-ab-"));
+  const dir = fs.mkdtempSync(path.join(process.env.BROWSER_BACKEND_TMP || os.tmpdir(), `xmesh-ab-${process.pid}-`));
   fs.chmodSync(dir, 0o700);
   const policyFile = path.join(dir, "policy.json");
   fs.writeFileSync(policyFile, JSON.stringify(policyDocument()), { mode: 0o600 });
   const env = buildEnv(process.env, namespace, policyFile);
   const binary = resolveBinary();
+  // The sweep environment carries no action policy: `close` must work even if a policy file is gone.
+  const sweepEnv = { ...process.env };
+  delete sweepEnv.AGENT_BROWSER_ACTION_POLICY;
+  const sweep = () => {
+    try {
+      sweepStale({ binary, env: sweepEnv });
+    } catch (error) {
+      process.stderr.write(`xmesh-agent-browser: sweep failed: ${error.message}\n`);
+    }
+  };
+  sweep();
+  setInterval(sweep, 60_000).unref();
 
   const child = spawn(binary, ["mcp", "--tools", tools], { env, stdio: ["pipe", "pipe", "inherit"] });
   child.on("error", (error) => {

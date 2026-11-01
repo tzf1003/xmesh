@@ -33,3 +33,16 @@
 - 离线设备使用 `AGENT_BROWSER_EXECUTABLE_PATH`。
 - `state` 工具组的加密登录态；本期默认不启用。
 - 经 tailnet/DERP 的跨设备调用；验收只走本机 Gateway。
+
+## 强杀后残留的回收（补充）
+
+真机补测发现 macOS 上包装器被 `kill -9` 后 daemon 与 Chrome 只能等 5 分钟空闲超时。包装器现在在启动时和每分钟清扫 pid 已不存在的 `xmesh-<pid>-*` 命名空间（`close --all` 加删除目录），并清理 `xmesh-ab-<pid>-*` 临时目录。
+
+| 检查 | 结果（Linux，Chrome 156） |
+| --- | --- |
+| `kill -9` 包装器后 | 14 个 agent-browser/Chrome 进程残留 |
+| 随后启动下一个包装器 | 残留被清到只剩新包装器自己的 1 个进程 |
+| 新包装器正常退出后 | 0 个进程 |
+| `scripts/test_agent_browser.py` | 9 项通过，新增：只清扫死亡 pid 的命名空间；强杀后由下一次启动清扫 |
+
+仍未覆盖：没有新包装器启动时依赖空闲超时；Windows 强杀仍需真机复验（`exec.run` 的干扰使上一轮无定论）。
