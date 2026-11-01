@@ -28,6 +28,8 @@ type Options struct {
 	Authorize  bool
 	Version    string
 	Factory    func() (computer.Provider, error)
+	// AuthorizedFactory starts the executor with local permission setup. Defaults to the native executor.
+	AuthorizedFactory func() (computer.Provider, error)
 }
 
 type Broker struct {
@@ -56,6 +58,9 @@ func Start(o Options) (*Broker, error) {
 	if o.Factory == nil {
 		o.Factory = func() (computer.Provider, error) { return computer.StartProcess(o.HelperPath) }
 	}
+	if o.AuthorizedFactory == nil {
+		o.AuthorizedFactory = func() (computer.Provider, error) { return computer.StartAuthorizedProcess(o.HelperPath) }
+	}
 	l, bound, err := control.Listen(control.ListenOptions{StateDir: o.StateDir, Node: "computer"})
 	if err != nil {
 		return nil, err
@@ -72,7 +77,7 @@ func Start(o Options) (*Broker, error) {
 		return nil, err
 	}
 	if o.Authorize && !b.suspended {
-		p, e := computer.StartAuthorizedProcess(o.HelperPath)
+		p, e := o.AuthorizedFactory()
 		if e != nil {
 			_ = l.Close()
 			return nil, e
@@ -246,7 +251,7 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 		if old != nil {
 			_ = old.Close()
 		}
-		p, err := computer.StartAuthorizedProcess(b.options.HelperPath)
+		p, err := b.options.AuthorizedFactory()
 		if err == nil {
 			b.provider = p
 			b.last = time.Now()
