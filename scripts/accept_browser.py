@@ -122,7 +122,7 @@ def main():
         direct, gateway = address(), address()
         cfg = {"schema_version": 2, "node": {"name": "browser-accept", "roles": ["agent", "gateway"]},
                "mesh": {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}},
-               "gateway": {"listen": gateway, "pats": pats},
+               "gateway": {"listen": gateway, "pats": pats, "tool_surface": "full"},
                "agent": {"default_cwd": str(work), "cwd_policy": {"allow": [str(work)]},
                          "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}},
                          "backends": {"browser": {

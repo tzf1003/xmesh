@@ -97,7 +97,7 @@ def main():
         log = root / "fake-ida.jsonl"
         direct, gateway = address(), address()
         cfg = {"schema_version": 2, "node": {"name": "backend-smoke", "roles": ["agent", "gateway"]},
-               "mesh": {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}}, "gateway": {"listen": gateway},
+               "mesh": {"lan": {"enabled": True, "mdns": True}, "tailnet": {"enabled": False}}, "gateway": {"listen": gateway, "tool_surface": "full"},
                "agent": {"default_cwd": str(workspace), "cwd_policy": {"allow": [str(workspace)]},
                          "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}},
                          "backends": {"ida": {"transport": "stdio", "policy": "exclusive", "idle_timeout": "30m",

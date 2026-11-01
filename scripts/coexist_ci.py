@@ -202,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix="xmesh-coexist-live-") as temp:
                         "authkey_file": "/work/authkey",
                     },
                 },
-                "gateway": {"listen": "0.0.0.0:8080", "access": ["localhost", "lan"]},
+                "gateway": {"listen": "0.0.0.0:8080", "access": ["localhost", "lan"], "tool_surface": "full"},
                 "agent": {
                     "default_cwd": f"/work/{name}/workspace",
                     "cwd_policy": {"allow": [f"/work/{name}/workspace"]},
