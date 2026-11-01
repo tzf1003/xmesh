@@ -104,6 +104,7 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.listIngressClients!();
   await api.revokeIngressClient!("c1");
   await api.rotateIngressPassword!("a-long-enough-password");
+  await api.setToolSurface!("unified");
   await api.exportPair!();
   await api.importPair!({ text: "t", fingerprint: "f" });
   await api.getPairPassword!();
@@ -125,7 +126,7 @@ test("panel data methods use their own fixed channels and forward only the calle
     [
       CHANNELS.getSessions, CHANNELS.getConfig, CHANNELS.putConfig, CHANNELS.patchConfig, CHANNELS.patchBackendEnv, CHANNELS.clearBackendEnv,
       CHANNELS.listPats, CHANNELS.createPat, CHANNELS.rotatePat, CHANNELS.deletePat, CHANNELS.listIngressClients, CHANNELS.revokeIngressClient,
-      CHANNELS.rotateIngressPassword, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.getPairPassword,
+      CHANNELS.rotateIngressPassword, CHANNELS.setToolSurface, CHANNELS.exportPair, CHANNELS.importPair, CHANNELS.getPairPassword,
       CHANNELS.setPairPassword, CHANNELS.clearPairPassword, CHANNELS.discoverPairs, CHANNELS.connectPair,
       CHANNELS.queryAudit, CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
       CHANNELS.ci,

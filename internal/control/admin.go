@@ -14,6 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"go.yaml.in/yaml/v3"
+
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/device"
@@ -560,3 +562,58 @@ func (s *Server) putIngressPassword(w http.ResponseWriter, r *http.Request, _ *c
 type PasswordSourceError struct{}
 
 func (*PasswordSourceError) Error() string { return "password is not read from a file" }
+
+// putIngressToolSurface sets gateway.tool_surface, the tools/list shape of the gateway and the ingress
+// (CTR-CTL-10). It writes through the same validated edit path as PUT /v2/gateway; the value is hot, so
+// connected clients re-read their tool list and nothing needs a restart.
+func (s *Server) putIngressToolSurface(w http.ResponseWriter, r *http.Request, _ *call) {
+	if !s.o.Store.Get().HasRole("ingress") {
+		failWith(w, newError(v2.ErrRoleDisabled, "此节点没有 ingress 角色"))
+		return
+	}
+	var req v2.IngressToolSurfaceRequest
+	if e := decode(r, &req, true); e != nil {
+		failWith(w, e)
+		return
+	}
+	switch req.ToolSurface {
+	case "full", "unified", "compact":
+	default:
+		failWith(w, argError("tool_surface", "tool_surface 须为 unified、compact 或 full"))
+		return
+	}
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	old, err := os.ReadFile(s.o.Store.Path())
+	if err != nil {
+		failWith(w, newError(v2.ErrInternal, "无法读取配置文件"))
+		return
+	}
+	edits := []Edit{{Path: "/gateway/tool_surface", Value: req.ToolSurface}}
+	if !gatewayListenWritten(old) {
+		// The schema requires gateway.listen whenever the gateway section exists; keep the address the node runs with.
+		edits = append([]Edit{{Path: "/gateway/listen", Value: s.o.Store.Get().Gateway.Listen}}, edits...)
+	}
+	if !s.editConfigLocked(w, old, edits) {
+		return
+	}
+	applyErrors := []v2.ApplyError{}
+	if s.o.Applier != nil {
+		settle, cancel := context.WithTimeout(r.Context(), applySettleTimeout)
+		if errs := s.o.Applier.Settle(settle, false); errs != nil {
+			applyErrors = errs
+		}
+		cancel()
+	}
+	writeJSON(w, 200, v2.IngressToolSurfaceResponse{ToolSurface: req.ToolSurface, RestartRequired: false, ApplyErrors: applyErrors})
+}
+
+// gatewayListenWritten reports whether the file spells out gateway.listen.
+func gatewayListenWritten(file []byte) bool {
+	var doc struct {
+		Gateway struct {
+			Listen *string `yaml:"listen"`
+		} `yaml:"gateway"`
+	}
+	return yaml.Unmarshal(file, &doc) == nil && doc.Gateway.Listen != nil
+}

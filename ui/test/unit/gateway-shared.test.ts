@@ -13,7 +13,7 @@ import {
   listenScope,
   parseCidr,
 } from "../../src/shared/gateway";
-import { parseGatewayCopy, parseGatewayUpdate } from "../../src/shared/ipc";
+import { parseGatewayCopy, parseGatewayUpdate, parseToolSurface } from "../../src/shared/ipc";
 
 test("IPv4: four decimal octets 0..255, no leading zeros", () => {
   for (const ok of ["0.0.0.0", "192.168.1.20", "255.255.255.255", "10.0.0.1"]) assert.equal(isIPv4(ok), true, ok);
@@ -135,4 +135,9 @@ test("gateway update: a whole reach replacement, validated entry by entry, with 
   ]) {
     assert.equal(parseGatewayUpdate(bad), undefined, JSON.stringify(bad).slice(0, 120));
   }
+});
+
+test("parseToolSurface accepts only the three tool list shapes", () => {
+  for (const v of ["unified", "compact", "full"]) assert.equal(parseToolSurface(v), v);
+  for (const v of ["", "Full", "bogus", undefined, 1, null, {}]) assert.equal(parseToolSurface(v), undefined);
 });

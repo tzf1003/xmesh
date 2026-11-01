@@ -1,13 +1,15 @@
 import type { JSX } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Banner, Confirm, Empty, ErrorBanner, Field, NotSupported, PageHead, ResourceView } from "../components";
 import { useResource } from "../hooks";
 import { errorText, useT } from "../i18n";
+import type { Key } from "../messages";
 import { formatTime } from "../lib/format";
 import { PASSWORD_MAX, PASSWORD_MIN, hasEdgeSpace, type ActionError } from "../../shared/ipc";
 import type { IngressClient } from "../../shared/control";
+import { TOOL_SURFACES, type ToolSurface } from "../../shared/ipc";
 
 export function Ingress({ ctx }: { ctx: PageContext }): JSX.Element | null {
   const t = useT();
@@ -47,6 +49,7 @@ export function Ingress({ ctx }: { ctx: PageContext }): JSX.Element | null {
           {t("ingress.issuer")}: <code data-testid="issuer">{info?.issuer ?? "—"}</code>
         </p>
       </section>
+      <ToolSurfaceSetting ctx={ctx} current={info?.tool_surface} />
       <Clients ctx={ctx} />
       <Password ctx={ctx} />
     </div>
@@ -175,6 +178,60 @@ function Password({ ctx }: { ctx: PageContext }): JSX.Element {
           {t("ingress.rotate")}
         </button>
       </form>
+    </section>
+  );
+}
+
+const SURFACE_KEYS: Record<ToolSurface, { name: Key; desc: Key }> = {
+  unified: { name: "ingress.surfaceUnified", desc: "ingress.surfaceUnifiedDesc" },
+  compact: { name: "ingress.surfaceCompact", desc: "ingress.surfaceCompactDesc" },
+  full: { name: "ingress.surfaceFull", desc: "ingress.surfaceFullDesc" },
+};
+const SURFACE_SHORT: Record<ToolSurface, Key> = { unified: "ingress.surfaceUnified", compact: "ingress.surfaceCompact", full: "ingress.surfaceFull" };
+
+/** `gateway.tool_surface`: the shape of the MCP tool list. Hot in the kernel, so a pick is saved at once. */
+function ToolSurfaceSetting({ ctx, current }: { ctx: PageContext; current: string | undefined }): JSX.Element {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<ActionError | undefined>();
+  // Right after a save the status may still show the old value; `saved` bridges until the kernel's status catches up.
+  const [saved, setSaved] = useState<ToolSurface | undefined>();
+  useEffect(() => setSaved(undefined), [current]);
+  const reported = (TOOL_SURFACES as readonly string[]).includes(current ?? "") ? (current as ToolSurface) : undefined;
+  const known = saved ?? reported;
+  const writable = ctx.can("config.write");
+  const pick = async (value: ToolSurface): Promise<void> => {
+    if (value === known || busy) return;
+    setBusy(true);
+    const r = await getApi().setToolSurface(value);
+    setBusy(false);
+    if (r.ok) {
+      setErr(undefined);
+      setSaved(value);
+      ctx.toast(t("ingress.surfaceSaved", { name: t(SURFACE_SHORT[value]) }));
+    } else setErr(r.error);
+  };
+  return (
+    <section class="card" data-testid="tool-surface">
+      <h2>{t("ingress.surface")}</h2>
+      <p class="hint">{t("ingress.surfaceHint")}</p>
+      {current === undefined ? (
+        <p class="hint" data-testid="tool-surface-unavailable">{t("ingress.surfaceUnavailable")}</p>
+      ) : (
+        <fieldset disabled={!writable || busy} aria-label={t("ingress.surface")}>
+          {TOOL_SURFACES.map((v) => (
+            <label class="check" key={v}>
+              <input type="radio" name="tool-surface" checked={known === v} onChange={() => void pick(v)} data-testid={`tool-surface-${v}`} />
+              <span>
+                <strong>{t(SURFACE_KEYS[v].name)}</strong>
+                <span class="hint"> {t(SURFACE_KEYS[v].desc)}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <p class="hint">{t("ingress.surfaceNote")}</p>
+      {err && <ErrorBanner error={err} testid="tool-surface-error" />}
     </section>
   );
 }

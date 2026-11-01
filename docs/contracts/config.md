@@ -28,7 +28,7 @@
 | `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供。可选 `ingress.tunnel_listen` 指定隧道到达入口的本机地址，必须是 `127.0.0.1:端口`，只在 `tunnel` 下允许；命令行 `--tunnel-listen` 优先，两者都没有时为 `127.0.0.1:8443`。入口角色热应用，改端口后入口重新监听 |
 | `ingress.oauth.dynamic_client_scopes` | 可选 scope 数组，语法与 `clients.*.scopes` 相同。动态注册客户端的 scope 上限，缺省 `["devices:read"]`，空数组表示只能完成 OAuth，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
 | `ingress.oauth.refresh_token_ttl` | 可选 Go 时长，刷新令牌的有效期，范围 `1h` 到 `8760h`（365 天），缺省 `720h`（30 天）。刷新令牌每次使用都会旋转并重新计时，客户端只要在这段时间内回来一次就不必重新授权；访问令牌固定 1 小时。令牌保存在入口进程内存，入口重启后须重新授权，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
-| `gateway.tool_surface` | `full`（缺省）、`unified`、`compact`。工具列表形态，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
+| `gateway.tool_surface` | `unified`（缺省，2026-11-01 起）、`full`、`compact`。工具列表形态；旧配置不写此键的节点升级后得到 `unified`，要保持逐设备完整列表就写 `full`，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
 | `gateway.listed_groups` | 工具组名数组，缺省 `[fs, exec, pty, sys]`。`unified` 下常驻列表的组；组名是工具名第一个 `.` 之前的部分，用户后端的组名是后端名，`favorite: true` 的后端才可加入候选 |
 | `gateway.pinned_tools` | 工具名数组，缺省空。`compact` 下与 Gateway 自有工具一起列出的工具 |
 | `gateway.max_listed_tools` | 正整数，缺省 40。`unified` 常驻工具总数上限（含 Gateway 自有工具）；额外的 `favorite` 后端组按工具数从小到大加入，总数不超过上限为止 |

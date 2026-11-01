@@ -316,6 +316,19 @@ test("ingress: revoke a client, rotate the password (write-only)", async () => {
   assert.deepEqual(last(k, "PUT", "/v2/ingress/password")?.body, { password: "correct horse battery" });
 });
 
+test("ingress: the tool list shape is a hot write to /v2/ingress/tool-surface", async () => {
+  const { k, service } = await setup();
+  const r = await service.setToolSurface("compact");
+  assert.ok(r.ok);
+  assert.equal(r.data.tool_surface, "compact");
+  assert.equal(r.data.restart_required, false);
+  assert.equal(k.panel.toolSurface, "compact");
+  assert.deepEqual(last(k, "PUT", "/v2/ingress/tool-surface")?.body, { tool_surface: "compact" });
+  const bad = await service.setToolSurface("bogus" as never);
+  assert.ok(!bad.ok);
+  assert.equal(k.panel.toolSurface, "compact");
+});
+
 test("pair export, and import only with a matching fingerprint", async () => {
   const { k, service } = await setup();
   const exp = await service.exportPair();

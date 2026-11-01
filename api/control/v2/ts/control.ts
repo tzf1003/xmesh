@@ -194,6 +194,10 @@ export type ControlEvent =
   | ConfigEvent
   | LifecycleEvent;
 /**
+ * gateway.tool_surface 的取值（CTR-GW-08）。缺省 unified。
+ */
+export type ToolSurface = "unified" | "compact" | "full";
+/**
  * 设备 SPKI 公钥的 SHA-256，与 device_id 的摘要一致。
  */
 export type PairFingerprint = string;
@@ -1492,6 +1496,10 @@ export interface IngressInfo {
    * OAuth issuer。尚未就绪时是 null。
    */
   issuer: string | null;
+  /**
+   * API 2.6 起。gateway.tool_surface 当前取值（Gateway 与 Ingress 共用）；旧内核没有这个字段。
+   */
+  tool_surface?: "unified" | "compact" | "full";
 }
 export interface PeerSummary {
   /**
@@ -1595,6 +1603,20 @@ export interface IngressPasswordRequest {
 }
 export interface IngressPasswordResponse {
   rotated_at: Timestamp;
+}
+export interface IngressToolSurfaceRequest {
+  /**
+   * API 2.6 起。写入 gateway.tool_surface；Gateway 与 Ingress 角色共用这个键，热加载。
+   */
+  tool_surface: "unified" | "compact" | "full";
+}
+export interface IngressToolSurfaceResponse {
+  tool_surface: ToolSurface;
+  /**
+   * 恒为 false：tool_surface 热加载。字段与 PUT /v2/gateway 的响应保持一致。
+   */
+  restart_required: boolean;
+  apply_errors: ApplyError[];
 }
 export interface PairDocument {
   name: NodeName;
@@ -2168,9 +2190,13 @@ export interface IngressInfo1 {
    * OAuth issuer。尚未就绪时是 null。
    */
   issuer: string | null;
+  /**
+   * API 2.6 起。gateway.tool_surface 当前取值（Gateway 与 Ingress 共用）；旧内核没有这个字段。
+   */
+  tool_surface?: "unified" | "compact" | "full";
 }
 
-export const CONTROL_API_VERSION = "2.5" as const;
+export const CONTROL_API_VERSION = "2.6" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -2849,6 +2875,25 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     ]
   },
   {
+    "id": "control.ingress.toolsurface.put",
+    "method": "PUT",
+    "path": "/v2/ingress/tool-surface",
+    "capability": "config.write",
+    "since": "2.6",
+    "query": null,
+    "body": "IngressToolSurfaceRequest",
+    "response": "IngressToolSurfaceResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "config_invalid",
+      "role_disabled",
+      "internal"
+    ]
+  },
+  {
     "id": "control.audit.list",
     "method": "GET",
     "path": "/v2/audit",
@@ -3107,6 +3152,7 @@ export interface ControlRouteTypes {
   "control.ingress.clients.list": { query: undefined; body: undefined; response: IngressClientsResponse };
   "control.ingress.clients.delete": { query: undefined; body: undefined; response: undefined };
   "control.ingress.password.put": { query: undefined; body: IngressPasswordRequest; response: IngressPasswordResponse };
+  "control.ingress.toolsurface.put": { query: undefined; body: IngressToolSurfaceRequest; response: IngressToolSurfaceResponse };
   "control.audit.list": { query: AuditQuery; body: undefined; response: AuditResponse };
   "control.pair.trust.update": { query: undefined; body: PairTrustUpdateRequest; response: PairTrustUpdateResponse };
   "control.pair.trust.delete": { query: undefined; body: undefined; response: undefined };

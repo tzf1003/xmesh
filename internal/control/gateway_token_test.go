@@ -185,3 +185,34 @@ func Test_GatewayDefaultPatRecoversInterruptedCreation(t *testing.T) {
 		})
 	}
 }
+
+// PUT /v2/ingress/tool-surface writes gateway.tool_surface through the hot path: no restart, bad values and
+// nodes without the ingress role are refused.
+func Test_IngressToolSurface(t *testing.T) {
+	plain := newFixture(t)
+	apiError(t, plain.do("PUT", "/v2/ingress/tool-surface", v2.IngressToolSurfaceRequest{ToolSurface: "full"}, nil), v2.ErrRoleDisabled)
+	plain.server.Close()
+
+	f := newFixtureConfig(t, tailnetIngressConfig)
+	if got := f.store.Get().Gateway.ToolSurface; got != "unified" {
+		t.Fatalf("default tool_surface = %q", got)
+	}
+	var out v2.IngressToolSurfaceResponse
+	decodeAs(t, f.ok("PUT", "/v2/ingress/tool-surface", v2.IngressToolSurfaceRequest{ToolSurface: "full"}, "IngressToolSurfaceResponse"), &out)
+	if out.ToolSurface != "full" || out.RestartRequired || len(out.ApplyErrors) != 0 {
+		t.Fatalf("%+v", out)
+	}
+	if got := f.store.Get().Gateway.ToolSurface; got != "full" {
+		t.Fatalf("store has %q", got)
+	}
+	raw, _ := os.ReadFile(f.path)
+	if !strings.Contains(string(raw), "tool_surface: full") {
+		t.Fatalf("file lacks the setting:\n%s", raw)
+	}
+	for _, bad := range []string{"", "bogus", "Full"} {
+		apiError(t, f.do("PUT", "/v2/ingress/tool-surface", v2.IngressToolSurfaceRequest{ToolSurface: bad}, nil), v2.ErrInvalidArgs)
+	}
+	if after, _ := os.ReadFile(f.path); string(after) != string(raw) {
+		t.Fatal("a refused update changed the file")
+	}
+}

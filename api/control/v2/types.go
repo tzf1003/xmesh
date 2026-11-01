@@ -173,6 +173,9 @@ type GatewayAddress struct {
 type IngressInfo struct {
 	Listen string  `json:"listen"`
 	Issuer *string `json:"issuer"`
+	// ToolSurface is gateway.tool_surface as configured now (API 2.6): unified, compact or full.
+	// Older kernels leave it out.
+	ToolSurface string `json:"tool_surface,omitempty"`
 }
 
 type PeerSummary struct {
@@ -594,6 +597,19 @@ type IngressPasswordRequest struct {
 
 type IngressPasswordResponse struct {
 	RotatedAt Time `json:"rotated_at"`
+}
+
+// IngressToolSurfaceRequest sets gateway.tool_surface (CTR-CTL-10, API 2.6). The key is shared by the
+// gateway and the ingress role.
+type IngressToolSurfaceRequest struct {
+	ToolSurface string `json:"tool_surface"`
+}
+
+// IngressToolSurfaceResponse echoes what was written. RestartRequired is always false: the value is hot.
+type IngressToolSurfaceResponse struct {
+	ToolSurface     string       `json:"tool_surface"`
+	RestartRequired bool         `json:"restart_required"`
+	ApplyErrors     []ApplyError `json:"apply_errors"`
 }
 
 // AuditQuery is the query string of GET /v2/audit. Empty fields are left out.

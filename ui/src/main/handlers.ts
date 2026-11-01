@@ -26,6 +26,7 @@ import {
   parseCopyKind,
   parseGatewayCopy,
   parseGatewayUpdate,
+  parseToolSurface,
   parseDrainMode,
   parseExternalKey,
   parseInstanceId,
@@ -214,6 +215,10 @@ export function createHandlers({ kernel, onboarding, transfers, playground, cont
   handle(CHANNELS.rotateIngressPassword, (password: unknown) => {
     const v = parsePassword(password);
     return v === undefined ? bad("password") : service.rotateIngressPassword(v);
+  });
+  handle(CHANNELS.setToolSurface, (value: unknown) => {
+    const v = parseToolSurface(value);
+    return v === undefined ? bad("tool surface") : service.setToolSurface(v);
   });
   handle(CHANNELS.exportPair, () => service.exportPair());
   handle(CHANNELS.importPair, (args: unknown) => {

@@ -138,7 +138,8 @@
       "required": ["listen", "issuer"],
       "properties": {
         "listen": { "enum": ["funnel", "public:443", "tunnel"] },
-        "issuer": { "type": ["string", "null"], "description": "OAuth issuer。尚未就绪时是 null。" }
+        "issuer": { "type": ["string", "null"], "description": "OAuth issuer。尚未就绪时是 null。" },
+        "tool_surface": { "enum": ["unified", "compact", "full"], "description": "API 2.6 起。gateway.tool_surface 当前取值（Gateway 与 Ingress 共用）；旧内核没有这个字段。" }
       }
     },
     "PeerSummary": {

@@ -275,7 +275,7 @@ func Test_CTRCFG01_GatewayToolSurfaceDefaultsAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := cfg.Gateway
-	if g.ToolSurface != "full" || g.MaxListedTools != 40 || len(g.PinnedTools) != 0 || strings.Join(g.ListedGroups, ",") != "fs,exec,pty,sys" {
+	if g.ToolSurface != "unified" || g.MaxListedTools != 40 || len(g.PinnedTools) != 0 || strings.Join(g.ListedGroups, ",") != "fs,exec,pty,sys" {
 		t.Fatal("tool surface defaults", g.ToolSurface, g.ListedGroups, g.PinnedTools, g.MaxListedTools)
 	}
 	bad := map[string]any{"tool_surface": "bogus", "listed_groups": []any{""}, "pinned_tools": []any{""}, "max_listed_tools": -1}

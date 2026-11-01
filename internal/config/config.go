@@ -552,7 +552,7 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.Policy.Isolation = "L1"
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
-	c.Gateway.ToolSurface = "full"
+	c.Gateway.ToolSurface = "unified" // 2026-11-01 起缺省为 unified；库内 gateway.Surface 零值仍是 full
 	c.Gateway.ListedGroups = []string{"fs", "exec", "pty", "sys"}
 	c.Gateway.PinnedTools = []string{}
 	c.Gateway.MaxListedTools = 40

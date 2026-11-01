@@ -268,6 +268,7 @@ export class FakeKernel {
       ...this.status,
       // The gateway block always follows the reach the panel data holds, as the kernel's status does.
       ...(this.status.gateway !== undefined && { gateway: this.panel.gatewayInfo() }),
+      ...(this.status.ingress !== undefined && { ingress: { ...this.status.ingress, tool_surface: this.panel.toolSurface as "unified" | "compact" | "full" } }),
       ...(this.playground && { gateway: { ...this.panel.gatewayInfo(), url: this.playground.url, addresses: [{ kind: "localhost" as const, host: "127.0.0.1", url: this.playground.url }] } }),
       // So do the backends: the configured ones, with the names (never the values) of their environment variables.
       backends: this.panel.backendRows(),
@@ -384,7 +385,7 @@ export class FakeKernel {
       return;
     }
     const cap = PANEL_ROUTE_CAPS.find(([prefix]) => url.split("?")[0]!.startsWith(prefix));
-    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v2/config" || url.split("?")[0] === "/v2/preferred-ip/run" ? "config.write" : cap[1])) {
+    if (cap && this.requires(res, method !== "GET" && cap[0] === "/v2/config" || url.split("?")[0] === "/v2/preferred-ip/run" || url === "/v2/ingress/tool-surface" ? "config.write" : cap[1])) {
       const request = body as { content?: string; dry_run?: boolean; authkey?: string } | null;
       if (method === "PUT" && url === "/v2/config" && request?.authkey !== undefined) {
         const preview = this.panel.handle(method, url, { ...request, dry_run: true }, ifMatch);

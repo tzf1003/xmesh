@@ -24,6 +24,7 @@ import type {
   GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
+  IngressToolSurfaceResponse,
   PairConnectResponse,
   PairDiscoveredResponse,
   PairExportResponse,
@@ -56,6 +57,7 @@ import {
   type PairConnectArgs,
   type PairImportArgs,
   type PatCreateArgs,
+  type ToolSurface,
 } from "../shared/ipc";
 import { DENY_FILE_NAME, isAuthKey } from "../shared/setup";
 import type { ControlClient } from "./client";
@@ -320,6 +322,11 @@ export class PanelService {
 
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>> {
     return this.data("ingress", (c) => c.call("PUT", "/v2/ingress/password", { body: { password } }));
+  }
+
+  /** The value is one of the three the kernel accepts (checked in the handler). The change is hot. */
+  setToolSurface(value: ToolSurface): Promise<DataResult<IngressToolSurfaceResponse>> {
+    return this.data("config.write", (c) => c.call("PUT", "/v2/ingress/tool-surface", { body: { tool_surface: value } }));
   }
 
   exportPair(): Promise<DataResult<PairExportResponse>> {
