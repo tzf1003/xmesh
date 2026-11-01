@@ -24,7 +24,7 @@
     {"alias": "foo", "path": "C:\\Users\\x\\repos\\foo", "desc": "主项目 (Rust)"}
   ],
   "backends": [
-    {"name": "ida", "policy": "exclusive", "state": "running", "favorite": true}
+    {"name": "ida", "policy": "exclusive", "state": "running", "favorite": true, "desc": "IDA Pro 反汇编"}
   ],
   "limits": {
     "exec_shared": 4,

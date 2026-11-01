@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tzf1003/xmesh/docs/contracts/schemas"
@@ -421,6 +422,7 @@ type Backend struct {
 	Favorite        bool     `json:"favorite"`
 	ShutdownTimeout string   `json:"shutdown_timeout,omitempty"`
 	ProcessCleanup  string   `json:"process_cleanup,omitempty"`
+	Desc            string   `json:"desc,omitempty"`
 }
 type Grant struct {
 	Backends []string `json:"backends"`
@@ -782,8 +784,12 @@ func (c *Config) Validate() error {
 		}
 	}
 	for name, b := range c.Agent.Backends {
-		if name == "computer" {
-			return fail("/agent/backends/computer: 保留名称")
+		switch name {
+		case "fs", "exec", "pty", "sys", "backend", "computer":
+			return fail("/agent/backends/" + name + ": 保留名称，不得与内置工具组同名")
+		}
+		if utf8.RuneCountInString(b.Desc) > 200 {
+			return fail("/agent/backends/" + name + "/desc: 不得超过 200 个字符")
 		}
 		if b.ProcessCleanup != "" && b.ProcessCleanup != "tree" {
 			return fail("/agent/backends/" + name + "/process_cleanup")

@@ -55,6 +55,8 @@ Gateway 的自有工具（`devices.list`、`tools.search`、`tools.call`、`sess
 
 `groups` 是工具组到该设备工具数的映射，组名为工具名第一个 `.` 之前的部分（内置 `fs`、`exec`、`pty`、`sys`、`backend`、`computer`，用户后端则是后端名）。模型据此一次得知设备有没有浏览器、桌面控制或某个后端，不必为此搜索。`backends` 字段保留。
 
+每行另含 `backend_info`：该设备用户后端的数组，按 `name` 排序，元素为 `{name, desc?, policy, favorite, tools}`。`desc` 是后端配置的一句话说明（最长 200 字符），未配置时省略；`policy`、`favorite` 来自设备 `sys.info`；`tools` 是该设备工具表中组名等于后端名、且调用方 scope 允许的工具数。`backends`（仅名称数组）保持不变。设备尚未读到 `sys.info` 时没有该字段。
+
 `id` 是 `node.name`。在线数据来自最近一次成功的 `sys.info`。从未成功过的新节点 `online: true` 但 `os` 可为空，并带 `stale: true`。离线节点保留在列表里最多 24 小时，`online: false`，方便模型解释「刚才那台没了」。超过 24 小时删除。
 
 scope 不含 `devices:read` 的客户端得到 `unauthorized`。
@@ -210,6 +212,14 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 6. 配置校验拒绝与内置组名（`fs`、`exec`、`pty`、`sys`、`backend`、`computer`）同名的后端，否则 `<后端>.<工具>` 会与内置组混在一起。
 
 `compact`：`pinned_tools` 里的工具按 unified 的规则（去重、注入 `device`）列出，其余只经 `tools.search` 与 `tools.call`。`computer.*` 缺省不在 `listed_groups` 内。
+
+### 按连接选择
+
+MCP 地址可带查询参数 `?surface=full|unified|compact`，只替换这一个会话的 `tool_surface`，`listed_groups`、`pinned_tools`、`max_listed_tools` 仍取全局配置。它只改变呈现，不改变授权：scope 与按目标设备的校验一视同仁。值不在这三者内时请求返回 400。省略则用全局设置。
+
+### 首次列表的等待
+
+`full` 下首次 `tools/list` 等待其他在线设备的首份能力表（[CTR-GW-04](#ctr-gw-04)）。`unified` 与 `compact` 在 `listed_groups` 与 `pinned_tools` 只含内置组时不等待其他设备：常驻部分来自内置工具，本机与默认设备已就绪，列表不依赖慢设备。含后端组时仍等待。慢设备上的 `favorite` 后端晚到后经 `tools/list_changed` 加入。
 
 ### 调用改写
 

@@ -134,6 +134,8 @@ type view struct {
 	generation uint64
 	catalog    [32]byte
 	closed     bool
+	// surfaceMode is the ?surface= the client connected with; it overrides gateway.tool_surface for this session only (CTR-GW-08).
+	surfaceMode string
 	// listed holds, per device, when tools/list stops waiting for its first
 	// catalogue. The deadline is set by the first list that sees the device, so
 	// concurrent or retried lists share one listWait and a slow device delays
@@ -315,7 +317,9 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 		if r.Header.Get("X-Xmesh-Origin") == "panel" {
 			p.Origin = "panel"
 		}
-		return g.newView(p).server
+		v := g.newView(p)
+		v.surfaceMode = r.URL.Query().Get("surface")
+		return v.server
 	}, &mcp.StreamableHTTPOptions{SessionTimeout: 30 * time.Minute, MaxRequestBodyBytes: maxRPCBodyBytes})
 	protected := http.NewCrossOriginProtection().Handler(handler)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +333,10 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 			return
 		}
 		if e := precheck(w, r); e {
+			return
+		}
+		if mode := r.URL.Query().Get("surface"); mode != "" && mode != SurfaceFull && mode != SurfaceUnified && mode != SurfaceCompact {
+			http.Error(w, "surface 参数无效", 400)
 			return
 		}
 		id := r.Header.Get("Mcp-Session-Id")
@@ -434,7 +442,7 @@ func (g *Gateway) newView(p Principal) *view {
 					if device != "" && device != g.opts.LocalPeer.Name {
 						v.waitReady(ctx, device)
 					}
-					if g.surface.Load().Mode != SurfaceCompact {
+					if v.waitsForOthers() {
 						v.waitOthers(ctx, g.opts.LocalPeer.Name, device)
 					}
 				}
@@ -451,7 +459,7 @@ func (g *Gateway) newView(p Principal) *view {
 						v.mu.Unlock()
 						var target string
 						_ = json.Unmarshal(deviceRaw, &target)
-						if target == "" && g.surface.Load().Mode != SurfaceFull {
+						if target == "" && v.surfaceNow().Mode != SurfaceFull {
 							return agent.Result(nil, v.missingDevice(name)), nil
 						}
 						if target != "" {
@@ -499,7 +507,7 @@ func (g *Gateway) newView(p Principal) *view {
 					v.attachSchema(out, r.(*mcp.CallToolRequest).Params.Name)
 				}
 			}
-			if e == nil && method == "tools/list" && g.surface.Load().Mode != SurfaceFull {
+			if e == nil && method == "tools/list" && v.surfaceNow().Mode != SurfaceFull {
 				if list, ok := result.(*mcp.ListToolsResult); ok {
 					visible := []*mcp.Tool{}
 					for _, t := range list.Tools {
@@ -507,7 +515,7 @@ func (g *Gateway) newView(p Principal) *view {
 							visible = append(visible, t)
 						}
 					}
-					list.Tools = append(visible, v.unifiedTools(*g.surface.Load())...)
+					list.Tools = append(visible, v.unifiedTools(v.surfaceNow())...)
 				}
 			} else if e == nil && method == "tools/list" {
 				if list, ok := result.(*mcp.ListToolsResult); ok {
@@ -839,7 +847,7 @@ func (v *view) publish(generation uint64) {
 		v.names = append(v.names, full)
 	}
 	sort.Strings(v.names)
-	encoded, _ := json.Marshal([]any{entries, visibility, v.defaultDeviceLocked(), v.g.surface.Load()})
+	encoded, _ := json.Marshal([]any{entries, visibility, v.defaultDeviceLocked(), v.surfaceNow()})
 	catalog := sha256.Sum256(encoded)
 	same := v.catalog == catalog && v.generation == generation
 	v.catalog = catalog

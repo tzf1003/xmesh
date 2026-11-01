@@ -137,7 +137,7 @@ func (v *view) rewriteCall(call *mcp.CallToolRequest) (rejected *mcp.CallToolRes
 		call.Params.Name, call.Params.Arguments = tool, in.Arguments
 		return nil, true
 	}
-	if v.g.surface.Load().Mode == SurfaceFull || strings.Contains(name, "/") || gatewayTool(name) {
+	if v.surfaceNow().Mode == SurfaceFull || strings.Contains(name, "/") || gatewayTool(name) {
 		return nil, false
 	}
 	var args map[string]json.RawMessage
@@ -359,4 +359,43 @@ func (v *view) gatewayToolVisible(name string) bool {
 		return v.p.Local || len(v.p.Scopes) > 0
 	}
 	return v.allowed("", name, "")
+}
+
+// surfaceNow is the surface in force for this session: the gateway's setting,
+// with the mode replaced by the client's ?surface= when it gave one.
+func (v *view) surfaceNow() Surface {
+	s := *v.g.surface.Load()
+	if v.surfaceMode != "" {
+		s.Mode = v.surfaceMode
+	}
+	return s
+}
+
+// builtinGroups are the tool groups every Agent serves itself.
+var builtinGroups = []string{"sys", "exec", "pty", "fs", "backend", "computer"}
+
+// waitsForOthers says whether tools/list must wait for the first catalogue of
+// the devices other than the local one and the default. Full lists every device,
+// so it does. In unified and compact the listed tools come from the built-in
+// groups, which the waited-for devices already serve; only a listing of backend
+// tools needs the other devices. Favorite backends that a slow device adds
+// later arrive through tools/list_changed.
+func (v *view) waitsForOthers() bool {
+	s := v.surfaceNow()
+	switch s.Mode {
+	case SurfaceFull:
+		return true
+	case SurfaceUnified:
+		for _, group := range s.ListedGroups {
+			if !slices.Contains(builtinGroups, group) {
+				return true
+			}
+		}
+	}
+	for _, name := range s.PinnedTools {
+		if !slices.Contains(builtinGroups, toolGroup(name)) {
+			return true
+		}
+	}
+	return false
 }
