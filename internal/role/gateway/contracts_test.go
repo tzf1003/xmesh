@@ -98,7 +98,7 @@ func Test_CTRGW02_03_ToolSchemas(t *testing.T) {
 	}
 	search := schema("tools.search")
 	props, _ := search["properties"].(map[string]any)
-	if props["device"] == nil || props["pattern"] == nil || len(search["required"].([]any)) != 2 {
+	if props["device"] == nil || props["pattern"] == nil || props["group"] == nil || props["names"] == nil || props["detail"] == nil || search["required"] != nil {
 		t.Fatal(search)
 	}
 	defaults := schema("session.set_defaults")

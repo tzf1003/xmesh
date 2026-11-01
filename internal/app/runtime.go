@@ -301,6 +301,7 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		}
 		for _, g := range registry.all() {
 			g.Reconfigure(next.Gateway.Quota, next.Gateway.ExposeBackends == "favorite")
+			g.SetSurface(SurfaceFromConfig(next.Gateway))
 		}
 		roles.submit(next)
 	})

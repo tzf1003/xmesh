@@ -28,6 +28,11 @@
 | `ingress.listen = tunnel` | 与 funnel 一样禁止 `domain` 和 `tls`。这是 [入口方式](../design/03-mesh.md) 里的反向隧道，证书由 Cloudflare Tunnel 或 frp 终止处提供。可选 `ingress.tunnel_listen` 指定隧道到达入口的本机地址，必须是 `127.0.0.1:端口`，只在 `tunnel` 下允许；命令行 `--tunnel-listen` 优先，两者都没有时为 `127.0.0.1:8443`。入口角色热应用，改端口后入口重新监听 |
 | `ingress.oauth.dynamic_client_scopes` | 可选 scope 数组，语法与 `clients.*.scopes` 相同。动态注册客户端的 scope 上限，缺省 `["devices:read"]`，空数组表示只能完成 OAuth，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
 | `ingress.oauth.refresh_token_ttl` | 可选 Go 时长，刷新令牌的有效期，范围 `1h` 到 `8760h`（365 天），缺省 `720h`（30 天）。刷新令牌每次使用都会旋转并重新计时，客户端只要在这段时间内回来一次就不必重新授权；访问令牌固定 1 小时。令牌保存在入口进程内存，入口重启后须重新授权，见 [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) |
+| `gateway.tool_surface` | `full`（缺省）、`unified`、`compact`。工具列表形态，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
+| `gateway.listed_groups` | 工具组名数组，缺省 `[fs, exec, pty, sys]`。`unified` 下常驻列表的组；组名是工具名第一个 `.` 之前的部分，用户后端的组名是后端名，`favorite: true` 的后端才可加入候选 |
+| `gateway.pinned_tools` | 工具名数组，缺省空。`compact` 下与 Gateway 自有工具一起列出的工具 |
+| `gateway.max_listed_tools` | 正整数，缺省 40。`unified` 常驻工具总数上限（含 Gateway 自有工具）；额外的 `favorite` 后端组按工具数从小到大加入，总数不超过上限为止 |
+| 后端名 | 不得与内置组名 `fs`、`exec`、`pty`、`sys`、`backend`、`computer` 同名，否则拒绝启动，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
 | `agent.quota`、`gateway.quota` | 可选对象，字段 `calls_per_hour`（正整数，缺省 10000）、`max_concurrent`（正整数，缺省 64）、`max_call_duration`（Go duration，缺省 `10m`）。`agent.exec.default_timeout` 不得超过 `agent.quota.max_call_duration`，见 [CON-SEC-10](../constraints/security.md#con-sec-10) |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
 
@@ -58,6 +63,7 @@
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
 | `gateway.quota` | 热加载。对之后的调用生效，已经放行的调用保留原来的截止时间 |
 | `gateway.expose_backends` | 热加载。已连接的客户端会被通知重新读取工具列表 |
+| `gateway.tool_surface`、`gateway.listed_groups`、`gateway.pinned_tools`、`gateway.max_listed_tools` | 热加载。已连接的客户端会被通知重新读取工具列表，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
 | `gateway.access`、`gateway.hosts` | 每个请求读取，立即生效；见 [CTR-GW-07](gateway.md#ctr-gw-07) |
 | `gateway.listen` | 热加载。运行中的 Gateway 先绑定新地址，成功后再放弃旧地址，Agent、PTY 与 exec 会话不受影响；新地址被占用时 Gateway 留在旧地址上，在 `apply_errors` 与状态警告里报告。同一个端口只是放宽绑定范围（例如 `127.0.0.1:8080` 改为 `:8080`）而系统不允许两个监听并存时，先关旧监听再绑新的，新的失败就恢复旧的 |
 | `node.roles` 中的 `gateway` | 热加载。加入时创建 Gateway（令牌不存在才创建，见 [CTR-GW-07](gateway.md#ctr-gw-07)）并开始监听，去掉时停止监听并关闭它的 MCP 会话；Agent、网络和其他角色不受影响。启动失败（例如端口被占用）时节点照常运行，在 `apply_errors` 与状态警告里报告 |

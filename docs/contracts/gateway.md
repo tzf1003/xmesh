@@ -18,7 +18,7 @@ Gateway 与入口不保存设备资源，见 [INV-03](../constraints/invariants.
 
 ### 转发
 
-1. 若本连接设置过默认 device，且工具名没有 `/`，则补上默认 device 的前缀。`session.set_defaults`、`devices.list`、`tools.search` 不加前缀。
+1. 若本连接设置过默认 device，且工具名没有 `/`，则补上默认 device 的前缀。`session.set_defaults`、`devices.list`、`tools.search`、`tools.call` 不加前缀。
 2. 鉴权，见 [CTR-AUTHZ-01](oauth-authz.md#ctr-authz-01)。
 3. 补全默认 `cwd` 与 `env`：仅当参数里没有这两个键，且目标是 `sys.`、`exec.`、`pty.`、`fs.` 这类内置工具并在其输入模式里声明了该参数。后端工具（如 `ida.*`）的参数原样透传，哪怕它也有名为 `cwd` 或 `env` 的参数。调用方显式传入的值，包括空字符串，都不覆盖。
 4. 写审计开始记录。
@@ -27,9 +27,9 @@ Gateway 与入口不保存设备资源，见 [INV-03](../constraints/invariants.
 
 目标不在线：`not_found`，`name` 为节点名。
 
-Gateway 三个自有工具在 `tools/list` 里带完整的输入模式和说明，模型据此填写 `device`、`pattern`、`cwd`、`env`。
+Gateway 的自有工具（`devices.list`、`tools.search`、`tools.call`、`session.set_defaults`，后两者见 [CTR-GW-02](#ctr-gw-02)、[CTR-GW-03](#ctr-gw-03)）在 `tools/list` 里带完整的输入模式和说明，模型据此填写 `device`、`pattern`、`cwd`、`env`。
 
-设置过默认 device 的连接，`tools/list` 额外展开该设备的完整工具表（含 `inputSchema`），不受 `expose_backends: favorite` 限制。默认设备是未带前缀调用的落点，客户端不应为了拿到 schema 再猜子串；其他设备仍按 favorite 过滤。
+`tool_surface: full` 下，设置过默认 device 的连接，`tools/list` 额外展开该设备的完整工具表（含 `inputSchema`），不受 `expose_backends: favorite` 限制。默认设备是未带前缀调用的落点，客户端不应为了拿到 schema 再猜子串；其他设备仍按 favorite 过滤。`unified` 与 `compact` 不做这种展开，见 [CTR-GW-08](#ctr-gw-08)。
 
 ## CTR-GW-02
 
@@ -46,11 +46,14 @@ Gateway 三个自有工具在 `tools/list` 里带完整的输入模式和说明�
       "online": true,
       "tags": ["tag:device"],
       "backends": ["ida", "frida"],
+      "groups": {"fs": 13, "exec": 2, "pty": 7, "sys": 1, "ida": 42},
       "load": {"pty_in_use": 2, "pty_max": 20, "exec_shared_in_use": 1}
     }
   ]
 }
 ```
+
+`groups` 是工具组到该设备工具数的映射，组名为工具名第一个 `.` 之前的部分（内置 `fs`、`exec`、`pty`、`sys`、`backend`、`computer`，用户后端则是后端名）。模型据此一次得知设备有没有浏览器、桌面控制或某个后端，不必为此搜索。`backends` 字段保留。
 
 `id` 是 `node.name`。在线数据来自最近一次成功的 `sys.info`。从未成功过的新节点 `online: true` 但 `os` 可为空，并带 `stale: true`。离线节点保留在列表里最多 24 小时，`online: false`，方便模型解释「刚才那台没了」。超过 24 小时删除。
 
@@ -58,11 +61,33 @@ scope 不含 `devices:read` 的客户端得到 `unauthorized`。
 
 ### tools.search
 
-参数：`device`（节点名或 `local`）、`pattern`（大小写不敏感的子串，不是正则；传 `*` 列出全部）。
+参数：
 
-在该设备的完整工具表里查找，包括当前 `expose_backends: favorite` 下没有放进默认 `tools/list` 的工具。返回 `tools`：`name`（已带前缀）、`description`、`inputSchema`。上限 100 条，带 `truncated`。
+| 参数 | 含义 |
+| --- | --- |
+| `device` | 可选，节点名或 `local`。省略表示在所有在线且调用方有权限的设备上搜 |
+| `pattern` | 大小写不敏感的子串，不是正则；`*` 为全部 |
+| `group` | 可选，按组筛选，如 `fs`、`computer`、后端名 |
+| `names` | 可选，精确名字数组，可带或不带设备前缀；一次取多个工具的 schema |
+| `detail` | `brief`（`tool`、`description`、`devices`）或 `schema`（再加 `inputSchema`）。给了 `device` 时缺省 `schema`，省略 `device` 时缺省 `brief` |
 
-`pattern` 为空 → `invalid_args`。设备不存在 → `not_found`。
+`pattern`、`group`、`names` 至少给一个，否则 `invalid_args`。设备不存在 → `not_found`。
+
+在设备的完整工具表里查找，包括 `expose_backends: favorite` 或 `tool_surface` 没有放进 `tools/list` 的工具。结果只含调用方 scope 允许的工具，判断与 `tools/list` 相同。指定 `device` 时，`tool` 为已带前缀的名字，其余同下。
+
+返回 `tools`，按「工具名 + schema 哈希」去重：`tool`、`description`、`schema_id`（schema 的哈希）、`inputSchema`（仅 `detail: schema`）、`devices`（持有该版本的设备）。设备间 schema 不同（Agent 版本不一致）时按 `schema_id` 拆成多项。上限：`brief` 200 条，`schema` 25 条，超出带 `truncated`。
+
+### tools.call
+
+参数：`device`（可选）、`tool`（必填）、`arguments`（可选，缺省 `{}`）。`tool` 也可直接写带前缀的 `<device>/<name>`。`device` 省略则用会话默认设备，二者都没有 → `invalid_args`，错误里列出在线设备。
+
+语义与直接调用该工具完全相同。Gateway 在中间件最前面（审计与配额之前）把请求改写成 `<device>/<tool>` 的 `tools/call`，保留 `_meta`（含 `progressToken`），之后走同一条流水线：在线检查、授权、配额、默认 `cwd`/`env` 补全、审计、取消与 drain。结果原样返回，不包装，不翻译错误码。
+
+- 授权：不需要 `devices:read`，也不为 `tools.call` 单设 scope；授权完全由内层工具按目标设备决定（[CTR-AUTHZ-01](oauth-authz.md#ctr-authz-01)）。
+- 审计：记录真实工具名，不把工具名记成 `tools.call`。
+- 目标不得是 Gateway 自有工具（`devices.list`、`tools.search`、`tools.call`、`session.set_defaults`）→ `invalid_args`，防止递归。
+- 目标工具或设备不存在、后端不可用：`not_found`，提示用 `tools.search` 查名字。
+- 目标返回 `invalid_args` 时，错误详情附该工具的 `inputSchema`；超过 8 KiB 则只附参数名与必填项。
 
 ## CTR-GW-03
 
@@ -160,3 +185,40 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 **令牌的生命周期。** 首次启动或升级时若没有任何 PAT，内核创建 `default`。已有令牌从不因启动、升级、更新或重装而改动。轮转只能由用户经 [CTR-CTL-09](../contracts/control.md#ctr-ctl-09) 的轮转路由发起。删除最后一个 PAT 被拒绝。
 
 验收：`internal/config/access_test.go` 覆盖来源与 Host 判定；`internal/role/gateway/gateway_access_test.go` 覆盖三层拒绝；`internal/control/gateway_token_test.go` 覆盖升级不轮换与 `PUT /v2/gateway`；`internal/app/gateway_info_test.go` 覆盖地址列表。
+
+## CTR-GW-08
+
+### tool surface
+
+`gateway.tool_surface` 决定 `tools/list` 的形态，缺省 `full`。
+
+| 模式 | `tools/list` |
+| --- | --- |
+| `full` | 现状：全部对端工具带 `<device>/` 前缀（受 `expose_backends` 过滤），CTR-GW-01 的默认设备展开仍适用 |
+| `unified` | Gateway 自有工具 + `listed_groups` 内、按工具名去重的无前缀工具，每个注入可选的 `device` |
+| `compact` | 只有 Gateway 自有工具 + `pinned_tools` |
+
+配置键：`gateway.tool_surface`（`full`|`unified`|`compact`）、`gateway.listed_groups`（缺省 `[fs, exec, pty, sys]`）、`gateway.pinned_tools`（缺省空）、`gateway.max_listed_tools`（缺省 40）。热加载，已连接的客户端被通知重新读取列表，见 [CTR-CFG-01](config.md#ctr-cfg-01)。
+
+### unified 列表
+
+1. 候选集合是在线设备工具表的并集，只取组在 `listed_groups` 内的工具，且调用方在至少一台设备上被 scope 允许。
+2. 按工具名去重；同名工具在设备间 schema 不同时，取持有设备最多的一版（schema 哈希多数），其余设备照常可调，由目标 Agent 自己校验并返回 `invalid_args`。
+3. 每个工具的 `inputSchema.properties` 注入可选字符串属性 `device`（目标设备名，见 `devices.list`；设了会话默认设备可省略）。不进 `required`，不用 `enum`：设备上下线不得改变 schema。
+4. 后端工具若自己声明了名为 `device` 的参数则不注入，该工具只能经 `tools.call` 调用。
+5. 用户后端：组名是后端名。后端默认不进列表；只有 `favorite: true` 的后端才加入候选。总数受 `max_listed_tools` 限制：先放入 `listed_groups` 内的内置组；`favorite` 后端组按工具数从小到大依次加入，只要加入后总数（含 Gateway 自有工具）不超过上限，超出的组留在按需通道，并在 `devices.list` 与日志里报告。
+6. 配置校验拒绝与内置组名（`fs`、`exec`、`pty`、`sys`、`backend`、`computer`）同名的后端，否则 `<后端>.<工具>` 会与内置组混在一起。
+
+`compact`：`pinned_tools` 里的工具按 unified 的规则（去重、注入 `device`）列出，其余只经 `tools.search` 与 `tools.call`。`computer.*` 缺省不在 `listed_groups` 内。
+
+### 调用改写
+
+在审计与配额之前：请求名不含 `/`、不是 Gateway 自有工具，且参数里有 `device` → 改名为 `<device>/<name>`，从参数里删去 `device`，其余原样转发。没有 `device` 时沿用会话默认设备（CTR-GW-01 第 1 步）；两者都没有 → `invalid_args`，错误里列出在线设备，模型可直接重试。`tools.call` 的改写见 [CTR-GW-02](#ctr-gw-02)。
+
+### 不变的部分
+
+- scope、配额、审计、默认 `cwd`/`env` 补全都针对改写后的真实目标设备，在调用时判定；`tools/list` 里出现一个工具不代表在每台设备上都被允许。
+- CTR-GW-01 里「设了默认设备就展开其完整工具表」只在 `full` 下适用。
+- `unified` 与 `compact` 的常驻部分可由内置工具静态表生成，首次 `tools/list` 不必等其他设备的能力表（CTR-GW-04 的 5 秒等待只在 `full` 下需要）。
+
+验收：改写后配额、审计、scope、默认 `cwd`/`env`、进度、取消与直接调用一致；`tools.call` 指向 Gateway 自有工具被拒；去重与 `schema_id`；`unified` 的列表长度不随设备数增长；`max_listed_tools` 的最小优先填充；热加载发 `tools/list_changed`。

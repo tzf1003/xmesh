@@ -38,6 +38,7 @@
 | [CTR-GW-03](gateway.md#ctr-gw-03) | Gateway | `session.set_defaults` |
 | [CTR-GW-04](gateway.md#ctr-gw-04) | Gateway | 发现 |
 | [CTR-GW-05](gateway.md#ctr-gw-05) | Gateway | 下线 |
+| [CTR-GW-08](gateway.md#ctr-gw-08) | Gateway | 工具表形态 `tool_surface`、`tools.call` |
 | [CTR-OAUTH-01](oauth-authz.md#ctr-oauth-01) | OAuth | 端点与 PKCE |
 | [CTR-OAUTH-02](oauth-authz.md#ctr-oauth-02) | OAuth | scope 语法 |
 | [CTR-AUTHZ-01](oauth-authz.md#ctr-authz-01) | 授权 | 双层判定 |

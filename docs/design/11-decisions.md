@@ -36,3 +36,4 @@
 | ConPTY 行为与 Unix PTY 差异（信号、resize、控制序列） | Windows 终端体验不一致 | `pty` 包按平台单独测试。默认 `pwsh` |
 | `exec` 被诱导执行破坏性命令 | 设备损坏 | 命令策略自动拦截 + L1/L2 隔离 |
 | 工具表膨胀导致模型选错设备或工具 | 调用质量下降 | 设备前缀 + `devices.list`。工具表过大时再开 `favorite` 过滤 |
+- 2026-11-01。[CTR-GW-08](../contracts/gateway.md#ctr-gw-08)、[CTR-GW-02](../contracts/gateway.md#ctr-gw-02)：工具列表渐进式披露。`tool_surface` 缺省仍为 `full`，升级后行为不变；推荐形态是 `unified` 加低频组按需（`tools.search` + 新增的 `tools.call`）。`computer.*` 缺省不进常驻列表，想保留客户端逐次确认的可加进 `listed_groups`。按连接的 `?surface=` 覆盖推迟，不在本契约内。用户后端按组处理，默认不常驻，`favorite` 才可常驻并受 `max_listed_tools` 限制。

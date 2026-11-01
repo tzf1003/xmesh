@@ -269,6 +269,65 @@ func Test_CTRCFG01_GatewayQuotaAndExposeHot(t *testing.T) {
 	}
 }
 
+func Test_CTRCFG01_GatewayToolSurfaceDefaultsAndValidation(t *testing.T) {
+	cfg, err := ingressConfig(t, func(doc map[string]any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.Gateway
+	if g.ToolSurface != "full" || g.MaxListedTools != 40 || len(g.PinnedTools) != 0 || strings.Join(g.ListedGroups, ",") != "fs,exec,pty,sys" {
+		t.Fatal("tool surface defaults", g.ToolSurface, g.ListedGroups, g.PinnedTools, g.MaxListedTools)
+	}
+	bad := map[string]any{"tool_surface": "bogus", "listed_groups": []any{""}, "pinned_tools": []any{""}, "max_listed_tools": -1}
+	for k, v := range bad {
+		if _, err := ingressConfig(t, func(doc map[string]any) { doc["gateway"].(map[string]any)[k] = v }); err == nil {
+			t.Fatal("invalid gateway", k, "accepted")
+		}
+	}
+	for _, m := range []string{"unified", "compact"} {
+		if _, err := ingressConfig(t, func(doc map[string]any) { doc["gateway"].(map[string]any)["tool_surface"] = m }); err != nil {
+			t.Fatal(m, err)
+		}
+	}
+}
+
+func Test_CTRCFG01_GatewayToolSurfaceHot(t *testing.T) {
+	b, e := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.config.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if e = os.WriteFile(path, b, 0600); e != nil {
+		t.Fatal(e)
+	}
+	s, e := NewStore(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(b, &doc)
+	gateway, _ := doc["gateway"].(map[string]any)
+	if gateway == nil {
+		gateway = map[string]any{}
+		doc["gateway"] = gateway
+	}
+	gateway["tool_surface"] = "unified"
+	gateway["listed_groups"] = []any{"fs"}
+	gateway["pinned_tools"] = []any{"exec_run"}
+	gateway["max_listed_tools"] = 7
+	changed, _ := json.Marshal(doc)
+	if e = os.WriteFile(path, changed, 0600); e != nil {
+		t.Fatal(e)
+	}
+	got := s.Get().Gateway
+	if got.ToolSurface != "unified" || got.MaxListedTools != 7 || len(got.ListedGroups) != 1 || len(got.PinnedTools) != 1 {
+		t.Fatal("tool surface did not apply", got)
+	}
+	if pending := s.RestartPending(); len(pending) != 0 {
+		t.Fatalf("a hot section asked for a restart: %v", pending)
+	}
+}
+
 func ingressConfig(t *testing.T, edit func(doc map[string]any)) (*Config, error) {
 	t.Helper()
 	body, err := os.ReadFile("../../docs/contracts/schemas/examples/xmesh.ingress-public.json")

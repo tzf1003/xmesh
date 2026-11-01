@@ -124,7 +124,7 @@ type gatewayRole struct {
 // startGatewayRole creates the gateway and binds gateway.listen from cfg. On failure nothing is left
 // running.
 func startGatewayRole(deps gatewayDeps, cfg *config.Config) (*gatewayRole, error) {
-	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Discover: deps.discover, Changed: deps.changed, Dial: deps.dial, Audit: deps.log})
+	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Surface: SurfaceFromConfig(cfg.Gateway), Discover: deps.discover, Changed: deps.changed, Dial: deps.dial, Audit: deps.log})
 	r := &gatewayRole{deps: deps, gw: g, retired: map[net.Listener]bool{}}
 	r.server = &http.Server{Handler: g.HTTP(gateway.LocalAuthentication(deps.store)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, ErrorLog: newHandshakeLog()}
 	bound, err := r.bind(cfg.Gateway.Listen)
@@ -260,6 +260,7 @@ func (r *gatewayRole) rebind(listen string) error {
 // reconfigure applies the quota and tool exposure of cfg to the running gateway.
 func (r *gatewayRole) reconfigure(cfg *config.Config) {
 	r.gw.Reconfigure(cfg.Gateway.Quota, cfg.Gateway.ExposeBackends == "favorite")
+	r.gw.SetSurface(SurfaceFromConfig(cfg.Gateway))
 }
 
 // bindAddress is the gateway.listen the role is serving now.
