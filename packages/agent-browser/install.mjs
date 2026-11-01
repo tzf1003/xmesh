@@ -21,12 +21,23 @@ function usage(code) {
   process.exit(code);
 }
 
+function realpathOrEmpty(item) {
+  try {
+    return fs.realpathSync(item);
+  } catch {
+    return "";
+  }
+}
+
 function npmCommand() {
   // Run npm through node so no shell is involved (a .cmd shim cannot be spawned directly on Windows).
   const candidates = [
     process.env.npm_execpath,
     path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
     path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    // Homebrew keeps npm in the shared prefix and links <node dir>/npm to its npm-cli.js.
+    realpathOrEmpty(path.join(path.dirname(process.execPath), "npm")),
+    realpathOrEmpty(path.join(path.dirname(fs.realpathSync(process.execPath)), "npm")),
   ].filter(Boolean);
   const cli = candidates.find((item) => item.endsWith("npm-cli.js") && fs.existsSync(item));
   if (!cli) throw new Error("npm-cli.js not found next to node; install npm or run `npm ci` in the prefix by hand");
@@ -77,7 +88,8 @@ function main() {
     for (const file of ["package.json", "package-lock.json"]) fs.copyFileSync(path.join(here, file), path.join(prefix, file));
     fs.copyFileSync(path.join(here, "bin", "xmesh-agent-browser.mjs"), path.join(prefix, "bin", "xmesh-agent-browser.mjs"));
     const [node, npm] = npmCommand();
-    run(node, [...npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", prefix]);
+    // Run in the prefix itself: npm 11 rejects `ci --prefix DIR` from another directory as out of sync with the lock file.
+    run(node, [...npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: prefix });
   }
 
   const binary = resolveBinary(path.join(prefix, "bin"));
