@@ -8,7 +8,7 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| `install.mjs --prefix %LOCALAPPDATA%\xmesh-browser --skip-chrome` | 通过（`npm ci` 约 4 秒，`agent-browser doctor` 通过）。打印的配置里 `command` 是 `["C:\\nodejs\\node.exe", ".\\bin\\xmesh-agent-browser.mjs", ...]`，即 `node.exe` 直连，不经 `.cmd` |
+| `install.mjs --prefix %LOCALAPPDATA%\xmesh-browser --skip-chrome` | 通过（`npm ci` 约 4 秒，`agent-browser doctor` 通过）。打印的配置里 `command` 是 `["C:\\nodejs\\node.exe", "C:\\Users\\12442\\AppData\\Local\\xmesh-browser\\bin\\xmesh-agent-browser.mjs", "--tools", "core,tabs"]`，即 `node.exe` 直连，不经 `.cmd` |
 | `node.exe` 直连包装器，经 stdio 做 MCP `initialize` | 通过 |
 | 离线设备用已装 Chrome（`AGENT_BROWSER_EXECUTABLE_PATH` 指向系统 Chrome） | 通过：`agent_browser_open https://example.com` 返回 `Example Domain`，`isError:false` |
 | 强制终止包装器（`TerminateProcess`）后的回收 | 见下 |
