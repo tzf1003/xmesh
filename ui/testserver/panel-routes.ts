@@ -128,6 +128,8 @@ export class PanelData {
   /** `lan` makes pairing available; anything else answers unsupported_mode. */
   mode: "lan" | "tailnet" | "local" = "lan";
   hasIngress = true;
+  /** `gateway.tool_surface`, which the status shows under `ingress` (control API 2.6). */
+  toolSurface = "unified";
   /** GitHub Actions runners (control API 1.8). */
   ci = new CiFake();
 
@@ -512,6 +514,12 @@ export class PanelData {
       if (typeof pw !== "string" || pw.length < 12 || pw.length > 256) return err(400, "invalid_args", "口令长度需为 12 到 256", { field: "password" });
       this.passwordRotations++;
       return ok({ rotated_at: iso() });
+    }
+    if (method === "PUT" && p === "/v2/ingress/tool-surface") {
+      const v = (body as { tool_surface?: unknown } | null)?.tool_surface;
+      if (v !== "unified" && v !== "compact" && v !== "full") return err(400, "invalid_args", "tool_surface 须为 unified、compact 或 full", { field: "tool_surface" });
+      this.toolSurface = v;
+      return ok({ tool_surface: v, restart_required: false, apply_errors: this.applyErrors.map((e) => ({ ...e })) });
     }
     return err(404, "not_found", "没有这个接口");
   }

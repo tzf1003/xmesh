@@ -40,6 +40,28 @@
       "properties": {
         "rotated_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
       }
+    },
+    "ToolSurface": {
+      "enum": ["unified", "compact", "full"],
+      "description": "gateway.tool_surface 的取值（CTR-GW-08）。缺省 unified。"
+    },
+    "IngressToolSurfaceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_surface"],
+      "properties": {
+        "tool_surface": { "$ref": "#/$defs/ToolSurface", "description": "API 2.6 起。写入 gateway.tool_surface；Gateway 与 Ingress 角色共用这个键，热加载。" }
+      }
+    },
+    "IngressToolSurfaceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_surface", "restart_required", "apply_errors"],
+      "properties": {
+        "tool_surface": { "$ref": "#/$defs/ToolSurface" },
+        "restart_required": { "type": "boolean", "description": "恒为 false：tool_surface 热加载。字段与 PUT /v2/gateway 的响应保持一致。" },
+        "apply_errors": { "type": "array", "items": { "$ref": "urn:xmesh:schema:control-config:2#/$defs/ApplyError" } }
+      }
     }
   }
 }

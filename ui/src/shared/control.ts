@@ -154,7 +154,7 @@ export function parseStatus(raw: unknown): StatusResponse {
     status.gateway.hosts ??= [];
     status.gateway.addresses ??= [];
   }
-  if (raw.ingress !== undefined && (!isRecord(raw.ingress) || typeof raw.ingress.listen !== "string" || (raw.ingress.issuer !== null && typeof raw.ingress.issuer !== "string"))) {
+  if (raw.ingress !== undefined && (!isRecord(raw.ingress) || typeof raw.ingress.listen !== "string" || (raw.ingress.tool_surface !== undefined && typeof raw.ingress.tool_surface !== "string") || (raw.ingress.issuer !== null && typeof raw.ingress.issuer !== "string"))) {
     throw new ControlRequestError("internal", "unexpected status response");
   }
   if (raw.ci !== undefined && (!isRecord(raw.ci) || !Array.isArray(raw.ci.bindings) || !raw.ci.bindings.every((b) =>

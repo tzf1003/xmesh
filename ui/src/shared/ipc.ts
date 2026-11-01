@@ -19,6 +19,7 @@ import type {
   GatewayUpdateResponse,
   IngressClientsResponse,
   IngressPasswordResponse,
+  IngressToolSurfaceResponse,
   PairConnectResponse,
   PairDiscoveredResponse,
   PairDocument,
@@ -86,6 +87,7 @@ export const CHANNELS = {
   listIngressClients: "xmesh:list-ingress-clients",
   revokeIngressClient: "xmesh:revoke-ingress-client",
   rotateIngressPassword: "xmesh:rotate-ingress-password",
+  setToolSurface: "xmesh:set-tool-surface",
   exportPair: "xmesh:export-pair",
   importPair: "xmesh:import-pair",
   getPairPassword: "xmesh:get-pair-password",
@@ -355,6 +357,8 @@ export interface PanelApi {
   listIngressClients(): Promise<DataResult<IngressClientsResponse>>;
   revokeIngressClient(clientId: string): Promise<ActionResult>;
   rotateIngressPassword(password: string): Promise<DataResult<IngressPasswordResponse>>;
+  /** Sets `gateway.tool_surface`, the MCP tool list shape (PUT /v2/ingress/tool-surface, control API 2.6). Hot: no restart. */
+  setToolSurface(value: ToolSurface): Promise<DataResult<IngressToolSurfaceResponse>>;
   exportPair(): Promise<DataResult<PairExportResponse>>;
   importPair(args: PairImportArgs): Promise<DataResult<PairImportResponse>>;
   getPairPassword(): Promise<DataResult<PairPasswordState>>;
@@ -433,6 +437,7 @@ export const PANEL_API_METHODS = [
   "listIngressClients",
   "revokeIngressClient",
   "rotateIngressPassword",
+  "setToolSurface",
   "exportPair",
   "importPair",
   "getPairPassword",
@@ -492,6 +497,14 @@ function uniqueStrings(v: unknown, valid: (s: string) => boolean): string[] | un
     out.push(x);
   }
   return out;
+}
+
+/** The shapes of the MCP tool list (`gateway.tool_surface`, CTR-GW-08), the recommended default first. */
+export const TOOL_SURFACES = ["unified", "compact", "full"] as const;
+export type ToolSurface = (typeof TOOL_SURFACES)[number];
+
+export function parseToolSurface(v: unknown): ToolSurface | undefined {
+  return (TOOL_SURFACES as readonly unknown[]).includes(v) ? (v as ToolSurface) : undefined;
 }
 
 /** The whole reach replacement: a listen value the contract allows, and valid, distinct access entries and host names. */

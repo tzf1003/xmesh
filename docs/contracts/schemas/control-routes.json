@@ -1,5 +1,5 @@
 {
-  "api_version": "2.5",
+  "api_version": "2.6",
   "routes": [
     {
       "id": "control.status.get",
@@ -605,6 +605,25 @@
         "invalid_args",
         "conflict",
         "role_disabled"
+      ]
+    },
+    {
+      "id": "control.ingress.toolsurface.put",
+      "method": "PUT",
+      "path": "/v2/ingress/tool-surface",
+      "capability": "config.write",
+      "since": "2.6",
+      "query": null,
+      "body": "urn:xmesh:schema:control-ingress:2#/$defs/IngressToolSurfaceRequest",
+      "response": "urn:xmesh:schema:control-ingress:2#/$defs/IngressToolSurfaceResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "config_invalid",
+        "role_disabled",
+        "internal"
       ]
     },
     {

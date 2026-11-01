@@ -193,7 +193,10 @@ def main():
                         "--tool", "local/sys.info", "--pat-file", str(pat_file), "--json"])
                     assert json.loads(status)["hostname"] == "smoke-node"
                 tools = client.request("tools/list", {})["tools"]
-                assert any(tool["name"] == "local/exec.run" for tool in tools)
+                # The default tool surface is unified (CTR-GW-08): tools are listed once, unprefixed, with a device argument.
+                names = {tool["name"] for tool in tools}
+                assert "exec.run" in names and "local/exec.run" not in names, sorted(names)
+                assert "device" in next(tool for tool in tools if tool["name"] == "exec.run")["inputSchema"]["properties"]
                 client.call("local/fs.write", {"path": "roundtrip", "content": "SMOKE_PRIVATE_BODY"})
                 assert "SMOKE_PRIVATE_BODY" in client.call("local/fs.read", {"path": "roundtrip"})["content"]
                 payload = bytes(range(256)) + b"\xef\xbb\xbfhello\r\n"

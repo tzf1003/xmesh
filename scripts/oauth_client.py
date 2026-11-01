@@ -187,14 +187,15 @@ def main():
     for entry in options.device:
         device, _, system = entry.partition(":")
         deadline = time.monotonic() + 30
-        while device + "/exec.run" not in names and time.monotonic() < deadline:
+        # The tool surface may be full (prefixed names) or unified (unprefixed with a device argument).
+        while device + "/exec.run" not in names and "exec.run" not in names and time.monotonic() < deadline:
             time.sleep(0.5)
             names = {tool["name"] for tool in client.request("tools/list", {})["tools"]}
-        assert device + "/exec.run" in names, (device, sorted(names))
+        assert device + "/exec.run" in names or "exec.run" in names, (device, sorted(names))
         marker = "XMESH_OAUTH_" + secrets.token_hex(4)
         run = (powershell("[Console]::Out.Write('%s')" % marker) if system == "windows"
                else {"cmd": "sh", "args": ["-c", "printf " + marker]})
-        out = client.call(device + "/exec.run", run)
+        out = client.call(device + "/exec.run", run)  # prefixed calls work in every tool surface
         assert out["exit_code"] == 0 and out["stdout"] == marker, out
         checks.append("exec.run@" + device)
     client.close()

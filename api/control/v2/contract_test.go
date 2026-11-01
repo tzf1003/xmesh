@@ -62,6 +62,8 @@ var typeFor = map[string]func() any{
 	"IngressClientsResponse":     func() any { return new(v2.IngressClientsResponse) },
 	"IngressPasswordRequest":     func() any { return new(v2.IngressPasswordRequest) },
 	"IngressPasswordResponse":    func() any { return new(v2.IngressPasswordResponse) },
+	"IngressToolSurfaceRequest":  func() any { return new(v2.IngressToolSurfaceRequest) },
+	"IngressToolSurfaceResponse": func() any { return new(v2.IngressToolSurfaceResponse) },
 	"AuditQuery":                 func() any { return new(v2.AuditQuery) },
 	"AuditResponse":              func() any { return new(v2.AuditResponse) },
 	"ControlError":               func() any { return new(v2.Error) },
@@ -354,7 +356,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v2.APIVersion != "2.5" {
+	if v2.APIVersion != "2.6" {
 		t.Errorf("APIVersion = %s; the schemas and route table are version 2.2", v2.APIVersion)
 	}
 }

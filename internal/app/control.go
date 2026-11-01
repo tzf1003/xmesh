@@ -154,7 +154,7 @@ func (h *controlHost) Status() v2.StatusResponse {
 		if running, ok := h.d.roles.ingressConfig(); ok {
 			section = running
 		}
-		info := &v2.IngressInfo{Listen: section.Listen}
+		info := &v2.IngressInfo{Listen: section.Listen, ToolSurface: cfg.Gateway.ToolSurface}
 		if section.OAuth.Issuer != "" {
 			info.Issuer = &section.OAuth.Issuer
 		}

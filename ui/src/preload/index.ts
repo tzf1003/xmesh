@@ -70,6 +70,7 @@ const api: PanelApi = {
   listIngressClients: () => invoke("xmesh:list-ingress-clients"),
   revokeIngressClient: (clientId) => invoke("xmesh:revoke-ingress-client", clientId),
   rotateIngressPassword: (password) => invoke("xmesh:rotate-ingress-password", password),
+  setToolSurface: (value) => invoke("xmesh:set-tool-surface", value),
   exportPair: () => invoke("xmesh:export-pair"),
   importPair: (args) => invoke("xmesh:import-pair", args),
   getPairPassword: () => invoke("xmesh:get-pair-password"),

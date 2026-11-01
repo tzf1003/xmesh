@@ -96,7 +96,7 @@ UI 通过枚举 `<UserConfigDir>/xmesh/*/control.json` 发现本机所有节点�
 | `drain` | `DrainState`，见 [CTR-CTL-06](#ctr-ctl-06) |
 | `paths` | `config_file`、`state_dir`、`log_dir`、`audit_dir`（不可用时为 `null`），供「打开配置文件、日志目录、审计目录」 |
 | `gateway` | `roles` 含 `gateway` 时存在：`listen`（配置原样）、`url`（本机 MCP 地址）、`auth`（恒为 `pat`，每个请求都要令牌）、`access` 与 `hosts`（配置原样）、`addresses`（当前真正可达的地址，见 [CTR-GW-07](gateway.md#ctr-gw-07)） |
-| `ingress` | `roles` 含 `ingress` 时存在：`listen`、`issuer` |
+| `ingress` | `roles` 含 `ingress` 时存在：`listen`、`issuer`，以及 API 2.6 起的 `tool_surface`（`gateway.tool_surface` 当前取值，Gateway 与 Ingress 共用；旧内核没有这个字段） |
 | `peers` | 不含本机的对端总数与在线数 |
 
 ### 警告
@@ -331,6 +331,8 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 | `GET /v2/ingress/clients` | `IngressClientsResponse`：issuer 与已注册的 OAuth 客户端（不含 `secret_hash`） |
 | `DELETE /v2/ingress/clients/{client_id}` | 撤销客户端，并使其已签发的 access / refresh token 失效。`204`；不存在返回 `not_found` |
 | `PUT /v2/ingress/password` | 轮转登录口令。只写不读：请求体是新口令，响应只有 `rotated_at`。口令写入内核启动参数 `--oauth-password-file` 指向的文件（`0600`，原子替换）并更新内存。口令不是来自文件时返回 `conflict`，`reason` 为 `password_source_not_file` |
+
+| `PUT /v2/ingress/tool-surface` | API 2.6 起，能力 `config.write`。请求体 `IngressToolSurfaceRequest`：`tool_surface` 取 `unified`、`compact`、`full`，写入 `gateway.tool_surface`（Gateway 与 Ingress 角色共用这个键）。别的值返回 `invalid_args`（`field` 为 `tool_surface`）。写入与 [CTR-CTL-07](#ctr-ctl-07) 相同的校验与原子写入，并发 `config` 事件；生效走热加载，已连接的 MCP 客户端被通知重新读取工具列表（见 [CTR-GW-08](gateway.md#ctr-gw-08)），所以响应 `IngressToolSurfaceResponse` 的 `restart_required` 恒为 `false`，`apply_errors` 与 `PUT /v2/gateway` 同义 |
 
 口令轮转不撤销已有 token；要让现有客户端全部失效，UI 对每个客户端调用 `DELETE`。口令长度 12 到 256 字符，不在响应、事件、审计、日志中出现。
 

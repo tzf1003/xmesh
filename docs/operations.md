@@ -599,6 +599,7 @@ L2 保护：L2 工作目录若包含控制套接字（例如把节点状态目�
 - `POST /v2/pair/export`、`POST /v2/pair/import`：使用统一的版本 2 设备身份，与网络模式无关。导入同时核对用户确认的指纹、文档指纹和公钥摘要，任一不符返回 `fingerprint_mismatch`；成功后立即生效（`restart_required: false`）。身份与信任保存在 `<状态目录>/identity-v2/`，与 `xmesh pair` 共用。`DELETE /v2/pair/trust/{device_id}` 撤销该设备的所有路径与会话。
 - `GET/POST /v2/pats`、`POST /v2/pats/{name}/rotate`、`DELETE /v2/pats/{name}`：改 `gateway.pats` 与令牌文件，Gateway 逐请求读取，立即生效。控制通道创建的令牌放在 `<状态目录>/pats/<名字>.token`（`0600`），先写文件再写配置条目，删除时先删条目再删文件；配置里指向别处的令牌文件可以轮转，但删除 PAT 时不会被删。节点没有 `gateway` 配置时创建返回 `conflict`（`gateway_not_configured`）。令牌正文只在创建与轮转的响应里出现一次。
 - `GET /v2/ingress/clients`、`DELETE /v2/ingress/clients/{client_id}`、`PUT /v2/ingress/password`：没有 `ingress` 角色返回 `role_disabled`。撤销客户端同时清掉它的授权码、access 与 refresh token 并持久化；写在 `ingress.oauth.clients` 里的客户端下次启动会重新登记，但旧 token 不会复活。轮转口令先原子重写口令文件（`0600`）再让运行中的服务切换，已签发的 token 不受影响；口令长度 12 到 256 个字符，首尾不能有空白。
+- `PUT /v2/ingress/tool-surface`（API 2.6）：写入 `gateway.tool_surface`（`unified`、`compact`、`full`），热加载，不需要重启；没有 `ingress` 角色返回 `role_disabled`。缺省值自 2026-11-01 起的下一个版本由 `full` 改为 `unified`：`xmesh.yaml` 里没有 `gateway.tool_surface` 的节点升级后得到 `unified`，要保持旧的逐设备完整列表就写 `gateway.tool_surface: full`，或在管理界面「入口」页选「完整」。
 - `GET /v2/audit`：审计元数据，最新在前，`limit` 默认 100、最大 1000。含未允许字段的记录不返回。
 
 经通道发生的非 `GET` 请求写审计，`event` 为 `control_call`，`actor` 为 `control`，`caller` 为 `control:uid-<数字>`（Windows 是管道所属用户的 SID），`tool` 是路由编号，`args_digest` 只含请求体的键名与字节数。`restart_required`：真正写入时是节点配置存储重新加载后的结论；`dry_run` 按需重启的配置路径及角色变化估计。版本 2 的 `mesh.lan` 与 `mesh.tailnet` 由各自的网络组件热应用。

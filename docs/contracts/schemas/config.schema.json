@@ -534,8 +534,8 @@
         "expose_backends": { "enum": ["all", "favorite"], "default": "all" },
         "tool_surface": {
           "enum": ["full", "unified", "compact"],
-          "default": "full",
-          "description": "tools/list 的形态：full 列出全部工具，unified 合并为统一入口，compact 只列精简集合。热加载。"
+          "default": "unified",
+          "description": "tools/list 的形态：full 列出全部工具，unified 合并为统一入口，compact 只列精简集合。缺省 unified（2026-11-01 起，此前为 full）。热加载。"
         },
         "listed_groups": {
           "type": "array",

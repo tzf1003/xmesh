@@ -192,7 +192,7 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 
 ### tool surface
 
-`gateway.tool_surface` 决定 `tools/list` 的形态，缺省 `full`。
+`gateway.tool_surface` 决定 `tools/list` 的形态，缺省 `unified`（2026-11-01 起；此前缺省 `full`）。`xmesh.yaml` 不写此键的节点升级后会得到 `unified`，要保持旧行为就写 `gateway.tool_surface: full`。Go 库里 `gateway.Surface` 的零值仍是 `full`，不经配置构造的 Gateway 不受缺省值影响。Ingress 角色与 Gateway 角色共用这个配置键。
 
 | 模式 | `tools/list` |
 | --- | --- |
