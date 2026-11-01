@@ -13,6 +13,8 @@ export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   { name: "computer.open", zh: "打开桌面会话", en: "Open a desktop session" },
   { name: "computer.observe", zh: "获取桌面截图", en: "Observe the desktop" },
   { name: "computer.act", zh: "执行桌面输入动作", en: "Execute desktop input actions" },
+  { name: "computer.snapshot", zh: "读取应用元素树", en: "Read an application element tree" },
+  { name: "computer.ref_act", zh: "按元素 ref 操作", en: "Act on an element by ref" },
   { name: "computer.action_status", zh: "查询桌面动作状态", en: "Query desktop action status" },
   { name: "computer.renew", zh: "续期桌面会话", en: "Renew a desktop session" },
   { name: "computer.close", zh: "关闭桌面会话", en: "Close a desktop session" },

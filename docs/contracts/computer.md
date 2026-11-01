@@ -16,6 +16,7 @@
 | `computer.renew` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；可选 ttl_seconds |
 | `computer.close` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；释放输入 |
 | `computer.sessions` | 无 | 仅调用方拥有的会话 |
+| `computer.snapshot` / `computer.ref_act` | 见“元素 ref” | 仅 agent-desktop 引擎 |
 
 租期默认 120 秒，范围 10–600 秒；观察会话也需要续期。会话上限默认 16，配置范围 1–32。每个会话最多缓存四张图和 128 个动作结果，全部会话共享 64 MiB 的截图缓存预算，超过预算按采集时间淘汰旧图。已过期会话立即拒绝；内核断开 caller、禁用 computer 或 kill drain 时撤销其会话。本机暂停只回收控制租约，观察会话保持有效。新的控制会话获得新的 fencing 序号。
 
@@ -76,7 +77,25 @@ Host 可按设备在两种执行器之间切换，Go 管理层（会话、租约
 - **macOS 后台回退**：agent-desktop 没有按进程投递的坐标输入。引擎为 `agent-desktop` 时 Host 仍同时启动原生执行器，后台会话（含 `info.targets`、`default_interaction: background` 与 `background:*` 能力、后台截图与输入）全部由它承担，桌面代次与布局版本也取自它，前台画面与之保持一致。原生执行器启动失败时只剩前台。Windows / Linux 没有回退，后台申请报 `background_unsupported`。
 - 切换引擎后 macOS 需要为 agent-desktop 另行授予辅助功能 / 屏幕录制，`xmesh computer host --authorize` 会同时请求两者。
 - 本机输入监测（`pause_on_user_input`）仍由原生执行器提供；单独使用 agent-desktop 时 `user_input_monitor` 为 false，启用该策略的控制申请返回 permission_required。
-- `computer.snapshot` / `computer.ref_act` 与契约 v2 尚未实现。
+- 元素 ref（仅 agent-desktop 引擎，`info.capabilities` 含 `refs`）见下节。
+
+### 元素 ref：computer.snapshot / computer.ref_act
+
+| 工具 | 必填参数 | 语义 |
+| --- | --- | --- |
+| `computer.snapshot` | session_id、desktop_epoch | 读取应用窗口的无障碍元素树；可选 app、window_id、root（下钻到旧快照的某个 ref）、skeleton（密集应用的浅层地图）。返回 snapshot_id、`@<snapshot_id>:eN` 形式的 ref、complete、不可信内容声明 |
+| `computer.ref_act` | session_id、desktop_epoch、lease_token、action_id、snapshot_id、ref、op | 对一个 ref 执行一个动作 |
+
+op 取值：click、right_click、focus、set_value、type、clear、select、toggle、check、uncheck、expand、collapse、scroll、scroll_to。set_value / type / select 必须带 text（UTF-8 上限 64 KiB），其余不得带；scroll 可带 direction（默认 down）与 amount（1–50，默认 3）。
+
+- 权限：snapshot 沿用 observe（`computer:observe:<device>`），ref_act 沿用 control（含 Agent 的 `computer.act` tag 授权）。同一桌面仍只有一个控制者，ref_act 与 act 共用租约、fencing、动作队列、`action_id` 幂等缓存和 `action_status`。
+- 无头：ref_act 从不传 `--headed`，不移动指针、不抢焦点；agent-desktop 没有语义路径时关闭式失败。
+- ref 只在所属会话和桌面代次内有效，且必须来自本会话取得的快照（每会话保留最近 16 个）；代次变化、窗口 UI 变化或快照过期返回 `stale_ref`，目标不唯一返回 `ambiguous_target`，此时重新 snapshot。
+- 失败归类沿用 act：仅 agent-desktop 证明 `not_delivered` 才报 failed，其余为 unknown，须先重新读取元素再决定是否重试。
+- 密码类控件（角色含 password / secure）的值不进入快照，set_value 与 type 在派发前以 `policy_denied` 拒绝。
+- 树中的窗口文字来自其他应用，属于不可信数据；响应带 `notice` 声明。快照上限 512 KiB，超出返回 too_large，请用 skeleton 或 root 缩小范围。
+- 审计只记会话 ID、动作 ID、参数键与字节数，不记快照内容和输入文本。
+- 限制：绑定窗口目标的 macOS 后台会话不支持 ref（`refs_unsupported_for_target`），须使用前台会话（需本机 `allow_foreground`）；native 引擎返回 `refs_unsupported`。Host 本机 IPC 新增 `/v1/snapshot`、`/v1/ref_act`（协议版本仍为 1，旧执行器不实现即报 refs_unsupported）。
 
 ## 本机执行器通道
 

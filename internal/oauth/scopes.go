@@ -38,7 +38,7 @@ func Allows(scopes []string, device, tool, backend string) bool {
 		if computerScope(scopes, device, "control") {
 			return true
 		}
-		return tool != "computer.act" && computerScope(scopes, device, "observe")
+		return tool != "computer.act" && tool != "computer.ref_act" && computerScope(scopes, device, "observe")
 	}
 	if strings.HasPrefix(tool, "backend.") && backend == "" {
 		expanded, e := Expand(scopes)
@@ -102,7 +102,7 @@ func Allows(scopes []string, device, tool, backend string) bool {
 
 func computerBuiltin(tool string) bool {
 	switch tool {
-	case "computer.info", "computer.open", "computer.observe", "computer.act", "computer.action_status", "computer.renew", "computer.close", "computer.sessions":
+	case "computer.info", "computer.open", "computer.observe", "computer.act", "computer.ref_act", "computer.snapshot", "computer.action_status", "computer.renew", "computer.close", "computer.sessions":
 		return true
 	default:
 		return false
