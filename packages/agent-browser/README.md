@@ -14,6 +14,10 @@
 | `eval` 默认可用，`AGENT_BROWSER_CONFIRM_ACTIONS=eval` 对 MCP 调用不生效 | 设置后 `agent_browser_eval` 仍直接执行 | 生成动作策略文件，`deny` 掉 `evaluate`、`download`、`upload` |
 | 不设域名白名单就能浏览任意站点；可连接日常浏览器 | 白名单对越界域名、子资源有效 | 未设置 `AGENT_BROWSER_ALLOWED_DOMAINS` 时拒绝启动；`CDP`、`AUTO_CONNECT`、`PROFILE`、`STATE` 默认拒绝 |
 
+### 强杀后的残留
+
+包装器被 `kill -9`、节点崩溃或断电时来不及清理，daemon 与 Chrome 会留到空闲超时（缺省 5 分钟）。每个包装器启动时和之后每分钟，会扫描 `~/.agent-browser/namespaces/` 里 `xmesh-<pid>-<随机>` 形式、且 pid 对应的包装器已不存在的命名空间，对其执行 `close --all` 并删除目录，同时清理对应的临时策略目录。pid 仍存活（含被复用）的命名空间不会被碰。没有任何新包装器启动时，仍由空闲超时兜底；对强杀后需要立即回收的场景，把 `AGENT_BROWSER_IDLE_TIMEOUT_MS` 调小。
+
 ## 安装
 
 需要 Node.js 20 以上（包装器与安装脚本）。agent-browser 的包声明要求 Node 24，但 0.41.0 实际携带各平台原生二进制，Node 22 下安装与运行均已验证；npm 会打印 `EBADENGINE` 警告，可忽略。
