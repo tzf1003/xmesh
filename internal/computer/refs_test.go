@@ -181,3 +181,30 @@ func TestSnapshotScrubsSecretsAndGuardsRefs(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestRefToolRevocationStopsQueuedActions(t *testing.T) {
+	m, d := refManager(t, true)
+	s := open(t, m, "caller", "control")
+	base := SessionRequest{SessionID: s.ID, Epoch: s.Epoch, Token: s.Token}
+	ctx := context.Background()
+	if _, err := m.Snapshot(ctx, "caller", SnapshotRequest{SessionRequest: base}); err != nil {
+		t.Fatal(err)
+	}
+	// computer.act stays allowed; only computer.ref_act is revoked.
+	m.SetAuthorization(func(_, tool string) bool { return tool != "computer.ref_act" })
+	if _, err := m.RefAct(ctx, "caller", RefActRequest{SessionRequest: base, ActionID: "r1", SnapshotID: "s1", Ref: "@s1:e1", Op: "click"}); err == nil {
+		t.Fatal("revoked ref_act must be refused")
+	}
+	if len(d.acts) != 0 {
+		t.Fatalf("revoked tool must not dispatch: %v", d.acts)
+	}
+}
+
+func TestSnapshotToolRevocation(t *testing.T) {
+	m, _ := refManager(t, true)
+	s := open(t, m, "caller", "observe")
+	m.SetAuthorization(func(_, tool string) bool { return tool != "computer.snapshot" })
+	if _, err := m.Snapshot(context.Background(), "caller", SnapshotRequest{SessionRequest: SessionRequest{SessionID: s.ID, Epoch: s.Epoch}}); err == nil {
+		t.Fatal("revoked snapshot tool must be refused")
+	}
+}

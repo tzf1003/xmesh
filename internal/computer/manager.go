@@ -919,6 +919,9 @@ func (m *Manager) Snapshot(ctx context.Context, caller string, r SnapshotRequest
 	}
 	m.mu.Lock()
 	s, err := m.observationLocked(caller, r.SessionRequest)
+	if err == nil {
+		err = m.authorizedLocked(caller, "computer.snapshot", s.ID)
+	}
 	m.mu.Unlock()
 	if err != nil {
 		return Snapshot{}, err
@@ -953,6 +956,9 @@ func (m *Manager) Snapshot(ctx context.Context, caller string, r SnapshotRequest
 	if _, err = m.observationLocked(caller, r.SessionRequest); err != nil {
 		return Snapshot{}, err
 	}
+	if err = m.authorizedLocked(caller, "computer.snapshot", s.ID); err != nil {
+		return Snapshot{}, err
+	}
 	if !slices.Contains(s.snapshots, snap.SnapshotID) {
 		if len(s.snapshots) >= 16 {
 			s.snapshots = s.snapshots[1:]
@@ -972,7 +978,7 @@ func (m *Manager) RefAct(ctx context.Context, caller string, r RefActRequest) (A
 	raw, _ := json.Marshal(r)
 	digest := sha256.Sum256(raw)
 	m.mu.Lock()
-	s, err := m.sessionLocked(caller, r.SessionRequest, true)
+	s, err := m.refSessionLocked(caller, r.SessionRequest)
 	if err != nil {
 		m.mu.Unlock()
 		return ActionResult{}, err
@@ -1038,7 +1044,7 @@ func (m *Manager) executeRef(s *ownedSession, op *operation, r RefActRequest) {
 		return
 	}
 	m.mu.Lock()
-	_, err := m.sessionLocked(s.Owner, r.SessionRequest, true)
+	_, err := m.refSessionLocked(s.Owner, r.SessionRequest)
 	m.mu.Unlock()
 	if err != nil {
 		result.Error = errorCode(err)
@@ -1068,7 +1074,7 @@ func (m *Manager) executeRef(s *ownedSession, op *operation, r RefActRequest) {
 		return
 	}
 	m.mu.Lock()
-	_, err = m.sessionLocked(s.Owner, r.SessionRequest, true)
+	_, err = m.refSessionLocked(s.Owner, r.SessionRequest)
 	m.mu.Unlock()
 	if err != nil {
 		result.Error = errorCode(err)
@@ -1087,4 +1093,18 @@ func (m *Manager) executeRef(s *ownedSession, op *operation, r RefActRequest) {
 	if result.Executed < 0 || result.Executed > 1 || (result.State == "executed" && result.Executed != 1) {
 		result.State, result.Error, result.Executed = "unknown", "invalid_execution_result", 0
 	}
+}
+
+// refSessionLocked is the control-session check plus the independently
+// configurable computer.ref_act authorization, so revoking that tool also stops
+// actions that were already accepted and queued.
+func (m *Manager) refSessionLocked(caller string, r SessionRequest) (*ownedSession, error) {
+	s, err := m.sessionLocked(caller, r, true)
+	if err != nil {
+		return nil, err
+	}
+	if err = m.authorizedLocked(caller, "computer.ref_act", s.ID); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
