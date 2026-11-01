@@ -126,6 +126,7 @@ class ReleaseGate(unittest.TestCase):
 
 
 from test_accept_scripts import AcceptCollect, AcceptConfig, GatewayTokenDiscovery, PtyBudget  # noqa: E402,F401  (picked up by unittest.main)
+from test_agent_browser import Launcher  # noqa: E402,F401  (picked up by unittest.main)
 
 
 if __name__ == "__main__":

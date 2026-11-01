@@ -1,0 +1,20 @@
+# agent-browser 浏览器后端的 xmesh 配置模板。
+# install.mjs 会按实际安装目录打印一份可直接使用的版本；路径与设备名按实际情况修改。
+# AGENT_BROWSER_ALLOWED_DOMAINS 等变量不写在这里，见 README.md「环境变量」。
+agent:
+  cwd_policy:
+    # 后端的工作目录必须在 allow 范围内；浏览器下载、profile 和状态也应放在这里面。
+    allow: ["/opt/xmesh-browser/work"]
+  authz:
+    # 谁能用这个后端；与 PAT / OAuth 的 backend:<设备>:browser scope 是两道独立的门。
+    tag:peer:
+      backends: ["browser"]
+  backends:
+    browser:
+      transport: stdio
+      command: ["/usr/bin/node", "/opt/xmesh-browser/bin/xmesh-agent-browser.mjs", "--tools", "core,tabs"]
+      cwd: /opt/xmesh-browser/work
+      policy: per-caller          # 每个调用方一个浏览器，页面和 cookie 互不可见
+      idle_timeout: 10m           # 无调用后回收该调用方的实例
+      shutdown_timeout: 15s       # 关闭 stdin 后留给启动包装器清理 daemon 与 Chrome
+      process_cleanup: tree       # Windows 绑定 Job；Unix 按进程组，脱离进程组的 daemon 由启动包装器回收

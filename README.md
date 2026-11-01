@@ -201,6 +201,7 @@ meshadmin/        Tailscale / Headscale 控制面与 DERP 管理（xmesh mesh）
 computer-native/  原生桌面执行器（Rust）
 ui/               桌面托盘应用与 Linux 网页管理面板（Electron + React）
 packages/ui-mcp/  在节点上运行 Web / Electron UI 测试的 MCP 服务
+packages/agent-browser/  把 agent-browser 作为浏览器后端接入节点（启动包装、安装、验收）
 scripts/          安装脚本、发布与安装站点构建
 docs/             设计、约束、契约与运行文档
 ```

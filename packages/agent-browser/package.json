@@ -1,0 +1,10 @@
+{
+  "name": "@xmesh/agent-browser-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "xmesh stdio backend wrapper and installer for agent-browser",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "xmesh-agent-browser": "bin/xmesh-agent-browser.mjs" },
+  "dependencies": { "agent-browser": "0.41.0" }
+}
