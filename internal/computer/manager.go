@@ -940,6 +940,18 @@ func (m *Manager) Snapshot(ctx context.Context, caller string, r SnapshotRequest
 	if err = refsReady(info, s); err != nil {
 		return Snapshot{}, err
 	}
+	if root := r.Root; root != "" {
+		// A drill-down root must come from a snapshot this session took.
+		m.mu.Lock()
+		owned := false
+		if g := refPattern.FindStringSubmatch(root); g != nil {
+			owned = slices.Contains(s.snapshots, g[1])
+		}
+		m.mu.Unlock()
+		if !owned {
+			return Snapshot{}, toolerr.New("conflict", "需要当前会话的新快照", "reason", "stale_ref")
+		}
+	}
 	rp, ok := m.provider.(RefProvider)
 	if !ok {
 		return Snapshot{}, toolerr.New("conflict", "当前桌面引擎不支持元素 ref", "reason", "refs_unsupported")
@@ -959,12 +971,13 @@ func (m *Manager) Snapshot(ctx context.Context, caller string, r SnapshotRequest
 	if err = m.authorizedLocked(caller, "computer.snapshot", s.ID); err != nil {
 		return Snapshot{}, err
 	}
-	if !slices.Contains(s.snapshots, snap.SnapshotID) {
-		if len(s.snapshots) >= 16 {
-			s.snapshots = s.snapshots[1:]
-		}
-		s.snapshots = append(s.snapshots, snap.SnapshotID)
+	// A re-obtained ID (for example a root drill-down) becomes the most recent.
+	if i := slices.Index(s.snapshots, snap.SnapshotID); i >= 0 {
+		s.snapshots = slices.Delete(s.snapshots, i, i+1)
+	} else if len(s.snapshots) >= 16 {
+		s.snapshots = s.snapshots[1:]
 	}
+	s.snapshots = append(s.snapshots, snap.SnapshotID)
 	snap.Epoch, snap.Notice = s.Epoch, untrustedNotice
 	return snap, nil
 }
@@ -1001,6 +1014,12 @@ func (m *Manager) RefAct(ctx context.Context, caller string, r RefActRequest) (A
 	}
 	if !slices.Contains(s.snapshots, r.SnapshotID) {
 		m.mu.Unlock()
+		// An engine without refs can never have issued a snapshot: say so rather than stale_ref.
+		if info, err := m.Info(ctx); err == nil {
+			if err = refsReady(info, s); err != nil {
+				return ActionResult{}, err
+			}
+		}
 		return ActionResult{}, toolerr.New("conflict", "需要当前会话的新快照", "reason", "stale_ref")
 	}
 	select {

@@ -234,6 +234,14 @@ func computerSpecs() map[string]spec {
 		if d[1] != "" {
 			schema["required"] = strings.Fields(d[1])
 		}
+		if name == "computer.ref_act" {
+			textOps := []string{"set_value", "type", "select"}
+			schema["allOf"] = []any{
+				map[string]any{"if": map[string]any{"properties": map[string]any{"op": map[string]any{"enum": textOps}}}, "then": map[string]any{"required": []string{"text"}}},
+				map[string]any{"if": map[string]any{"properties": map[string]any{"op": map[string]any{"not": map[string]any{"enum": textOps}}}}, "then": map[string]any{"not": map[string]any{"required": []string{"text"}}}},
+				map[string]any{"if": map[string]any{"properties": map[string]any{"op": map[string]any{"not": map[string]any{"const": "scroll"}}}}, "then": map[string]any{"not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"direction"}}, map[string]any{"required": []string{"amount"}}}}}},
+			}
+		}
 		if name == "computer.open" {
 			schema["allOf"] = []any{
 				map[string]any{"if": map[string]any{"required": []string{"interaction"}, "properties": map[string]any{"interaction": map[string]any{"const": "background"}}}, "then": map[string]any{"required": []string{"target_id"}}},

@@ -208,3 +208,41 @@ func TestSnapshotToolRevocation(t *testing.T) {
 		t.Fatal("revoked snapshot tool must be refused")
 	}
 }
+
+func TestSnapshotRootMustBeOwnedAndRetentionIsRecencyBased(t *testing.T) {
+	m, d := refManager(t, true)
+	s := open(t, m, "caller", "observe")
+	base := SessionRequest{SessionID: s.ID, Epoch: s.Epoch}
+	ctx := context.Background()
+	if _, err := m.Snapshot(ctx, "caller", SnapshotRequest{SessionRequest: base, SnapshotQuery: SnapshotQuery{Root: "@other:e1"}}); errorReason(err) != "stale_ref" || len(d.snaps) != 0 {
+		t.Fatalf("a root from another session must be refused before the engine runs: %v", err)
+	}
+	if _, err := m.Snapshot(ctx, "caller", SnapshotRequest{SessionRequest: base}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Snapshot(ctx, "caller", SnapshotRequest{SessionRequest: base, SnapshotQuery: SnapshotQuery{Root: "@s1:e1"}}); err != nil {
+		t.Fatalf("own root must drill down: %v", err)
+	}
+	// Re-obtaining an ID moves it to the newest position.
+	m.mu.Lock()
+	m.sessions[s.ID].snapshots = []string{"s1", "a", "b"}
+	m.mu.Unlock()
+	if _, err := m.Snapshot(ctx, "caller", SnapshotRequest{SessionRequest: base, SnapshotQuery: SnapshotQuery{Root: "@s1:e1"}}); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	got := m.sessions[s.ID].snapshots
+	m.mu.Unlock()
+	if len(got) != 3 || got[2] != "s1" {
+		t.Fatalf("re-obtained snapshot must be most recent: %v", got)
+	}
+}
+
+func TestRefActReportsUnsupportedEngineBeforeStaleRef(t *testing.T) {
+	m, _ := refManager(t, false)
+	s := open(t, m, "caller", "control")
+	_, err := m.RefAct(context.Background(), "caller", RefActRequest{SessionRequest: SessionRequest{SessionID: s.ID, Epoch: s.Epoch, Token: s.Token}, ActionID: "a", SnapshotID: "s1", Ref: "@s1:e1", Op: "click"})
+	if errorReason(err) != "refs_unsupported" {
+		t.Fatalf("%v", err)
+	}
+}

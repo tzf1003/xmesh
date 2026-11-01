@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
-const maxSnapshotBytes = 512 << 10
+const (
+	maxSnapshotBytes = 512 << 10
+	maxRoleSnapshots = 16 * 16 // MaxSessions default sessions x per-session snapshots
+)
 
 var secretRole = regexp.MustCompile(`(?i)password|secure|passcode`)
 
@@ -87,13 +91,15 @@ func (a *AgentDesktop) Snapshot(ctx context.Context, q SnapshotQuery) (Snapshot,
 		return Snapshot{}, toolerr.New("too_large", "快照过大，请使用 skeleton 或 root 缩小范围", "size", len(out), "limit", maxSnapshotBytes)
 	}
 	a.mu.Lock()
-	if _, ok := a.roles[id]; !ok {
-		a.order = append(a.order, id)
-		if len(a.order) > 16 {
-			delete(a.roles, a.order[0])
-			a.order = a.order[1:]
-		}
+	// The cache is shared by every session of this Host, so it keeps far more IDs
+	// than one session's 16: another session's snapshots must not evict this one's refs.
+	if i := slices.Index(a.order, id); i >= 0 {
+		a.order = slices.Delete(a.order, i, i+1)
+	} else if len(a.order) >= maxRoleSnapshots {
+		delete(a.roles, a.order[0])
+		a.order = a.order[1:]
 	}
+	a.order = append(a.order, id)
 	// A --root drill-down replaces refs inside an existing snapshot, so merge.
 	if a.roles[id] == nil {
 		a.roles[id] = map[string]string{}
