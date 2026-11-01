@@ -21,12 +21,23 @@ function usage(code) {
   process.exit(code);
 }
 
+function realpathOrEmpty(item) {
+  try {
+    return fs.realpathSync(item);
+  } catch {
+    return "";
+  }
+}
+
 function npmCommand() {
   // Run npm through node so no shell is involved (a .cmd shim cannot be spawned directly on Windows).
   const candidates = [
     process.env.npm_execpath,
     path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
     path.join(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    // Homebrew keeps npm in the shared prefix and links <node dir>/npm to its npm-cli.js.
+    realpathOrEmpty(path.join(path.dirname(process.execPath), "npm")),
+    realpathOrEmpty(path.join(path.dirname(fs.realpathSync(process.execPath)), "npm")),
   ].filter(Boolean);
   const cli = candidates.find((item) => item.endsWith("npm-cli.js") && fs.existsSync(item));
   if (!cli) throw new Error("npm-cli.js not found next to node; install npm or run `npm ci` in the prefix by hand");
