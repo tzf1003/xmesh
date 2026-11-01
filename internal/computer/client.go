@@ -165,6 +165,17 @@ func (c *Client) Release(ctx context.Context, r Execution) error {
 	return c.call(ctx, "release", r, nil)
 }
 
+func (c *Client) Snapshot(ctx context.Context, q SnapshotQuery) (Snapshot, error) {
+	var out Snapshot
+	err := c.call(ctx, "snapshot", q, &out)
+	return out, err
+}
+func (c *Client) RefAct(ctx context.Context, r RefExecution) (ActionResult, error) {
+	var out ActionResult
+	err := c.call(ctx, "ref_act", r, &out)
+	return out, err
+}
+
 // Authorize is a local setup operation and is never registered as an MCP tool.
 func (c *Client) Authorize(ctx context.Context) error { return c.call(ctx, "authorize", nil, nil) }
 func (c *Client) EmergencyStop(ctx context.Context) error {

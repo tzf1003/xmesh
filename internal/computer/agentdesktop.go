@@ -112,12 +112,15 @@ type AgentDesktop struct {
 	tmp      string
 	epoch    string
 	mu       sync.Mutex
+	// roles maps snapshot id -> ref -> accessibility role, bounded to recent snapshots.
+	roles map[string]map[string]string
+	order []string
 }
 
 // NewAgentDesktop builds the adapter. tmp is a private (0700) scratch directory
 // for screenshot files; fallback may be nil.
 func NewAgentDesktop(run Runner, fallback Provider, tmp string) *AgentDesktop {
-	return &AgentDesktop{run: run, fallback: fallback, tmp: tmp, epoch: "ad-" + randHex(8)}
+	return &AgentDesktop{run: run, fallback: fallback, tmp: tmp, epoch: "ad-" + randHex(8), roles: map[string]map[string]string{}}
 }
 
 func randHex(n int) string {
@@ -241,7 +244,7 @@ func (a *AgentDesktop) own(ctx context.Context) (Info, error) {
 	}
 	info.Available = true
 	info.LayoutVersion = layoutOf(ds)
-	info.Capabilities = []string{"screenshot", "pointer", "keyboard", "engine:agent-desktop"}
+	info.Capabilities = []string{"screenshot", "pointer", "keyboard", "refs", "engine:agent-desktop"}
 	return info, nil
 }
 
@@ -271,7 +274,7 @@ func (a *AgentDesktop) Info(ctx context.Context) (Info, error) {
 	if !fb.Available {
 		return own, nil
 	}
-	fb.Capabilities = appendUnique(fb.Capabilities, "engine:agent-desktop")
+	fb.Capabilities = appendUnique(fb.Capabilities, "engine:agent-desktop", "refs")
 	return fb, nil
 }
 

@@ -264,7 +264,7 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]bool{"requested": true})
 		return
 	}
-	if method != "info" && method != "capture" && method != "execute" && method != "release" && method != "heartbeat" && method != "disconnect" {
+	if method != "info" && method != "capture" && method != "execute" && method != "release" && method != "snapshot" && method != "ref_act" && method != "heartbeat" && method != "disconnect" {
 		http.NotFound(w, r)
 		return
 	}
@@ -315,6 +315,27 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out, err = p.Execute(r.Context(), q)
+	case "snapshot", "ref_act":
+		rp, ok := p.(computer.RefProvider)
+		if !ok {
+			fail(toolerr.New("conflict", "当前桌面引擎不支持元素 ref", "reason", "refs_unsupported"))
+			return
+		}
+		if method == "snapshot" {
+			var q computer.SnapshotQuery
+			if decode(&q) != nil {
+				fail(toolerr.Args("snapshot"))
+				return
+			}
+			out, err = rp.Snapshot(r.Context(), q)
+		} else {
+			var q computer.RefExecution
+			if decode(&q) != nil {
+				fail(toolerr.Args("ref_act"))
+				return
+			}
+			out, err = rp.RefAct(r.Context(), q)
+		}
 	case "release":
 		var q computer.Execution
 		if decode(&q) != nil {

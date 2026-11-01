@@ -38,6 +38,7 @@ type ownedSession struct {
 	foregroundRestricted bool
 	frames               map[string]Frame
 	actions              map[string]*operation
+	snapshots            []string
 	ctx                  context.Context
 	cancel               context.CancelFunc
 }
@@ -898,4 +899,192 @@ func (m *Manager) String() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return fmt.Sprintf("computer(enabled=%t paused=%t sessions=%d)", m.settings.Enabled, m.paused, len(m.sessions))
+}
+
+func refsReady(info Info, s *ownedSession) error {
+	if !slices.Contains(info.Capabilities, "refs") {
+		return toolerr.New("conflict", "当前桌面引擎不支持元素 ref", "reason", "refs_unsupported")
+	}
+	if s.TargetID != "" {
+		return toolerr.New("conflict", "绑定窗口目标的后台会话不支持元素 ref，请使用前台会话", "reason", "refs_unsupported_for_target")
+	}
+	return nil
+}
+
+// Snapshot reads the accessibility tree through the engine. Refs in the result are
+// valid only for this session and desktop epoch.
+func (m *Manager) Snapshot(ctx context.Context, caller string, r SnapshotRequest) (Snapshot, error) {
+	if err := validSnapshotQuery(r.SnapshotQuery); err != nil {
+		return Snapshot{}, err
+	}
+	m.mu.Lock()
+	s, err := m.observationLocked(caller, r.SessionRequest)
+	m.mu.Unlock()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	info, err := m.Info(ctx)
+	if err == nil {
+		err = desktopReady(info)
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if info.Epoch != s.Epoch {
+		m.invalidate(s.ID)
+		return Snapshot{}, toolerr.New("conflict", "桌面会话已重建", "reason", "desktop_epoch")
+	}
+	if err = refsReady(info, s); err != nil {
+		return Snapshot{}, err
+	}
+	rp, ok := m.provider.(RefProvider)
+	if !ok {
+		return Snapshot{}, toolerr.New("conflict", "当前桌面引擎不支持元素 ref", "reason", "refs_unsupported")
+	}
+	snap, err := rp.Snapshot(ctx, r.SnapshotQuery)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !snapshotPattern.MatchString(snap.SnapshotID) {
+		return Snapshot{}, toolerr.New("desktop_unavailable", "引擎返回的快照无效", "reason", "invalid_snapshot")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err = m.observationLocked(caller, r.SessionRequest); err != nil {
+		return Snapshot{}, err
+	}
+	if !slices.Contains(s.snapshots, snap.SnapshotID) {
+		if len(s.snapshots) >= 16 {
+			s.snapshots = s.snapshots[1:]
+		}
+		s.snapshots = append(s.snapshots, snap.SnapshotID)
+	}
+	snap.Epoch, snap.Notice = s.Epoch, untrustedNotice
+	return snap, nil
+}
+
+// RefAct performs one element action. It shares the controller lease, the global
+// action queue, idempotency cache and unknown-state rules with Act.
+func (m *Manager) RefAct(ctx context.Context, caller string, r RefActRequest) (ActionResult, error) {
+	if err := validRefAct(&r); err != nil {
+		return ActionResult{}, err
+	}
+	raw, _ := json.Marshal(r)
+	digest := sha256.Sum256(raw)
+	m.mu.Lock()
+	s, err := m.sessionLocked(caller, r.SessionRequest, true)
+	if err != nil {
+		m.mu.Unlock()
+		return ActionResult{}, err
+	}
+	if op := s.actions[r.ActionID]; op != nil {
+		if op.digest != digest {
+			m.mu.Unlock()
+			return ActionResult{}, toolerr.New("conflict", "动作 ID 已用于其他参数", "reason", "action_id_reused")
+		}
+		m.mu.Unlock()
+		return m.wait(ctx, s, op)
+	}
+	if len(s.actions) >= 128 {
+		m.mu.Unlock()
+		return ActionResult{}, toolerr.New("resource_busy", "动作缓存达到上限，请创建新会话", "resource", "computer:actions")
+	}
+	if s.TargetID != "" {
+		m.mu.Unlock()
+		return ActionResult{}, toolerr.New("conflict", "绑定窗口目标的后台会话不支持元素 ref，请使用前台会话", "reason", "refs_unsupported_for_target")
+	}
+	if !slices.Contains(s.snapshots, r.SnapshotID) {
+		m.mu.Unlock()
+		return ActionResult{}, toolerr.New("conflict", "需要当前会话的新快照", "reason", "stale_ref")
+	}
+	select {
+	case m.queue <- struct{}{}:
+	default:
+		m.mu.Unlock()
+		return ActionResult{}, toolerr.New("resource_busy", "桌面动作队列已满", "resource", "computer:queue")
+	}
+	op := &operation{digest: digest, result: ActionResult{ActionID: r.ActionID, State: "accepted"}, done: make(chan struct{}), previous: m.tail}
+	m.tail = op.done
+	s.actions[r.ActionID] = op
+	m.workers.Add(1)
+	go m.executeRef(s, op, r)
+	m.mu.Unlock()
+	return m.wait(ctx, s, op)
+}
+
+func (m *Manager) executeRef(s *ownedSession, op *operation, r RefActRequest) {
+	defer m.workers.Done()
+	defer func() { <-m.queue }()
+	result := ActionResult{ActionID: r.ActionID, State: "failed"}
+	defer func() {
+		m.mu.Lock()
+		op.result = result
+		close(op.done)
+		m.mu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+	defer cancel()
+	select {
+	case <-op.previous:
+	case <-ctx.Done():
+		result.Error = "cancelled"
+		return
+	}
+	select {
+	case m.executing <- struct{}{}:
+		defer func() { <-m.executing }()
+	case <-ctx.Done():
+		result.Error = "cancelled"
+		return
+	}
+	m.mu.Lock()
+	_, err := m.sessionLocked(s.Owner, r.SessionRequest, true)
+	m.mu.Unlock()
+	if err != nil {
+		result.Error = errorCode(err)
+		return
+	}
+	info, err := m.Info(ctx)
+	if err == nil {
+		err = desktopReady(info)
+	}
+	if err == nil && info.Epoch != s.Epoch {
+		result.Error = "stale_ref"
+		return
+	}
+	if err == nil {
+		err = refsReady(info, s)
+	}
+	if err != nil {
+		result.Error = errorCode(err)
+		if errorCode(err) != "conflict" {
+			m.invalidate(s.ID)
+		}
+		return
+	}
+	rp, ok := m.provider.(RefProvider)
+	if !ok {
+		result.Error = "refs_unsupported"
+		return
+	}
+	m.mu.Lock()
+	_, err = m.sessionLocked(s.Owner, r.SessionRequest, true)
+	m.mu.Unlock()
+	if err != nil {
+		result.Error = errorCode(err)
+		return
+	}
+	result, err = rp.RefAct(ctx, RefExecution{Epoch: s.Epoch, Token: s.Token, ActionID: r.ActionID, SnapshotID: r.SnapshotID, Ref: r.Ref, Op: r.Op, Text: r.Text, Direction: r.Direction, Amount: r.Amount})
+	result.ActionID = r.ActionID
+	if err != nil {
+		m.invalidate(s.ID)
+		result.State, result.Error, result.Executed = "unknown", "execution_unknown", 0
+		return
+	}
+	if result.State != "executed" && result.State != "failed" && result.State != "unknown" {
+		result.State, result.Error = "unknown", "execution_unknown"
+	}
+	if result.Executed < 0 || result.Executed > 1 || (result.State == "executed" && result.Executed != 1) {
+		result.State, result.Error, result.Executed = "unknown", "invalid_execution_result", 0
+	}
 }

@@ -441,7 +441,7 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			if slices.Contains(cfg.Agent.DisabledTools, name) {
 				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
 			}
-			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act") {
+			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act" || name == "computer.ref_act") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
 			}
 			if !Allowed(cfg, caller, name, "") {
