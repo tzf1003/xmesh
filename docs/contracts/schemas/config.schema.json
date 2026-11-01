@@ -532,6 +532,31 @@
           "description": "额外接受的 Host 名（域名），并在地址列表里展示。"
         },
         "expose_backends": { "enum": ["all", "favorite"], "default": "all" },
+        "tool_surface": {
+          "enum": ["full", "unified", "compact"],
+          "default": "full",
+          "description": "tools/list 的形态：full 列出全部工具，unified 合并为统一入口，compact 只列精简集合。热加载。"
+        },
+        "listed_groups": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": ["fs", "exec", "pty", "sys"],
+          "items": { "type": "string", "minLength": 1 },
+          "description": "非 full 形态下仍列入 tools/list 的工具组。热加载。"
+        },
+        "pinned_tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": [],
+          "items": { "type": "string", "minLength": 1 },
+          "description": "无论所属组，始终列入 tools/list 的工具名。热加载。"
+        },
+        "max_listed_tools": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 40,
+          "description": "tools/list 最多列出的工具数。热加载。"
+        },
         "pats": {
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/nodeName" },

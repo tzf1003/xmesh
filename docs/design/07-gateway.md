@@ -30,6 +30,12 @@ Gateway 自身的工具（不带设备前缀，因为它们描述的是聚合视
 
 契约见 [CTR-GW-01](../contracts/gateway.md#ctr-gw-01) 至 [CTR-GW-03](../contracts/gateway.md#ctr-gw-03)。
 
+### 渐进式披露（工具表形态）
+
+列表变长的根因是「设备 × 工具」。`gateway.tool_surface` 提供三种形态（[CTR-GW-08](../contracts/gateway.md#ctr-gw-08)）：`full` 为现状，缺省不变；`unified` 每个工具只列一次，不带设备前缀，schema 里注入可选的 `device`，Gateway 把调用改写成 `<设备>/<工具>`；`compact` 只留 Gateway 自有工具和 `pinned_tools`。低频组（`computer.*`、用户后端等）不进列表，经 `devices.list` 的 `groups` 摘要得知，用 `tools.search`（去重、分档）查 schema，用 `tools.call` 按需调用。授权、配额、审计仍按真实目标设备判定。
+
+用户在设备上配置的 MCP 后端就是一个组，组名为后端名，默认不进常驻列表，`favorite: true` 才可加入，并受 `max_listed_tools` 限制。后端名不得与内置组同名。
+
 ## 会话默认值
 
 `session.set_defaults({device, cwd, env})`：每个 MCP 连接设一次。后续调用省略 `device` / `cwd` 时，由 Gateway 在转发前补全。Agent 不保存这个状态。连接关闭后默认值消失。

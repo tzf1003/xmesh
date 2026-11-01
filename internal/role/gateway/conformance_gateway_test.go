@@ -641,7 +641,7 @@ func Test_CTRGW02_DevicesListScopeAndSearchArguments(t *testing.T) {
 			t.Fatalf("devices.list row lacks %q: %v", key, row)
 		}
 	}
-	for _, args := range []map[string]any{{"device": "test-node", "pattern": ""}, {"device": "test-node"}, {"pattern": "fs"}} {
+	for _, args := range []map[string]any{{"device": "test-node", "pattern": ""}, {"device": "test-node"}, {"detail": "full"}} {
 		if o := call(t, client, "tools.search", args); !o.IsError || object(t, o)["error"] != "invalid_args" {
 			t.Fatalf("tools.search %v: %v", args, object(t, o))
 		}

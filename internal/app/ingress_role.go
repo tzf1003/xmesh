@@ -176,12 +176,13 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 		principal.Ingress = true
 		return deps.dial(ctx, peer, principal, opts)
 	}
-	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, Ingress: true, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Discover: deps.discover, Changed: deps.changed, Dial: ingressDial, Audit: deps.log, PTYBudget: ptyBudget})
+	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, Ingress: true, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Surface: SurfaceFromConfig(cfg.Gateway), Discover: deps.discover, Changed: deps.changed, Dial: ingressDial, Audit: deps.log, PTYBudget: ptyBudget})
 	deps.registry.add(g)
 	// Read the generation after registering, so a change landing between the two is either seen here
 	// or delivered to the subscription.
 	current := deps.store.Get().Gateway
 	g.Reconfigure(current.Quota, current.ExposeBackends == "favorite")
+	g.SetSurface(SurfaceFromConfig(current))
 	handler := authorization.Handler(g.HTTP(func(r *http.Request) (gateway.Principal, error) {
 		token, ok := oauth.FromContext(r.Context())
 		if !ok {

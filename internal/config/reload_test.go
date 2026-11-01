@@ -65,7 +65,7 @@ func Test_NeedsRestartPointers(t *testing.T) {
 			t.Errorf("%q should need a restart", ptr)
 		}
 	}
-	hot := []string{"/ingress", "/ingress/oauth/issuer", "/ingress/listen", "/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway", "/gateway/listen", "/gateway/expose_backends", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer", "/node_x"}
+	hot := []string{"/ingress", "/ingress/oauth/issuer", "/ingress/listen", "/agent/policy/allow_dangerous", "/agent/policy/exec/deny_patterns", "/gateway", "/gateway/listen", "/gateway/expose_backends", "/gateway/tool_surface", "/gateway/listed_groups", "/gateway/pinned_tools", "/gateway/max_listed_tools", "/gateway/quota/calls_per_hour", "/gateway/pats/ci", "/gateway/listen_x", "/agent/quota", "/agent/authz/tag:peer", "/node_x"}
 	for _, ptr := range hot {
 		if NeedsRestart(ptr) {
 			t.Errorf("%q should apply without a restart", ptr)

@@ -53,9 +53,11 @@ type Options struct {
 	NodeName string
 	// NodeID is the network identity that Agents see as the caller's node
 	// (CTR-ID-01). Audit callers are NodeID/<session>; it defaults to NodeName.
-	NodeID    string
-	Ingress   bool
-	Favorite  bool
+	NodeID   string
+	Ingress  bool
+	Favorite bool
+	// Surface is gateway.tool_surface and its companions (CTR-GW-08); the zero value is "full".
+	Surface   Surface
 	LocalPeer mesh.Peer
 	Dial      Dial
 	Discover  Discover
@@ -87,6 +89,8 @@ type Gateway struct {
 	quotaApplied config.Quota
 	// favorite mirrors gateway.expose_backends; Reconfigure may change it while requests run.
 	favorite atomic.Bool
+	// surface mirrors gateway.tool_surface; SetSurface may change it while requests run.
+	surface atomic.Pointer[Surface]
 	// info holds the background sys.info readings behind the control channel's device state.
 	info        map[string]*infoRecord
 	infoWorkers sync.WaitGroup
@@ -144,6 +148,8 @@ func New(o Options) *Gateway {
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{opts: o, devices: map[string]device{}, views: map[*view]bool{}, ctx: ctx, cancel: cancel, done: make(chan struct{}), draining: map[string]bool{}, info: map[string]*infoRecord{}, quota: quota.New(o.Quota.Limits()), quotaApplied: o.Quota}
 	g.favorite.Store(o.Favorite)
+	normal := normalizeSurface(o.Surface)
+	g.surface.Store(&normal)
 	if o.LocalPeer.Name != "" {
 		g.devices[o.LocalPeer.Name] = device{o.LocalPeer, true, time.Now()}
 	}
@@ -370,6 +376,13 @@ func (g *Gateway) newView(p Principal) *view {
 	v.server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, r mcp.Request) (result mcp.Result, e error) {
 			started := time.Now()
+			viaCall := false
+			if method == "tools/call" {
+				var rejected *mcp.CallToolResult
+				if rejected, viaCall = v.rewriteCall(r.(*mcp.CallToolRequest)); rejected != nil {
+					return rejected, nil
+				}
+			}
 			if method == "tools/call" && g.opts.Audit != nil {
 				call := r.(*mcp.CallToolRequest)
 				device, caller := v.auditIdentity(call.Params.Name, call.Session.ID())
@@ -421,14 +434,16 @@ func (g *Gateway) newView(p Principal) *view {
 					if device != "" && device != g.opts.LocalPeer.Name {
 						v.waitReady(ctx, device)
 					}
-					v.waitOthers(ctx, g.opts.LocalPeer.Name, device)
+					if g.surface.Load().Mode != SurfaceCompact {
+						v.waitOthers(ctx, g.opts.LocalPeer.Name, device)
+					}
 				}
 			}
 			if method == "tools/call" {
 				req := r.(*mcp.CallToolRequest)
 				name := req.Params.Name
 				switch name {
-				case "devices.list", "tools.search", "session.set_defaults":
+				case "devices.list", "tools.search", "tools.call", "session.set_defaults":
 				default:
 					if !strings.Contains(name, "/") {
 						v.mu.Lock()
@@ -436,6 +451,9 @@ func (g *Gateway) newView(p Principal) *view {
 						v.mu.Unlock()
 						var target string
 						_ = json.Unmarshal(deviceRaw, &target)
+						if target == "" && g.surface.Load().Mode != SurfaceFull {
+							return agent.Result(nil, v.missingDevice(name)), nil
+						}
 						if target != "" {
 							req.Params.Name = target + "/" + name
 						}
@@ -476,7 +494,22 @@ func (g *Gateway) newView(p Principal) *view {
 				audit.SetExecutionState(ctx, "running")
 			}
 			result, e = next(ctx, method, r)
-			if e == nil && method == "tools/list" {
+			if e == nil && viaCall {
+				if out, ok := result.(*mcp.CallToolResult); ok {
+					v.attachSchema(out, r.(*mcp.CallToolRequest).Params.Name)
+				}
+			}
+			if e == nil && method == "tools/list" && g.surface.Load().Mode != SurfaceFull {
+				if list, ok := result.(*mcp.ListToolsResult); ok {
+					visible := []*mcp.Tool{}
+					for _, t := range list.Tools {
+						if !strings.Contains(t.Name, "/") && v.gatewayToolVisible(t.Name) {
+							visible = append(visible, t)
+						}
+					}
+					list.Tools = append(visible, v.unifiedTools(*g.surface.Load())...)
+				}
+			} else if e == nil && method == "tools/list" {
 				if list, ok := result.(*mcp.ListToolsResult); ok {
 					visible := []*mcp.Tool{}
 					for _, t := range list.Tools {
@@ -496,7 +529,7 @@ func (g *Gateway) newView(p Principal) *view {
 							if shown {
 								visible = append(visible, t)
 							}
-						} else if v.allowed("", t.Name, "") {
+						} else if v.gatewayToolVisible(t.Name) {
 							visible = append(visible, t)
 						}
 					}
@@ -806,7 +839,7 @@ func (v *view) publish(generation uint64) {
 		v.names = append(v.names, full)
 	}
 	sort.Strings(v.names)
-	encoded, _ := json.Marshal([]any{entries, visibility, v.defaultDeviceLocked()})
+	encoded, _ := json.Marshal([]any{entries, visibility, v.defaultDeviceLocked(), v.g.surface.Load()})
 	catalog := sha256.Sum256(encoded)
 	same := v.catalog == catalog && v.generation == generation
 	v.catalog = catalog

@@ -251,9 +251,17 @@ type Gateway struct {
 	// loopback address to serve this machine only (CTR-CFG-01).
 	Listen string `json:"listen"`
 	// Access says which sources may connect (CTR-GW-07). Every request needs a token.
-	Access         []string       `json:"access"`
-	Hosts          []string       `json:"hosts"`
-	ExposeBackends string         `json:"expose_backends"`
+	Access         []string `json:"access"`
+	Hosts          []string `json:"hosts"`
+	ExposeBackends string   `json:"expose_backends"`
+	// ToolSurface is the tools/list shape: full, unified or compact.
+	ToolSurface string `json:"tool_surface"`
+	// ListedGroups are the tool groups listed in tools/list outside the full surface.
+	ListedGroups []string `json:"listed_groups"`
+	// PinnedTools are tool names always listed regardless of group.
+	PinnedTools []string `json:"pinned_tools"`
+	// MaxListedTools caps the number of tools listed; at least 1.
+	MaxListedTools int            `json:"max_listed_tools"`
 	PATs           map[string]PAT `json:"pats"`
 	Quota          Quota          `json:"quota"`
 }
@@ -542,6 +550,10 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.Policy.Isolation = "L1"
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
+	c.Gateway.ToolSurface = "full"
+	c.Gateway.ListedGroups = []string{"fs", "exec", "pty", "sys"}
+	c.Gateway.PinnedTools = []string{}
+	c.Gateway.MaxListedTools = 40
 	c.Gateway.Listen = ":8080"
 	c.Gateway.Access = []string{"localhost", "lan", "tailnet"}
 	c.Ingress.MaxPTYPerClient = 8
@@ -711,6 +723,24 @@ func (c *Config) Validate() error {
 	}
 	if _, e := ParseAccess(c.Gateway.Access); e != nil {
 		return fail("/gateway/access")
+	}
+	switch c.Gateway.ToolSurface {
+	case "", "full", "unified", "compact":
+	default:
+		return fail("/gateway/tool_surface")
+	}
+	for _, g := range c.Gateway.ListedGroups {
+		if strings.TrimSpace(g) == "" {
+			return fail("/gateway/listed_groups")
+		}
+	}
+	for _, n := range c.Gateway.PinnedTools {
+		if strings.TrimSpace(n) == "" {
+			return fail("/gateway/pinned_tools")
+		}
+	}
+	if c.Gateway.MaxListedTools < 0 {
+		return fail("/gateway/max_listed_tools")
 	}
 	for _, h := range c.Gateway.Hosts {
 		if net.ParseIP(h) != nil {
