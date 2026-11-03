@@ -24,7 +24,6 @@ import base64
 import hashlib
 import json
 import re
-import shutil
 import sys
 import tarfile
 import tempfile
@@ -46,6 +45,8 @@ CHUNK = 1 << 20
 MAX_TEXT_MEMBER = 1 << 20  # sidecars and package.json are a few KiB; anything larger is refused
 MAX_JSON = 32 << 20  # the registry document is about 100 KiB today; this only stops a runaway response
 MAX_DOWNLOAD_BYTES = 512 << 20  # the tarball is about 15 MB today; this only stops a runaway download
+MAX_BINARY_MEMBER = 256 << 20  # the largest platform binary is about 7 MB; this only stops a runaway member
+MAX_ARCHIVE_MEMBERS = 10_000  # the package has 26 entries; this only stops a crafted archive from exhausting memory
 
 # process.platform-process.arch -> (main executable, helper executables). Names are
 # files in the npm package's bin/ directory and mirror lib/platform.js in the
@@ -191,7 +192,10 @@ def verify_integrity(path, integrity):
 def index_archive(archive):
     """Map package-relative names to regular-file members. Anything else is rejected."""
     files = {}
-    for member in archive.getmembers():
+    # Iterate instead of calling getmembers(), and count entries before the index grows.
+    for count, member in enumerate(archive, 1):
+        if count > MAX_ARCHIVE_MEMBERS:
+            raise UpstreamError(f"archive has more than {MAX_ARCHIVE_MEMBERS} entries")
         parts = PurePosixPath(member.name).parts
         if member.name.startswith("/") or ".." in parts or not parts or parts[0] != "package":
             raise UpstreamError(f"unexpected archive entry {member.name!r}")
@@ -215,6 +219,8 @@ def read_member(archive, member):
 
 
 def sha256_of(archive, member):
+    if member.size > MAX_BINARY_MEMBER:
+        raise UpstreamError(f"{member.name!r} is {member.size} bytes, over the {MAX_BINARY_MEMBER}-byte limit")
     handle = archive.extractfile(member)
     if handle is None:
         raise UpstreamError(f"cannot read {member.name!r}")
@@ -299,6 +305,11 @@ def updated_manifest(manifest, target, platforms):
     return result
 
 
+def code_span(text):
+    """Keep control characters and backticks inside one Markdown code span, so a file name cannot break the record."""
+    return json.dumps(text, ensure_ascii=False)[1:-1].replace("`", "\\u0060")
+
+
 def render_record(target, pinned, platforms, unmapped):
     lines = [
         f"# agent-desktop {target.version} 验收记录",
@@ -333,7 +344,7 @@ def render_record(target, pinned, platforms, unmapped):
         lines.append(f"| {key} | `{binary['member']}` | `{binary['sha256']}` | {helper_cells} |")
     lines += ["", "## 未映射的上游文件", ""]
     if unmapped:
-        lines += [f"- `{name}`：不写入清单，也不会暴露为工具" for name in unmapped]
+        lines += [f"- `{code_span(name)}`：不写入清单，也不会暴露为工具" for name in unmapped]
     else:
         lines.append("- 无")
     lines += [

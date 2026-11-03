@@ -308,6 +308,13 @@ class ProposalTest(unittest.TestCase):
         manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
         self.assertNotIn("riscv", json.dumps(manifest["platforms"]))
 
+    def test_unmapped_names_are_escaped_in_the_record(self):
+        tarball, packument = self.publish("1.1.0", files=package_files("1.1.0", extra={"bin/odd`name": b"x"}))
+        code, values = self.run_tool(tarball, packument)
+        self.assertEqual((code, values["changed"]), (0, "true"))
+        record = (self.root / "docs/validation/agent-desktop-1.1.0.md").read_text(encoding="utf-8")
+        self.assertIn("`bin/odd\\u0060name`：不写入清单", record)
+
     def test_requested_version_that_is_older_is_not_proposed(self):
         tarball, packument = self.publish("1.0.1")
         code, values = self.run_tool(tarball, packument, requested_version="1.0.1")
@@ -374,6 +381,25 @@ class RedirectTest(unittest.TestCase):
         moved = "https://registry.npmjs.org/agent-desktop/-/moved-1.1.0.tgz"
         followed = adu.SameHostRedirects().redirect_request(request, None, 302, "Found", {}, moved)
         self.assertEqual(followed.full_url, moved)
+
+
+class ArchiveLimitTest(unittest.TestCase):
+    def test_binary_over_the_limit_is_refused_before_hashing(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = pathlib.Path(scratch) / "oversized.tgz"
+            write_tarball(path, {"bin/agent-desktop-linux-x64": b"x" * 17})
+            with tarfile.open(path, "r:gz") as archive, mock.patch.object(adu, "MAX_BINARY_MEMBER", 16):
+                member = archive.getmember("package/bin/agent-desktop-linux-x64")
+                with self.assertRaisesRegex(adu.UpstreamError, "over the"):
+                    adu.sha256_of(archive, member)
+
+    def test_archive_with_too_many_entries_is_refused(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = pathlib.Path(scratch) / "many.tgz"
+            write_tarball(path, {f"f{i}.txt": b"" for i in range(5)})
+            with tarfile.open(path, "r:gz") as archive, mock.patch.object(adu, "MAX_ARCHIVE_MEMBERS", 3):
+                with self.assertRaisesRegex(adu.UpstreamError, "more than 3 entries"):
+                    adu.index_archive(archive)
 
 
 class FakeOpener:
