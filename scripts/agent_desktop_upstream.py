@@ -47,6 +47,7 @@ MAX_JSON = 32 << 20  # the registry document is about 100 KiB today; this only s
 MAX_DOWNLOAD_BYTES = 512 << 20  # the tarball is about 15 MB today; this only stops a runaway download
 MAX_BINARY_MEMBER = 256 << 20  # the largest platform binary is about 7 MB; this only stops a runaway member
 MAX_ARCHIVE_MEMBERS = 10_000  # the package has 26 entries; this only stops a crafted archive from exhausting memory
+MAX_RECORD_BYTES = 60_000  # a record is about 3 KB; GitHub caps a pull request body at 65,536 characters
 
 # process.platform-process.arch -> (main executable, helper executables). Names are
 # files in the npm package's bin/ directory and mirror lib/platform.js in the
@@ -307,6 +308,8 @@ def updated_manifest(manifest, target, platforms):
 
 def code_span(text):
     """Keep control characters and backticks inside one Markdown code span, so a file name cannot break the record."""
+    # tarfile keeps a name that is not valid UTF-8 as lone surrogates; write those as escapes, which UTF-8 can hold.
+    text = text.encode("utf-8", "backslashreplace").decode("utf-8")
     return json.dumps(text, ensure_ascii=False)[1:-1].replace("`", "\\u0060")
 
 
@@ -421,6 +424,10 @@ def run(args):
             unmapped = unmapped_members(files)
 
     document = render_record(target, pinned, platforms, unmapped)
+    size = len(document.encode("utf-8"))
+    if size > MAX_RECORD_BYTES:
+        # Checked before anything is written, so an oversized record never reaches the manifest, the record or the PR body.
+        raise UpstreamError(f"the validation record would be {size} bytes, over the {MAX_RECORD_BYTES}-byte limit")
     manifest_file.write_text(
         json.dumps(updated_manifest(manifest, target, platforms), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",

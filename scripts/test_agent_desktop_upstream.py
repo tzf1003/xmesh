@@ -309,11 +309,22 @@ class ProposalTest(unittest.TestCase):
         self.assertNotIn("riscv", json.dumps(manifest["platforms"]))
 
     def test_unmapped_names_are_escaped_in_the_record(self):
-        tarball, packument = self.publish("1.1.0", files=package_files("1.1.0", extra={"bin/odd`name": b"x"}))
+        names = {"bin/odd`name": b"x", "bin/line\nbreak": b"x"}
+        tarball, packument = self.publish("1.1.0", files=package_files("1.1.0", extra=names))
         code, values = self.run_tool(tarball, packument)
         self.assertEqual((code, values["changed"]), (0, "true"))
         record = (self.root / "docs/validation/agent-desktop-1.1.0.md").read_text(encoding="utf-8")
         self.assertIn("`bin/odd\\u0060name`：不写入清单", record)
+        self.assertIn("`bin/line\\nbreak`：不写入清单", record)
+
+    def test_a_record_over_the_size_limit_is_not_written(self):
+        tarball, packument = self.publish("1.1.0")
+        manifest_before = self.manifest.read_text(encoding="utf-8")
+        with mock.patch.object(adu, "MAX_RECORD_BYTES", 100):
+            with self.assertRaisesRegex(adu.UpstreamError, "over the 100-byte limit"):
+                self.run_tool(tarball, packument)
+        self.assertEqual(self.manifest.read_text(encoding="utf-8"), manifest_before)
+        self.assertFalse((self.root / "docs/validation/agent-desktop-1.1.0.md").exists())
 
     def test_requested_version_that_is_older_is_not_proposed(self):
         tarball, packument = self.publish("1.0.1")
@@ -400,6 +411,21 @@ class ArchiveLimitTest(unittest.TestCase):
             with tarfile.open(path, "r:gz") as archive, mock.patch.object(adu, "MAX_ARCHIVE_MEMBERS", 3):
                 with self.assertRaisesRegex(adu.UpstreamError, "more than 3 entries"):
                     adu.index_archive(archive)
+
+    def test_mapped_binary_over_the_limit_is_refused_on_the_proposal_path(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = pathlib.Path(scratch) / "oversized-mapped.tgz"
+            write_tarball(path, {"bin/agent-desktop-linux-x64": b"x" * 17})
+            with tarfile.open(path, "r:gz") as archive, mock.patch.object(adu, "MAX_BINARY_MEMBER", 16):
+                files = adu.index_archive(archive)
+                with self.assertRaisesRegex(adu.UpstreamError, "over the"):
+                    adu.platform_entry(archive, files, "agent-desktop-linux-x64")
+
+
+class CodeSpanTest(unittest.TestCase):
+    def test_a_lone_surrogate_is_written_as_an_escape(self):
+        # tarfile keeps a name that is not valid UTF-8 as a lone surrogate, which UTF-8 cannot encode.
+        self.assertEqual(adu.code_span("bin/odd\udcffname"), "bin/odd\\\\udcffname")
 
 
 class FakeOpener:
