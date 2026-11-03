@@ -1,0 +1,27 @@
+{
+  "enabled": true,
+  "paused": false,
+  "info": {
+    "protocol_version": 1,
+    "available": true,
+    "state": "ready",
+    "desktop_id": "desktop",
+    "desktop_epoch": "epoch",
+    "layout_version": "layout",
+    "capabilities": [
+      "screenshot",
+      "pointer",
+      "keyboard",
+      "refs",
+      "engine:agent-desktop"
+    ],
+    "displays": [],
+    "unmapped_commands": [
+      "find",
+      "launch",
+      "list-apps",
+      "wait"
+    ]
+  },
+  "sessions": []
+}

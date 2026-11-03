@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "table_version": "1.0.2",
+  "source": "agent-desktop 1.0.2 README 的 Commands 表，共 60 个命令名。1.1.0 的命令表与之相同；升级时必须重新核对本表，新出现的命令会在 Info.unmapped_commands 中报告。",
+  "tool_requires": {
+    "computer.snapshot": ["refs"],
+    "computer.ref_act": ["refs"]
+  },
+  "commands": [
+    {"name": "snapshot", "risk": "observe", "tool": "computer.snapshot"},
+    {"name": "find", "risk": "observe"},
+    {"name": "get", "risk": "observe"},
+    {"name": "is", "risk": "observe"},
+    {"name": "screenshot", "risk": "observe", "tool": "computer.observe"},
+    {"name": "list-surfaces", "risk": "observe"},
+
+    {"name": "click", "risk": "pointer", "tool": "computer.ref_act", "op": "click"},
+    {"name": "double-click", "risk": "pointer"},
+    {"name": "triple-click", "risk": "pointer"},
+    {"name": "right-click", "risk": "pointer", "tool": "computer.ref_act", "op": "right_click"},
+    {"name": "type", "risk": "text", "tool": "computer.ref_act", "op": "type"},
+    {"name": "set-value", "risk": "text", "tool": "computer.ref_act", "op": "set_value"},
+    {"name": "clear", "risk": "text", "tool": "computer.ref_act", "op": "clear"},
+    {"name": "focus", "risk": "pointer", "tool": "computer.ref_act", "op": "focus"},
+    {"name": "select", "risk": "text", "tool": "computer.ref_act", "op": "select"},
+    {"name": "toggle", "risk": "pointer", "tool": "computer.ref_act", "op": "toggle"},
+    {"name": "check", "risk": "pointer", "tool": "computer.ref_act", "op": "check"},
+    {"name": "uncheck", "risk": "pointer", "tool": "computer.ref_act", "op": "uncheck"},
+    {"name": "expand", "risk": "pointer", "tool": "computer.ref_act", "op": "expand"},
+    {"name": "collapse", "risk": "pointer", "tool": "computer.ref_act", "op": "collapse"},
+    {"name": "scroll", "risk": "pointer", "tool": "computer.ref_act", "op": "scroll"},
+    {"name": "scroll-to", "risk": "pointer", "tool": "computer.ref_act", "op": "scroll_to"},
+
+    {"name": "press", "risk": "keyboard", "tool": "computer.act"},
+    {"name": "hover", "risk": "pointer"},
+    {"name": "drag", "risk": "pointer", "tool": "computer.act"},
+    {"name": "mouse-move", "risk": "pointer", "tool": "computer.act"},
+    {"name": "mouse-click", "risk": "pointer", "tool": "computer.act"},
+    {"name": "mouse-wheel", "risk": "pointer", "tool": "computer.act"},
+    {"name": "key-down", "risk": "keyboard"},
+    {"name": "key-up", "risk": "keyboard"},
+    {"name": "mouse-down", "risk": "pointer"},
+    {"name": "mouse-up", "risk": "pointer"},
+
+    {"name": "launch", "risk": "app_control"},
+    {"name": "close-app", "risk": "app_control"},
+    {"name": "list-apps", "risk": "observe"},
+    {"name": "list-windows", "risk": "observe"},
+    {"name": "list-displays", "risk": "observe", "tool": "computer.info"},
+    {"name": "focus-window", "risk": "app_control"},
+    {"name": "resize-window", "risk": "app_control"},
+    {"name": "move-window", "risk": "app_control"},
+    {"name": "minimize", "risk": "app_control"},
+    {"name": "maximize", "risk": "app_control"},
+    {"name": "restore", "risk": "app_control"},
+    {"name": "open-system-surface", "risk": "app_control"},
+
+    {"name": "list-notifications", "risk": "observe"},
+    {"name": "dismiss-notification", "risk": "app_control"},
+    {"name": "dismiss-all-notifications", "risk": "app_control"},
+    {"name": "notification-action", "risk": "app_control"},
+
+    {"name": "clipboard-get", "risk": "clipboard"},
+    {"name": "clipboard-set", "risk": "clipboard"},
+    {"name": "clipboard-clear", "risk": "clipboard"},
+
+    {"name": "wait", "risk": "observe"},
+
+    {"name": "session", "risk": "system"},
+    {"name": "trace", "risk": "system"},
+    {"name": "cursor-overlay", "risk": "system"},
+
+    {"name": "status", "risk": "observe"},
+    {"name": "permissions", "risk": "observe", "tool": "computer.info"},
+    {"name": "version", "risk": "observe"},
+    {"name": "batch", "risk": "system"},
+    {"name": "skills", "risk": "observe"}
+  ]
+}

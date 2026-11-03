@@ -23,6 +23,12 @@ import (
 
 func fixture(t *testing.T, ingress bool) (*Gateway, string) {
 	t.Helper()
+	return fixtureWith(t, ingress, nil)
+}
+
+// fixtureWith is fixture with a hook that edits the agent's configuration before the agent starts.
+func fixtureWith(t *testing.T, ingress bool, edit func(*config.Config)) (*Gateway, string) {
+	t.Helper()
 	root := t.TempDir()
 	root, _ = filepath.EvalSymlinks(root)
 	c := &config.Config{}
@@ -32,6 +38,9 @@ func fixture(t *testing.T, ingress bool) (*Gateway, string) {
 	c.Agent.Authz = map[string]config.Grant{"tag:peer": {Tools: []string{"*"}, Backends: []string{"*"}}}
 	c.Agent.Exec = config.Exec{MaxConcurrent: 4, ExclusiveSlots: 1, DefaultTimeout: "5s", InlineOutputBytes: "256KiB", IdempotencyCache: 20}
 	c.Agent.PTY = config.PTY{MaxSessions: 20, MaxPerCaller: 8, IdleTimeout: "30m", OrphanGrace: "10m", DefaultShell: "auto", ScrollbackBytes: "1MiB", ClosedRetain: "5m", ClosedRetainMax: 20}
+	if edit != nil {
+		edit(c)
+	}
 	a, e := agent.New(config.Static(c))
 	if e != nil {
 		t.Fatal(e)

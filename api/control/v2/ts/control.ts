@@ -815,6 +815,7 @@ export interface ComputerInfo {
   user_input_serial?: number;
   targets?: ComputerTarget[];
   default_interaction?: "background" | "foreground";
+  unmapped_commands?: string[];
 }
 export interface ComputerTarget {
   id: string;

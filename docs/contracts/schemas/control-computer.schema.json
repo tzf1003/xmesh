@@ -98,6 +98,12 @@
             "background",
             "foreground"
           ]
+        },
+        "unmapped_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

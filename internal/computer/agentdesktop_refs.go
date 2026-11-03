@@ -111,8 +111,6 @@ func (a *AgentDesktop) Snapshot(ctx context.Context, q SnapshotQuery) (Snapshot,
 	return Snapshot{SnapshotID: id, Complete: complete, Tree: out}, nil
 }
 
-var refCommands = map[string]string{"click": "click", "right_click": "right-click", "focus": "focus", "set_value": "set-value", "type": "type", "clear": "clear", "select": "select", "toggle": "toggle", "check": "check", "uncheck": "uncheck", "expand": "expand", "collapse": "collapse", "scroll": "scroll", "scroll_to": "scroll-to"}
-
 func refErrorCode(code string) string {
 	switch code {
 	case "STALE_REF", "SNAPSHOT_NOT_FOUND":
@@ -136,7 +134,7 @@ func (a *AgentDesktop) RefAct(ctx context.Context, r RefExecution) (ActionResult
 		res.Error = "stale_ref"
 		return res, nil
 	}
-	cmd, ok := refCommands[r.Op]
+	cmd, ok := adCatalogTable.commandForOp(r.Op)
 	m := refPattern.FindStringSubmatch(r.Ref)
 	if !ok || m == nil || m[1] != r.SnapshotID {
 		res.Error = "invalid_args"

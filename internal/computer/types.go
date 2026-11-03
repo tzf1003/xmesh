@@ -36,6 +36,9 @@ type Info struct {
 	UserInputSerial    uint64    `json:"user_input_serial,omitempty"`
 	Targets            []Target  `json:"targets,omitempty"`
 	DefaultInteraction string    `json:"default_interaction,omitempty"`
+	// UnmappedCommands lists upstream agent-desktop commands that no xmesh tool uses yet. They are reported
+	// for review and never exposed; see agentdesktop_catalog.json.
+	UnmappedCommands []string `json:"unmapped_commands,omitempty"`
 }
 
 // Target is an executor-issued application window identity, scoped to Epoch.
