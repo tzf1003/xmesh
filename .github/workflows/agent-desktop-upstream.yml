@@ -55,7 +55,9 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          # The whole history counts: a closed proposal blocks the daily run for its version.
+          # Every pull request counts, closed ones included, because a closed proposal blocks the daily
+          # run for its version. gh returns at most --limit entries: 5000 is well above the number of
+          # pull requests this repository has today, so raise it before the count approaches it.
           gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 5000 \
             --json number,state,headRefName,isCrossRepository > "$RUNNER_TEMP/pulls.json"
           python3 scripts/agent_desktop_upstream.py \

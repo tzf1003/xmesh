@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 import unittest
 import urllib.request
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -373,6 +374,44 @@ class RedirectTest(unittest.TestCase):
         moved = "https://registry.npmjs.org/agent-desktop/-/moved-1.1.0.tgz"
         followed = adu.SameHostRedirects().redirect_request(request, None, 302, "Found", {}, moved)
         self.assertEqual(followed.full_url, moved)
+
+
+class FakeOpener:
+    """Stands in for adu.OPENER: `open` returns the body without touching the network."""
+
+    def __init__(self, body):
+        self.body = body
+
+    def open(self, request, timeout=None):
+        return io.BytesIO(self.body)
+
+
+class FetchTest(unittest.TestCase):
+    def test_production_opener_routes_redirects_through_the_same_host_handler(self):
+        self.assertTrue(any(isinstance(handler, adu.SameHostRedirects) for handler in adu.OPENER.handlers))
+
+    def test_registry_document_within_the_limit_is_parsed(self):
+        with mock.patch.object(adu, "MAX_JSON", 16), mock.patch.object(adu, "OPENER", FakeOpener(b'{"a": 1}')):
+            self.assertEqual(adu.fetch_json("https://registry.npmjs.org/agent-desktop"), {"a": 1})
+
+    def test_registry_document_over_the_limit_is_refused(self):
+        with mock.patch.object(adu, "MAX_JSON", 16), mock.patch.object(adu, "OPENER", FakeOpener(b"x" * 17)):
+            with self.assertRaisesRegex(adu.UpstreamError, "is larger than"):
+                adu.fetch_json("https://registry.npmjs.org/agent-desktop")
+
+    def test_download_within_the_limit_is_written(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            destination = pathlib.Path(scratch) / "package.tgz"
+            with mock.patch.object(adu, "MAX_DOWNLOAD_BYTES", 16), mock.patch.object(adu, "OPENER", FakeOpener(b"x" * 16)):
+                adu.fetch_file("https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.1.0.tgz", destination)
+            self.assertEqual(destination.read_bytes(), b"x" * 16)
+
+    def test_download_over_the_limit_is_refused(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            destination = pathlib.Path(scratch) / "package.tgz"
+            with mock.patch.object(adu, "MAX_DOWNLOAD_BYTES", 16), mock.patch.object(adu, "OPENER", FakeOpener(b"x" * 17)):
+                with self.assertRaisesRegex(adu.UpstreamError, "over the"):
+                    adu.fetch_file("https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.1.0.tgz", destination)
 
 
 if __name__ == "__main__":

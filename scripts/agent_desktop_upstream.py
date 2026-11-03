@@ -44,6 +44,8 @@ BRANCH_PREFIX = "automation/agent-desktop-"
 OUTPUT_KEYS = ("changed", "reason", "pinned", "upstream", "version", "branch", "title")
 CHUNK = 1 << 20
 MAX_TEXT_MEMBER = 1 << 20  # sidecars and package.json are a few KiB; anything larger is refused
+MAX_JSON = 32 << 20  # the registry document is about 100 KiB today; this only stops a runaway response
+MAX_DOWNLOAD_BYTES = 512 << 20  # the tarball is about 15 MB today; this only stops a runaway download
 
 # process.platform-process.arch -> (main executable, helper executables). Names are
 # files in the npm package's bin/ directory and mirror lib/platform.js in the
@@ -152,13 +154,21 @@ OPENER = urllib.request.build_opener(SameHostRedirects)
 def fetch_json(url):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     with OPENER.open(request, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
+        body = response.read(MAX_JSON + 1)
+    if len(body) > MAX_JSON:
+        raise UpstreamError(f"{url} is larger than {MAX_JSON} bytes")
+    return json.loads(body.decode("utf-8"))
 
 
 def fetch_file(url, destination):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    written = 0
     with OPENER.open(request, timeout=120) as response, open(destination, "wb") as handle:
-        shutil.copyfileobj(response, handle, CHUNK)
+        for chunk in iter(lambda: response.read(CHUNK), b""):
+            written += len(chunk)
+            if written > MAX_DOWNLOAD_BYTES:
+                raise UpstreamError(f"download of {url} is over the {MAX_DOWNLOAD_BYTES}-byte limit")
+            handle.write(chunk)
 
 
 def load_json(path):
