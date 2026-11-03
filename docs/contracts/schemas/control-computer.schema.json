@@ -99,6 +99,22 @@
             "foreground"
           ]
         },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "native",
+            "agent-desktop"
+          ]
+        },
+        "engine_version": {
+          "type": "string"
+        },
+        "engine_status": {
+          "type": "string"
+        },
+        "engine_reason": {
+          "type": "string"
+        },
         "unmapped_commands": {
           "type": "array",
           "items": {

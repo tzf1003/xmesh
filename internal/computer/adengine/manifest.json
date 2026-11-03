@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "package": "agent-desktop",
+  "version": "1.0.2",
+  "license": "Apache-2.0",
+  "tarball": {
+    "url": "https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.0.2.tgz",
+    "integrity": "sha512-k2Qi3f0y1U60YaJOw1dob3EO55P/DuH4HK3WKdI9sMZLjVxpGZAzuG50rIWuIqS0JIVy07g+0pp9Of2JDjTX0w==",
+    "published_at": "2026-10-30T21:18:45.761Z"
+  },
+  "platforms": {
+    "darwin-arm64": {
+      "binary": {
+        "member": "bin/agent-desktop-darwin-arm64",
+        "sha256": "bf0a3c9256512f2f57288d37ccd17d7f03665fccc53c2f74011a49b98e61ba59"
+      },
+      "helpers": [
+        {
+          "member": "bin/agent-desktop-macos-helper-darwin-arm64",
+          "sha256": "522829116cb006b5770c6a82b361f466a4775f794d6af4083e75231a2d6bb551"
+        }
+      ]
+    },
+    "darwin-x64": {
+      "binary": {
+        "member": "bin/agent-desktop-darwin-x64",
+        "sha256": "9684916bb4b5486c02cef8b2d480e55a551639b08358284f90a87cef43b2da8b"
+      },
+      "helpers": [
+        {
+          "member": "bin/agent-desktop-macos-helper-darwin-x64",
+          "sha256": "ce52467818ac601ae1145a0b9ecaa14aaf04d2e72d24cf6d29d26757340f9c6b"
+        }
+      ]
+    },
+    "linux-arm64": {
+      "binary": {
+        "member": "bin/agent-desktop-linux-arm64",
+        "sha256": "529ae49006278f778bcda6b68d7460a55148e2cefb1cb69a23485381d9dbdec0"
+      },
+      "helpers": [
+        {
+          "member": "bin/agent-desktop-linux-clipboard-owner-linux-arm64",
+          "sha256": "dcd6f2ce9a0e92e42f4d2ee9161ea1b9f2b11c0e4b1878119a19c0a2db3630a6"
+        }
+      ]
+    },
+    "linux-x64": {
+      "binary": {
+        "member": "bin/agent-desktop-linux-x64",
+        "sha256": "05427281a6746489bc0e15c16698a70a86322125c76c7a9e2f4c2d7a12bf7c5b"
+      },
+      "helpers": [
+        {
+          "member": "bin/agent-desktop-linux-clipboard-owner-linux-x64",
+          "sha256": "bf17de139902724e86b3616970b7b7f16f5f1fb4143910b532a38dd2182720fa"
+        }
+      ]
+    },
+    "win32-arm64": {
+      "binary": {
+        "member": "bin/agent-desktop-win32-arm64.exe",
+        "sha256": "5877fbca41fb85806353d0aaf67c23cfdf06a58a77c5d9cba005727a2891034e"
+      },
+      "helpers": []
+    },
+    "win32-x64": {
+      "binary": {
+        "member": "bin/agent-desktop-win32-x64.exe",
+        "sha256": "409e58cbdd6aed47e29771ffa60bc122a9843505a227af488cded85215943988"
+      },
+      "helpers": []
+    }
+  },
+  "validation": {
+    "validated_versions": [
+      "1.0.2"
+    ],
+    "validated_platforms": [
+      "darwin-arm64"
+    ],
+    "record": "docs/validation/2026-11-01-agent-browser-desktop-p0.md"
+  },
+  "upstream": {
+    "latest": "1.1.0"
+  }
+}

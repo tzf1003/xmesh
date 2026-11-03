@@ -36,6 +36,12 @@ type Info struct {
 	UserInputSerial    uint64    `json:"user_input_serial,omitempty"`
 	Targets            []Target  `json:"targets,omitempty"`
 	DefaultInteraction string    `json:"default_interaction,omitempty"`
+	// Engine is the executor that is actually running; EngineStatus explains why
+	// it is native when agent-desktop was selected but cannot be used.
+	Engine        string `json:"engine,omitempty"`
+	EngineVersion string `json:"engine_version,omitempty"`
+	EngineStatus  string `json:"engine_status,omitempty"`
+	EngineReason  string `json:"engine_reason,omitempty"`
 	// UnmappedCommands lists upstream agent-desktop commands that no xmesh tool uses yet. They are reported
 	// for review and never exposed; see agentdesktop_catalog.json.
 	UnmappedCommands []string `json:"unmapped_commands,omitempty"`
@@ -178,16 +184,28 @@ type Provider interface {
 }
 
 type Settings struct {
-	AllowForeground  bool   `json:"allow_foreground,omitempty"`
-	PauseOnUserInput bool   `json:"pause_on_user_input,omitempty"`
-	Enabled          bool   `json:"enabled"`
-	Endpoint         string `json:"endpoint,omitempty"`
-	MaxSessions      int    `json:"max_sessions,omitempty"`
-	LeaseSeconds     int    `json:"lease_seconds,omitempty"`
-	MaxImageBytes    int    `json:"max_image_bytes,omitempty"`
+	AllowForeground  bool           `json:"allow_foreground,omitempty"`
+	PauseOnUserInput bool           `json:"pause_on_user_input,omitempty"`
+	Enabled          bool           `json:"enabled"`
+	Endpoint         string         `json:"endpoint,omitempty"`
+	MaxSessions      int            `json:"max_sessions,omitempty"`
+	LeaseSeconds     int            `json:"lease_seconds,omitempty"`
+	MaxImageBytes    int            `json:"max_image_bytes,omitempty"`
+	Engine           EngineSettings `json:"engine,omitempty"`
+}
+
+// EngineSettings controls how the agent-desktop engine is kept current.
+type EngineSettings struct {
+	// AutoUpdate is off, check or apply. The default, check, only reports
+	// availability. apply stages the pinned release when it is a validated patch
+	// update on a non-macOS device; the switch takes effect at the next Host start.
+	AutoUpdate string `json:"auto_update,omitempty"`
 }
 
 func (s Settings) Effective() Settings {
+	if s.Engine.AutoUpdate == "" {
+		s.Engine.AutoUpdate = "check"
+	}
 	if s.MaxSessions == 0 {
 		s.MaxSessions = 16
 	}
