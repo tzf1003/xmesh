@@ -78,3 +78,31 @@ func TestEngineProviderStampsResolvedEngine(t *testing.T) {
 		t.Fatalf("stamped info = %+v", info)
 	}
 }
+
+// childStub is a provider with a native child process, as the native executor is.
+// The desktop broker finds the child through these optional methods.
+type childStub struct {
+	stubProvider
+	pid    int
+	exited bool
+}
+
+func (c childStub) PID() int     { return c.pid }
+func (c childStub) Exited() bool { return c.exited }
+
+func TestEngineProviderForwardsChildCapabilities(t *testing.T) {
+	p := withEngine(childStub{pid: 1200, exited: true}, engineInfo{engine: EngineNative})
+	child, ok := p.(interface{ PID() int })
+	if !ok || child.PID() != 1200 {
+		t.Fatalf("native child pid is hidden by the engine wrapper: ok=%v", ok)
+	}
+	exited, ok := p.(interface{ Exited() bool })
+	if !ok || !exited.Exited() {
+		t.Fatalf("native child exit state is hidden by the engine wrapper: ok=%v", ok)
+	}
+	// A provider without a child reports no process.
+	plain := withEngine(stubProvider{}, engineInfo{engine: EngineAgentDesktop})
+	if c, ok := plain.(interface{ PID() int }); ok && c.PID() != 0 {
+		t.Fatalf("provider without a child reports pid %d", c.PID())
+	}
+}

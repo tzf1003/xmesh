@@ -187,6 +187,23 @@ func (p engineProvider) Info(ctx context.Context) (Info, error) {
 	return info, err
 }
 
+// PID and Exited are optional capabilities the desktop broker looks for on its
+// provider: the native child's process id (HostStatus.native_pid) and whether the
+// child has exited. The wrapper must forward them, or the broker cannot see the child.
+func (p engineProvider) PID() int {
+	if child, ok := p.Provider.(interface{ PID() int }); ok {
+		return child.PID()
+	}
+	return 0
+}
+
+func (p engineProvider) Exited() bool {
+	if child, ok := p.Provider.(interface{ Exited() bool }); ok {
+		return child.Exited()
+	}
+	return false
+}
+
 // String keeps error text readable in logs.
 func (e EngineResolution) String() string {
 	return fmt.Sprintf("engine=%s configured=%s state=%s reason=%s", e.Effective, e.Configured, e.Status.State, e.Status.Reason)
