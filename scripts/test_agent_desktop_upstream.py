@@ -12,6 +12,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -101,7 +102,17 @@ class DecideTest(unittest.TestCase):
 
     def test_closed_proposal_is_not_reopened(self):
         pulls = [{"number": 8, "state": "CLOSED", "headRefName": "automation/agent-desktop-1.1.0"}]
-        self.assertFalse(adu.decide("1.0.2", "1.1.0", pulls)[0])
+        propose, reason = adu.decide("1.0.2", "1.1.0", pulls)
+        self.assertFalse(propose)
+        self.assertIn("run this workflow by hand with version 1.1.0", reason)
+
+    def test_closed_proposal_can_be_requested_again(self):
+        pulls = [{"number": 8, "state": "CLOSED", "headRefName": "automation/agent-desktop-1.1.0"}]
+        self.assertTrue(adu.decide("1.0.2", "1.1.0", pulls, requested=True)[0])
+
+    def test_open_proposal_still_blocks_a_requested_version(self):
+        pulls = [{"number": 7, "state": "OPEN", "headRefName": "automation/agent-desktop-1.1.0"}]
+        self.assertFalse(adu.decide("1.0.2", "1.1.0", pulls, requested=True)[0])
 
     def test_unrelated_pull_requests_are_ignored(self):
         pulls = [{"number": 9, "state": "OPEN", "headRefName": "claude/project-thread-x"}]
@@ -144,15 +155,16 @@ class ProposalTest(unittest.TestCase):
         self._repo.cleanup()
         self._fixtures.cleanup()
 
-    def publish(self, version="1.1.0", files=None, raw=None, integrity=None):
+    def publish(self, version="1.1.0", files=None, raw=None, integrity=None, latest=None):
         """Write a fake tarball and packument into the fixtures directory."""
         tarball = self.fixtures / f"agent-desktop-{version}.tgz"
         write_tarball(tarball, files if files is not None else package_files(version), raw)
         packument = self.fixtures / "packument.json"
-        packument.write_text(json.dumps(packument_for(version, integrity or sha512_integrity(tarball))), encoding="utf-8")
+        document = packument_for(version, integrity or sha512_integrity(tarball), latest)
+        packument.write_text(json.dumps(document), encoding="utf-8")
         return tarball, packument
 
-    def run_tool(self, tarball, packument, requested_version=""):
+    def run_tool(self, tarball, packument, requested_version="", pulls=None):
         output = self.root / "github-output.txt"
         output.write_text("", encoding="utf-8")
         argv = [
@@ -162,6 +174,10 @@ class ProposalTest(unittest.TestCase):
             "--github-output", str(output),
             "--requested-version", requested_version,
         ]
+        if pulls is not None:
+            listing = self.fixtures / "pulls.json"
+            listing.write_text(json.dumps(pulls), encoding="utf-8")
+            argv += ["--pulls", str(listing)]
         with contextlib.redirect_stdout(io.StringIO()):
             code = adu.main(argv)
         values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines() if line)
@@ -288,6 +304,23 @@ class ProposalTest(unittest.TestCase):
         self.assertEqual((code, values["changed"]), (0, "false"))
         self.assertIn("the pin never moves backwards", values["reason"])
 
+    def test_requested_version_is_not_recorded_as_upstream_latest(self):
+        tarball, packument = self.publish("1.1.0", latest="1.2.0")
+        code, values = self.run_tool(tarball, packument, requested_version="1.1.0")
+        self.assertEqual((code, values["changed"], values["upstream"]), (0, "true", "1.2.0"))
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], "1.1.0")
+        self.assertEqual(manifest["upstream"], {"latest": "1.2.0"})
+
+    def test_closed_proposal_blocks_the_daily_run_until_requested_by_hand(self):
+        tarball, packument = self.publish("1.1.0")
+        pulls = [{"number": 8, "state": "CLOSED", "headRefName": "automation/agent-desktop-1.1.0"}]
+        code, values = self.run_tool(tarball, packument, pulls=pulls)
+        self.assertEqual((code, values["changed"]), (0, "false"))
+        self.assertIn("run this workflow by hand", values["reason"])
+        code, values = self.run_tool(tarball, packument, requested_version="1.1.0", pulls=pulls)
+        self.assertEqual((code, values["changed"]), (0, "true"))
+
     def test_cli_reports_failures_as_annotations_and_exits_nonzero(self):
         tarball, packument = self.publish("1.1.0", integrity="sha512-" + base64.b64encode(bytes(64)).decode("ascii"))
         done = subprocess.run(
@@ -297,6 +330,21 @@ class ProposalTest(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 1)
         self.assertIn("::error::", done.stdout)
+
+
+class RedirectTest(unittest.TestCase):
+    def test_redirect_to_another_host_or_scheme_is_refused(self):
+        request = urllib.request.Request("https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.1.0.tgz")
+        for location in ("https://cdn.example.com/agent-desktop-1.1.0.tgz",
+                         "http://registry.npmjs.org/agent-desktop/-/agent-desktop-1.1.0.tgz"):
+            with self.subTest(location=location), self.assertRaisesRegex(adu.UpstreamError, "refusing redirect"):
+                adu.SameHostRedirects().redirect_request(request, None, 302, "Found", {}, location)
+
+    def test_redirect_within_the_registry_host_is_followed(self):
+        request = urllib.request.Request("https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.1.0.tgz")
+        moved = "https://registry.npmjs.org/agent-desktop/-/moved-1.1.0.tgz"
+        followed = adu.SameHostRedirects().redirect_request(request, None, 302, "Found", {}, moved)
+        self.assertEqual(followed.full_url, moved)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to propose (default: the npm dist-tag latest)'
+        description: 'Version to propose (default: the npm dist-tag latest). Also proposes a version whose earlier proposal was closed.'
         required: false
         type: string
   pull_request:
@@ -54,7 +54,8 @@ jobs:
         id: check
         run: |
           set -euo pipefail
-          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 200 \
+          # The whole history counts: a closed proposal blocks the daily run for its version.
+          gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 5000 \
             --json number,state,headRefName > "$RUNNER_TEMP/pulls.json"
           python3 scripts/agent_desktop_upstream.py \
             --repo-root . \

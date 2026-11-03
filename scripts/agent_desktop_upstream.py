@@ -15,7 +15,8 @@ Run daily by .github/workflows/agent-desktop-upstream.yml. For the npm dist-tag
    manifest, and writes a pending validation record for the new version.
 
 It never adds a version to validation.validated_versions. People do that after
-acceptance testing.
+acceptance testing. The daily run does not reopen a proposal that was closed; name
+the version by hand to propose it again.
 """
 
 import argparse
@@ -27,6 +28,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -67,6 +69,7 @@ class UpstreamError(Exception):
 @dataclass(frozen=True)
 class Target:
     version: str
+    latest: str
     tarball: str
     integrity: str
     published_at: str
@@ -84,7 +87,9 @@ def record_path(version):
 
 
 def select_target(packument, requested=""):
-    version = requested or packument.get("dist-tags", {}).get("latest", "")
+    latest = packument.get("dist-tags", {}).get("latest", "")
+    parse_version(latest)
+    version = requested or latest
     parse_version(version)
     doc = packument.get("versions", {}).get(version)
     if doc is None:
@@ -95,11 +100,17 @@ def select_target(packument, requested=""):
         raise UpstreamError(f"unexpected tarball URL {tarball!r}")
     if not integrity.startswith("sha512-"):
         raise UpstreamError(f"{PACKAGE}@{version} has no sha512 integrity in the registry")
-    return Target(version, tarball, integrity, packument.get("time", {}).get(version, ""))
+    return Target(version, latest, tarball, integrity, packument.get("time", {}).get(version, ""))
 
 
-def decide(pinned, target, pulls):
-    """Return (propose, reason). `pulls` holds `gh pr list --state all` entries."""
+def decide(pinned, target, pulls, requested=False):
+    """Return (propose, reason). `pulls` holds `gh pr list --state all` entries.
+
+    An open proposal blocks every other one. A proposal that was closed without
+    merging blocks the daily run for its version, so a rejected proposal is not
+    reopened every day. A requested version is a deliberate choice, so it may be
+    proposed again.
+    """
     pinned_version, target_version = parse_version(pinned), parse_version(target)
     if target_version == pinned_version:
         return False, f"upstream {target} is already pinned"
@@ -109,22 +120,42 @@ def decide(pinned, target, pulls):
         if pull.get("state") == "OPEN" and str(pull.get("headRefName", "")).startswith(BRANCH_PREFIX):
             return False, f"open proposal #{pull.get('number')} ({pull.get('headRefName')}) is handled first"
     branch = BRANCH_PREFIX + target
-    for pull in pulls:
-        if pull.get("headRefName") == branch:
-            return False, (f"the proposal for {target} was closed as #{pull.get('number')}; "
-                           f"delete branch {branch} to propose it again")
+    if not requested:
+        for pull in pulls:
+            if pull.get("headRefName") == branch:
+                return False, (f"the proposal for {target} already exists as #{pull.get('number')} "
+                               f"({str(pull.get('state', '')).lower()}); run this workflow by hand "
+                               f"with version {target} to propose it again")
     return True, f"upstream {target} is newer than the pinned {pinned}"
+
+
+class SameHostRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to the scheme and host the request started from.
+
+    The tarball URL comes from the registry document, so a redirect may not point CI
+    at another host. A refused redirect fails the run.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        origin = urllib.parse.urlsplit(req.full_url)
+        target = urllib.parse.urlsplit(newurl)
+        if (target.scheme, target.netloc) != (origin.scheme, origin.netloc):
+            raise UpstreamError(f"refusing redirect from {origin.netloc} to {target.netloc or newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(SameHostRedirects)
 
 
 def fetch_json(url):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with OPENER.open(request, timeout=60) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def fetch_file(url, destination):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=120) as response, open(destination, "wb") as handle:
+    with OPENER.open(request, timeout=120) as response, open(destination, "wb") as handle:
         shutil.copyfileobj(response, handle, CHUNK)
 
 
@@ -243,7 +274,7 @@ def updated_manifest(manifest, target, platforms):
     result["tarball"] = {"url": target.tarball, "integrity": target.integrity, "published_at": target.published_at}
     result["platforms"] = platforms
     upstream = dict(manifest.get("upstream") or {})
-    upstream["latest"] = target.version
+    upstream["latest"] = target.latest
     result["upstream"] = upstream
     validation = dict(manifest.get("validation") or {})
     validation.setdefault("validated_versions", [])
@@ -261,7 +292,8 @@ def render_record(target, pinned, platforms, unmapped):
         "",
         "## 来源",
         "",
-        f"- 上游包：`{PACKAGE}@{target.version}`（npm dist-tag `latest`，或人工指定的版本）",
+        f"- 上游包：`{PACKAGE}@{target.version}`",
+        f"- npm dist-tag `latest`：{target.latest}",
         f"- 发布时间：{target.published_at or '未知'}",
         f"- tarball：{target.tarball}",
         f"- integrity：`{target.integrity}`（已与 registry 比对）",
@@ -344,10 +376,10 @@ def run(args):
     packument = load_json(args.packument) if args.packument else fetch_json(REGISTRY_DOC)
     target = select_target(packument, args.requested_version)
     pulls = load_json(args.pulls) if args.pulls else []
-    propose, reason = decide(pinned, target.version, pulls)
+    propose, reason = decide(pinned, target.version, pulls, requested=bool(args.requested_version))
     if not propose:
         print(f"::notice::{reason}")
-        return decision_record(args, False, reason, pinned=pinned, upstream=target.version)
+        return decision_record(args, False, reason, pinned=pinned, upstream=target.latest)
 
     with tempfile.TemporaryDirectory(prefix="agent-desktop-upstream-") as scratch:
         tarball = Path(args.tarball) if args.tarball else Path(scratch) / "package.tgz"
@@ -378,7 +410,7 @@ def run(args):
         True,
         reason,
         pinned=pinned,
-        upstream=target.version,
+        upstream=target.latest,
         version=target.version,
         branch=BRANCH_PREFIX + target.version,
         title=f"agent-desktop: 提议钉住上游 {target.version}（待验收）",
