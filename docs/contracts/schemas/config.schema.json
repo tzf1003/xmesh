@@ -689,7 +689,14 @@
             "endpoint": { "type": "string", "minLength": 1, "description": "用户桌面执行器的本机套接字或命名管道；改变需要重启。" },
             "max_sessions": { "type": "integer", "minimum": 1, "maximum": 32, "default": 16 },
             "lease_seconds": { "type": "integer", "minimum": 10, "maximum": 600, "default": 120 },
-            "max_image_bytes": { "type": "integer", "minimum": 1024, "maximum": 4194304, "default": 4194304 }
+            "max_image_bytes": { "type": "integer", "minimum": 1024, "maximum": 4194304, "default": 4194304 },
+            "engine": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "auto_update": { "type": "string", "enum": ["off", "check", "apply"], "default": "check", "description": "agent-desktop 引擎自动更新。off 关闭；check 仅报告（默认）；apply 仅在补丁版本、已验收且非 macOS 时准备更新，于下次桌面 Host 启动时先校验再生效，失败回滚。" }
+              }
+            }
           }
         },
         "default_cwd": { "type": "string", "minLength": 1 },

@@ -67,7 +67,21 @@ Host 可按设备在两种执行器之间切换，Go 管理层（会话、租约
 | `native`（默认） | 内置 Rust 执行器 `computer-native` |
 | `agent-desktop` | 由 Host 监督固定版本的 [agent-desktop](https://github.com/vercel-labs/agent-desktop) CLI 子进程，经适配器翻译 info / capture / execute / release |
 
-选择顺序：`xmesh computer host --engine`，其次 Host 状态目录中的 `engine` 文件，最后是 `native`。`xmesh computer engine [native|agent-desktop]` 读取或写入该文件，随后重启 Host 生效；回退只需写回 `native`。`--agent-desktop` 指定二进制的绝对路径，缺省为 xmesh 可执行文件旁（macOS 优先 `xmesh-computer.app/Contents/MacOS/`，使辅助功能授权记在 xmesh 名下）。
+选择顺序：`xmesh computer host --engine`，其次 Host 状态目录中的 `engine` 文件，最后是 `native`。`xmesh computer engine [native|agent-desktop]` 读取或写入该文件，随后重启 Host 生效；回退只需写回 `native`。`--agent-desktop` 指定二进制的绝对路径，同样需要通过清单校验。缺省顺序为：本机 `state/engines/agent-desktop/active` 指向的受管安装，其次是 xmesh 可执行文件旁的内置副本（macOS 优先 `xmesh-computer.app/Contents/MacOS/`，使辅助功能授权记在 xmesh 名下）。无法验证或不在验收范围内的二进制不会运行：Host 回退 native，并在 `info` 中说明原因（见下文）。
+
+### 引擎清单、校验与更新
+
+清单 `internal/computer/adengine/manifest.json` 随 xmesh 编译进二进制，钉住一个上游版本，列出各平台主程序与辅助程序的 SHA-256。格式见 [agent-desktop 引擎清单](agent-desktop-manifest.md)。
+
+- **校验**：Host 启动时对选定的二进制计算 SHA-256。受管安装以安装回执为准，回执由通过 tarball integrity 与逐文件 SHA-256 校验的安装写入。内置副本与清单钉住的值比对。
+- **版本门控**：版本须在 `validated_versions` 中，且当前平台在 `validated_platforms` 中（缺省为全部平台）。
+- **状态**（`info.engine_status`，原因在 `info.engine_reason`）：`native`（未选择 agent-desktop）；`not_installed`；`integrity_failed`；`version_unsupported`；`update_available`（同平台有更新的已验收版本）；`upstream_unvalidated`（钉住的较新版本或上游较新版本未验收）；`current`。前三种回退 native；后三种运行 agent-desktop，`info.engine` 为 `agent-desktop`，`info.engine_version` 为已验证的版本。
+- **本机命令**（只接受本机执行，远端不能触发）：
+  - `xmesh computer engine status`：只读本机状态，包括安装版本、钉住版本、验收记录、待生效切换与自动更新记录。
+  - `xmesh computer engine update [--to 版本]`：下载清单中的 tarball，校验 integrity 与每个文件的 SHA-256，在 `state/engines/agent-desktop/<版本>/` 中安装，对新二进制运行 `version`、`permissions`、`list-displays` 健康检查，然后切换指针、重启 Host 服务，并通过 Host 的 `info` 复核。复核失败则切回原版本并再次重启，返回 `rolled_back`。Host 不是服务时只返回 `restart_required`，切换在下次启动时生效。`--to` 只能是清单钉住的版本。本机引擎为 native 时拒绝执行，因为 Host 不加载 agent-desktop，无法复核；请先执行 `xmesh computer engine agent-desktop`。
+  - `xmesh computer engine rollback`：切回上一版本并重启 Host。仅在本机引擎为 agent-desktop 时可用。
+- **自动更新**：`agent.computer.engine.auto_update` 取 `off`、`check`（默认，只报告）或 `apply`。`apply` 仅在以下条件全部满足时准备更新：引擎为 agent-desktop；清单中有同一 `major.minor` 的更新且已验收；设备不是 macOS；自动更新未因连续两次失败而暂停。准备过程只下载、校验并健康检查，然后标记为待生效；**下次 Host 启动时**先运行健康检查，失败则回滚并记下该版本。连续两次失败后暂停自动更新，直到人工执行 `engine update` 成功。macOS 上替换二进制可能使辅助功能与屏幕录制授权失效，因此由人工执行。
+- **不做的事**：不直接跟随 npm 的 `latest`；清单之外的产物不会被下载；远端（MCP 与云端）不能安装、切换或回滚引擎。
 
 适配器行为：
 

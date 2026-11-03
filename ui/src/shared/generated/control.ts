@@ -816,6 +816,10 @@ export interface ComputerInfo {
   user_input_serial?: number;
   targets?: ComputerTarget[];
   default_interaction?: "background" | "foreground";
+  engine?: "native" | "agent-desktop";
+  engine_version?: string;
+  engine_status?: string;
+  engine_reason?: string;
 }
 export interface ComputerTarget {
   id: string;
