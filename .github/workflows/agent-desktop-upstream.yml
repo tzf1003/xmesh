@@ -37,7 +37,8 @@ jobs:
 
   propose:
     needs: test
-    if: github.event_name != 'pull_request'
+    # Only the default branch proposes. A dispatch from another branch would be checked against that branch's manifest.
+    if: "github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -56,7 +57,7 @@ jobs:
           set -euo pipefail
           # The whole history counts: a closed proposal blocks the daily run for its version.
           gh pr list --repo "$GITHUB_REPOSITORY" --state all --limit 5000 \
-            --json number,state,headRefName > "$RUNNER_TEMP/pulls.json"
+            --json number,state,headRefName,isCrossRepository > "$RUNNER_TEMP/pulls.json"
           python3 scripts/agent_desktop_upstream.py \
             --repo-root . \
             --requested-version "$REQUESTED_VERSION" \

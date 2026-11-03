@@ -43,6 +43,7 @@ RECORD_DIR = "docs/validation"
 BRANCH_PREFIX = "automation/agent-desktop-"
 OUTPUT_KEYS = ("changed", "reason", "pinned", "upstream", "version", "branch", "title")
 CHUNK = 1 << 20
+MAX_TEXT_MEMBER = 1 << 20  # sidecars and package.json are a few KiB; anything larger is refused
 
 # process.platform-process.arch -> (main executable, helper executables). Names are
 # files in the npm package's bin/ directory and mirror lib/platform.js in the
@@ -88,7 +89,6 @@ def record_path(version):
 
 def select_target(packument, requested=""):
     latest = packument.get("dist-tags", {}).get("latest", "")
-    parse_version(latest)
     version = requested or latest
     parse_version(version)
     doc = packument.get("versions", {}).get(version)
@@ -111,6 +111,8 @@ def decide(pinned, target, pulls, requested=False):
     reopened every day. A requested version is a deliberate choice, so it may be
     proposed again.
     """
+    # A fork can use any branch name, so only this repository's pull requests can block a proposal.
+    pulls = [pull for pull in pulls if not pull.get("isCrossRepository")]
     pinned_version, target_version = parse_version(pinned), parse_version(target)
     if target_version == pinned_version:
         return False, f"upstream {target} is already pinned"
@@ -193,6 +195,8 @@ def index_archive(archive):
 
 
 def read_member(archive, member):
+    if member.size > MAX_TEXT_MEMBER:
+        raise UpstreamError(f"{member.name!r} is {member.size} bytes, over the {MAX_TEXT_MEMBER}-byte limit")
     handle = archive.extractfile(member)
     if handle is None:
         raise UpstreamError(f"cannot read {member.name!r}")
@@ -273,9 +277,11 @@ def updated_manifest(manifest, target, platforms):
     result["version"] = target.version
     result["tarball"] = {"url": target.tarball, "integrity": target.integrity, "published_at": target.published_at}
     result["platforms"] = platforms
-    upstream = dict(manifest.get("upstream") or {})
-    upstream["latest"] = target.latest
-    result["upstream"] = upstream
+    if SEMVER.fullmatch(target.latest):
+        # The manifest records X.Y.Z only. Any other dist-tag is left out, and the old value stays.
+        upstream = dict(manifest.get("upstream") or {})
+        upstream["latest"] = target.latest
+        result["upstream"] = upstream
     validation = dict(manifest.get("validation") or {})
     validation.setdefault("validated_versions", [])
     validation["record"] = record_path(target.version)
@@ -293,7 +299,8 @@ def render_record(target, pinned, platforms, unmapped):
         "## 来源",
         "",
         f"- 上游包：`{PACKAGE}@{target.version}`",
-        f"- npm dist-tag `latest`：{target.latest}",
+        f"- npm dist-tag `latest`：{target.latest or '未提供'}"
+        + ("" if SEMVER.fullmatch(target.latest) else "（不是 X.Y.Z 格式，清单的 upstream.latest 保持不变）"),
         f"- 发布时间：{target.published_at or '未知'}",
         f"- tarball：{target.tarball}",
         f"- integrity：`{target.integrity}`（已与 registry 比对）",
@@ -424,7 +431,7 @@ def parse_args(argv):
     parser.add_argument("--requested-version", default="", help="propose this version instead of dist-tag latest")
     parser.add_argument("--packument", help="offline: registry packument JSON, instead of fetching it")
     parser.add_argument("--tarball", help="offline: npm tarball, instead of downloading it")
-    parser.add_argument("--pulls", help="JSON from `gh pr list --state all --json number,state,headRefName`")
+    parser.add_argument("--pulls", help="JSON from `gh pr list --state all --json number,state,headRefName,isCrossRepository`")
     parser.add_argument("--pr-body", help="write the proposal's markdown here")
     parser.add_argument("--github-output", help="GitHub Actions output file")
     parser.add_argument("--step-summary", help="GitHub Actions step summary file")

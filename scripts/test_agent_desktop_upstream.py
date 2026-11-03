@@ -118,6 +118,13 @@ class DecideTest(unittest.TestCase):
         pulls = [{"number": 9, "state": "OPEN", "headRefName": "claude/project-thread-x"}]
         self.assertTrue(adu.decide("1.0.2", "1.1.0", pulls)[0])
 
+    def test_fork_pull_requests_do_not_block_a_proposal(self):
+        pulls = [
+            {"number": 7, "state": "OPEN", "headRefName": "automation/agent-desktop-1.1.1", "isCrossRepository": True},
+            {"number": 8, "state": "CLOSED", "headRefName": "automation/agent-desktop-1.1.0", "isCrossRepository": True},
+        ]
+        self.assertTrue(adu.decide("1.0.2", "1.1.0", pulls)[0])
+
 
 class VersionTest(unittest.TestCase):
     def test_rejects_anything_but_plain_semver(self):
@@ -202,6 +209,8 @@ class ProposalTest(unittest.TestCase):
             "record": "docs/validation/agent-desktop-1.1.0.md",
         })
         self.assertEqual(manifest["engine_note"], PINNED_MANIFEST["engine_note"])
+        self.assertEqual(set(manifest["platforms"]),
+                         {"darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"})
         for key, (binary, helpers) in adu.PLATFORMS.items():
             entry = manifest["platforms"][key]
             self.assertEqual(entry["binary"]["member"], f"bin/{binary}")
@@ -321,6 +330,14 @@ class ProposalTest(unittest.TestCase):
         code, values = self.run_tool(tarball, packument, requested_version="1.1.0", pulls=pulls)
         self.assertEqual((code, values["changed"]), (0, "true"))
 
+    def test_prerelease_dist_tag_does_not_block_a_requested_version(self):
+        tarball, packument = self.publish("1.1.0", latest="2.0.0-beta.1")
+        code, values = self.run_tool(tarball, packument, requested_version="1.1.0")
+        self.assertEqual((code, values["changed"], values["upstream"]), (0, "true", "2.0.0-beta.1"))
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], "1.1.0")
+        self.assertNotIn("upstream", manifest)
+
     def test_cli_reports_failures_as_annotations_and_exits_nonzero(self):
         tarball, packument = self.publish("1.1.0", integrity="sha512-" + base64.b64encode(bytes(64)).decode("ascii"))
         done = subprocess.run(
@@ -330,6 +347,17 @@ class ProposalTest(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 1)
         self.assertIn("::error::", done.stdout)
+
+
+class ArchiveTest(unittest.TestCase):
+    def test_text_member_over_the_limit_is_refused_unread(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = pathlib.Path(scratch) / "oversized.tgz"
+            write_tarball(path, {"bin/agent-desktop-linux-x64.sha256": b"0" * (adu.MAX_TEXT_MEMBER + 1)})
+            with tarfile.open(path, "r:gz") as archive:
+                member = archive.getmember("package/bin/agent-desktop-linux-x64.sha256")
+                with self.assertRaisesRegex(adu.UpstreamError, "over the"):
+                    adu.read_member(archive, member)
 
 
 class RedirectTest(unittest.TestCase):
