@@ -130,6 +130,10 @@ func randHex(n int) string {
 }
 
 func (a *AgentDesktop) call(ctx context.Context, args ...string) (json.RawMessage, *adError, error) {
+	// Default deny: only a command the catalog maps to an xmesh tool may reach the CLI.
+	if _, ok := adCatalogTable.mapped(args); !ok {
+		return nil, nil, errUnmappedCommand
+	}
 	raw, err := a.run.Run(ctx, args...)
 	if err != nil {
 		return nil, nil, err
@@ -250,7 +254,16 @@ func (a *AgentDesktop) own(ctx context.Context) (Info, error) {
 
 // Info reports the engine's own desktop identity. With a fallback, the fallback
 // owns identity (epoch, layout, targets) so frames from both paths agree.
+// unmapped_commands always comes from this engine's catalog, whichever path answered.
 func (a *AgentDesktop) Info(ctx context.Context) (Info, error) {
+	info, err := a.engineInfo(ctx)
+	if err == nil {
+		info.UnmappedCommands = adCatalogTable.unmapped()
+	}
+	return info, err
+}
+
+func (a *AgentDesktop) engineInfo(ctx context.Context) (Info, error) {
 	own, ownErr := a.own(ctx)
 	if a.fallback == nil {
 		return own, ownErr

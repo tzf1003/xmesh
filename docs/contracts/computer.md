@@ -111,6 +111,15 @@ op 取值：click、right_click、focus、set_value、type、clear、select、to
 - 审计只记会话 ID、动作 ID、参数键与字节数，不记快照内容和输入文本。
 - 限制：绑定窗口目标的 macOS 后台会话不支持 ref（`refs_unsupported_for_target`），须使用前台会话（需本机 `allow_foreground`）；native 引擎返回 `refs_unsupported`。Host 本机 IPC 新增 `/v1/snapshot`、`/v1/ref_act`（协议版本仍为 1，旧执行器不实现即报 refs_unsupported）。
 
+### agent-desktop 命令映射与暴露
+
+映射清单 `internal/computer/agentdesktop_catalog.json` 是 agent-desktop 命令表（1.0.2 README，60 个命令名）到 xmesh 工具的唯一来源。每条记录给出映射的工具（`tool`）、ref 操作（`op`）和风险类别（observe、pointer、keyboard、text、clipboard、app_control、system）。`table_version` 标明该表对应的上游版本；升级上游时必须重新核对本表。
+
+- **默认拒绝**：没有 `tool` 的命令属于未映射。适配器在调用 CLI 之前拒绝运行这类命令，不会产生任何输入；未映射命令同时列在 `computer.info` 的 `unmapped_commands` 中，只供审阅，不进入 MCP 或云端。上游新增的命令必须先映射、实现并通过审阅，才会出现为工具。
+- **当前映射**：23 个命令。`permissions`、`list-displays` 属于 `computer.info`；`screenshot` 属于 `computer.observe`；`snapshot` 属于 `computer.snapshot`；`mouse-move`、`mouse-click`、`mouse-wheel`、`drag`、`press` 属于 `computer.act`；14 个元素命令属于 `computer.ref_act`。其余 37 个未映射，包括剪贴板、应用与窗口控制、通知、`batch` 等。clipboard、app_control、system 类在映射时应默认关闭。
+- **能力过滤**：`tool_requires` 声明工具所需的引擎能力，`computer.snapshot` 与 `computer.ref_act` 需要 `refs`。Agent 按引擎最近一次上报的能力决定 tools/list：能力集合变化（例如切换引擎或授予权限）时重建所有已打开视图，工具随之出现或消失，无需重启。在收到第一次上报前，工具全部列出，调用仍在运行时检查。原生引擎不报告 `refs`，因此 tools/list 不再列出必然失败的 snapshot 与 ref_act。
+- **云端暴露**：工具由 Agent 注册，Gateway 的 unified 列表只列出 `gateway.listed_groups` 中的组，默认为 fs、exec、pty、sys，computer 不在其中。管理员可把 `computer` 加入 `listed_groups`，或用 `pinned_tools` 逐个固定工具。`tools.call` 始终可达，授权在每次调用时检查。版本门控（只有通过验收的 agent-desktop 版本才上报 `engine:agent-desktop`）由引擎清单决定，本映射不另行判定版本。
+
 ## 本机执行器通道
 
 `xmesh computer host` 在图形用户会话中运行，使用用户专用 Unix socket 或 Windows 命名管道接入目标内核，并通过匿名继承管道监督 Rust 原生执行器。此 host 不承载 Agent / Gateway / Ingress，也不接入 mesh。Windows SYSTEM 内核通过配置的用户 SID 管道连接图形会话。

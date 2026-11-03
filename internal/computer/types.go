@@ -42,6 +42,9 @@ type Info struct {
 	EngineVersion string `json:"engine_version,omitempty"`
 	EngineStatus  string `json:"engine_status,omitempty"`
 	EngineReason  string `json:"engine_reason,omitempty"`
+	// UnmappedCommands lists upstream agent-desktop commands that no xmesh tool uses yet. They are reported
+	// for review and never exposed; see agentdesktop_catalog.json.
+	UnmappedCommands []string `json:"unmapped_commands,omitempty"`
 }
 
 // Target is an executor-issued application window identity, scoped to Epoch.

@@ -819,6 +819,7 @@ export interface ComputerInfo {
   engine_version?: string;
   engine_status?: string;
   engine_reason?: string;
+  unmapped_commands?: string[];
 }
 export interface ComputerTarget {
   id: string;

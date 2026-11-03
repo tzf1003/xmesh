@@ -114,6 +114,12 @@
         },
         "engine_reason": {
           "type": "string"
+        },
+        "unmapped_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

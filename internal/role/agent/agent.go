@@ -123,6 +123,8 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 		a.computerProvider = computer.NewClient(c.Agent.Computer.Endpoint)
 	}
 	a.Computer = computer.New(a.computerProvider, c.Agent.Computer)
+	// A capability change, such as refs appearing after the engine switches, rebuilds every open view.
+	a.Computer.OnCapabilities(a.refreshBuiltins)
 	engineCtx, engineStop := context.WithCancel(context.Background())
 	a.engineStop = engineStop
 	go computer.RunEngineMaintenance(engineCtx, computer.DefaultStateDir(), a.Computer.EngineAutoUpdate, 6*time.Hour)
@@ -423,10 +425,13 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 
 // installBuiltins lists the built-in tools that agent.disabled_tools leaves on and removes the others
 // from the view, so a tool switched off in the configuration disappears from tools/list on reload.
+// A computer tool also leaves the view while the engine's reported capabilities do not satisfy it
+// (computer.snapshot and computer.ref_act need refs), and returns when a later report does.
 func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 	disabled := a.store.Get().Agent.DisabledTools
 	for name, spec := range builtinSpecs() {
-		if slices.Contains(disabled, name) || (strings.HasPrefix(name, "computer.") && !a.store.Get().Agent.Computer.Enabled) {
+		computerHidden := strings.HasPrefix(name, "computer.") && (!a.store.Get().Agent.Computer.Enabled || !a.Computer.ToolListed(name))
+		if slices.Contains(disabled, name) || computerHidden {
 			server.RemoveTools(name)
 			continue
 		}

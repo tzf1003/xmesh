@@ -62,10 +62,17 @@ type Manager struct {
 	workers     sync.WaitGroup
 	authorize   func(string, string) bool
 	now         func() time.Time
+	// caps is the capability set of the last successful Info; capsKnown stays false until one succeeds.
+	caps           []string
+	capsKnown      bool
+	onCapabilities func()
+	// While capsKnown is false the sweep probes Info, no sooner than probeEvery after the previous attempt.
+	nextProbe  time.Time
+	probeEvery time.Duration
 }
 
 func New(p Provider, settings Settings) *Manager {
-	m := &Manager{provider: p, settings: settings.Effective(), sessions: map[string]*ownedSession{}, frameBudget: 64 << 20, queue: make(chan struct{}, 8), executing: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), now: time.Now}
+	m := &Manager{provider: p, settings: settings.Effective(), sessions: map[string]*ownedSession{}, frameBudget: 64 << 20, queue: make(chan struct{}, 8), executing: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), now: time.Now, probeEvery: 5 * time.Second}
 	ready := make(chan struct{})
 	close(ready)
 	m.tail = ready
@@ -85,8 +92,14 @@ func (m *Manager) sweep() {
 			m.mu.Lock()
 			m.expireLocked()
 			active := len(m.sessions) > 0 && m.settings.Enabled
+			// Until one report succeeds, learn the capabilities anyway, so the agent's tool list settles
+			// without waiting for a caller. A failed attempt backs off by probeEvery.
+			probe := !active && !m.capsKnown && m.settings.Enabled && m.provider != nil && !m.now().Before(m.nextProbe)
+			if probe {
+				m.nextProbe = m.now().Add(m.probeEvery)
+			}
 			m.mu.Unlock()
-			if active {
+			if active || probe {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				_, _ = m.Info(ctx)
 				cancel()
@@ -151,6 +164,9 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 		return Info{}, toolerr.New("desktop_unavailable", "桌面执行器协议不兼容", "reason", "protocol_mismatch")
 	}
 	m.mu.Lock()
+	changed := !m.capsKnown || !slices.Equal(m.caps, info.Capabilities)
+	m.caps, m.capsKnown = slices.Clone(info.Capabilities), true
+	hook := m.onCapabilities
 	for id, s := range m.sessions {
 		serial := info.UserInputSerial
 		if s.TargetID != "" {
@@ -171,7 +187,44 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 		}
 	}
 	m.mu.Unlock()
+	if changed && hook != nil {
+		// The hook rebuilds MCP tool lists, which must not run while the manager lock is held.
+		go hook()
+	}
 	return info, nil
+}
+
+// OnCapabilities registers fn to run, on its own goroutine, when a successful Info reports a capability
+// set that differs from the previous one. The agent uses it to rebuild tool lists when refs appear or go.
+func (m *Manager) OnCapabilities(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onCapabilities = fn
+}
+
+// Capabilities returns the capability set of the last successful Info, and whether a report has succeeded yet.
+func (m *Manager) Capabilities() ([]string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.caps), m.capsKnown
+}
+
+// ToolListed reports whether a desktop tool belongs in tools/list. A tool is listed when the capabilities
+// from the engine's last report satisfy its catalog requirement (computer.snapshot and computer.ref_act need
+// refs). Until the engine has reported once, every tool stays listed; calls are still checked when they run.
+func (m *Manager) ToolListed(tool string) bool {
+	m.mu.Lock()
+	caps, known := m.caps, m.capsKnown
+	m.mu.Unlock()
+	if !known {
+		return true
+	}
+	for _, need := range adCatalogTable.requires(tool) {
+		if !slices.Contains(caps, need) {
+			return false
+		}
+	}
+	return true
 }
 
 func desktopReady(info Info) error {
