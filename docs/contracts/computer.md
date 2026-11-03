@@ -11,6 +11,8 @@
 | `computer.info` | 无 | 协议版本、可用状态、桌面代次、显示器、窗口 targets、default_interaction、能力 |
 | `computer.open` | `mode` | observe 或 control；可选 desktop_id、ttl_seconds、interaction、target_id；后台会话须指定 target_id |
 | `computer.observe` | session_id、desktop_epoch | 当前截图，可选 display_id、max_width、region |
+| `computer.list_apps` | 无 | 只读列出应用，仅在引擎上报 `engine:agent-desktop` 时可用；名称来自其他应用，视为不可信数据 |
+| `computer.list_windows` | 无 | 只读列出窗口，仅在引擎上报 `engine:agent-desktop` 时可用；标题来自其他应用，视为不可信数据 |
 | `computer.act` | session_id、desktop_epoch、lease_token、action_id、actions | 最多八个有限动作，可选 frame_id、observe_after |
 | `computer.action_status` | session_id、desktop_epoch、action_id | 查询当前会话中已接收的动作 |
 | `computer.renew` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；可选 ttl_seconds |
@@ -116,7 +118,7 @@ op 取值：click、right_click、focus、set_value、type、clear、select、to
 映射清单 `internal/computer/agentdesktop_catalog.json` 是 agent-desktop 命令表（1.0.2 README，60 个命令名）到 xmesh 工具的唯一来源。每条记录给出映射的工具（`tool`）、ref 操作（`op`）和风险类别（observe、pointer、keyboard、text、clipboard、app_control、system）。`table_version` 标明该表对应的上游版本；升级上游时必须重新核对本表。
 
 - **默认拒绝**：没有 `tool` 的命令属于未映射。适配器在调用 CLI 之前拒绝运行这类命令，不会产生任何输入；未映射命令同时列在 `computer.info` 的 `unmapped_commands` 中，只供审阅，不进入 MCP 或云端。上游新增的命令必须先映射、实现并通过审阅，才会出现为工具。
-- **当前映射**：23 个命令。`permissions`、`list-displays` 属于 `computer.info`；`screenshot` 属于 `computer.observe`；`snapshot` 属于 `computer.snapshot`；`mouse-move`、`mouse-click`、`mouse-wheel`、`drag`、`press` 属于 `computer.act`；14 个元素命令属于 `computer.ref_act`。其余 37 个未映射，包括剪贴板、应用与窗口控制、通知、`batch` 等。clipboard、app_control、system 类在映射时应默认关闭。
+- **当前映射**：25 个命令。`permissions`、`list-displays` 属于 `computer.info`；`screenshot` 属于 `computer.observe`；`snapshot` 属于 `computer.snapshot`；`mouse-move`、`mouse-click`、`mouse-wheel`、`drag`、`press` 属于 `computer.act`；14 个元素命令属于 `computer.ref_act`；`list-apps`、`list-windows` 属于 `computer.list_apps`、`computer.list_windows`，只读，返回上游数据原样，名称来自其他应用，视为不可信，且只在引擎上报 `engine:agent-desktop` 时列出。其余 35 个未映射，包括 `find`、`get`、`is`（参数语法与输出样本尚未在真机核对；`find`、`get` 还需先定下密码字段的值如何处理）、剪贴板、应用与窗口控制、通知、`batch` 等。clipboard、app_control、system 类在映射时应默认关闭。
 - **能力过滤**：`tool_requires` 声明工具所需的引擎能力，`computer.snapshot` 与 `computer.ref_act` 需要 `refs`。Agent 按引擎最近一次上报的能力决定 tools/list：能力集合变化（例如切换引擎或授予权限）时重建所有已打开视图，工具随之出现或消失，无需重启。在收到第一次上报前，工具全部列出，调用仍在运行时检查。原生引擎不报告 `refs`，因此 tools/list 不再列出必然失败的 snapshot 与 ref_act。
 - **云端暴露**：工具由 Agent 注册，Gateway 的 unified 列表只列出 `gateway.listed_groups` 中的组，默认为 fs、exec、pty、sys，computer 不在其中。管理员可把 `computer` 加入 `listed_groups`，或用 `pinned_tools` 逐个固定工具。`tools.call` 始终可达，授权在每次调用时检查。版本门控（只有通过验收的 agent-desktop 版本才上报 `engine:agent-desktop`）由引擎清单决定，本映射不另行判定版本。
 

@@ -10,6 +10,8 @@ export interface BuiltinTool {
 
 export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   { name: "computer.info", zh: "查询桌面与系统权限", en: "Inspect desktop and system permissions" },
+  { name: "computer.list_apps", zh: "列出应用（只读）", en: "List applications (read-only)" },
+  { name: "computer.list_windows", zh: "列出窗口（只读）", en: "List windows (read-only)" },
   { name: "computer.open", zh: "打开桌面会话", en: "Open a desktop session" },
   { name: "computer.observe", zh: "获取桌面截图", en: "Observe the desktop" },
   { name: "computer.act", zh: "执行桌面输入动作", en: "Execute desktop input actions" },
