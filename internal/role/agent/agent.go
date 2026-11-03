@@ -40,8 +40,10 @@ type Agent struct {
 	Computer          *computer.Manager
 	computerProvider  computer.Provider
 	computerUnprotect func()
-	store             *config.Store
-	PTY               *pty.Manager
+	// engineStop ends the agent-desktop update maintenance loop.
+	engineStop func()
+	store      *config.Store
+	PTY        *pty.Manager
 	// BudgetAuthority hosts the cross-host PTY admission lease for ingress nodes.
 	BudgetAuthority *pty.BudgetAuthority
 	Exec            *runexec.Manager
@@ -121,6 +123,9 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 		a.computerProvider = computer.NewClient(c.Agent.Computer.Endpoint)
 	}
 	a.Computer = computer.New(a.computerProvider, c.Agent.Computer)
+	engineCtx, engineStop := context.WithCancel(context.Background())
+	a.engineStop = engineStop
+	go computer.RunEngineMaintenance(engineCtx, computer.DefaultStateDir(), a.Computer.EngineAutoUpdate, 6*time.Hour)
 	if runtime.GOOS != "windows" {
 		endpoint := c.Agent.Computer.Endpoint
 		if endpoint == "" {
@@ -665,6 +670,9 @@ func (a *Agent) Close() {
 		}
 		a.PTY.Shutdown()
 		_ = a.Computer.Close()
+		if a.engineStop != nil {
+			a.engineStop()
+		}
 		if a.computerUnprotect != nil {
 			a.computerUnprotect()
 		}

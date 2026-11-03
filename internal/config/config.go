@@ -697,6 +697,11 @@ func (c *Config) Validate() error {
 	if ep := cs.Endpoint; ep != "" && !computer.ValidEndpoint(ep) {
 		return fail("/agent/computer/endpoint: 必须是当前平台支持的本机 Computer 地址")
 	}
+	switch cs.Engine.AutoUpdate {
+	case "off", "check", "apply":
+	default:
+		return fail("/agent/computer/engine/auto_update: 可选 off、check 或 apply")
+	}
 	if c.Ingress.PTYBudgetFile != "" && !filepath.IsAbs(c.Ingress.PTYBudgetFile) {
 		return fail("/ingress/pty_budget_file")
 	}

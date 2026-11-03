@@ -267,8 +267,16 @@ func TestEngineSelection(t *testing.T) {
 	if err := WriteEngine(dir, "bogus"); err == nil {
 		t.Fatal("unknown engine must not be persisted")
 	}
-	_, _, err := EngineOptions{Engine: EngineAgentDesktop, AgentDesktopPath: "relative", StateDir: dir}.Factories()
-	if err == nil {
-		t.Fatal("agent-desktop path must be absolute and exist")
+	// An unusable path no longer stops the Host: the engine falls back to native
+	// and the reason is reported through Info and the engine status.
+	res, err := EngineOptions{Engine: EngineAgentDesktop, AgentDesktopPath: "relative", StateDir: dir}.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Effective != EngineNative || res.Status.State != "not_installed" {
+		t.Fatalf("relative path must fall back to native: %s", res)
+	}
+	if _, _, err := (EngineOptions{Engine: EngineAgentDesktop, AgentDesktopPath: "relative", NativePath: "/nonexistent-native", StateDir: dir}).Factories(); err != nil {
+		t.Fatalf("factories must still be built for the native fallback: %v", err)
 	}
 }
