@@ -195,6 +195,22 @@ func (a *AgentDesktop) displays(ctx context.Context) ([]adDisplay, error) {
 	return ds, nil
 }
 
+// Lists runs one of the two read-only listings and returns the data as the engine wrote it. Application and
+// window names come from other applications, so callers must treat the result as untrusted.
+func (a *AgentDesktop) Lists(ctx context.Context, command string) (json.RawMessage, error) {
+	if command != "list-apps" && command != "list-windows" {
+		return nil, errUnmappedCommand
+	}
+	data, aerr, err := a.call(ctx, command)
+	if err != nil {
+		return nil, err
+	}
+	if aerr != nil {
+		return nil, mapObserveError(aerr)
+	}
+	return data, nil
+}
+
 func layoutOf(ds []adDisplay) string {
 	h := sha256.New()
 	for i, d := range ds {
