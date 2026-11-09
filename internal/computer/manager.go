@@ -138,6 +138,33 @@ func (m *Manager) availableLocked() error {
 	return nil
 }
 
+// Listing is an agent-desktop listing as the engine wrote it. Notice marks Data as untrusted.
+type Listing struct {
+	Notice string          `json:"notice"`
+	Data   json.RawMessage `json:"data"`
+}
+
+// Lists runs a read-only agent-desktop listing (list-apps or list-windows). Only that engine has them.
+func (m *Manager) Lists(ctx context.Context, command string) (Listing, error) {
+	m.mu.Lock()
+	err := m.availableLocked()
+	m.mu.Unlock()
+	if err != nil {
+		return Listing{}, err
+	}
+	lister, ok := m.provider.(interface {
+		Lists(context.Context, string) (json.RawMessage, error)
+	})
+	if !ok {
+		return Listing{}, toolerr.New("unsupported", "当前桌面引擎没有此列表", "tool", command)
+	}
+	data, err := lister.Lists(ctx, command)
+	if err != nil {
+		return Listing{}, err
+	}
+	return Listing{Notice: untrustedNotice, Data: data}, nil
+}
+
 func (m *Manager) Info(ctx context.Context) (Info, error) {
 	m.mu.Lock()
 	err := m.availableLocked()

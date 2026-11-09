@@ -32,6 +32,8 @@ var adAdapterMapping = map[string]string{
 	"mouse-wheel":   "computer.act",
 	"drag":          "computer.act",
 	"press":         "computer.act",
+	"list-apps":     "computer.list_apps",
+	"list-windows":  "computer.list_windows",
 }
 
 // adRefOps is the op enum of computer.ref_act and the upstream command each op runs.
@@ -179,7 +181,7 @@ func TestInfoReportsTheUnmappedCommandsOfTheCatalog(t *testing.T) {
 	if !slices.Equal(info.UnmappedCommands, adCatalogTable.unmapped()) {
 		t.Fatalf("unmapped_commands = %v", info.UnmappedCommands)
 	}
-	if len(info.UnmappedCommands) != 37 || !slices.Contains(info.UnmappedCommands, "find") || slices.Contains(info.UnmappedCommands, "mouse-click") {
+	if len(info.UnmappedCommands) != 35 || !slices.Contains(info.UnmappedCommands, "find") || slices.Contains(info.UnmappedCommands, "mouse-click") {
 		t.Fatalf("unmapped_commands = %v", info.UnmappedCommands)
 	}
 }

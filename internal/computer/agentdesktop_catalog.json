@@ -4,7 +4,9 @@
   "source": "agent-desktop 1.0.2 README 的 Commands 表，共 60 个命令名。1.1.0 的命令表与之相同；升级时必须重新核对本表，新出现的命令会在 Info.unmapped_commands 中报告。",
   "tool_requires": {
     "computer.snapshot": ["refs"],
-    "computer.ref_act": ["refs"]
+    "computer.ref_act": ["refs"],
+    "computer.list_apps": ["engine:agent-desktop"],
+    "computer.list_windows": ["engine:agent-desktop"]
   },
   "commands": [
     {"name": "snapshot", "risk": "observe", "tool": "computer.snapshot"},
@@ -44,8 +46,8 @@
 
     {"name": "launch", "risk": "app_control"},
     {"name": "close-app", "risk": "app_control"},
-    {"name": "list-apps", "risk": "observe"},
-    {"name": "list-windows", "risk": "observe"},
+    {"name": "list-apps", "risk": "observe", "tool": "computer.list_apps"},
+    {"name": "list-windows", "risk": "observe", "tool": "computer.list_windows"},
     {"name": "list-displays", "risk": "observe", "tool": "computer.info"},
     {"name": "focus-window", "risk": "app_control"},
     {"name": "resize-window", "risk": "app_control"},
