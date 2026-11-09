@@ -15,28 +15,61 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
 
-func TestEmbeddedManifestPinsValidatedRelease(t *testing.T) {
+func TestEmbeddedManifestMatchesValidationRecord(t *testing.T) {
 	m, err := Embedded()
 	if err != nil {
 		t.Fatalf("embedded manifest: %v", err)
 	}
-	if m.Version != "1.0.2" || len(m.Platforms) != 6 {
-		t.Fatalf("pin = %s with %d platforms", m.Version, len(m.Platforms))
+	if m.Validation.Record == "" {
+		t.Fatal("embedded manifest names no validation record")
 	}
-	if !m.Validated("1.0.2", "darwin-arm64") || m.Validated("1.0.2", "linux-x64") || m.Validated("1.1.0", "darwin-arm64") {
-		t.Fatalf("validation gate does not match the recorded acceptance")
+	// The record is read instead of restating the pin, its hashes or the upstream version, so a new
+	// proposal changes only the manifest and the record it generates.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", filepath.FromSlash(m.Validation.Record)))
+	if err != nil {
+		t.Fatalf("validation record %s: %v", m.Validation.Record, err)
 	}
-	if got := m.UpstreamLatest(); got != "1.1.0" {
-		t.Fatalf("upstream latest = %q", got)
+	record := string(raw)
+
+	for _, v := range m.Validation.ValidatedVersions {
+		if !strings.Contains(record, v) {
+			t.Fatalf("validation record does not name validated version %s", v)
+		}
 	}
-	if got := m.Platforms["darwin-arm64"].Binary.SHA256; got != "bf0a3c9256512f2f57288d37ccd17d7f03665fccc53c2f74011a49b98e61ba59" {
-		t.Fatalf("darwin-arm64 binary hash = %s", got)
+
+	// The gate opens for the recorded pairs and for nothing else.
+	for key := range m.Platforms {
+		recorded := len(m.Validation.ValidatedPlatforms) == 0 || slices.Contains(m.Validation.ValidatedPlatforms, key)
+		for _, v := range m.Validation.ValidatedVersions {
+			if got := m.Validated(v, key); got != recorded {
+				t.Fatalf("Validated(%s, %s) = %v, want %v", v, key, got, recorded)
+			}
+		}
+		for _, v := range []string{m.Version, m.UpstreamLatest()} {
+			if !slices.Contains(m.Validation.ValidatedVersions, v) && m.Validated(v, key) {
+				t.Fatalf("Validated(%s, %s) is true for an unvalidated version", v, key)
+			}
+		}
+	}
+
+	// An unvalidated pin has no acceptance evidence, so its record must list the hash of every file
+	// the manifest pins for it. An accepted pin is checked by name only, because the 1.0.2 record
+	// predates the hash table.
+	if !slices.Contains(m.Validation.ValidatedVersions, m.Version) {
+		for key, p := range m.Platforms {
+			for _, f := range append([]File{p.Binary}, p.Helpers...) {
+				if !strings.Contains(record, f.SHA256) {
+					t.Fatalf("pin %s is unvalidated and its record does not list the sha256 of %s (%s)", m.Version, f.Member, key)
+				}
+			}
+		}
 	}
 }
 
