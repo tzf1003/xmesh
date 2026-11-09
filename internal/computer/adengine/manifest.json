@@ -74,12 +74,13 @@
   },
   "validation": {
     "validated_versions": [
-      "1.0.2"
+      "1.0.2",
+      "1.2.0"
     ],
     "validated_platforms": [
       "darwin-arm64"
     ],
-    "record": "docs/validation/2026-11-01-agent-browser-desktop-p0.md"
+    "record": "docs/validation/2026-11-09-agent-desktop-1.2.0.md"
   },
   "upstream": {
     "latest": "1.1.0"
