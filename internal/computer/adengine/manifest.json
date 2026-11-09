@@ -1,73 +1,73 @@
 {
   "schema_version": 1,
   "package": "agent-desktop",
-  "version": "1.0.2",
+  "version": "1.2.0",
   "license": "Apache-2.0",
   "tarball": {
-    "url": "https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.0.2.tgz",
-    "integrity": "sha512-k2Qi3f0y1U60YaJOw1dob3EO55P/DuH4HK3WKdI9sMZLjVxpGZAzuG50rIWuIqS0JIVy07g+0pp9Of2JDjTX0w==",
-    "published_at": "2026-10-30T21:18:45.761Z"
+    "url": "https://registry.npmjs.org/agent-desktop/-/agent-desktop-1.2.0.tgz",
+    "integrity": "sha512-sp8hHs8JfnuZe8ZQwiKZrqSOlu26SSeZXkjDog4KsU31L09G3uZJa8pITGN2vORif9uuh0iOSJHD146CEyTqag==",
+    "published_at": "2026-11-05T02:45:51.044Z"
   },
   "platforms": {
     "darwin-arm64": {
       "binary": {
         "member": "bin/agent-desktop-darwin-arm64",
-        "sha256": "bf0a3c9256512f2f57288d37ccd17d7f03665fccc53c2f74011a49b98e61ba59"
+        "sha256": "dec75e0bba0d1f9b589bdb88188770ad1a199cde9e02cf0a5b94175491f738e9"
       },
       "helpers": [
         {
           "member": "bin/agent-desktop-macos-helper-darwin-arm64",
-          "sha256": "522829116cb006b5770c6a82b361f466a4775f794d6af4083e75231a2d6bb551"
+          "sha256": "4a795a40ba7fc93b726b0834342f0225779c30d83e28f1f219db479860c38a78"
         }
       ]
     },
     "darwin-x64": {
       "binary": {
         "member": "bin/agent-desktop-darwin-x64",
-        "sha256": "9684916bb4b5486c02cef8b2d480e55a551639b08358284f90a87cef43b2da8b"
+        "sha256": "5dae755fee4af37d1a245f058139b262d358352cce15aeb49d0100ff46b12156"
       },
       "helpers": [
         {
           "member": "bin/agent-desktop-macos-helper-darwin-x64",
-          "sha256": "ce52467818ac601ae1145a0b9ecaa14aaf04d2e72d24cf6d29d26757340f9c6b"
+          "sha256": "bdf060658b93f326efa06ac24d521e88025bf88109cecc257fa7fa40e65801cd"
         }
       ]
     },
     "linux-arm64": {
       "binary": {
         "member": "bin/agent-desktop-linux-arm64",
-        "sha256": "529ae49006278f778bcda6b68d7460a55148e2cefb1cb69a23485381d9dbdec0"
+        "sha256": "915de59a8b3d22c9ad33023740bbcc5fe0b4fa830de9587bbf761237eafeb76f"
       },
       "helpers": [
         {
           "member": "bin/agent-desktop-linux-clipboard-owner-linux-arm64",
-          "sha256": "dcd6f2ce9a0e92e42f4d2ee9161ea1b9f2b11c0e4b1878119a19c0a2db3630a6"
+          "sha256": "a6bfde6778dadcf9fd04ba94de17cdf205eb0b23b643c3f34073d264d2117cc3"
         }
       ]
     },
     "linux-x64": {
       "binary": {
         "member": "bin/agent-desktop-linux-x64",
-        "sha256": "05427281a6746489bc0e15c16698a70a86322125c76c7a9e2f4c2d7a12bf7c5b"
+        "sha256": "da52a1eb2152cdc21b756ab20e6208d242da8062c73cd20bc8a8ae2a0384392c"
       },
       "helpers": [
         {
           "member": "bin/agent-desktop-linux-clipboard-owner-linux-x64",
-          "sha256": "bf17de139902724e86b3616970b7b7f16f5f1fb4143910b532a38dd2182720fa"
+          "sha256": "3e96f92b805c0d1f9de309935d62f4189b8e11e1385ad022bb878487bb3942ec"
         }
       ]
     },
     "win32-arm64": {
       "binary": {
         "member": "bin/agent-desktop-win32-arm64.exe",
-        "sha256": "5877fbca41fb85806353d0aaf67c23cfdf06a58a77c5d9cba005727a2891034e"
+        "sha256": "f1577d9f8cb6c9b1e767584fed96c72fbe1591fefbd67100965607d1a337a2fb"
       },
       "helpers": []
     },
     "win32-x64": {
       "binary": {
         "member": "bin/agent-desktop-win32-x64.exe",
-        "sha256": "409e58cbdd6aed47e29771ffa60bc122a9843505a227af488cded85215943988"
+        "sha256": "d274667031322e50b9c2b1ab81c2ca46835d52cc932769a5c34bd4d481fd94c3"
       },
       "helpers": []
     }
@@ -79,9 +79,9 @@
     "validated_platforms": [
       "darwin-arm64"
     ],
-    "record": "docs/validation/2026-11-01-agent-browser-desktop-p0.md"
+    "record": "docs/validation/agent-desktop-1.2.0.md"
   },
   "upstream": {
-    "latest": "1.1.0"
+    "latest": "1.2.0"
   }
 }
