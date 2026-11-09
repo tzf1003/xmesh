@@ -11,7 +11,8 @@
 
 - 观察、无头动作和部分物理动作有结果。
 - 多数物理动作的回执是 `delivered_unverified`。这表示引擎报告已投递，但没有独立观察确认效果。
-- 复位点击失败后，物理输入停止。失败时指针没有到位，前台应用已切到 Google Chrome。原因未确认，可能有人在使用这台 Mac。
+- 复位点击失败后，物理输入暂停。失败时指针没有到位，前台应用已切到 Google Chrome，原因未确认。
+- 你确认 Mac 空闲后，我继续完成了 cmd+a 全选与取消框选的验证。之后前台又切到 Chrome，我仍尝试过几次把测试窗口拉回前台，这是操作失误。最后停止了所有物理输入。
 
 ## 结果
 
@@ -34,7 +35,9 @@
 | mouse-click | --headed | 成功，delivered_unverified | 空白处点击，效果未验证 |
 | mouse-wheel | --headed | 成功，delivered_unverified | 空白处滚轮，效果未验证 |
 | drag | --headed | 成功，delivered_unverified | 从空白处框选，`tmp` 行出现 selected 状态，有旁证 |
-| mouse-click 复位 | --headed | 失败，ACTION_FAILED | 指针未到位：观察到 (611.7, 559.8)，请求 (600, 400)。之后没有再发送物理输入 |
+| mouse-click 复位 | --headed | 失败，ACTION_FAILED | 指针未到位：观察到 (611.7, 559.8)，请求 (600, 400)。确认空闲后重新移动指针，见下方记录 |
+| press cmd+a | --headed | 成功，delivered_unverified；行状态已验证 | 测试窗口获得焦点、前台为 Finder 后发送。三行均变为 selected |
+| mouse-click 取消框选 | --headed | 成功，delivered_unverified；行状态已验证 | 空白处点击后三行恢复为 focused，没有 selected |
 
 ## 安全与环境
 
@@ -42,10 +45,11 @@
 - 测试窗口曾被 `GestaltX-main` 窗口遮挡，导致一次 headed click 被命中测试拒绝。之后测试窗口成为焦点窗口，hover 的命中测试通过。
 - 物理输入只在测试窗口内的空白区域进行。没有拖放文件，也没有使用 Delete 键。
 - 一次无窗口指定的 `press escape` 把按键投递到了前台应用。按键本身没有副作用，但这说明无头按键前必须先确认焦点。
+- 确认空闲后的物理步骤，只在测试窗口获得焦点、且前台应用为 Finder 时发送按键。
+- 确认空闲后，前台又切到 Chrome 时，我仍尝试过几次把测试窗口拉回前台。这是操作失误。之后停止了所有物理输入。
 
 ## 未完成
 
-- 物理 click 与 type 的效果验证：需要窗口稳定、位于最前、没有遮挡。
-- 取消 `tmp` 行的框选。复位点击失败，之后没有再发送物理输入。
-- 确认焦点后的物理 press 验证。
+- 物理 type：Finder 搜索框上被拒绝（ACTION_NOT_SUPPORTED），还没有找到可以安全验证物理输入的文本框。
+- 物理 click 的效果：点击只有引擎回执，没有独立的效果观察。
 - 是否把 1.2.0 加入 `validated_versions`：待以上项目完成后人工决定。升级固定版本需要另外的 PR。
