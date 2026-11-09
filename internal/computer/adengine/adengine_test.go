@@ -26,16 +26,16 @@ func TestEmbeddedManifestPinsValidatedRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded manifest: %v", err)
 	}
-	if m.Version != "1.0.2" || len(m.Platforms) != 6 {
+	if m.Version != "1.2.0" || len(m.Platforms) != 6 {
 		t.Fatalf("pin = %s with %d platforms", m.Version, len(m.Platforms))
 	}
 	if !m.Validated("1.0.2", "darwin-arm64") || m.Validated("1.0.2", "linux-x64") || m.Validated("1.1.0", "darwin-arm64") {
 		t.Fatalf("validation gate does not match the recorded acceptance")
 	}
-	if got := m.UpstreamLatest(); got != "1.1.0" {
+	if got := m.UpstreamLatest(); got != "1.2.0" {
 		t.Fatalf("upstream latest = %q", got)
 	}
-	if got := m.Platforms["darwin-arm64"].Binary.SHA256; got != "bf0a3c9256512f2f57288d37ccd17d7f03665fccc53c2f74011a49b98e61ba59" {
+	if got := m.Platforms["darwin-arm64"].Binary.SHA256; got != "dec75e0bba0d1f9b589bdb88188770ad1a199cde9e02cf0a5b94175491f738e9" {
 		t.Fatalf("darwin-arm64 binary hash = %s", got)
 	}
 }
