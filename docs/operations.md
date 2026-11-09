@@ -726,7 +726,7 @@ macOS 后台后端已接入窗口列表、单窗口采集及固定版本的开�
 
 CLI 对应步骤：`xmesh computer setup` 安装并启动当前用户的桌面服务并请求系统授权；`xmesh computer info` 查询执行器状态；`xmesh computer stop|start|restart|uninstall` 管理用户服务。需要前台诊断时运行 `xmesh computer host --authorize`。这些命令要求发行包中同时存在 `xmesh` 与原生桌面执行器；macOS 原生执行器位于同目录的 `xmesh-computer.app`。
 
-在节点配置中设置 `agent.computer.enabled: true`，并按用途向节点 tag 授予 `computer.info`、`computer.open`、`computer.observe`、`computer.sessions`、`computer.renew`、`computer.close`；控制还需要 `computer.act` 和 `computer.action_status`；agent-desktop 引擎的元素 ref 另需 `computer.snapshot`（观察）与 `computer.ref_act`（控制）。Gateway PAT / Ingress OAuth 使用 `computer:observe:<设备名>` 或 `computer:control:<设备名>`。
+在节点配置中设置 `agent.computer.enabled: true`，并按用途向节点 tag 授予 `computer.info`、`computer.open`、`computer.observe`、`computer.sessions`、`computer.renew`、`computer.close`；控制还需要 `computer.act` 和 `computer.action_status`；agent-desktop 引擎的元素 ref 另需 `computer.snapshot`（观察）、`computer.ref_read`（观察，只读取属性）与 `computer.ref_act`（控制）。Gateway PAT / Ingress OAuth 使用 `computer:observe:<设备名>` 或 `computer:control:<设备名>`。
 
 面板预览须显式选择具有目标设备观察权限的凭据。默认 Gateway PAT 未包含桌面 scope 时，到“授权”页创建观察凭据，再回到桌面页选择它。页面只接触凭据名称，令牌由主进程读取；控制 scope 也可观察，剪贴板 scope 不授予预览权限。
 

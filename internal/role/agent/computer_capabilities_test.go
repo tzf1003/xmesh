@@ -63,7 +63,7 @@ func TestComputerRefToolsFollowTheEngineCapabilities(t *testing.T) {
 			t.Fatal(want, "is hidden though it needs no capability")
 		}
 	}
-	if slices.Contains(names, "computer.ref_act") {
+	if slices.Contains(names, "computer.ref_act") || slices.Contains(names, "computer.ref_read") {
 		t.Fatal("computer.ref_act is listed without refs")
 	}
 
@@ -73,8 +73,41 @@ func TestComputerRefToolsFollowTheEngineCapabilities(t *testing.T) {
 	}
 	waitUntil(t, func() bool {
 		names := listedToolNames(t, client)
-		return slices.Contains(names, "computer.snapshot") && slices.Contains(names, "computer.ref_act")
+		return slices.Contains(names, "computer.snapshot") && slices.Contains(names, "computer.ref_read") && slices.Contains(names, "computer.ref_act")
 	})
+}
+
+// computer.ref_read advertises exactly the ops the catalog maps, and its schema admits only the properties of
+// the op it names: a value is never offered, and text is not a property of is.
+func Test_RefReadAdvertisesTheCatalogOps(t *testing.T) {
+	spec := builtinSpecs()["computer.ref_read"]
+	enum := spec.schema["properties"].(map[string]any)["op"].(map[string]any)["enum"].([]string)
+	got := slices.Clone(enum)
+	want := computer.MappedOps("computer.ref_read")
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("computer.ref_read advertises %v, the catalog maps %v", got, want)
+	}
+	for _, op := range want {
+		if len(computer.RefReadProperties(op)) == 0 {
+			t.Fatalf("op %s has no readable properties", op)
+		}
+	}
+	const base = `"session_id":"s","desktop_epoch":"e","snapshot_id":"s1","ref":"@s1:e1"`
+	for _, bad := range []string{
+		`{` + base + `,"op":"get","property":"value"}`,
+		`{` + base + `,"op":"is","property":"text"}`,
+		`{` + base + `,"op":"get","property":"text","text":"x"}`,
+		`{` + base + `,"op":"get","property":"text","lease_token":"t"}`,
+	} {
+		if spec.validate([]byte(bad)) == nil {
+			t.Fatalf("computer.ref_read accepted %s", bad)
+		}
+	}
+	if err := spec.validate([]byte(`{` + base + `,"op":"is","property":"visible"}`)); err != nil {
+		t.Fatalf("a valid is read was refused: %v", err)
+	}
 }
 
 // The catalog and the built-in schemas describe the same surface: every mapped tool is a built-in, and the

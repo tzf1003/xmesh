@@ -170,6 +170,11 @@ func (c *Client) Snapshot(ctx context.Context, q SnapshotQuery) (Snapshot, error
 	err := c.call(ctx, "snapshot", q, &out)
 	return out, err
 }
+func (c *Client) RefRead(ctx context.Context, r RefReadExecution) (RefReadResult, error) {
+	var out RefReadResult
+	err := c.call(ctx, "ref_read", r, &out)
+	return out, err
+}
 func (c *Client) RefAct(ctx context.Context, r RefExecution) (ActionResult, error) {
 	var out ActionResult
 	err := c.call(ctx, "ref_act", r, &out)

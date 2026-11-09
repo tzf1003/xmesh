@@ -26,7 +26,7 @@ func TestToolListedFollowsTheLastReportedCapabilities(t *testing.T) {
 	if _, err := m.Info(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"computer.snapshot", "computer.ref_act"} {
+	for _, tool := range []string{"computer.snapshot", "computer.ref_read", "computer.ref_act"} {
 		if m.ToolListed(tool) {
 			t.Fatalf("%s is listed without the refs capability", tool)
 		}
@@ -40,7 +40,7 @@ func TestToolListedFollowsTheLastReportedCapabilities(t *testing.T) {
 	if _, err := m.Info(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !m.ToolListed("computer.snapshot") || !m.ToolListed("computer.ref_act") {
+	if !m.ToolListed("computer.snapshot") || !m.ToolListed("computer.ref_read") || !m.ToolListed("computer.ref_act") {
 		t.Fatal("refs tools stay hidden after the engine reports refs")
 	}
 }

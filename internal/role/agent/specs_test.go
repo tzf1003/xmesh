@@ -24,6 +24,12 @@ func Test_ToolSchemasRejectUnknownArgs(t *testing.T) {
 				args[key] = []map[string]any{{"type": "wait", "duration_ms": 1}}
 				continue
 			}
+			if name == "computer.ref_read" {
+				if v, ok := map[string]string{"ref": "@s1:e1", "snapshot_id": "s1", "op": "get", "property": "text"}[key]; ok {
+					args[key] = v
+					continue
+				}
+			}
 			if name == "computer.ref_act" {
 				if v, ok := map[string]string{"ref": "@s1:e1", "snapshot_id": "s1", "op": "click"}[key]; ok {
 					args[key] = v

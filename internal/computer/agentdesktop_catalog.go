@@ -33,6 +33,10 @@ const (
 
 var riskClasses = []string{riskObserve, riskPointer, riskKeyboard, riskText, riskClipboard, riskAppControl, riskSystem}
 
+// refTools are the tools whose catalog entries carry an op. Each op is one upstream command of its tool, and
+// the adapter runs that command only for the op the caller named.
+var refTools = []string{"computer.ref_act", "computer.ref_read"}
+
 // errUnmappedCommand refuses a command the catalog does not map. It is returned before the CLI runs.
 // Callers that issue actions treat it as unknown, the conservative outcome, though nothing was sent.
 var errUnmappedCommand = errors.New("agent-desktop command is not mapped")
@@ -93,8 +97,8 @@ func parseADCatalog(raw []byte) (*adCatalog, error) {
 		if cmd.Tool != "" && !adToolName.MatchString(cmd.Tool) {
 			return nil, fmt.Errorf("agent-desktop catalog: command %q maps to malformed tool %q", cmd.Name, cmd.Tool)
 		}
-		if (cmd.Op != "") != (cmd.Tool == "computer.ref_act") {
-			return nil, fmt.Errorf("agent-desktop catalog: command %q must carry op exactly when it maps to computer.ref_act", cmd.Name)
+		if (cmd.Op != "") != slices.Contains(refTools, cmd.Tool) {
+			return nil, fmt.Errorf("agent-desktop catalog: command %q must carry op exactly when it maps to computer.ref_act or computer.ref_read", cmd.Name)
 		}
 		c.byName[cmd.Name] = cmd
 	}
@@ -141,10 +145,10 @@ func (c *adCatalog) unmapped() []string {
 	return out
 }
 
-// commandForOp returns the upstream command that implements one op of computer.ref_act.
-func (c *adCatalog) commandForOp(op string) (string, bool) {
+// commandForOp returns the upstream command that implements one op of tool, which must be one of refTools.
+func (c *adCatalog) commandForOp(tool, op string) (string, bool) {
 	for _, cmd := range c.Commands {
-		if cmd.Tool == "computer.ref_act" && cmd.Op == op {
+		if cmd.Tool == tool && cmd.Op == op && op != "" {
 			return cmd.Name, true
 		}
 	}
@@ -156,7 +160,7 @@ func (c *adCatalog) requires(tool string) []string {
 	return c.ToolRequires[tool]
 }
 
-// MappedOps returns the ops that tool maps to, in catalog order. Only computer.ref_act carries ops. The agent
+// MappedOps returns the ops that tool maps to, in catalog order. Only the refTools carry ops. The agent
 // package checks its schema enum against this list, so an op cannot be advertised without a command behind it.
 func MappedOps(tool string) []string {
 	var ops []string

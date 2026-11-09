@@ -134,7 +134,7 @@ func (a *AgentDesktop) RefAct(ctx context.Context, r RefExecution) (ActionResult
 		res.Error = "stale_ref"
 		return res, nil
 	}
-	cmd, ok := adCatalogTable.commandForOp(r.Op)
+	cmd, ok := adCatalogTable.commandForOp("computer.ref_act", r.Op)
 	m := refPattern.FindStringSubmatch(r.Ref)
 	if !ok || m == nil || m[1] != r.SnapshotID {
 		res.Error = "invalid_args"
@@ -175,6 +175,72 @@ func (a *AgentDesktop) RefAct(ctx context.Context, r RefExecution) (ActionResult
 	}
 	res.State, res.Executed = "executed", 1
 	return res, nil
+}
+
+// inputRole matches the roles of elements that take typed text. Their text and title are withheld from reads,
+// because what a user typed is not a label. secretRole covers password fields.
+var inputRole = regexp.MustCompile(`(?i)text ?(field|area|box)|search ?field|combo ?box`)
+
+// maxReadBytes bounds the engine's answer to one read. A larger answer is refused, never cut short.
+const maxReadBytes = 64 << 10
+
+// RefRead reads one property of one element with agent-desktop get or is. Neither command acts on the element.
+// The role of a ref comes from the snapshot the adapter read, so an unknown ref is refused before the engine runs,
+// and text or title of an input or password element never leaves the adapter.
+func (a *AgentDesktop) RefRead(ctx context.Context, r RefReadExecution) (RefReadResult, error) {
+	if err := validRefRead(r.SnapshotID, r.Ref, r.Op, r.Property); err != nil {
+		return RefReadResult{}, err
+	}
+	cmd, ok := adCatalogTable.commandForOp("computer.ref_read", r.Op)
+	if !ok {
+		return RefReadResult{}, toolerr.Args("op")
+	}
+	a.mu.Lock()
+	role, known := a.roles[r.SnapshotID][r.Ref]
+	a.mu.Unlock()
+	if !known {
+		return RefReadResult{}, toolerr.New("conflict", "快照或 ref 已过期", "reason", "stale_ref")
+	}
+	if (r.Property == "text" || r.Property == "title") && (inputRole.MatchString(role) || secretRole.MatchString(role)) {
+		return RefReadResult{}, toolerr.New("policy_denied", "输入框与密码框的文本不通过只读工具返回", "rule", "computer.input_text_withheld", "property", r.Property)
+	}
+	data, aerr, err := a.call(ctx, cmd, r.Ref, "--property", r.Property)
+	if err != nil {
+		return RefReadResult{}, err
+	}
+	if aerr != nil {
+		switch aerr.Code {
+		case "STALE_REF", "SNAPSHOT_NOT_FOUND":
+			return RefReadResult{}, toolerr.New("conflict", "快照或 ref 已过期", "reason", "stale_ref")
+		case "AMBIGUOUS_TARGET":
+			return RefReadResult{}, toolerr.New("conflict", "目标不唯一，请重新快照", "reason", "ambiguous_target")
+		}
+		return RefReadResult{}, mapObserveError(aerr)
+	}
+	if len(data) > maxReadBytes {
+		return RefReadResult{}, toolerr.New("too_large", "读取结果过大", "size", len(data), "limit", maxReadBytes)
+	}
+	var reply struct {
+		Value      json.RawMessage `json:"value"`
+		Applicable *bool           `json:"applicable"`
+		Result     *bool           `json:"result"`
+	}
+	if json.Unmarshal(data, &reply) != nil {
+		return RefReadResult{}, toolerr.New("desktop_unavailable", "引擎返回的读取结果无效", "reason", "invalid_read")
+	}
+	out := RefReadResult{Ref: r.Ref, Property: r.Property}
+	if r.Op == "get" {
+		if len(reply.Value) == 0 {
+			return RefReadResult{}, toolerr.New("desktop_unavailable", "引擎返回的读取结果无效", "reason", "invalid_read")
+		}
+		out.Value = reply.Value
+		return out, nil
+	}
+	if reply.Applicable == nil || reply.Result == nil {
+		return RefReadResult{}, toolerr.New("desktop_unavailable", "引擎返回的读取结果无效", "reason", "invalid_read")
+	}
+	out.Applicable, out.Result = reply.Applicable, reply.Result
+	return out, nil
 }
 
 func itoaInt(n int) string { return strconv.Itoa(n) }
