@@ -102,7 +102,7 @@ func Allows(scopes []string, device, tool, backend string) bool {
 
 func computerBuiltin(tool string) bool {
 	switch tool {
-	case "computer.info", "computer.open", "computer.observe", "computer.act", "computer.ref_act", "computer.snapshot", "computer.action_status", "computer.renew", "computer.close", "computer.sessions", "computer.list_apps", "computer.list_windows":
+	case "computer.info", "computer.open", "computer.observe", "computer.act", "computer.ref_act", "computer.ref_read", "computer.snapshot", "computer.action_status", "computer.renew", "computer.close", "computer.sessions", "computer.list_apps", "computer.list_windows":
 		return true
 	default:
 		return false

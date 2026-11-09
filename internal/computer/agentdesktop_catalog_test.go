@@ -43,6 +43,9 @@ var adRefOps = map[string]string{
 	"expand": "expand", "collapse": "collapse", "scroll": "scroll", "scroll_to": "scroll-to",
 }
 
+// adRefReadOps is the op enum of computer.ref_read and the upstream command each op runs.
+var adRefReadOps = map[string]string{"get": "get", "is": "is"}
+
 func TestCatalogListsEveryCommandOfTheUpstreamTableOnce(t *testing.T) {
 	if len(adReadmeCommands) != 60 {
 		t.Fatalf("the reference table has %d names, want 60", len(adReadmeCommands))
@@ -67,10 +70,19 @@ func TestMappingsAreTheCallsTheAdapterMakes(t *testing.T) {
 		}
 	}
 	for op, command := range adRefOps {
-		got, ok := adCatalogTable.commandForOp(op)
+		got, ok := adCatalogTable.commandForOp("computer.ref_act", op)
 		if !ok || got != command {
 			t.Fatalf("ref op %s runs %q, want %q", op, got, command)
 		}
+	}
+	for op, command := range adRefReadOps {
+		got, ok := adCatalogTable.commandForOp("computer.ref_read", op)
+		if !ok || got != command {
+			t.Fatalf("ref read op %s runs %q, want %q", op, got, command)
+		}
+	}
+	if reads := MappedOps("computer.ref_read"); len(reads) != len(adRefReadOps) {
+		t.Fatalf("computer.ref_read maps %v, want %d ops", reads, len(adRefReadOps))
 	}
 	ops := MappedOps("computer.ref_act")
 	if len(ops) != len(adRefOps) {
@@ -81,7 +93,7 @@ func TestMappingsAreTheCallsTheAdapterMakes(t *testing.T) {
 			t.Fatalf("unexpected mapped op %q", op)
 		}
 	}
-	if want := len(adAdapterMapping) + len(adRefOps); len(adCatalogTable.Commands) != 60 || countMapped() != want {
+	if want := len(adAdapterMapping) + len(adRefOps) + len(adRefReadOps); len(adCatalogTable.Commands) != 60 || countMapped() != want {
 		t.Fatalf("mapped commands = %d, want %d of 60", countMapped(), want)
 	}
 }
@@ -127,6 +139,7 @@ func TestCatalogRejectsMalformedEntries(t *testing.T) {
 		"tool outside computer":   `{"schema":1,"table_version":"1.0.2","commands":[{"name":"x","risk":"observe","tool":"fs.read"}]}`,
 		"op on a non-ref tool":    `{"schema":1,"table_version":"1.0.2","commands":[{"name":"x","risk":"observe","tool":"computer.observe","op":"click"}]}`,
 		"ref tool without op":     `{"schema":1,"table_version":"1.0.2","commands":[{"name":"x","risk":"pointer","tool":"computer.ref_act"}]}`,
+		"read tool without op":    `{"schema":1,"table_version":"1.0.2","commands":[{"name":"x","risk":"observe","tool":"computer.ref_read"}]}`,
 		"empty requirement":       `{"schema":1,"table_version":"1.0.2","tool_requires":{"computer.snapshot":[]},"commands":[]}`,
 		"requirement on non-tool": `{"schema":1,"table_version":"1.0.2","tool_requires":{"snapshot":["refs"]},"commands":[]}`,
 	}
@@ -181,7 +194,7 @@ func TestInfoReportsTheUnmappedCommandsOfTheCatalog(t *testing.T) {
 	if !slices.Equal(info.UnmappedCommands, adCatalogTable.unmapped()) {
 		t.Fatalf("unmapped_commands = %v", info.UnmappedCommands)
 	}
-	if len(info.UnmappedCommands) != 35 || !slices.Contains(info.UnmappedCommands, "find") || slices.Contains(info.UnmappedCommands, "mouse-click") {
+	if len(info.UnmappedCommands) != 33 || !slices.Contains(info.UnmappedCommands, "find") || slices.Contains(info.UnmappedCommands, "mouse-click") {
 		t.Fatalf("unmapped_commands = %v", info.UnmappedCommands)
 	}
 }
@@ -193,6 +206,12 @@ func TestEveryCommandTheAdapterIssuesIsMapped(t *testing.T) {
 	ctx := context.Background()
 	reply := f.reply
 	f.reply = func(args []string) string {
+		if args[0] == "get" {
+			return `{"ok":true,"data":{"property":"title","ref":"@s1:e2","value":"Close"}}`
+		}
+		if args[0] == "is" {
+			return `{"ok":true,"data":{"applicable":true,"property":"visible","ref":"@s1:e2","result":true}}`
+		}
 		if args[0] == "snapshot" {
 			return `{"ok":true,"data":{"snapshot_id":"s1","complete":true,"tree":{"role":"window","children":[{"role":"textfield","ref_id":"@s1:e1","value":"x"},{"role":"button","ref_id":"@s1:e2"}]}}}`
 		}
@@ -218,6 +237,12 @@ func TestEveryCommandTheAdapterIssuesIsMapped(t *testing.T) {
 		}
 		if res, err := a.RefAct(ctx, r); err != nil || res.State != "executed" {
 			t.Fatalf("ref op %s: %+v %v", op, res, err)
+		}
+	}
+	for _, op := range MappedOps("computer.ref_read") {
+		prop := map[string]string{"get": "title", "is": "visible"}[op]
+		if res, err := a.RefRead(ctx, RefReadExecution{SnapshotID: "s1", Ref: "@s1:e2", Op: op, Property: prop}); err != nil || res.Property != prop {
+			t.Fatalf("ref read op %s: %+v %v", op, res, err)
 		}
 	}
 	frame := Frame{Epoch: info.Epoch, DisplayID: "1", LayoutVersion: info.LayoutVersion, Width: 800, Height: 600, Region: Region{Width: 800, Height: 600}}

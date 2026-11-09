@@ -97,6 +97,10 @@ func TestComputerScopesAndMixedModeOpen(t *testing.T) {
 	if Allows(observe, "mac", "computer.act", "") || Allows(observe, "win", "computer.observe", "") {
 		t.Fatal("scope escalation")
 	}
+	// A read of one element property is observation; acting on an element is control.
+	if !Allows(observe, "mac", "computer.ref_read", "") || Allows(observe, "mac", "computer.ref_act", "") {
+		t.Fatal("ref_read must follow observe and ref_act must not")
+	}
 	if !Allows(observe, "mac", "computer.open", "") || !Allows(control, "mac", "computer.observe", "") {
 		t.Fatal("scope visibility")
 	}

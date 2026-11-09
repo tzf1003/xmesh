@@ -426,7 +426,7 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 // installBuiltins lists the built-in tools that agent.disabled_tools leaves on and removes the others
 // from the view, so a tool switched off in the configuration disappears from tools/list on reload.
 // A computer tool also leaves the view while the engine's reported capabilities do not satisfy it
-// (computer.snapshot and computer.ref_act need refs), and returns when a later report does.
+// (computer.snapshot, computer.ref_read and computer.ref_act need refs), and returns when a later report does.
 func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 	disabled := a.store.Get().Agent.DisabledTools
 	for name, spec := range builtinSpecs() {

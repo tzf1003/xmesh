@@ -11,11 +11,16 @@ type refDesktop struct {
 	*fakeDesktop
 	snaps []SnapshotQuery
 	acts  []RefExecution
+	reads []RefReadExecution
 }
 
 func (r *refDesktop) Snapshot(_ context.Context, q SnapshotQuery) (Snapshot, error) {
 	r.snaps = append(r.snaps, q)
 	return Snapshot{SnapshotID: "s1", Complete: true, Tree: json.RawMessage(`{"snapshot_id":"s1"}`)}, nil
+}
+func (r *refDesktop) RefRead(_ context.Context, e RefReadExecution) (RefReadResult, error) {
+	r.reads = append(r.reads, e)
+	return RefReadResult{Ref: e.Ref, Property: e.Property, Value: json.RawMessage(`"Close"`)}, nil
 }
 func (r *refDesktop) RefAct(_ context.Context, e RefExecution) (ActionResult, error) {
 	r.acts = append(r.acts, e)
@@ -235,6 +240,51 @@ func TestSnapshotRootMustBeOwnedAndRetentionIsRecencyBased(t *testing.T) {
 	m.mu.Unlock()
 	if len(got) != 3 || got[2] != "s1" {
 		t.Fatalf("re-obtained snapshot must be most recent: %v", got)
+	}
+}
+
+// computer.ref_read reads only refs of a snapshot this session took, needs its own authorization, and needs no
+// lease. Each refusal happens before the engine runs, and a revoked read returns no value.
+func TestRefReadIsObservationOnlyAndOwnsItsSnapshot(t *testing.T) {
+	m, d := refManager(t, true)
+	s := open(t, m, "caller", "control")
+	base := SessionRequest{SessionID: s.ID, Epoch: s.Epoch, Token: s.Token}
+	ctx := context.Background()
+	read := func(ref, op, property string) (RefReadResult, error) {
+		return m.RefRead(ctx, "caller", RefReadRequest{SessionRequest: base, SnapshotID: "s1", Ref: ref, Op: op, Property: property})
+	}
+	if _, err := read("@s1:e1", "is", "visible"); errorReason(err) != "stale_ref" || len(d.reads) != 0 {
+		t.Fatalf("a snapshot this session never took must be stale before the engine runs: %v %v", err, d.reads)
+	}
+	if _, err := m.Snapshot(ctx, "caller", SnapshotRequest{SessionRequest: base}); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ ref, op, property string }{
+		"value is never offered": {"@s1:e1", "get", "value"},
+		"is takes no text":       {"@s1:e1", "is", "text"},
+		"unknown op":             {"@s1:e1", "click", "text"},
+		"bare ref":               {"@e1", "get", "text"},
+	} {
+		if _, err := read(c.ref, c.op, c.property); err == nil || len(d.reads) != 0 {
+			t.Fatalf("%s must be refused before the engine runs: %v", name, err)
+		}
+	}
+	res, err := read("@s1:e1", "get", "title")
+	if err != nil || string(res.Value) != `"Close"` || len(d.reads) != 1 || d.reads[0].SnapshotID != "s1" {
+		t.Fatalf("%+v %v %+v", res, err, d.reads)
+	}
+	m.SetAuthorization(func(_, tool string) bool { return tool != "computer.ref_read" })
+	if _, err = read("@s1:e1", "get", "title"); err == nil || len(d.reads) != 1 {
+		t.Fatalf("revoked ref_read must be refused before the engine runs: %v", err)
+	}
+}
+
+func TestRefReadReportsUnsupportedEngineBeforeStaleRef(t *testing.T) {
+	m, d := refManager(t, false)
+	s := open(t, m, "caller", "observe")
+	_, err := m.RefRead(context.Background(), "caller", RefReadRequest{SessionRequest: SessionRequest{SessionID: s.ID, Epoch: s.Epoch}, SnapshotID: "s1", Ref: "@s1:e1", Op: "is", Property: "visible"})
+	if errorReason(err) != "refs_unsupported" || len(d.reads) != 0 {
+		t.Fatalf("%v", err)
 	}
 }
 

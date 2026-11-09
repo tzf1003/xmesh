@@ -18,7 +18,7 @@
 | `computer.renew` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；可选 ttl_seconds |
 | `computer.close` | session_id、desktop_epoch | 控制会话还须匹配 lease_token；释放输入 |
 | `computer.sessions` | 无 | 仅调用方拥有的会话 |
-| `computer.snapshot` / `computer.ref_act` | 见“元素 ref” | 仅 agent-desktop 引擎 |
+| `computer.snapshot` / `computer.ref_read` / `computer.ref_act` | 见“元素 ref” | 仅 agent-desktop 引擎 |
 
 租期默认 120 秒，范围 10–600 秒；观察会话也需要续期。会话上限默认 16，配置范围 1–32。每个会话最多缓存四张图和 128 个动作结果，全部会话共享 64 MiB 的截图缓存预算，超过预算按采集时间淘汰旧图。已过期会话立即拒绝；内核断开 caller、禁用 computer 或 kill drain 时撤销其会话。本机暂停只回收控制租约，观察会话保持有效。新的控制会话获得新的 fencing 序号。
 
@@ -95,31 +95,34 @@ Host 可按设备在两种执行器之间切换，Go 管理层（会话、租约
 - 本机输入监测（`pause_on_user_input`）仍由原生执行器提供；单独使用 agent-desktop 时 `user_input_monitor` 为 false，启用该策略的控制申请返回 permission_required。
 - 元素 ref（仅 agent-desktop 引擎，`info.capabilities` 含 `refs`）见下节。
 
-### 元素 ref：computer.snapshot / computer.ref_act
+### 元素 ref：computer.snapshot / computer.ref_read / computer.ref_act
 
 | 工具 | 必填参数 | 语义 |
 | --- | --- | --- |
 | `computer.snapshot` | session_id、desktop_epoch | 读取应用窗口的无障碍元素树；可选 app、window_id、root（下钻到旧快照的某个 ref）、skeleton（密集应用的浅层地图）。返回 snapshot_id、`@<snapshot_id>:eN` 形式的 ref、complete、不可信内容声明 |
 | `computer.ref_act` | session_id、desktop_epoch、lease_token、action_id、snapshot_id、ref、op | 对一个 ref 执行一个动作 |
+| `computer.ref_read` | session_id、desktop_epoch、snapshot_id、ref、op、property | 只读取一个 ref 的一个属性，不需要租约，不改变桌面。op 为 get 时返回 text、title、role、bounds 或 states；op 为 is 时返回 applicable 与 result |
 
 op 取值：click、right_click、focus、set_value、type、clear、select、toggle、check、uncheck、expand、collapse、scroll、scroll_to。set_value / type / select 必须带 text（UTF-8 上限 64 KiB），其余不得带；scroll 可带 direction（默认 down）与 amount（1–50，默认 3）。
 
-- 权限：snapshot 沿用 observe（`computer:observe:<device>`），ref_act 沿用 control（含 Agent 的 `computer.act` tag 授权）。同一桌面仍只有一个控制者，ref_act 与 act 共用租约、fencing、动作队列、`action_id` 幂等缓存和 `action_status`。
-- 无头：ref_act 从不传 `--headed`，不移动指针、不抢焦点；agent-desktop 没有语义路径时关闭式失败。
+ref_read 的 op 与 property：get 读取 text、title、role、bounds、states；is 读取 visible、enabled、checked、focused、expanded、selected 之一，并返回 applicable（该状态不适用于元素时为 false）与 result。没有 value 属性，任何元素的 value 都不返回。输入框（角色含 textfield、textarea、searchfield、combobox 等）与密码框的 text、title 不返回。ref 必须来自本会话取得的快照；输出上限 64 KiB，超出返回 too_large。
+
+- 权限：snapshot 沿用 observe（`computer:observe:<device>`），ref_read 沿用 observe（`computer:observe:<device>`），另需单独授予 `computer.ref_read` 工具，不需要租约，也不改变桌面；ref_act 沿用 control（含 Agent 的 `computer.act` tag 授权）。同一桌面仍只有一个控制者，ref_act 与 act 共用租约、fencing、动作队列、`action_id` 幂等缓存和 `action_status`。
+- 无头：ref_read 只调用 get 与 is，不产生输入；ref_act 从不传 `--headed`，不移动指针、不抢焦点；agent-desktop 没有语义路径时关闭式失败。
 - ref 只在所属会话和桌面代次内有效，且必须来自本会话取得的快照（每会话保留最近 16 个）；代次变化、窗口 UI 变化或快照过期返回 `stale_ref`，目标不唯一返回 `ambiguous_target`，此时重新 snapshot。
 - 失败归类沿用 act：仅 agent-desktop 证明 `not_delivered` 才报 failed，其余为 unknown，须先重新读取元素再决定是否重试。
 - 密码类控件（角色含 password / secure）的值不进入快照，set_value 与 type 在派发前以 `policy_denied` 拒绝。
 - 树中的窗口文字来自其他应用，属于不可信数据；响应带 `notice` 声明。快照上限 512 KiB，超出返回 too_large，请用 skeleton 或 root 缩小范围。
 - 审计只记会话 ID、动作 ID、参数键与字节数，不记快照内容和输入文本。
-- 限制：绑定窗口目标的 macOS 后台会话不支持 ref（`refs_unsupported_for_target`），须使用前台会话（需本机 `allow_foreground`）；native 引擎返回 `refs_unsupported`。Host 本机 IPC 新增 `/v1/snapshot`、`/v1/ref_act`（协议版本仍为 1，旧执行器不实现即报 refs_unsupported）。
+- 限制：绑定窗口目标的 macOS 后台会话不支持 ref（`refs_unsupported_for_target`），须使用前台会话（需本机 `allow_foreground`）；native 引擎返回 `refs_unsupported`。Host 本机 IPC 新增 `/v1/snapshot`、`/v1/ref_read`、`/v1/ref_act`（协议版本仍为 1，旧执行器不实现即报 refs_unsupported）。
 
 ### agent-desktop 命令映射与暴露
 
 映射清单 `internal/computer/agentdesktop_catalog.json` 是 agent-desktop 命令表（1.0.2 README，60 个命令名）到 xmesh 工具的唯一来源。每条记录给出映射的工具（`tool`）、ref 操作（`op`）和风险类别（observe、pointer、keyboard、text、clipboard、app_control、system）。`table_version` 标明该表对应的上游版本；升级上游时必须重新核对本表。
 
 - **默认拒绝**：没有 `tool` 的命令属于未映射。适配器在调用 CLI 之前拒绝运行这类命令，不会产生任何输入；未映射命令同时列在 `computer.info` 的 `unmapped_commands` 中，只供审阅，不进入 MCP 或云端。上游新增的命令必须先映射、实现并通过审阅，才会出现为工具。
-- **当前映射**：25 个命令。`permissions`、`list-displays` 属于 `computer.info`；`screenshot` 属于 `computer.observe`；`snapshot` 属于 `computer.snapshot`；`mouse-move`、`mouse-click`、`mouse-wheel`、`drag`、`press` 属于 `computer.act`；14 个元素命令属于 `computer.ref_act`；`list-apps`、`list-windows` 属于 `computer.list_apps`、`computer.list_windows`，只读，返回上游数据原样，名称来自其他应用，视为不可信，且只在引擎上报 `engine:agent-desktop` 时列出。其余 35 个未映射，包括 `find`、`get`、`is`（参数语法与输出样本尚未在真机核对；`find`、`get` 还需先定下密码字段的值如何处理）、剪贴板、应用与窗口控制、通知、`batch` 等。clipboard、app_control、system 类在映射时应默认关闭。
-- **能力过滤**：`tool_requires` 声明工具所需的引擎能力，`computer.snapshot` 与 `computer.ref_act` 需要 `refs`。Agent 按引擎最近一次上报的能力决定 tools/list：能力集合变化（例如切换引擎或授予权限）时重建所有已打开视图，工具随之出现或消失，无需重启。在收到第一次上报前，工具全部列出，调用仍在运行时检查。原生引擎不报告 `refs`，因此 tools/list 不再列出必然失败的 snapshot 与 ref_act。
+- **当前映射**：27 个命令。`permissions`、`list-displays` 属于 `computer.info`；`screenshot` 属于 `computer.observe`；`snapshot` 属于 `computer.snapshot`；`mouse-move`、`mouse-click`、`mouse-wheel`、`drag`、`press` 属于 `computer.act`；14 个元素命令属于 `computer.ref_act`，`get`、`is` 属于 `computer.ref_read`；`list-apps`、`list-windows` 属于 `computer.list_apps`、`computer.list_windows`，只读，返回上游数据原样，名称来自其他应用，视为不可信，且只在引擎上报 `engine:agent-desktop` 时列出。其余 33 个未映射，包括 `find`（输出样本尚未在真机核对）、剪贴板、应用与窗口控制、通知、`batch` 等。clipboard、app_control、system 类在映射时应默认关闭。
+- **能力过滤**：`tool_requires` 声明工具所需的引擎能力，`computer.snapshot`、`computer.ref_read` 与 `computer.ref_act` 需要 `refs`。Agent 按引擎最近一次上报的能力决定 tools/list：能力集合变化（例如切换引擎或授予权限）时重建所有已打开视图，工具随之出现或消失，无需重启。在收到第一次上报前，工具全部列出，调用仍在运行时检查。原生引擎不报告 `refs`，因此 tools/list 不再列出必然失败的 snapshot、ref_read 与 ref_act。
 - **云端暴露**：工具由 Agent 注册，Gateway 的 unified 列表只列出 `gateway.listed_groups` 中的组，默认为 fs、exec、pty、sys，computer 不在其中。管理员可把 `computer` 加入 `listed_groups`，或用 `pinned_tools` 逐个固定工具。`tools.call` 始终可达，授权在每次调用时检查。版本门控（只有通过验收的 agent-desktop 版本才上报 `engine:agent-desktop`）由引擎清单决定，本映射不另行判定版本。
 
 ## 本机执行器通道

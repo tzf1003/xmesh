@@ -11,7 +11,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
 
-// Element refs (computer.snapshot / computer.ref_act) need an engine that reads
+// Element refs (computer.snapshot, computer.ref_read and computer.ref_act) need an engine that reads
 // the accessibility tree. They never use the pointer, so they carry the headless
 // guarantees of agent-desktop: no focus change and no cursor movement.
 
@@ -65,10 +65,39 @@ type RefExecution struct {
 	Amount     int    `json:"amount,omitempty"`
 }
 
+// RefReadRequest asks for one property of one element of a snapshot this session took. A read is observation
+// only: it needs an observation session and no lease, and it never changes the desktop.
+type RefReadRequest struct {
+	SessionRequest
+	SnapshotID string `json:"snapshot_id"`
+	Ref        string `json:"ref"`
+	Op         string `json:"op"`
+	Property   string `json:"property"`
+}
+
+// RefReadExecution is the request sent to the engine. It carries no lease token: a read authorises nothing.
+type RefReadExecution struct {
+	SnapshotID string `json:"snapshot_id"`
+	Ref        string `json:"ref"`
+	Op         string `json:"op"`
+	Property   string `json:"property"`
+}
+
+// RefReadResult answers one read. get fills Value with the engine's JSON for the property, null when the element
+// has none. is fills Applicable, false when the state does not apply to the element, and Result.
+type RefReadResult struct {
+	Ref        string          `json:"ref"`
+	Property   string          `json:"property"`
+	Value      json.RawMessage `json:"value,omitempty"`
+	Applicable *bool           `json:"applicable,omitempty"`
+	Result     *bool           `json:"result,omitempty"`
+}
+
 // RefProvider is implemented by engines that can read and act on the element tree.
 // Such engines advertise the "refs" capability in Info.
 type RefProvider interface {
 	Snapshot(context.Context, SnapshotQuery) (Snapshot, error)
+	RefRead(context.Context, RefReadExecution) (RefReadResult, error)
 	RefAct(context.Context, RefExecution) (ActionResult, error)
 }
 
@@ -81,6 +110,36 @@ var (
 var refOps = []string{"click", "right_click", "focus", "set_value", "type", "clear", "select", "toggle", "check", "uncheck", "expand", "collapse", "scroll", "scroll_to"}
 
 func needsText(op string) bool { return op == "set_value" || op == "type" || op == "select" }
+
+// RefReadProperties returns the properties a read op accepts, or nil when op is not a read. get reads the text,
+// title, role, bounds or states of an element, and is reads one state flag. Element values are never offered.
+func RefReadProperties(op string) []string {
+	switch op {
+	case "get":
+		return []string{"text", "title", "role", "bounds", "states"}
+	case "is":
+		return []string{"visible", "enabled", "checked", "focused", "expanded", "selected"}
+	}
+	return nil
+}
+
+// validRefRead checks one read. The manager and the adapter both run it, so neither trusts the other.
+func validRefRead(snapshotID, ref, op, property string) error {
+	if !snapshotPattern.MatchString(snapshotID) {
+		return toolerr.Args("snapshot_id")
+	}
+	if m := refPattern.FindStringSubmatch(ref); m == nil || m[1] != snapshotID {
+		return toolerr.Args("ref")
+	}
+	props := RefReadProperties(op)
+	if props == nil {
+		return toolerr.Args("op")
+	}
+	if !slices.Contains(props, property) {
+		return toolerr.Args("property")
+	}
+	return nil
+}
 
 func validSnapshotQuery(q SnapshotQuery) error {
 	// Values reach a child process argv; a leading dash would be parsed as a flag.

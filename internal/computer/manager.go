@@ -237,7 +237,8 @@ func (m *Manager) Capabilities() ([]string, bool) {
 }
 
 // ToolListed reports whether a desktop tool belongs in tools/list. A tool is listed when the capabilities
-// from the engine's last report satisfy its catalog requirement (computer.snapshot and computer.ref_act need
+// from the engine's last report satisfy its catalog requirement (computer.snapshot, computer.ref_read and
+// computer.ref_act need
 // refs). Until the engine has reported once, every tool stays listed; calls are still checked when they run.
 func (m *Manager) ToolListed(tool string) bool {
 	m.mu.Lock()
@@ -1192,6 +1193,61 @@ func (m *Manager) executeRef(s *ownedSession, op *operation, r RefActRequest) {
 	if result.Executed < 0 || result.Executed > 1 || (result.State == "executed" && result.Executed != 1) {
 		result.State, result.Error, result.Executed = "unknown", "invalid_execution_result", 0
 	}
+}
+
+// RefRead reads one property of one element ref. It is observation only: the session must own the snapshot, the
+// caller needs the computer.ref_read authorization, and no lease or action queue is involved.
+func (m *Manager) RefRead(ctx context.Context, caller string, r RefReadRequest) (RefReadResult, error) {
+	if err := validRefRead(r.SnapshotID, r.Ref, r.Op, r.Property); err != nil {
+		return RefReadResult{}, err
+	}
+	m.mu.Lock()
+	s, err := m.observationLocked(caller, r.SessionRequest)
+	if err == nil {
+		err = m.authorizedLocked(caller, "computer.ref_read", s.ID)
+	}
+	m.mu.Unlock()
+	if err != nil {
+		return RefReadResult{}, err
+	}
+	info, err := m.Info(ctx)
+	if err == nil {
+		err = desktopReady(info)
+	}
+	if err != nil {
+		return RefReadResult{}, err
+	}
+	if info.Epoch != s.Epoch {
+		m.invalidate(s.ID)
+		return RefReadResult{}, toolerr.New("conflict", "桌面会话已重建", "reason", "desktop_epoch")
+	}
+	if err = refsReady(info, s); err != nil {
+		return RefReadResult{}, err
+	}
+	rp, ok := m.provider.(RefProvider)
+	if !ok {
+		return RefReadResult{}, toolerr.New("conflict", "当前桌面引擎不支持元素 ref", "reason", "refs_unsupported")
+	}
+	m.mu.Lock()
+	owned := slices.Contains(s.snapshots, r.SnapshotID)
+	m.mu.Unlock()
+	if !owned {
+		return RefReadResult{}, toolerr.New("conflict", "需要当前会话的新快照", "reason", "stale_ref")
+	}
+	res, err := rp.RefRead(ctx, RefReadExecution{SnapshotID: r.SnapshotID, Ref: r.Ref, Op: r.Op, Property: r.Property})
+	if err != nil {
+		return RefReadResult{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Authority is checked again after the read, so a revocation during the call returns no value.
+	if _, err = m.observationLocked(caller, r.SessionRequest); err != nil {
+		return RefReadResult{}, err
+	}
+	if err = m.authorizedLocked(caller, "computer.ref_read", s.ID); err != nil {
+		return RefReadResult{}, err
+	}
+	return res, nil
 }
 
 // refSessionLocked is the control-session check plus the independently

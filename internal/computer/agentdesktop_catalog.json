@@ -5,14 +5,15 @@
   "tool_requires": {
     "computer.snapshot": ["refs"],
     "computer.ref_act": ["refs"],
+    "computer.ref_read": ["refs"],
     "computer.list_apps": ["engine:agent-desktop"],
     "computer.list_windows": ["engine:agent-desktop"]
   },
   "commands": [
     {"name": "snapshot", "risk": "observe", "tool": "computer.snapshot"},
     {"name": "find", "risk": "observe"},
-    {"name": "get", "risk": "observe"},
-    {"name": "is", "risk": "observe"},
+    {"name": "get", "risk": "observe", "tool": "computer.ref_read", "op": "get"},
+    {"name": "is", "risk": "observe", "tool": "computer.ref_read", "op": "is"},
     {"name": "screenshot", "risk": "observe", "tool": "computer.observe"},
     {"name": "list-surfaces", "risk": "observe"},
 
