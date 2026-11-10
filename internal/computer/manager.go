@@ -36,6 +36,7 @@ type ownedSession struct {
 	Session
 	userInputSerial      uint64
 	foregroundRestricted bool
+	background           bool
 	frames               map[string]Frame
 	actions              map[string]*operation
 	snapshots            []string
@@ -125,6 +126,13 @@ func (m *Manager) Configure(settings Settings) {
 			}
 		}
 	}
+	if !settings.AllowBackgroundSession {
+		for id, s := range m.sessions {
+			if s.background {
+				m.removeLocked(id)
+			}
+		}
+	}
 	m.settings = settings
 }
 
@@ -191,6 +199,7 @@ func (m *Manager) Info(ctx context.Context) (Info, error) {
 		return Info{}, toolerr.New("desktop_unavailable", "桌面执行器协议不兼容", "reason", "protocol_mismatch")
 	}
 	m.mu.Lock()
+	info = backgroundPolicy(info, m.settings.AllowBackgroundSession)
 	changed := !m.capsKnown || !slices.Equal(m.caps, info.Capabilities)
 	m.caps, m.capsKnown = slices.Clone(info.Capabilities), true
 	hook := m.onCapabilities
@@ -283,6 +292,20 @@ func interactionCapable(info Info, interaction string) bool {
 	return inputCapable(info)
 }
 
+// backgroundPolicy keeps a background (non-console) session out of the agent's reach until the local
+// allow_background_session setting enables it. The executor reports what it sees; the manager decides what may be used.
+func backgroundPolicy(info Info, allowed bool) Info {
+	if info.Session != "background" || allowed {
+		return info
+	}
+	info.Available = false
+	info.State = "session_inactive"
+	info.Reason = "background_session_disabled"
+	info.Capabilities = []string{}
+	info.Targets = nil
+	return info
+}
+
 func targetOf(info Info, id string) (Target, bool) {
 	for _, target := range info.Targets {
 		if target.ID == id {
@@ -347,6 +370,9 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 			return Session{}, toolerr.New("desktop_unavailable", "当前执行器不支持后台窗口截图", "reason", "background_unavailable")
 		}
 	}
+	if r.Mode == "control" && r.Interaction == "foreground" && info.Session == "background" && (info.Engine == string(EngineAgentDesktop) || !inputCapable(info)) {
+		return Session{}, toolerr.New("policy_denied", "后台会话只支持后台窗口控制", "rule", "computer.background_session")
+	}
 	if !slices.Contains(info.Capabilities, "screenshot") || (r.Mode == "control" && !interactionCapable(info, r.Interaction)) {
 		return Session{}, toolerr.New("permission_required", "需要系统桌面权限", "reason", "desktop_capability_missing")
 	}
@@ -392,7 +418,7 @@ func (m *Manager) Open(ctx context.Context, caller string, r OpenRequest) (Sessi
 		return Session{}, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &ownedSession{Session: Session{ID: "cs-" + rand.Text(), DesktopID: info.DesktopID, Epoch: info.Epoch, Mode: r.Mode, Owner: caller, ExpiresAt: m.now().Add(ttl), Interaction: r.Interaction, TargetID: r.TargetID}, frames: map[string]Frame{}, actions: map[string]*operation{}, ctx: ctx, cancel: cancel}
+	s := &ownedSession{Session: Session{ID: "cs-" + rand.Text(), DesktopID: info.DesktopID, Epoch: info.Epoch, Mode: r.Mode, Owner: caller, ExpiresAt: m.now().Add(ttl), Interaction: r.Interaction, TargetID: r.TargetID}, frames: map[string]Frame{}, actions: map[string]*operation{}, background: info.Session == "background", ctx: ctx, cancel: cancel}
 	s.userInputSerial = info.UserInputSerial
 	s.foregroundRestricted = r.Mode == "control" && r.Interaction == "foreground" && info.DefaultInteraction == "background"
 	if r.TargetID != "" {

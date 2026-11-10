@@ -64,6 +64,16 @@ pub fn targets() -> Vec<Target> {
     Vec::new()
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn off_console() -> bool {
+    false
+}
+
+// Whether this platform can drive a session that does not own the physical screen through session-level input.
+pub fn session_input_available() -> bool {
+    cfg!(target_os = "macos")
+}
+
 pub fn target(id: &str) -> Result<Target, &'static str> {
     targets()
         .into_iter()

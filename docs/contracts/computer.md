@@ -38,7 +38,7 @@ MCP 发现返回的 schema 明确列出 mode、action type 和 button 枚举、�
 
 OAuth / PAT scope 按设备区分 `computer:observe:<device>` 和 `computer:control:<device>`；control 包含观察。open 的 control 模式还在参数级检查 control scope 和 Agent 的 computer.act tag 授权。剪贴板 scope 单独保留，不授予截图或输入权限。
 
-Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop_unavailable 表示执行器 / 图形会话不可用；macOS 上当前用户不是控制台会话或尚未完成登录时同样返回 desktop_unavailable，reason 为 session_inactive。desktop_locked 表示锁屏，permission_required 表示本机系统权限缺失。conflict 携带 reason 表达 desktop_epoch、layout_changed、stale_frame、action_id_reused。其余 not_owner、session_not_found、lease_required、resource_busy 沿用共享语义。Computer 的版本冲突使用桌面 reason，文件冲突仍使用文件 hash 和 mtime。
+Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop_unavailable 表示执行器 / 图形会话不可用；macOS 上当前用户尚未完成登录时返回 desktop_unavailable，reason 为 session_inactive；当前用户不是控制台会话且本机未开启 `allow_background_session` 时返回 desktop_unavailable，reason 为 background_session_disabled。desktop_locked 表示锁屏，permission_required 表示本机系统权限缺失。conflict 携带 reason 表达 desktop_epoch、layout_changed、stale_frame、action_id_reused。其余 not_owner、session_not_found、lease_required、resource_busy 沿用共享语义。Computer 的版本冲突使用桌面 reason，文件冲突仍使用文件 hash 和 mtime。
 
 审计记录动作 ID、会话 ID、参数键和字节数。输入正文、图片和其可猜测摘要不写入审计。完整桌面控制具有用户级 GUI 权限；文件路径策略不会自动约束 GUI。Ingress 处理工具结果，是截图数据的信任边界。
 
@@ -47,6 +47,8 @@ Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop
 macOS 执行器现在报告 `default_interaction: background`。控制会话省略 interaction 时按此默认值处理，并要求 `target_id` 来自当前 `info.targets`；观察会话省略 target 时仍采集桌面。`foreground` 需要明确选择，使用共享的系统鼠标与焦点。后台会话固定目标，观察和动作不能重新指定另一窗口。后台能力以 `background:screenshot`、`background:pointer`、`background:keyboard`、`background:text` 报告；私有接口缺失时不报告相关输入能力。
 
 默认后台的设备还要求本机配置 `agent.computer.allow_foreground: true` 才接受显式前台控制。该值默认 false，远程工具参数不能开启；本机撤销该配置会立即回收受其授权的前台会话。后台操作能力缺失时返回错误。
+
+非控制台的 macOS 会话（例如未持有屏幕的隔离账户）是后台会话，`info` 中 `session` 为 `background`，控制台会话为 `console`。本机配置 `agent.computer.allow_background_session: true` 后才对外报告它的截图与输入能力。该值默认 false，远程工具参数不能开启；本机撤销该配置会立即回收此类会话。后台会话的显式前台控制同样需要 `allow_foreground: true`，并且只经会话级事件投递，只到达本会话，不经物理键鼠通道。agent-desktop 引擎，或不具备输入能力的执行器，在后台会话中拒绝前台控制，错误为 `policy_denied`，rule 为 `computer.background_session`。
 
 后台拖动与滚动另以 `background:drag` 和 `background:scroll` 声明，和文字、键盘及截图能力分开报告。能力表示后端提供该路由；每个应用与动作形式仍可能返回 `background_action_unsupported`，动作后的实际结果须重新观察。
 

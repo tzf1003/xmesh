@@ -36,6 +36,9 @@ type Info struct {
 	UserInputSerial    uint64    `json:"user_input_serial,omitempty"`
 	Targets            []Target  `json:"targets,omitempty"`
 	DefaultInteraction string    `json:"default_interaction,omitempty"`
+	// Session is "background" when the executor's user does not own the physical screen (macOS). The manager
+	// reports such a session unavailable until the local allow_background_session setting enables it.
+	Session string `json:"session,omitempty"`
 	// Engine is the executor that is actually running; EngineStatus explains why
 	// it is native when agent-desktop was selected but cannot be used.
 	Engine        string `json:"engine,omitempty"`
@@ -184,14 +187,15 @@ type Provider interface {
 }
 
 type Settings struct {
-	AllowForeground  bool           `json:"allow_foreground,omitempty"`
-	PauseOnUserInput bool           `json:"pause_on_user_input,omitempty"`
-	Enabled          bool           `json:"enabled"`
-	Endpoint         string         `json:"endpoint,omitempty"`
-	MaxSessions      int            `json:"max_sessions,omitempty"`
-	LeaseSeconds     int            `json:"lease_seconds,omitempty"`
-	MaxImageBytes    int            `json:"max_image_bytes,omitempty"`
-	Engine           EngineSettings `json:"engine,omitempty"`
+	AllowForeground        bool           `json:"allow_foreground,omitempty"`
+	AllowBackgroundSession bool           `json:"allow_background_session,omitempty"`
+	PauseOnUserInput       bool           `json:"pause_on_user_input,omitempty"`
+	Enabled                bool           `json:"enabled"`
+	Endpoint               string         `json:"endpoint,omitempty"`
+	MaxSessions            int            `json:"max_sessions,omitempty"`
+	LeaseSeconds           int            `json:"lease_seconds,omitempty"`
+	MaxImageBytes          int            `json:"max_image_bytes,omitempty"`
+	Engine                 EngineSettings `json:"engine,omitempty"`
 }
 
 // EngineSettings controls how the agent-desktop engine is kept current.

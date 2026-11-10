@@ -6,6 +6,9 @@ mod background;
 pub use background::initialize as initialize_background;
 pub use background::{available as background_available, execute as execute_background, targets};
 pub use background::{run_loop as run_background_loop, stop_loop as stop_background_loop};
+#[path = "macos_session.rs"]
+mod session;
+pub use session::SessionInput;
 pub fn target_input_serial(id: &str) -> u64 {
     if id.is_empty() {
         super::user_input_serial()
@@ -66,6 +69,17 @@ extern "C" {
         context: *mut c_void,
     ) -> *mut c_void;
     fn CGEventTapEnable(tap: *mut c_void, enabled: bool);
+    fn CGEventSourceCreate(state: i32) -> *mut c_void;
+    fn CGEventCreateMouseEvent(
+        source: *const c_void,
+        kind: u32,
+        location: Point,
+        button: u32,
+    ) -> *mut c_void;
+    fn CGEventCreateKeyboardEvent(source: *const c_void, keycode: u16, down: bool) -> *mut c_void;
+    fn CGEventKeyboardSetUnicodeString(event: *mut c_void, length: usize, string: *const u16);
+    fn CGEventSetFlags(event: *mut c_void, flags: u64);
+    fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
 }
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
@@ -127,6 +141,10 @@ pub fn request_screen_permission() {
 }
 
 pub fn scroll(length: i32, axis: enigo::Axis) -> Result<(), &'static str> {
+    if off_console() {
+        // Wheel events posted here reach the console session, which another user may own.
+        return Err("session_inactive");
+    }
     unsafe {
         let current = CGEventCreate(std::ptr::null());
         if current.is_null() {
@@ -209,13 +227,23 @@ pub fn input_permission() -> bool {
 pub fn interactive() -> bool {
     !displays().is_empty()
 }
-// Reads the caller's session. A locked screen and a session that is not the console session are reported
-// apart: another macOS user holding the screen is not a lock, and that session cannot see or drive it.
-fn session_state() -> (bool, bool) {
+// What the caller's session is. A locked screen, a login that has not finished and a session that does not own the
+// physical screen are separate facts: another user holding the screen is not a lock, and a background session can
+// still be driven through its own windows.
+struct SessionFacts {
+    locked: bool,
+    login_done: bool,
+    console: bool,
+}
+fn session_state() -> SessionFacts {
     unsafe {
         let dictionary = CGSessionCopyCurrentDictionary();
         if dictionary.is_null() {
-            return (false, true);
+            return SessionFacts {
+                locked: false,
+                login_done: false,
+                console: false,
+            };
         }
         let boolean = |name: &std::ffi::CStr| {
             let key = CFStringCreateWithCString(std::ptr::null(), name.as_ptr(), 0x08000100);
@@ -227,18 +255,25 @@ fn session_state() -> (bool, bool) {
             CFRelease(key);
             result
         };
-        let locked = boolean(c"CGSSessionScreenIsLocked").unwrap_or(false);
-        let inactive = boolean(c"kCGSSessionOnConsoleKey") != Some(true)
-            || boolean(c"kCGSessionLoginDoneKey") != Some(true);
+        let facts = SessionFacts {
+            locked: boolean(c"CGSSessionScreenIsLocked").unwrap_or(false),
+            login_done: boolean(c"kCGSessionLoginDoneKey") == Some(true),
+            console: boolean(c"kCGSSessionOnConsoleKey") == Some(true),
+        };
         CFRelease(dictionary);
-        (locked, inactive)
+        facts
     }
 }
 pub fn locked() -> bool {
-    session_state().0
+    session_state().locked
 }
+// The login has not finished, so nothing can be driven in this session.
 pub fn inactive() -> bool {
-    session_state().1
+    !session_state().login_done
+}
+// Another user owns the physical screen. This session is driven through its own windows and session input only.
+pub fn off_console() -> bool {
+    !session_state().console
 }
 
 pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {

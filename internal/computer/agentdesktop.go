@@ -285,6 +285,13 @@ func (a *AgentDesktop) engineInfo(ctx context.Context) (Info, error) {
 		return own, ownErr
 	}
 	fb, fbErr := a.fallback.Info(ctx)
+	return combineInfo(own, ownErr, fb, fbErr)
+}
+
+// combineInfo merges the engine's own identity with the native fallback's. The native executor judges the
+// desktop session: when it reports session_inactive, the engine's own ready state must not stand in for that
+// judgement, because the engine's grant drives the global pointer, which a session off the console must not reach.
+func combineInfo(own Info, ownErr error, fb Info, fbErr error) (Info, error) {
 	if fbErr != nil {
 		if ownErr != nil || !own.Available {
 			return own, ownErr
@@ -301,6 +308,9 @@ func (a *AgentDesktop) engineInfo(ctx context.Context) (Info, error) {
 		return fb, nil
 	}
 	if !fb.Available {
+		if fb.State == "session_inactive" {
+			return fb, nil
+		}
 		return own, nil
 	}
 	fb.Capabilities = appendUnique(fb.Capabilities, "engine:agent-desktop", "refs")

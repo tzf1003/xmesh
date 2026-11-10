@@ -4,6 +4,9 @@ pub enum Input {
     Native(Box<Enigo>),
     #[cfg(target_os = "linux")]
     Portal(crate::platform::PortalInput),
+    // Pointer and keyboard that reach only this session. Used while another user owns the physical screen.
+    #[cfg(target_os = "macos")]
+    Session(crate::platform::SessionInput),
 }
 
 impl Input {
@@ -32,6 +35,10 @@ impl Input {
         };
         Enigo::new(&settings).ok().map(Box::new).map(Self::Native)
     }
+    #[cfg(target_os = "macos")]
+    pub fn session() -> Self {
+        Self::Session(crate::platform::SessionInput::open())
+    }
 
     pub fn move_mouse(
         &mut self,
@@ -49,6 +56,8 @@ impl Input {
                 .map_err(|_| "input_failed"),
             #[cfg(target_os = "linux")]
             Self::Portal(input) => input.move_mouse(x, y, coordinate),
+            #[cfg(target_os = "macos")]
+            Self::Session(input) => input.move_mouse(x, y, coordinate),
         }
     }
     pub fn button(&mut self, button: Button, direction: Direction) -> Result<(), &'static str> {
@@ -56,9 +65,15 @@ impl Input {
             Self::Native(input) => input.button(button, direction).map_err(|_| "input_failed"),
             #[cfg(target_os = "linux")]
             Self::Portal(input) => input.button(button, direction),
+            #[cfg(target_os = "macos")]
+            Self::Session(input) => input.button(button, direction),
         }
     }
     pub fn scroll(&mut self, length: i32, axis: Axis) -> Result<(), &'static str> {
+        #[cfg(target_os = "macos")]
+        if let Self::Session(input) = self {
+            return input.scroll(length, axis);
+        }
         #[cfg(target_os = "macos")]
         {
             crate::platform::scroll(length, axis)
@@ -75,6 +90,8 @@ impl Input {
             Self::Native(input) => input.key(key, direction).map_err(|_| "input_failed"),
             #[cfg(target_os = "linux")]
             Self::Portal(input) => input.key(key, direction),
+            #[cfg(target_os = "macos")]
+            Self::Session(input) => input.key(key, direction),
         }
     }
     pub fn text(&mut self, text: &str) -> Result<(), &'static str> {
@@ -82,6 +99,8 @@ impl Input {
             Self::Native(input) => input.text(text).map_err(|_| "input_failed"),
             #[cfg(target_os = "linux")]
             Self::Portal(input) => input.text(text),
+            #[cfg(target_os = "macos")]
+            Self::Session(input) => input.text(text),
         }
     }
 }
