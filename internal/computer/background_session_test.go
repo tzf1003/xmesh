@@ -87,3 +87,12 @@ func TestEngineDoesNotAdoptItsGrantWhenNativeSessionIsInactive(t *testing.T) {
 		t.Fatal("ready native session did not keep the native capability set", info, err)
 	}
 }
+
+func TestEngineDoesNotAdoptItsGrantInALockedBackgroundSession(t *testing.T) {
+	own := Info{ProtocolVersion: ProtocolVersion, Available: true, State: "ready", DesktopID: "desktop", Epoch: "e", LayoutVersion: "l", Capabilities: []string{"screenshot", "pointer", "keyboard"}}
+	locked := Info{ProtocolVersion: ProtocolVersion, State: "locked", Reason: "locked", Session: "background", Capabilities: []string{}}
+	info, err := combineInfo(own, nil, locked, nil)
+	if err != nil || info.Available || info.State != "locked" || info.Session != "background" || slices.Contains(info.Capabilities, "pointer") {
+		t.Fatal("engine grant stood in for a locked background session", info, err)
+	}
+}

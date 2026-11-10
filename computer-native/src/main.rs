@@ -157,7 +157,8 @@ impl Runtime {
             "ready"
         };
         let input = self.input_ready.load(Ordering::Acquire) && platform::input_permission();
-        let background = state == "ready" && platform::off_console();
+        // Off the console is a background session whatever its lock or login state, so the manager can gate it.
+        let background = platform::off_console();
         let mut capabilities = foreground_capabilities(
             state == "ready",
             input,

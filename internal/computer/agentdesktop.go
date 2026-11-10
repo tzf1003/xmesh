@@ -308,7 +308,8 @@ func combineInfo(own Info, ownErr error, fb Info, fbErr error) (Info, error) {
 		return fb, nil
 	}
 	if !fb.Available {
-		if fb.State == "session_inactive" {
+		// A session off the console is judged by the native verdict whatever its state, such as locked.
+		if fb.State == "session_inactive" || fb.Session == "background" {
 			return fb, nil
 		}
 		return own, nil
