@@ -317,6 +317,10 @@ pub fn session_id() -> u32 {
     };
     session
 }
+// Only macOS reports a session that is not the console session apart from a locked screen.
+pub fn inactive() -> bool {
+    false
+}
 pub fn locked() -> bool {
     if !interactive() {
         return true;
