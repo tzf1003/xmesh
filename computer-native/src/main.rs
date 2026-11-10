@@ -138,6 +138,8 @@ impl Runtime {
             "permission_required"
         } else if platform::locked() {
             "locked"
+        } else if platform::inactive() {
+            "session_inactive"
         } else {
             "ready"
         };
@@ -189,7 +191,7 @@ impl Runtime {
             target,
             platform::screen_permission(),
             platform::input_permission(),
-            platform::locked(),
+            platform::locked() || platform::inactive(),
         )
     }
     fn live_with_permissions(
@@ -199,9 +201,9 @@ impl Runtime {
         target: &str,
         screen: bool,
         input: bool,
-        locked: bool,
+        unavailable: bool,
     ) -> bool {
-        if locked || !screen || !input {
+        if unavailable || !screen || !input {
             // Permission restoration must not resume the authority that was
             // executing when the desktop became unavailable.
             self.revoked.fetch_max(token, Ordering::AcqRel);
@@ -227,23 +229,30 @@ fn capture_error_code(reason: &str) -> &'static str {
     }
 }
 
-fn capture_access_error(screen: bool, locked: bool) -> Option<&'static str> {
+fn capture_access_error(screen: bool, locked: bool, inactive: bool) -> Option<&'static str> {
     if !screen {
         Some("permission_required")
     } else if locked {
         Some("desktop_locked")
+    } else if inactive {
+        Some("session_inactive")
     } else {
         None
     }
 }
 
-fn capture_failure(reason: &'static str, screen: bool, locked: bool) -> &'static str {
+fn capture_failure(
+    reason: &'static str,
+    screen: bool,
+    locked: bool,
+    inactive: bool,
+) -> &'static str {
     // This response asks the supervisor to retire a blocked platform thread.
     // Permission changes are reported by the replacement executor's discovery.
     if reason == "capture_timeout" {
         reason
     } else {
-        capture_access_error(screen, locked).unwrap_or(reason)
+        capture_access_error(screen, locked, inactive).unwrap_or(reason)
     }
 }
 
@@ -256,7 +265,11 @@ fn scaled_span(origin: i32, extent: i32, scale: f64, pixels: u32) -> (u32, u32) 
 }
 
 fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> {
-    if let Some(reason) = capture_access_error(platform::screen_permission(), platform::locked()) {
+    if let Some(reason) = capture_access_error(
+        platform::screen_permission(),
+        platform::locked(),
+        platform::inactive(),
+    ) {
         return Err(reason);
     }
     let displays = platform::displays();
@@ -374,7 +387,11 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
     } else {
         platform::layout(&platform::displays())
     };
-    if let Some(reason) = capture_access_error(platform::screen_permission(), platform::locked()) {
+    if let Some(reason) = capture_access_error(
+        platform::screen_permission(),
+        platform::locked(),
+        platform::inactive(),
+    ) {
         return Err(reason);
     }
     if current_layout != layout {
@@ -937,6 +954,7 @@ fn serve_stdio(authorize: bool) {
                                     reason,
                                     platform::screen_permission(),
                                     platform::locked(),
+                                    platform::inactive(),
                                 );
                                 rt.error(q.id, capture_error_code(reason), reason);
                             }
@@ -971,19 +989,29 @@ mod tests {
     }
     #[test]
     fn capture_timeout_keeps_the_supervisors_retirement_signal() {
-        for (screen, locked) in [(true, false), (false, false), (true, true), (false, true)] {
+        for (screen, locked, inactive) in [
+            (true, false, false),
+            (false, false, false),
+            (true, true, false),
+            (false, true, false),
+            (true, false, true),
+        ] {
             assert_eq!(
-                capture_failure("capture_timeout", screen, locked),
+                capture_failure("capture_timeout", screen, locked, inactive),
                 "capture_timeout"
             );
         }
         assert_eq!(
-            capture_failure("capture_failed", false, true),
+            capture_failure("capture_failed", false, true, false),
             "permission_required"
         );
         assert_eq!(
-            capture_failure("capture_failed", true, true),
+            capture_failure("capture_failed", true, true, false),
             "desktop_locked"
+        );
+        assert_eq!(
+            capture_failure("capture_failed", true, false, true),
+            "session_inactive"
         );
     }
     #[test]
@@ -1011,6 +1039,7 @@ mod tests {
             ("invalid_region", "invalid_args"),
             ("capture_busy", "resource_busy"),
             ("pipewire_connect", "desktop_unavailable"),
+            ("session_inactive", "desktop_unavailable"),
         ] {
             assert_eq!(capture_error_code(reason), code);
         }
@@ -1018,15 +1047,26 @@ mod tests {
     #[test]
     fn missing_portal_permission_precedes_its_locked_fallback() {
         assert_eq!(
-            capture_access_error(false, true),
+            capture_access_error(false, true, false),
             Some("permission_required")
         );
         assert_eq!(
-            capture_access_error(false, false),
+            capture_access_error(false, false, true),
             Some("permission_required")
         );
-        assert_eq!(capture_access_error(true, true), Some("desktop_locked"));
-        assert_eq!(capture_access_error(true, false), None);
+        assert_eq!(
+            capture_access_error(true, true, true),
+            Some("desktop_locked")
+        );
+        assert_eq!(
+            capture_access_error(true, true, false),
+            Some("desktop_locked")
+        );
+        assert_eq!(
+            capture_access_error(true, false, true),
+            Some("session_inactive")
+        );
+        assert_eq!(capture_access_error(true, false, false), None);
     }
     #[test]
     fn permission_loss_fences_the_active_lease_across_permission_restoration() {
@@ -1040,7 +1080,7 @@ mod tests {
         };
         let start = Instant::now();
         assert!(runtime.live_with_permissions(1, start, "", true, true, false));
-        for (index, (screen, input, locked)) in [
+        for (index, (screen, input, unavailable)) in [
             (false, true, false),
             (true, false, false),
             (true, true, true),
@@ -1050,7 +1090,7 @@ mod tests {
         {
             let token = index as u64 + 1;
             assert!(runtime.live_with_permissions(token, start, "", true, true, false));
-            assert!(!runtime.live_with_permissions(token, start, "", screen, input, locked));
+            assert!(!runtime.live_with_permissions(token, start, "", screen, input, unavailable));
             assert_eq!(runtime.revoked.load(Ordering::Acquire), token);
             assert!(!runtime.live_with_permissions(token, start, "", true, true, false));
         }

@@ -38,7 +38,7 @@ MCP 发现返回的 schema 明确列出 mode、action type 和 button 枚举、�
 
 OAuth / PAT scope 按设备区分 `computer:observe:<device>` 和 `computer:control:<device>`；control 包含观察。open 的 control 模式还在参数级检查 control scope 和 Agent 的 computer.act tag 授权。剪贴板 scope 单独保留，不授予截图或输入权限。
 
-Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop_unavailable 表示执行器 / 图形会话不可用，desktop_locked 表示锁屏，permission_required 表示本机系统权限缺失。conflict 携带 reason 表达 desktop_epoch、layout_changed、stale_frame、action_id_reused。其余 not_owner、session_not_found、lease_required、resource_busy 沿用共享语义。Computer 的版本冲突使用桌面 reason，文件冲突仍使用文件 hash 和 mtime。
+Computer 错误在共享错误信封中带 `resource: computer:<name>`。desktop_unavailable 表示执行器 / 图形会话不可用；macOS 上当前用户不是控制台会话或尚未完成登录时同样返回 desktop_unavailable，reason 为 session_inactive。desktop_locked 表示锁屏，permission_required 表示本机系统权限缺失。conflict 携带 reason 表达 desktop_epoch、layout_changed、stale_frame、action_id_reused。其余 not_owner、session_not_found、lease_required、resource_busy 沿用共享语义。Computer 的版本冲突使用桌面 reason，文件冲突仍使用文件 hash 和 mtime。
 
 审计记录动作 ID、会话 ID、参数键和字节数。输入正文、图片和其可猜测摘要不写入审计。完整桌面控制具有用户级 GUI 权限；文件路径策略不会自动约束 GUI。Ingress 处理工具结果，是截图数据的信任边界。
 

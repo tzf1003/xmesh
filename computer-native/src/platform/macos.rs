@@ -209,11 +209,13 @@ pub fn input_permission() -> bool {
 pub fn interactive() -> bool {
     !displays().is_empty()
 }
-pub fn locked() -> bool {
+// Reads the caller's session. A locked screen and a session that is not the console session are reported
+// apart: another macOS user holding the screen is not a lock, and that session cannot see or drive it.
+fn session_state() -> (bool, bool) {
     unsafe {
         let dictionary = CGSessionCopyCurrentDictionary();
         if dictionary.is_null() {
-            return true;
+            return (false, true);
         }
         let boolean = |name: &std::ffi::CStr| {
             let key = CFStringCreateWithCString(std::ptr::null(), name.as_ptr(), 0x08000100);
@@ -225,12 +227,18 @@ pub fn locked() -> bool {
             CFRelease(key);
             result
         };
-        let locked = boolean(c"CGSSessionScreenIsLocked").unwrap_or(false)
-            || boolean(c"kCGSSessionOnConsoleKey") != Some(true)
+        let locked = boolean(c"CGSSessionScreenIsLocked").unwrap_or(false);
+        let inactive = boolean(c"kCGSSessionOnConsoleKey") != Some(true)
             || boolean(c"kCGSessionLoginDoneKey") != Some(true);
         CFRelease(dictionary);
-        locked
+        (locked, inactive)
     }
+}
+pub fn locked() -> bool {
+    session_state().0
+}
+pub fn inactive() -> bool {
+    session_state().1
 }
 
 pub fn capture(display: &Display) -> Result<(i32, i32, Vec<u8>), &'static str> {

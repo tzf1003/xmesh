@@ -148,6 +148,10 @@ pub fn input_permission() -> bool {
 pub fn interactive() -> bool {
     std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some()
 }
+// Only macOS reports a session that is not the console session apart from a locked screen.
+pub fn inactive() -> bool {
+    false
+}
 pub fn locked() -> bool {
     if !interactive() {
         return true;
