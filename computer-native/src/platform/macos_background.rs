@@ -348,6 +348,7 @@ mod tests {
             input_ready: AtomicBool::new(false),
             pause_on_input: AtomicBool::new(false),
             input_baseline: AtomicU64::new(0),
+            batch_background: AtomicBool::new(false),
             output: Mutex::new(std::io::stdout()),
         };
         let mut target = WindowTarget {
