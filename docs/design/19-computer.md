@@ -25,6 +25,12 @@ Windows、macOS、Linux 上的 Agent 经现有 Streamable HTTP MCP、Gateway / I
 
 后台验收同时断言目标 UI 状态变化、系统鼠标未被 Agent 移动、前台应用及用户焦点未改变、用户在其他应用的输入继续可用。覆盖原生 AppKit 和 Electron 目标、被遮挡窗口及同一应用多窗口。初期先完成事件构造 / 路由的模拟测试和静态检查；真实窗口验证需本机用户批准，普通检查保持无系统输入副作用。
 
+非控制台会话（例如未持有屏幕的隔离 macOS 账户）的实现分三步。第一步和第二步已在本分支完成，仅通过模拟测试与静态检查，真机验证尚未执行：
+
+- 第一步：后台窗口引擎对非控制台会话开放，但受本机 `agent.computer.allow_background_session` 控制，默认关闭。关闭时会话报告 `desktop_unavailable`，reason 为 `background_session_disabled`，不暴露任何能力；撤销该配置会回收已打开的此类会话。
+- 第二步：显式前台输入在该会话内只经会话级事件（`kCGSessionEventTap`）投递，只到达本会话。物理 HID 事件源在后台会话中从不使用。投递的事件带有执行器标记，输入监测会忽略它。桌面代次在控制台与后台之间切换时改变，租约随之失效。
+- 第三步：为不在后台渲染的应用提供回退路径。该步须经真实应用验证后才能声明，本次未实现。遮挡窗口的渲染降级是候选问题，验收时逐应用评估。
+
 ## 工具与状态
 
 工具：`computer.info`、`computer.open`、`computer.observe`、`computer.act`、`computer.action_status`、`computer.renew`、`computer.close`、`computer.sessions`。

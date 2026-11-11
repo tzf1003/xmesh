@@ -141,14 +141,19 @@ func (o EngineOptions) Factories() (normal, authorized func() (Provider, error),
 	run := ExecRunner{Path: res.Path, TempDir: tmp}
 	build := func(start func(string) (*Process, error)) (Provider, error) {
 		var fallback Provider
+		nativeLost := false
 		if runtime.GOOS == "darwin" && regularFile(o.NativePath) {
-			// Background coordinate input has no agent-desktop equivalent.
-			// If the native module cannot start, foreground still works.
+			// Background coordinate input has no agent-desktop equivalent. The native module also carries the
+			// session verdict, so when it cannot start the engine must not act alone.
 			if p, e := start(o.NativePath); e == nil {
 				fallback = p
+			} else {
+				nativeLost = true
 			}
 		}
-		return withEngine(NewAgentDesktop(run, fallback, tmp), info), nil
+		ad := NewAgentDesktop(run, fallback, tmp)
+		ad.nativeLost = nativeLost
+		return withEngine(ad, info), nil
 	}
 	normal = func() (Provider, error) { return build(StartProcess) }
 	authorized = func() (Provider, error) {

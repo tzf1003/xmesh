@@ -18,6 +18,7 @@ function status(state: ComputerState, t: T): string {
   if (state.info.available) return t("computer.ready");
   if (state.info.state === "permission_required") return t("computer.permissionRequired");
   if (state.info.state === "locked") return t("computer.locked");
+  if (state.info.reason === "background_session_disabled") return t("computer.backgroundDisabled");
   if (state.info.state === "session_inactive") return t("computer.sessionInactive");
   return t("computer.unavailable");
 }

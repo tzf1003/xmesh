@@ -1,5 +1,7 @@
 mod input;
 mod platform;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod session_keys;
 mod singleton;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -109,10 +111,21 @@ struct Runtime {
     input_ready: AtomicBool,
     pause_on_input: AtomicBool,
     input_baseline: AtomicU64,
+    // Whether the batch being executed runs in a background session. A change during the batch ends its lease.
+    batch_background: AtomicBool,
     output: Mutex<io::Stdout>,
 }
 
 impl Runtime {
+    // The epoch names the desktop as the caller sees it. A background session and the console are different
+    // desktops, so an observation or lease taken on one is refused on the other.
+    fn desktop_epoch(&self) -> String {
+        if platform::off_console() {
+            format!("{}-background", self.epoch)
+        } else {
+            self.epoch.clone()
+        }
+    }
     fn reply(&self, id: u64, result: Value) {
         if let Ok(mut out) = self.output.lock() {
             let _ = serde_json::to_writer(&mut *out, &json!({"id":id,"result":result}));
@@ -144,13 +157,14 @@ impl Runtime {
             "ready"
         };
         let input = self.input_ready.load(Ordering::Acquire) && platform::input_permission();
-        let mut capabilities = if state == "ready" && input {
-            vec!["screenshot", "pointer", "keyboard", "text"]
-        } else if state == "ready" {
-            vec!["screenshot"]
-        } else {
-            vec![]
-        };
+        // Off the console is a background session whatever its lock or login state, so the manager can gate it.
+        let background = platform::off_console();
+        let mut capabilities = foreground_capabilities(
+            state == "ready",
+            input,
+            background,
+            platform::session_input_available(),
+        );
         #[cfg(target_os = "linux")]
         if input && state == "ready" {
             if let Some(backend) = platform::input_backend() {
@@ -177,14 +191,19 @@ impl Runtime {
                 ]);
             }
         }
-        json!({"protocol_version":1,"available":state=="ready","state":state,
+        json!({"protocol_version":1,"available":state=="ready","state":state,"session":if background{"background"}else{"console"},
             "reason":if state=="permission_required"{"screen_permission"}else if state=="ready"&&!input{"input_permission_required"}else{state},
-            "desktop_id":"desktop","desktop_epoch":self.epoch,"layout_version":platform::layout(&displays),
+            "desktop_id":"desktop","desktop_epoch":self.desktop_epoch(),"layout_version":platform::layout(&displays),
             "capabilities":capabilities,"displays":displays,
             "user_input_monitor":platform::input_monitor_available(),"user_input_serial":platform::user_input_serial(),
             "targets":targets,"default_interaction":if cfg!(target_os="macos"){"background"}else{"foreground"}})
     }
     fn live(&self, token: u64, start: Instant, target: &str) -> bool {
+        if platform::off_console() != self.batch_background.load(Ordering::Acquire) {
+            // The desktop changed hands during this batch. The lease ends and the caller observes again.
+            self.revoked.fetch_max(token, Ordering::AcqRel);
+            return false;
+        }
         self.live_with_permissions(
             token,
             start,
@@ -216,6 +235,24 @@ impl Runtime {
                     && platform::target_input_serial(target)
                         == self.input_baseline.load(Ordering::Acquire)))
     }
+}
+
+// Global input reaches whichever session owns the physical screen. A background session therefore gets pointer,
+// keyboard and text only through the session-level backend, never through the global one.
+fn foreground_capabilities(
+    ready: bool,
+    input: bool,
+    background: bool,
+    session_input: bool,
+) -> Vec<&'static str> {
+    if !ready {
+        return Vec::new();
+    }
+    let mut capabilities = vec!["screenshot"];
+    if input && (!background || session_input) {
+        capabilities.extend(["pointer", "keyboard", "text"]);
+    }
+    capabilities
 }
 
 fn capture_error_code(reason: &str) -> &'static str {
@@ -398,7 +435,7 @@ fn capture(runtime: &Runtime, q: CaptureRequest) -> Result<Value, &'static str> 
         return Err("layout_changed");
     }
     Ok(
-        json!({"desktop_epoch":runtime.epoch,"display_id":display.id,"layout_version":layout,"image_width":img.width(),"image_height":img.height(),
+        json!({"desktop_epoch":runtime.desktop_epoch(),"display_id":display.id,"layout_version":layout,"image_width":img.width(),"image_height":img.height(),
         "capture_region":{"x":region.x,"y":region.y,"width":region.width,"height":region.height},"target_id":q.target_id,"mime_type":mime,"image":STANDARD.encode(encoded.into_inner())}),
     )
 }
@@ -705,6 +742,10 @@ fn background_action(
 
 fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, authorize: bool) {
     let mut input = Input::new(authorize);
+    #[cfg(target_os = "macos")]
+    let mut session = Some(Input::session());
+    #[cfg(not(target_os = "macos"))]
+    let mut session: Option<Input> = None;
     if input.is_some() {
         platform::start_input_monitor();
     }
@@ -745,7 +786,7 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         let token = q.lease_token.parse::<u64>().unwrap_or(0);
         if token == 0
             || token <= runtime.revoked.load(Ordering::Acquire)
-            || q.desktop_epoch != runtime.epoch
+            || q.desktop_epoch != runtime.desktop_epoch()
             || token < previous_token
         {
             runtime.error(id, "lease_required", "stale_authority");
@@ -778,7 +819,7 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         }
         if q.frame
             .as_ref()
-            .is_some_and(|f| f.desktop_epoch != runtime.epoch)
+            .is_some_and(|f| f.desktop_epoch != runtime.desktop_epoch())
         {
             runtime.error(id, "conflict", "desktop_epoch");
             continue;
@@ -799,6 +840,16 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
         runtime
             .input_baseline
             .store(q.user_input_serial.unwrap_or(0), Ordering::Release);
+        let background = platform::off_console();
+        runtime
+            .batch_background
+            .store(background, Ordering::Release);
+        // A batch uses one backend throughout: the global one on the console, the session one in a background session.
+        let driver = if background {
+            session.as_mut()
+        } else {
+            input.as_mut()
+        };
         let mut error = None;
         let start = Instant::now();
         if q.interaction == "background" {
@@ -811,9 +862,9 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
                     }
                 }
             }
-        } else if let Some(enigo) = input.as_mut() {
+        } else if let Some(driver) = driver {
             for a in &q.actions {
-                match action(enigo, &runtime, token, start, &q, a) {
+                match action(driver, &runtime, token, start, &q, a) {
                     Ok(()) => executed += 1,
                     Err(reason) => {
                         error = Some(reason);
@@ -822,7 +873,11 @@ fn input_worker(runtime: Arc<Runtime>, rx: mpsc::Receiver<(u64, Execution)>, aut
                 }
             }
         } else {
-            error.get_or_insert("permission_required");
+            error.get_or_insert(if background {
+                "session_inactive"
+            } else {
+                "permission_required"
+            });
         }
         if q.user_input_serial
             .is_some_and(|serial| serial != platform::target_input_serial(&q.target_id))
@@ -892,6 +947,7 @@ fn serve_stdio(authorize: bool) {
         input_ready: AtomicBool::new(false),
         pause_on_input: AtomicBool::new(false),
         input_baseline: AtomicU64::new(0),
+        batch_background: AtomicBool::new(false),
         output: Mutex::new(io::stdout()),
     });
     let (tx, rx) = mpsc::sync_channel(8);
@@ -920,7 +976,7 @@ fn serve_stdio(authorize: bool) {
             "info" => runtime.reply(q.id, runtime.info()),
             "release" => {
                 if let Ok(e) = serde_json::from_value::<Execution>(q.params) {
-                    if e.desktop_epoch == runtime.epoch {
+                    if e.desktop_epoch == runtime.desktop_epoch() {
                         runtime
                             .revoked
                             .fetch_max(e.lease_token.parse().unwrap_or(0), Ordering::AcqRel);
@@ -1076,6 +1132,7 @@ mod tests {
             input_ready: AtomicBool::new(true),
             pause_on_input: AtomicBool::new(false),
             input_baseline: AtomicU64::new(0),
+            batch_background: AtomicBool::new(false),
             output: Mutex::new(io::stdout()),
         };
         let start = Instant::now();
@@ -1105,6 +1162,41 @@ mod tests {
         assert!(request.actions.is_empty());
         assert!(request.interaction.is_empty());
         assert!(request.target_id.is_empty());
+    }
+    #[test]
+    fn background_session_offers_per_window_capabilities_until_session_input_exists() {
+        assert_eq!(
+            foreground_capabilities(true, true, false, false),
+            ["screenshot", "pointer", "keyboard", "text"]
+        );
+        assert_eq!(
+            foreground_capabilities(true, true, true, false),
+            ["screenshot"]
+        );
+        assert_eq!(
+            foreground_capabilities(true, true, true, true),
+            ["screenshot", "pointer", "keyboard", "text"]
+        );
+        assert_eq!(
+            foreground_capabilities(true, false, true, true),
+            ["screenshot"]
+        );
+        assert!(foreground_capabilities(false, true, false, true).is_empty());
+    }
+    #[test]
+    fn a_batch_ends_when_the_desktop_changes_hands() {
+        let runtime = Runtime {
+            epoch: "test".into(),
+            revoked: AtomicU64::new(0),
+            input_ready: AtomicBool::new(true),
+            pause_on_input: AtomicBool::new(false),
+            input_baseline: AtomicU64::new(0),
+            // The batch started on the other side of a desktop change, whichever side this host is on.
+            batch_background: AtomicBool::new(!platform::off_console()),
+            output: Mutex::new(io::stdout()),
+        };
+        assert!(!runtime.live(7, Instant::now(), ""));
+        assert_eq!(runtime.revoked.load(Ordering::Acquire), 7);
     }
     #[test]
     fn keys_are_explicit() {
