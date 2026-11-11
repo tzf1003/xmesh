@@ -92,7 +92,7 @@ Host 可按设备在两种执行器之间切换，Go 管理层（会话、租约
 - 截图：`list-displays` 与 `screenshot --screen`，由适配器按 `region`、`max_width` 裁剪缩放；桌面代次为适配器实例标识，布局版本由显示器几何推导，变化后旧 frame 失效（`stale_frame`）。
 - 前台输入：坐标动作用 `--headed mouse-click / mouse-move / mouse-wheel / drag`，按键用 `press`，与原生前台交互一样共用系统指针和焦点。无 ref 的 `text` 只接受基础 ASCII（逐字 `press`），其余在派发前以 `text_requires_ref` 拒绝；中文与 IME 等待 ref 输入工具。
 - 失败归类：agent-desktop 的 `disposition.delivery` 为 `not_delivered` 才报 failed，其余、运行器出错和取消均报 unknown。
-- **macOS 后台回退**：agent-desktop 没有按进程投递的坐标输入。引擎为 `agent-desktop` 时 Host 仍同时启动原生执行器，后台会话（含 `info.targets`、`default_interaction: background` 与 `background:*` 能力、后台截图与输入）全部由它承担，桌面代次与布局版本也取自它，前台画面与之保持一致。原生执行器启动失败时只剩前台。Windows / Linux 没有回退，后台申请报 `background_unsupported`。
+- **macOS 后台回退**：agent-desktop 没有按进程投递的坐标输入。引擎为 `agent-desktop` 时 Host 仍同时启动原生执行器，后台会话（含 `info.targets`、`default_interaction: background` 与 `background:*` 能力、后台截图与输入）全部由它承担，桌面代次与布局版本也取自它，前台画面与之保持一致。原生执行器已安装却启动失败，或运行中无法报告桌面会话时，agent-desktop 引擎关闭式地报告 `desktop_unavailable`（`reason` 为 `native_unavailable`，不提供任何能力），直到原生执行器恢复判断；引擎自身的授权不替代它。Windows / Linux 没有回退，后台申请报 `background_unsupported`。
 - 切换引擎后 macOS 需要为 agent-desktop 另行授予辅助功能 / 屏幕录制，`xmesh computer host --authorize` 会同时请求两者。
 - 本机输入监测（`pause_on_user_input`）仍由原生执行器提供；单独使用 agent-desktop 时 `user_input_monitor` 为 false，启用该策略的控制申请返回 permission_required。
 - 元素 ref（仅 agent-desktop 引擎，`info.capabilities` 含 `refs`）见下节。

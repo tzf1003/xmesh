@@ -115,6 +115,8 @@ type AgentDesktop struct {
 	// roles maps snapshot id -> ref -> accessibility role, bounded to recent snapshots.
 	roles map[string]map[string]string
 	order []string
+	// nativeLost is set when the macOS native module is installed but did not start, so no verdict judges the session.
+	nativeLost bool
 }
 
 // NewAgentDesktop builds the adapter. tmp is a private (0700) scratch directory
@@ -280,6 +282,9 @@ func (a *AgentDesktop) Info(ctx context.Context) (Info, error) {
 }
 
 func (a *AgentDesktop) engineInfo(ctx context.Context) (Info, error) {
+	if a.nativeLost {
+		return unjudgedInfo(), nil
+	}
 	own, ownErr := a.own(ctx)
 	if a.fallback == nil {
 		return own, ownErr
@@ -296,7 +301,8 @@ func combineInfo(own Info, ownErr error, fb Info, fbErr error) (Info, error) {
 		if ownErr != nil || !own.Available {
 			return own, ownErr
 		}
-		return own, nil // background path unavailable; foreground still works
+		// Without the native verdict the ready grant cannot be kept off the console, so the engine stays closed.
+		return unjudgedInfo(), nil
 	}
 	if ownErr != nil {
 		return Info{}, ownErr
@@ -316,6 +322,12 @@ func combineInfo(own Info, ownErr error, fb Info, fbErr error) (Info, error) {
 	}
 	fb.Capabilities = appendUnique(fb.Capabilities, "engine:agent-desktop", "refs")
 	return fb, nil
+}
+
+// unjudgedInfo is reported when no native verdict says which desktop the engine would drive. The engine's grant
+// reaches the global pointer and the console, so it offers nothing until the verdict returns.
+func unjudgedInfo() Info {
+	return Info{ProtocolVersion: ProtocolVersion, State: "desktop_unavailable", Reason: "native_unavailable", Capabilities: []string{}, Displays: []Display{}}
 }
 
 func appendUnique(s []string, v ...string) []string {
