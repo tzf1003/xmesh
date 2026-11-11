@@ -113,6 +113,7 @@ def main():
     assert not options.reject_other_window_key or (options.binary and options.occluded),"other-window rejection requires MCP and the occluded AppKit fixture"
     steps=options.steps.split(',')
     assert steps and all(step in ('click','sky_click','text','append','key','native_key','drag','scroll') for step in steps)
+    assert "append" not in steps or "text" in steps, "append expects the text step, which writes the base value"
     root = pathlib.Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="xmesh-background-accept-") as temporary, ExitStack() as cleanup:
         directory = pathlib.Path(temporary)
@@ -175,7 +176,7 @@ def main():
                           "mesh": {"mode": "lan", "lan": {"mdns": True}},
                           "gateway": {"listen": gateway, "pats": {"accept": {"token_file": str(token_file), "scopes": ["devices:read", "computer:control:background-accept"]}}},
                           "agent": {"default_cwd": str(directory), "cwd_policy": {"allow": [str(directory)]},
-                                    "policy": {"isolation": "L1"}, "computer": {"enabled": True, "endpoint": endpoint,"pause_on_user_input":options.pause_on_user_input},
+                                    "policy": {"isolation": "L1"}, "computer": {"enabled": True, "allow_background_session": True, "endpoint": endpoint,"pause_on_user_input":options.pause_on_user_input},
                                     "authz": {"tag:peer": {"tools": ["*"], "backends": ["*"]}}}}
                 config_file = directory / "xmesh.json"
                 config_file.write_text(json.dumps(config))
