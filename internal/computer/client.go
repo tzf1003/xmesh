@@ -54,6 +54,11 @@ func (c *Client) call(ctx context.Context, method string, in, out any) error {
 	err := c.request(ctx, method, in, out)
 	var network *url.Error
 	if errors.As(err, &network) {
+		// http.Client wraps the caller's own deadline or cancellation in url.Error too.
+		// Report that as the caller's error: a timed-out sweep is not a lost executor.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return toolerr.New("desktop_unavailable", "用户桌面执行器未连接", "reason", "executor_disconnected")
 	}
 	return err
