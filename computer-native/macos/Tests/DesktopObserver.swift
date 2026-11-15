@@ -2,12 +2,14 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import Dispatch
 import Foundation
 
 // Accessibility queries into the foreground app can block for over a second.
 // They run on their own thread, so the 15 ms pointer and frontmost-app sample
-// keeps publishing while a query is slow. Focus fields may lag behind a slow
-// query; the harness's post-action assertions cover that window.
+// keeps publishing while a query is slow. The file reports how long ago the
+// last focus sample completed, and the harness fails the run past its limit,
+// because a focus change during a stalled query cannot be seen.
 final class FocusSampler {
     private let lock=NSLock()
     private let system=AXUIElementCreateSystemWide()
@@ -16,6 +18,9 @@ final class FocusSampler {
     private var available=false
     private var previousElement:AXUIElement?
     private var previousWindow:AXUIElement?
+    // Monotonic time of the last completed sample. Initialization counts as the
+    // first completion, so startup is not reported as a stall.
+    private var completedNanoseconds=DispatchTime.now().uptimeNanoseconds
 
     init(){
         AXUIElementSetMessagingTimeout(system,0.025)
@@ -28,9 +33,13 @@ final class FocusSampler {
         lock.lock();target=pid;lock.unlock()
     }
 
-    func snapshot()->(generation:Int,available:Bool){
+    // Age is measured from the last completed sample, so a slow or blocked
+    // Accessibility query grows it even while the generation stays unchanged.
+    func snapshot()->(generation:Int,available:Bool,ageMilliseconds:Double){
         lock.lock();defer{lock.unlock()}
-        return (generation,available)
+        let now=DispatchTime.now().uptimeNanoseconds
+        let elapsed=now>=completedNanoseconds ? now-completedNanoseconds : 0
+        return (generation,available,Double(elapsed)/1_000_000)
     }
 
     private func run(){
@@ -52,6 +61,7 @@ final class FocusSampler {
         lock.lock();defer{lock.unlock()}
         if isAvailable != available || !equal(focused,previousElement) || !equal(window,previousWindow){generation+=1}
         previousElement=focused;previousWindow=window;available=isAvailable
+        completedNanoseconds=DispatchTime.now().uptimeNanoseconds
     }
 
     private func element(_ object:AXUIElement,_ attribute:String)->AXUIElement?{
@@ -79,7 +89,7 @@ final class FocusSampler {
                   let point=CGEvent(source:nil)?.location else{return}
             sampler.setTarget(front.processIdentifier)
             let focus=sampler.snapshot()
-            let value:[String:Any]=["pid":front.processIdentifier,"x":point.x,"y":point.y,"app_name":front.executableURL?.lastPathComponent ?? "","focus_generation":focus.generation,"focus_available":focus.available]
+            let value:[String:Any]=["pid":front.processIdentifier,"x":point.x,"y":point.y,"app_name":front.executableURL?.lastPathComponent ?? "","focus_generation":focus.generation,"focus_available":focus.available,"focus_sample_age_ms":focus.ageMilliseconds]
             if let data=try? JSONSerialization.data(withJSONObject:value){try? data.write(to:file,options:.atomic)}
         }
         withExtendedLifetime(timer){CFRunLoopRun()}

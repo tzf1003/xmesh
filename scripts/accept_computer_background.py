@@ -18,6 +18,12 @@ from contextlib import ExitStack
 from smoke_local import MCP, address, wait_for_gateway
 
 observation_file=None
+# A focus sample older than this can hide a focus change, so the run fails instead.
+FOCUS_SAMPLE_MAX_AGE_MS=250
+
+
+class FocusObservationStalled(Exception):
+    pass
 
 
 class MouseTrace:
@@ -80,6 +86,9 @@ def pointer_and_focus(fresh_after=None):
             time.sleep(.005)
     assert time.time() - observation_file.stat().st_mtime < .5, "desktop observer stale"
     value = json.loads(observation_file.read_text())
+    age = value.get("focus_sample_age_ms")
+    if not isinstance(age, (int, float)) or not (0 <= age <= FOCUS_SAMPLE_MAX_AGE_MS):
+        raise FocusObservationStalled(f"focus_sample_age_ms={age!r} limit={FOCUS_SAMPLE_MAX_AGE_MS}")
     return value["x"], value["y"], value["pid"],value.get("app_name",""),value["focus_generation"],value["focus_available"]
 
 
@@ -275,6 +284,8 @@ def main():
                             interference.append({"pointer_changed":pointer_changed,"foreground_changed":foreground_changed,"control_focus_changed":control_focus_changed,"foreground_focus_available":current[5],"foreground_before_pid":baseline[2],"foreground_after_pid":current[2],"foreground_before_app":baseline[3],"foreground_after_app":current[3],"fixture_pid":fixture.pid,"fixture_activated":current[2]==fixture.pid,"executor_activated":current[2]==native_pid,"hardware_motion_events":hardware_motion,"executor_motion_events":own,"hardware_focus_events":hardware_focus})
                             helper.kill()
                             return
+                    except FocusObservationStalled as error:
+                        interference.append({"focus_observation_stalled":str(error),"fixture_pid":fixture.pid}); helper.kill(); return
                     except Exception:
                         interference.append("interference monitor unavailable"); helper.kill(); return
             def verify_monitor():
