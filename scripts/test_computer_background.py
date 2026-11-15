@@ -5,6 +5,7 @@ import json
 import pathlib
 import platform
 import subprocess
+import sys
 import tempfile
 
 
@@ -18,6 +19,47 @@ def verify_snapshot(root):
     return vendor
 
 
+def verify_focus_stall_guard():
+    # A focus sample older than the limit can hide a focus change, so the
+    # acceptance harness must stop rather than pass on stale identity.
+    scripts = pathlib.Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    import accept_computer_background as harness
+    fields = {"x": 1.0, "y": 2.0, "pid": 3, "app_name": "Fixture", "focus_generation": 4, "focus_available": True}
+    limit = harness.FOCUS_SAMPLE_MAX_AGE_MS
+    with tempfile.TemporaryDirectory(prefix="xmesh-focus-guard-") as temporary:
+        observation = pathlib.Path(temporary) / "observation.json"
+        harness.observation_file = observation
+        try:
+            for age, accepted in ((0, True), (limit, True), (limit + 1, False), (-1, False), (None, False), ("late", False)):
+                observation.write_text(json.dumps({**fields, "focus_sample_age_ms": age}))
+                try:
+                    harness.pointer_and_focus()
+                except harness.FocusObservationStalled:
+                    assert not accepted, age
+                else:
+                    assert accepted, age
+            observation.write_text(json.dumps(fields))
+            try:
+                harness.pointer_and_focus()
+            except harness.FocusObservationStalled:
+                pass
+            else:
+                raise AssertionError("observation without focus_sample_age_ms was accepted")
+        finally:
+            harness.observation_file = None
+
+
+def verify_observer_compiles(root):
+    # The acceptance harness compiles this observer at run time. Compiling it
+    # here catches Swift errors before a merged change reaches the Mac.
+    observer = root / "computer-native/macos/Tests/DesktopObserver.swift"
+    with tempfile.TemporaryDirectory(prefix="xmesh-observer-") as temporary:
+        subprocess.run(["xcrun", "swiftc", "-swift-version", "5", "-parse-as-library",
+                        "-o", str(pathlib.Path(temporary) / "observer"), str(observer)], check=True)
+
+
 def main():
     root = pathlib.Path(__file__).resolve().parents[1]
     vendor = verify_snapshot(root)
@@ -27,9 +69,11 @@ def main():
         text = source.read_text()
         for forbidden in (".post(tap:", "CGWarpMouseCursorPosition(", ".activate(", "NSPasteboard"):
             assert forbidden not in text, (source.name, forbidden)
+    verify_focus_stall_guard()
     if platform.system() != "Darwin":
-        print("PASS: pinned source hashes and background adapter route checks; Swift recipes require macOS")
+        print("PASS: pinned source hashes, focus stall guard and background adapter route checks; Swift recipes require macOS")
         return
+    verify_observer_compiles(root)
     target = "arm64" if platform.machine() == "arm64" else "x86_64"
     with tempfile.TemporaryDirectory(prefix="xmesh-background-recipes-") as temporary:
         output = pathlib.Path(temporary) / "checks"

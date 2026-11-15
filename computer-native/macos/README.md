@@ -96,7 +96,7 @@ removes its private profiles, tokens, processes and temporary files. It saves
 neither desktop images nor user input text. The observer compares opaque AX
 foreground-window/control identity every 50ms and requires an available AX
 baseline before input. It reads no titles, values or selections; this covers
-sampled exposed focus identity rather than transient or app-private focus.
+sampled exposed focus identity rather than transient or app-private focus. A focus sample older than 250 ms fails the run, because a focus change during a stalled Accessibility query cannot be seen.
 Synthetic-focus cleanup checks real foreground identity so user activation of
 the target is retained while held input is released.
 `--cancel-drag` with AppKit and without `--binary` additionally verifies native
