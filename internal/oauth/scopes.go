@@ -61,6 +61,9 @@ func Allows(scopes []string, device, tool, backend string) bool {
 		required = "sys:" + device
 	case strings.HasPrefix(tool, "exec."):
 		required = "exec:" + device
+	case strings.HasPrefix(tool, "delegate."):
+		// Delegated tasks run commands on the device, so they need the same scope as exec.run (CTR-DLG-06).
+		required = "exec:" + device
 	case strings.HasPrefix(tool, "pty."):
 		required = "pty:" + device
 	case strings.HasPrefix(tool, "fs."):

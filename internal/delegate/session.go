@@ -112,7 +112,7 @@ func (m *Manager) send(r Request, raw json.RawMessage) (Object, error) {
 		return nil, toolerr.Args("message")
 	}
 	if !r.Settings.SessionsAllowed() {
-		return nil, toolerr.New("policy_denied", "活会话注入已关闭", "rule", "delegate.sessions_disabled", "reason", "agent.delegate.allow_sessions 为 false")
+		return nil, toolerr.New("policy_denied", "活会话注入已关闭", "rule", "delegate.sessions_disabled", "reason", "agent.delegate.allow_sessions 未设为 true")
 	}
 	sessions := discoverSessions(r.Resolver)
 	var target *session

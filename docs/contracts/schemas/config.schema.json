@@ -804,7 +804,7 @@
           "properties": {
             "enabled": { "type": "boolean", "default": false },
             "allow_write": { "type": "boolean", "default": false, "description": "是否允许 mode: write。" },
-            "allow_sessions": { "type": "boolean", "default": true, "description": "是否列出并允许注入活会话。" },
+            "allow_sessions": { "type": "boolean", "default": false, "description": "是否列出并允许注入活会话。" },
             "max_concurrent": { "type": "integer", "minimum": 1, "default": 2 },
             "default_timeout": { "$ref": "#/$defs/duration", "default": "30m" },
             "max_timeout": { "$ref": "#/$defs/duration", "default": "2h" },

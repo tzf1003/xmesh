@@ -47,9 +47,11 @@ func fakeRunner(t *testing.T, scenario string, params ...string) config.Delegate
 	}
 }
 
-// testSettings enables delegation with the given runners and the default limits.
+// testSettings enables delegation with the given runners and the default limits. Live sessions are allowed here,
+// because they are off by default (CTR-DLG-04).
 func testSettings(runners map[string]config.DelegateRunner) config.Delegate {
-	return config.Delegate{Enabled: true, Runners: runners}
+	on := true
+	return config.Delegate{Enabled: true, AllowSessions: &on, Runners: runners}
 }
 
 // harness drives a Manager as the tools would: one working directory allowed by the cwd policy, one settings value

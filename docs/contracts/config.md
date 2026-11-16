@@ -35,7 +35,7 @@
 | `agent.backends.*.desc` | 可选字符串，最长 200 个字符。后端的一句话说明，出现在 `sys.info` 的 `backends[]` 与 Gateway `devices.list` 的 `backend_info` 中，省略时不输出 |
 | 后端名 | 不得与内置组名 `fs`、`exec`、`pty`、`sys`、`backend`、`computer`、`delegate` 同名，否则拒绝启动，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
 | `agent.quota`、`gateway.quota` | 可选对象，字段 `calls_per_hour`（正整数，缺省 10000）、`max_concurrent`（正整数，缺省 64）、`max_call_duration`（Go duration，缺省 `10m`）。`agent.exec.default_timeout` 不得超过 `agent.quota.max_call_duration`，见 [CON-SEC-10](../constraints/security.md#con-sec-10) |
-| `agent.delegate` | 可选对象，Agent 委托，契约见 [CTR-DLG-06](delegate.md#ctr-dlg-06)。`enabled`（缺省 `false`）为总开关；`allow_write`（缺省 `false`）；`allow_sessions`（缺省 `true`）；`max_concurrent`（正整数，缺省 `2`）；`default_timeout`（缺省 `30m`）；`max_timeout`（缺省 `2h`，不得小于 `default_timeout`）；`retain`（缺省 `1h`，另限最多 64 个已结束任务）；`runners`（按名字覆盖内置 `claude`、`codex` 的字段或新增运行器，字段见 [CTR-DLG-05](delegate.md#ctr-dlg-05)）。`delegate` 是保留的内置组名 |
+| `agent.delegate` | 可选对象，Agent 委托，契约见 [CTR-DLG-06](delegate.md#ctr-dlg-06)。`enabled`（缺省 `false`）为总开关；`allow_write`（缺省 `false`）；`allow_sessions`（缺省 `false`）；`max_concurrent`（正整数，缺省 `2`）；`default_timeout`（缺省 `30m`）；`max_timeout`（缺省 `2h`，不得小于 `default_timeout`）；`retain`（缺省 `1h`，另限最多 64 个已结束任务）；`runners`（按名字覆盖内置 `claude`、`codex` 的字段或新增运行器，字段见 [CTR-DLG-05](delegate.md#ctr-dlg-05)）。`delegate` 是保留的内置组名 |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
 
 新版 `mesh` 配置热应用；变更控制面或登录参数只重启对应网络组件。局域网和 Tailnet 共享设备身份及配对信任，路径故障不会撤销设备。

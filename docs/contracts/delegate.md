@@ -14,7 +14,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 - `agent.delegate.enabled` 为 `false`（缺省）时，五个工具不出现在 `tools/list` 中，Gateway 的工具列表也不含它们。调用返回 `policy_denied`，`rule: delegate.disabled`。
 - `enabled` 由 `true` 改为 `false`（热加载）时，终止全部运行中的任务（进程树），与 Agent 关闭时一致。
-- `allow_sessions` 为 `false` 时 `sessions[]` 为空，`delegate.send` 返回 `policy_denied`，见 [CTR-DLG-04](#ctr-dlg-04)。
+- `allow_sessions` 缺省为 `false`，未设为 `true` 时 `sessions[]` 为空，`delegate.send` 返回 `policy_denied`，见 [CTR-DLG-04](#ctr-dlg-04)。
 - `delegate` 是低频组：不在 `gateway.listed_groups` 的缺省值内，经 `tools.search` 与 `tools.call` 取用，见 [CTR-GW-08](gateway.md#ctr-gw-08)。
 
 ### 结果
@@ -126,7 +126,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 ## CTR-DLG-04
 
-工具名：`delegate.send`。向设备上活着的 Claude Code 会话注入一条消息。注入是推送式的：写入 Claude Code 自己的收件 socket，不轮询，也不等待会话回复。
+工具名：`delegate.send`。向设备上活着的 Claude Code 会话注入一条消息。注入是推送式的：写入 Claude Code 自己的收件 socket，不轮询，也不等待会话回复。注入缺省关闭：只有 `agent.delegate.allow_sessions` 显式设为 `true` 时才列出活会话、允许注入。
 
 ### 参数
 
@@ -181,7 +181,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | 情况 | 错误 |
 | --- | --- |
 | `session_id` 不存在、进程已退出，或 cwd 不在允许范围内 | `not_found` |
-| `allow_sessions` 为 `false` | `policy_denied`，`rule: delegate.sessions_disabled` |
+| `allow_sessions` 未设为 `true`（缺省） | `policy_denied`，`rule: delegate.sessions_disabled` |
 | 节点 draining | `policy_denied`，`rule: mesh.draining` |
 | 收件 socket 不存在、连接失败、密钥文件不可读、写超时、写失败 | `delegate_unavailable`，`reason` 为 `socket_missing`、`connect_failed`、`key_unreadable`、`write_timeout`、`write_failed` 之一 |
 
@@ -255,7 +255,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | --- | --- | --- |
 | `enabled` | `false` | 总开关，见 [CTR-DLG-01](#ctr-dlg-01) |
 | `allow_write` | `false` | 是否允许 `mode: write` |
-| `allow_sessions` | `true` | 是否列出并允许注入活会话 |
+| `allow_sessions` | `false` | 是否列出并允许注入活会话，设为 `true` 才开启 |
 | `max_concurrent` | `2` | 同时运行的任务数上限，正整数 |
 | `default_timeout` | `30m` | Go duration |
 | `max_timeout` | `2h` | Go duration，不得小于 `default_timeout` |
@@ -266,7 +266,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 ### 授权
 
-按现有的 `Allowed(cfg, caller, name, "")` 判定，`name` 为具体工具名（`delegate.list` 等），与 `exec.run` 一致。scope 或 tag 不允许时返回 `unauthorized`。
+按现有的 `Allowed(cfg, caller, name, "")` 判定，`name` 为具体工具名（`delegate.list` 等），与 `exec.run` 一致。scope 或 tag 不允许时返回 `unauthorized`。OAuth 客户端的 scope 同样与 `exec.run` 一致：`delegate.*` 需要 `exec:<设备>` 或 `exec:*`，`backend:*:*` 不授权委托工具（见 [oauth-authz](oauth-authz.md)）。
 
 ### 下线与关闭
 

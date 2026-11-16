@@ -70,7 +70,7 @@
 | `delegate.send` | `session_id`、`message` | 向活着的 Claude Code 会话注入一条消息，只保证送达 |
 | `delegate.cancel` | `task_id` | 终止进程树，对已结束的任务幂等 |
 
-任务只存在于目标设备的进程内存里，只对创建它的调用方可见。运行器用无界面参数启动 `claude` 或 `codex`，提示词经标准输入传入。委托整体默认关闭（`agent.delegate.enabled`）。`mode: write` 需要 `allow_write: true`，缺省为 false。活会话注入在委托启用后缺省开启，设 `allow_sessions: false` 才会关闭。完整约定见 [delegate 契约](../contracts/delegate.md)（CTR-DLG-01 至 CTR-DLG-06）。
+任务只存在于目标设备的进程内存里，只对创建它的调用方可见。运行器用无界面参数启动 `claude` 或 `codex`，提示词经标准输入传入。委托整体默认关闭（`agent.delegate.enabled`）。`mode: write` 需要 `allow_write: true`，缺省为 false。活会话注入缺省关闭，设 `allow_sessions: true` 并启用委托后才会开启。完整约定见 [delegate 契约](../contracts/delegate.md)（CTR-DLG-01 至 CTR-DLG-06）。
 
 ## 后端工具
 

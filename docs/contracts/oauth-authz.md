@@ -115,6 +115,7 @@ backend-name = 字母数字、`-`，长度 1 到 63
 | `devices.list`、`tools.search` | `devices:read` |
 | `<device>/sys.*` | `sys:<device>` 或 `sys:*` |
 | `<device>/exec.*` | `exec:<device>` 或 `exec:*` |
+| `<device>/delegate.*` | `exec:<device>` 或 `exec:*`（委托运行命令，与 `exec.run` 同级，见 [delegate 契约](delegate.md#ctr-dlg-06)） |
 | `<device>/pty.*` | `pty:<device>` 或 `pty:*` |
 | `<device>/fs.read`、`fs.download`、`fs.glob`、`fs.grep`、`fs.list`、`fs.stat`、`fs.sha256` | `fs:read:<device>` |
 | `<device>/fs.write`、`fs.upload`、`fs.edit`、`fs.mkdir`、`fs.move`、`fs.delete` | `fs:write:<device>` |

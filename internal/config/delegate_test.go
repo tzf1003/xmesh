@@ -41,7 +41,7 @@ func Test_CTRDLG06_DelegateDefaults(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		d := c.Agent.Delegate
-		if d.Enabled || d.AllowWrite || !d.SessionsAllowed() || d.Concurrency() != 2 ||
+		if d.Enabled || d.AllowWrite || d.SessionsAllowed() || d.Concurrency() != 2 ||
 			d.DefaultTimeoutDuration() != 30*time.Minute || d.MaxTimeoutDuration() != 2*time.Hour || d.RetainDuration() != time.Hour {
 			t.Fatalf("%s: defaults = %+v", name, d)
 		}

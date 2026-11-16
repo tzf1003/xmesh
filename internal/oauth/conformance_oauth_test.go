@@ -237,6 +237,11 @@ func Test_CTROAUTH02_ToolToScopeTable(t *testing.T) {
 		{"sys.whoami", "", "sys:win"},
 		{"exec.run", "", "exec:win"},
 		{"exec.start", "", "exec:win"},
+		{"delegate.list", "", "exec:win"},
+		{"delegate.run", "", "exec:win"},
+		{"delegate.output", "", "exec:win"},
+		{"delegate.send", "", "exec:win"},
+		{"delegate.cancel", "", "exec:win"},
 		{"pty.open", "", "pty:win"},
 		{"pty.write", "", "pty:win"},
 		{"fs.read", "", "fs:read:win"},
@@ -291,6 +296,10 @@ func Test_CTROAUTH02_ToolToScopeTable(t *testing.T) {
 	// Backend scope: wildcard backend, but not another named one.
 	if !Allows([]string{"backend:win:*"}, "win", "ida.echo", "") || Allows([]string{"backend:win:ghidra"}, "win", "ida.echo", "") {
 		t.Fatal("backend scope matching")
+	}
+	// Delegation runs commands, so a backend scope does not grant it: delegate.* needs exec.
+	if Allows([]string{"backend:*:*"}, "win", "delegate.run", "") || Allows([]string{"backend:win:delegate"}, "win", "delegate.run", "") {
+		t.Fatal("delegate tools granted by a backend scope")
 	}
 	// Read-only and write-only fs tokens do not cross over (RUL-09 expanded form).
 	if Allows([]string{"fs:read:*"}, "win", "fs.write", "") || Allows([]string{"fs:write:*"}, "win", "fs.read", "") {
