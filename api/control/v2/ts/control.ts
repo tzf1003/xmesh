@@ -311,8 +311,19 @@ export interface AuditEvent {
     session_id?: string;
     action_id?: string;
     signal?: "INT" | "TERM" | "KILL";
-    mode?: "shared" | "exclusive";
+    /**
+     * exec.run 的 shared 或 exclusive；delegate.run 的 read 或 write。
+     */
+    mode?: "shared" | "exclusive" | "read" | "write";
     backend?: string;
+    /**
+     * delegate 运行器名，如 claude、codex。
+     */
+    runner?: string;
+    /**
+     * delegate.send 的消息 id。
+     */
+    message_id?: string;
     token?: number;
     value_len?: number;
     value_sha256?: string;
