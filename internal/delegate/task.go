@@ -18,6 +18,10 @@ const maxEventText = 8 << 10
 // cannot exhaust memory. When the bound is reached, one system event says so and the rest is dropped.
 const maxEventBytes = 4 << 20
 
+// eventOverhead is what one event costs against maxEventBytes besides its text: the record that holds it. Without it,
+// a runner that prints empty lines without end would grow the log without bound while the byte count stayed at zero.
+const eventOverhead = 64
+
 const budgetNotice = "输出超过单个任务的上限，之后的输出已省略"
 
 // event is one entry of the output log of a task.
@@ -51,10 +55,13 @@ type task struct {
 	finished  bool
 	failed    bool
 
-	answer    string
-	hasAnswer bool
-	assistant strings.Builder
-	result    string
+	answer       string
+	answerCut    bool
+	hasAnswer    bool
+	assistant    strings.Builder
+	assistantCut bool
+	result       string
+	resultCut    bool
 
 	events      []event
 	eventBytes  int
@@ -93,12 +100,12 @@ func (t *task) setReady(err error) {
 }
 
 // finalReply is the reply of a finished task: the final result of the runner, or the assistant text when the
-// runner gave no final result. The caller holds m.mu.
-func (t *task) finalReply() string {
+// runner gave no final result. It also says whether that text was cut to the output budget. The caller holds m.mu.
+func (t *task) finalReply() (string, bool) {
 	if t.hasAnswer {
-		return t.answer
+		return t.answer, t.answerCut
 	}
-	return t.assistant.String()
+	return t.assistant.String(), t.assistantCut
 }
 
 // summary is the row of delegate.list. The caller holds m.mu.
@@ -122,6 +129,9 @@ func (t *task) runViewLocked() Object {
 	}
 	if t.finished {
 		out["result"] = t.result
+		if t.resultCut {
+			out["result_truncated"] = true
+		}
 		out["exit_code"] = t.exitCode
 		out["duration_ms"] = t.ended.Sub(t.started).Milliseconds()
 		out["next_cursor"] = int64(len(t.events))
@@ -148,6 +158,9 @@ func (t *task) outputLocked(cursor int64, page []event) Object {
 	out := Object{"state": t.stateLocked(), "events": events, "next_cursor": next, "eof": t.finished && next >= int64(len(t.events))}
 	if t.finished {
 		out["result"] = t.result
+		if t.resultCut {
+			out["result_truncated"] = true
+		}
 		out["exit_code"] = t.exitCode
 		out["duration_ms"] = t.ended.Sub(t.started).Milliseconds()
 		if t.sessionID != "" {
@@ -166,35 +179,48 @@ func eventObject(e event) Object {
 }
 
 // appendLocked adds one event unless the output budget of the task is spent. It reports whether the event was
-// kept. The caller holds m.mu.
+// kept. An event is charged its text and eventOverhead. The first event that does not fit becomes one system event
+// that says so, and nothing after it is kept. The caller holds m.mu.
 func (t *task) appendLocked(typ, text string) bool {
+	if t.budgetNoted {
+		return false
+	}
 	text, cut := clip(text)
-	if t.eventBytes+len(text) > maxEventBytes {
-		if t.budgetNoted {
-			return false
-		}
+	charge := len(text) + eventOverhead
+	if t.eventBytes+charge > maxEventBytes {
 		t.budgetNoted = true
 		typ, text, cut = "system", budgetNotice, false
+		charge = len(text) + eventOverhead
 	}
-	t.eventBytes += len(text)
+	t.eventBytes += charge
 	t.events = append(t.events, event{seq: uint64(len(t.events)) + 1, typ: typ, text: text, truncated: cut})
 	return true
 }
 
-// keepAssistantLocked adds assistant text to the fallback reply, within the same budget. The caller holds m.mu.
+// keepAssistantLocked adds assistant text to the fallback reply, within the output budget. The reply is a prefix of
+// the output: once a part is cut, nothing after it is kept. The caller holds m.mu.
 func (t *task) keepAssistantLocked(text string) {
-	if t.assistant.Len()+len(text) <= maxEventBytes {
-		t.assistant.WriteString(text)
+	if t.assistantCut {
+		return
 	}
+	text, cut := capText(text, maxEventBytes-t.assistant.Len())
+	t.assistant.WriteString(text)
+	t.assistantCut = cut
 }
 
 // clip cuts s to at most maxEventText bytes, at a UTF-8 character boundary, and reports whether it cut. A cut text is
 // copied, so that it does not keep the longer line it came from alive: the output budget counts only the kept bytes.
 func clip(s string) (string, bool) {
-	if len(s) <= maxEventText {
+	return capText(s, maxEventText)
+}
+
+// capText cuts s to at most limit bytes, at a UTF-8 character boundary, and reports whether it cut. A cut text is a
+// copy, so the storage it holds follows the kept length.
+func capText(s string, limit int) (string, bool) {
+	if len(s) <= limit {
 		return s, false
 	}
-	n := maxEventText
+	n := limit
 	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}

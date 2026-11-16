@@ -512,4 +512,5 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
   - 事件文本截断后复制，不再让超长行（单行上限 16 MiB）整段留在内存中。
   - 委托开关在调用读取配置与登记任务之间被关闭时，任务不登记、不启动（`Manager.Generation`，`Request.Gen`）。
   - 错误码契约：`error.schema.json` 补入 `delegate_saturated`、`delegate_unavailable` 及其必填字段；委托的 `policy_denied` 带 `reason`；`not_found` 带 `name`，与 `output_ref` 一致。
+- **CodeRabbit 审查修正**（`b8d46c9` 之后的发现，已逐条核对）：`processAlive` 拒绝超出有符号 32 位（Unix）与 DWORD（Windows）范围的 pid；Windows 的 `deliver` 只打开命名管道，普通文件直接拒绝，不再被覆盖；事件预算按每条事件 64 字节的记录开销计，空事件也有上限；最终答复与备用答复各上限 4 MiB，截断时带 `result_truncated`；网关列出 `delegate` 组时等待其他设备的首次目录（`conditionalGroups`），因为该组只在启用了委托的设备上存在；`05-tools.md` 的缺省值说明更正。
 - **待决定（安全）**：（1）OAuth 客户端的授权范围：`oauth.Allows` 把 `delegate.*` 当作后端工具，`backend:*:*` 即可调用委托工具，等同于能执行命令。（2）`agent.delegate.allow_sessions` 缺省为 `true`，启用委托后即可注入活会话，不受 `allow_write` 约束。二者都需要用户决定，决定前不改动。

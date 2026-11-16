@@ -64,7 +64,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `runner` | 运行器名 |
 | `resolved_path` | 解析后的 `cwd`，与 [exec.run](exec.md#ctr-exec-01) 的同名字段一致 |
 | `session_id` | 运行器给出后才有 |
-| `result`、`exit_code`、`duration_ms`、`next_cursor` | 任务已结束时才有。`result` 的取法见 [CTR-DLG-05](#ctr-dlg-05) |
+| `result`、`exit_code`、`duration_ms`、`next_cursor` | 任务已结束时才有。`result` 的取法见 [CTR-DLG-05](#ctr-dlg-05)，被截断时另带 `result_truncated: true` |
 
 ### 错误
 
@@ -106,7 +106,9 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `next_cursor` | 本次返回的最后一个 `seq`；没有新事件时等于 `cursor` |
 | `eof` | 任务已结束，且 `next_cursor` 之后没有更多事件 |
 
-任务已结束时另带 `result`、`exit_code`、`duration_ms`、`session_id`。
+任务已结束时另带 `result`、`exit_code`、`duration_ms`、`session_id`。`result` 被截断时另带 `result_truncated: true`。
+
+单个任务的事件日志最多保留 4 MiB：每条事件按其文本字节数加 64 字节计入。超出后追加一条 `type=system` 的事件说明，其后的输出省略。
 
 错误：`invalid_args`、`not_found`、`unauthorized`。
 
@@ -231,6 +233,8 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | 最终答复 | `type=result` 事件的 `result`。该事件标记 `is_error` 为真时，任务为 `failed` | 最后一个 `type=item.completed` 且 `item.type=agent_message` 的 `item.text` |
 
 拿不到最终答复时，`result` 取全部 assistant 文本按顺序拼接；仍没有则为空串。
+
+`result` 最多保留 4 MiB。超出时在 UTF-8 字符边界处截断，并带 `result_truncated: true`。备用答复截断后不再保留之后的文本，因此它始终是输出的前缀。
 
 ### 输出解析
 

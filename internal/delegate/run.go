@@ -260,7 +260,8 @@ func (m *Manager) consume(t *task, line []byte) {
 		t.sessionID = p.session
 	}
 	if p.hasAnswer {
-		t.answer, t.hasAnswer = p.answer, true
+		t.answer, t.answerCut = capText(p.answer, maxEventBytes)
+		t.hasAnswer = true
 	}
 	if p.failed {
 		t.failed = true

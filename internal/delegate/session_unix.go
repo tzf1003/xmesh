@@ -4,15 +4,17 @@ package delegate
 
 import (
 	"errors"
+	"math"
 	"net"
 	"os"
 	"syscall"
 	"time"
 )
 
-// processAlive reports whether a process with pid exists. A process owned by another user still counts.
+// processAlive reports whether a process with pid exists. A process owned by another user still counts. A pid above the
+// signed 32-bit range names no process: the kernel reads only its low bits, which may name a live one.
 func processAlive(pid int) bool {
-	if pid <= 0 {
+	if pid <= 0 || int64(pid) > math.MaxInt32 {
 		return false
 	}
 	err := syscall.Kill(pid, 0)

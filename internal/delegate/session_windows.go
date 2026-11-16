@@ -3,7 +3,10 @@ package delegate
 import (
 	"errors"
 	"io/fs"
+	"math"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -12,9 +15,10 @@ import (
 // stillActive is the exit code that GetExitCodeProcess reports for a process that has not ended.
 const stillActive = 259
 
-// processAlive reports whether a process with pid is still running.
+// processAlive reports whether a process with pid is still running. A pid above the DWORD range names no process, and
+// converting it would name another one.
 func processAlive(pid int) bool {
-	if pid <= 0 {
+	if pid <= 0 || int64(pid) > math.MaxUint32 {
 		return false
 	}
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
@@ -29,9 +33,21 @@ func processAlive(pid int) bool {
 	return code == stillActive
 }
 
+// pipePath says whether path names a Windows named pipe, in the \\.\pipe\ namespace. Only a pipe is opened here: an
+// ordinary file opened the same way would have its beginning overwritten.
+func pipePath(path string) bool {
+	return strings.HasPrefix(strings.ToLower(filepath.ToSlash(path)), "//./pipe/")
+}
+
+// errNotPipe is the cause of a session endpoint that is not a named pipe.
+var errNotPipe = errors.New("delegate: the session endpoint is not a named pipe")
+
 // deliver opens the named pipe at path as a file and writes payload to it. A write to such a pipe has no deadline,
 // so the write runs in its own goroutine and is given up after sessionWriteTimeout. The reasons match the Unix form.
 func deliver(path string, payload []byte) (string, error) {
+	if !pipePath(path) {
+		return "connect_failed", errNotPipe
+	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

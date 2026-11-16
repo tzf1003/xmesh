@@ -244,7 +244,7 @@ func (m *Manager) finish(t *task, code int, timedOut bool, runErr error) {
 		t.state = stateDone
 	}
 	t.finished = true
-	t.result = t.finalReply()
+	t.result, t.resultCut = t.finalReply()
 	m.running--
 	m.finished = append(m.finished, t)
 	m.pruneLocked(now)
