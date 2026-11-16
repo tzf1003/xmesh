@@ -268,6 +268,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 - 节点 draining 时（[CTR-GW-05](gateway.md#ctr-gw-05)），`delegate.run` 与 `delegate.send` 返回 `policy_denied`，`rule: mesh.draining`。`delegate.list`、`delegate.output`、`delegate.cancel` 仍可用，便于收尾。
 - Agent 关闭，或 `enabled` 变为 `false` 时，终止全部运行中的任务（进程树）。进程退出时同样终止。
+- 命令自行退出后，同一进程组中残留的子进程同样终止，任务结束时不再有属于它的进程。Unix 上由启动器形式实现；Windows 上随 Job 关闭终止；受管运行器随沙箱回收。
 
 ### 审计
 

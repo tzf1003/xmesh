@@ -28,6 +28,9 @@ type Request struct {
 	Settings config.Delegate
 	Resolver *cwd.Resolver
 	Policy   *policy.Engine
+	// Gen is the value of Manager.Generation read before Settings was read. A run whose switch went off in between
+	// registers nothing (CTR-DLG-06).
+	Gen uint64
 }
 
 // End describes a task that has finished, for the audit log (CTR-DLG-06). It never carries the prompt, the
@@ -73,6 +76,7 @@ type Manager struct {
 	finished []*task
 	running  int
 	closed   bool
+	gen      uint64
 	base     context.Context
 	stop     context.CancelFunc
 	wg       sync.WaitGroup
@@ -89,7 +93,7 @@ func New(onEnd func(End)) *Manager {
 // draining and authorization before it gets here.
 func (m *Manager) Tool(ctx context.Context, r Request, tool string, raw json.RawMessage) (Object, error) {
 	if !r.Settings.Enabled {
-		return nil, toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled")
+		return nil, disabledError()
 	}
 	switch tool {
 	case "delegate.list":
@@ -141,9 +145,11 @@ func (m *Manager) owned(caller, id string) *task {
 }
 
 // CancelAll terminates every running task (CTR-DLG-06). It is used when the switch turns off; the Manager
-// keeps accepting calls, which the switch refuses.
+// keeps accepting calls, which the switch refuses. It also advances the generation, so that a call which read the
+// switch before it turned off registers nothing.
 func (m *Manager) CancelAll() {
 	m.mu.Lock()
+	m.gen++
 	var cancels []func()
 	for _, t := range m.tasks {
 		if !t.finished {
@@ -155,6 +161,19 @@ func (m *Manager) CancelAll() {
 	for _, cancel := range cancels {
 		cancel()
 	}
+}
+
+// Generation returns the switch generation, which CancelAll advances. The Agent reads it before it reads the
+// configuration of a call, and passes it in Request.Gen (CTR-DLG-06).
+func (m *Manager) Generation() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gen
+}
+
+// disabledError is the refusal of every delegate tool while agent.delegate.enabled is off.
+func disabledError() error {
+	return toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled", "reason", "agent.delegate.enabled 为 false")
 }
 
 // Close terminates every task, waits until their processes are gone, and refuses new tasks. The Agent calls

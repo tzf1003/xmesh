@@ -93,7 +93,7 @@ func (h *harness) request(caller string) Request {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return Request{Caller: caller, Settings: h.settings, Resolver: resolver, Policy: engine}
+	return Request{Caller: caller, Settings: h.settings, Resolver: resolver, Policy: engine, Gen: h.m.Generation()}
 }
 
 // call runs one tool as caller and returns its reply or its error.

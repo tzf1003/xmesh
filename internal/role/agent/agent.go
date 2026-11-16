@@ -447,6 +447,9 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			if c, ok := a.Callers.Get(caller.ID); ok {
 				caller = c
 			}
+			// The generation is read before the configuration, so a switch that lands after this read refuses the
+			// task when it registers (CTR-DLG-06).
+			delegateGen := a.Delegate.Generation()
 			cfg := a.store.Get()
 			if strings.HasPrefix(name, "computer.") {
 				a.Computer.Configure(cfg.Agent.Computer)
@@ -458,7 +461,7 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
 			}
 			if strings.HasPrefix(name, "delegate.") && !cfg.Agent.Delegate.Enabled {
-				return Result(nil, toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled")), nil
+				return Result(nil, toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled", "reason", "agent.delegate.enabled 为 false")), nil
 			}
 			if a.draining.Load() && (name == "exec.run" || name == "delegate.run" || name == "delegate.send" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act" || name == "computer.ref_act") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
@@ -503,7 +506,7 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			case name == "exec.output":
 				out, e = a.Exec.Output(caller.ID, raw)
 			case strings.HasPrefix(name, "delegate."):
-				out, e = a.Delegate.Tool(ctx, delegate.Request{Caller: caller.ID, Settings: cfg.Agent.Delegate, Resolver: resolver, Policy: engine}, name, raw)
+				out, e = a.Delegate.Tool(ctx, delegate.Request{Caller: caller.ID, Settings: cfg.Agent.Delegate, Resolver: resolver, Policy: engine, Gen: delegateGen}, name, raw)
 			case strings.HasPrefix(name, "pty."):
 				out, e = a.PTY.Call(ctx, caller, resolver, engine, name, raw)
 			case strings.HasPrefix(name, "backend."):

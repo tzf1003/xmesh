@@ -188,7 +188,8 @@ func (t *task) keepAssistantLocked(text string) {
 	}
 }
 
-// clip cuts s to at most maxEventText bytes, at a UTF-8 character boundary, and reports whether it cut.
+// clip cuts s to at most maxEventText bytes, at a UTF-8 character boundary, and reports whether it cut. A cut text is
+// copied, so that it does not keep the longer line it came from alive: the output budget counts only the kept bytes.
 func clip(s string) (string, bool) {
 	if len(s) <= maxEventText {
 		return s, false
@@ -197,7 +198,7 @@ func clip(s string) (string, bool) {
 	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
-	return s[:n], true
+	return strings.Clone(s[:n]), true
 }
 
 // output implements delegate.output (CTR-DLG-03). It waits up to wait_ms for an event after the cursor, and
@@ -290,5 +291,5 @@ func (m *Manager) cancel(ctx context.Context, r Request, raw json.RawMessage) (O
 
 // notFound is the error for a task another caller created, or one that does not exist. The two are not told apart.
 func notFound(taskID string) error {
-	return toolerr.New("not_found", "任务不存在，或不属于当前调用方", "task_id", taskID)
+	return toolerr.New("not_found", "任务不存在，或不属于当前调用方", "name", taskID)
 }

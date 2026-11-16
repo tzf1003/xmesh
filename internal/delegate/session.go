@@ -112,7 +112,7 @@ func (m *Manager) send(r Request, raw json.RawMessage) (Object, error) {
 		return nil, toolerr.Args("message")
 	}
 	if !r.Settings.SessionsAllowed() {
-		return nil, toolerr.New("policy_denied", "活会话注入已关闭", "rule", "delegate.sessions_disabled")
+		return nil, toolerr.New("policy_denied", "活会话注入已关闭", "rule", "delegate.sessions_disabled", "reason", "agent.delegate.allow_sessions 为 false")
 	}
 	sessions := discoverSessions(r.Resolver)
 	var target *session
@@ -123,7 +123,7 @@ func (m *Manager) send(r Request, raw json.RawMessage) (Object, error) {
 		}
 	}
 	if target == nil {
-		return nil, toolerr.New("not_found", "会话不存在、已退出，或不在允许范围内", "session_id", a.SessionID)
+		return nil, toolerr.New("not_found", "会话不存在、已退出，或不在允许范围内", "name", a.SessionID)
 	}
 	id := newID("")
 	payload, err := injection(target.dir, target.PID, r.Caller, id, a.Message)

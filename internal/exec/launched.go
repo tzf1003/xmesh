@@ -14,11 +14,13 @@ import (
 // runLaunched starts the command through the platform launcher form of the
 // policy sandbox and owns its process group until it exits or the context ends.
 func runLaunched(ctx context.Context, p *policy.Engine, cwd string, a Args, env []string, out, errout *os.File) (int, bool, error) {
-	return runLaunchedStarted(ctx, p, cwd, a, env, out, errout, nil)
+	return runLaunchedStarted(ctx, p, cwd, a, env, out, errout, nil, false)
 }
 
-// runLaunchedStarted is runLaunched that also calls started, when it is not nil, once the process exists.
-func runLaunchedStarted(ctx context.Context, p *policy.Engine, cwd string, a Args, env []string, out, errout *os.File, started func()) (int, bool, error) {
+// runLaunchedStarted is runLaunched that also calls started, when it is not nil, once the process exists. When sweep
+// is true, the process group is also terminated after the command has exited on its own, so that a child the command
+// left behind cannot keep running, or keep the output open, once the caller has finished with the command.
+func runLaunchedStarted(ctx context.Context, p *policy.Engine, cwd string, a Args, env []string, out, errout *os.File, started func(), sweep bool) (int, bool, error) {
 	launch, argv, env, e := p.Sandbox(a.Cmd, a.Args, cwd, env)
 	if e != nil {
 		return 0, false, e
@@ -45,6 +47,9 @@ func runLaunchedStarted(ctx context.Context, p *policy.Engine, cwd string, a Arg
 	timedOut := false
 	select {
 	case e = <-done:
+		if sweep {
+			kill(cmd)
+		}
 	case <-ctx.Done():
 		timedOut = true
 		terminate(cmd)

@@ -54,7 +54,7 @@ func (m *Manager) run(ctx context.Context, r Request, raw json.RawMessage) (Obje
 	case "read":
 	case "write":
 		if !r.Settings.AllowWrite {
-			return nil, toolerr.New("policy_denied", "委托写模式未开启", "rule", "delegate.write_disabled")
+			return nil, toolerr.New("policy_denied", "委托写模式未开启", "rule", "delegate.write_disabled", "reason", "agent.delegate.allow_write 为 false")
 		}
 	default:
 		return nil, toolerr.Args("mode")
@@ -107,6 +107,11 @@ func (m *Manager) run(ctx context.Context, r Request, raw json.RawMessage) (Obje
 	if m.closed {
 		m.mu.Unlock()
 		return nil, toolerr.New("internal", "委托管理器正在关闭", "op", "delegate.run")
+	}
+	if m.gen != r.Gen {
+		// The switch went off after this call read it. Nothing is registered or started (CTR-DLG-06).
+		m.mu.Unlock()
+		return nil, disabledError()
 	}
 	m.pruneLocked(time.Now())
 	if a.Key != "" {

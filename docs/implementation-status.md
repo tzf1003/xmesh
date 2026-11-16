@@ -507,3 +507,9 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
   - Windows 上的命名管道写入、进程存活判断与进程树终止，以及 macOS 上的进程树终止：只做了交叉编译，未在对应系统上运行。
   - 注入的 `write_timeout` 与 `write_failed` 两个原因码没有测试覆盖。
 - **契约已补充的两处细节**（见 [delegate.md](contracts/delegate.md)）：`mode: write` 未开启时，在解析 `cwd` 之前即返回 `policy_denied`；`session_id` 续聊限定为同一调用方、同一运行器的任务返回过的值。
+- **审查修正**（Devin 审查 `a9ce846` 的发现，已确认并修复）：
+  - 命令自行退出后，Unix 启动器形式终止同一进程组中残留的子进程。此前任务已显示 `done`，子进程仍在运行，且 `delegate.cancel` 对已结束的任务无效。`exec.run` 的生命周期不变。
+  - 事件文本截断后复制，不再让超长行（单行上限 16 MiB）整段留在内存中。
+  - 委托开关在调用读取配置与登记任务之间被关闭时，任务不登记、不启动（`Manager.Generation`，`Request.Gen`）。
+  - 错误码契约：`error.schema.json` 补入 `delegate_saturated`、`delegate_unavailable` 及其必填字段；委托的 `policy_denied` 带 `reason`；`not_found` 带 `name`，与 `output_ref` 一致。
+- **待决定（安全）**：（1）OAuth 客户端的授权范围：`oauth.Allows` 把 `delegate.*` 当作后端工具，`backend:*:*` 即可调用委托工具，等同于能执行命令。（2）`agent.delegate.allow_sessions` 缺省为 `true`，启用委托后即可注入活会话，不受 `allow_write` 约束。二者都需要用户决定，决定前不改动。

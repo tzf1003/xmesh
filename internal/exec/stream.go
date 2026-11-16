@@ -19,7 +19,9 @@ import (
 // has started. A start failure is only visible in the returned error, and started has not run by then.
 //
 // The result reports the exit code and whether ctx ended the command. A done ctx terminates the process group
-// or job, as exec.run does. An error means the command never started, or that the isolation refused it.
+// or job, as exec.run does. When the command exits on its own, the launcher form also terminates the rest of its
+// process group, so a child it left behind neither keeps the output open nor runs on after the call. A managed run
+// reclaims its sandbox when it closes. An error means the command never started, or that the isolation refused it.
 func RunStream(ctx context.Context, p *policy.Engine, dir string, env []string, argv []string, stdin string, out, errout *os.File, started func()) (int, bool, error) {
 	if len(argv) == 0 || argv[0] == "" {
 		return 0, false, toolerr.Args("cmd")
@@ -28,7 +30,7 @@ func RunStream(ctx context.Context, p *policy.Engine, dir string, env []string, 
 	if runner := p.SandboxRunner(); runner != nil {
 		return runManagedStarted(ctx, runner, dir, a, env, out, errout, started)
 	}
-	return runLaunchedStarted(ctx, p, dir, a, env, out, errout, started)
+	return runLaunchedStarted(ctx, p, dir, a, env, out, errout, started, true)
 }
 
 // LookupCommand resolves cmd as the managed runner starts it: a bare name is searched on PATH, and an
