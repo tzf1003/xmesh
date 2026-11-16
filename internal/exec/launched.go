@@ -29,6 +29,12 @@ func runLaunchedStarted(ctx context.Context, p *policy.Engine, cwd string, a Arg
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin = strings.NewReader(a.Stdin)
+	if sweep {
+		// Wait also waits for the copy into stdin. A child the command left behind can hold that pipe without
+		// reading it, which would keep Wait from returning, so the sweep below would never run. WaitDelay closes
+		// the pipe a short time after the command exits.
+		cmd.WaitDelay = time.Second
+	}
 	cmd.Stdout = out
 	cmd.Stderr = errout
 	waitCommand, finish, e := startCommand(cmd)

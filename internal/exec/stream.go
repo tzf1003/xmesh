@@ -17,6 +17,7 @@ import (
 // their write ends: the caller must close those after RunStream returns, so that a reader sees end of file
 // once the command and every process holding the pipe have gone. started, when not nil, runs once the command
 // has started. A start failure is only visible in the returned error, and started has not run by then.
+// A ctx that is already done when the call begins means the command never runs, and started does not run.
 //
 // The result reports the exit code and whether ctx ended the command. A done ctx terminates the process group
 // or job, as exec.run does. When the command exits on its own, the launcher form also terminates the rest of its
@@ -25,6 +26,11 @@ import (
 func RunStream(ctx context.Context, p *policy.Engine, dir string, env []string, argv []string, stdin string, out, errout *os.File, started func()) (int, bool, error) {
 	if len(argv) == 0 || argv[0] == "" {
 		return 0, false, toolerr.Args("cmd")
+	}
+	if ctx.Err() != nil {
+		// Checked before the start, so a command whose context is already done never runs. A cancellation that lands
+		// after this check still ends the command as soon as it starts.
+		return 1, true, nil
 	}
 	a := Args{Cmd: argv[0], Args: argv[1:], Stdin: stdin}
 	if runner := p.SandboxRunner(); runner != nil {
