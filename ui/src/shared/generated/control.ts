@@ -168,6 +168,8 @@ export type ToolErrorCode =
   | "not_owner"
   | "session_not_found"
   | "exec_saturated"
+  | "delegate_saturated"
+  | "delegate_unavailable"
   | "lease_required"
   | "resource_busy"
   | "backend_unavailable"
