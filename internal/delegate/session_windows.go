@@ -46,6 +46,11 @@ var errNotPipe = errors.New("delegate: the session endpoint is not a named pipe"
 // so the write runs in its own goroutine and is given up after sessionWriteTimeout. The reasons match the Unix form.
 func deliver(path string, payload []byte) (string, error) {
 	if !pipePath(path) {
+		// A path outside the pipe namespace is never opened. A missing one is still a missing socket, as on Unix
+		// (CTR-DLG-04).
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			return "socket_missing", err
+		}
 		return "connect_failed", errNotPipe
 	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
