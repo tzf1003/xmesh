@@ -25,6 +25,8 @@
 - 2026-10-16。用户决定内部小范围使用的 DERP 先不处理法律问题，因此 U10 的法律前置在内部自建准入范围内取消；计量、计费、多租户目录仍未做，对外提供前须另行评估。
 - 2026-10-17，本 PR。[CTR-GW-07](../contracts/gateway.md#ctr-gw-07)、[RUL-02](../contracts/rulings.md#rul-02)、[CTR-CFG-01](../contracts/config.md#ctr-cfg-01)：推翻「Gateway 永远只监听回环、没有令牌时不认证」。改为：默认来源为本机、内网与 Tailscale 网段，可在面板增删 IP、CIDR 与域名；每个请求都要令牌（含本机），令牌在首次启动或升级且没有任何令牌时自动创建，之后只由用户轮转；升级、更新、重装从不改动已有令牌。绑定的地址仍由 `gateway.listen` 决定，回环绑定时只有本机可达。
 
+- 2026-11-16，本 PR。[CTR-DLG-01](../contracts/delegate.md#ctr-dlg-01) 至 [CTR-DLG-06](../contracts/delegate.md#ctr-dlg-06)：Agent 委托（`delegate.*`）完整自研，不 fork、不捆绑 reason-network，不接 Reason 账号登录与中继；跨设备传输、鉴权与审计沿用 xmesh 现有链路。一期只做推送式注入（Claude Code 收件 socket）与 Codex 无界面执行及续聊，钩子类回合式适配器放二期。`claude` 运行器的读模式由 `--permission-mode default` 改为 `dontAsk` 加 `--permission-prompts none`，因为 Claude Code 2.1.325 的 `--permission-mode` 不接受 `default`。
+
 ## 风险
 
 | 风险 | 影响 | 缓解 |

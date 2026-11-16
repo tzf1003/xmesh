@@ -495,3 +495,8 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 | 实测后待用户本机复测 | Windows：未安装服务时 `xmesh stop --json`，多网卡机器的 LAN 选网卡，无符号链接权限账户上 `go test ./internal/privdir ./internal/cwd`，未提权账户下 L2 被拒的托盘与面板显示；macOS：Gatekeeper 与 `xattr` 放行、登录项自启、`install` 与 launchd 用户服务、向导最后的安装步骤、通知弹窗。 |
 | beta 标签 | 用户已推送 `v0.1.0-beta.1`（指向 `21698d4`），已作为预发布发布：<https://github.com/tzf1003/xmesh/releases/tag/v0.1.0-beta.1>，含 6 个 Go 归档、4 个未签名 UI 安装包和 `SHA256SUMS`（协调线转述）。`release.yml` 的 UI 安装包已由 #53 接入。会话代理仍拒绝推送标签，之后的标签仍需用户推送。 |
 | Windows 代码签名与 Apple 开发者证书 | 桌面 UI 正式发布前需要；在此之前 beta 为未签名构建。 |
+
+## 2026-11-16 Agent 委托（delegate）一期
+
+- **契约**（本 PR）：新增 [delegate.md](contracts/delegate.md)，编号 CTR-DLG-01 至 06。同步 [errors.md](contracts/errors.md)（`delegate_saturated`、`delegate_unavailable`）、[config.md](contracts/config.md)、`schemas/config.schema.json`（`agent.delegate` 与 `disabled_tools` 中的五个工具名）、[gateway.md](contracts/gateway.md) 的组列表、[05-tools.md](design/05-tools.md)、[11-decisions.md](design/11-decisions.md) 与 [符合性矩阵](conformance.md) 的阶段 7。
+- **实现**：待实现，结果见后续更新。

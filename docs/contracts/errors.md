@@ -40,6 +40,8 @@
 | `not_found` | 设备、工具、output_ref 不存在 | `name` |
 | `timeout` | 命令或后端调用超过 timeout | `timeout_ms` |
 | `internal` | 未分类的本机故障 | `op`；Windows 上底层是 Win32 错误时另带 `win32_error`（错误码）与 `reason`（系统给出的文字） |
+| `delegate_saturated` | `delegate.run` 时运行中的任务已达 `agent.delegate.max_concurrent`，见 [CTR-DLG-02](delegate.md#ctr-dlg-02) | `in_use`、`limit` |
+| `delegate_unavailable` | `delegate.send` 无法把消息写进会话的收件通道，见 [CTR-DLG-04](delegate.md#ctr-dlg-04) | `reason`：`socket_missing`、`connect_failed`、`key_unreadable`、`write_timeout`、`write_failed` 之一 |
 
 `invalid_cwd.reason = denied` 与 `policy_denied` 的分工：路径根本不在 allow/deny 规则允许的范围内，用 `invalid_cwd`。路径合法，但某条命名规则拒绝这次操作（递归删除、命令黑名单、环境变量），用 `policy_denied`。
 
@@ -113,3 +115,5 @@
 | `unauthorized` | 换工具或换设备。重试不会扩大 scope |
 | `backend_unavailable` | 可以一次重试。连续失败则换设备 |
 | `internal` | 可以一次重试。不得把 `internal` 当成已执行成功 |
+| `delegate_saturated` | 等运行中的任务结束（`delegate.output` 的 `wait_ms` 可以用来等），或用 `delegate.cancel` 取消不需要的任务 |
+| `delegate_unavailable` | 先用 `delegate.list` 确认会话仍在，不要立即重试 |

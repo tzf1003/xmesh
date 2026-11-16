@@ -158,6 +158,19 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-CTL-14 | 内核实现：值只写不读，响应、配置、状态、审计、事件里都没有值；非法变量名、含空字符或过长的值、同名同时 set 与 unset、超过 64 个、被策略拒绝的名字（`reason` 为 `env_denied`）返回 `invalid_args` 且不写文件；没有存储时 `unavailable`；删除配置里的后端时一并清掉它的变量，先于后端存放的变量保留（`Test_ControlBackendEnvKeepsValuesWriteOnly`、`Test_ControlBackendEnvRejectsWithoutWriting`、`Test_ControlBackendEnvGoesWithItsBackend`） |
 | CTR-CTL-08 CTR-CTL-09 CTR-CTL-10 | 内核实现：连接密码只写不读、长度与首尾空白规则、限流锁定与清零、连接错误映射到 `pair_rejected` / `rate_limited` / `invalid_args`，并在确认前核对指定指纹（`Test_CTRCTL08_*`）；配对导入核对用户确认的指纹、文档指纹及设备公钥摘要，LAN 与 Tailnet 共用设备信任并立即生效；PAT 创建、轮转、删除后正在运行的 Gateway 立即按新凭据认证，令牌正文只出现在 `PatSecret`，配置外的令牌文件删除时保留；入口路由无角色 `role_disabled`，撤销客户端使其 token 全部失效，口令只写不读（`Test_ControlPairExportImport`、`Test_ControlPats`、`Test_ControlIngress`、`Test_ControlPatsReachTheGateway`） |
 
+## 阶段 7 · Agent 委托（delegate，一期）
+
+契约见 [delegate.md](contracts/delegate.md)。测试名去掉横线后以 `Test_CTRDLG01_`、`Test_CTRDLG02_` 等开头，或在测试上方写 `// conformance: CTR-DLG-01`。
+
+| 编号 | 观察点 |
+| --- | --- |
+| CTR-DLG-01 | `delegate.list` 的字段；`enabled: false` 时五个工具不出现在 `tools/list`，调用返回 `policy_denied`、`rule: delegate.disabled`；`allow_sessions: false` 时 `sessions[]` 为空 |
+| CTR-DLG-02 | `delegate.run` 的参数校验与执行顺序；`mode: write` 被拒（`delegate.write_disabled`）；超过 `max_timeout` 按上限执行；`wait_ms` 内结束则直接带回结果；幂等重试返回原任务，参数不同返回 `invalid_args` |
+| CTR-DLG-03 | `delegate.output` 按序号分页与长轮询；`delegate.cancel` 终止进程树且幂等；并发达到上限返回 `delegate_saturated`；他人的 `task_id` 返回 `not_found`；已结束任务按保留时长与 64 个上限淘汰 |
+| CTR-DLG-04 | 会话发现：cwd 不在允许范围或进程已退出的会话不列出、不可寻址；注入帧的框定与转义，对端文本不能闭合或伪造框；收件 socket 不存在或写失败返回 `delegate_unavailable` 并带 `reason` |
+| CTR-DLG-05 | 运行器参数拼接（续聊替代、模式追加、末尾 `-` 之前插入、提示词只经标准输入）；Claude 的会话 id 与最终答复；非 JSON 行记为 `raw`；非零退出为 `failed`；超时终止进程树为 `timeout` |
+| CTR-DLG-06 | draining 时 `delegate.run` 与 `delegate.send` 被拒（`mesh.draining`）；`enabled` 关闭或 Agent 关闭时终止全部任务；审计不含提示词与输出正文；`agent.delegate` 的缺省值与校验（`max_timeout` 不小于 `default_timeout`；后端不得叫 `delegate`） |
+
 ## 模式夹具
 
 每次改契约或模式，都要执行：

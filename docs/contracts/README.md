@@ -16,6 +16,12 @@
 | [CTR-SYS-01](sys.md#ctr-sys-01) | sys | `sys.info` |
 | [CTR-EXEC-01](exec.md#ctr-exec-01) | exec | `exec.run` |
 | [CTR-EXEC-02](exec.md#ctr-exec-02) | exec | `exec.output` |
+| [CTR-DLG-01](delegate.md#ctr-dlg-01) | delegate | `delegate.list`、开关与可见性 |
+| [CTR-DLG-02](delegate.md#ctr-dlg-02) | delegate | `delegate.run` |
+| [CTR-DLG-03](delegate.md#ctr-dlg-03) | delegate | `delegate.output` / `delegate.cancel`、任务状态与保留 |
+| [CTR-DLG-04](delegate.md#ctr-dlg-04) | delegate | `delegate.send` 与活会话注入 |
+| [CTR-DLG-05](delegate.md#ctr-dlg-05) | delegate | 运行器参数与输出解析 |
+| [CTR-DLG-06](delegate.md#ctr-dlg-06) | delegate | 配置、授权、下线、审计 |
 | [CTR-PTY-01](pty.md#ctr-pty-01) | pty | 状态机 |
 | [CTR-PTY-02](pty.md#ctr-pty-02) | pty | 八个工具 |
 | [CTR-FS-01](fs.md#ctr-fs-01) | fs | `fs.read` |

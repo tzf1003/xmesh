@@ -53,7 +53,7 @@ Gateway 的自有工具（`devices.list`、`tools.search`、`tools.call`、`sess
 }
 ```
 
-`groups` 是工具组到该设备工具数的映射，组名为工具名第一个 `.` 之前的部分（内置 `fs`、`exec`、`pty`、`sys`、`backend`、`computer`，用户后端则是后端名）。模型据此一次得知设备有没有浏览器、桌面控制或某个后端，不必为此搜索。`backends` 字段保留。
+`groups` 是工具组到该设备工具数的映射，组名为工具名第一个 `.` 之前的部分（内置 `fs`、`exec`、`pty`、`sys`、`backend`、`computer`、`delegate`，用户后端则是后端名）。模型据此一次得知设备有没有浏览器、桌面控制或某个后端，不必为此搜索。`backends` 字段保留。
 
 每行另含 `backend_info`：该设备用户后端的数组，按 `name` 排序，元素为 `{name, desc?, policy, favorite, tools}`。`desc` 是后端配置的一句话说明（最长 200 字符），未配置时省略；`policy`、`favorite` 来自设备 `sys.info`；`tools` 是该设备工具表中组名等于后端名、且调用方 scope 允许的工具数。`backends`（仅名称数组）保持不变。设备尚未读到 `sys.info` 时没有该字段。
 
@@ -209,7 +209,7 @@ xmesh drain --scope mesh [--mode keep|kill] --config xmesh.yaml
 3. 每个工具的 `inputSchema.properties` 注入可选字符串属性 `device`（目标设备名，见 `devices.list`；设了会话默认设备可省略）。不进 `required`，不用 `enum`：设备上下线不得改变 schema。
 4. 后端工具若自己声明了名为 `device` 的参数则不注入，该工具只能经 `tools.call` 调用。
 5. 用户后端：组名是后端名。后端默认不进列表；只有 `favorite: true` 的后端才加入候选。总数受 `max_listed_tools` 限制：先放入 `listed_groups` 内的内置组；`favorite` 后端组按工具数从小到大依次加入，只要加入后总数（含 Gateway 自有工具）不超过上限，超出的组留在按需通道，并在 `devices.list` 与日志里报告。
-6. 配置校验拒绝与内置组名（`fs`、`exec`、`pty`、`sys`、`backend`、`computer`）同名的后端，否则 `<后端>.<工具>` 会与内置组混在一起。
+6. 配置校验拒绝与内置组名（`fs`、`exec`、`pty`、`sys`、`backend`、`computer`、`delegate`）同名的后端，否则 `<后端>.<工具>` 会与内置组混在一起。`delegate` 组（见 [CTR-DLG-01](delegate.md#ctr-dlg-01)）缺省不在 `listed_groups` 内，经 `tools.search` 与 `tools.call` 取用。
 
 `compact`：`pinned_tools` 里的工具按 unified 的规则（去重、注入 `device`）列出，其余只经 `tools.search` 与 `tools.call`。`computer.*` 缺省不在 `listed_groups` 内。
 
