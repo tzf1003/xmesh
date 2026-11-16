@@ -49,6 +49,11 @@ export const BUILTIN_TOOLS: readonly BuiltinTool[] = [
   { name: "pty.transfer", zh: "交接终端所有权", en: "Hand over terminal ownership" },
   { name: "pty.close", zh: "关闭所属终端", en: "Close an owned terminal" },
   { name: "pty.list", zh: "列出可见终端", en: "List visible terminals" },
+  { name: "delegate.list", zh: "列出委托运行器、任务与活会话", en: "List delegate runners, tasks and live sessions" },
+  { name: "delegate.run", zh: "在设备上启动本地 Agent 任务", en: "Start a local agent task on the device" },
+  { name: "delegate.output", zh: "分页读取委托任务输出", en: "Read delegate task output in pages" },
+  { name: "delegate.send", zh: "向活会话注入一条消息", en: "Inject a message into a live session" },
+  { name: "delegate.cancel", zh: "取消委托任务", en: "Cancel a delegate task" },
 ];
 
 export const BUILTIN_TOOL_NAMES: readonly string[] = BUILTIN_TOOLS.map((t) => t.name);
