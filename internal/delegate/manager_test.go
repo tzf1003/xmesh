@@ -416,14 +416,24 @@ func Test_CTRDLG03_OtherCallerGetsNotFound(t *testing.T) {
 
 // conformance: CTR-DLG-03
 func Test_CTRDLG03_RetentionCapsFinishedTasksAtSixtyFour(t *testing.T) {
-	h := newHarness(t, testSettings(map[string]config.DelegateRunner{"claude": fakeRunner(t, "claude")}))
-	var first, last string
-	for i := 0; i < 66; i++ {
-		out := h.ok(callerA, "delegate.run", map[string]any{"runner": "claude", "prompt": fmt.Sprint(i), "wait_ms": 20000})
-		if i == 0 {
-			first = out["task_id"].(string)
+	// Every task runs a helper process, and under -race each one takes about a second to start. So the tasks after the
+	// first run in batches of eight rather than one after another. The first task ends before the others start, which
+	// makes it the oldest finished task, and the cap must evict it.
+	settings := testSettings(map[string]config.DelegateRunner{"claude": fakeRunner(t, "claude")})
+	settings.MaxConcurrent = 8
+	h := newHarness(t, settings)
+	first := h.ok(callerA, "delegate.run", map[string]any{"runner": "claude", "prompt": "0", "wait_ms": 20000})["task_id"].(string)
+	var last string
+	for start := 1; start < 66; start += 8 {
+		var batch []string
+		for i := start; i < start+8 && i < 66; i++ {
+			out := h.ok(callerA, "delegate.run", map[string]any{"runner": "claude", "prompt": fmt.Sprint(i), "wait_ms": 0})
+			batch = append(batch, out["task_id"].(string))
 		}
-		last = out["task_id"].(string)
+		for _, id := range batch {
+			h.finish(callerA, id)
+		}
+		last = batch[len(batch)-1]
 	}
 	_, err := h.call(callerA, "delegate.output", map[string]any{"task_id": first})
 	h.wantCode(err, "not_found")
