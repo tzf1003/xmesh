@@ -372,7 +372,7 @@ func (v *view) surfaceNow() Surface {
 }
 
 // builtinGroups are the tool groups every Agent serves itself.
-var builtinGroups = []string{"sys", "exec", "pty", "fs", "backend", "computer"}
+var builtinGroups = []string{"sys", "exec", "pty", "fs", "backend", "computer", "delegate"}
 
 // waitsForOthers says whether tools/list must wait for the first catalogue of
 // the devices other than the local one and the default. Full lists every device,

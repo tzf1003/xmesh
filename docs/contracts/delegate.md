@@ -39,14 +39,14 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `prompt` | 字符串 | 必须。非空，UTF-8 不超过 64 KiB。经标准输入传给运行器，不放进 argv |
 | `cwd` | 字符串 | 可以。经 [CTR-CWD-01](cwd.md#ctr-cwd-01) 解析，缺省 `agent.default_cwd` |
 | `mode` | 字符串 | 可以。`read`（默认）或 `write`。`write` 需要 `agent.delegate.allow_write: true`，否则 `policy_denied`，`rule: delegate.write_disabled` |
-| `session_id` | 字符串 | 可以。续聊：在该运行器的既有会话上继续。取值必须是之前某个任务返回的 `session_id`（运行器自己的会话 id） |
+| `session_id` | 字符串 | 可以。续聊：在该运行器的既有会话上继续。取值必须是同一 `caller_id` 在同一运行器上的任务返回过的 `session_id`（运行器自己的会话 id），且该运行器配置了 `resume_args`。不符合则返回 `invalid_args`，`field: session_id` |
 | `timeout` | 字符串或整数 | 可以。Go duration 字符串，或毫秒整数。缺省 `agent.delegate.default_timeout`；超过 `max_timeout` 时按 `max_timeout` 执行，不报错 |
 | `wait_ms` | 整数 | 可以。缺省 0，最大 60000。任务在这段时间内结束则直接带回结果 |
 | `idempotency_key` | 字符串 | 可以。规则同 [CTR-EXEC-01](exec.md#ctr-exec-01)：长度 1 到 200，匹配 `[A-Za-z0-9._:-]+` |
 
 ### 执行顺序
 
-1. 校验参数。失败返回 `invalid_args`，进程未创建。
+1. 校验参数。失败返回 `invalid_args`，进程未创建。`mode` 为 `write` 而 `allow_write` 未开启时，同样在本步返回 `policy_denied`，早于解析 `cwd`。
 2. 解析 `cwd`。失败返回 `invalid_cwd` 或 `policy_denied`，进程未创建。
 3. 运行器存在且可执行文件可找到。否则返回 `invalid_args`，`field: runner`。
 4. 按 [RUL-11](rulings.md#rul-11) 对实际 argv 的规范化命令行做命令策略检查。命中拒绝则 `policy_denied`，进程未创建。
@@ -271,7 +271,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 ### 审计
 
-审计事件（[CTR-AUD-01](audit.md#ctr-aud-01)）记录：工具名、调用方、运行器、解析后的 `cwd`、模式、任务 id、结束状态、时长。`delegate.send` 记录工具名、调用方、会话 id、消息 id 与结果。
+审计事件（[CTR-AUD-01](audit.md#ctr-aud-01)）记录：工具名、调用方、运行器、解析后的 `cwd`、模式、任务 id、结束状态、时长。结束状态写入 `task_status`，取审计词表：`done` 为 `passed`，`timeout` 为 `timed_out`，`failed` 与 `cancelled` 不变。`delegate.send` 记录工具名、调用方、会话 id、消息 id 与结果。
 
 不记录提示词、消息正文、最终答复和输出事件。
 

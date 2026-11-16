@@ -43,6 +43,7 @@ if "date-time" not in FormatChecker.checkers:
     "lease.json": "lease.schema.json",
     "audit-event.json": "audit-event.schema.json",
     "audit-progress-unrouted.json": "audit-event.schema.json",
+    "audit-delegate-task.json": "audit-event.schema.json",
     "xmesh.ingress-public.json": "config.schema.json",
     "xmesh.ingress-multihost.json": "config.schema.json",
     "xmesh.ingress-tunnel.json": "config.schema.json",

@@ -32,7 +32,7 @@ var builtinSpecs = sync.OnceValue(buildSpecs)
 
 func buildSpecs() map[string]spec {
 	props := map[string]any{}
-	for _, k := range strings.Fields("path cwd from to content sha256 transfer_id old_string new_string expected_sha256 pattern glob type output_mode cmd stdin mode idempotency_key output_ref stream session_id shell name data signal to_caller") {
+	for _, k := range strings.Fields("path cwd from to content sha256 transfer_id old_string new_string expected_sha256 pattern glob type output_mode cmd stdin mode idempotency_key output_ref stream session_id shell name data signal to_caller runner prompt task_id message") {
 		props[k] = map[string]any{"type": "string"}
 	}
 	for _, k := range strings.Fields("offset byte_offset chunk_size limit depth context head_limit cols rows cursor max_bytes wait_ms") {
@@ -56,47 +56,67 @@ func buildSpecs() map[string]spec {
 	}
 	specs := map[string]spec{}
 	for name, d := range definitions {
-		properties := map[string]any{}
-		for _, k := range strings.Fields(d[2]) {
-			properties[k] = props[k]
-		}
-		// Unknown arguments are rejected rather than silently dropped, so a typo in an
-		// optional parameter surfaces as invalid_args instead of a changed meaning.
-		schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
-		if d[1] != "" {
-			schema["required"] = strings.Fields(d[1])
-		}
-		// Validation also tolerates keys that are deliberately ignored without being
-		// advertised: forged identity fields (CTR-ID-01 says they are ignored, never
-		// trusted) and the session defaults a Gateway adds to every forwarded call.
-		accepted := map[string]any{}
-		for k, v := range properties {
-			accepted[k] = v
-		}
-		for _, k := range ignoredArguments {
-			if _, declared := accepted[k]; !declared {
-				accepted[k] = map[string]any{}
-			}
-		}
-		validation := map[string]any{"type": "object", "properties": accepted, "additionalProperties": false}
-		if d[1] != "" {
-			validation["required"] = strings.Fields(d[1])
-		}
-		compiler := jsonschema.NewCompiler()
-		b, _ := json.Marshal(validation)
-		var normalized any
-		_ = json.Unmarshal(b, &normalized)
-		if e := compiler.AddResource("urn:xmesh:"+name, normalized); e != nil {
-			panic(e)
-		}
-		compiled, e := compiler.Compile("urn:xmesh:" + name)
-		if e != nil {
-			panic(e)
-		}
-		specs[name] = spec{d[0], schema, compiled}
+		specs[name] = newSpec(name, d[0], d[1], d[2], props)
 	}
 	for name, s := range computerSpecs() {
 		specs[name] = s
 	}
+	for name, s := range delegateSpecs(props) {
+		specs[name] = s
+	}
 	return specs
+}
+
+// newSpec builds the advertised schema and the validator of one built-in tool. required and optional are
+// space-separated property names, and props holds the schema of every property name.
+func newSpec(name, desc, required, optional string, props map[string]any) spec {
+	properties := map[string]any{}
+	for _, k := range strings.Fields(optional) {
+		properties[k] = props[k]
+	}
+	// Unknown arguments are rejected rather than silently dropped, so a typo in an
+	// optional parameter surfaces as invalid_args instead of a changed meaning.
+	schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
+	if required != "" {
+		schema["required"] = strings.Fields(required)
+	}
+	// Validation also tolerates keys that are deliberately ignored without being
+	// advertised: forged identity fields (CTR-ID-01 says they are ignored, never
+	// trusted) and the session defaults a Gateway adds to every forwarded call.
+	accepted := map[string]any{}
+	for k, v := range properties {
+		accepted[k] = v
+	}
+	for _, k := range ignoredArguments {
+		if _, declared := accepted[k]; !declared {
+			accepted[k] = map[string]any{}
+		}
+	}
+	validation := map[string]any{"type": "object", "properties": accepted, "additionalProperties": false}
+	if required != "" {
+		validation["required"] = strings.Fields(required)
+	}
+	compiler := jsonschema.NewCompiler()
+	b, _ := json.Marshal(validation)
+	var normalized any
+	_ = json.Unmarshal(b, &normalized)
+	if e := compiler.AddResource("urn:xmesh:"+name, normalized); e != nil {
+		panic(e)
+	}
+	compiled, e := compiler.Compile("urn:xmesh:" + name)
+	if e != nil {
+		panic(e)
+	}
+	return spec{desc, schema, compiled}
+}
+
+// delegateSpecs are the five delegate tools (CTR-DLG-01 to CTR-DLG-04). Their parameters follow the contract tables.
+func delegateSpecs(props map[string]any) map[string]spec {
+	return map[string]spec{
+		"delegate.list":   newSpec("delegate.list", "列出可委托的运行器、本调用方的委托任务，以及可注入的活 Claude Code 会话", "", "", props),
+		"delegate.run":    newSpec("delegate.run", "在本机以无界面方式启动 Agent CLI（claude、codex）执行一段完整任务，返回任务句柄；提示词经标准输入传入。mode 缺省 read，write 需管理员开启", "runner prompt", "runner prompt cwd mode session_id timeout wait_ms idempotency_key", props),
+		"delegate.output": newSpec("delegate.output", "分页读取委托任务的输出事件；没有新事件时最长等待 wait_ms，有新事件或任务结束即返回", "task_id", "task_id cursor wait_ms limit", props),
+		"delegate.send":   newSpec("delegate.send", "向设备上已开着的 Claude Code 会话注入一条消息。推送式，只保证送达，不回收回复", "session_id message", "session_id message", props),
+		"delegate.cancel": newSpec("delegate.cancel", "终止委托任务的进程树，状态置为 cancelled；对已结束的任务幂等", "task_id", "task_id", props),
+	}
 }

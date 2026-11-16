@@ -12,6 +12,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
+	"github.com/tzf1003/xmesh/internal/delegate"
 	runexec "github.com/tzf1003/xmesh/internal/exec"
 	toolsfs "github.com/tzf1003/xmesh/internal/fs"
 	"github.com/tzf1003/xmesh/internal/identity"
@@ -47,33 +48,36 @@ type Agent struct {
 	// BudgetAuthority hosts the cross-host PTY admission lease for ingress nodes.
 	BudgetAuthority *pty.BudgetAuthority
 	Exec            *runexec.Manager
-	Callers         *identity.Registry
-	Backends        *backend.Manager
-	Leases          *lease.Manager
-	quota           *quota.Limiter
-	quotaMu         sync.Mutex
-	quotaApplied    config.Quota
-	mu              sync.Mutex
-	sessions        map[string]identity.Caller
-	servers         map[*mcp.ServerSession]bool
-	fileMu          sync.Mutex
-	transfers       *toolsfs.Transfers
-	closeOnce       sync.Once
-	stopDenyFile    func()
-	watchers        sync.WaitGroup
-	views           map[string]*mcp.Server
-	viewMu          sync.Mutex
-	backendNames    map[*mcp.Server][]string
-	backendEnv      *backendenv.Store // nil: stdio backends get no configured variables
-	auditLog        atomic.Pointer[audit.Logger]
-	networkInfo     atomic.Pointer[NetworkInfo]
-	sandbox         atomic.Pointer[sandboxState]
-	draining        atomic.Bool
-	backendChanged  chan struct{}
-	stop            chan struct{}
-	done            chan struct{}
-	executionCtx    context.Context
-	executionCancel context.CancelFunc
+	// Delegate runs the agent delegation tools (CTR-DLG-01 to CTR-DLG-06).
+	Delegate            *delegate.Manager
+	unsubscribeDelegate func()
+	Callers             *identity.Registry
+	Backends            *backend.Manager
+	Leases              *lease.Manager
+	quota               *quota.Limiter
+	quotaMu             sync.Mutex
+	quotaApplied        config.Quota
+	mu                  sync.Mutex
+	sessions            map[string]identity.Caller
+	servers             map[*mcp.ServerSession]bool
+	fileMu              sync.Mutex
+	transfers           *toolsfs.Transfers
+	closeOnce           sync.Once
+	stopDenyFile        func()
+	watchers            sync.WaitGroup
+	views               map[string]*mcp.Server
+	viewMu              sync.Mutex
+	backendNames        map[*mcp.Server][]string
+	backendEnv          *backendenv.Store // nil: stdio backends get no configured variables
+	auditLog            atomic.Pointer[audit.Logger]
+	networkInfo         atomic.Pointer[NetworkInfo]
+	sandbox             atomic.Pointer[sandboxState]
+	draining            atomic.Bool
+	backendChanged      chan struct{}
+	stop                chan struct{}
+	done                chan struct{}
+	executionCtx        context.Context
+	executionCancel     context.CancelFunc
 }
 type NetworkInfo struct {
 	Mode string   `json:"mode"`
@@ -115,6 +119,7 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	a.backendChanged, a.stop, a.done = make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
 	a.executionCtx, a.executionCancel = context.WithCancel(context.Background())
 	a.transfers = toolsfs.NewTransfers()
+	a.Delegate = delegate.New(a.delegateEnded)
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
 	for _, option := range options {
 		option(a)
@@ -153,6 +158,7 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	a.Backends.WaitReady(ctx)
+	a.unsubscribeDelegate = a.store.Subscribe(a.delegateSwitched)
 	go a.supervise(c)
 	retained = true
 	return a, nil
@@ -451,7 +457,10 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			if slices.Contains(cfg.Agent.DisabledTools, name) {
 				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
 			}
-			if a.draining.Load() && (name == "exec.run" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act" || name == "computer.ref_act") {
+			if strings.HasPrefix(name, "delegate.") && !cfg.Agent.Delegate.Enabled {
+				return Result(nil, toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled")), nil
+			}
+			if a.draining.Load() && (name == "exec.run" || name == "delegate.run" || name == "delegate.send" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act" || name == "computer.ref_act") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
 			}
 			if !Allowed(cfg, caller, name, "") {
@@ -493,6 +502,8 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 				out, e = a.Exec.Run(ctx, caller.ID, resolver, engine, raw)
 			case name == "exec.output":
 				out, e = a.Exec.Output(caller.ID, raw)
+			case strings.HasPrefix(name, "delegate."):
+				out, e = a.Delegate.Tool(ctx, delegate.Request{Caller: caller.ID, Settings: cfg.Agent.Delegate, Resolver: resolver, Policy: engine}, name, raw)
 			case strings.HasPrefix(name, "pty."):
 				out, e = a.PTY.Call(ctx, caller, resolver, engine, name, raw)
 			case strings.HasPrefix(name, "backend."):
@@ -681,6 +692,8 @@ func (a *Agent) Close() {
 		if a.computerUnprotect != nil {
 			a.computerUnprotect()
 		}
+		a.unsubscribeDelegate()
+		a.Delegate.Close()
 		a.Exec.Close()
 		a.Backends.Close()
 		a.Leases.Close()

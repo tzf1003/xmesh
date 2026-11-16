@@ -14,6 +14,11 @@ import (
 // runLaunched starts the command through the platform launcher form of the
 // policy sandbox and owns its process group until it exits or the context ends.
 func runLaunched(ctx context.Context, p *policy.Engine, cwd string, a Args, env []string, out, errout *os.File) (int, bool, error) {
+	return runLaunchedStarted(ctx, p, cwd, a, env, out, errout, nil)
+}
+
+// runLaunchedStarted is runLaunched that also calls started, when it is not nil, once the process exists.
+func runLaunchedStarted(ctx context.Context, p *policy.Engine, cwd string, a Args, env []string, out, errout *os.File, started func()) (int, bool, error) {
 	launch, argv, env, e := p.Sandbox(a.Cmd, a.Args, cwd, env)
 	if e != nil {
 		return 0, false, e
@@ -32,6 +37,9 @@ func runLaunched(ctx context.Context, p *policy.Engine, cwd string, a Args, env 
 		return 0, false, toolerr.Internal("exec.start", e)
 	}
 	defer finish()
+	if started != nil {
+		started()
+	}
 	done := make(chan error, 1)
 	go func() { done <- waitCommand() }()
 	timedOut := false

@@ -870,7 +870,7 @@ func (v *view) publish(generation uint64) {
 	}
 }
 func builtin(name string) bool {
-	for _, p := range []string{"sys.", "exec.", "pty.", "fs.", "backend.", "computer."} {
+	for _, p := range []string{"sys.", "exec.", "pty.", "fs.", "backend.", "computer.", "delegate."} {
 		if strings.HasPrefix(name, p) {
 			return true
 		}

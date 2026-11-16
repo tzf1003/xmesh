@@ -22,7 +22,7 @@
     "backendName": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,62}$",
-      "not": { "enum": ["fs", "exec", "pty", "sys", "backend", "computer"] }
+      "not": { "enum": ["fs", "exec", "pty", "sys", "backend", "computer", "delegate"] }
     },
     "quota": {
       "type": "object",
