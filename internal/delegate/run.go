@@ -89,16 +89,24 @@ func (m *Manager) run(ctx context.Context, r Request, raw json.RawMessage) (Obje
 	if sessionID != "" && len(spec.resumeArgs) == 0 {
 		return nil, toolerr.Args("session_id")
 	}
-	if _, err := runexec.LookupCommand(spec.cmd, resolved.Path); err != nil {
+	binary, err := locateRunner(spec.cmd, resolved.Path)
+	if err != nil {
 		return nil, toolerr.Args("runner")
 	}
 	argv := spec.argv(mode, sessionID)
+	argv[0] = binary
 	if err := r.Policy.Command(argv[0], argv[1:]); err != nil {
 		return nil, err
 	}
 	env, err := r.Policy.Environment(nil)
 	if err != nil {
 		return nil, err
+	}
+	if extra, ok := withBinaryDir(env, binary); ok {
+		// The policy still filters the new PATH. When it refuses, the task keeps the inherited one.
+		if widened, e := r.Policy.Environment(extra); e == nil {
+			env = widened
+		}
 	}
 	env = append(env, "XMESH_DELEGATE=1")
 	fp := fingerprint(a.Runner, a.Prompt, resolved.Path, mode, sessionID, timeout.String())
