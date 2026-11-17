@@ -22,6 +22,8 @@
         "not_owner",
         "session_not_found",
         "exec_saturated",
+        "delegate_saturated",
+        "delegate_unavailable",
         "lease_required",
         "resource_busy",
         "backend_unavailable",
@@ -244,6 +246,25 @@
         "required": ["error"]
       },
       "then": { "required": ["op"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "delegate_saturated" } },
+        "required": ["error"]
+      },
+      "then": { "required": ["in_use", "limit"] }
+    },
+    {
+      "if": {
+        "properties": { "error": { "const": "delegate_unavailable" } },
+        "required": ["error"]
+      },
+      "then": {
+        "required": ["reason"],
+        "properties": {
+          "reason": { "enum": ["socket_missing", "connect_failed", "key_unreadable", "write_timeout", "write_failed"] }
+        }
+      }
     }
   ]
 }

@@ -363,6 +363,8 @@ type Agent struct {
 	Policy        Policy       `json:"policy"`
 	Quota         Quota        `json:"quota"`
 	FS            FileTransfer `json:"fs"`
+	// Delegate is agent delegation (CTR-DLG-06). It is off unless enabled.
+	Delegate Delegate `json:"delegate"`
 }
 
 type FileTransfer struct {
@@ -549,6 +551,7 @@ func Parse(b []byte) (*Config, error) {
 	c.Agent.Exec = Exec{4, 1, "120s", 200, "256KiB"}
 	c.Agent.PTY = PTY{20, 8, "30m", "10m", "1MiB", "auto", "5m", 20}
 	c.Agent.FS.MaxFileSize = "1GiB"
+	setDelegateDefaults(&c.Agent.Delegate)
 	c.Agent.Policy.Isolation = "L1"
 	c.Agent.DefaultCWD = "~"
 	c.Gateway.ExposeBackends = "all"
@@ -790,7 +793,7 @@ func (c *Config) Validate() error {
 	}
 	for name, b := range c.Agent.Backends {
 		switch name {
-		case "fs", "exec", "pty", "sys", "backend", "computer":
+		case "fs", "exec", "pty", "sys", "backend", "computer", "delegate":
 			return fail("/agent/backends/" + name + ": 保留名称，不得与内置工具组同名")
 		}
 		if utf8.RuneCountInString(b.Desc) > 200 {
@@ -851,6 +854,9 @@ func (c *Config) Validate() error {
 	}
 	if _, err := c.Agent.FS.Limit(); err != nil {
 		return fail("/agent/fs/max_file_size")
+	}
+	if err := c.validateDelegate(); err != nil {
+		return err
 	}
 	return c.validateCI()
 }

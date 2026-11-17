@@ -198,6 +198,9 @@ func (l *Logger) recordSessionOrigin(x *Execution, origin, oauthSession, caller,
 			digest["session_id"] = meta.SessionID
 		}
 	}
+	if strings.HasPrefix(localTool, "delegate.") {
+		delegateDigest(record, args, out)
+	}
 	if origin == "panel" {
 		record["origin"] = origin
 	}
@@ -243,6 +246,67 @@ func (l *Logger) recordSessionOrigin(x *Execution, origin, oauthSession, caller,
 	}
 	return l.Write(record)
 }
+
+// DelegateTaskStatus maps a delegate task state (CTR-DLG-03) to the task_status values of the schema.
+// It returns "" for a state the schema has no word for.
+func DelegateTaskStatus(state string) string {
+	switch state {
+	case "running":
+		return "running"
+	case "done":
+		return "passed"
+	case "failed":
+		return "failed"
+	case "timeout":
+		return "timed_out"
+	case "cancelled":
+		return "cancelled"
+	}
+	return ""
+}
+
+// delegateDigest keeps the identifiers that CTR-DLG-06 names for a delegate call: the runner, the mode, the
+// session, the task (as run_id) and its state, and the message id. The digests of the arguments and of the
+// result are dropped, because a short prompt, message or answer could be guessed from its hash.
+func delegateDigest(record map[string]any, args json.RawMessage, out map[string]any) {
+	digest := record["args_digest"].(map[string]any)
+	delete(digest, "value_sha256")
+	delete(record, "output_sha256")
+	var in struct {
+		Runner    string `json:"runner"`
+		Mode      string `json:"mode"`
+		SessionID string `json:"session_id"`
+		TaskID    string `json:"task_id"`
+	}
+	_ = json.Unmarshal(args, &in)
+	if bounded(in.Runner, 64) {
+		digest["runner"] = in.Runner
+	}
+	if in.Mode == "read" || in.Mode == "write" {
+		digest["mode"] = in.Mode
+	}
+	if bounded(in.SessionID, 128) {
+		digest["session_id"] = in.SessionID
+	}
+	taskID := in.TaskID
+	if id, ok := out["task_id"].(string); ok {
+		taskID = id
+	}
+	if bounded(taskID, 128) {
+		record["run_id"] = taskID
+	}
+	if state, ok := out["state"].(string); ok {
+		if status := DelegateTaskStatus(state); status != "" {
+			record["task_status"] = status
+		}
+	}
+	if id, ok := out["message_id"].(string); ok && bounded(id, 32) {
+		digest["message_id"] = id
+	}
+}
+
+// bounded reports whether s is a non-empty string of at most limit bytes.
+func bounded(s string, limit int) bool { return s != "" && len(s) <= limit }
 
 // Event writes a metadata-only record that is not a tool call, such as a
 // dropped progress notification (CTR-MUX-02). It carries no arguments.

@@ -372,14 +372,19 @@ func (v *view) surfaceNow() Surface {
 }
 
 // builtinGroups are the tool groups every Agent serves itself.
-var builtinGroups = []string{"sys", "exec", "pty", "fs", "backend", "computer"}
+var builtinGroups = []string{"sys", "exec", "pty", "fs", "backend", "computer", "delegate"}
+
+// conditionalGroups are built-in groups that an Agent serves only while its
+// configuration turns them on. Listing one of them waits for the other devices
+// like a backend listing does: the device that serves it may be a remote one.
+var conditionalGroups = []string{"delegate"}
 
 // waitsForOthers says whether tools/list must wait for the first catalogue of
 // the devices other than the local one and the default. Full lists every device,
 // so it does. In unified and compact the listed tools come from the built-in
 // groups, which the waited-for devices already serve; only a listing of backend
-// tools needs the other devices. Favorite backends that a slow device adds
-// later arrive through tools/list_changed.
+// tools, or of a conditional group, needs the other devices. Favorite backends
+// that a slow device adds later arrive through tools/list_changed.
 func (v *view) waitsForOthers() bool {
 	s := v.surfaceNow()
 	switch s.Mode {
@@ -387,15 +392,22 @@ func (v *view) waitsForOthers() bool {
 		return true
 	case SurfaceUnified:
 		for _, group := range s.ListedGroups {
-			if !slices.Contains(builtinGroups, group) {
+			if needsOtherDevices(group) {
 				return true
 			}
 		}
 	}
 	for _, name := range s.PinnedTools {
-		if !slices.Contains(builtinGroups, toolGroup(name)) {
+		if needsOtherDevices(toolGroup(name)) {
 			return true
 		}
 	}
 	return false
+}
+
+// needsOtherDevices says whether a group listed on its own can be missing from
+// the catalogue of the local device and the default: every group that is not
+// built in, and the conditional ones.
+func needsOtherDevices(group string) bool {
+	return !slices.Contains(builtinGroups, group) || slices.Contains(conditionalGroups, group)
 }

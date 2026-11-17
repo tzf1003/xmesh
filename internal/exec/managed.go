@@ -23,6 +23,11 @@ const managedCleanupLimit = 90 * time.Second
 // obligation outlives a successful tool result. An unfinished cleanup is
 // reported instead of being hidden behind the command's own result.
 func runManaged(ctx context.Context, runner sandbox.Runner, cwd string, a Args, env []string, out, errout *os.File) (int, bool, error) {
+	return runManagedStarted(ctx, runner, cwd, a, env, out, errout, nil)
+}
+
+// runManagedStarted is runManaged that also calls started, when it is not nil, once the runner has started the process.
+func runManagedStarted(ctx context.Context, runner sandbox.Runner, cwd string, a Args, env []string, out, errout *os.File, started func()) (int, bool, error) {
 	command, e := managedCommand(a.Cmd, cwd)
 	if e != nil {
 		return 0, false, e
@@ -47,6 +52,9 @@ func runManaged(ctx context.Context, runner sandbox.Runner, cwd string, a Args, 
 			return 1, true, nil
 		}
 		return 0, false, toolerr.SandboxRunner("sandbox.runner_failed", startErr)
+	}
+	if started != nil {
+		started()
 	}
 	type result struct {
 		code int

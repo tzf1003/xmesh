@@ -1,0 +1,17 @@
+{
+  "time": "2026-11-16T09:12:40.512Z",
+  "event": "task_complete",
+  "caller": "node-abc/s7f",
+  "device": "win-dev-01",
+  "tool": "delegate.run",
+  "args_digest": {
+    "runner": "claude",
+    "resolved_path": "C:\\Users\\x\\repos\\foo",
+    "mode": "read"
+  },
+  "run_id": "t-3f9c1a0e7b2d4c6f8a1b2c3d4e5f6071",
+  "task_status": "passed",
+  "status": "ok",
+  "error": null,
+  "duration_ms": 84210
+}

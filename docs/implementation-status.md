@@ -495,3 +495,22 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 | 实测后待用户本机复测 | Windows：未安装服务时 `xmesh stop --json`，多网卡机器的 LAN 选网卡，无符号链接权限账户上 `go test ./internal/privdir ./internal/cwd`，未提权账户下 L2 被拒的托盘与面板显示；macOS：Gatekeeper 与 `xattr` 放行、登录项自启、`install` 与 launchd 用户服务、向导最后的安装步骤、通知弹窗。 |
 | beta 标签 | 用户已推送 `v0.1.0-beta.1`（指向 `21698d4`），已作为预发布发布：<https://github.com/tzf1003/xmesh/releases/tag/v0.1.0-beta.1>，含 6 个 Go 归档、4 个未签名 UI 安装包和 `SHA256SUMS`（协调线转述）。`release.yml` 的 UI 安装包已由 #53 接入。会话代理仍拒绝推送标签，之后的标签仍需用户推送。 |
 | Windows 代码签名与 Apple 开发者证书 | 桌面 UI 正式发布前需要；在此之前 beta 为未签名构建。 |
+
+## 2026-11-16 Agent 委托（delegate）一期
+
+- **契约**（本 PR）：新增 [delegate.md](contracts/delegate.md)，编号 CTR-DLG-01 至 06。同步 [errors.md](contracts/errors.md)（`delegate_saturated`、`delegate_unavailable`）、[config.md](contracts/config.md)、`schemas/config.schema.json`（`agent.delegate` 与 `disabled_tools` 中的五个工具名）、[gateway.md](contracts/gateway.md) 的组列表、[05-tools.md](design/05-tools.md)、[11-decisions.md](design/11-decisions.md) 与 [符合性矩阵](conformance.md) 的阶段 7。
+- **实现**（本 PR 第二个提交）：`internal/delegate`（任务管理器、运行器 argv 与输出解析、会话发现与推送式注入，Unix socket 与 Windows 命名管道）、`internal/config/delegate.go`、`internal/role/agent` 的分发、停用与 draining 检查、任务结束审计、`internal/exec/stream.go`（`RunStream`，供委托边运行边读输出），以及保留组名与审计摘要的 schema。
+- **验证**（2026-11-16，开发容器）：`go vet ./...` 通过；`go test -race ./...` 39 个包通过，无数据竞争；`GOOS=windows` 与 `GOOS=darwin` 下委托相关包 `go vet` 通过，`GOOS=windows go build ./cmd/xmesh` 通过；`scripts/conformance_check.py` 153/153；`docs/contracts/schemas/check_examples.py` 通过。
+- **未验证**：
+  - Codex 运行器的默认参数（`--sandbox`、`exec resume`）：容器里没有 Codex CLI，发布前需在有 Codex 的环境核对。
+  - 向真实运行中的 Claude Code 会话注入：目前只有对伪造 socket 的单元测试。Claude Code 在忙碌回合中如何排队注入消息，未测。
+  - Windows 上的命名管道写入、进程存活判断与进程树终止，以及 macOS 上的进程树终止：只做了交叉编译，未在对应系统上运行。
+  - 注入的 `write_timeout` 与 `write_failed` 两个原因码没有测试覆盖。
+- **契约已补充的两处细节**（见 [delegate.md](contracts/delegate.md)）：`mode: write` 未开启时，在解析 `cwd` 之前即返回 `policy_denied`；`session_id` 续聊限定为同一调用方、同一运行器的任务返回过的值。
+- **审查修正**（Devin 审查 `a9ce846` 的发现，已确认并修复）：
+  - 命令自行退出后，Unix 启动器形式终止同一进程组中残留的子进程。此前任务已显示 `done`，子进程仍在运行，且 `delegate.cancel` 对已结束的任务无效。`exec.run` 的生命周期不变。
+  - 事件文本截断后复制，不再让超长行（单行上限 16 MiB）整段留在内存中。
+  - 委托开关在调用读取配置与登记任务之间被关闭时，任务不登记、不启动（`Manager.Generation`，`Request.Gen`）。
+  - 错误码契约：`error.schema.json` 补入 `delegate_saturated`、`delegate_unavailable` 及其必填字段；委托的 `policy_denied` 带 `reason`；`not_found` 带 `name`，与 `output_ref` 一致。
+- **CodeRabbit 审查修正**（`b8d46c9` 之后的发现，已逐条核对）：`processAlive` 拒绝超出有符号 32 位（Unix）与 DWORD（Windows）范围的 pid；Windows 的 `deliver` 只打开命名管道，普通文件直接拒绝，不再被覆盖；事件预算按每条事件 64 字节的记录开销计，空事件也有上限；最终答复与备用答复各上限 4 MiB，截断时带 `result_truncated`；网关列出 `delegate` 组时等待其他设备的首次目录（`conditionalGroups`），因为该组只在启用了委托的设备上存在；`05-tools.md` 的缺省值说明更正。
+- **待决定（安全）**：（1）OAuth 客户端的授权范围：`delegate.*` 现在需要 `exec:<设备>`（或 `exec:*`），与 `exec.run` 同级，`backend:*:*` 不再授权委托工具。（2）`agent.delegate.allow_sessions` 现在缺省为 `false`，只有显式设为 `true` 才注入活会话。两项都已按推荐方案在分支上实现，待用户确认；确认前 PR 不合并，若选择其他方案再调整。

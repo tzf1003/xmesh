@@ -13,17 +13,17 @@ SUITES = ("go", "windows_native", "l2_unix", "headscale", "ui", "ui_mcp", "compu
 # Keep expensive integration suites scoped to their runtime dependencies.
 NETWORK_PACKAGES = {
     "app", "audit", "backend", "backendenv", "config", "connectivity", "control",
-    "cwd", "device", "devicelink", "exec", "filelock", "fs", "identity", "lease",
+    "cwd", "delegate", "device", "devicelink", "exec", "filelock", "fs", "identity", "lease",
     "localendpoint", "mcpmux", "mdns", "mesh", "oauth", "policy", "privdir", "pty",
     "quota", "role", "sandbox", "spake2", "toolerr", "winbox", "winjob",
 }
 WINDOWS_PACKAGES = {
-    "app", "config", "control", "cwd", "exec", "filelock", "fs", "identity",
+    "app", "config", "control", "cwd", "delegate", "exec", "filelock", "fs", "identity",
     "localendpoint", "policy", "privdir", "pty", "quota", "role", "sandbox",
     "toolerr", "winbox", "winjob",
 }
 L2_PACKAGES = {
-    "app", "config", "control", "cwd", "exec", "identity", "localendpoint",
+    "app", "config", "control", "cwd", "delegate", "exec", "identity", "localendpoint",
     "policy", "privdir", "pty", "sandbox", "toolerr",
 }
 COMPUTER_PACKAGES = {
@@ -31,7 +31,7 @@ COMPUTER_PACKAGES = {
     "privdir", "role", "toolerr",
 }
 MCP_PACKAGES = {
-    "app", "backend", "backendenv", "config", "control", "cwd", "exec", "identity",
+    "app", "backend", "backendenv", "config", "control", "cwd", "delegate", "exec", "identity",
     "lease", "localendpoint", "mcpmux", "mesh", "oauth", "policy", "privdir", "pty",
     "quota", "role", "sandbox", "toolerr", "winbox", "winjob",
 }
