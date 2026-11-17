@@ -6,6 +6,7 @@ import { playgroundZh, playgroundEn } from "./playground-messages";
 
 import { topologyEn, topologyZh } from "./topology-messages";
 import { computerEn, computerZh } from "./computer-messages";
+import { delegateEn, delegateZh } from "./delegate-messages";
 import { kernelEn, kernelZh } from "./kernel-messages";
 
 export const zh = {
@@ -45,6 +46,7 @@ export const zh = {
   "device.tagsNarrowHint": "去掉权限组会结束该设备现有的会话；只增加权限组不会打断现有会话。",
 
   ...computerZh,
+  ...delegateZh,
   ...playgroundZh,
   ...workspaceZh,
   ...topologyZh,
@@ -1133,6 +1135,7 @@ export const en: Record<Key, string> = {
   "mode.offline": "Device networking disabled",
 
   ...computerEn,
+  ...delegateEn,
   ...playgroundEn,
   ...workspaceEn,
   ...topologyEn,

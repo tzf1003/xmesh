@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "allow_write": true,
+  "allow_sessions": true,
+  "max_concurrent": 2,
+  "running": 1,
+  "runners": [
+    { "name": "claude", "available": true, "path": "/usr/local/bin/claude" },
+    { "name": "codex", "available": false }
+  ],
+  "sessions": [
+    { "session_id": "3f1c9a2e-6b7d-4e8f-9a0b-1c2d3e4f5a6b", "runner": "claude", "pid": 8812, "cwd": "/home/dev/repos/foo", "name": "foo refactor", "status": "busy", "tier": "push" }
+  ],
+  "tasks": [
+    { "task_id": "t-5e0a7c41b9d24f6e8a13c0d7f2e4b916", "caller": "node-abc/s7f", "runner": "claude", "state": "running", "cwd": "/home/dev/repos/foo", "started_at": "2026-11-17T03:00:00.123Z", "duration_ms": 42000, "session_id": "9b2d4f61-0c3e-4a7b-8d5f-2e1a6c9b0d74" },
+    { "task_id": "t-19ab3e02c5f84d7aa6e1b9d0c3f27a48", "caller": "node-abc/s7f", "runner": "codex", "state": "failed", "cwd": "/home/dev/repos/bar", "started_at": "2026-11-17T02:10:00.000Z", "duration_ms": 1530 }
+  ]
+}

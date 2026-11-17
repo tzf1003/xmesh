@@ -514,3 +514,10 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
   - 错误码契约：`error.schema.json` 补入 `delegate_saturated`、`delegate_unavailable` 及其必填字段；委托的 `policy_denied` 带 `reason`；`not_found` 带 `name`，与 `output_ref` 一致。
 - **CodeRabbit 审查修正**（`b8d46c9` 之后的发现，已逐条核对）：`processAlive` 拒绝超出有符号 32 位（Unix）与 DWORD（Windows）范围的 pid；Windows 的 `deliver` 只打开命名管道，普通文件直接拒绝，不再被覆盖；事件预算按每条事件 64 字节的记录开销计，空事件也有上限；最终答复与备用答复各上限 4 MiB，截断时带 `result_truncated`；网关列出 `delegate` 组时等待其他设备的首次目录（`conditionalGroups`），因为该组只在启用了委托的设备上存在；`05-tools.md` 的缺省值说明更正。
 - **待决定（安全）**：（1）OAuth 客户端的授权范围：`delegate.*` 现在需要 `exec:<设备>`（或 `exec:*`），与 `exec.run` 同级，`backend:*:*` 不再授权委托工具。（2）`agent.delegate.allow_sessions` 现在缺省为 `false`，只有显式设为 `true` 才注入活会话。两项都已按推荐方案在分支上实现，待用户确认；确认前 PR 不合并，若选择其他方案再调整。
+
+## 2026-11-17 Agent 委托桌面视图（API 2.7）
+
+- **契约**：API 2.7。新增能力 `delegate` 与 `GET /v2/delegate`（[control-delegate.schema.json](contracts/schemas/control-delegate.schema.json)），说明见 [control.md](contracts/control.md) 的「Agent 委托视图」；[delegate.md](contracts/delegate.md) 补一段本机视角的说明。
+- **实现**：`internal/delegate/overview.go` 汇总运行器、活会话与各调用方的任务，不含提示词、输出和答复；`internal/role/agent/control.go` 的 `DelegateState` 映射为控制类型；`internal/control/delegate.go` 只在节点有 Agent 角色时声明能力。桌面端「Agent 委托」页位于「运行」组，开关经 `PATCH /v2/config` 写入 `/agent/delegate/enabled`，`allow_write` 与 `allow_sessions` 只读展示。
+- **未做**：控制通道取消单个任务；桌面端修改 `allow_write` 与 `allow_sessions`。
+- **验证**（2026-11-17，开发容器）：`go vet ./...` 通过；改动包的 `go test -race` 与全量 `go test ./...` 通过；`check_examples.py`、`check_control.py`、`conformance_check.py` 通过；UI 的 `check-types`、`typecheck` 通过，`npm test` 为 669 通过、7 跳过、0 失败；端到端 `panel-delegate.spec.ts` 与 `panel-computer.spec.ts` 共 7 个用例通过。

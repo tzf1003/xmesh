@@ -84,6 +84,7 @@ var typeFor = map[string]func() any{
 	"PreferredIPRunRequest":      func() any { return new(v2.PreferredIPRunRequest) },
 	"PreferredIPInspectRequest":  func() any { return new(v2.PreferredIPInspectRequest) },
 	"PreferredIPInspectResponse": func() any { return new(v2.PreferredIPInspectResponse) },
+	"DelegateState":              func() any { return new(v2.DelegateState) },
 }
 
 func fixtures(t *testing.T, sub string) map[string][]byte {
@@ -278,7 +279,7 @@ func Test_CTRCTL12_RouteTable(t *testing.T) {
 			t.Errorf("route %s is a stream and has a response type", r.ID)
 		}
 	}
-	for _, c := range []v2.Capability{v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer} {
+	for _, c := range []v2.Capability{v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer, v2.CapDelegate} {
 		if !capabilities[c] {
 			t.Errorf("capability %s has no route", c)
 		}
@@ -330,7 +331,7 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 		}
 	}
 	check("Capability", enumOf(t, "control-common.schema.json", "$defs", "Capability", "enum"),
-		sorted(v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer))
+		sorted(v2.CapStatus, v2.CapEvents, v2.CapPeers, v2.CapSessions, v2.CapDrain, v2.CapConfigRead, v2.CapConfigWrite, v2.CapPair, v2.CapPats, v2.CapGateway, v2.CapIngress, v2.CapAudit, v2.CapCI, v2.CapComputer, v2.CapDelegate))
 	check("Severity", enumOf(t, "control-common.schema.json", "$defs", "Severity", "enum"),
 		sorted(v2.SeverityInfo, v2.SeverityWarning, v2.SeverityError))
 	check("WarningCode", enumOf(t, "control-common.schema.json", "$defs", "WarningCode", "enum"),
@@ -356,8 +357,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v2.APIVersion != "2.6" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 2.2", v2.APIVersion)
+	if v2.APIVersion != "2.7" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 2.7", v2.APIVersion)
 	}
 }
 

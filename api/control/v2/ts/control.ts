@@ -111,7 +111,8 @@ export type Capability =
   | "ingress"
   | "audit"
   | "ci"
-  | "computer";
+  | "computer"
+  | "delegate";
 export type Severity = "info" | "warning" | "error";
 /**
  * 次版本可以增加取值。客户端遇到未知取值按 unclassified 处理。
@@ -1026,6 +1027,67 @@ export interface ApplyError {
    * 给人看的原因，例如监听地址被占用，以及运行中的进程现在是什么状态。
    */
   message: string;
+}
+export interface DelegateRunner {
+  name: string;
+  available: boolean;
+  /**
+   * 可执行文件的解析结果，仅在 available 为 true 时给出。
+   */
+  path?: string;
+}
+export interface DelegateSession {
+  session_id: string;
+  runner: "claude";
+  pid: number;
+  cwd: string;
+  name: string;
+  /**
+   * 会话自己报告的状态，原样透传（例如 busy、idle）。
+   */
+  status: string;
+  tier: "push";
+}
+export interface DelegateTask {
+  task_id: string;
+  /**
+   * 创建任务的调用方 id。控制通道不按调用方过滤。
+   */
+  caller: string;
+  runner: string;
+  state: "running" | "done" | "failed" | "timeout" | "cancelled";
+  cwd: string;
+  started_at: Timestamp;
+  /**
+   * 运行中为已运行时长，结束后为总时长。
+   */
+  duration_ms: number;
+  /**
+   * 运行器给出会话 id 后才有。
+   */
+  session_id?: string;
+}
+export interface DelegateState {
+  /**
+   * agent.delegate.enabled。为 false 时五个委托工具不可用。
+   */
+  enabled: boolean;
+  allow_write: boolean;
+  /**
+   * 为 false 时 sessions 恒为空。
+   */
+  allow_sessions: boolean;
+  max_concurrent: number;
+  /**
+   * 占用并发名额的任务数，包括所有调用方。
+   */
+  running: number;
+  runners: DelegateRunner[];
+  sessions: DelegateSession[];
+  /**
+   * 运行中的任务与保留中的已结束任务，按开始时间从新到旧。
+   */
+  tasks: DelegateTask[];
 }
 export interface DrainState {
   draining: boolean;
@@ -2214,7 +2276,7 @@ export interface IngressInfo1 {
   tool_surface?: "unified" | "compact" | "full";
 }
 
-export const CONTROL_API_VERSION = "2.6" as const;
+export const CONTROL_API_VERSION = "2.7" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -2232,7 +2294,8 @@ export const CONTROL_CAPABILITIES = [
   "ingress",
   "audit",
   "ci",
-  "computer"
+  "computer",
+  "delegate"
 ] as const;
 
 /** Event "type" values on GET /v2/events, in schema order. */
@@ -3128,6 +3191,20 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "stream": false,
     "if_match": "none",
     "errors": []
+  },
+  {
+    "id": "control.delegate.get",
+    "method": "GET",
+    "path": "/v2/delegate",
+    "capability": "delegate",
+    "since": "2.7",
+    "query": null,
+    "body": null,
+    "response": "DelegateState",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": []
   }
 ];
 
@@ -3184,4 +3261,5 @@ export interface ControlRouteTypes {
   "control.preferredip.get": { query: undefined; body: undefined; response: PreferredIPState };
   "control.preferredip.run": { query: undefined; body: PreferredIPRunRequest; response: PreferredIPState };
   "control.preferredip.inspect": { query: undefined; body: PreferredIPInspectRequest; response: PreferredIPInspectResponse };
+  "control.delegate.get": { query: undefined; body: undefined; response: DelegateState };
 }

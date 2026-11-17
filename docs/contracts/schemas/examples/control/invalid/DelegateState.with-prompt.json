@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "allow_write": false,
+  "allow_sessions": false,
+  "max_concurrent": 2,
+  "running": 1,
+  "runners": [],
+  "sessions": [],
+  "tasks": [
+    { "task_id": "t-5e0a7c41b9d24f6e8a13c0d7f2e4b916", "caller": "node-abc/s7f", "runner": "claude", "state": "running", "cwd": "/home/dev/repos/foo", "started_at": "2026-11-17T03:00:00.123Z", "duration_ms": 42000, "prompt": "删除 build 目录" }
+  ]
+}

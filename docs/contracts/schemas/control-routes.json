@@ -1,5 +1,5 @@
 {
-  "api_version": "2.6",
+  "api_version": "2.7",
   "routes": [
     {
       "id": "control.status.get",
@@ -839,6 +839,20 @@
       "query": null,
       "body": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPInspectRequest",
       "response": "urn:xmesh:schema:control-preferred-ip:2#/$defs/PreferredIPInspectResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": []
+    },
+    {
+      "id": "control.delegate.get",
+      "method": "GET",
+      "path": "/v2/delegate",
+      "capability": "delegate",
+      "since": "2.7",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateState",
       "success": 200,
       "stream": false,
       "if_match": "none",

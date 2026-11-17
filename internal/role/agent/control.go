@@ -134,6 +134,34 @@ func (a *Agent) Sessions() v2.SessionsResponse {
 	return out
 }
 
+// DelegateState is the delegation view behind GET /v2/delegate (API 2.7). The switch and the limits come from the
+// configuration in force; runners, live sessions and tasks come from the delegation manager. It is not filtered by
+// caller and never carries a prompt, output or reply.
+func (a *Agent) DelegateState() v2.DelegateState {
+	cfg := a.store.Get()
+	settings := cfg.Agent.Delegate
+	var resolver *cwd.Resolver
+	if r, e := cwd.New(cfg.Agent.DefaultCWD, cfg.Agent.Workspaces, cfg.Agent.CWDPolicy); e == nil {
+		resolver = r
+	}
+	view := a.Delegate.Overview(settings, resolver)
+	out := v2.DelegateState{
+		Enabled: settings.Enabled, AllowWrite: settings.AllowWrite, AllowSessions: settings.SessionsAllowed(),
+		MaxConcurrent: settings.Concurrency(), Running: view.Running,
+		Runners: []v2.DelegateRunner{}, Sessions: []v2.DelegateSession{}, Tasks: []v2.DelegateTask{},
+	}
+	for _, r := range view.Runners {
+		out.Runners = append(out.Runners, v2.DelegateRunner{Name: r.Name, Available: r.Available, Path: r.Path})
+	}
+	for _, s := range view.Sessions {
+		out.Sessions = append(out.Sessions, v2.DelegateSession{SessionID: s.ID, Runner: "claude", PID: s.PID, CWD: s.CWD, Name: s.Name, Status: s.Status, Tier: "push"})
+	}
+	for _, t := range view.Tasks {
+		out.Tasks = append(out.Tasks, v2.DelegateTask{TaskID: t.ID, Caller: t.Caller, Runner: t.Runner, State: t.State, CWD: t.CWD, StartedAt: v2.At(t.Started), DurationMS: t.Duration.Milliseconds(), SessionID: t.SessionID})
+	}
+	return out
+}
+
 // backendLeases are the leases the control view shows: backend ownership only.
 func (a *Agent) backendLeases() []lease.Lease {
 	out := []lease.Lease{}

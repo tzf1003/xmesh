@@ -49,6 +49,7 @@ const RING = 1024;
 /** Panel route prefixes and the capability that gates each (PUT and PATCH /v2/config need config.write instead). */
 const PANEL_ROUTE_CAPS: [string, Capability][] = [
   ["/v2/computer", "computer"],
+  ["/v2/delegate", "delegate"],
   ["/v2/preferred-ip", "config.read"],
   ["/v2/config", "config.read"],
   ["/v2/backends", "config.write"],

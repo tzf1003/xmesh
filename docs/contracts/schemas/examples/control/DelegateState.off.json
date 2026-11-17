@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "allow_write": false,
+  "allow_sessions": false,
+  "max_concurrent": 2,
+  "running": 0,
+  "runners": [
+    { "name": "claude", "available": true, "path": "/usr/local/bin/claude" },
+    { "name": "codex", "available": false }
+  ],
+  "sessions": [],
+  "tasks": []
+}

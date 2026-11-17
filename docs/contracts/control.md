@@ -431,3 +431,13 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 **机房与地区（API 2.5）。** 测速握手成功后再发一次 `GET /cdn-cgi/trace` 读出应答的机房（失败时取 `cf-ray` 后缀）。`PreferredIPEntry` 增加 `colo`、`region`；`PreferredIPScanState` 增加 `regions`（按地区的分布，最快在前）、`chosen`（保留地址所属的地区或机房代码）与 `unidentified`。`scan.region_mode` 默认 `auto`：只留延时最低的 `region_count` 个地区；`pick` 只留 `regions`；`none` 不限。该规则只作用于测速自己加入的地址；一次测速读不到任何机房时不筛选，`pick` 无结果时保留上次结果并给出 `error`。
 
 类型与路由见 `control-preferred-ip.schema.json` 与 `control-routes.json`。
+
+## Agent 委托视图（API 2.7）
+
+能力 `delegate` 表示节点有 Agent 角色，持有委托管理器。`GET /v2/delegate` 返回只读视图：`enabled`、`allow_write`、`allow_sessions`，并发上限 `max_concurrent` 与占用数 `running`，运行器（每项 `name`、`available`，找到时给出 `path`），可注入的活会话，以及各调用方的任务（`task_id`、`caller`、`runner`、`state`、`cwd`、`started_at`、`duration_ms`，运行器给出后才有 `session_id`）。没有 Agent 角色的节点不声明该能力，路由返回 `not_implemented`。
+
+与 `delegate.list` 不同，这个视图不按调用方过滤：控制通道属于节点本机用户，桌面端需要看到全部任务。它同样不含提示词、消息正文、最终答复和输出事件（见 [CTR-DLG-06](delegate.md#ctr-dlg-06) 的审计规则）。
+
+开关经 `PATCH /v2/config` 写入 `/agent/delegate/enabled`，热加载，下一次调用生效；关闭时终止全部运行中的任务。`allow_write` 与 `allow_sessions` 在配置文件的 `agent.delegate` 中设置，本视图只读展示。取消单个任务暂未在控制通道提供。
+
+类型与路由见 `control-delegate.schema.json` 与 `control-routes.json`。

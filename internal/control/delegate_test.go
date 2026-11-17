@@ -1,0 +1,45 @@
+package control
+
+import (
+	"testing"
+
+	v2 "github.com/tzf1003/xmesh/api/control/v2"
+)
+
+// fakeDelegate is an agent with one running task of another caller and one runner.
+type fakeDelegate struct{}
+
+func (fakeDelegate) DelegateState() v2.DelegateState {
+	return v2.DelegateState{
+		Enabled: true, AllowWrite: true, AllowSessions: false, MaxConcurrent: 2, Running: 1,
+		Runners:  []v2.DelegateRunner{{Name: "claude", Available: true, Path: "/usr/bin/claude"}, {Name: "codex", Available: false}},
+		Sessions: []v2.DelegateSession{},
+		Tasks: []v2.DelegateTask{{
+			TaskID: "t-5e0a7c41b9d24f6e8a13c0d7f2e4b916", Caller: "node-b/bob", Runner: "claude", State: "running", CWD: "/w/a",
+			StartedAt: v2.Now(), DurationMS: 5,
+		}},
+	}
+}
+
+// conformance: CTR-CTL-12
+//
+// A node without an agent does not declare the delegate capability, and GET /v2/delegate answers not_implemented.
+// Each fixture is a test of its own: on Windows the control pipe name is per node and user, so two servers in one test collide.
+func TestDelegateRouteAbsentWithoutAgent(t *testing.T) {
+	f := newFixture(t)
+	if f.server.hasCapability(v2.CapDelegate) {
+		t.Fatal("delegate capability declared without an agent")
+	}
+	apiError(t, f.do("GET", "/v2/delegate", nil, nil), v2.ErrNotImplemented)
+}
+
+// conformance: CTR-CTL-12
+//
+// A node with an agent declares the delegate capability, and GET /v2/delegate answers with a DelegateState.
+func TestDelegateRouteServedByAgent(t *testing.T) {
+	f := newFixture(t, func(o *Options) { o.Delegate = fakeDelegate{} })
+	if !f.server.hasCapability(v2.CapDelegate) {
+		t.Fatal("delegate capability missing with an agent")
+	}
+	f.ok("GET", "/v2/delegate", nil, "DelegateState")
+}
