@@ -174,7 +174,11 @@ jobs:
         id: sign
         run: |
           signed=false
-          if [ "${{ matrix.platform }}" = win ] && [ -n "$WIN_CSC_LINK" ] && [ -n "$WIN_CSC_KEY_PASSWORD" ]; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # electron-builder skips code signing for pull requests (CSC_FOR_PULL_REQUEST), so a PR run is an unsigned
+            # smoke build. Claiming signed=true here would only make the signature checks below fail.
+            echo "Pull request build: not signing."
+          elif [ "${{ matrix.platform }}" = win ] && [ -n "$WIN_CSC_LINK" ] && [ -n "$WIN_CSC_KEY_PASSWORD" ]; then
             echo "CSC_LINK=$WIN_CSC_LINK" >> "$GITHUB_ENV"
             echo "CSC_KEY_PASSWORD=$WIN_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
             signed=true
