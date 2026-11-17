@@ -197,7 +197,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 | 键 | 含义 |
 | --- | --- |
-| `cmd` | 可执行文件名或路径，不经过 shell |
+| `cmd` | 可执行文件名或路径，不经过 shell。只给文件名时先在 PATH 里找；由 launchd 或 systemd 启动的节点 PATH 很短，找不到时再按顺序查用户目录（`~/.local/bin`、`~/.claude/local`、`~/.npm-global/bin`、`~/.bun/bin`、`~/.volta/bin`、`~/.cargo/bin`，以及 `/opt/homebrew/bin`、`/usr/local/bin`、`/opt/local/bin`）。任务以找到的绝对路径启动，其所在目录会加到任务的 PATH 前面 |
 | `args` | 基础参数数组 |
 | `read_args` | `mode: read` 时追加的参数 |
 | `write_args` | `mode: write` 时追加的参数 |

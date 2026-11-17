@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/tzf1003/xmesh/internal/config"
-	runexec "github.com/tzf1003/xmesh/internal/exec"
 )
 
 // runner is one way to start an Agent CLI without a screen (CTR-DLG-05). kind selects the output mapping: claude
@@ -128,7 +127,7 @@ func runnerRows(cfg config.Delegate, dir string) []RunnerRow {
 			continue
 		}
 		row := RunnerRow{Name: name}
-		if path, err := runexec.LookupCommand(r.cmd, dir); err == nil {
+		if path, err := locateRunner(r.cmd, dir); err == nil {
 			row.Available = true
 			row.Path = path
 		}
