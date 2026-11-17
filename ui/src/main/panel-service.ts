@@ -34,6 +34,7 @@ import type {
   PairTrustUpdateResponse,
   PairPasswordState,
   PatList,
+  DelegateState,
   PatSecret,
   SessionsResponse,
 } from "../shared/control";
@@ -353,6 +354,10 @@ export class PanelService {
 
   setDeviceTags(deviceId: string, tags: string[]): Promise<DataResult<PairTrustUpdateResponse>> {
     return this.data("pair", (c) => c.call("PATCH", `/v2/pair/trust/${deviceId}`, { body: { tags } }));
+  }
+
+  delegate(): Promise<DataResult<DelegateState>> {
+    return this.data("delegate", (c) => c.call("GET", "/v2/delegate"));
   }
 
   listOffers(): Promise<DataResult<OffersResponse>> {

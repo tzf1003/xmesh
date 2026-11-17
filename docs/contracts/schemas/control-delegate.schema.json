@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xmesh:schema:control-delegate:2",
+  "title": "ControlDelegate",
+  "description": "GET /v2/delegate 的只读视图（API 2.7），见 control.md 的「Agent 委托视图」一节。只有元数据：没有提示词、消息正文、最终答复和输出事件。开关经 PATCH /v2/config 的 /agent/delegate/enabled 修改。",
+  "$defs": {
+    "DelegateRunner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "available"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "available": { "type": "boolean" },
+        "path": { "type": "string", "minLength": 1, "description": "可执行文件的解析结果，仅在 available 为 true 时给出。" }
+      }
+    },
+    "DelegateSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "runner", "pid", "cwd", "name", "status", "tier"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "runner": { "const": "claude" },
+        "pid": { "type": "integer", "minimum": 1 },
+        "cwd": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "status": { "type": "string", "description": "会话自己报告的状态，原样透传（例如 busy、idle）。" },
+        "tier": { "const": "push" }
+      }
+    },
+    "DelegateTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "caller", "runner", "state", "cwd", "started_at", "duration_ms"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "caller": { "type": "string", "minLength": 1, "description": "创建任务的调用方 id。控制通道不按调用方过滤。" },
+        "runner": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["running", "done", "failed", "timeout", "cancelled"] },
+        "cwd": { "type": "string", "minLength": 1 },
+        "started_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "duration_ms": { "type": "integer", "minimum": 0, "description": "运行中为已运行时长，结束后为总时长。" },
+        "session_id": { "type": "string", "minLength": 1, "description": "运行器给出会话 id 后才有。" }
+      }
+    },
+    "DelegateState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "allow_write", "allow_sessions", "max_concurrent", "running", "runners", "sessions", "tasks"],
+      "properties": {
+        "enabled": { "type": "boolean", "description": "agent.delegate.enabled。为 false 时五个委托工具不可用。" },
+        "allow_write": { "type": "boolean" },
+        "allow_sessions": { "type": "boolean", "description": "为 false 时 sessions 恒为空。" },
+        "max_concurrent": { "type": "integer", "minimum": 1 },
+        "running": { "type": "integer", "minimum": 0, "description": "占用并发名额的任务数，包括所有调用方。" },
+        "runners": { "type": "array", "items": { "$ref": "#/$defs/DelegateRunner" } },
+        "sessions": { "type": "array", "items": { "$ref": "#/$defs/DelegateSession" } },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/DelegateTask" }, "description": "运行中的任务与保留中的已结束任务，按开始时间从新到旧。" }
+      }
+    }
+  }
+}

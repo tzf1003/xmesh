@@ -23,6 +23,7 @@ import type {
   PatSecret,
   SessionsResponse,
   ComputerState,
+  DelegateState,
 } from "../src/shared/control";
 import type { ConfigReloadResponse } from "../src/shared/ipc";
 import { isAccessEntry, isGatewayHost, isListen, listenPort, listenScope } from "../src/shared/gateway";
@@ -96,6 +97,13 @@ export class PanelData {
   }
   computer: ComputerState = { enabled: true, paused: false, info: { protocol_version: 1, available: true, state: "ready", desktop_id: "desktop", desktop_epoch: "epoch", layout_version: "layout", capabilities: ["screenshot", "pointer", "keyboard", "text"], displays: [{ id: "main", name: "Main display", x: 0, y: 0, width: 1920, height: 1080, scale: 1, rotation: 0 }] }, sessions: [] };
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
+  /** The delegation view (API 2.7). Its switch follows the configuration on disk; the runners, sessions and tasks are fixed. */
+  delegate: DelegateState = fixture("DelegateState.active");
+  private delegateState(): DelegateState {
+    let enabled = false;
+    try { enabled = (parse(this.diskContent) as { agent?: { delegate?: { enabled?: unknown } } } | null)?.agent?.delegate?.enabled === true; } catch { enabled = false; }
+    return { ...this.delegate, enabled };
+  }
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
   restartPaths: string[] = [];
@@ -178,6 +186,7 @@ export class PanelData {
     const u = new URL(url, "http://x");
     const p = u.pathname;
     if (p === "/v2/computer" && method === "GET") return ok(this.computer);
+    if (p === "/v2/delegate" && method === "GET") return ok(this.delegateState());
     if (p === "/v2/computer/pause" && method === "POST") {
       const req = body as { paused?: unknown };
       if (typeof req?.paused !== "boolean") return err(400, "invalid_args", "paused required", { field: "paused" });

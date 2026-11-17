@@ -87,13 +87,13 @@ test("the copied TypeScript types are the contract's generated file", () => {
 });
 
 test("the UI speaks the contract's API version", () => {
-  assert.equal(CONTROL_API_VERSION, "2.6");
+  assert.equal(CONTROL_API_VERSION, "2.7");
 });
 
 test("status, peers, sessions and control.json from the fake validate against the schemas", async () => {
   const status = await call(k.endpoint, "GET", "/v2/status");
   assert.equal(status.status, 200);
-  assert.equal(status.headers["x-xmesh-control-version"], "2.6");
+  assert.equal(status.headers["x-xmesh-control-version"], "2.7");
   validate("control-status", "StatusResponse", status.body);
   validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v2/peers")).body);
   validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v2/sessions")).body);
@@ -141,6 +141,18 @@ test("a capability the kernel does not advertise answers 501 not_implemented", a
     assert.equal((await call(partial.endpoint, "GET", "/v2/status")).status, 200);
   } finally {
     await partial.stop();
+  }
+});
+
+test("GET /v2/delegate answers only when the kernel advertises delegate, and the view validates", async () => {
+  assert.equal((await call(k.endpoint, "GET", "/v2/delegate")).status, 501, "the default fake kernel advertises no delegate capability");
+  const agent = await FakeKernel.start({ pingMs: 50, capabilities: ["status", "delegate"] });
+  try {
+    const r = await call(agent.endpoint, "GET", "/v2/delegate");
+    assert.equal(r.status, 200);
+    validate("control-delegate", "DelegateState", r.body);
+  } finally {
+    await agent.stop();
   }
 });
 
@@ -208,6 +220,8 @@ test("routes the UI calls exist in the contract route table with the capability 
   assert.equal(find("POST", "/v2/drain")?.capability, "drain");
   assert.equal(find("POST", "/v2/resume")?.capability, "drain");
   assert.equal(find("POST", "/v2/resume")?.body, null, "resume takes no body");
+  assert.equal(find("GET", "/v2/delegate")?.capability, "delegate");
+  assert.equal(find("GET", "/v2/delegate")?.response, "DelegateState");
   assert.equal(find("PUT", "/v2/gateway")?.capability, "gateway");
   assert.equal(find("PUT", "/v2/gateway")?.body, "GatewayUpdateRequest");
   assert.equal(find("PUT", "/v2/gateway")?.response, "GatewayUpdateResponse");

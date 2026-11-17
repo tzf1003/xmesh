@@ -6,6 +6,8 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 一期范围：推送式注入只支持 Claude Code（经它自己的收件 socket）；Codex 只走无界面执行与续聊。活会话的回复不回收，`delegate.send` 只保证送达。
 
+本机控制通道的只读视图（`GET /v2/delegate`，API 2.7，见 [control.md](control.md) 的「Agent 委托视图」）是节点本机用户的视角：它列出各调用方的任务，但只有状态、耗时等元数据，不含提示词、输出和答复。
+
 ## CTR-DLG-01
 
 工具名：`delegate.list`。无参数。返回本设备能否委托、本调用方的任务，以及可注入的活会话。

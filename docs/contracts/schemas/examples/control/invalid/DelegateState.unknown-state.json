@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "allow_write": false,
+  "allow_sessions": false,
+  "max_concurrent": 2,
+  "running": 0,
+  "runners": [],
+  "sessions": [],
+  "tasks": [
+    { "task_id": "t-19ab3e02c5f84d7aa6e1b9d0c3f27a48", "caller": "node-abc/s7f", "runner": "claude", "state": "queued", "cwd": "/home/dev/repos/bar", "started_at": "2026-11-17T02:10:00.000Z", "duration_ms": 0 }
+  ]
+}

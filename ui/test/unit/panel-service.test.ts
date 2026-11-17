@@ -426,6 +426,24 @@ test("a capability the kernel lacks is refused locally without a request", async
   assert.equal(k.requests.slice(before).filter((x) => x.path.startsWith("/v2/config") || x.path.startsWith("/v2/pats") || x.path.startsWith("/v2/audit")).length, 0);
 });
 
+test("delegation: the view is the kernel's document", async () => {
+  const { k, service } = await setup([...ALL, "delegate"]);
+  const view = await service.delegate();
+  assert.ok(view.ok);
+  assert.equal(view.data.max_concurrent, 2);
+  assert.ok(Array.isArray(view.data.runners) && Array.isArray(view.data.sessions) && Array.isArray(view.data.tasks));
+  assert.ok(last(k, "GET", "/v2/delegate"));
+});
+
+test("delegation: a kernel that declares no delegate capability is refused locally", async () => {
+  const { k, service } = await setup(ALL);
+  const before = k.requests.length;
+  const refused = await service.delegate();
+  assert.ok(!refused.ok);
+  assert.equal(refused.error.code, "not_implemented");
+  assert.equal(k.requests.slice(before).filter((r) => r.path.startsWith("/v2/delegate")).length, 0);
+});
+
 test("call events feed the recent-calls ring, newest last", async () => {
   const { k, c, service } = await setup();
   const seen: number[] = [];

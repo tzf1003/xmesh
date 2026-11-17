@@ -119,20 +119,33 @@ func (r runner) argv(mode, sessionID string) []string {
 	return append(argv, modeArgs...)
 }
 
-// runnerViews lists the runners for delegate.list. available reports whether the executable can be found from dir.
-func runnerViews(cfg config.Delegate, dir string) []Object {
-	out := []Object{}
+// runnerRows lists the runners under cfg. Available reports whether the executable can be found from dir.
+func runnerRows(cfg config.Delegate, dir string) []RunnerRow {
+	out := []RunnerRow{}
 	for _, name := range runnerNames(cfg) {
 		r, ok := runnerFor(cfg, name)
 		if !ok {
 			continue
 		}
-		row := Object{"name": name, "available": false}
+		row := RunnerRow{Name: name}
 		if path, err := runexec.LookupCommand(r.cmd, dir); err == nil {
-			row["available"] = true
-			row["path"] = path
+			row.Available = true
+			row.Path = path
 		}
 		out = append(out, row)
+	}
+	return out
+}
+
+// runnerViews lists the runners for delegate.list.
+func runnerViews(cfg config.Delegate, dir string) []Object {
+	out := []Object{}
+	for _, row := range runnerRows(cfg, dir) {
+		obj := Object{"name": row.Name, "available": row.Available}
+		if row.Available {
+			obj["path"] = row.Path
+		}
+		out = append(out, obj)
 	}
 	return out
 }

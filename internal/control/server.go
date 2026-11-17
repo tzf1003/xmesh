@@ -54,7 +54,9 @@ type Options struct {
 	// Offers serves the connection-method routes; nil answers them with unavailable.
 	Offers OfferAdmin
 	// Preferred serves the Cloudflare preferred-address routes; nil answers them with unavailable.
-	Preferred      PreferredAdmin
+	Preferred PreferredAdmin
+	// Delegate serves GET /v2/delegate; nil on a node without the agent role, which then declares no delegate capability.
+	Delegate       DelegateAdmin
 	DeviceIdentity *device.Identity
 	DeviceTrust    *device.TrustStore
 	// Applier reports on the roles the node starts, stops and moves when the configuration changes;
@@ -197,6 +199,9 @@ func capabilities(o Options) []v2.Capability {
 	if o.Computer != nil {
 		caps = append(caps, v2.CapComputer)
 	}
+	if o.Delegate != nil {
+		caps = append(caps, v2.CapDelegate)
+	}
 	return caps
 }
 
@@ -321,6 +326,7 @@ func (s *Server) table() map[string]handler {
 		"control.computer.get":        s.getComputer,
 		"control.computer.pause":      s.pauseComputer,
 		"control.computer.revoke":     s.revokeComputer,
+		"control.delegate.get":        s.getDelegate,
 		"control.status.get":          s.status,
 		"control.events.stream":       func(w http.ResponseWriter, r *http.Request, _ *call) { s.events(w, r) },
 		"control.peers.list":          s.listPeers,

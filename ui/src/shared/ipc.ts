@@ -13,6 +13,7 @@ import type {
   ConfigDiagnostic,
   ConfigPutResponse,
   ConfigResponse,
+  DelegateState,
   DrainMode,
   DrainResponse,
   GatewayUpdateRequest,
@@ -110,6 +111,7 @@ export const CHANNELS = {
   ci: "xmesh:ci",
   computer: "xmesh:computer",
   preferredIp: "xmesh:preferred-ip",
+  delegate: "xmesh:delegate",
   playground: "xmesh:playground",
   transfers: "xmesh:transfers",
 } as const;
@@ -390,6 +392,8 @@ export interface PanelApi {
   computer(request: ComputerRequest): Promise<DataResult<ComputerResult>>;
   /** Cloudflare preferred edge addresses (API 2.4，2.5 加机房）: the pool and its scores, run a scan or a refresh, check pasted text. Settings are written through patchConfig. */
   preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>>;
+  /** Agent 委托（API 2.7）：开关、本机运行器、活会话与各调用方的任务，只读。开关经 patchConfig 写入 /agent/delegate/enabled。 */
+  delegate(): Promise<DataResult<DelegateState>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -461,6 +465,7 @@ export const PANEL_API_METHODS = [
   "ci",
   "computer",
   "preferredIp",
+  "delegate",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";
