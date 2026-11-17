@@ -179,8 +179,26 @@ jobs:
             echo "CSC_KEY_PASSWORD=$WIN_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
             signed=true
           elif [ "${{ matrix.platform }}" = mac ] && [ -n "$MAC_CSC_LINK" ] && [ -n "$MAC_CSC_KEY_PASSWORD" ]; then
-            echo "CSC_LINK=$MAC_CSC_LINK" >> "$GITHUB_ENV"
-            echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+            # electron-builder's own temporary keychain failed to unlock on the macOS runner
+            # (security set-key-partition-list: "passphrase ... is not correct") even though the same .p12 imports
+            # fine by hand. Import the certificate into a keychain with a password of our own and hand electron-builder
+            # only the identity (CSC_NAME) and the keychain (CSC_KEYCHAIN).
+            keychain="$RUNNER_TEMP/xmesh-signing.keychain-db"
+            keychain_pass=$(openssl rand -hex 16)
+            cert="$RUNNER_TEMP/xmesh-mac.p12"
+            printf %s "$MAC_CSC_LINK" | openssl base64 -d -A > "$cert"
+            security create-keychain -p "$keychain_pass" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_pass" "$keychain"
+            security import "$cert" -k "$keychain" -P "$MAC_CSC_KEY_PASSWORD" -T /usr/bin/codesign
+            rm -f "$cert"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_pass" "$keychain" > /dev/null
+            existing=$(security list-keychains -d user | tr -d '"')
+            security list-keychains -d user -s "$keychain" $existing
+            identity=$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2; exit}')
+            test -n "$identity" || { echo "No Developer ID Application identity in the imported certificate." >&2; exit 1; }
+            echo "CSC_NAME=$identity" >> "$GITHUB_ENV"
+            echo "CSC_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
             signed=true
           fi
           if [ "$REQUIRE_SIGNING" = true ]; then
