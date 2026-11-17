@@ -23,15 +23,21 @@ func (fakeDelegate) DelegateState() v2.DelegateState {
 
 // conformance: CTR-CTL-12
 //
-// GET /v2/delegate is served, and declares the delegate capability, only when the node has an agent to answer it.
-func TestDelegateRouteNeedsAnAgent(t *testing.T) {
+// A node without an agent does not declare the delegate capability, and GET /v2/delegate answers not_implemented.
+// Each fixture is a test of its own: on Windows the control pipe name is per node and user, so two servers in one test collide.
+func TestDelegateRouteAbsentWithoutAgent(t *testing.T) {
 	f := newFixture(t)
-	apiError(t, f.do("GET", "/v2/delegate", nil, nil), v2.ErrNotImplemented)
-
 	if f.server.hasCapability(v2.CapDelegate) {
 		t.Fatal("delegate capability declared without an agent")
 	}
-	f = newFixture(t, func(o *Options) { o.Delegate = fakeDelegate{} })
+	apiError(t, f.do("GET", "/v2/delegate", nil, nil), v2.ErrNotImplemented)
+}
+
+// conformance: CTR-CTL-12
+//
+// A node with an agent declares the delegate capability, and GET /v2/delegate answers with a DelegateState.
+func TestDelegateRouteServedByAgent(t *testing.T) {
+	f := newFixture(t, func(o *Options) { o.Delegate = fakeDelegate{} })
 	if !f.server.hasCapability(v2.CapDelegate) {
 		t.Fatal("delegate capability missing with an agent")
 	}
