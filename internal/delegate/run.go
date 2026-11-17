@@ -94,15 +94,16 @@ func (m *Manager) run(ctx context.Context, r Request, raw json.RawMessage) (Obje
 		return nil, toolerr.Args("runner")
 	}
 	argv := spec.argv(mode, sessionID)
-	argv[0] = binary
+	// The policy judges the command as configured, as it always did. The task then starts from the resolved path.
 	if err := r.Policy.Command(argv[0], argv[1:]); err != nil {
 		return nil, err
 	}
+	argv[0] = binary
 	env, err := r.Policy.Environment(nil)
 	if err != nil {
 		return nil, err
 	}
-	if extra, ok := withBinaryDir(env, binary); ok {
+	if extra, ok := withDirs(env, runnerDirs(binary, resolved.Path)); ok {
 		// The policy still filters the new PATH. When it refuses, the task keeps the inherited one.
 		if widened, e := r.Policy.Environment(extra); e == nil {
 			env = widened

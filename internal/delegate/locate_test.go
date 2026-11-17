@@ -49,17 +49,48 @@ func TestLocateRunnerFindsUserInstallDirs(t *testing.T) {
 	}
 }
 
-func TestWithBinaryDirAddsOnlyAMissingDirectory(t *testing.T) {
+func TestWithDirsAddsOnlyMissingDirectories(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix path layout")
 	}
 	sep := string(os.PathListSeparator)
 	env := []string{"HOME=/h", "PATH=/usr/bin" + sep + "/bin"}
-	extra, ok := withBinaryDir(env, filepath.Join("/opt", "x", "codex"))
-	if !ok || extra["PATH"] != filepath.Join("/opt", "x")+sep+"/usr/bin"+sep+"/bin" {
-		t.Fatalf("withBinaryDir = %v, %v", extra, ok)
+	extra, ok := withDirs(env, []string{"/opt/x", "/usr/bin", "/opt/x"})
+	if !ok || extra["PATH"] != "/opt/x"+sep+"/usr/bin"+sep+"/bin" {
+		t.Fatalf("withDirs = %v, %v", extra, ok)
 	}
-	if _, ok := withBinaryDir(env, "/usr/bin/codex"); ok {
+	if _, ok := withDirs(env, []string{"/usr/bin"}); ok {
 		t.Fatal("a directory already on PATH must not be added again")
+	}
+}
+
+// An npm CLI is a script that starts with "#!/usr/bin/env node", and Node may live in another directory than the CLI.
+func TestRunnerDirsIncludesTheInterpreterDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shebang scripts")
+	}
+	home := t.TempDir()
+	cliDir := filepath.Join(home, ".npm-global", "bin")
+	nodeDir := filepath.Join(home, ".local", "bin")
+	for _, d := range []string{cliDir, nodeDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cli := filepath.Join(cliDir, "codex")
+	if err := os.WriteFile(cli, []byte("#!/usr/bin/env fakenode\nconsole.log(1)\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nodeDir, "fakenode"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	got := runnerDirs(cli, t.TempDir())
+	if len(got) != 2 || got[0] != cliDir || got[1] != nodeDir {
+		t.Fatalf("runnerDirs = %v, want [%s %s]", got, cliDir, nodeDir)
+	}
+	if plain := runnerDirs(filepath.Join(nodeDir, "fakenode"), t.TempDir()); len(plain) != 1 {
+		t.Fatalf("a shell script needs only its own directory, got %v", plain)
 	}
 }

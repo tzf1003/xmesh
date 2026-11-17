@@ -48,10 +48,35 @@ func locateRunner(cmd, dir string) (string, error) {
 	return "", err
 }
 
-// withBinaryDir returns env with the directory of binary at the front of PATH when PATH does not have it yet. Scripts
-// that start with "#!/usr/bin/env node" need the directory of their interpreter, which is usually next to them.
-func withBinaryDir(env []string, binary string) (extra map[string]string, ok bool) {
-	dir := filepath.Dir(binary)
+// runnerDirs lists the directories a task needs on PATH to run binary: its own, and, for a script that starts with
+// "#!/usr/bin/env node", the directory of that interpreter, which npm and Homebrew often keep elsewhere.
+func runnerDirs(binary, dir string) []string {
+	dirs := []string{filepath.Dir(binary)}
+	f, err := os.Open(binary)
+	if err != nil {
+		return dirs
+	}
+	defer f.Close()
+	head := make([]byte, 256)
+	n, _ := f.Read(head)
+	line, _, _ := strings.Cut(string(head[:n]), "\n")
+	fields := strings.Fields(strings.TrimPrefix(line, "#!"))
+	if !strings.HasPrefix(line, "#!") || len(fields) < 2 || filepath.Base(fields[0]) != "env" {
+		return dirs
+	}
+	name := fields[1]
+	if strings.HasPrefix(name, "-") && len(fields) > 2 {
+		name = fields[2]
+	}
+	if interpreter, err := locateRunner(name, dir); err == nil && filepath.Dir(interpreter) != dirs[0] {
+		dirs = append(dirs, filepath.Dir(interpreter))
+	}
+	return dirs
+}
+
+// withDirs returns the PATH setting for env with dirs put in front of PATH, leaving out the ones PATH already has. ok is
+// false when there is nothing to add.
+func withDirs(env []string, dirs []string) (extra map[string]string, ok bool) {
 	sep := string(os.PathListSeparator)
 	current := ""
 	for _, kv := range env {
@@ -59,13 +84,22 @@ func withBinaryDir(env []string, binary string) (extra map[string]string, ok boo
 			current = v
 		}
 	}
+	have := map[string]bool{}
 	for _, entry := range strings.Split(current, sep) {
-		if entry == dir {
-			return nil, false
+		have[entry] = true
+	}
+	var add []string
+	for _, d := range dirs {
+		if !have[d] {
+			have[d] = true
+			add = append(add, d)
 		}
 	}
-	if current == "" {
-		return map[string]string{"PATH": dir}, true
+	if len(add) == 0 {
+		return nil, false
 	}
-	return map[string]string{"PATH": dir + sep + current}, true
+	if current != "" {
+		add = append(add, current)
+	}
+	return map[string]string{"PATH": strings.Join(add, sep)}, true
 }
