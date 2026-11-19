@@ -138,6 +138,15 @@ func serve(args []string) error {
 	if e != nil {
 		return e
 	}
+	if *localOnly && !*local {
+		if cfg := store.Get(); configWantsDeviceNetwork(cfg) {
+			// A service registered for the local purpose keeps --local-only in its unit. When the
+			// configuration later turns on a device path, the configuration wins; otherwise the node
+			// would keep reporting "尚未加入 tailnet" no matter how often it restarts.
+			fmt.Fprintln(os.Stderr, "配置已启用设备网络（tailnet/direct/cloudflare），忽略服务单元里的 --local-only")
+			*localOnly = false
+		}
+	}
 	options := app.Options{Local: *local || *localOnly, InternalAgent: *localOnly, Listen: *listen, StateDir: *state, PasswordFile: *password, Ingress: *ingress, TunnelListen: *tunnel}
 	if *controlSIDs != "" {
 		options.ControlAllowSIDs = strings.Split(*controlSIDs, ",")
@@ -148,6 +157,15 @@ func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return app.Run(ctx, store, options)
+}
+// configWantsDeviceNetwork reports whether the configuration enables a device path that needs the
+// node to leave local-only mode. LAN is not counted: it is on unless switched off explicitly, and
+// the local purpose keeps its data structure.
+func configWantsDeviceNetwork(cfg *config.Config) bool {
+	if cfg.SchemaVersion == 2 {
+		return cfg.Mesh.TailnetEnabled() || cfg.Mesh.DirectEnabled() || cfg.Mesh.CloudflareEnabled()
+	}
+	return cfg.Mesh.Mode == "tailnet"
 }
 func status(args []string) error {
 	flags := flag.NewFlagSet("status", flag.ContinueOnError)

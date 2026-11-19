@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tzf1003/xmesh/internal/config"
 )
 
 func Test_CLIUsageMentionsEverySubcommand(t *testing.T) {
@@ -54,5 +56,25 @@ func Test_CLIStatusToleratesMissingFields(t *testing.T) {
 	got := formatStatus(map[string]any{"hostname": "bare"})
 	if !strings.Contains(got, "后端: 无") || !strings.Contains(got, "角色: 无") || strings.Contains(got, "map[") || strings.Contains(got, "<nil>") || !strings.Contains(got, "平台: ?/?") {
 		t.Fatalf("缺字段时输出异常:\n%s", got)
+	}
+}
+
+func Test_ConfigWantsDeviceNetworkOverridesLocalOnly(t *testing.T) {
+	off := false
+	local := &config.Config{SchemaVersion: 2}
+	local.Mesh.LAN.Enabled = &off
+	if configWantsDeviceNetwork(local) {
+		t.Fatal("a local-purpose configuration must stay local-only")
+	}
+	tailnet := &config.Config{SchemaVersion: 2}
+	tailnet.Mesh.LAN.Enabled = &off
+	tailnet.Mesh.Tailnet.Enabled = true
+	if !configWantsDeviceNetwork(tailnet) {
+		t.Fatal("an enabled tailnet must win over --local-only in the service unit")
+	}
+	legacy := &config.Config{SchemaVersion: 1}
+	legacy.Mesh.Mode = "tailnet"
+	if !configWantsDeviceNetwork(legacy) {
+		t.Fatal("a schema 1 tailnet configuration must win over --local-only")
 	}
 }
