@@ -201,7 +201,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `args` | 基础参数数组 |
 | `read_args` | `mode: read` 时追加的参数 |
 | `write_args` | `mode: write` 时追加的参数 |
-| `resume_args` | 续聊时替代 `args` 的参数数组，其中的 `{session_id}` 替换为续聊的会话 id |
+| `resume_args` | 续聊时替代 `args` 的参数数组。`{session_id}` 替换为会话 ID，独立的 `{mode_args}` 插入当前模式的参数数组 |
 
 `agent.delegate.runners` 可以按名字覆盖上述任意字段，也可以新增运行器。新增的运行器没有内置解析规则，见下文「输出解析」。
 
@@ -213,17 +213,18 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `args` | `-p --output-format stream-json --verbose` | `exec --json --skip-git-repo-check -` |
 | `read_args` | `--permission-mode dontAsk --permission-prompts none --allowedTools Read,Glob,Grep` | `--sandbox read-only` |
 | `write_args` | `--permission-mode acceptEdits --permission-prompts none --allowedTools Read,Glob,Grep,Edit,Write,Bash` | `--sandbox workspace-write` |
-| `resume_args` | `-p --output-format stream-json --verbose --resume {session_id}` | `exec resume {session_id} --json --skip-git-repo-check -` |
+| `resume_args` | `-p --output-format stream-json --verbose --resume {session_id}` | `exec {mode_args} resume {session_id} --json --skip-git-repo-check -` |
 
 核对状态：
 
 - `claude` 的默认值按 Claude Code 2.1.325 的 `--help` 核对。该版本的 `--permission-mode` 不接受 `default`，所以读模式改用 `dontAsk`，并加 `--permission-prompts none`：需要询问的操作直接拒绝，不挂起。
-- `codex` 的默认值未核对。容器里没有 Codex CLI，发布前需在有 Codex 的环境用 `codex exec --help` 确认 `--sandbox` 与 `resume` 子命令。
+- `codex` 已在 Linux 上用 Codex CLI 0.172.0 核对。`--sandbox` 是 `exec` 的选项，续聊时通过 `{mode_args}` 放在 `resume` 前。见 [冒烟验证记录](../validation/2026-11-26-codex-delegate-runner.md)。
 
 拼接规则：
 
-- argv = 续聊时的 `resume_args`，否则 `args`；再追加模式参数（`read_args` 或 `write_args`）。
-- 若 argv 末尾是单独的 `-`（Codex 用它表示从标准输入读取提示），模式参数插在 `-` 之前。
+- 新任务使用 `args`，续聊使用 `resume_args`。
+- 续聊模板含独立的 `{mode_args}` 时，在该位置插入 `read_args` 或 `write_args`。否则把模式参数追加到参数数组末尾。
+- 追加模式参数时，若参数数组末尾是单独的 `-`（Codex 用它表示从标准输入读取提示），模式参数插在 `-` 之前。
 - 提示词只经标准输入传入，不出现在 argv 中。
 - 子进程环境在 [exec 的环境构造规则](exec.md#ctr-exec-01) 之上追加 `XMESH_DELEGATE=1`。
 

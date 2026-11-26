@@ -159,7 +159,9 @@ func Test_CTRDLG05_ArgvAssembly(t *testing.T) {
 			"--resume", "sess-1", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--allowedTools", "Read,Glob,Grep"}},
 		{"codex read", codex, "read", "", []string{"codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "read-only", "-"}},
 		{"codex write", codex, "write", "", []string{"codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write", "-"}},
-		{"codex resume", codex, "write", "thr-9", []string{"codex", "exec", "resume", "thr-9", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write", "-"}},
+		{"codex resume read", codex, "read", "thr-9", []string{"codex", "exec", "--sandbox", "read-only", "resume", "thr-9", "--json", "--skip-git-repo-check", "-"}},
+		{"codex resume write", codex, "write", "thr-9", []string{"codex", "exec", "--sandbox", "workspace-write", "resume", "thr-9", "--json", "--skip-git-repo-check", "-"}},
+		{"custom resume keeps mode args before stdin", runner{cmd: "x", resumeArgs: []string{"resume", "id={session_id}", "-"}, readArgs: []string{"r"}}, "read", "sess-1", []string{"x", "resume", "id=sess-1", "r", "-"}},
 		{"no trailing dash keeps the order", runner{cmd: "x", args: []string{"a"}, readArgs: []string{"r"}}, "read", "", []string{"x", "a", "r"}},
 	}
 	for _, c := range cases {
@@ -173,6 +175,7 @@ func Test_CTRDLG05_ArgvAssembly(t *testing.T) {
 func Test_CTRDLG05_ConfigOverridesOnlyTheFieldsItNames(t *testing.T) {
 	cfg := config.Delegate{Runners: map[string]config.DelegateRunner{
 		"claude": {Cmd: "/opt/bin/claude", ReadArgs: []string{}},
+		"codex":  {ReadArgs: []string{}},
 		"mytool": {Cmd: "mytool", Args: []string{"run"}},
 		"bare":   {Args: []string{"x"}},
 	}}
@@ -185,6 +188,10 @@ func Test_CTRDLG05_ConfigOverridesOnlyTheFieldsItNames(t *testing.T) {
 	}
 	if len(claude.readArgs) != 0 {
 		t.Fatalf("an empty list must clear the read args, got %q", claude.readArgs)
+	}
+	codex, ok := runnerFor(cfg, "codex")
+	if want := []string{"codex", "exec", "resume", "thr-9", "--json", "--skip-git-repo-check", "-"}; !ok || !slices.Equal(codex.argv("read", "thr-9"), want) {
+		t.Fatalf("codex resume with cleared read args = %q, want %q", codex.argv("read", "thr-9"), want)
 	}
 	mine, ok := runnerFor(cfg, "mytool")
 	if !ok || mine.kind != "generic" || mine.cmd != "mytool" || !slices.Equal(mine.args, []string{"run"}) {

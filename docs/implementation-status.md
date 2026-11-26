@@ -514,8 +514,8 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 - **契约**（本 PR）：新增 [delegate.md](contracts/delegate.md)，编号 CTR-DLG-01 至 06。同步 [errors.md](contracts/errors.md)（`delegate_saturated`、`delegate_unavailable`）、[config.md](contracts/config.md)、`schemas/config.schema.json`（`agent.delegate` 与 `disabled_tools` 中的五个工具名）、[gateway.md](contracts/gateway.md) 的组列表、[05-tools.md](design/05-tools.md)、[11-decisions.md](design/11-decisions.md) 与 [符合性矩阵](conformance.md) 的阶段 7。
 - **实现**（本 PR 第二个提交）：`internal/delegate`（任务管理器、运行器 argv 与输出解析、会话发现与推送式注入，Unix socket 与 Windows 命名管道）、`internal/config/delegate.go`、`internal/role/agent` 的分发、停用与 draining 检查、任务结束审计、`internal/exec/stream.go`（`RunStream`，供委托边运行边读输出），以及保留组名与审计摘要的 schema。
 - **验证**（2026-11-16，开发容器）：`go vet ./...` 通过；`go test -race ./...` 39 个包通过，无数据竞争；`GOOS=windows` 与 `GOOS=darwin` 下委托相关包 `go vet` 通过，`GOOS=windows go build ./cmd/xmesh` 通过；`scripts/conformance_check.py` 153/153；`docs/contracts/schemas/check_examples.py` 通过。
+- **Codex 运行器冒烟**（2026-11-26，Linux）：修正续聊时 `--sandbox` 的位置。真实 Codex CLI 0.172.0 上的新任务和按 `session_id` 续聊已通过，见 [验证记录](validation/2026-11-26-codex-delegate-runner.md)。
 - **未验证**：
-  - Codex 运行器的默认参数（`--sandbox`、`exec resume`）：容器里没有 Codex CLI，发布前需在有 Codex 的环境核对。
   - 向真实运行中的 Claude Code 会话注入：目前只有对伪造 socket 的单元测试。Claude Code 在忙碌回合中如何排队注入消息，未测。
   - Windows 上的命名管道写入、进程存活判断与进程树终止，以及 macOS 上的进程树终止：只做了交叉编译，未在对应系统上运行。
 - **补充单测（#211）**：用内存连接和虚拟时钟覆盖注入写入的 `write_timeout` 与 `write_failed` 两个原因码。
