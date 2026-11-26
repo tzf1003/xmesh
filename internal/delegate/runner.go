@@ -19,7 +19,7 @@ type runner struct {
 }
 
 // builtinRunners are the defaults of CTR-DLG-05. The claude defaults follow the Claude Code 2.1.325 --help output.
-// The codex defaults are not verified against a Codex CLI.
+// Codex CLI 0.172.0 expects --sandbox on exec, before the resume subcommand.
 var builtinRunners = map[string]runner{
 	"claude": {
 		kind:       "claude",
@@ -35,7 +35,7 @@ var builtinRunners = map[string]runner{
 		args:       []string{"exec", "--json", "--skip-git-repo-check", "-"},
 		readArgs:   []string{"--sandbox", "read-only"},
 		writeArgs:  []string{"--sandbox", "workspace-write"},
-		resumeArgs: []string{"exec", "resume", "{session_id}", "--json", "--skip-git-repo-check", "-"},
+		resumeArgs: []string{"exec", "{mode_args}", "resume", "{session_id}", "--json", "--skip-git-repo-check", "-"},
 	},
 }
 
@@ -93,20 +93,24 @@ func runnerNames(cfg config.Delegate) []string {
 	return names
 }
 
-// argv assembles the command line of one task (CTR-DLG-05). The resume arguments replace the base arguments when a
-// session is named, and the arguments of the mode follow. A base argument list that ends with a lone "-" (standard
-// input) keeps the mode arguments before it. The prompt never appears here.
+// argv assembles the command line of one task (CTR-DLG-05). A resume template can place the mode arguments at
+// {mode_args}. Otherwise they follow the base arguments, before a trailing "-". The prompt never appears here.
 func (r runner) argv(mode, sessionID string) []string {
-	base := r.args
-	if sessionID != "" {
-		base = make([]string, len(r.resumeArgs))
-		for i, arg := range r.resumeArgs {
-			base[i] = strings.ReplaceAll(arg, "{session_id}", sessionID)
-		}
-	}
 	modeArgs := r.readArgs
 	if mode == "write" {
 		modeArgs = r.writeArgs
+	}
+	base := r.args
+	if sessionID != "" {
+		base = make([]string, 0, len(r.resumeArgs)+len(modeArgs))
+		for _, arg := range r.resumeArgs {
+			if arg == "{mode_args}" {
+				base = append(base, modeArgs...)
+				modeArgs = nil
+				continue
+			}
+			base = append(base, strings.ReplaceAll(arg, "{session_id}", sessionID))
+		}
 	}
 	argv := []string{r.cmd}
 	if n := len(base); n > 0 && base[n-1] == "-" {
