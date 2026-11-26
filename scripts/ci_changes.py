@@ -62,6 +62,9 @@ def select(paths, full=False):
             for suite in WORKFLOW_SUITES.get(path.rsplit("/", 1)[-1], SUITES):
                 selected[suite] = True
             continue
+        if path.startswith(".github/actions/windows-sandbox-helper/"):
+            selected["windows_native"] = True
+            continue
         if matches("go.mod", "go.sum", "go.work*", "scripts/ci_changes.py",
                    "scripts/test_ci_changes.py", "scripts/release_gate.py", "scripts/test_scripts.py"):
             selected.update(dict.fromkeys(SUITES, True))

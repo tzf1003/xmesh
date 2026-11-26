@@ -37,6 +37,10 @@ class CIChanges(unittest.TestCase):
         self.assertEqual({s for s, enabled in select([".github/workflows/headscale.yml"]).items() if enabled}, {"headscale"})
         self.assertFalse(any(select([".github/workflows/pages.yml"]).values()))
 
+    def test_windows_sandbox_helper_action_runs_native_checks(self):
+        selected = select([".github/actions/windows-sandbox-helper/action.yml"])
+        self.assertEqual({suite for suite, enabled in selected.items() if enabled}, {"windows_native"})
+
     def test_windows_sandbox_and_unix_sandbox_are_separate(self):
         selected = select(["internal/winbox/runner_windows.go"])
         self.assertTrue(selected["windows_native"])

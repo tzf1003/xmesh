@@ -27,7 +27,9 @@
 
 ## 诊断与打包
 
-**Windows diagnostics** 支持手动选择 `joint`、`race`、`flakes` 或 `all`。`joint` 保留三轮 AppContainer 联合验收；`race` 和 `flakes` 保留高次数压测及命名管道复现。日常 Go 检查继续运行一轮 Windows L2 验收。
+**Windows diagnostics** 支持手动选择 `joint`、`race`、`flakes` 或 `all`。`joint` 保留三轮 AppContainer 联合验收；`race` 和 `flakes` 保留高次数压测及命名管道复现。`flakes` 单独重复运行 `delayed-delete` 40 次。日常 Go 检查继续运行一轮 Windows L2 验收。
+
+日常 Windows 原生验收和涉及 winbox 的诊断作业在单独的步骤用 `go test -c -race=false` 构建并校验 AppContainer payload helper，再通过 `XMESH_TEST_SANDBOX_HELPER_IMAGE` 复用映像。编译耗时计入作业总时限，移出各项测试的 `go test -timeout` 预算。原生验收仍用 `go test -race`，同一测试二进制启动的 supervisor、keeper 和 race 诊断探针也继续启用 race。本地启用 `XMESH_TEST_WINDOWS_SANDBOX=1` 时，未提供映像则由 `TestMain` 构建。
 
 桌面安装包在打包配方、依赖、图标或验证脚本变化的 PR 上执行两种本机架构的构建与冒烟；完整四目标安装包和六目标桌面执行器包在发布或手动验证时构建。发布前由 `scripts/release_gate.py` 等待同一 SHA、同一发布标签的完整 CI 成功，再开始构建发布产物。
 
