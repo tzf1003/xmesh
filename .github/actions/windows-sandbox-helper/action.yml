@@ -1,0 +1,17 @@
+name: Prepare Windows sandbox test helper
+description: Build and verify the ordinary AppContainer payload image before timed tests
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      env:
+        XMESH_TEST_WINDOWS_SANDBOX: "1"
+      run: |
+        $image = Join-Path $env:RUNNER_TEMP 'winbox-helper.test.exe'
+        go test -c -race=false -o $image ./internal/winbox
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        $env:XMESH_TEST_SANDBOX_HELPER_IMAGE = $image
+        & $image '-test.run=^Test_WindowsSandboxHelperImageHasNoRaceRuntime$' '-test.v'
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        "XMESH_TEST_SANDBOX_HELPER_IMAGE=$image" >> $env:GITHUB_ENV

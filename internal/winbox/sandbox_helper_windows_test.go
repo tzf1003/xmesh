@@ -8,7 +8,6 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -24,8 +23,8 @@ import (
 // themselves the code under test (supervisor, keeper) and the race-runtime
 // probes keep using os.Args[0].
 //
-// The ordinary build is made once, before the first test, because tests give
-// their sandbox work a fixed time budget that a build must not eat into.
+// CI supplies a prebuilt image so its compilation is outside the test command.
+// TestMain can build the image for local runs that do not supply one.
 const sandboxHelperImageEnv = "XMESH_TEST_SANDBOX_HELPER_IMAGE"
 
 func TestMain(m *testing.M) {
@@ -60,14 +59,8 @@ func buildSandboxHelperImage(directory string) (string, error) {
 	image := filepath.Join(directory, "winbox-helper.test.exe")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	cmd := osexec.CommandContext(ctx, tool, "test", "-c", "-o", image, ".")
-	for _, entry := range os.Environ() {
-		// A GOFLAGS=-race would put the race runtime straight back.
-		if strings.HasPrefix(strings.ToUpper(entry), "GOFLAGS=") && strings.Contains(entry, "-race") {
-			continue
-		}
-		cmd.Env = append(cmd.Env, entry)
-	}
+	// The explicit flag overrides -race in GOFLAGS while keeping other flags.
+	cmd := osexec.CommandContext(ctx, tool, "test", "-c", "-race=false", "-o", image, ".")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("go test -c: %w: %s", err, output)
 	}
@@ -75,8 +68,8 @@ func buildSandboxHelperImage(directory string) (string, error) {
 }
 
 // sandboxHelperImage returns the executable image for programs that run inside
-// an AppContainer: the ordinary build made by TestMain, or this test binary
-// when that build is unavailable.
+// an AppContainer: the ordinary build supplied by CI or made by TestMain,
+// or this test binary when that build is unavailable.
 func sandboxHelperImage() ([]byte, error) {
 	if image := os.Getenv(sandboxHelperImageEnv); image != "" && image != "-" {
 		return os.ReadFile(image)

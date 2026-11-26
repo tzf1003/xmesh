@@ -33,6 +33,7 @@ jobs:
           "Physical memory free/total (MB): {0}/{1}" -f [int]($os.FreePhysicalMemory/1024), [int]($os.TotalVisibleMemorySize/1024)
       - name: Build the xmesh binary the serve tests launch
         run: go build -o "$env:RUNNER_TEMP/xmesh-service-test.exe" ./cmd/xmesh
+      - uses: ./.github/actions/windows-sandbox-helper
       - name: Three rounds of managed runner, serve acceptance and counterexamples
         shell: pwsh
         env:
@@ -80,13 +81,15 @@ jobs:
           "Physical memory free/total (MB): {0}/{1}" -f [int]($os.FreePhysicalMemory/1024), [int]($os.TotalVisibleMemorySize/1024)
           "Virtual memory free/total (MB): {0}/{1}" -f [int]($os.FreeVirtualMemory/1024), [int]($os.TotalVirtualMemorySize/1024)
           Get-CimInstance Win32_PageFileUsage | ForEach-Object { "Page file {0}: allocated {1} MB, peak {2} MB" -f $_.Name, $_.AllocatedBaseSize, $_.PeakUsage }
+      - uses: ./.github/actions/windows-sandbox-helper
+        id: sandbox-helper
       - name: Race exit status control and trivial launch stress
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
           XMESH_TEST_WINDOWS_RACE_STRESS: "300"
         run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerRaceDiagnosticsControl|Test_WindowsAppContainerRaceHelperLaunchStress' -v -count=1 -timeout=1500s
       - name: Deletion recovery repetition
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.sandbox-helper.outcome == 'success' }}
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
         run: go test -race ./internal/winbox -run 'Test_WindowsAppContainerWorkspaceDeletionRecovery' -v -count=25 -timeout=1500s
@@ -101,6 +104,7 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - uses: ./.github/actions/windows-sandbox-helper
       - name: Managed runner exec and ConPTY acceptance
         env:
           XMESH_TEST_WINDOWS_SANDBOX: "1"
@@ -113,7 +117,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -121,6 +125,7 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - uses: ./.github/actions/windows-sandbox-helper
       - name: Repeat the flaky tests
         shell: pwsh
         env:
@@ -132,23 +137,24 @@ jobs:
             @{ Name = 'ExecConcurrent'; Pattern = '^Test_WindowsManagedRunnerExecConcurrent$'; Count = 80 },
             @{ Name = 'WorkspaceExecution'; Pattern = '^Test_WindowsAppContainerWorkspaceExecution$'; Count = 40 },
             @{ Name = 'TerminalKill'; Pattern = '^Test_WindowsManagedRunnerTerminalKill$'; Count = 40 },
-            @{ Name = 'TerminalInterrupt'; Pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$'; Count = 40 }
+            @{ Name = 'TerminalInterrupt'; Pattern = '^Test_WindowsManagedRunnerTerminalInterrupt$'; Count = 40 },
+            @{ Name = 'DelayedDelete'; Pattern = '^Test_WindowsAppContainerWorkspaceChangeMonitor$/^delayed-delete$'; Count = 40 }
           )
-          # Each shard repeats one test, so the four run in parallel instead of four times over.
+          # Each shard repeats one test and has a separate runner.
           $runs = @($runs[([int]$env:SHARD - 1)])
           foreach ($run in $runs) {
             $out = "hunt-$($run.Name).txt"
             $pattern = $run.Pattern
             $count = $run.Count
             $started = Get-Date
-            go test -race ./internal/winbox -run $pattern -count $count -timeout 2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
+            go test -race ./internal/winbox -run $pattern -v -count $count -timeout 2400s 2>&1 | Tee-Object -FilePath $out | Out-Null
             if ($LASTEXITCODE -ne 0) { $failed = 1 }
             "{0}: {1:n0}s for {2} iterations, go test exit {3}" -f $run.Name, ((Get-Date) - $started).TotalSeconds, $count, $LASTEXITCODE
           }
           "==== failures ===="
           foreach ($run in $runs) {
             "---- $($run.Name)"
-            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- FAIL|_test.go:|failed to allocate|sandbox helper image|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
+            Select-String -Path "hunt-$($run.Name).txt" -Pattern '--- (FAIL|SKIP)|_test.go:|failed to allocate|race runtime failed to start|sandbox helper image|ThreadSanitizer|DATA RACE|exit \d+|^(ok|FAIL)\s' | ForEach-Object { $_.Line }
           }
           if ($failed -ne 0) { exit 1 }
 
