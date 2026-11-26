@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -60,5 +61,27 @@ func Test_ControlDelegateStateShowsTasksWithoutPromptOrReply(t *testing.T) {
 	}
 	if strings.Contains(string(raw), secret) || strings.Contains(string(raw), "answer:") {
 		t.Fatalf("the control view carries the prompt or the reply: %s", raw)
+	}
+}
+
+// CancelDelegateTask cancels a running task started by any caller and leaves finished tasks intact.
+func Test_ControlCancelDelegateTask(t *testing.T) {
+	a, _, client := startDelegate(t, map[string]any{"enabled": true, "runners": map[string]any{"sleepy": fakeRunnerConfig(t, "sleep")}})
+	out := object(t, tool(t, client, "delegate.run", map[string]any{"runner": "sleepy", "prompt": "wait", "wait_ms": 0}))
+	taskID, _ := out["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("missing task_id: %v", out)
+	}
+	res, ok := a.CancelDelegateTask(context.Background(), taskID)
+	if !ok || res.TaskID != taskID || res.State != "cancelled" {
+		t.Fatalf("CancelDelegateTask = (%+v, %v)", res, ok)
+	}
+	st := a.DelegateState()
+	if st.Running != 0 || len(st.Tasks) != 1 || st.Tasks[0].State != "cancelled" {
+		t.Fatalf("DelegateState after cancel = %+v", st)
+	}
+	// Missing task returns false.
+	if _, ok := a.CancelDelegateTask(context.Background(), "t-missing"); ok {
+		t.Fatal("CancelDelegateTask on missing task returned ok=true")
 	}
 }

@@ -1,6 +1,7 @@
 package delegate
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -34,5 +35,24 @@ func TestOverviewListsEveryCallersTasks(t *testing.T) {
 	}
 	if len(view.Runners) != 2 || view.Runners[0].Name != "claude" || view.Runners[1].Name != "codex" {
 		t.Fatalf("runners: %+v", view.Runners)
+	}
+}
+
+// CancelTask cancels any caller's running task, is idempotent on finished tasks, and returns false when missing.
+func TestCancelTaskIgnoresCallerAndIsIdempotent(t *testing.T) {
+	h := newHarness(t, testSettings(map[string]config.DelegateRunner{"sleepy": fakeRunner(t, "sleep")}))
+	started := h.ok(callerA, "delegate.run", map[string]any{"runner": "sleepy", "prompt": "wait", "wait_ms": 0})
+	taskID := started["task_id"].(string)
+
+	state, ok := h.m.CancelTask(context.Background(), taskID)
+	if !ok || state != stateCancelled {
+		t.Fatalf("CancelTask running = (%q, %v), want (%q, true)", state, ok, stateCancelled)
+	}
+	state, ok = h.m.CancelTask(context.Background(), taskID)
+	if !ok || state != stateCancelled {
+		t.Fatalf("CancelTask finished = (%q, %v), want (%q, true)", state, ok, stateCancelled)
+	}
+	if _, ok := h.m.CancelTask(context.Background(), "t-missing"); ok {
+		t.Fatal("CancelTask on missing task returned ok=true")
 	}
 }

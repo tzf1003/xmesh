@@ -35,6 +35,7 @@ import type {
   PairPasswordState,
   PatList,
   DelegateState,
+  DelegateTaskCancelResponse,
   PatSecret,
   SessionsResponse,
 } from "../shared/control";
@@ -358,6 +359,10 @@ export class PanelService {
 
   delegate(): Promise<DataResult<DelegateState>> {
     return this.data("delegate", (c) => c.call("GET", "/v2/delegate"));
+  }
+
+  cancelDelegateTask(taskId: string): Promise<DataResult<DelegateTaskCancelResponse>> {
+    return this.data("delegate", (c) => c.call("POST", `/v2/delegate/tasks/${encodeURIComponent(taskId)}/cancel`));
   }
 
   listOffers(): Promise<DataResult<OffersResponse>> {

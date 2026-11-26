@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xmesh:schema:control-delegate:2",
   "title": "ControlDelegate",
-  "description": "GET /v2/delegate 的只读视图（API 2.7），见 control.md 的「Agent 委托视图」一节。只有元数据：没有提示词、消息正文、最终答复和输出事件。开关经 PATCH /v2/config 的 /agent/delegate/enabled 修改。",
+  "description": "本机控制通道 Agent 委托接口（API 2.7 起；2.8 加取消单个任务），见 control.md 的「Agent 委托」一节。只含元数据：没有提示词、消息正文、最终答复和输出事件。开关、allow_write 与 allow_sessions 经 PATCH /v2/config 修改。",
   "$defs": {
     "DelegateRunner": {
       "type": "object",
@@ -56,6 +56,15 @@
         "runners": { "type": "array", "items": { "$ref": "#/$defs/DelegateRunner" } },
         "sessions": { "type": "array", "items": { "$ref": "#/$defs/DelegateSession" } },
         "tasks": { "type": "array", "items": { "$ref": "#/$defs/DelegateTask" }, "description": "运行中的任务与保留中的已结束任务，按开始时间从新到旧。" }
+      }
+    },
+    "DelegateTaskCancelResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "state"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["running", "done", "failed", "timeout", "cancelled"] }
       }
     }
   }

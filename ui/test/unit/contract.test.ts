@@ -87,13 +87,13 @@ test("the copied TypeScript types are the contract's generated file", () => {
 });
 
 test("the UI speaks the contract's API version", () => {
-  assert.equal(CONTROL_API_VERSION, "2.7");
+  assert.equal(CONTROL_API_VERSION, "2.8");
 });
 
 test("status, peers, sessions and control.json from the fake validate against the schemas", async () => {
   const status = await call(k.endpoint, "GET", "/v2/status");
   assert.equal(status.status, 200);
-  assert.equal(status.headers["x-xmesh-control-version"], "2.7");
+  assert.equal(status.headers["x-xmesh-control-version"], "2.8");
   validate("control-status", "StatusResponse", status.body);
   validate("control-peers", "PeersResponse", (await call(k.endpoint, "GET", "/v2/peers")).body);
   validate("control-sessions", "SessionsResponse", (await call(k.endpoint, "GET", "/v2/sessions")).body);
@@ -144,13 +144,32 @@ test("a capability the kernel does not advertise answers 501 not_implemented", a
   }
 });
 
-test("GET /v2/delegate answers only when the kernel advertises delegate, and the view validates", async () => {
+test("GET /v2/delegate and POST /v2/delegate/tasks/{task_id}/cancel answer only when the kernel advertises delegate, and validate", async () => {
   assert.equal((await call(k.endpoint, "GET", "/v2/delegate")).status, 501, "the default fake kernel advertises no delegate capability");
+  assert.equal((await call(k.endpoint, "POST", "/v2/delegate/tasks/t-5e0a7c41b9d24f6e8a13c0d7f2e4b916/cancel")).status, 501);
   const agent = await FakeKernel.start({ pingMs: 50, capabilities: ["status", "delegate"] });
   try {
     const r = await call(agent.endpoint, "GET", "/v2/delegate");
     assert.equal(r.status, 200);
     validate("control-delegate", "DelegateState", r.body);
+
+    const bad = await call(agent.endpoint, "POST", "/v2/delegate/tasks/bad!id/cancel");
+    assert.equal(bad.status, 400);
+    validate("control-error", "ControlError", bad.body);
+
+    const missing = await call(agent.endpoint, "POST", "/v2/delegate/tasks/t-missing/cancel");
+    assert.equal(missing.status, 404);
+    validate("control-error", "ControlError", missing.body);
+
+    const cancelled = await call(agent.endpoint, "POST", "/v2/delegate/tasks/t-5e0a7c41b9d24f6e8a13c0d7f2e4b916/cancel");
+    assert.equal(cancelled.status, 200);
+    validate("control-delegate", "DelegateTaskCancelResponse", cancelled.body);
+    assert.equal((cancelled.body as { state: string }).state, "cancelled");
+
+    const idempotent = await call(agent.endpoint, "POST", "/v2/delegate/tasks/t-19ab3e02c5f84d7aa6e1b9d0c3f27a48/cancel");
+    assert.equal(idempotent.status, 200);
+    validate("control-delegate", "DelegateTaskCancelResponse", idempotent.body);
+    assert.equal((idempotent.body as { state: string }).state, "failed");
   } finally {
     await agent.stop();
   }
@@ -222,6 +241,8 @@ test("routes the UI calls exist in the contract route table with the capability 
   assert.equal(find("POST", "/v2/resume")?.body, null, "resume takes no body");
   assert.equal(find("GET", "/v2/delegate")?.capability, "delegate");
   assert.equal(find("GET", "/v2/delegate")?.response, "DelegateState");
+  assert.equal(find("POST", "/v2/delegate/tasks/{task_id}/cancel")?.capability, "delegate");
+  assert.equal(find("POST", "/v2/delegate/tasks/{task_id}/cancel")?.response, "DelegateTaskCancelResponse");
   assert.equal(find("PUT", "/v2/gateway")?.capability, "gateway");
   assert.equal(find("PUT", "/v2/gateway")?.body, "GatewayUpdateRequest");
   assert.equal(find("PUT", "/v2/gateway")?.response, "GatewayUpdateResponse");

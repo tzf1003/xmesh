@@ -14,6 +14,7 @@ import type {
   ConfigPutResponse,
   ConfigResponse,
   DelegateState,
+  DelegateTaskCancelResponse,
   DrainMode,
   DrainResponse,
   GatewayUpdateRequest,
@@ -112,6 +113,7 @@ export const CHANNELS = {
   computer: "xmesh:computer",
   preferredIp: "xmesh:preferred-ip",
   delegate: "xmesh:delegate",
+  cancelDelegateTask: "xmesh:cancel-delegate-task",
   playground: "xmesh:playground",
   transfers: "xmesh:transfers",
 } as const;
@@ -392,8 +394,9 @@ export interface PanelApi {
   computer(request: ComputerRequest): Promise<DataResult<ComputerResult>>;
   /** Cloudflare preferred edge addresses (API 2.4，2.5 加机房）: the pool and its scores, run a scan or a refresh, check pasted text. Settings are written through patchConfig. */
   preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>>;
-  /** Agent 委托（API 2.7）：开关、本机运行器、活会话与各调用方的任务，只读。开关经 patchConfig 写入 /agent/delegate/enabled。 */
+  /** Agent 委托（API 2.7/2.8）：开关与策略经 patchConfig 写入 /agent/delegate/*，任务列表可按 task_id 取消。 */
   delegate(): Promise<DataResult<DelegateState>>;
+  cancelDelegateTask(taskId: string): Promise<DataResult<DelegateTaskCancelResponse>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -466,6 +469,7 @@ export const PANEL_API_METHODS = [
   "computer",
   "preferredIp",
   "delegate",
+  "cancelDelegateTask",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";
@@ -473,9 +477,14 @@ export const PANEL_API_GLOBAL = "xmesh";
 // Argument validators. Each returns the parsed value or undefined.
 
 const INSTANCE_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const DELEGATE_TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export function parseInstanceId(v: unknown): string | undefined {
   return typeof v === "string" && INSTANCE_ID.test(v) && v !== "." && v !== ".." ? v : undefined;
+}
+
+export function parseDelegateTaskId(v: unknown): string | undefined {
+  return typeof v === "string" && DELEGATE_TASK_ID.test(v) ? v : undefined;
 }
 
 export function parseCopyKind(v: unknown): CopyKind | undefined {

@@ -108,7 +108,11 @@ func shortTempDir(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		return t.TempDir()
 	}
-	dir, err := os.MkdirTemp("/tmp", "xmc")
+	base := "/tmp"
+	if d := os.Getenv("TMPDIR"); d != "" && len(d) <= 40 {
+		base = d
+	}
+	dir, err := os.MkdirTemp(base, "xmc")
 	if err != nil {
 		t.Fatal(err)
 	}

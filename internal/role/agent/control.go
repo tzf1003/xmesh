@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -160,6 +161,15 @@ func (a *Agent) DelegateState() v2.DelegateState {
 		out.Tasks = append(out.Tasks, v2.DelegateTask{TaskID: t.ID, Caller: t.Caller, Runner: t.Runner, State: t.State, CWD: t.CWD, StartedAt: v2.At(t.Started), DurationMS: t.Duration.Milliseconds(), SessionID: t.SessionID})
 	}
 	return out
+}
+
+// CancelDelegateTask cancels any caller's delegate task by id (control API 2.8) and returns its resulting state.
+func (a *Agent) CancelDelegateTask(ctx context.Context, taskID string) (v2.DelegateTaskCancelResponse, bool) {
+	state, ok := a.Delegate.CancelTask(ctx, taskID)
+	if !ok {
+		return v2.DelegateTaskCancelResponse{}, false
+	}
+	return v2.DelegateTaskCancelResponse{TaskID: taskID, State: state}, true
 }
 
 // backendLeases are the leases the control view shows: backend ownership only.

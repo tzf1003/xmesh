@@ -255,6 +255,7 @@ UI MCP `protocol_version: 1` 的 `.run`、`.script` 返回已知状态与 `run_i
 `diff` 的每项是 `{pointer, op, before, after, restart_required, weakens_security}`，`pointer` 是对 `parsed` 的 RFC 6901 JSON Pointer。`weakens_security` 由内核按下列规则计算，仅供 UI 弹确认对话框：
 
 - `agent.allow_dangerous` 变为 `true`。
+- `agent.delegate.allow_write` 或 `agent.delegate.allow_sessions` 变为 `true`。
 - `agent.cwd_policy.allow` 增加条目，或 `deny` 减少条目。
 - `agent.authz` 放宽（增加 tag 的工具授权或后端授权）。
 - `gateway.pats` 里某个 PAT 的 `scopes` 变宽，或 PAT 被整体删除后 `gateway.pats` 为空（认证关闭）。
@@ -432,12 +433,14 @@ PAT 是 `gateway.pats`（[CTR-CFG-01](config.md#ctr-cfg-01)）里的条目加上
 
 类型与路由见 `control-preferred-ip.schema.json` 与 `control-routes.json`。
 
-## Agent 委托视图（API 2.7）
+## Agent 委托（API 2.7，2.8 加取消单个任务）
 
 能力 `delegate` 表示节点有 Agent 角色，持有委托管理器。`GET /v2/delegate` 返回只读视图：`enabled`、`allow_write`、`allow_sessions`，并发上限 `max_concurrent` 与占用数 `running`，运行器（每项 `name`、`available`，找到时给出 `path`），可注入的活会话，以及各调用方的任务（`task_id`、`caller`、`runner`、`state`、`cwd`、`started_at`、`duration_ms`，运行器给出后才有 `session_id`）。没有 Agent 角色的节点不声明该能力，路由返回 `not_implemented`。
 
 与 `delegate.list` 不同，这个视图不按调用方过滤：控制通道属于节点本机用户，桌面端需要看到全部任务。它同样不含提示词、消息正文、最终答复和输出事件（见 [CTR-DLG-06](delegate.md#ctr-dlg-06) 的审计规则）。
 
-开关经 `PATCH /v2/config` 写入 `/agent/delegate/enabled`，热加载，下一次调用生效；关闭时终止全部运行中的任务。`allow_write` 与 `allow_sessions` 在配置文件的 `agent.delegate` 中设置，本视图只读展示。取消单个任务暂未在控制通道提供。
+`POST /v2/delegate/tasks/{task_id}/cancel`（API 2.8，能力 `delegate`）按 `task_id` 取消单个委托任务，不按调用方过滤。若任务仍在运行，终止其进程树并等待退出后返回 `DelegateTaskCancelResponse`（`task_id`、`state`）；对已结束的任务幂等，不改变状态，返回当前状态。`task_id` 格式无效返回 `invalid_args`（`field: task_id`），任务不存在或已被淘汰返回 `not_found`（404）。请求经本机控制通道身份校验并写 `control_call` 元数据审计（以及任务结束的 `task_complete` 审计）。
+
+开关（`/agent/delegate/enabled`）、`allow_write`（`/agent/delegate/allow_write`）与 `allow_sessions`（`/agent/delegate/allow_sessions`）经 `PATCH /v2/config` 写入，热加载，下一次调用生效；关闭开关时终止全部运行中的任务。
 
 类型与路由见 `control-delegate.schema.json` 与 `control-routes.json`。
