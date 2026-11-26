@@ -35,6 +35,10 @@ func deliver(path string, payload []byte) (string, error) {
 		return "connect_failed", err
 	}
 	defer conn.Close()
+	return writeInjection(conn, payload)
+}
+
+func writeInjection(conn net.Conn, payload []byte) (string, error) {
 	if err := conn.SetWriteDeadline(time.Now().Add(sessionWriteTimeout)); err != nil {
 		return "write_failed", err
 	}

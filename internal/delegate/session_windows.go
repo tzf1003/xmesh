@@ -2,6 +2,7 @@ package delegate
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -61,9 +62,13 @@ func deliver(path string, payload []byte) (string, error) {
 		return "connect_failed", err
 	}
 	defer f.Close()
+	return writeInjection(f, payload)
+}
+
+func writeInjection(w io.Writer, payload []byte) (string, error) {
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.Write(payload)
+		_, err := w.Write(payload)
 		done <- err
 	}()
 	timer := time.NewTimer(sessionWriteTimeout)

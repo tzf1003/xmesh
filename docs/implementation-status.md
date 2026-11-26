@@ -505,7 +505,7 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
   - Codex 运行器的默认参数（`--sandbox`、`exec resume`）：容器里没有 Codex CLI，发布前需在有 Codex 的环境核对。
   - 向真实运行中的 Claude Code 会话注入：目前只有对伪造 socket 的单元测试。Claude Code 在忙碌回合中如何排队注入消息，未测。
   - Windows 上的命名管道写入、进程存活判断与进程树终止，以及 macOS 上的进程树终止：只做了交叉编译，未在对应系统上运行。
-  - 注入的 `write_timeout` 与 `write_failed` 两个原因码没有测试覆盖。
+- **补充单测（#211）**：用内存连接和虚拟时钟覆盖注入写入的 `write_timeout` 与 `write_failed` 两个原因码。
 - **契约已补充的两处细节**（见 [delegate.md](contracts/delegate.md)）：`mode: write` 未开启时，在解析 `cwd` 之前即返回 `policy_denied`；`session_id` 续聊限定为同一调用方、同一运行器的任务返回过的值。
 - **审查修正**（Devin 审查 `a9ce846` 的发现，已确认并修复）：
   - 命令自行退出后，Unix 启动器形式终止同一进程组中残留的子进程。此前任务已显示 `done`，子进程仍在运行，且 `delegate.cancel` 对已结束的任务无效。`exec.run` 的生命周期不变。
