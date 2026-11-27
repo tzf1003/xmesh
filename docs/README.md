@@ -54,6 +54,7 @@
 | [17 快速安装与首次配置](design/17-quick-setup.md) | 统一安装入口、agent 协议、首次向导、恢复与连接验收 |
 | [19 Computer 三端远程桌面](design/19-computer.md) | Agent 桌面观察与输入、租约、三端执行器和验收进度（实现中） |
 | [20 自定义紧凑托盘面板](design/20-tray-popover.md) | 400 × 580 DIP 浮层、实时状态、受限操作与主窗口导航 |
+| [21 服务端/客户端拆分、配置链接绑定与 SaaS 演进 RFC](design/21-split-bootstrap-saas-rfc.md) | 架构拆分路线、`xmesh://bind` 引导协议、原生出站中继与 SaaS 预留（已拍板定稿） |
 | [设计提案与验证笔记](design/proposals/README.md) | 方案草稿、鉴权链路梳理、P0 实测笔记（过程记录，非规范） |
 | [术语表](glossary.md) | 角色、身份、资源名词 |
 
