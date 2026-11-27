@@ -169,7 +169,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-DLG-03 | `delegate.output` 按序号分页与长轮询；`delegate.cancel` 终止进程树且幂等；并发达到上限返回 `delegate_saturated`；他人的 `task_id` 返回 `not_found`；已结束任务按保留时长与 64 个上限淘汰 |
 | CTR-DLG-04 | 会话发现：cwd 不在允许范围或进程已退出的会话不列出、不可寻址；注入帧的框定与转义，对端文本不能闭合或伪造框；收件 socket 不存在或写失败返回 `delegate_unavailable` 并带 `reason` |
 | CTR-DLG-05 | 运行器参数拼接（续聊替代、模式追加、末尾 `-` 之前插入、提示词只经标准输入）；Claude 的会话 id 与最终答复；非 JSON 行记为 `raw`；非零退出为 `failed`；超时终止进程树为 `timeout` |
-| CTR-DLG-06 | draining 时 `delegate.run` 与 `delegate.send` 被拒（`mesh.draining`）；`enabled` 关闭或 Agent 关闭时终止全部任务；审计不含提示词与输出正文；`agent.delegate` 的缺省值与校验（`max_timeout` 不小于 `default_timeout`；后端不得叫 `delegate`） |
+| CTR-DLG-06 | draining 时 `delegate.run` 与 `delegate.send` 被拒（`mesh.draining`）；`enabled` 关闭或 Agent 关闭时终止全部任务；审计不含提示词与输出正文；`agent.delegate` 的缺省值与校验（`max_timeout` 不小于 `default_timeout`；后端不得叫 `delegate`）；被委托任务内禁止再委托硬性保证（不依赖 `XMESH_DELEGATE`，覆盖 `Agent`、`Gateway` PAT、`exec.run` 间接派生、会话劫持与控制通道 HTTP 403，`policy_denied` 的 `rule: delegate.redelegate_denied`） |
 
 ## 模式夹具
 

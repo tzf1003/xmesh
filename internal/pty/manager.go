@@ -17,6 +17,7 @@ import (
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/toolerr"
@@ -32,6 +33,8 @@ type terminal interface {
 type Session struct {
 	ID, Owner, Node, OAuthClient, Budget, Name, CWD, State string
 	Cols, Rows                                             int
+	Delegated                                              bool
+	untrack                                                func()
 	term                                                   terminal
 	started                                                chan struct{}
 	closedAt, orphanAt, created                            time.Time
@@ -50,6 +53,7 @@ type Manager struct {
 	byCaller map[string]int
 	cfg      config.PTY
 	callers  *identity.Registry
+	guard    *delegateguard.Guard
 	stop     chan struct{}
 	done     chan struct{}
 	once     sync.Once
@@ -79,6 +83,14 @@ func New(cfg config.PTY, callers *identity.Registry) *Manager {
 	return m
 }
 func (m *Manager) Configure(cfg config.PTY) { m.mu.Lock(); m.cfg = cfg; m.mu.Unlock() }
+
+// SetDelegateGuard installs the delegation process-tree guard used to track
+// PTY sessions opened on behalf of a delegated caller.
+func (m *Manager) SetDelegateGuard(g *delegateguard.Guard) {
+	m.mu.Lock()
+	m.guard = g
+	m.mu.Unlock()
+}
 func (m *Manager) Call(ctx context.Context, c identity.Caller, r *cwd.Resolver, p *policy.Engine, name string, raw json.RawMessage) (Object, error) {
 	a := Args{MaxBytes: 32768, WaitMS: 1000}
 	if e := json.Unmarshal(raw, &a); e != nil {
@@ -283,7 +295,7 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 		return nil, e
 	}
 	capacity, _ := config.Size(cfg.ScrollbackBytes)
-	s := &Session{ID: "p-" + hex.EncodeToString(random), Owner: c.ID, Node: identity.Node(c.ID), OAuthClient: c.OAuthClient, Budget: identity.Budget(c), Name: a.Name, CWD: resolved.Path, State: "active", Cols: a.Cols, Rows: a.Rows, created: time.Now(), capacity: capacity, changed: make(chan struct{}), started: make(chan struct{})}
+	s := &Session{ID: "p-" + hex.EncodeToString(random), Owner: c.ID, Node: identity.Node(c.ID), OAuthClient: c.OAuthClient, Budget: identity.Budget(c), Name: a.Name, CWD: resolved.Path, State: "active", Cols: a.Cols, Rows: a.Rows, Delegated: c.Delegated, created: time.Now(), capacity: capacity, changed: make(chan struct{}), started: make(chan struct{})}
 	s.touch()
 	m.mu.Lock()
 	if m.closing {
@@ -294,26 +306,39 @@ func (m *Manager) open(c identity.Caller, r *cwd.Resolver, p *policy.Engine, a A
 		m.mu.Unlock()
 		return nil, e
 	}
+	var guard *delegateguard.Guard
+	if c.Delegated {
+		guard = m.guard
+	}
 	m.sessions[s.ID] = s
 	m.byCaller[c.ID]++
 	m.mu.Unlock()
+	doneStart := guard.BeginStart()
 	var term terminal
 	if runner != nil {
 		term, e = startManaged(runner, shell, resolved.Path, env, a.Cols, a.Rows)
+		if e == nil {
+			s.untrack = guard.Track(term.PID(), 0)
+		}
 	} else {
-		term, e = start(launch, argv, resolved.Path, env, a.Cols, a.Rows, innerTerminal)
+		var untrack func()
+		term, untrack, e = startWithGuard(launch, argv, resolved.Path, env, a.Cols, a.Rows, innerTerminal, guard)
 		if e != nil && auto {
 			// `auto` must not strand the caller on a first choice the system
 			// cannot launch; an explicitly requested shell is never replaced.
 			if alt, ok := alternateShell(shell); ok && p.Command(alt, nil) == nil {
 				if l, av, ev, inner, pe := p.SandboxPTY(alt, nil, resolved.Path, baseEnv); pe == nil {
-					if t2, e2 := start(l, av, resolved.Path, ev, a.Cols, a.Rows, inner); e2 == nil {
-						term, e = t2, nil
+					if t2, u2, e2 := startWithGuard(l, av, resolved.Path, ev, a.Cols, a.Rows, inner, guard); e2 == nil {
+						term, untrack, e = t2, u2, nil
 					}
 				}
 			}
 		}
+		if e == nil {
+			s.untrack = untrack
+		}
 	}
+	doneStart()
 	m.mu.Lock()
 	if e != nil {
 		if s.State == "active" {
@@ -364,6 +389,9 @@ func (m *Manager) pump(s *Session) {
 	}
 	_ = s.term.Wait()
 	_ = s.term.Close()
+	if s.untrack != nil {
+		s.untrack()
+	}
 	m.mu.Lock()
 	if s.State == "active" {
 		m.byCaller[s.Owner]--
@@ -463,6 +491,9 @@ func (m *Manager) transferLocked(s *Session, c identity.Caller, to string) (Obje
 	target, exists := m.callers.Get(to)
 	if !identity.Valid(to) || !exists {
 		return nil, toolerr.Args("to_caller")
+	}
+	if (c.Delegated || target.Delegated) && !s.Delegated {
+		return nil, notOwner(s)
 	}
 	if s.State == "active" {
 		if s.Owner != c.ID {

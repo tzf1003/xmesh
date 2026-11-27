@@ -13,6 +13,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
 	"github.com/tzf1003/xmesh/internal/delegate"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	runexec "github.com/tzf1003/xmesh/internal/exec"
 	toolsfs "github.com/tzf1003/xmesh/internal/fs"
 	"github.com/tzf1003/xmesh/internal/identity"
@@ -120,6 +121,7 @@ func New(store *config.Store, options ...Option) (*Agent, error) {
 	a.executionCtx, a.executionCancel = context.WithCancel(context.Background())
 	a.transfers = toolsfs.NewTransfers()
 	a.Delegate = delegate.New(a.delegateEnded)
+	a.PTY.SetDelegateGuard(a.Delegate.Guard())
 	a.quota, a.quotaApplied = quota.New(c.Agent.Quota.Limits()), c.Agent.Quota
 	for _, option := range options {
 		option(a)
@@ -366,7 +368,7 @@ func (a *Agent) syncQuota(q config.Quota) {
 }
 func (a *Agent) bind(session *mcp.ServerSession, p Principal) identity.Caller {
 	id := p.Node + "/" + session.ID()
-	c := identity.Caller{ID: id, Tags: p.Tags, OAuthClient: p.OAuthClient}
+	c := identity.Caller{ID: id, Tags: p.Tags, OAuthClient: p.OAuthClient, Delegated: p.Delegated}
 	a.mu.Lock()
 	_, seen := a.servers[session]
 	if !seen {
@@ -390,9 +392,27 @@ func (a *Agent) bind(session *mcp.ServerSession, p Principal) identity.Caller {
 	}
 	return c
 }
+// DelegateGuard returns the guard tracking delegated subprocesses of this Agent.
+func (a *Agent) DelegateGuard() *delegateguard.Guard { return a.Delegate.Guard() }
+
+// ConnContext returns an http.Server ConnContext hook for Agent HTTP endpoints.
+func (a *Agent) ConnContext() func(context.Context, net.Conn) context.Context {
+	return delegateguard.ConnContext(a.Delegate.Guard())
+}
+
 func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
+	auth := func(r *http.Request) (Principal, error) {
+		p, e := authenticate(r)
+		if e != nil {
+			return p, e
+		}
+		if delegateguard.IsDelegatedHTTPRequest(a.Delegate.Guard(), r) {
+			p.Delegated = true
+		}
+		return p, nil
+	}
 	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		principal, e := authenticate(r)
+		principal, e := auth(r)
 		if e != nil {
 			return nil
 		}
@@ -404,7 +424,7 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		p, e := authenticate(r)
+		p, e := auth(r)
 		if e != nil {
 			w.WriteHeader(401)
 			_ = json.NewEncoder(w).Encode(toolerr.Internal("authenticate", e).Object())
@@ -417,7 +437,7 @@ func (a *Agent) HTTP(authenticate Authenticate) http.Handler {
 		a.mu.Lock()
 		c, exists := a.sessions[r.Header.Get("Mcp-Session-Id")]
 		a.mu.Unlock()
-		if exists && (identity.Node(c.ID) != p.Node || c.OAuthClient != p.OAuthClient) {
+		if exists && (identity.Node(c.ID) != p.Node || c.OAuthClient != p.OAuthClient || c.Delegated != p.Delegated) {
 			http.Error(w, "会话身份不匹配", 403)
 			return
 		}
@@ -460,8 +480,13 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 			if slices.Contains(cfg.Agent.DisabledTools, name) {
 				return Result(nil, toolerr.New("policy_denied", "工具已在配置中关闭", "rule", "tool.disabled", "tool", name)), nil
 			}
-			if strings.HasPrefix(name, "delegate.") && !cfg.Agent.Delegate.Enabled {
-				return Result(nil, toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled", "reason", "agent.delegate.enabled 为 false")), nil
+			if strings.HasPrefix(name, "delegate.") {
+				if caller.Delegated {
+					return Result(nil, delegate.RedelegateDeniedError()), nil
+				}
+				if !cfg.Agent.Delegate.Enabled {
+					return Result(nil, toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled", "reason", "agent.delegate.enabled 为 false")), nil
+				}
 			}
 			if a.draining.Load() && (name == "exec.run" || name == "delegate.run" || name == "delegate.send" || name == "pty.open" || name == "backend.acquire" || name == "computer.open" || name == "computer.act" || name == "computer.ref_act") {
 				return Result(nil, toolerr.New("policy_denied", "节点正在下线", "rule", "mesh.draining", "reason", "停止接受新的资源调用")), nil
@@ -502,11 +527,15 @@ func (a *Agent) installBuiltins(server *mcp.Server, p Principal) {
 				out, e = service.Call(ctx, name, raw)
 				a.fileMu.Unlock()
 			case name == "exec.run":
-				out, e = a.Exec.Run(ctx, caller.ID, resolver, engine, raw)
+				var hooks runexec.ProcessHooks
+				if caller.Delegated {
+					hooks = runexec.ProcessHooks{Subreaper: true, Guard: a.Delegate.Guard()}
+				}
+				out, e = a.Exec.RunWithHooks(ctx, caller.ID, resolver, engine, raw, hooks)
 			case name == "exec.output":
 				out, e = a.Exec.Output(caller.ID, raw)
 			case strings.HasPrefix(name, "delegate."):
-				out, e = a.Delegate.Tool(ctx, delegate.Request{Caller: caller.ID, Settings: cfg.Agent.Delegate, Resolver: resolver, Policy: engine, Gen: delegateGen}, name, raw)
+				out, e = a.Delegate.Tool(ctx, delegate.Request{Caller: caller.ID, Settings: cfg.Agent.Delegate, Resolver: resolver, Policy: engine, Gen: delegateGen, Delegated: caller.Delegated}, name, raw)
 			case strings.HasPrefix(name, "pty."):
 				out, e = a.PTY.Call(ctx, caller, resolver, engine, name, raw)
 			case strings.HasPrefix(name, "backend."):
@@ -585,7 +614,7 @@ func (a *Agent) server(p Principal) *mcp.Server {
 			}
 			result, e = next(ctx, method, req)
 			if e == nil && method == "tools/list" {
-				caller := identity.Caller{Tags: p.Tags}
+				caller := identity.Caller{Tags: p.Tags, Delegated: p.Delegated}
 				if session := req.GetSession(); session != nil {
 					if current, ok := a.Callers.Get(p.Node + "/" + session.ID()); ok {
 						caller = current

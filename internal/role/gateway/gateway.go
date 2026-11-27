@@ -9,12 +9,15 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/delegate"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/oauth"
 	"github.com/tzf1003/xmesh/internal/quota"
 	"github.com/tzf1003/xmesh/internal/role/agent"
 	"github.com/tzf1003/xmesh/internal/toolerr"
+	"net"
 	"net/http"
 	"reflect"
 	"slices"
@@ -46,6 +49,7 @@ type Principal struct {
 	Scopes       []string
 	Local        bool
 	Ingress      bool
+	Delegated    bool
 }
 type Dial func(context.Context, mesh.Peer, Principal, mcpmux.Options) (*mcpmux.Bridge, error)
 type Discover func(context.Context) ([]mesh.Peer, error)
@@ -67,6 +71,8 @@ type Options struct {
 	PTYBudget *PTYBudget
 	// Quota is gateway.quota; zero fields take the built-in defaults.
 	Quota config.Quota
+	// DelegateGuard identifies connections originating from delegated task trees.
+	DelegateGuard *delegateguard.Guard
 }
 type device struct {
 	peer     mesh.Peer
@@ -305,11 +311,30 @@ func (g *Gateway) prefix(name string) string {
 	return name
 }
 func (v *view) allowed(device, tool, backend string) bool {
+	if v.p.Delegated && strings.HasPrefix(tool, "delegate.") {
+		return false
+	}
 	return v.p.Local || oauth.Allows(v.p.Scopes, device, tool, backend)
 }
+
+// ConnContext returns an http.Server ConnContext hook for Gateway HTTP servers.
+func (g *Gateway) ConnContext() func(context.Context, net.Conn) context.Context {
+	return delegateguard.ConnContext(g.opts.DelegateGuard)
+}
+
 func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler {
-	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+	authWithDelegation := func(r *http.Request) (Principal, error) {
 		p, e := auth(r)
+		if e != nil {
+			return p, e
+		}
+		if delegateguard.IsDelegatedHTTPRequest(g.opts.DelegateGuard, r) {
+			p.Delegated = true
+		}
+		return p, nil
+	}
+	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		p, e := authWithDelegation(r)
 		if e != nil {
 			return nil
 		}
@@ -327,7 +352,7 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 			http.NotFound(w, r)
 			return
 		}
-		p, e := auth(r)
+		p, e := authWithDelegation(r)
 		if e != nil {
 			http.Error(w, "身份无效", 401)
 			return
@@ -354,7 +379,7 @@ func (g *Gateway) HTTP(auth func(*http.Request) (Principal, error)) http.Handler
 				}
 			}
 			g.mu.Unlock()
-			if existing != nil && (existing.p.ClientID != p.ClientID || existing.p.CredentialID != p.CredentialID || existing.p.Local != p.Local || scopeKey(existing.p.Scopes) != scopeKey(p.Scopes)) {
+			if existing != nil && (existing.p.ClientID != p.ClientID || existing.p.CredentialID != p.CredentialID || existing.p.Local != p.Local || existing.p.Delegated != p.Delegated || scopeKey(existing.p.Scopes) != scopeKey(p.Scopes)) {
 				http.Error(w, "会话身份不匹配", 403)
 				return
 			}
@@ -480,7 +505,13 @@ func (g *Gateway) newView(p Principal) *view {
 					if strings.HasPrefix(tool, "backend.") {
 						_ = json.Unmarshal(args["name"], &backend)
 					}
-					if !v.allowed(deviceName, tool, backend) || (!v.p.Local && !oauth.AllowsArguments(v.p.Scopes, deviceName, tool, args)) {
+					if v.p.Delegated && strings.HasPrefix(tool, "delegate.") {
+						return agent.Result(nil, delegate.RedelegateDeniedError()), nil
+					}
+					if v.p.Delegated && strings.HasPrefix(tool, "delegate.") {
+		return agent.Result(nil, delegate.RedelegateDeniedError()), nil
+	}
+	if !v.allowed(deviceName, tool, backend) || (!v.p.Local && !oauth.AllowsArguments(v.p.Scopes, deviceName, tool, args)) {
 						return agent.Result(nil, toolerr.New("unauthorized", "scope 不允许此工具", "scope", strings.Join(v.p.Scopes, " "), "tool", req.Params.Name)), nil
 					}
 					devices, _ := g.snapshot()
@@ -912,6 +943,9 @@ func (v *view) forward(ctx context.Context, r *mcp.CallToolRequest, name string)
 	backend := ""
 	if strings.HasPrefix(tool, "backend.") {
 		_ = json.Unmarshal(args["name"], &backend)
+	}
+	if v.p.Delegated && strings.HasPrefix(tool, "delegate.") {
+		return agent.Result(nil, delegate.RedelegateDeniedError()), nil
 	}
 	if !v.allowed(deviceName, tool, backend) || (!v.p.Local && !oauth.AllowsArguments(v.p.Scopes, deviceName, tool, args)) {
 		return agent.Result(nil, toolerr.New("unauthorized", "scope 不允许此工具", "scope", strings.Join(v.p.Scopes, " "), "tool", name)), nil

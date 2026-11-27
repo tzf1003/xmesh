@@ -23,11 +23,19 @@ const managedCleanupLimit = 90 * time.Second
 // obligation outlives a successful tool result. An unfinished cleanup is
 // reported instead of being hidden behind the command's own result.
 func runManaged(ctx context.Context, runner sandbox.Runner, cwd string, a Args, env []string, out, errout *os.File) (int, bool, error) {
-	return runManagedStarted(ctx, runner, cwd, a, env, out, errout, nil)
+	return runManagedStartedHooks(ctx, runner, cwd, a, env, out, errout, nil, ProcessHooks{})
+}
+
+func runManagedHooks(ctx context.Context, runner sandbox.Runner, cwd string, a Args, env []string, out, errout *os.File, hooks ProcessHooks) (int, bool, error) {
+	return runManagedStartedHooks(ctx, runner, cwd, a, env, out, errout, nil, hooks)
 }
 
 // runManagedStarted is runManaged that also calls started, when it is not nil, once the runner has started the process.
 func runManagedStarted(ctx context.Context, runner sandbox.Runner, cwd string, a Args, env []string, out, errout *os.File, started func()) (int, bool, error) {
+	return runManagedStartedHooks(ctx, runner, cwd, a, env, out, errout, started, ProcessHooks{})
+}
+
+func runManagedStartedHooks(ctx context.Context, runner sandbox.Runner, cwd string, a Args, env []string, out, errout *os.File, started func(), hooks ProcessHooks) (int, bool, error) {
 	command, e := managedCommand(a.Cmd, cwd)
 	if e != nil {
 		return 0, false, e
@@ -43,16 +51,21 @@ func runManagedStarted(ctx context.Context, runner sandbox.Runner, cwd string, a
 		_, _ = feed.WriteString(a.Stdin)
 	}()
 	spec := sandbox.Spec{Args: append([]string{command}, a.Args...), Dir: cwd, Env: env}
+	doneStart := hooks.Guard.BeginStart()
 	process, startErr := runner.Start(ctx, cwd, spec, sandbox.Streams{Stdin: input, Stdout: out, Stderr: errout})
 	// The runner transfers private duplicates; this end is no longer needed.
 	_ = input.Close()
 	if startErr != nil {
+		doneStart()
 		<-fed
 		if ctx.Err() != nil {
 			return 1, true, nil
 		}
 		return 0, false, toolerr.SandboxRunner("sandbox.runner_failed", startErr)
 	}
+	untrack := hooks.Guard.Track(process.PID(), 0)
+	doneStart()
+	defer untrack()
 	if started != nil {
 		started()
 	}

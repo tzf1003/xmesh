@@ -14,6 +14,7 @@ import (
 
 	"github.com/tzf1003/xmesh/internal/audit"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/mesh"
 	"github.com/tzf1003/xmesh/internal/role/gateway"
 )
@@ -103,7 +104,8 @@ type gatewayDeps struct {
 	// mode is the mesh mode of the running process, which a configuration change cannot alter.
 	mode string
 	// serveFailed hears about an accept loop that ended on its own.
-	serveFailed func(error)
+	serveFailed   func(error)
+	delegateGuard *delegateguard.Guard
 }
 
 // gatewayRole is the local gateway with the listeners that serve it. The role can be started and
@@ -124,9 +126,9 @@ type gatewayRole struct {
 // startGatewayRole creates the gateway and binds gateway.listen from cfg. On failure nothing is left
 // running.
 func startGatewayRole(deps gatewayDeps, cfg *config.Config) (*gatewayRole, error) {
-	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Surface: SurfaceFromConfig(cfg.Gateway), Discover: deps.discover, Changed: deps.changed, Dial: deps.dial, Audit: deps.log})
+	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Surface: SurfaceFromConfig(cfg.Gateway), Discover: deps.discover, Changed: deps.changed, Dial: deps.dial, Audit: deps.log, DelegateGuard: deps.delegateGuard})
 	r := &gatewayRole{deps: deps, gw: g, retired: map[net.Listener]bool{}}
-	r.server = &http.Server{Handler: g.HTTP(gateway.LocalAuthentication(deps.store)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, ErrorLog: newHandshakeLog()}
+	r.server = &http.Server{Handler: g.HTTP(gateway.LocalAuthentication(deps.store)), ConnContext: g.ConnContext(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, ErrorLog: newHandshakeLog()}
 	bound, err := r.bind(cfg.Gateway.Listen)
 	if err != nil {
 		g.Close()

@@ -48,7 +48,7 @@ func fixtureWith(t *testing.T, ingress bool, edit func(*config.Config)) (*Gatewa
 	t.Cleanup(a.Close)
 	server := httptest.NewServer(a.HTTP(agent.Local))
 	t.Cleanup(server.Close)
-	g := New(Options{NodeName: c.Node.Name, Ingress: ingress, LocalPeer: mesh.Peer{ID: "local", Name: c.Node.Name, Address: server.URL + "/mcp", Online: true, Tags: []string{"tag:device"}}, Dial: RemoteDial(server.Client())})
+	g := New(Options{NodeName: c.Node.Name, Ingress: ingress, LocalPeer: mesh.Peer{ID: "local", Name: c.Node.Name, Address: server.URL + "/mcp", Online: true, Tags: []string{"tag:device"}}, Dial: RemoteDial(server.Client()), DelegateGuard: a.DelegateGuard()})
 	t.Cleanup(g.Close)
 	return g, root
 }

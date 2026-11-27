@@ -176,7 +176,7 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 		principal.Ingress = true
 		return deps.dial(ctx, peer, principal, opts)
 	}
-	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, Ingress: true, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Surface: SurfaceFromConfig(cfg.Gateway), Discover: deps.discover, Changed: deps.changed, Dial: ingressDial, Audit: deps.log, PTYBudget: ptyBudget})
+	g := gateway.New(gateway.Options{Quota: cfg.Gateway.Quota, NodeName: cfg.Node.Name, NodeID: deps.nodeID, Ingress: true, LocalPeer: deps.localPeer, Favorite: cfg.Gateway.ExposeBackends == "favorite", Surface: SurfaceFromConfig(cfg.Gateway), Discover: deps.discover, Changed: deps.changed, Dial: ingressDial, Audit: deps.log, PTYBudget: ptyBudget, DelegateGuard: deps.delegateGuard})
 	deps.registry.add(g)
 	// Read the generation after registering, so a change landing between the two is either seen here
 	// or delivered to the subscription.
@@ -191,7 +191,7 @@ func startIngressRole(deps ingressDeps, cfg *config.Config) (*ingressRole, error
 		return gateway.Principal{ClientID: token.ClientID, OAuthSession: token.Family, Scopes: token.Scopes}, nil
 	}))
 	r := &ingressRole{deps: deps, cfg: cfg, admin: &ingressAdmin{auth: authorization, passwordFile: passwordFile}, gw: g}
-	r.server = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tlsConfig, ErrorLog: newHandshakeLog()}
+	r.server = &http.Server{Handler: handler, ConnContext: g.ConnContext(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tlsConfig, ErrorLog: newHandshakeLog()}
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()

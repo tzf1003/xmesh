@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 )
 
 // Marker is the first argument that makes a test binary behave as the fake runner.
@@ -19,6 +21,7 @@ const Marker = "--xmesh-delegate-fake"
 
 // Serve runs the fake when args select it, and exits the process with the fake's status. Otherwise it returns.
 func Serve(args []string) {
+	delegateguard.HandleReaper(args)
 	if len(args) < 3 || args[1] != Marker {
 		return
 	}

@@ -79,6 +79,11 @@ func (m *Manager) Configure(cfg config.Exec) {
 	m.scheduler.configure(cfg.MaxConcurrent, cfg.ExclusiveSlots)
 }
 func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *policy.Engine, raw json.RawMessage) (Object, error) {
+	return m.RunWithHooks(ctx, caller, r, p, raw, ProcessHooks{})
+}
+
+// RunWithHooks executes a command with optional ProcessHooks for delegation tracking.
+func (m *Manager) RunWithHooks(ctx context.Context, caller string, r *cwd.Resolver, p *policy.Engine, raw json.RawMessage, hooks ProcessHooks) (Object, error) {
 	a := Args{Mode: "shared"}
 	if e := json.Unmarshal(raw, &a); e != nil {
 		return nil, toolerr.Args("arguments")
@@ -157,7 +162,7 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	defer m.wg.Done()
 	run := m.track(caller, a)
 	defer m.untrack(run)
-	result, err := m.execute(ctx, caller, resolved.Path, env, a, cfg, rec, timeout, p, run)
+	result, err := m.execute(ctx, caller, resolved.Path, env, a, cfg, rec, timeout, p, run, hooks)
 	m.mu.Lock()
 	rec.result = clone(result)
 	rec.err = err
@@ -175,7 +180,7 @@ func (m *Manager) Run(ctx context.Context, caller string, r *cwd.Resolver, p *po
 	m.mu.Unlock()
 	return result, err
 }
-func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration, p *policy.Engine, run *Run) (Object, error) {
+func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string, a Args, cfg config.Exec, rec *record, timeout time.Duration, p *policy.Engine, run *Run, hooks ProcessHooks) (Object, error) {
 	audit.SetExecutionState(ctx, "queued")
 	release, wait, e := m.scheduler.acquire(ctx, caller, a.Mode)
 	if e != nil {
@@ -211,9 +216,9 @@ func (m *Manager) execute(ctx context.Context, caller, cwd string, env []string,
 	var code int
 	var timedOut bool
 	if runner := p.SandboxRunner(); runner != nil {
-		code, timedOut, e = runManaged(ctx, runner, cwd, a, env, out, errout)
+		code, timedOut, e = runManagedHooks(ctx, runner, cwd, a, env, out, errout, hooks)
 	} else {
-		code, timedOut, e = runLaunched(ctx, p, cwd, a, env, out, errout)
+		code, timedOut, e = runLaunchedHooks(ctx, p, cwd, a, env, out, errout, hooks)
 	}
 	if e != nil {
 		return nil, e

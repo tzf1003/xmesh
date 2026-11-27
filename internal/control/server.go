@@ -23,6 +23,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/backendenv"
 	"github.com/tzf1003/xmesh/internal/computer"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/device"
 )
 
@@ -69,6 +70,8 @@ type Options struct {
 	CIAccounts CIAccounts
 	// CIVisibility replaces the public-repository check; nil asks GitHub.
 	CIVisibility CIVisibility
+	// DelegateGuard rejects control-channel access from delegated task process trees.
+	DelegateGuard *delegateguard.Guard
 }
 
 // Applier is the part of the node that puts a new configuration generation into effect in the
@@ -164,7 +167,7 @@ func Start(o Options) (*Server, error) {
 		APIVersion: v2.APIVersion, KernelVersion: o.Version, Node: o.Listen.Node, PID: os.Getpid(), BootID: s.bus.BootID(),
 		Transport: bound.Transport, Endpoint: bound.Address, StartedAt: s.started, Capabilities: s.caps,
 	}
-	s.srv = &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	s.srv = &http.Server{Handler: http.HandlerFunc(s.serve), ConnContext: delegateguard.ConnContext(o.DelegateGuard), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	if err = WriteEndpoint(o.StateDir, s.endpoint, o.Listen.AllowSIDs...); err != nil {
 		_ = listener.Close()
 		return nil, err
@@ -427,6 +430,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	// Browsers cannot reach a socket or pipe; a request that looks like one is wrong.
 	if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
 		failWith(w, newError(v2.ErrForbidden, "控制通道不接受来自网页的请求"))
+		return
+	}
+	if delegateguard.IsDelegatedHTTPRequest(s.o.DelegateGuard, r) {
+		failWith(w, newError(v2.ErrForbidden, "被委托任务内禁止访问本机控制通道"))
 		return
 	}
 	var matched *route

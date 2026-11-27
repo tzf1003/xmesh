@@ -72,7 +72,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 `invalid_args`、`invalid_cwd`、`policy_denied`、`delegate_saturated`、`unauthorized`、`unauthenticated`、`internal`。
 
-`policy_denied` 的 `rule` 为 `delegate.write_disabled`、`mesh.draining`，或命令策略命中的规则名。`delegate_saturated` 另带 `in_use` 与 `limit`。
+`policy_denied` 的 `rule` 为 `delegate.write_disabled`、`delegate.redelegate_denied`、`mesh.draining`，或命令策略命中的规则名。`delegate_saturated` 另带 `in_use` 与 `limit`。
 
 ## CTR-DLG-03
 
@@ -226,7 +226,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 - 续聊模板含独立的 `{mode_args}` 时，在该位置插入 `read_args` 或 `write_args`。否则把模式参数追加到参数数组末尾。
 - 追加模式参数时，若参数数组末尾是单独的 `-`（Codex 用它表示从标准输入读取提示），模式参数插在 `-` 之前。
 - 提示词只经标准输入传入，不出现在 argv 中。
-- 子进程环境在 [exec 的环境构造规则](exec.md#ctr-exec-01) 之上追加 `XMESH_DELEGATE=1`。
+- 子进程环境在 [exec 的环境构造规则](exec.md#ctr-exec-01) 之上追加 `XMESH_DELEGATE=1`。该变量仅作辅助标记；硬性禁止再委托不依赖环境变量（详见 [CTR-DLG-06](#ctr-dlg-06)）。
 
 ### 会话 id 与最终答复
 
@@ -283,9 +283,27 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 不记录提示词、消息正文、最终答复和输出事件。
 
+### 禁止再委托的硬性保证与威胁模型
+
+被委托任务（`delegate.run` 启动的进程树及其经由本机 `exec.run`、`pty.open` 派生的后代进程）内禁止再次发起或操作委托，且该限制不依赖子进程可自行 `unset` 的 `XMESH_DELEGATE` 环境变量：
+
+1. **服务端进程树归属**：节点运行期通过进程身份表（`delegateguard.Guard`）记录全部活跃委托任务的根 PID（Windows 同时记录其 Job Object 句柄），在本地回环 TCP（Linux 查 `/proc/net/tcp{,6}` 与活跃委托进程的 `/proc/<pid>/fd`；macOS 查 `lsof`；Windows 查 `netstat`）、Unix 域套接字内核对端凭据（Linux `SO_PEERCRED`、macOS `LOCAL_PEERPID`）与 Windows 命名管道（`GetNamedPipeClientProcessId`）上识别发起方 PID，并沿父进程/进程组/会话链（Windows 另有 `IsProcessInJob` 与快照父链）回溯判断是否源自活跃委托任务。
+2. **多跳分离防逃逸**：
+   - Linux 在非 L2 启动路径通过内嵌 `PR_SET_CHILD_SUBREAPER` 包装入口（`__delegate-reaper`）接管 `double-fork + setsid` 孤儿后代，配合死亡管道在任务结束或被取消时清理整棵后代树。
+   - Windows 将委托进程树绑定到作业对象（Job Object），后代即使脱离控制台或原父进程退出仍留在同一作业内并随关闭终止。
+3. **入口强制拒绝**：
+   - **本机 Agent（`--local` 及本机转发）**：被归属为委托源的调用方在 `tools/list` 中看不到 `delegate.*`；直接调用任何 `delegate.*` 工具统一返回 `policy_denied`、`rule: delegate.redelegate_denied`。
+   - **Gateway / Ingress**：即使携带拥有 `exec:*` 权限的合法本地 PAT 或 OAuth 令牌，通过 Gateway 调用 `local/delegate.*`、`remote/delegate.*`、默认设备 `delegate.*` 或 `tools.call` 元工具均在入口与转发层返回 `policy_denied`、`rule: delegate.redelegate_denied`，且 `tools/list` 与 `tools.search` 隐藏 `delegate.*`。
+   - **防困惑代理人与会话劫持**：委托源不可借 `Mcp-Session-Id` 复用非委托调用方已建立的 MCP 会话（HTTP 403）；经由 `exec.run` / `pty.open` 间接派生的子进程同样被追踪，`pty.transfer` 禁止跨越委托/非委托调用方边界移交会话。
+   - **控制通道隔离**：被归属为委托源的本机进程访问控制通道（Unix socket 或 Windows 命名管道上的任意 `/v2/*` 路由）一律返回 HTTP 403 `forbidden`，阻断其读取 `PAT` / 节点配置 / `control` 状态。
+
+已知残余边界（L1 无 OS 沙箱层场景下）：
+
+- **跨网络直连远端节点**：在 `isolation: L1` 下，委托任务与宿主使用同一系统用户；若任务读取本机保存的远端 OAuth 凭据或对等网络身份私钥并绕过本机 Gateway/Agent/控制通道、直接跨网络向**远端**节点发起 TCP/TLS 连接，远端节点只能看到远端对等体连接而非本机 PID（通过本机 Gateway 转发 `remote/delegate.*` 仍会被阻断）。需要开启 `isolation: L2` 与网络/文件隔离收口该路径。
+- **macOS L1 极快 `double-fork + setsid`**：macOS 内核无 `PR_SET_CHILD_SUBREAPER` 且 `sandbox-exec` 无法在自带 Seatbelt 沙箱的运行器（如 `codex`）外层嵌套。若后代在 15ms 树采样周期内完成 `double-fork + setsid()` 且中间父进程先于采样退出，该孙进程会重挂到 PID 1（`launchd`）而失去祖先归属链。Linux（`__delegate-reaper`）与 Windows（Job Object）均不存在该窗口，且开启 `isolation: L2` 可在全平台同时隔离文件系统与网络访问。
+
 ### 一期不做
 
 - 活会话回复的回收（读会话记录或回信工具）。
 - Codex 活线程注入（`codex queue`）。
 - 钩子类回合式适配器（Cursor、Gemini、Copilot 等）。
-- 禁止再委托的硬性保证。环境变量 `XMESH_DELEGATE=1` 只为以后做这件事留出标记。

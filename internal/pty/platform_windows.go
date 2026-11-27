@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
@@ -23,6 +24,7 @@ type windowsTerminal struct {
 	console       windows.Handle
 	process       windows.ProcessInformation
 	job           windows.Handle
+	untrack       func()
 	exited        chan struct{}
 	consoleOnce   sync.Once
 	closeOnce     sync.Once
@@ -34,15 +36,20 @@ var denyJobList bool
 
 var updateConsoleAttribute = windows.NewLazySystemDLL("kernel32.dll").NewProc("UpdateProcThreadAttribute")
 
-func start(shell string, args []string, cwd string, env []string, cols, rows int, _ bool) (terminal, error) {
+func start(shell string, args []string, cwd string, env []string, cols, rows int, inner bool) (terminal, error) {
+	t, _, err := startWithGuard(shell, args, cwd, env, cols, rows, inner, nil)
+	return t, err
+}
+
+func startWithGuard(shell string, args []string, cwd string, env []string, cols, rows int, _ bool, guard *delegateguard.Guard) (terminal, func(), error) {
 	var inR, inW, outR, outW windows.Handle
 	if e := windows.CreatePipe(&inR, &inW, nil, 0); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	defer windows.CloseHandle(inR)
 	if e := windows.CreatePipe(&outR, &outW, nil, 0); e != nil {
 		windows.CloseHandle(inW)
-		return nil, e
+		return nil, nil, e
 	}
 	defer windows.CloseHandle(outW)
 	t := &windowsTerminal{input: os.NewFile(uintptr(inW), "conpty-input"), output: os.NewFile(uintptr(outR), "conpty-output"), exited: make(chan struct{})}
@@ -63,20 +70,20 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 	var e error
 	t.job, e = winjob.New()
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	if e := windows.CreatePseudoConsole(windows.Coord{X: int16(cols), Y: int16(rows)}, inR, outW, 0, &t.console); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	// Explicit standard handles prevent the child from using the hosting
 	// process's redirected handles; ConPTY supplies the attached console.
 	command, e := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{shell}, args...)))
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	dir, e := windows.UTF16PtrFromString(cwd)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
 	// The process is created suspended and stays so until all hosting-side
@@ -124,10 +131,11 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 		}
 	}
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
+	t.untrack = guard.Track(int(t.process.ProcessId), uintptr(t.job))
 	if _, e = windows.ResumeThread(t.process.Thread); e != nil {
-		return nil, e
+		return nil, nil, e
 	}
 	windows.CloseHandle(t.process.Thread)
 	t.process.Thread = 0
@@ -140,7 +148,7 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 		close(t.exited)
 		t.closeConsole()
 	}()
-	return t, nil
+	return t, t.closeJob, nil
 }
 func (t *windowsTerminal) Read(b []byte) (int, error)  { return t.output.Read(b) }
 func (t *windowsTerminal) Write(b []byte) (int, error) { return t.input.Write(b) }
@@ -209,6 +217,10 @@ func (t *windowsTerminal) terminateJob() error {
 func (t *windowsTerminal) closeJob() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.untrack != nil {
+		t.untrack()
+		t.untrack = nil
+	}
 	if t.job != 0 {
 		_ = windows.CloseHandle(t.job)
 		t.job = 0

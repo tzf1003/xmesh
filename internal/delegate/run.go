@@ -218,10 +218,10 @@ func (m *Manager) launch(ctx context.Context, p *policy.Engine, t *task, argv, e
 	go func() {
 		defer m.wg.Done()
 		started := false
-		code, timedOut, runErr := runexec.RunStream(ctx, p, t.cwd, env, argv, prompt, outW, errW, func() {
+		code, timedOut, runErr := runexec.RunStreamWithHooks(ctx, p, t.cwd, env, argv, prompt, outW, errW, func() {
 			started = true
 			t.setReady(nil)
-		})
+		}, runexec.ProcessHooks{Subreaper: true, Guard: m.guard})
 		if !started {
 			if runErr == nil {
 				runErr = errNotStarted

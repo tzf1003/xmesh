@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tzf1003/xmesh/internal/app"
 	"github.com/tzf1003/xmesh/internal/config"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/winbox"
 	"io"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 func main() {
 	prepareStandardIO()
+	delegateguard.EnableSubreaper()
 	if e := run(os.Args[1:]); e != nil {
 		fmt.Fprintln(os.Stderr, e)
 		os.Exit(1)
@@ -78,6 +80,9 @@ func run(args []string) error {
 		return winbox.RunProcessSupervisor(args[1:])
 	case "__sandbox-guard":
 		return winbox.RunGuardKeeper(args[1:])
+	case delegateguard.ReaperMarker:
+		os.Exit(delegateguard.RunReaper(args[1:]))
+		return nil
 	case "setup":
 		return setupCommand(args[1:])
 	case "doctor":

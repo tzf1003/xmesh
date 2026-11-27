@@ -301,7 +301,7 @@ func Test_CTRDLG03_TimeoutTerminatesTheProcessTree(t *testing.T) {
 	heartbeat := filepath.Join(t.TempDir(), "beat.txt")
 	killHeartbeat(t, heartbeat)
 	h := newHarness(t, testSettings(map[string]config.DelegateRunner{"tree": fakeRunner(t, "tree", heartbeat)}))
-	out := h.ok(callerA, "delegate.run", map[string]any{"runner": "tree", "prompt": "x", "timeout": "1s", "wait_ms": 60000})
+	out := h.ok(callerA, "delegate.run", map[string]any{"runner": "tree", "prompt": "x", "timeout": "4s", "wait_ms": 60000})
 	if out["state"] != "timeout" {
 		t.Fatalf("state = %v, want timeout (%v)", out["state"], out)
 	}

@@ -230,5 +230,5 @@ func assertStopped(t *testing.T, file string) {
 			return
 		}
 	}
-	t.Fatal("the process of the task is still writing its heartbeat after the task ended")
+	t.Fatalf("the process of the task is still writing its heartbeat (or never started: size=%d) after the task ended", size())
 }

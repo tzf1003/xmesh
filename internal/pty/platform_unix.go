@@ -4,6 +4,7 @@ package pty
 
 import (
 	unixpty "github.com/creack/pty"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"golang.org/x/sys/unix"
 	"os"
 	"os/exec"
@@ -18,6 +19,11 @@ type unixTerminal struct {
 }
 
 func start(shell string, args []string, cwd string, env []string, cols, rows int, innerTerminal bool) (terminal, error) {
+	t, _, err := startWithGuard(shell, args, cwd, env, cols, rows, innerTerminal, nil)
+	return t, err
+}
+
+func startWithGuard(shell string, args []string, cwd string, env []string, cols, rows int, innerTerminal bool, guard *delegateguard.Guard) (terminal, func(), error) {
 	cmd := exec.Command(shell, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(env, "TERM=xterm-256color")
@@ -25,9 +31,10 @@ func start(shell string, args []string, cwd string, env []string, cols, rows int
 	// launchers attach here, in the same session that will run the shell.
 	f, e := unixpty.StartWithAttrs(cmd, &unixpty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}, &syscall.SysProcAttr{Setsid: true, Setctty: !innerTerminal})
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
-	return &unixTerminal{file: f, cmd: cmd}, nil
+	untrack := guard.Track(cmd.Process.Pid, 0)
+	return &unixTerminal{file: f, cmd: cmd}, untrack, nil
 }
 func (t *unixTerminal) Read(b []byte) (int, error)  { return t.file.Read(b) }
 func (t *unixTerminal) Write(b []byte) (int, error) { return t.file.Write(b) }

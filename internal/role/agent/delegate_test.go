@@ -19,6 +19,7 @@ import (
 // TestMain lets the test binary act as the fake Agent CLI that the delegate runners start (delegatetest), before the
 // test framework starts. The other tests of this package are unaffected.
 func TestMain(m *testing.M) {
+	runRedelegateProbe(os.Args)
 	delegatetest.Serve(os.Args)
 	os.Exit(m.Run())
 }

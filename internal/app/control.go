@@ -72,6 +72,7 @@ func startControl(d controlDeps) (stop func()) {
 		options.Computer = d.agent.Computer
 		options.Delegate = d.agent
 		options.ApplyBackendEnv = d.agent.ApplyBackendEnv
+		options.DelegateGuard = d.agent.DelegateGuard()
 	}
 	if d.ci != nil {
 		options.CI = d.ci

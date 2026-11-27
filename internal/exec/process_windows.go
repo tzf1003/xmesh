@@ -13,6 +13,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 	"github.com/tzf1003/xmesh/internal/winjob"
 	"golang.org/x/sys/windows"
@@ -29,10 +30,18 @@ var denyJobList bool
 // aliases) are created suspended without it and assigned to the Job before
 // their primary thread is resumed.
 func startCommand(c *exec.Cmd) (wait func() error, finish func(), err error) {
-	return startCommandWithWindow(c, false)
+	return startCommandWithOptions(c, false, nil)
+}
+
+func startCommandWithGuard(c *exec.Cmd, guard *delegateguard.Guard) (wait func() error, finish func(), err error) {
+	return startCommandWithOptions(c, false, guard)
 }
 
 func startCommandWithWindow(c *exec.Cmd, hideWindow bool) (wait func() error, finish func(), err error) {
+	return startCommandWithOptions(c, hideWindow, nil)
+}
+
+func startCommandWithOptions(c *exec.Cmd, hideWindow bool, guard *delegateguard.Guard) (wait func() error, finish func(), err error) {
 	if c.Err != nil {
 		return nil, nil, c.Err
 	}
@@ -127,7 +136,15 @@ func startCommandWithWindow(c *exec.Cmd, hideWindow bool) (wait func() error, fi
 		return nil, nil, err
 	}
 	var once sync.Once
-	closeJob := func() { once.Do(func() { _ = windows.CloseHandle(job) }) }
+	untrack := func() {}
+	closeJob := func() {
+		once.Do(func() {
+			untrack()
+			_ = windows.CloseHandle(job)
+		})
+	}
+	doneStart := guard.BeginStart()
+	defer doneStart()
 	defer func() {
 		if err != nil {
 			closeJob()
@@ -209,6 +226,10 @@ func startCommandWithWindow(c *exec.Cmd, hideWindow bool) (wait func() error, fi
 			return nil, nil, err
 		}
 	}
+	// Register the suspended process and its Job handle before resuming so the
+	// child cannot execute any instruction outside the delegation guard.
+	untrack = guard.Track(int(process.ProcessId), uintptr(job))
+	doneStart()
 	var previous uint32
 	previous, err = windows.ResumeThread(process.Thread)
 	if err != nil {

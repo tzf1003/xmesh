@@ -12,6 +12,7 @@ import (
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/connectivity"
 	"github.com/tzf1003/xmesh/internal/control"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/mcpmux"
 	"github.com/tzf1003/xmesh/internal/mesh"
@@ -168,7 +169,11 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 		wg.Wait()
 	}()
 	launch := func(listener net.Listener, handler http.Handler, label string, tlsConfig *tls.Config) {
-		server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tlsConfig, ErrorLog: newHandshakeLog()}
+		var connContext func(context.Context, net.Conn) context.Context
+		if a != nil {
+			connContext = a.ConnContext()
+		}
+		server := &http.Server{Handler: handler, ConnContext: connContext, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, TLSConfig: tlsConfig, ErrorLog: newHandshakeLog()}
 		servers = append(servers, server)
 		listeners = append(listeners, listener)
 		wg.Add(1)
@@ -281,7 +286,11 @@ func Run(ctx context.Context, store *config.Store, o Options) (runErr error) {
 	if devices != nil {
 		dial = dialPeer
 	}
-	roles = newRoleRuntime(gatewayDeps{store: store, registry: registry, log: log, network: network, nodeID: self.Node, localPeer: localPeer, discover: discover, changed: gatewayChanged, dial: dial, mode: c.Mesh.Mode}, o.StateDir, func(e error) {
+	var delegateGuard *delegateguard.Guard
+	if a != nil {
+		delegateGuard = a.DelegateGuard()
+	}
+	roles = newRoleRuntime(gatewayDeps{store: store, registry: registry, log: log, network: network, nodeID: self.Node, localPeer: localPeer, discover: discover, changed: gatewayChanged, dial: dial, mode: c.Mesh.Mode, delegateGuard: delegateGuard}, o.StateDir, func(e error) {
 		select {
 		case errc <- e:
 		default:
@@ -413,6 +422,7 @@ func localAgentPrincipal(self identity.Principal, p gateway.Principal) identity.
 	if p.Ingress {
 		self.Tags = []string{"tag:ingress"}
 	}
+	self.Delegated = p.Delegated
 	return self
 }
 

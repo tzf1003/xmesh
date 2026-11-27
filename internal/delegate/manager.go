@@ -14,6 +14,7 @@ import (
 
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
+	"github.com/tzf1003/xmesh/internal/delegateguard"
 	"github.com/tzf1003/xmesh/internal/policy"
 	"github.com/tzf1003/xmesh/internal/toolerr"
 )
@@ -31,6 +32,8 @@ type Request struct {
 	// Gen is the value of Manager.Generation read before Settings was read. A run whose switch went off in between
 	// registers nothing (CTR-DLG-06).
 	Gen uint64
+	// Delegated is true when the caller originates from inside an active delegated task.
+	Delegated bool
 }
 
 // End describes a task that has finished, for the audit log (CTR-DLG-06). It never carries the prompt, the
@@ -81,17 +84,24 @@ type Manager struct {
 	stop     context.CancelFunc
 	wg       sync.WaitGroup
 	onEnd    func(End)
+	guard    *delegateguard.Guard
 }
 
 // New returns an empty Manager. onEnd, when not nil, is called once for every task that ends.
 func New(onEnd func(End)) *Manager {
 	base, stop := context.WithCancel(context.Background())
-	return &Manager{tasks: map[string]*task{}, keys: map[string]map[string]*task{}, base: base, stop: stop, onEnd: onEnd}
+	return &Manager{tasks: map[string]*task{}, keys: map[string]map[string]*task{}, base: base, stop: stop, onEnd: onEnd, guard: delegateguard.New()}
 }
+
+// Guard returns the process-tree guard tracking all active delegated tasks of this Manager.
+func (m *Manager) Guard() *delegateguard.Guard { return m.guard }
 
 // Tool serves one of the five delegate tools (CTR-DLG-01 to CTR-DLG-04). The Agent checks the switch,
 // draining and authorization before it gets here.
 func (m *Manager) Tool(ctx context.Context, r Request, tool string, raw json.RawMessage) (Object, error) {
+	if r.Delegated {
+		return nil, RedelegateDeniedError()
+	}
 	if !r.Settings.Enabled {
 		return nil, disabledError()
 	}
@@ -174,6 +184,11 @@ func (m *Manager) Generation() uint64 {
 // disabledError is the refusal of every delegate tool while agent.delegate.enabled is off.
 func disabledError() error {
 	return toolerr.New("policy_denied", "Agent 委托已关闭", "rule", "delegate.disabled", "reason", "agent.delegate.enabled 为 false")
+}
+
+// RedelegateDeniedError is the refusal when a delegated task tries to invoke any delegate.* tool.
+func RedelegateDeniedError() error {
+	return toolerr.New("policy_denied", "被委托任务内禁止再次发起委托", "rule", "delegate.redelegate_denied", "reason", "被委托任务内禁止再次发起委托")
 }
 
 // Close terminates every task, waits until their processes are gone, and refuses new tasks. The Agent calls

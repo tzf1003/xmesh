@@ -534,3 +534,12 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 - **实现**：`internal/delegate/overview.go` 汇总运行器、活会话与各调用方的任务，不含提示词、输出和答复；`internal/role/agent/control.go` 的 `DelegateState` 映射为控制类型；`internal/control/delegate.go` 只在节点有 Agent 角色时声明能力。桌面端「Agent 委托」页位于「运行」组，开关经 `PATCH /v2/config` 写入 `/agent/delegate/enabled`，`allow_write` 与 `allow_sessions` 只读展示。
 - **未做**：控制通道取消单个任务；桌面端修改 `allow_write` 与 `allow_sessions`。
 - **验证**（2026-11-17，开发容器）：`go vet ./...` 通过；改动包的 `go test -race` 与全量 `go test ./...` 通过；`check_examples.py`、`check_control.py`、`conformance_check.py` 通过；UI 的 `check-types`、`typecheck` 通过，`npm test` 为 669 通过、7 跳过、0 失败；端到端 `panel-delegate.spec.ts` 与 `panel-computer.spec.ts` 共 7 个用例通过。
+
+## 2026-11-27 委托禁止再委托硬性保证（#214）
+
+- **契约与符合性**：更新 [delegate.md](contracts/delegate.md)（`policy_denied` 新增 `delegate.redelegate_denied`，补齐硬性机制说明、防绕过威胁模型及 L1 残余边界，移除「一期不做」中的遗留条目）与 [conformance.md](conformance.md) 的 `CTR-DLG-06`。
+- **实现**：
+  - 新增 `internal/delegateguard`：内核级活跃委托进程树追踪、回环 TCP/Unix socket/命名管道对端 PID 识别（Linux `/proc` + `SO_PEERCRED`、macOS `lsof`/`sysctl` + `LOCAL_PEERPID`、Windows Job Object `IsProcessInJob` + `GetNamedPipeClientProcessId` + `netstat`），以及 Linux `PR_SET_CHILD_SUBREAPER` 包装入口（`__delegate-reaper`，接入 `cmd/xmesh` 与 `delegatetest`），捕获 `double-fork + setsid` 重挂孙进程并连同 `start-status` 握手与死亡管道一并清理。
+  - 接入 `internal/identity`、`internal/exec`、`internal/pty`（含 `pty.transfer` 防跨委托边界移交）、`internal/delegate`、`internal/role/agent`、`internal/role/gateway`（本地 `exec:*` PAT、OAuth 与 `tools.search`/`tools.call` 均拒 `delegate.*`）、`internal/control`（委托进程树访问 `/v2/*` 返回 HTTP 403 `forbidden`）与 `internal/app`。
+- **残余边界（如实记录）**：`isolation: L1` 下同用户直连**远端**节点绕过本机入口需由 L2 隔离收口；macOS L1 下极快退出的 `double-fork + setsid` 孙进程存在超越 15ms 树采样的理论竞态窗口（Linux/Windows 不存在，全平台 L2 可封闭）。
+- **验证状态**：本机（Linux）完成三平台 `go vet ./...`（linux/windows/darwin）、改动相关的 12 个 Go 包 `go test -race`（760 passed）与 `conformance_check.py`（153/153）；`check_examples.py` 因本机缺少 `rfc3339-validator` 交由 CI 验证，Windows 与 macOS 原生运行时验证交由 GitHub Actions CI。

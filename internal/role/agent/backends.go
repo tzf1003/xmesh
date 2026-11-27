@@ -57,6 +57,9 @@ func backendToolAllowed(cfg *config.Config, caller identity.Caller, name string)
 }
 func (a *Agent) toolAllowed(cfg *config.Config, caller identity.Caller, name string) bool {
 	prefix, _, _ := strings.Cut(name, ".")
+	if caller.Delegated && prefix == "delegate" {
+		return false
+	}
 	if _, builtin := builtinSpecs()[name]; builtin {
 		// The delegate tools stay registered while the switch is off, so a call is refused with delegate.disabled.
 		// They are hidden from tools/list until the switch is on.

@@ -12,11 +12,13 @@ type Caller struct {
 	ID          string
 	Tags        []string
 	OAuthClient string
+	Delegated   bool
 }
 type Principal struct {
 	Node        string
 	Tags        []string
 	OAuthClient string
+	Delegated   bool
 }
 
 func FromPeer(node string, tags []string, oauthClient string) (Principal, error) {
