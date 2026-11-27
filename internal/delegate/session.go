@@ -112,7 +112,13 @@ func (m *Manager) send(r Request, raw json.RawMessage) (Object, error) {
 		return nil, toolerr.Args("message")
 	}
 	if !r.Settings.SessionsAllowed() {
-		return nil, toolerr.New("policy_denied", "活会话注入已关闭", "rule", "delegate.sessions_disabled", "reason", "agent.delegate.allow_sessions 未设为 true")
+		return nil, sessionsDisabledError()
+	}
+	replyEnabled := r.Settings.SessionRepliesAllowed()
+	if replyEnabled {
+		if err := m.checkReplyCapacity(r); err != nil {
+			return nil, err
+		}
 	}
 	sessions := discoverSessions(r.Resolver)
 	var target *session
@@ -126,14 +132,20 @@ func (m *Manager) send(r Request, raw json.RawMessage) (Object, error) {
 		return nil, toolerr.New("not_found", "会话不存在、已退出，或不在允许范围内", "name", a.SessionID)
 	}
 	id := newID("")
-	payload, err := injection(target.dir, target.PID, r.Caller, id, a.Message)
+	payload, err := injection(target.dir, target.PID, r.Caller, id, a.Message, replyEnabled)
 	if err != nil {
 		return nil, unavailable("key_unreadable")
 	}
 	if reason, err := deliver(target.socket, payload); err != nil {
 		return nil, unavailable(reason)
 	}
-	return Object{"delivered": true, "message_id": id, "tier": "push", "status": target.Status}, nil
+	out := Object{"delivered": true, "message_id": id, "tier": "push", "status": target.Status}
+	if replyEnabled {
+		if taskID, ok := m.registerReplyThread(r, target.ID, target.CWD, id); ok {
+			out["task_id"] = taskID
+		}
+	}
+	return out, nil
 }
 
 // unavailable is the error of a failed injection. The reason names the step that failed.
@@ -157,7 +169,7 @@ type userLine struct {
 
 // injection is the byte sequence written to the session socket: an auth line when a key file exists, then the user
 // line that carries the framed message. Every line ends with a newline.
-func injection(dir string, pid int, caller, id, message string) ([]byte, error) {
+func injection(dir string, pid int, caller, id, message string, replyEnabled bool) ([]byte, error) {
 	token, hasKey, err := peerToken(dir, pid)
 	if err != nil {
 		return nil, err
@@ -173,7 +185,7 @@ func injection(dir string, pid int, caller, id, message string) ([]byte, error) 
 	var frame userLine
 	frame.Type = "user"
 	frame.Message.Role = "user"
-	frame.Message.Content = frameMessage(caller, id, message)
+	frame.Message.Content = frameMessage(caller, id, message, replyEnabled)
 	if err := enc.Encode(frame); err != nil {
 		return nil, err
 	}
@@ -181,10 +193,14 @@ func injection(dir string, pid int, caller, id, message string) ([]byte, error) 
 }
 
 // frameMessage wraps a message from a remote agent in the frame of CTR-DLG-04, so the text reads as a remote agent's
-// and not as the local user's.
-func frameMessage(caller, id, message string) string {
+// and not as the local user's. When replyEnabled is true, it appends instructions for the explicit reply adapter.
+func frameMessage(caller, id, message string, replyEnabled bool) string {
 	body := escapeFrameTag.ReplaceAllString(message, "&lt;$1")
-	return `<xmesh-message from="` + html.EscapeString(caller) + `" id="` + id + `">` + "\n" + body + "\n</xmesh-message>\n" + frameNotice
+	out := `<xmesh-message from="` + html.EscapeString(caller) + `" id="` + id + `">` + "\n" + body + "\n</xmesh-message>\n" + frameNotice
+	if replyEnabled {
+		out += "\n如需回复此消息，请在本机执行 `xmesh delegate reply --message-id " + id + " --stdin`（仅限非空合法 UTF-8，不超过 8 KiB）；回信草稿会先进入本机待确认队列，经本机用户预览并确认后才会发送给远端调用方。"
+	}
+	return out
 }
 
 // peerToken reads the token of the session's key file, <pid>.*.key in dir (CTR-DLG-04). It reports false when there is

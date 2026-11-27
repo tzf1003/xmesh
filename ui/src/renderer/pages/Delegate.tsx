@@ -1,6 +1,6 @@
 import type { JSX } from "preact";
 import { useState } from "preact/hooks";
-import type { DelegateState } from "../../shared/control";
+import type { DelegateRepliesResponse, DelegateReplyDetail, DelegateState } from "../../shared/control";
 import type { PageContext } from "../app";
 import { getApi } from "../api";
 import { Badge, Empty, NotSupported, PageHead, ResourceView } from "../components";
@@ -20,6 +20,17 @@ function taskState(state: string, t: T): string {
   }
 }
 
+function replyStateLabel(state: string, t: T): string {
+  switch (state) {
+    case "pending": return t("delegate.replyState.pending");
+    case "approved": return t("delegate.replyState.approved");
+    case "rejected": return t("delegate.replyState.rejected");
+    case "expired": return t("delegate.replyState.expired");
+    case "cancelled": return t("delegate.replyState.cancelled");
+    default: return state;
+  }
+}
+
 function sessionStatus(status: string, t: T): string {
   if (status === "busy") return t("delegate.busy");
   if (status === "idle") return t("delegate.idle");
@@ -35,7 +46,13 @@ export function Delegate({ ctx }: { ctx: PageContext }): JSX.Element {
 function DelegatePage({ ctx }: { ctx: PageContext }): JSX.Element {
   const t = useT();
   const { resource, reload } = useResource(() => getApi().delegate(), [ctx.snapshot.selectedInstance], 2000);
+  const repliesRes = useResource(() => getApi().delegateReply({ op: "list" }), [ctx.snapshot.selectedInstance], 2000);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<DelegateReplyDetail | null>(null);
+  const reloadAll = (): void => {
+    reload();
+    repliesRes.reload();
+  };
   const toggle = async (enabled: boolean): Promise<void> => {
     setBusy(true);
     try {
@@ -44,11 +61,33 @@ function DelegatePage({ ctx }: { ctx: PageContext }): JSX.Element {
       const saved = await getApi().patchConfig({ edits: [{ path: "/agent/delegate/enabled", value: enabled }], etag: loaded.data.etag, dryRun: false });
       if (!saved.ok) ctx.toast(saved.error.message, true);
       else { ctx.applied(await applySaved(saved.data.restart_required)); ctx.toast(t("delegate.saved")); }
-      reload();
+      reloadAll();
+    } finally { setBusy(false); }
+  };
+  const openPreview = async (replyId: string): Promise<void> => {
+    setBusy(true);
+    try {
+      const res = await getApi().delegateReply({ op: "preview", reply_id: replyId });
+      if (!res.ok) { ctx.toast(res.error.message, true); return; }
+      setPreview(res.data);
+      repliesRes.reload();
+    } finally { setBusy(false); }
+  };
+  const decideReply = async (approve: boolean): Promise<void> => {
+    if (!preview) return;
+    setBusy(true);
+    try {
+      const res = approve
+        ? await getApi().delegateReply({ op: "approve", reply_id: preview.reply_id, body_sha256: preview.body_sha256 })
+        : await getApi().delegateReply({ op: "reject", reply_id: preview.reply_id });
+      if (!res.ok) { ctx.toast(res.error.message, true); return; }
+      ctx.toast(t(approve ? "delegate.replyApproved" : "delegate.replyRejected"));
+      setPreview(null);
+      reloadAll();
     } finally { setBusy(false); }
   };
   return <div class="page" data-testid="page-delegate">
-    <PageHead title={t("nav.delegate")} sub={t("delegate.sub")}><button type="button" class="btn" onClick={reload}>{t("common.refresh")}</button></PageHead>
+    <PageHead title={t("nav.delegate")} sub={t("delegate.sub")}><button type="button" class="btn" onClick={reloadAll}>{t("common.refresh")}</button></PageHead>
     <ResourceView resource={resource}>{(state: DelegateState) => <>
       <section class="card stack">
         <div><Badge kind={state.enabled ? "ok" : "warn"}><span data-testid="delegate-state">{state.enabled ? t("delegate.enabled") : t("delegate.disabled")}</span></Badge></div>
@@ -59,8 +98,38 @@ function DelegatePage({ ctx }: { ctx: PageContext }): JSX.Element {
           {t("delegate.policyWrite", { state: state.allow_write ? t("delegate.allowed") : t("delegate.denied") })}
           {" · "}
           {t("delegate.policySessions", { state: state.allow_sessions ? t("delegate.allowed") : t("delegate.denied") })}
+          {" · "}
+          {t("delegate.policySessionReplies", { state: state.allow_session_replies ? t("delegate.allowed") : t("delegate.denied") })}
         </p>
         <p class="hint">{t("delegate.policyHint")}</p>
+      </section>
+      <section class="card stack"><h2>{t("delegate.replies")}</h2>
+        <p class="hint">{t("delegate.repliesHint")}</p>
+        <ResourceView resource={repliesRes.resource}>{(list: DelegateRepliesResponse) => <>
+          {list.replies.length === 0 ? <Empty>{t("delegate.noReplies")}</Empty> : <div class="table-wrap"><table data-testid="delegate-replies"><thead><tr><th scope="col">{t("delegate.colReply")}</th><th scope="col">{t("delegate.colSession")}</th><th scope="col">{t("delegate.colCaller")}</th><th scope="col">{t("delegate.colState")}</th><th scope="col">{t("delegate.colBytes")}</th><th scope="col">{t("delegate.colExpires")}</th><th scope="col">{t("delegate.colAction")}</th></tr></thead>
+            <tbody>{list.replies.map((reply) => <tr key={reply.reply_id}>
+              <td class="mono">{reply.reply_id}</td>
+              <td class="mono">{reply.session_id}</td>
+              <td class="mono">{reply.caller}</td>
+              <td data-testid={`delegate-reply-state-${reply.reply_id}`}>{replyStateLabel(reply.state, t)}</td>
+              <td>{t("delegate.replyBytes", { bytes: reply.bytes })}</td>
+              <td>{formatTime(reply.expires_at)}</td>
+              <td>{reply.state === "pending" && <button type="button" class="btn" disabled={busy} onClick={() => void openPreview(reply.reply_id)} data-testid={`delegate-reply-preview-${reply.reply_id}`}>{t("delegate.replyPreview")}</button>}</td>
+            </tr>)}</tbody>
+          </table></div>}
+          {preview && <div class="card stack" data-testid="delegate-reply-preview">
+            <h3>{t("delegate.replyPreviewTitle")} · <span class="mono">{preview.reply_id}</span></h3>
+            <p class="hint mono">{t("delegate.replyBytes", { bytes: preview.bytes })} · {t("delegate.replySha", { sha: preview.body_sha256 })}</p>
+            <pre class="mono" data-testid="delegate-reply-preview-body" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{preview.body ?? ""}</pre>
+            <div class="row">
+              {preview.state === "pending" && <>
+                <button type="button" class="btn primary" disabled={busy} onClick={() => void decideReply(true)} data-testid="delegate-reply-approve">{t("delegate.replyApprove")}</button>
+                <button type="button" class="btn danger" disabled={busy} onClick={() => void decideReply(false)} data-testid="delegate-reply-reject">{t("delegate.replyReject")}</button>
+              </>}
+              <button type="button" class="btn" disabled={busy} onClick={() => setPreview(null)}>{t("delegate.replyClosePreview")}</button>
+            </div>
+          </div>}
+        </>}</ResourceView>
       </section>
       <section class="card"><h2>{t("delegate.runners")}</h2>
         <div class="table-wrap"><table data-testid="delegate-runners"><thead><tr><th scope="col">{t("delegate.colName")}</th><th scope="col">{t("delegate.colState")}</th><th scope="col">{t("delegate.colPath")}</th></tr></thead>

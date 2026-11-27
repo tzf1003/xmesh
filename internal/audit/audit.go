@@ -255,9 +255,9 @@ func DelegateTaskStatus(state string) string {
 		return "running"
 	case "done":
 		return "passed"
-	case "failed":
+	case "failed", "rejected":
 		return "failed"
-	case "timeout":
+	case "timeout", "expired":
 		return "timed_out"
 	case "cancelled":
 		return "cancelled"

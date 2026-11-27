@@ -23,6 +23,9 @@ import type {
   PatSecret,
   SessionsResponse,
   ComputerState,
+  DelegateReplyDetail,
+  DelegateReplyState,
+  DelegateReplySummary,
   DelegateState,
 } from "../src/shared/control";
 import type { ConfigReloadResponse } from "../src/shared/ipc";
@@ -97,12 +100,97 @@ export class PanelData {
   }
   computer: ComputerState = { enabled: true, paused: false, info: { protocol_version: 1, available: true, state: "ready", desktop_id: "desktop", desktop_epoch: "epoch", layout_version: "layout", capabilities: ["screenshot", "pointer", "keyboard", "text"], displays: [{ id: "main", name: "Main display", x: 0, y: 0, width: 1920, height: 1080, scale: 1, rotation: 0 }] }, sessions: [] };
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
-  /** The delegation view (API 2.7). Its switch follows the configuration on disk; the runners, sessions and tasks are fixed. */
+  /** The delegation view (API 2.7, 2.8). Its switch follows the configuration on disk; the runners, sessions and tasks are fixed. */
   delegate: DelegateState = fixture("DelegateState.active");
+  delegateReplies: DelegateReplyDetail[] = [fixture("DelegateReplyDetail.pending")];
   private delegateState(): DelegateState {
     let enabled = false;
     try { enabled = (parse(this.diskContent) as { agent?: { delegate?: { enabled?: unknown } } } | null)?.agent?.delegate?.enabled === true; } catch { enabled = false; }
-    return { ...this.delegate, enabled };
+    const pending_replies = this.delegateReplies.filter((r) => r.state === "pending").length;
+    return { ...this.delegate, enabled, pending_replies };
+  }
+  private replySummary(d: DelegateReplyDetail): DelegateReplySummary {
+    const out: DelegateReplySummary = {
+      reply_id: d.reply_id,
+      task_id: d.task_id,
+      message_id: d.message_id,
+      session_id: d.session_id,
+      caller: d.caller,
+      state: d.state,
+      bytes: d.bytes,
+      previewed: d.previewed,
+      created_at: d.created_at,
+      expires_at: d.expires_at,
+    };
+    if (d.decided_at !== undefined) out.decided_at = d.decided_at;
+    return out;
+  }
+  private delegateReplyRoute(method: string, p: string, query: URLSearchParams, body: unknown): RouteResult {
+    if (p === "/v2/delegate/replies" && method === "GET") {
+      const state = query.get("state");
+      if (state !== null && !["pending", "approved", "rejected", "expired", "cancelled"].includes(state)) {
+        return err(400, "invalid_args", "无效的 state", { field: "state" });
+      }
+      const replies = this.delegateReplies
+        .filter((r) => state === null || r.state === (state as DelegateReplyState))
+        .map((r) => this.replySummary(r));
+      return ok({ replies });
+    }
+    if (p === "/v2/delegate/replies" && method === "POST") {
+      const req = body as { message_id?: unknown; session_id?: unknown; body?: unknown } | null;
+      if (typeof req?.message_id !== "string" || !/^[0-9a-f]{32}$/.test(req.message_id)) {
+        return err(400, "invalid_args", "无效的 message_id", { field: "message_id" });
+      }
+      if (typeof req?.body !== "string" || Buffer.byteLength(req.body, "utf8") === 0 || Buffer.byteLength(req.body, "utf8") > 8192) {
+        return err(400, "invalid_args", "无效的回信正文", { field: "body" });
+      }
+      const now = new Date().toISOString().replace(/(\.\d{3})\d*Z$/, "$1Z");
+      const entry: DelegateReplyDetail = {
+        reply_id: `r-${randomBytes(16).toString("hex")}`,
+        task_id: `sr-${randomBytes(16).toString("hex")}`,
+        message_id: req.message_id,
+        session_id: typeof req.session_id === "string" && req.session_id !== "" ? req.session_id : "3f1c9a2e-6b7d-4e8f-9a0b-1c2d3e4f5a6b",
+        caller: "node-abc/s7f",
+        state: "pending",
+        bytes: Buffer.byteLength(req.body, "utf8"),
+        previewed: false,
+        body: req.body,
+        body_sha256: createHash("sha256").update(req.body, "utf8").digest("hex"),
+        created_at: now,
+        expires_at: now,
+      };
+      this.delegateReplies.unshift(entry);
+      return ok(this.replySummary(entry), 201);
+    }
+    const detail = /^\/v2\/delegate\/replies\/([^/]+)$/.exec(p);
+    if (detail && method === "GET") {
+      const d = this.delegateReplies.find((r) => r.reply_id === decodeURIComponent(detail[1]!));
+      if (!d) return err(404, "not_found", "回信草稿不存在");
+      if (d.state === "pending") d.previewed = true;
+      return ok({ ...d, body: d.state === "pending" ? d.body : undefined });
+    }
+    const action = /^\/v2\/delegate\/replies\/([^/]+)\/(approve|reject)$/.exec(p);
+    if (action && method === "POST") {
+      const id = decodeURIComponent(action[1]!);
+      const op = action[2]!;
+      const d = this.delegateReplies.find((r) => r.reply_id === id);
+      if (!d) return err(404, "not_found", "回信草稿不存在");
+      if (d.state !== "pending") return err(409, "conflict", "回信已处理", { reason: `reply_${d.state}` });
+      if (op === "approve") {
+        if (!d.previewed) return err(409, "conflict", "需先预览正文", { reason: "preview_required" });
+        const sha = (body as { body_sha256?: unknown } | null)?.body_sha256;
+        if (typeof sha === "string" && sha !== "" && sha !== d.body_sha256) {
+          return err(409, "conflict", "摘要不一致", { reason: "body_mismatch" });
+        }
+        d.state = "approved";
+      } else {
+        d.state = "rejected";
+      }
+      delete d.body;
+      d.decided_at = new Date().toISOString().replace(/(\.\d{3})\d*Z$/, "$1Z");
+      return ok(this.replySummary(d));
+    }
+    return err(404, "not_found", "未找到接口");
   }
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
@@ -187,6 +275,7 @@ export class PanelData {
     const p = u.pathname;
     if (p === "/v2/computer" && method === "GET") return ok(this.computer);
     if (p === "/v2/delegate" && method === "GET") return ok(this.delegateState());
+    if (p === "/v2/delegate/replies" || p.startsWith("/v2/delegate/replies/")) return this.delegateReplyRoute(method, p, u.searchParams, body);
     if (p === "/v2/computer/pause" && method === "POST") {
       const req = body as { paused?: unknown };
       if (typeof req?.paused !== "boolean") return err(400, "invalid_args", "paused required", { field: "paused" });

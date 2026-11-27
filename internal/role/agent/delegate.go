@@ -8,11 +8,16 @@ import (
 	"github.com/tzf1003/xmesh/internal/delegate"
 )
 
-// delegateSwitched ends every delegate task when a reload turns agent.delegate.enabled off (CTR-DLG-06). It runs on
-// the goroutine that adopted the configuration, so it only signals the tasks and does not wait for them.
+// delegateSwitched ends every delegate task when a reload turns agent.delegate.enabled off (CTR-DLG-06),
+// and cancels pending session reply drafts when sessions or session replies are turned off (CTR-DLG-07).
+// It runs on the goroutine that adopted the configuration, so it only signals the tasks and does not wait for them.
 func (a *Agent) delegateSwitched(next *config.Config) {
 	if !next.Agent.Delegate.Enabled {
 		a.Delegate.CancelAll()
+		return
+	}
+	if !next.Agent.Delegate.SessionsAllowed() || !next.Agent.Delegate.SessionRepliesAllowed() {
+		a.Delegate.CancelSessionReplies()
 	}
 }
 

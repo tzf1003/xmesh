@@ -11,6 +11,7 @@ import (
 	v2 "github.com/tzf1003/xmesh/api/control/v2"
 	"github.com/tzf1003/xmesh/internal/config"
 	"github.com/tzf1003/xmesh/internal/cwd"
+	"github.com/tzf1003/xmesh/internal/delegate"
 	"github.com/tzf1003/xmesh/internal/identity"
 	"github.com/tzf1003/xmesh/internal/lease"
 )
@@ -147,7 +148,8 @@ func (a *Agent) DelegateState() v2.DelegateState {
 	view := a.Delegate.Overview(settings, resolver)
 	out := v2.DelegateState{
 		Enabled: settings.Enabled, AllowWrite: settings.AllowWrite, AllowSessions: settings.SessionsAllowed(),
-		MaxConcurrent: settings.Concurrency(), Running: view.Running,
+		AllowSessionReplies: settings.SessionRepliesAllowed(),
+		MaxConcurrent:       settings.Concurrency(), Running: view.Running, PendingReplies: view.PendingReplies,
 		Runners: []v2.DelegateRunner{}, Sessions: []v2.DelegateSession{}, Tasks: []v2.DelegateTask{},
 	}
 	for _, r := range view.Runners {
@@ -160,6 +162,95 @@ func (a *Agent) DelegateState() v2.DelegateState {
 		out.Tasks = append(out.Tasks, v2.DelegateTask{TaskID: t.ID, Caller: t.Caller, Runner: t.Runner, State: t.State, CWD: t.CWD, StartedAt: v2.At(t.Started), DurationMS: t.Duration.Milliseconds(), SessionID: t.SessionID})
 	}
 	return out
+}
+
+func replySummaryToV2(s delegate.ReplySummary) v2.DelegateReplySummary {
+	out := v2.DelegateReplySummary{
+		ReplyID:   s.ReplyID,
+		TaskID:    s.TaskID,
+		MessageID: s.MessageID,
+		SessionID: s.SessionID,
+		Caller:    s.Caller,
+		State:     v2.DelegateReplyState(s.State),
+		Bytes:     s.Bytes,
+		Previewed: s.Previewed,
+		CreatedAt: v2.At(s.CreatedAt),
+		ExpiresAt: v2.At(s.ExpiresAt),
+	}
+	if !s.DecidedAt.IsZero() {
+		decided := v2.At(s.DecidedAt)
+		out.DecidedAt = &decided
+	}
+	return out
+}
+
+// ListDelegateReplies returns metadata summaries of session reply drafts (CTR-DLG-07).
+func (a *Agent) ListDelegateReplies(state string) (v2.DelegateRepliesResponse, error) {
+	items, err := a.Delegate.ListSessionReplies(state)
+	if err != nil {
+		return v2.DelegateRepliesResponse{}, err
+	}
+	out := v2.DelegateRepliesResponse{Replies: make([]v2.DelegateReplySummary, 0, len(items))}
+	for _, item := range items {
+		out.Replies = append(out.Replies, replySummaryToV2(item))
+	}
+	return out, nil
+}
+
+// SubmitDelegateReply submits an explicit reply draft from a live session into the local confirmation queue (CTR-DLG-07).
+func (a *Agent) SubmitDelegateReply(req v2.DelegateReplyCreateRequest) (v2.DelegateReplySummary, error) {
+	settings := a.store.Get().Agent.Delegate
+	item, err := a.Delegate.SubmitSessionReply(settings, req.MessageID, req.SessionID, req.Body)
+	if err != nil {
+		return v2.DelegateReplySummary{}, err
+	}
+	return replySummaryToV2(item), nil
+}
+
+// PreviewDelegateReply returns a single reply draft with its full body for local preview (CTR-DLG-07).
+func (a *Agent) PreviewDelegateReply(replyID string) (v2.DelegateReplyDetail, error) {
+	d, err := a.Delegate.PreviewSessionReply(replyID)
+	if err != nil {
+		return v2.DelegateReplyDetail{}, err
+	}
+	out := v2.DelegateReplyDetail{
+		ReplyID:    d.ReplyID,
+		TaskID:     d.TaskID,
+		MessageID:  d.MessageID,
+		SessionID:  d.SessionID,
+		Caller:     d.Caller,
+		State:      v2.DelegateReplyState(d.State),
+		Bytes:      d.Bytes,
+		Previewed:  d.Previewed,
+		Body:       d.Body,
+		BodySHA256: d.BodySHA256,
+		CreatedAt:  v2.At(d.CreatedAt),
+		ExpiresAt:  v2.At(d.ExpiresAt),
+	}
+	if !d.DecidedAt.IsZero() {
+		decided := v2.At(d.DecidedAt)
+		out.DecidedAt = &decided
+	}
+	return out, nil
+}
+
+// ApproveDelegateReply approves a previously previewed reply draft and releases its body to the caller (CTR-DLG-07).
+func (a *Agent) ApproveDelegateReply(replyID, bodySHA256 string) (v2.DelegateReplySummary, error) {
+	settings := a.store.Get().Agent.Delegate
+	item, err := a.Delegate.ApproveSessionReply(settings, replyID, bodySHA256)
+	if err != nil {
+		return v2.DelegateReplySummary{}, err
+	}
+	return replySummaryToV2(item), nil
+}
+
+// RejectDelegateReply rejects a pending reply draft and wipes its body from memory (CTR-DLG-07).
+func (a *Agent) RejectDelegateReply(replyID string) (v2.DelegateReplySummary, error) {
+	item, err := a.Delegate.RejectSessionReply(replyID)
+	if err != nil {
+		return v2.DelegateReplySummary{}, err
+	}
+	return replySummaryToV2(item), nil
 }
 
 // backendLeases are the leases the control view shows: backend ownership only.

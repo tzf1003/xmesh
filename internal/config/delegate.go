@@ -15,6 +15,8 @@ type Delegate struct {
 	AllowWrite bool `json:"allow_write"`
 	// AllowSessions is nil when the key is absent, which means false: live sessions are opt-in (CTR-DLG-04).
 	AllowSessions *bool `json:"allow_sessions,omitempty"`
+	// AllowSessionReplies is nil when absent, which means false: explicit live session replies are opt-in (CTR-DLG-07).
+	AllowSessionReplies *bool `json:"allow_session_replies,omitempty"`
 	// MaxConcurrent is how many tasks may run at once, at least 1 (the schema enforces it). The file default is 2,
 	// and Concurrency falls back to that default for a zero value built in code.
 	MaxConcurrent  int                       `json:"max_concurrent"`
@@ -49,6 +51,12 @@ var delegateRunnerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 // SessionsAllowed reports whether live sessions are listed and may be written to. They are off unless allow_sessions
 // is set to true (CTR-DLG-04).
 func (d Delegate) SessionsAllowed() bool { return d.AllowSessions != nil && *d.AllowSessions }
+
+// SessionRepliesAllowed reports whether live sessions may submit explicit reply drafts for local preview and
+// confirmation. They are off unless allow_session_replies is set to true (CTR-DLG-07).
+func (d Delegate) SessionRepliesAllowed() bool {
+	return d.AllowSessionReplies != nil && *d.AllowSessionReplies
+}
 
 // Concurrency is the number of tasks that may run at once.
 func (d Delegate) Concurrency() int {

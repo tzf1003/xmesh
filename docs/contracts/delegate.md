@@ -4,7 +4,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 状态只存在目标设备 Agent 的进程内存里（[INV-03](../constraints/invariants.md#inv-03)）。进程重启后，任务、输出和幂等记录全部清空。任务、输出和幂等记录只对创建它的 `caller_id` 可见，其他调用方得到 `not_found`，与 [CTR-EXEC-02](exec.md#ctr-exec-02) 的 `output_ref` 一致。
 
-一期范围：推送式注入只支持 Claude Code（经它自己的收件 socket）；Codex 只走无界面执行与续聊。活会话的回复不回收，`delegate.send` 只保证送达。
+一期范围：推送式注入只支持 Claude Code（经它自己的收件 socket）；Codex 只走无界面执行与续聊。活会话回信默认关闭（`allow_session_replies: false`）；显式开启后采用「活会话显式回信草稿 + 本机逐条预览确认具体正文后发送」机制（见 [CTR-DLG-07](#ctr-dlg-07)）。
 
 本机控制通道的只读视图（`GET /v2/delegate`，API 2.7，见 [control.md](control.md) 的「Agent 委托视图」）是节点本机用户的视角：它列出各调用方的任务，但只有状态、耗时等元数据，不含提示词、输出和答复。
 
@@ -17,6 +17,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 - `agent.delegate.enabled` 为 `false`（缺省）时，五个工具不出现在 `tools/list` 中，Gateway 的工具列表也不含它们。调用返回 `policy_denied`，`rule: delegate.disabled`。
 - `enabled` 由 `true` 改为 `false`（热加载）时，终止全部运行中的任务（进程树），与 Agent 关闭时一致。
 - `allow_sessions` 缺省为 `false`，未设为 `true` 时 `sessions[]` 为空，`delegate.send` 返回 `policy_denied`，见 [CTR-DLG-04](#ctr-dlg-04)。
+- `allow_session_replies` 缺省为 `false`，仅当 `enabled`、`allow_sessions` 与 `allow_session_replies` 均为 `true` 时允许活会话提交回信草稿与回收已确认回信，见 [CTR-DLG-07](#ctr-dlg-07)。
 - `delegate` 是低频组：不在 `gateway.listed_groups` 的缺省值内，经 `tools.search` 与 `tools.call` 取用，见 [CTR-GW-08](gateway.md#ctr-gw-08)。
 
 ### 结果
@@ -82,11 +83,13 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 | 状态 | 含义 |
 | --- | --- |
-| `running` | 进程仍在运行 |
-| `done` | 进程以 0 退出，且最终结果事件没有标记错误 |
+| `running` | 进程仍在运行；对于开启回信的 `delegate.send` 任务，表示正在等待活会话提交或等待本机预览确认 |
+| `done` | 进程以 0 退出且最终结果事件没有标记错误；或活会话回信已被本机用户预览并确认发送 |
 | `failed` | 进程非零退出，或最终结果事件标记为错误（例如权限不足、运行器报错） |
-| `timeout` | 超过任务的 `timeout`，进程树已终止 |
-| `cancelled` | 被 `delegate.cancel` 终止 |
+| `timeout` | 超过任务的 `timeout`（进程树已终止），或注入消息超过回信窗口仍未收到回信草稿 |
+| `cancelled` | 被 `delegate.cancel` 终止，或委托/会话/回信开关关闭 |
+| `rejected` | 仅活会话回信任务：本机用户拒绝发送该回信草稿 |
+| `expired` | 仅活会话回信任务：回信草稿进入本机待确认队列后超时未确认而过期 |
 
 无界面模式下权限不足直接失败，不存在等待人工批准的状态。
 
@@ -177,6 +180,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `message_id` | 与框定文本里的 `id` 相同 |
 | `tier` | 固定为 `push` |
 | `status` | 注入时会话的 `status`（`busy` 或 `idle`） |
+| `task_id` | 仅当 `agent.delegate.allow_session_replies` 为 `true` 时返回，供同一调用方通过 `delegate.output` 取回本机确认后的回信，或通过 `delegate.cancel` 取消等待 |
 
 ### 错误
 
@@ -259,6 +263,7 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 | `enabled` | `false` | 总开关，见 [CTR-DLG-01](#ctr-dlg-01) |
 | `allow_write` | `false` | 是否允许 `mode: write` |
 | `allow_sessions` | `false` | 是否列出并允许注入活会话，设为 `true` 才开启 |
+| `allow_session_replies` | `false` | 是否允许活会话在注入后提交显式回信草稿，设为 `true` 且 `allow_sessions: true` 时开启，见 [CTR-DLG-07](#ctr-dlg-07) |
 | `max_concurrent` | `2` | 同时运行的任务数上限，正整数 |
 | `default_timeout` | `30m` | Go duration |
 | `max_timeout` | `2h` | Go duration，不得小于 `default_timeout` |
@@ -279,13 +284,50 @@ Agent 委托：云端 Agent 把一段完整任务交给设备上的本地 Agent�
 
 ### 审计
 
-审计事件（[CTR-AUD-01](audit.md#ctr-aud-01)）记录：工具名、调用方、运行器、解析后的 `cwd`、模式、任务 id、结束状态、时长。结束状态写入 `task_status`，取审计词表：`done` 为 `passed`，`timeout` 为 `timed_out`，`failed` 与 `cancelled` 不变。`delegate.send` 记录工具名、调用方、会话 id、消息 id 与结果。
+审计事件（[CTR-AUD-01](audit.md#ctr-aud-01)）记录：工具名、调用方、运行器、解析后的 `cwd`、模式、任务 id、结束状态、时长。结束状态写入 `task_status`，取审计词表：`done` 为 `passed`，`timeout` 与 `expired` 为 `timed_out`，`failed` 与 `rejected` 为 `failed`（控制通道或任务状态保留原值），`cancelled` 不变。`delegate.send` 记录工具名、调用方、会话 id、消息 id、回信任务 id（如有）与结果。
 
-不记录提示词、消息正文、最终答复和输出事件。
+本机控制通道对活会话回信草稿的提交、批准和拒绝属于非 `GET` 请求，按 [CTR-CTL-02](control.md#ctr-ctl-02) 记为 `actor=control`、`event=control_call` 的审计记录，只记录路由编号、请求键名和字节数。预览请求（`GET /v2/delegate/replies`、`GET /v2/delegate/replies/{reply_id}`）不写审计。
 
-### 一期不做
+**禁止**在任何审计记录、`GET /v2/delegate` 只读视图或 `GET /v2/delegate/replies` 列表摘要中记录提示词、注入消息正文、回信草稿正文、最终答复或输出事件。
 
-- 活会话回复的回收（读会话记录或回信工具）。
+## CTR-DLG-07
+
+活会话显式回信与本机逐条预览确认（[问题 #215](https://github.com/tzf1003/xmesh/issues/215)）。
+
+### 方案与安全边界
+
+- **禁止被动读取本地会话记录**：xmesh **禁止**读取 Claude Code 本地会话记录或 transcript 文件；活会话只能通过本机显式回信入口主动提交希望发出的回信草稿。
+- **默认关闭**：`agent.delegate.allow_session_replies` 缺省为 `false`。未显式设为 `true`（或 `enabled` / `allow_sessions` 为 `false`）时：
+  - `delegate.send` 不登记回信任务，也不返回 `task_id`；
+  - 显式回信入口拒绝草稿提交，明确返回策略错误（内核层 `policy_denied`，规则 `delegate.session_replies_disabled`；控制通道映射为 `forbidden`，`reason: session_replies_disabled`）；
+  - 批准待确认草稿同样拒绝并返回相同策略错误。
+- **单条正文上限 8 KiB**：回信草稿正文必须是非空合法 UTF-8，字节长度不得超过 **8 KiB（8192 字节）**；超限或非合法 UTF-8 拒绝提交（`invalid_args`，`field: body`，超限时 `reason: body_too_large`），不截断放行，不进入待确认队列。
+- **未获本机逐条预览确认前绝不发送**：
+  - 活会话提交的回信草稿只进入本机内存中的待确认队列，状态为 `pending`。
+  - 未获本机用户批准前，`delegate.output` **禁止**返回草稿正文，也不得通过 `events[]`、`result` 或报错文本泄露草稿是否存在或任何正文内容，任务状态保持 `running`。
+  - 本机确认入口仅对同机同用户开放（经控制通道 UDS `SO_PEERCRED`/`LOCAL_PEERCRED` 或 Windows 命名管道 DACL 鉴权，[CON-SEC-12](../constraints/security.md#con-sec-12)），L2 沙箱与远端 MCP 调用方均不可访问。
+  - **逐条预览门禁**：批准必须针对单条 `reply_id`，且内核强制要求该条目已通过本机预览端点读取过完整正文；未预览直接批准返回 `conflict`（`reason: preview_required`）。批准请求可附带预览时得到的 `body_sha256` 做一致性校验。
+
+### 显式回信入口与适配器
+
+1. 启用 `allow_session_replies: true` 后，`delegate.send` 在注入帧末尾附带显式回信提示（给出 `message_id`、8 KiB 上限与本机确认说明），返回 `task_id` 并为该 `(caller_id, session_id, message_id)` 建立回信等待窗口（默认 30 分钟；待确认队列最多保留 64 个活跃条目）。
+2. 被注入的活会话通过本机适配器 `xmesh delegate reply --message-id <id> [--session-id <sid>] (--body <正文> | --body-file <文件> | --stdin)` 或控制通道 `POST /v2/delegate/replies` 提交回信草稿。
+3. 适配器与内核均严格校验：`enabled`、`allow_sessions`、`allow_session_replies` 全为 `true`；`message_id` 存在且未结束、未重复提交；如提供 `session_id` 须与注入目标一致；`body` 非空、合法 UTF-8、字节数 ≤ 8192。
+
+### 本机逐条预览确认与状态流转
+
+| 草稿状态 | 触发条件 | 内存正文处理 | 对应 `delegate.output` 状态 |
+| --- | --- | --- | --- |
+| `pending` | 活会话成功提交草稿（默认确认有效期 10 分钟） | 仅本机 `GET /v2/delegate/replies/{reply_id}` 可预览完整正文 | `running`（`events: []`，绝不返回草稿正文） |
+| `approved` | 本机已预览该条目，且调用 `POST /v2/delegate/replies/{reply_id}/approve` 批准 | 将正文写入对应 `task_id` 的 `assistant` 事件与 `result`，唤醒阻塞中的 `delegate.output`；草稿自身不再保留正文副本 | `done`（`events` 含 1 条 `assistant` 事件，`result` 为已确认正文，`eof: true`） |
+| `rejected` | 本机调用 `POST /v2/delegate/replies/{reply_id}/reject` 拒绝 | **立即清空**草稿正文（归零为空串），调用方永不可读 | `rejected`（`events: []`，无 `result`，`eof: true`） |
+| `expired` | 草稿处于 `pending` 超过确认有效期（10 分钟）仍未批准或拒绝 | **立即清空**草稿正文，调用方永不可读 | `expired`（`events: []`，无 `result`，`eof: true`） |
+| `cancelled` | 调用方执行 `delegate.cancel`、`agent.delegate.enabled` / `allow_sessions` / `allow_session_replies` 热加载关闭，或节点关闭 | **立即清空**草稿正文，调用方永不可读 | `cancelled`（`events: []`，无 `result`，`eof: true`） |
+
+若活会话在注入消息的回信窗口（默认 30 分钟）内始终未提交任何草稿，该回信任务转为 `timeout`（`events: []`，`eof: true`），之后再提交草稿将被拒绝。已结束的回信任务按 `agent.delegate.retain` 与最多 64 条上限淘汰，淘汰时一并清除正文与事件；只有创建该注入消息的 `caller_id` 可通过 `delegate.output` / `delegate.cancel` 访问其 `task_id`，其他调用方一律返回 `not_found`。
+
+### 暂时不做
+
 - Codex 活线程注入（`codex queue`）。
 - 钩子类回合式适配器（Cursor、Gemini、Copilot 等）。
 - 禁止再委托的硬性保证。环境变量 `XMESH_DELEGATE=1` 只为以后做这件事留出标记。

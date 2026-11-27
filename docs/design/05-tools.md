@@ -60,17 +60,17 @@
 
 契约见 [fs](../contracts/fs.md)。
 
-## delegate（Agent 委托，一期）
+## delegate（Agent 委托）
 
 | 工具 | 参数 | 返回 / 语义 |
 | --- | --- | --- |
 | `delegate.list` | 无 | `runners[]`、本调用方的 `tasks[]`、可注入的 `sessions[]` |
 | `delegate.run` | `runner`、`prompt`、`cwd?`、`mode?`（`read` 默认 / `write`）、`session_id?`、`timeout?`、`wait_ms?`、`idempotency_key?` | `task_id`、`state`；结束后带 `result`、`exit_code` |
-| `delegate.output` | `task_id`、`cursor?`、`wait_ms?`、`limit?` | 按序号分页的 `events[]`，可长轮询 |
-| `delegate.send` | `session_id`、`message` | 向活着的 Claude Code 会话注入一条消息，只保证送达 |
-| `delegate.cancel` | `task_id` | 终止进程树，对已结束的任务幂等 |
+| `delegate.output` | `task_id`、`cursor?`、`wait_ms?`、`limit?` | 按序号分页的 `events[]`，可长轮询；亦用于取回已获本机确认的活会话回信 |
+| `delegate.send` | `session_id`、`message` | 向活着的 Claude Code 会话注入一条消息；开启 `allow_session_replies` 时返回 `task_id` 供回信回收 |
+| `delegate.cancel` | `task_id` | 终止进程树或取消待回信任务，对已结束的任务幂等 |
 
-任务只存在于目标设备的进程内存里，只对创建它的调用方可见。运行器用无界面参数启动 `claude` 或 `codex`，提示词经标准输入传入。委托整体默认关闭（`agent.delegate.enabled`）。`mode: write` 需要 `allow_write: true`，缺省为 false。活会话注入缺省关闭，设 `allow_sessions: true` 并启用委托后才会开启。完整约定见 [delegate 契约](../contracts/delegate.md)（CTR-DLG-01 至 CTR-DLG-06）。
+任务只存在于目标设备的进程内存里，只对创建它的调用方可见。运行器用无界面参数启动 `claude` 或 `codex`，提示词经标准输入传入。委托整体默认关闭（`agent.delegate.enabled`）。`mode: write` 需要 `allow_write: true`，缺省为 false。活会话注入缺省关闭，设 `allow_sessions: true` 并启用委托后才会开启；活会话回信同样缺省关闭，设 `allow_session_replies: true` 后允许活会话提交不超过 8 KiB 的显式回信草稿，并须经本机逐条预览确认具体正文后才发送给调用方。完整约定见 [delegate 契约](../contracts/delegate.md)（CTR-DLG-01 至 CTR-DLG-07）。
 
 ## 后端工具
 

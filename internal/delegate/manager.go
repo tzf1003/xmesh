@@ -67,26 +67,45 @@ const (
 	cancelWait = 10 * time.Second
 )
 
-// Manager holds the task table of one Agent: the running tasks, the finished ones kept for retention, and
-// the idempotency keys of both.
+// Manager holds the task table of one Agent: the running tasks, the finished ones kept for retention,
+// the idempotency keys of both, and any active or retained session reply threads.
 type Manager struct {
-	mu       sync.Mutex
-	tasks    map[string]*task
-	keys     map[string]map[string]*task
-	finished []*task
-	running  int
-	closed   bool
-	gen      uint64
-	base     context.Context
-	stop     context.CancelFunc
-	wg       sync.WaitGroup
-	onEnd    func(End)
+	mu              sync.Mutex
+	tasks           map[string]*task
+	keys            map[string]map[string]*task
+	finished        []*task
+	running         int
+	replyThreads    map[string]*replyThread
+	replyByMsg      map[string]*replyThread
+	replies         map[string]*sessionReply
+	finishedReplies []*replyThread
+	nowFn           func() time.Time
+	replyWindow     time.Duration
+	approvalTTL     time.Duration
+	closed          bool
+	gen             uint64
+	base            context.Context
+	stop            context.CancelFunc
+	wg              sync.WaitGroup
+	onEnd           func(End)
 }
 
 // New returns an empty Manager. onEnd, when not nil, is called once for every task that ends.
 func New(onEnd func(End)) *Manager {
 	base, stop := context.WithCancel(context.Background())
-	return &Manager{tasks: map[string]*task{}, keys: map[string]map[string]*task{}, base: base, stop: stop, onEnd: onEnd}
+	return &Manager{
+		tasks:        map[string]*task{},
+		keys:         map[string]map[string]*task{},
+		replyThreads: map[string]*replyThread{},
+		replyByMsg:   map[string]*replyThread{},
+		replies:      map[string]*sessionReply{},
+		nowFn:        time.Now,
+		replyWindow:  defaultSessionReplyWindow,
+		approvalTTL:  defaultReplyApprovalTTL,
+		base:         base,
+		stop:         stop,
+		onEnd:        onEnd,
+	}
 }
 
 // Tool serves one of the five delegate tools (CTR-DLG-01 to CTR-DLG-04). The Agent checks the switch,
@@ -114,7 +133,7 @@ func (m *Manager) Tool(ctx context.Context, r Request, tool string, raw json.Raw
 func (m *Manager) list(r Request) Object {
 	runners := runnerViews(r.Settings, r.Resolver.Default)
 	m.mu.Lock()
-	now := time.Now()
+	now := m.now()
 	m.pruneLocked(now)
 	tasks := []Object{}
 	for _, t := range m.tasks {
@@ -137,7 +156,7 @@ func (m *Manager) list(r Request) Object {
 // cannot tell a foreign task from a missing one. An expired finished task is pruned first, so it is
 // absent too (CTR-DLG-03). The caller holds m.mu.
 func (m *Manager) owned(caller, id string) *task {
-	m.pruneLocked(time.Now())
+	m.pruneLocked(m.now())
 	if t := m.tasks[id]; t != nil && t.caller == caller {
 		return t
 	}
@@ -157,6 +176,7 @@ func (m *Manager) CancelAll() {
 			cancels = append(cancels, t.cancelFn)
 		}
 	}
+	m.cancelAllRepliesLocked(m.now())
 	m.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
@@ -216,6 +236,7 @@ func (m *Manager) pruneLocked(now time.Time) {
 		m.evictLocked(m.finished[0])
 		m.finished = m.finished[1:]
 	}
+	m.pruneRepliesLocked(now)
 }
 
 // evictLocked removes a finished task, its output and its idempotency key. The caller holds m.mu.
@@ -230,7 +251,7 @@ func (m *Manager) evictLocked(t *task) {
 // concurrency slot is given back.
 func (m *Manager) finish(t *task, code int, timedOut bool, runErr error) {
 	m.mu.Lock()
-	now := time.Now()
+	now := m.now()
 	t.ended = now
 	t.exitCode = code
 	switch {

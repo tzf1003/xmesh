@@ -256,12 +256,12 @@ func (m *Manager) output(ctx context.Context, r Request, raw json.RawMessage) (O
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(wait)
+	deadline := m.now().Add(wait)
 	m.mu.Lock()
 	t := m.owned(r.Caller, a.TaskID)
 	if t == nil {
 		m.mu.Unlock()
-		return nil, notFound(a.TaskID)
+		return m.replyOutput(ctx, r.Caller, a.TaskID, a.Cursor, limit, deadline)
 	}
 	for {
 		page := t.pageLocked(a.Cursor, limit)
@@ -297,6 +297,9 @@ func (m *Manager) cancel(ctx context.Context, r Request, raw json.RawMessage) (O
 	t := m.owned(r.Caller, a.TaskID)
 	if t == nil {
 		m.mu.Unlock()
+		if out, ok := m.cancelReply(r.Caller, a.TaskID); ok {
+			return out, nil
+		}
 		return nil, notFound(a.TaskID)
 	}
 	running := !t.finished

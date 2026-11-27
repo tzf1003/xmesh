@@ -2,8 +2,10 @@
   "enabled": true,
   "allow_write": false,
   "allow_sessions": false,
+  "allow_session_replies": false,
   "max_concurrent": 2,
   "running": 0,
+  "pending_replies": 0,
   "runners": [],
   "sessions": [],
   "tasks": [

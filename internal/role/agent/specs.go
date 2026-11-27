@@ -115,8 +115,8 @@ func delegateSpecs(props map[string]any) map[string]spec {
 	return map[string]spec{
 		"delegate.list":   newSpec("delegate.list", "列出可委托的运行器、本调用方的委托任务，以及可注入的活 Claude Code 会话", "", "", props),
 		"delegate.run":    newSpec("delegate.run", "在本机以无界面方式启动 Agent CLI（claude、codex）执行一段完整任务，返回任务句柄；提示词经标准输入传入。mode 缺省 read，write 需管理员开启", "runner prompt", "runner prompt cwd mode session_id timeout wait_ms idempotency_key", props),
-		"delegate.output": newSpec("delegate.output", "分页读取委托任务的输出事件；没有新事件时最长等待 wait_ms，有新事件或任务结束即返回", "task_id", "task_id cursor wait_ms limit", props),
-		"delegate.send":   newSpec("delegate.send", "向设备上已开着的 Claude Code 会话注入一条消息。推送式，只保证送达，不回收回复", "session_id message", "session_id message", props),
-		"delegate.cancel": newSpec("delegate.cancel", "终止委托任务的进程树，状态置为 cancelled；对已结束的任务幂等", "task_id", "task_id", props),
+		"delegate.output": newSpec("delegate.output", "分页读取委托任务或活会话回信的输出事件；没有新事件时最长等待 wait_ms，有新事件或任务结束即返回", "task_id", "task_id cursor wait_ms limit", props),
+		"delegate.send":   newSpec("delegate.send", "向设备上已开着的 Claude Code 会话注入一条消息；当开启 allow_session_replies 时返回 task_id，供调用方在经本机预览确认后通过 delegate.output 取回回信", "session_id message", "session_id message", props),
+		"delegate.cancel": newSpec("delegate.cancel", "终止委托任务的进程树或取消等待中的活会话回信；对已结束的任务幂等", "task_id", "task_id", props),
 	}
 }

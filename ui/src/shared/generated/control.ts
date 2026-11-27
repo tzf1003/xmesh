@@ -139,6 +139,7 @@ export type Actor = "file" | "control";
  */
 export type DrainMode = "keep" | "kill";
 export type DeviceId = string;
+export type DelegateReplyState = "pending" | "approved" | "rejected" | "expired" | "cancelled";
 export type ControlErrorCode =
   | "invalid_args"
   | "forbidden"
@@ -1068,6 +1069,57 @@ export interface DelegateTask {
    */
   session_id?: string;
 }
+export interface DelegateReplySummary {
+  reply_id: string;
+  task_id: string;
+  message_id: string;
+  session_id: string;
+  caller: string;
+  state: DelegateReplyState;
+  bytes: number;
+  /**
+   * 本机是否已经预览过完整正文。
+   */
+  previewed: boolean;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  decided_at?: Timestamp;
+}
+export interface DelegateRepliesQuery {
+  state?: DelegateReplyState;
+}
+export interface DelegateRepliesResponse {
+  replies: DelegateReplySummary[];
+}
+export interface DelegateReplyDetail {
+  reply_id: string;
+  task_id: string;
+  message_id: string;
+  session_id: string;
+  caller: string;
+  state: DelegateReplyState;
+  bytes: number;
+  previewed: boolean;
+  /**
+   * 仅在 state 为 pending 时返回完整回信正文供本机预览；已决定或过期后清空。
+   */
+  body?: string;
+  body_sha256: string;
+  created_at: Timestamp;
+  expires_at: Timestamp;
+  decided_at?: Timestamp;
+}
+export interface DelegateReplyCreateRequest {
+  message_id: string;
+  session_id?: string;
+  body: string;
+}
+export interface DelegateReplyApproveRequest {
+  /**
+   * 可选：核对预览时看到的正文 SHA-256。
+   */
+  body_sha256?: string;
+}
 export interface DelegateState {
   /**
    * agent.delegate.enabled。为 false 时五个委托工具不可用。
@@ -1078,11 +1130,19 @@ export interface DelegateState {
    * 为 false 时 sessions 恒为空。
    */
   allow_sessions: boolean;
+  /**
+   * agent.delegate.allow_session_replies。为 false 时拒绝活会话提交回信草稿。
+   */
+  allow_session_replies: boolean;
   max_concurrent: number;
   /**
    * 占用并发名额的任务数，包括所有调用方。
    */
   running: number;
+  /**
+   * 待本机预览确认的活会话回信草稿数。
+   */
+  pending_replies: number;
   runners: DelegateRunner[];
   sessions: DelegateSession[];
   /**
@@ -2277,7 +2337,7 @@ export interface IngressInfo1 {
   tool_surface?: "unified" | "compact" | "full";
 }
 
-export const CONTROL_API_VERSION = "2.7" as const;
+export const CONTROL_API_VERSION = "2.8" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -3206,6 +3266,94 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "stream": false,
     "if_match": "none",
     "errors": []
+  },
+  {
+    "id": "control.delegate.replies.list",
+    "method": "GET",
+    "path": "/v2/delegate/replies",
+    "capability": "delegate",
+    "since": "2.8",
+    "query": "DelegateRepliesQuery",
+    "body": null,
+    "response": "DelegateRepliesResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args"
+    ]
+  },
+  {
+    "id": "control.delegate.replies.create",
+    "method": "POST",
+    "path": "/v2/delegate/replies",
+    "capability": "delegate",
+    "since": "2.8",
+    "query": null,
+    "body": "DelegateReplyCreateRequest",
+    "response": "DelegateReplySummary",
+    "success": 201,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "forbidden",
+      "not_found",
+      "conflict",
+      "payload_too_large"
+    ]
+  },
+  {
+    "id": "control.delegate.replies.get",
+    "method": "GET",
+    "path": "/v2/delegate/replies/{reply_id}",
+    "capability": "delegate",
+    "since": "2.8",
+    "query": null,
+    "body": null,
+    "response": "DelegateReplyDetail",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "not_found"
+    ]
+  },
+  {
+    "id": "control.delegate.replies.approve",
+    "method": "POST",
+    "path": "/v2/delegate/replies/{reply_id}/approve",
+    "capability": "delegate",
+    "since": "2.8",
+    "query": null,
+    "body": "DelegateReplyApproveRequest",
+    "response": "DelegateReplySummary",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "forbidden",
+      "not_found",
+      "conflict"
+    ]
+  },
+  {
+    "id": "control.delegate.replies.reject",
+    "method": "POST",
+    "path": "/v2/delegate/replies/{reply_id}/reject",
+    "capability": "delegate",
+    "since": "2.8",
+    "query": null,
+    "body": null,
+    "response": "DelegateReplySummary",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "not_found",
+      "conflict"
+    ]
   }
 ];
 
@@ -3263,4 +3411,9 @@ export interface ControlRouteTypes {
   "control.preferredip.run": { query: undefined; body: PreferredIPRunRequest; response: PreferredIPState };
   "control.preferredip.inspect": { query: undefined; body: PreferredIPInspectRequest; response: PreferredIPInspectResponse };
   "control.delegate.get": { query: undefined; body: undefined; response: DelegateState };
+  "control.delegate.replies.list": { query: DelegateRepliesQuery; body: undefined; response: DelegateRepliesResponse };
+  "control.delegate.replies.create": { query: undefined; body: DelegateReplyCreateRequest; response: DelegateReplySummary };
+  "control.delegate.replies.get": { query: undefined; body: undefined; response: DelegateReplyDetail };
+  "control.delegate.replies.approve": { query: undefined; body: DelegateReplyApproveRequest; response: DelegateReplySummary };
+  "control.delegate.replies.reject": { query: undefined; body: undefined; response: DelegateReplySummary };
 }

@@ -13,6 +13,11 @@ test("delegation shows its switch, runners, live sessions and tasks, and the swi
     await expect(page.getByTestId("delegate-sessions")).toContainText("foo refactor");
     await expect(page.getByTestId("delegate-tasks")).toContainText("node-abc/s7f");
     await expect(page.getByTestId("delegate-task-state-t-5e0a7c41b9d24f6e8a13c0d7f2e4b916")).toHaveText("运行中");
+    await expect(page.getByTestId("delegate-replies")).toContainText("r-8f1c9a2e6b7d4e8f9a0b1c2d3e4f5a6b");
+    await page.getByTestId("delegate-reply-preview-r-8f1c9a2e6b7d4e8f9a0b1c2d3e4f5a6b").click();
+    await expect(page.getByTestId("delegate-reply-preview-body")).toContainText("Tests pass on branch main.");
+    await page.getByTestId("delegate-reply-approve").click();
+    await expect(page.getByTestId("delegate-reply-state-r-8f1c9a2e6b7d4e8f9a0b1c2d3e4f5a6b")).toHaveText("已发送");
     await page.getByTestId("delegate-toggle").click();
     await expect(page.getByTestId("delegate-state")).toHaveText("已开启");
     expect((JSON.parse(h.kernel.panel.content) as { agent: { delegate: { enabled: boolean } } }).agent.delegate.enabled).toBe(true);

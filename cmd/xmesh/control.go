@@ -29,6 +29,8 @@ const controlUsage = `用法: xmesh control <子命令> [参数]
   status | peers | sessions       读取状态、对端、会话
   computer [--action get|pause|resume|revoke --session-id ID]
                                    查看桌面状态、暂停控制、恢复或撤销桌面会话
+  delegate status | replies list [--state S] | replies preview ID | replies approve ID [--sha256 H] | replies reject ID
+                                   查看委托状态、列出并逐条预览确认/拒绝活会话回信草稿
   events [--last-event-id ID] [--count N] [--timeout 时长]
                                    订阅事件流，每行一个事件（首条为 hello）；
                                    --count 把 hello 也算在内；空闲节点除 hello 外没有事件，
@@ -198,6 +200,8 @@ func controlCommand(args []string) error {
 		return controlPats(ctx, flags, target, rest)
 	case "ingress":
 		return controlIngress(ctx, flags, target, rest)
+	case "delegate":
+		return controlDelegate(ctx, flags, target, rest)
 	}
 	return fmt.Errorf("未知的 control 子命令: %s\n\n%s", verb, controlUsage)
 }

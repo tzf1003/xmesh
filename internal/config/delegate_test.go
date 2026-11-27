@@ -41,7 +41,7 @@ func Test_CTRDLG06_DelegateDefaults(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		d := c.Agent.Delegate
-		if d.Enabled || d.AllowWrite || d.SessionsAllowed() || d.Concurrency() != 2 ||
+		if d.Enabled || d.AllowWrite || d.SessionsAllowed() || d.SessionRepliesAllowed() || d.Concurrency() != 2 ||
 			d.DefaultTimeoutDuration() != 30*time.Minute || d.MaxTimeoutDuration() != 2*time.Hour || d.RetainDuration() != time.Hour {
 			t.Fatalf("%s: defaults = %+v", name, d)
 		}
@@ -52,10 +52,11 @@ func Test_CTRDLG06_DelegateDefaults(t *testing.T) {
 func Test_CTRDLG06_DelegateOverridesParse(t *testing.T) {
 	c, err := Parse(delegateDoc(t, func(agent map[string]any) {
 		agent["delegate"] = map[string]any{
-			"enabled":        true,
-			"allow_sessions": false,
-			"max_concurrent": 4,
-			"max_timeout":    "3h",
+			"enabled":               true,
+			"allow_sessions":        false,
+			"allow_session_replies": true,
+			"max_concurrent":        4,
+			"max_timeout":           "3h",
 			"runners": map[string]any{
 				"claude": map[string]any{"cmd": "/usr/local/bin/claude"},
 				"mytool": map[string]any{"cmd": "mytool", "args": []string{"run"}},
@@ -66,7 +67,7 @@ func Test_CTRDLG06_DelegateOverridesParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := c.Agent.Delegate
-	if !d.Enabled || d.SessionsAllowed() || d.Concurrency() != 4 || d.MaxTimeoutDuration() != 3*time.Hour || d.DefaultTimeoutDuration() != 30*time.Minute {
+	if !d.Enabled || d.SessionsAllowed() || !d.SessionRepliesAllowed() || d.Concurrency() != 4 || d.MaxTimeoutDuration() != 3*time.Hour || d.DefaultTimeoutDuration() != 30*time.Minute {
 		t.Fatalf("overrides = %+v", d)
 	}
 	if d.Runners["claude"].Cmd != "/usr/local/bin/claude" || d.Runners["mytool"].Cmd != "mytool" {

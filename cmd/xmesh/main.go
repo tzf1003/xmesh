@@ -52,6 +52,7 @@ const usage = `用法: xmesh <子命令> [参数]
   control  本机控制通道客户端：status、peers、sessions、events、audit、drain、resume、config、
            pair、pats、ingress（xmesh control help 查看参数）
   computer 图形用户会话桌面服务：host、info（xmesh computer help 查看参数）
+  delegate 活会话显式回信适配器：reply（xmesh delegate help 查看参数）
   uninstall / start / stop / restart
            卸载、启动、停止、重启已安装的服务
            --config 路径（或 --name 服务名）  --system（仅 Windows）  --json
@@ -108,6 +109,8 @@ func run(args []string) error {
 		return controlCommand(args[1:])
 	case "computer":
 		return computerCommand(args[1:])
+	case "delegate":
+		return delegateCommand(args[1:])
 	case "uninstall", "start", "stop", "restart":
 		return withJSON(args[0], args[1:], func(rest []string) error { return serviceCommand(args[0], rest) })
 	case "drain":

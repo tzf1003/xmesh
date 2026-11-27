@@ -83,8 +83,14 @@ var typeFor = map[string]func() any{
 	"PreferredIPState":           func() any { return new(v2.PreferredIPState) },
 	"PreferredIPRunRequest":      func() any { return new(v2.PreferredIPRunRequest) },
 	"PreferredIPInspectRequest":  func() any { return new(v2.PreferredIPInspectRequest) },
-	"PreferredIPInspectResponse": func() any { return new(v2.PreferredIPInspectResponse) },
-	"DelegateState":              func() any { return new(v2.DelegateState) },
+	"PreferredIPInspectResponse":  func() any { return new(v2.PreferredIPInspectResponse) },
+	"DelegateState":               func() any { return new(v2.DelegateState) },
+	"DelegateReplySummary":        func() any { return new(v2.DelegateReplySummary) },
+	"DelegateRepliesQuery":        func() any { return new(v2.DelegateRepliesQuery) },
+	"DelegateRepliesResponse":     func() any { return new(v2.DelegateRepliesResponse) },
+	"DelegateReplyDetail":         func() any { return new(v2.DelegateReplyDetail) },
+	"DelegateReplyCreateRequest":  func() any { return new(v2.DelegateReplyCreateRequest) },
+	"DelegateReplyApproveRequest": func() any { return new(v2.DelegateReplyApproveRequest) },
 }
 
 func fixtures(t *testing.T, sub string) map[string][]byte {
@@ -357,8 +363,8 @@ func Test_CTRCTL02_ConstantsMatchSchemas(t *testing.T) {
 			t.Errorf("%s: schema says %d, Go says %d", code, doc.Status[string(code)], code.HTTPStatus())
 		}
 	}
-	if v2.APIVersion != "2.7" {
-		t.Errorf("APIVersion = %s; the schemas and route table are version 2.7", v2.APIVersion)
+	if v2.APIVersion != "2.8" {
+		t.Errorf("APIVersion = %s; the schemas and route table are version 2.8", v2.APIVersion)
 	}
 }
 

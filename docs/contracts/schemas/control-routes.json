@@ -1,5 +1,5 @@
 {
-  "api_version": "2.7",
+  "api_version": "2.8",
   "routes": [
     {
       "id": "control.status.get",
@@ -857,6 +857,94 @@
       "stream": false,
       "if_match": "none",
       "errors": []
+    },
+    {
+      "id": "control.delegate.replies.list",
+      "method": "GET",
+      "path": "/v2/delegate/replies",
+      "capability": "delegate",
+      "since": "2.8",
+      "query": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateRepliesQuery",
+      "body": null,
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateRepliesResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args"
+      ]
+    },
+    {
+      "id": "control.delegate.replies.create",
+      "method": "POST",
+      "path": "/v2/delegate/replies",
+      "capability": "delegate",
+      "since": "2.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateReplyCreateRequest",
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateReplySummary",
+      "success": 201,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "payload_too_large"
+      ]
+    },
+    {
+      "id": "control.delegate.replies.get",
+      "method": "GET",
+      "path": "/v2/delegate/replies/{reply_id}",
+      "capability": "delegate",
+      "since": "2.8",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateReplyDetail",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found"
+      ]
+    },
+    {
+      "id": "control.delegate.replies.approve",
+      "method": "POST",
+      "path": "/v2/delegate/replies/{reply_id}/approve",
+      "capability": "delegate",
+      "since": "2.8",
+      "query": null,
+      "body": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateReplyApproveRequest",
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateReplySummary",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "forbidden",
+        "not_found",
+        "conflict"
+      ]
+    },
+    {
+      "id": "control.delegate.replies.reject",
+      "method": "POST",
+      "path": "/v2/delegate/replies/{reply_id}/reject",
+      "capability": "delegate",
+      "since": "2.8",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateReplySummary",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "not_found",
+        "conflict"
+      ]
     }
   ]
 }
