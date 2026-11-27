@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xmesh 工具列表渐进式披露设计</title>
+<style>
+:root{--bg:#fafaf8;--fg:#1d1d1b;--mute:#6b6b66;--line:#deded8;--card:#fff;--acc:#2f5fd0;--accbg:#eaf0fc;--warn:#b4570a;--warnbg:#fdf1e3;--ok:#1f7a4d;--okbg:#e6f4ec;--code:#f1f1ed}
+@media(prefers-color-scheme:dark){:root{--bg:#161615;--fg:#e8e8e4;--mute:#9a9a93;--line:#333330;--card:#1f1f1d;--acc:#7da2f5;--accbg:#1e2740;--warn:#e8a15a;--warnbg:#33281a;--ok:#5cc58d;--okbg:#17291f;--code:#262624}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:860px;margin:0 auto;padding:40px 20px 80px}
+h1{font-size:28px;margin:0 0 6px}
+h2{font-size:21px;margin:44px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:26px 0 6px}
+p{margin:10px 0}
+.meta{color:var(--mute);font-size:14px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:16px 0}
+.box.acc{background:var(--accbg);border-color:transparent}
+.box.warn{background:var(--warnbg);border-color:transparent}
+.box.ok{background:var(--okbg);border-color:transparent}
+code{background:var(--code);padding:1px 6px;border-radius:4px;font:13.5px/1.5 ui-monospace,Menlo,Consolas,monospace}
+pre{background:var(--code);border-radius:8px;padding:12px 14px;overflow-x:auto;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;margin:12px 0}
+pre code{background:none;padding:0}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--code);white-space:nowrap}
+ul,ol{padding-left:22px}
+li{margin:4px 0}
+.tier{display:grid;gap:10px;margin:16px 0}
+.tier div{border-left:4px solid var(--acc);background:var(--card);border-radius:0 8px 8px 0;padding:10px 16px;border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tier b{display:block}
+.tag{font-size:12px;border-radius:99px;padding:1px 9px;background:var(--accbg);color:var(--acc);margin-left:6px;white-space:nowrap}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+
+<h1>xmesh 工具列表渐进式披露设计</h1>
+<p class="meta">仅设计，未改代码 · 基于仓库 <code>tzf1003/xmesh</code> master（cf8c834）的 <code>docs/contracts/gateway.md</code>、<code>docs/contracts/mcpmux.md</code>、<code>internal/role/gateway/gateway.go</code>、<code>internal/role/agent/specs.go</code> · 2026-11-01</p>
+
+<div class="box acc">
+<b>结论先说。</b>列表长的根因是“设备 × 工具”的乘法：同一个 <code>fs.read</code> 为每台设备各登记一份。按你的方向，第一步是<b>每个工具只列一次，用 <code>device</code> 参数选设备</b>，设备数从列表长度里彻底消失，123 个工具降到 37 个。第二步才是渐进式披露：低频能力组（<code>computer.*</code>、将来的 <code>browser.*</code>、<code>desktop.*</code>、后端工具）不进列表，经已有的 <code>tools.search</code> 加一个新增的 <code>tools.call</code> 按需取用，列表固定在约 27 个。两步叠加，列表长度只随“工具种类”增长，不再随设备增长，也不会被新后端撑大。
+</div>
+
+<h2>1. 现状：列表为什么会越来越长</h2>
+
+<h3>1.1 当前注册与暴露方式</h3>
+<ul>
+<li><b>Agent 侧。</b><code>specs.go</code> 的 <code>buildSpecs</code> 里固定 26 个内置工具：<code>fs.*</code> 13 个、<code>pty.*</code> 7 个、<code>exec.*</code> 2 个、<code>backend.*</code> 3 个、<code>sys.info</code> 1 个。启用 Computer 的设备再多 8 个 <code>computer.*</code>。后端（stdio MCP 服务）的工具以 <code>&lt;后端&gt;.&lt;工具&gt;</code> 并入，如 <code>ida.decompile_function</code>、计划中的 <code>browser.*</code>。</li>
+<li><b>Gateway 侧。</b><code>mcpmux</code> 给每条对端工具加 <code>&lt;设备&gt;/</code> 前缀后<b>全量聚合</b>进一份 <code>tools/list</code>。所以总数是 <code>3 + Σ每台设备的工具数</code>，随设备数线性增长，每台设备的 schema 重复一份。</li>
+<li><b>已有的缓解手段。</b>(a) <code>gateway.expose_backends: favorite</code>：只列内置工具和标记 favorite 的后端工具；(b) <code>session.set_defaults</code> 设默认设备后，列表额外展开该设备完整工具表；(c) <code>tools.search</code> 能在设备的完整工具表里查，返回含 <code>inputSchema</code>。</li>
+<li><b>客户端限制。</b>claude.ai 一类客户端只读一次 <code>tools/list</code>、不处理 <code>tools/list_changed</code>，所以首次 <code>tools/list</code> 要等各设备能力表就绪，最多再等 5 秒（CTR-GW-04）。列表越依赖设备状态，越容易出现“列表读早了”。</li>
+</ul>
+
+<h3>1.2 实际规模（本会话看到的 xmesh 连接器）</h3>
+<table>
+<tr><th>设备</th><th>工具数</th><th>构成</th></tr>
+<tr><td>home-windows</td><td>34</td><td>26 内置 + 8 computer</td></tr>
+<tr><td>ubuntu-cloud</td><td>34</td><td>26 内置 + 8 computer</td></tr>
+<tr><td>ubuntu-aws</td><td>26</td><td>26 内置</td></tr>
+<tr><td>xiaosong-home-ubuntu</td><td>26</td><td>26 内置</td></tr>
+<tr><td>Gateway 自有</td><td>3</td><td>devices.list、tools.search、session.set_defaults</td></tr>
+<tr><td><b>合计</b></td><td><b>123</b></td><td>4 台设备，且 4 套里 26 个内置 schema 是逐字重复的</td></tr>
+</table>
+<p>客户端还会把 <code>home-windows/fs.read</code> 摊平成 <code>mcp__xmesh__home-windows_fs_read</code> 这类名字，名字本身也占上下文。</p>
+
+<h3>1.3 接下来的增量</h3>
+<p>并行线程的方案要把 agent-browser、agent-desktop 作为后端接入，工具会以 <code>&lt;设备&gt;/browser.*</code> 出现，每台装了的设备都是一份。假设浏览器每台约 20 个（<b>这是我的假设，P0 要实测</b>），3 台设备装上就是 123 → 约 183。<code>favorite</code> 过滤只能整个后端“全显或全藏”，且默认关闭，解决不了“设备多 × 工具多”的乘法。</p>
+
+<div class="box warn">
+<b>还有一个现有缺口。</b>切到 <code>expose_backends: favorite</code> 后，被藏起来的工具可以用 <code>tools.search</code> 查到 schema，但<b>模型没有一个工具可以调用它们</b>：客户端只会调用出现在 <code>tools/list</code> 里的工具。服务端 <code>tools/call</code> 其实不要求工具在列表里（只做 scope 校验和在线检查），所以缺的只是一个入口。
+</div>
+
+<p>Token 量级估算：每个工具的名字、说明和 schema 按 150 到 300 token 算，123 个工具约 2 万到 3.7 万 token，每次会话都要背着。这是粗估，P0 会直接量 <code>tools/list</code> 的字节数。</p>
+
+<h2>2. 方案总览：先去掉设备乘数，再按组披露</h2>
+
+<div class="tier">
+<div><b>第 A 层：设备参数化 <span class="tag">解决 设备 × 工具</span></b>
+同名工具只列一次，不带设备前缀，schema 里多一个可选的 <code>device</code> 参数。模型调用 <code>fs.read {"device":"home-windows","path":"…"}</code>。Gateway 在收到后把它改写成现有的 <code>home-windows/fs.read</code>，下游流水线不变。设了默认设备时 <code>device</code> 可省略，这与 CTR-GW-01 现有“无前缀名补默认设备”的语义一致。</div>
+<div><b>第 B 层：按组披露 <span class="tag">解决 工具种类增长</span></b>
+配置 <code>listed_groups</code>（默认 <code>fs, exec, pty, sys</code>）。这些组常驻列表；其余组（<code>computer</code>、<code>browser</code>、<code>desktop</code>、各后端）不进列表，通过 <code>devices.list</code> 的能力摘要得知存在，用 <code>tools.search</code> 取 schema，用 <code>tools.call</code> 调用。</div>
+<div><b>元工具 <span class="tag">永远在列表里</span></b>
+<code>devices.list</code>、<code>tools.search</code>、<code>tools.call</code>、<code>session.set_defaults</code>。</div>
+</div>
+
+<table>
+<tr><th>模式</th><th>列表里的工具数（当前 4 台设备）</th><th>加 1 台设备</th><th>加 browser（假设约 20 个）</th></tr>
+<tr><td><code>full</code>（现状）</td><td>123</td><td>+26 到 +34</td><td>每台装了的设备 +20</td></tr>
+<tr><td><code>unified</code>（仅第 A 层）</td><td>37（3 + 26 内置 + 8 computer）</td><td>0</td><td>+20（一次）</td></tr>
+<tr><td><code>unified</code> + 第 B 层（推荐）</td><td>约 27（4 元工具 + fs 13 + exec 2 + pty 7 + sys 1）</td><td>0</td><td>0</td></tr>
+<tr><td><code>compact</code>（只留元工具）</td><td>4，可再加 pinned</td><td>0</td><td>0</td></tr>
+</table>
+<p><code>backend.*</code> 三个租约工具也归入非常驻组，由 search/call 取用。<code>compact</code> 保留给“连几十个工具都嫌多”的客户端。</p>
+
+<h3>典型调用链（推荐模式）</h3>
+<pre><code>1. devices.list
+   → [{"id":"home-windows","groups":{"fs":13,"pty":7,"exec":2,"computer":8,"browser":24}, ...}]
+2. fs.read {"device":"home-windows","path":"C:\\x.txt"}          ← 常驻工具，直接调用
+3. tools.search {"group":"browser","detail":"brief"}             ← 低频组，先找
+   → [{"tool":"browser.open","description":"打开网址","devices":["home-windows"]}, ...]
+4. tools.search {"names":["browser.open"]}                       ← 取 schema
+5. tools.call {"device":"home-windows","tool":"browser.open","arguments":{"url":"https://example.com"}}
+   → 结果与直接调用完全一致（content / isError / structuredContent / 图片块）</code></pre>
+
+<h2>3. 设备参数化的细节</h2>
+<ul>
+<li><b>名字。</b>列表里是无前缀的 <code>fs.read</code>、<code>exec.run</code> 等。客户端摊平后是 <code>mcp__xmesh__fs_read</code>，名字也不再带设备名。</li>
+<li><b>schema 注入。</b>Gateway 在每个列出的工具的 <code>inputSchema.properties</code> 里加 <code>device</code>：<code>{"type":"string","description":"目标设备名，见 devices.list；已用 session.set_defaults 设过默认设备时可省略"}</code>。不放进 <code>required</code>，因为列表是静态的，而是否设过默认设备是会话状态。运行时两者都没有则返回 <code>invalid_args</code>，错误里带当前在线设备名，模型下一轮可直接重试。不用 <code>enum</code> 列出设备名，否则设备上下线就要改 schema 并发 <code>list_changed</code>，而 claude.ai 一类客户端不处理它。</li>
+<li><b>改写。</b>在中间件最前面（审计与配额之前，见第 5 节）：若请求名无 <code>/</code>、不是 Gateway 自有工具，且参数里有 <code>device</code>，则取出 <code>device</code>，名字改为 <code>device + "/" + name</code>，从参数里删掉 <code>device</code>，其余字段原样转发。此后走现有的在线检查、scope、配额、审计、默认 cwd/env 注入。没有 <code>device</code> 时走现有补默认设备分支。</li>
+<li><b>参数名冲突。</b>内置工具没有名为 <code>device</code> 的参数（<code>specs.go</code> 的参数集合里没有）。后端工具若自己声明了 <code>device</code>，Gateway 不对它注入，该工具改走 <code>tools.call</code>（显式 <code>device</code> 字段与工具自己的参数不冲突）。</li>
+<li><b>列哪些工具。</b>列表里的工具集合 = 在线设备（及离线不足 24 小时，与 <code>devices.list</code> 保留期一致，减少抖动）工具表的并集，再按 <code>listed_groups</code> 过滤。调用方在<b>任一</b>设备上被 scope 允许就列出；真正调用时按目标设备再判一次，与现有 <code>oauth.AllowsArguments(v.p.Scopes, deviceName, tool, args)</code> 一致，所以设备级 scope 不会被绕开。</li>
+<li><b>版本差异。</b>同名工具在不同设备 schema 不同（Agent 版本不一致）时，按 schema 哈希分组，列出设备数最多的那一版；其余设备照常可调，Agent 自己会按自己的 schema 校验并返回 <code>invalid_args</code>，search 能看到各版本。</li>
+<li><b>首次列表更快。</b>内置工具的 schema 来自同一代码库的 <code>buildSpecs</code>，Gateway 可以用静态内置表生成常驻部分，不必再等各设备的能力表（现在要 <code>waitOthers</code> 最多 5 秒）。后端工具不进常驻列表，也就不再有“列表读早了”的问题。</li>
+<li><b>默认设备展开的旧行为。</b>现在设默认设备后会额外展开该设备完整工具表（CTR-GW-01）。在 <code>unified</code> 下这条改为不再展开，因为同名工具已经在列表里、<code>device</code> 可省略，展开只会制造重复。</li>
+</ul>
+
+<h2>4. 元工具契约（拟）</h2>
+
+<h3>4.1 devices.list：增加能力摘要（向后兼容）</h3>
+<p>现有字段不变，每台设备新增 <code>groups</code>：按工具名第一个 <code>.</code> 之前的部分统计数量。模型一次调用就知道“这台机器有没有浏览器、有没有桌面控制”，不用为此去搜索。<code>backends</code> 字段保留。</p>
+
+<h3>4.2 tools.search：去重、分档、可选设备</h3>
+<table>
+<tr><th>参数</th><th>说明</th></tr>
+<tr><td><code>device</code></td><td>变为可选。省略表示在所有在线、且调用方有权限的设备上搜。</td></tr>
+<tr><td><code>pattern</code></td><td>沿用大小写不敏感子串，<code>*</code> 为全部。</td></tr>
+<tr><td><code>group</code></td><td>新增，按组筛选，如 <code>fs</code>、<code>browser</code>。</td></tr>
+<tr><td><code>names</code></td><td>新增，精确名字数组，用于一次取多个工具的 schema（取代单独的 describe 工具）。<code>pattern</code>、<code>group</code>、<code>names</code> 至少给一个。</td></tr>
+<tr><td><code>detail</code></td><td>新增，<code>brief</code>（名字、说明、所在设备）或 <code>schema</code>（再加 <code>inputSchema</code>）。为不破坏现有契约，指定 <code>device</code> 时缺省仍是 <code>schema</code>；省略 <code>device</code> 时缺省为 <code>brief</code>。</td></tr>
+</table>
+<p><b>返回按“工具 + schema 版本”去重</b>：<code>{"tool":"fs.read","description":"…","schema_id":"a1b2","inputSchema":{…},"devices":["home-windows","ubuntu-aws"]}</code>。若设备间 schema 因版本差异不同，则按 <code>schema_id</code>（schema 的哈希）拆成多项。4 台设备的 26 个内置工具从 104 份 schema 变成 26 份。上限：<code>brief</code> 200 条、<code>schema</code> 25 条，超出带 <code>truncated</code>。结果只含调用方 scope 允许的工具，规则与现在 <code>tools/list</code> 的 <code>allowed</code> 判断相同。</p>
+
+<h3>4.3 tools.call：新增</h3>
+<pre><code>{"device": "home-windows", "tool": "browser.open", "arguments": {"url": "https://example.com"}}</code></pre>
+<ul>
+<li><code>device</code> 与 <code>tool</code> 分开传，与第 A 层的 <code>device</code> 参数同一语义；<code>device</code> 省略则用默认设备。也接受 <code>tool</code> 直接写 <code>home-windows/browser.open</code>。<code>arguments</code> 缺省 <code>{}</code>。</li>
+<li>目标不得是 Gateway 自有工具（<code>devices.list</code>、<code>tools.search</code>、<code>tools.call</code>、<code>session.set_defaults</code>），否则 <code>invalid_args</code>，防止递归。</li>
+<li><b>语义等价于直接调用该工具。</b>结果原样返回，不包一层，不翻译错误码，<code>resource_busy</code> 等照旧。</li>
+<li><b>自纠错提示。</b>目标工具返回 <code>invalid_args</code> 时，在错误详情里附上该工具的 <code>inputSchema</code>（超过 8 KiB 则只附参数名与必填项），模型下一轮可直接修正，不必再搜一次。</li>
+<li>工具不存在或后端不可用：沿用 <code>not_found</code>，并提示用 <code>tools.search</code> 查名字。</li>
+</ul>
+
+<h2>5. Gateway 实现落点</h2>
+<p>核心原则：<b>在最前面把 <code>tools.call</code> 改写成真实的 <code>tools/call</code>，之后整条现有流水线原封不动。</b>这样鉴权、配额、审计、默认 cwd/env 注入、进度令牌、取消、drain 都不用重写。</p>
+<ol>
+<li><b>改写位置（两种改写共用）。</b>要改写的有两类：<code>tools.call</code>，以及带 <code>device</code> 参数的无前缀工具调用。<code>gateway.go</code> 中间件里，必须放在审计开始（约第 373 行）和 <code>CheckExecTimeout</code>/<code>quota.Acquire</code>（约第 392 行）<b>之前</b>：这两处用 <code>call.Params.Name</code> 做判断，若在改写之前执行，看到的会是 <code>tools.call</code>，配额和审计就记错了对象。改写把 <code>Params.Name</code> 换成 <code>设备/工具</code>，<code>Params.Arguments</code> 换成去掉 <code>device</code> 后的参数（<code>tools.call</code> 则取其 <code>arguments</code>），保留 <code>_meta</code>（含 <code>progressToken</code>）。</li>
+<li><b>审计。</b>记录真实工具名，另加一个 <code>via: "tools.call"</code> 字段。不改工具名本身（coexist CI 对审计工具名有断言）。</li>
+<li><b>scope。</b>不为 <code>tools.call</code> 单设权限，授权完全由内层工具决定：现有 <code>v.allowed</code> 与 <code>oauth.AllowsArguments</code> 照常对真实目标生效。<code>tools.search</code> 过滤结果用同一判断。</li>
+<li><b>默认补全。</b>改写后名字若无 <code>/</code>，走现有“补默认设备前缀”分支。<code>devices.list</code>、<code>tools.search</code>、<code>session.set_defaults</code> 的特例分支不动。</li>
+<li><b>列表生成。</b>现有 <code>tools/list</code> 过滤处（约第 479 行起）按 <code>tool_surface</code> 分支：<code>full</code> 保持现状；<code>unified</code> 返回元工具加 <code>listed_groups</code> 内的去重工具（注入 <code>device</code> 参数，见第 3 节）；<code>compact</code> 只留元工具和 <code>pinned_tools</code>。<code>unified</code>、<code>compact</code> 下可以<b>跳过 <code>waitOthers</code></b>，因为常驻部分来自静态内置表，不再依赖其他设备的能力表，首次 <code>tools/list</code> 变快，也彻底绕开“客户端只读一次列表”的问题；目标设备的能力就绪仍由 <code>tools/call</code> 和 <code>tools.search</code> 里的 <code>waitReady</code> 保证。</li>
+<li><b>search 的数据源。</b>复用 <code>v.down[device].tools</code> 的缓存，在 Gateway 内存里做去重和哈希，不新增设备往返。</li>
+<li><b>引导文案。</b>在 MCP <code>initialize</code> 的 <code>instructions</code> 与三个元工具的 description 里写清流程“devices.list → tools.search → tools.call”，并说明“设了默认设备后可省略前缀”。这是模型会不会用的关键，不能省。</li>
+</ol>
+
+<h2>6. 配置与兼容</h2>
+<pre><code>gateway:
+  tool_surface: full        # full（现状，默认）| unified | compact
+  listed_groups: [fs, exec, pty, sys]   # unified 下常驻列表的工具组；其余组走 search / call
+  pinned_tools: []          # compact 下，在默认设备上固定展开的工具，如 [exec.run, fs.read]
+  expose_backends: all      # 保留；unified / compact 下被 tool_surface 覆盖</code></pre>
+<ul>
+<li><b>默认仍是 <code>full</code></b>，升级后行为不变；元工具的新参数全是增量。<code>tool_surface</code>、<code>listed_groups</code>、<code>pinned_tools</code> 走 <code>gateway.expose_backends</code> 同款热加载，变更时发 <code>tools/list_changed</code>。</li>
+<li>现有 <code>favorite</code> 标记在 <code>unified</code> / <code>compact</code> 下可作为常驻与 pinned 的补充来源，避免两套概念并存太久，文档里标注为过渡。</li>
+<li><b>按连接选择模式</b>（可选）：允许在 MCP 地址上带 <code>?surface=compact|full</code> 覆盖全局值，让同一个 Gateway 同时服务“能自己做工具搜索的客户端”和“只会读一次列表的客户端”。倾向做，但放在第二阶段。</li>
+</ul>
+
+<h2>7. 用户自己添加的 MCP 服务器</h2>
+<p>这里指的是用户在某台设备的 <code>agent.backends</code> 里配置的 stdio 或 http MCP 服务器，如 <code>ida</code>、<code>frida</code>，以及计划中的 agent-browser。它们已经走统一机制：Agent 启动时对每个后端做 <code>initialize</code> + <code>tools/list</code>，工具名变成 <code>&lt;后端名&gt;.&lt;工具&gt;</code>，再由 Gateway 加设备前缀。所以它们不需要单独的通道，就是本方案里的“一个组”，组名是第一个 <code>.</code> 之前的后端名。（如果你说的是云端 Agent 侧自己加的连接器，那不在 xmesh 控制范围内，xmesh 只是其中一个连接器。）</p>
+
+<h3>默认怎么处理</h3>
+<ul>
+<li><b>默认不常驻。</b>用户加的后端工具数量和质量不可预知（一个第三方 MCP 可能带几十上百个工具、很长的说明），所以不自动进 <code>unified</code> 的常驻列表，而是走 <code>devices.list</code> 看到、<code>tools.search</code> 找、<code>tools.call</code> 调。这样用户随便加多少后端，列表都不变。</li>
+<li><b>用户可以把某个后端升为常驻。</b>现有 <code>favorite: true</code> 沿用为“常驻”开关（在 <code>unified</code> 下等价于把该后端名加进 <code>listed_groups</code>）。同时加一个全局上限 <code>max_listed_tools</code>（建议 30）：常驻工具总数超限时，按后端从大到小降回按需，并在 <code>devices.list</code> 和日志里报告，避免一个大后端把列表撑回去。</li>
+<li><b>让模型知道这个后端是干什么的。</b>后端名（如 <code>ida</code>）对模型不一定自明，而按需披露依赖模型先“知道有这个东西”。所以给后端配置新增可选的 <code>desc</code> 字段，<code>devices.list</code> 的能力摘要里带出来：<code>"backends":[{"name":"ida","desc":"IDA Pro 反汇编","tools":42,"policy":"exclusive","lease":"需先 backend.acquire"}]</code>。没写 <code>desc</code> 时退回到后端 <code>initialize</code> 返回的 <code>serverInfo</code> 和工具名样例。</li>
+</ul>
+
+<h3>要注意的几个点</h3>
+<table>
+<tr><th>情况</th><th>处理</th></tr>
+<tr><td>租约后端（<code>policy: exclusive</code>）</td><td><code>tools.call</code> 对 <code>_lease_token</code> 等参数原样透传，<code>backend.acquire</code> 本身也是普通工具，流程不变。search 结果在该后端的工具上标注“需要先 acquire”，否则模型会直接调用后撞上租约错误。</td></tr>
+<tr><td>后端工具自带名为 <code>device</code> 的参数</td><td>只影响常驻工具的 <code>device</code> 参数注入：这类工具不注入，强制走 <code>tools.call</code>（显式 <code>device</code> 字段不会与它自己的参数冲突）。</td></tr>
+<tr><td>后端名与内置组重名（如叫 <code>fs</code>）</td><td>组名按第一个 <code>.</code> 切分，会与内置 <code>fs.*</code> 混在一起。配置校验时拒绝与内置组同名的后端。</td></tr>
+<tr><td>同一后端装在多台设备</td><td>search 按 schema 哈希去重，只出现一次并列出设备；版本不同则分项。这正好受益于第 4.2 节的去重。</td></tr>
+<tr><td>后端工具名含 <code>/</code></td><td>CTR-GW-01 规定 Agent 工具名不得含 <code>/</code>。第三方后端的工具名是否会被拒绝或改写，我没有核对代码，列入 P0 检查。</td></tr>
+<tr><td>权限</td><td>现有 scope 已有 <code>backend:&lt;设备&gt;:&lt;后端&gt;</code> 形式。search 和 call 都按它过滤，用户加的后端不会因为走按需通道而绕开授权。</td></tr>
+<tr><td>说明文字不可信</td><td>后端的 description 来自第三方，可能带提示注入。与现状一致，原样透传，不因按需披露多出新信任边界；search 不对内容做改写。</td></tr>
+<tr><td>后端崩溃或重启</td><td>常驻部分不受影响（它们不含后端工具）。按需部分每次 search 都读最新缓存，不需要靠 <code>list_changed</code>，反而比现在更可靠。</td></tr>
+</table>
+
+<h2>8. 风险与取舍</h2>
+<table>
+<tr><th>风险</th><th>说明</th><th>缓解</th></tr>
+<tr><td>模型多绕一步，偶尔不会用</td><td>间接调用比直接看到工具更容易出错。</td><td><code>pinned_tools</code> 保留热点；instructions 写明流程；<code>invalid_args</code> 自带 schema；上线后看 search→call 转化率。</td></tr>
+<tr><td><code>device</code> 参数被模型漏填或填错</td><td>设备名要靠 <code>devices.list</code> 得知，模型可能猜名字。</td><td>错误里带在线设备名；instructions 要求先 <code>devices.list</code>；设默认设备后可省略；上线后看该类 <code>invalid_args</code> 比例。</td></tr>
+<tr><td>客户端按工具粒度的审批变粗</td><td><code>unified</code> 下常驻工具仍是逐个工具，审批粒度不变，只是不再区分设备。只有走 <code>tools.call</code> 的低频组（浏览器、桌面等）会合并成一个审批项，也带不了逐个的读写、破坏性注解。</td><td>xmesh 的权威授权本来就在服务端（scope、策略、审计），客户端审批只是附加一层；高风险的组（如 <code>computer</code>）若你希望保留客户端逐次确认，可把它加进 <code>listed_groups</code>，代价是多 8 个工具、与设备数无关。</td></tr>
+<tr><td>搜索结果泄露能力</td><td>未授权的工具不应被搜出来。</td><td>search 与 list 共用 <code>allowed</code> 和 scope 判断，不额外放宽。</td></tr>
+<tr><td>schema 去重误并</td><td>不同版本 Agent 的同名工具 schema 不同。</td><td>以 schema 哈希区分，不同则分项列出设备。</td></tr>
+<tr><td>提示注入面</td><td>搜索结果里的 description 来自后端，是不可信文本。</td><td>与现状相同，原样透传说明；不因搜索多出新信任边界。</td></tr>
+</table>
+
+<h2>9. 考虑过但不选的方案</h2>
+<table>
+<tr><th>方案</th><th>不选的原因</th></tr>
+<tr><td>把同类工具合并成“单个大工具 + action 参数”（如 <code>fs {action, ...}</code>）</td><td>丢掉每个动作自己的强类型 schema，现有 <code>specs.go</code> 与契约测试都要重写，参数校验变弱。</td></tr>
+<tr><td>每台设备一个独立 MCP 地址 / 连接器</td><td>把设备选择的负担推给用户，连接器数量随设备增长，跨设备任务做不了。</td></tr>
+<tr><td>只靠客户端自带的延迟加载 / 工具搜索</td><td>不是所有客户端有，有的也只延迟 schema、仍列出全部名字；服务端不能依赖。可以与本方案叠加，不冲突。</td></tr>
+<tr><td>只做 <code>compact</code>（只留元工具）</td><td>每次都要多绕一步，常用的读写文件、执行命令也要先搜索，体验差。<code>unified</code> 让常用工具直接可见，只把低频组放到后面。</td></tr>
+<tr><td>继续靠 <code>expose_backends: favorite</code></td><td>粒度只有“后端整体”，且藏起来的工具没有调用入口，即 1.3 的缺口。</td></tr>
+</table>
+
+<h2>10. 分阶段落地</h2>
+<table>
+<tr><th>阶段</th><th>内容</th><th>验收</th></tr>
+<tr><td>P0 度量</td><td>在现有 4 台设备上导出 <code>full</code> 的 <code>tools/list</code> 字节数与估算 token；实测未列出的工具能否经 Gateway <code>tools/call</code> 成功；确认 claude.ai、Claude Code 等客户端对 <code>tools.call</code> 的行为和审批表现。</td><td>得到基线数字和客户端兼容表，写入 <code>docs/validation/</code>。</td></tr>
+<tr><td>P1 纯增量</td><td><code>tools.call</code>、search 的 <code>group/names/detail</code> 与去重、<code>devices.list</code> 的 <code>groups</code>。默认仍 <code>full</code>。</td><td>契约测试：改写后配额、审计、scope、默认 cwd/env、进度、取消都与直接调用一致；递归被拒；去重与 <code>schema_id</code> 正确。</td></tr>
+<tr><td>P2 unified</td><td><code>tool_surface: unified</code>：列表去重、注入 <code>device</code> 参数、改写、<code>listed_groups</code>、instructions 文案、跳过 <code>waitOthers</code>；随后 <code>compact</code> 与 <code>pinned_tools</code>；可选 <code>?surface=</code> 覆盖。</td><td>列表长度与设备数无关（接入第 5 台设备后不变）；带 <code>device</code> 的调用在配额、审计、scope、默认 cwd/env 上与前缀调用一致；热加载时发 <code>list_changed</code>。</td></tr>
+<tr><td>P3 接入新能力</td><td>agent-browser、agent-desktop 后端不进 <code>listed_groups</code>，只经 search/call 暴露；后端启动参数用 <code>--tools core</code> 等再压一层。</td><td>新增后端后列表长度不变。</td></tr>
+<tr><td>P4 观察后翻默认</td><td>统计 <code>tools/list</code> 大小、search→call 转化率、<code>device</code> 相关 <code>invalid_args</code> 率、首次任务成功率，再决定是否把默认改成 <code>unified</code>。</td><td>指标不劣于 <code>full</code>。</td></tr>
+</table>
+
+<h2>11. 需要你拍板的点</h2>
+<ol>
+<li><b>推荐的落地形态是 <code>unified</code> + 低频组按需。</b>这就是你说的“工具只列一次，调用时带设备名”，再加上把不常用的组藏起来。如果你更想先只做第 A 层（<code>listed_groups</code> 设成全部组，约 37 个），改一个配置即可，设计上两者是同一套机制。</li>
+<li><b><code>computer.*</code> 要不要常驻？</b>我的倾向：不常驻，走 search/call；想保留客户端逐次确认就加进 <code>listed_groups</code>。</li>
+<li><b>要不要做按连接的 <code>?surface=</code>？</b>我的倾向：要，但放到 P2 之后。</li>
+</ol>
+<p class="meta">以上数字里，设备工具数来自本会话实际看到的连接器列表；token 数和浏览器工具数是估算或假设，已在文中标明，P0 会实测替换。</p>
+
+</main>
+</body>
+</html>
