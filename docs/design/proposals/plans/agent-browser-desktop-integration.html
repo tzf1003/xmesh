@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xmesh 接入 agent-browser 与 agent-desktop</title>
+<style>
+/* 布局：单栏长文，左侧目录在宽屏固定；分期表与对比表为主要信息载体 */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1b2430; --muted:#5b6675; --line:#d9dee6;
+  --accent:#0b6e8a; --accent-soft:#e1f1f6; --warn:#a85d00; --warn-soft:#fdf0dc; --bad:#a3262a; --good:#1f7a4d;
+  --code:#eef1f5;
+  --display:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --body:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10161d; --panel:#18212b; --ink:#e4e9ef; --muted:#9aa6b4; --line:#2b3745;
+    --accent:#58b8d4; --accent-soft:#17323c; --warn:#e8a54b; --warn-soft:#33281a; --bad:#ef7b7f; --good:#5fc593; --code:#1f2a36;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10161d; --panel:#18212b; --ink:#e4e9ef; --muted:#9aa6b4; --line:#2b3745;
+  --accent:#58b8d4; --accent-soft:#17323c; --warn:#e8a54b; --warn-soft:#33281a; --bad:#ef7b7f; --good:#5fc593; --code:#1f2a36;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.75}
+.wrap{max-width:980px;margin:0 auto;padding:32px 20px 80px}
+header{padding:8px 0 24px;border-bottom:1px solid var(--line);margin-bottom:24px}
+header .meta{color:var(--muted);font-size:14px}
+h1{font-family:var(--display);font-size:30px;line-height:1.3;margin:6px 0 10px;text-wrap:balance}
+h2{font-size:22px;margin:44px 0 12px;padding-top:8px;text-wrap:balance;border-top:1px solid var(--line)}
+h3{font-size:17px;margin:26px 0 6px}
+p{margin:8px 0}
+ul,ol{padding-left:22px;margin:8px 0}
+li{margin:4px 0}
+code{font-family:var(--mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.55}
+pre code{background:none;padding:0}
+a{color:var(--accent)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.summary{background:var(--accent-soft);border-left:4px solid var(--accent);padding:14px 18px;border-radius:4px}
+.summary p{margin:4px 0}
+.note{background:var(--warn-soft);border-left:4px solid var(--warn);padding:10px 16px;border-radius:4px;margin:14px 0}
+.tbl{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;min-width:560px;background:var(--panel);font-size:14.5px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;line-height:1.55}
+th{background:var(--code);font-weight:600}
+.pill{display:inline-block;font-size:12px;padding:0 8px;border-radius:99px;border:1px solid var(--line);white-space:nowrap}
+.pill.rec{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.pill.risk{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;margin-bottom:8px}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:14px 0}
+.flow .box{flex:1 1 140px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13.5px;line-height:1.5}
+.flow .box b{display:block;font-size:14px}
+.flow .arrow{align-self:center;color:var(--muted)}
+.box.hl{border-color:var(--accent);background:var(--accent-soft)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="meta">xmesh 设计文档 · 2026-11-01 · 仅设计，尚无代码</div>
+  <h1>把 agent-browser 与 agent-desktop 接入 xmesh</h1>
+  <nav class="toc" aria-label="目录">
+    <a href="#s1">1 结论</a><a href="#s2">2 两个项目</a><a href="#s3">3 xmesh 现状</a><a href="#s4">4 浏览器方案</a><a href="#s5">5 桌面替换</a><a href="#s6">6 安全</a><a href="#s7">7 分期</a><a href="#s7b">P0 结果</a><a href="#s8">8 风险与待确认</a>
+  </nav>
+</header>
+
+<section id="s1">
+<h2>1 结论</h2>
+<div class="summary">
+<p><b>agent-browser 作为 stdio 后端直接接入。</b>它自带 <code>agent-browser mcp</code>（stdio MCP 服务），正好是 xmesh 后端机制现成支持的形态，工具会以 <code>&lt;设备&gt;/browser.*</code> 出现在 Gateway 的工具表里，不需要改协议。</p>
+<p><b>agent-desktop 替换现有的桌面执行器（<code>computer-native</code>）。</b>替换的是最底层的“采集与输入”，不是整个 computer 能力。Go 管理层（会话、排他租约、fencing、幂等、scope、审计、配额）、Computer Host 通道（用户 SID 管道、心跳、自启）、面板和安装流程保留，因为 agent-desktop 自己没有这些，而它们正是云端远程使用所需要的安全边界。</p>
+<p><b>最大的差距已核实：agent-desktop 没有“不动鼠标的坐标点击”。</b>它的“不打扰”指的是按 ref 的无障碍操作（不动指针、不抢焦点）和一个只用于展示的虚拟光标。按坐标点击在 macOS 上是全局 HID 事件，会移动真实指针且不恢复。所以完整替换会丢掉 xmesh 现有的像素级后台输入。依据见 5.4。建议改为：<b>通用引擎换成 agent-desktop，macOS 保留现有后台输入模块作为坐标回退</b>。</p>
+<p>建议顺序：P0 对照验证 → P1 浏览器后端 → P2 桌面引擎适配器（与原生引擎并存，可切换）→ P3 macOS 默认切换 → P4 Windows / Linux 切换并删除原生执行器。</p>
+</div>
+</section>
+
+<section id="s2">
+<h2>2 两个项目是什么</h2>
+<p>以下来自两个项目的官网与 GitHub 首页。我没有安装运行过它们，带“待验证”的条目在 P0 里确认。</p>
+<div class="tbl"><table>
+<thead><tr><th></th><th>agent-browser</th><th>agent-desktop</th></tr></thead>
+<tbody>
+<tr><th>定位</th><td>给 AI Agent 用的浏览器自动化 CLI，输出紧凑文本以省上下文</td><td>给 AI Agent 用的桌面应用操作工具，通过系统无障碍树读取和操作应用（Vercel Labs）</td></tr>
+<tr><th>实现</th><td>Rust CLI + 常驻 Rust daemon，daemon 直接用 CDP 控制 Chrome</td><td>Rust 核心，CLI 加 C ABI 库（<code>libagent_desktop_ffi</code>）</td></tr>
+<tr><th>许可</th><td>Apache-2.0</td><td>Apache-2.0</td></tr>
+<tr><th>平台</th><td>macOS / Linux / Windows，x64 与 arm64（Windows 仅 x64）</td><td>macOS / Windows / Linux，x64 与 arm64；各平台功能不完全一致</td></tr>
+<tr><th>核心模型</th><td><code>snapshot</code> 返回无障碍树，元素带 <code>@e1</code> 之类 ref，<code>click @e2</code> 直接作用于该元素</td><td><code>snapshot</code> 返回 JSON，ref 形如 <code>@&lt;snapshot_id&gt;:eN</code>，绑定到某次快照；过期返回 <code>STALE_REF</code></td></tr>
+<tr><th>接入形态</th><td>CLI；另有 <code>agent-browser mcp</code>，用 <code>--tools</code> 选 core / network / state / debug / tabs / react / mobile / all</td><td>CLI 每条命令输出一个 JSON 信封（<code>ok</code>、<code>data</code>、<code>error</code>、<code>disposition</code>）。首页未描述 MCP 模式（待验证）</td></tr>
+<tr><th>会话与状态</th><td>daemon 常驻，空闲 1 小时自动保存并退出；<code>--session</code>、<code>--profile</code>、<code>state save/load</code>；状态可用 <code>AGENT_BROWSER_ENCRYPTION_KEY</code> 做 AES-256-GCM 加密</td><td>macOS 上有按快照命名空间复用的私有 command host，空闲 15 分钟退出，要求 <code>TMPDIR</code> 属当前用户且为 0700</td></tr>
+<tr><th>后台/无头</th><td>默认无头；<code>--headed</code> 可显示窗口；可 <code>--cdp</code> 连接已有浏览器</td><td>默认“无头”：按 ref 的操作走无障碍接口，不移动指针、不抢焦点；<code>--headed</code> 才用物理输入。键鼠按下/抬起类命令暂不可用</td></tr>
+<tr><th>安全开关</th><td>域名白名单、内容边界标记、动作策略文件、危险动作确认（eval、download 等）、输出长度上限；均为可选开启</td><td>文档提醒快照、剪贴板、截图可能含隐私；macOS 需辅助功能授权，Windows 同权限级别无需授权，Linux 需要 at-spi2-core</td></tr>
+<tr><th>可观测</th><td><code>dashboard start</code>（默认 4848）、<code>stream enable</code> WebSocket 推流、录像</td><td><code>trace</code>、<code>status</code>、<code>permissions</code></td></tr>
+<tr><th>成熟度</th><td>已发布，有 npm / Homebrew</td><td>Labs 项目，信封版本 2.5，官方 Homebrew / Scoop 仍在提交中</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="s3">
+<h2>3 xmesh 里能直接复用的部分</h2>
+<p>读 <code>docs/contracts/backend-lease.md</code>、<code>mcpmux.md</code>、<code>constraints/tools.md</code> 与 <code>design/19-computer.md</code> 后，与本方案相关的现有能力如下。</p>
+<ul>
+<li><b>后端机制</b>：Agent 把每个后端的工具暴露为 <code>&lt;backend&gt;.&lt;tool&gt;</code>，Gateway 再加设备前缀。stdio 后端的 <code>command</code> 数组直接当 argv，不经 shell。</li>
+<li><b>三种 policy</b>：<code>exclusive</code>（需 <code>backend.acquire</code> 租约）、<code>shared</code>、<code>per-caller</code>（每个调用方一个进程）。UI 测试后端已在用 <code>per-caller</code> + <code>process_cleanup: tree</code> + <code>shutdown_timeout</code>，是最接近的先例，见 <code>packages/ui-mcp</code>。</li>
+<li><b>后端环境变量</b>（CON-TOOL-12）：密钥类变量存在 <code>backend-env.json</code>（0600），不进 <code>xmesh.yaml</code>、不进审计和日志。适合放 <code>AGENT_BROWSER_ENCRYPTION_KEY</code>。</li>
+<li><b>结果原样透传</b>（CON-TOOL-10）：MCP 的文本和图片内容块由 Agent 原样交给上游，浏览器截图可以直接走这条路。</li>
+<li><b>崩溃恢复</b>：后端退出后指数退避重启，最多 5 次，并发出 <code>tools/list_changed</code>。</li>
+<li><b>Computer</b>：<code>computer.*</code> 八个工具，截图加坐标，每个交互桌面同一时刻一个控制者，动作幂等，scope 为 <code>computer:observe|control:&lt;device&gt;</code>。macOS 已有应用/窗口后台执行，复用了 open-computer-use 的 AX 与 SkyLight 配方。图形会话里的工作由 <code>xmesh computer host</code> 承担，SYSTEM 内核通过用户 SID 管道连接它。</li>
+</ul>
+<div class="note"><b>现有 backends 的 scope 与审计粒度我没有逐项核对。</b>Computer 有参数级 scope，普通后端是否能按工具名做 scope 过滤，要在 P0 查 <code>internal/oauth</code> 与 <code>internal/policy</code>。这决定第 6 节“浏览器 scope”是配置项还是需要新增代码。</div>
+</section>
+
+<section id="s4">
+<h2>4 agent-browser 接入方案</h2>
+
+<h3>4.1 形态：stdio 后端，per-caller</h3>
+<div class="flow" aria-label="浏览器调用链">
+  <div class="box"><b>云端 Agent</b>Codex / Claude</div><div class="arrow">→</div>
+  <div class="box"><b>Gateway / Ingress</b>OAuth + scope</div><div class="arrow">→</div>
+  <div class="box"><b>目标设备 Agent</b>后端 <code>browser</code></div><div class="arrow">→</div>
+  <div class="box hl"><b>agent-browser mcp</b>stdio 子进程</div><div class="arrow">→</div>
+  <div class="box"><b>daemon + Chrome</b>CDP</div>
+</div>
+<p>配置示意（字段名以 <code>docs/contracts/config.md</code> 为准，实现时对照 schema 写）：</p>
+<pre><code>backends:
+  browser:
+    transport: stdio
+    command: ["agent-browser", "mcp", "--tools", "core,tabs,state"]
+    policy: per-caller          # 每个调用方一个进程，互不干扰
+    process_cleanup: tree       # 连同 daemon / Chrome 子进程一起回收
+    shutdown_timeout: 10s
+    # 环境变量走本机控制通道写入 backend-env.json，不写在这里：
+    #   AGENT_BROWSER_ALLOWED_DOMAINS, AGENT_BROWSER_CONTENT_BOUNDARIES=1,
+    #   AGENT_BROWSER_MAX_OUTPUT, AGENT_BROWSER_ENCRYPTION_KEY,
+    #   AGENT_BROWSER_IDLE_TIMEOUT_MS</code></pre>
+<p>选 <code>per-caller</code> 的原因：agent-browser 的会话、cookie 和标签页是有状态的，两个云端会话共用一个浏览器会互相覆盖页面。<code>exclusive</code> 会强制租约流程，对浏览器这种“每个任务一个窗口”的用法太重。</p>
+
+<h3>4.2 需要处理的四个问题</h3>
+<div class="tbl"><table>
+<thead><tr><th>问题</th><th>原因</th><th>处理</th></tr></thead>
+<tbody>
+<tr><td>daemon 比 MCP 进程活得久</td><td>agent-browser 的 daemon 常驻，默认空闲 1 小时才退出，MCP 子进程退出后它仍在</td><td>用 <code>process_cleanup: tree</code>；每个 per-caller 进程设独立 <code>AGENT_BROWSER_NAMESPACE</code> / session，避免串到别人的 daemon；把 idle timeout 调到 5 到 10 分钟。P0 验证 Unix 上 daemon 是否留在原进程组，不在的话需要后端自己的 supervisor（见 CTR-BE-01 对进程树的保证范围）</td></tr>
+<tr><td>下载与文件落盘</td><td>浏览器下载不经过 xmesh 的 <code>cwd.Resolver</code>，会绕过 allow/deny</td><td>把 profile、state、下载目录固定在 workspace allow 范围内的专用目录；默认开启 download 确认或在动作策略里禁用；取回文件仍用 <code>fs.download</code>，保留 SHA-256 校验</td></tr>
+<tr><td>有头模式与服务账户</td><td>内核可能是 Windows SYSTEM 服务或无图形会话的 Linux 服务器</td><td>默认无头，不需要图形会话。需要登录态/人工接管时才用 <code>--headed</code>，此时后端要在用户会话里跑，走第 5 节同一条 Host 通道，P1 不做</td></tr>
+<tr><td>Chrome 的获取</td><td><code>agent-browser install</code> 需要联网下载 Chrome，设备可能在受限网络</td><td>安装脚本加一步“检测 Chrome 或执行 install”；离线设备用 <code>--executable-path</code> 指向已装浏览器（待验证该参数）。不把 Chrome 打进 xmesh 安装包</td></tr>
+</tbody></table></div>
+
+<h3>4.3 工具暴露</h3>
+<p>用 <code>--tools</code> 做能力分级，不在 xmesh 里重新发明工具：</p>
+<ul>
+<li><b>默认</b>：<code>core,tabs</code>，覆盖打开、快照、点击、填写、截图。</li>
+<li><b>需要显式开启</b>：<code>state</code>（保存/加载登录态）、<code>network</code>、<code>debug</code>、<code>react</code>、<code>mobile</code>。<code>all</code> 不作为默认。</li>
+<li>工具名在 Gateway 里形如 <code>home-windows/browser.&lt;tool&gt;</code>。Agent 侧工具搜索（<code>tools_search</code>）已能按名字发现，不需要新代码。</li>
+</ul>
+
+<h3>4.4 登录态与 profile</h3>
+<ul>
+<li>每个设备一个“工作 profile”目录，放在 xmesh 状态目录之外、workspace allow 之内，权限 0700。</li>
+<li>需要保留登录时用 <code>state save/load</code>，并强制设置 <code>AGENT_BROWSER_ENCRYPTION_KEY</code>。密钥由用户通过本机控制通道写入后端环境变量，xmesh 读接口只返回变量名。</li>
+<li><code>--auto-connect</code> / <code>--cdp</code> 连接用户正在使用的日常浏览器，等于把全部登录态交给云端 Agent，默认禁止；需要本机配置明确打开（见第 6 节）。</li>
+</ul>
+
+<h3>4.5 实时画面</h3>
+<p>agent-browser 的 dashboard（默认 4848）和 stream 只绑回环地址，不出设备。后续可在 xmesh 面板的“桌面预览”旁加“浏览器预览”，由面板经现有受保护本机通道访问。HTTP 后端必须是回环或 tailnet 地址（CTR-BE-01），这个约束天然适用。P3 再做，不阻塞主线。</p>
+</section>
+
+<section id="s5">
+<h2>5 agent-desktop 替换桌面执行器</h2>
+
+<h3>5.1 替换的边界</h3>
+<div class="tbl"><table>
+<thead><tr><th>层</th><th>现有实现</th><th>替换后</th></tr></thead>
+<tbody>
+<tr><th>MCP 工具与契约</th><td><code>computer.*</code> 八个工具</td><td><span class="pill rec">保留名称</span>并新增 <code>computer.snapshot</code>、<code>computer.ref_act</code>；契约升到 v2，旧工具仍可用但部分能力受限（见 5.4）</td></tr>
+<tr><th>Go 管理层</th><td><code>internal/computer</code>：会话、租约、fencing、幂等、unknown 状态、配额、scope、审计</td><td><span class="pill rec">保留</span>，ref 与 snapshot_id 绑定进会话和桌面代次</td></tr>
+<tr><th>Host 通道</th><td><code>xmesh computer host</code>、用户专用管道、对端身份检查、2 秒心跳</td><td><span class="pill rec">保留</span>，Host 改为监督 agent-desktop 进程，而不是 Rust 执行器</td></tr>
+<tr><th>原生执行器</th><td><code>computer-native</code>：Rust 采集与输入，macOS 的 Swift 后台输入（open-computer-use 配方、SkyLight SPI），Windows 的 windows-capture / SendInput，Linux 的 x11rb / PipeWire / EIS</td><td><span class="pill risk">替换</span>为 agent-desktop（CLI 子进程，必要时再评估 FFI）；macOS 的 Swift 后台坐标输入模块暂留作回退</td></tr>
+<tr><th>面板与安装</th><td>权限引导、预览、接管、紧急停止、自启、打包</td><td><span class="pill rec">保留</span>，权限引导改为 agent-desktop 的 <code>permissions</code> 检查结果</td></tr>
+<tr><th>CI 与第三方声明</th><td><code>computer.yml</code> 三端原生工作流、<code>THIRD_PARTY_NOTICES</code></td><td>原生构建与 vendored 代码在迁移完成后删除；新增 agent-desktop 的固定版本、SHA-256 与 Apache-2.0 声明</td></tr>
+</tbody></table></div>
+<p>这样改的好处：不再自己维护三平台的采集与输入代码，尤其是 Wayland / EIS、Windows 混合 DPI 这类最难的部分，交给上游；目前 <code>design/19-computer.md</code> 里 C3 到 C5 尚未完成的验收项（macOS 后台、Windows 混合 DPI、GNOME / KDE）改为验收上游引擎。</p>
+
+<h3>5.2 引擎适配器</h3>
+<div class="flow" aria-label="桌面调用链">
+  <div class="box"><b>云端 Agent</b>computer.* 工具</div><div class="arrow">→</div>
+  <div class="box"><b>Gateway / Agent</b>scope、租约、审计</div><div class="arrow">→</div>
+  <div class="box"><b>Computer Manager (Go)</b>会话 / 幂等 / ref 绑定</div><div class="arrow">→</div>
+  <div class="box"><b>Computer Host</b>用户图形会话</div><div class="arrow">→</div>
+  <div class="box hl"><b>agent-desktop</b>无障碍树 / 输入</div>
+</div>
+<p>在 Host 里实现“引擎”接口，有两个实现并存一段时间：<code>native</code>（现有）和 <code>agent-desktop</code>。配置项 <code>agent.computer.engine</code>，默认 <code>native</code>，迁移期可按设备切换，出问题能立即回退。Host 与内核之间的 IPC 协议 v1（info / capture / execute / release）保持不变，由适配器把它翻译成 agent-desktop 命令，所以 Go 管理层几乎不用动。</p>
+
+<h3>5.3 命令映射</h3>
+<div class="tbl"><table>
+<thead><tr><th>xmesh</th><th>agent-desktop 命令</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>computer.info</code></td><td><code>status</code>、<code>permissions</code>、<code>list-apps</code>、<code>list-windows</code></td><td>targets 来自窗口列表；能力按引擎与平台实测后声明</td></tr>
+<tr><td><code>computer.observe</code></td><td><code>screenshot</code></td><td>截图仍可用；frame 的布局版本改由窗口信息和 snapshot 变化推导</td></tr>
+<tr><td><code>computer.snapshot</code>（新）</td><td><code>snapshot</code>、<code>find</code>、<code>get</code></td><td>返回精简树和 <code>@snapshot_id:eN</code> 形式的 ref；snapshot_id 记入会话</td></tr>
+<tr><td><code>computer.ref_act</code>（新）</td><td><code>click</code>、<code>type</code>、<code>set-value</code>、<code>select</code>、<code>toggle</code>、<code>scroll</code>、<code>focus</code></td><td>按 ref 操作，无头，不移动指针、不抢焦点；带 <code>action_id</code> 幂等</td></tr>
+<tr><td><code>computer.act</code>：click / move / scroll</td><td><code>mouse-click</code>、<code>mouse-move</code>、<code>mouse-wheel</code></td><td>坐标操作，需要 <code>--headed</code> 物理输入，等同前台交互，受 <code>allow_foreground</code> 管控</td></tr>
+<tr><td><code>computer.act</code>：drag</td><td><code>drag</code></td><td>同上；拖动时长、释放保证由适配器的超时和清理路径承担</td></tr>
+<tr><td><code>computer.act</code>：key / text</td><td><code>press</code>、<code>type</code></td><td>中文与组合键需 P0 逐项验证</td></tr>
+<tr><td><code>computer.act</code>：wait</td><td><code>wait</code></td><td>沿用 4 秒预算</td></tr>
+<tr><td>错误</td><td><code>STALE_REF</code>、<code>AMBIGUOUS_TARGET</code>、<code>INVALID_ARGS</code>，及 <code>disposition.retry</code></td><td>映射进共享错误信封：<code>stale_ref</code>、<code>ambiguous_target</code>；动作已提交后出错归为 <code>unknown</code></td></tr>
+</tbody></table></div>
+
+<h3>5.4 替换会丢掉什么（需要你决定）</h3>
+<p>下表是我根据 agent-desktop 首页说明和 xmesh 现有契约做的对照。上游行为我没有实测，标“待验证”的在 P0 确认。</p>
+<div class="tbl"><table>
+<thead><tr><th>能力</th><th>现有 native</th><th>agent-desktop</th><th>判断</th></tr></thead>
+<tbody>
+<tr><td>按元素操作</td><td>仅 AX press / value 作为后台候选</td><td>完整，ref 化、稳定</td><td><span class="pill rec">更好</span></td></tr>
+<tr><td>像素坐标点击的后台执行（macOS）</td><td>有，SkyLight 与 Chromium 点击配方，不动用户鼠标</td><td>没有。无头模式不支持坐标；有头坐标点击是全局 HID 事件，会移动真实指针且不恢复（已读源码核实，见下）</td><td><span class="pill risk">损失</span> 无障碍信息不足的界面受影响</td></tr>
+<tr><td>拖动、滚动的后台执行</td><td>有（<code>background:drag</code> / <code>scroll</code>）</td><td>ref 滚动可无头；拖动待验证</td><td><span class="pill risk">待验证</span></td></tr>
+<tr><td>键盘与中文文本</td><td>已通过真实验收（点击、中文、组合键、拖动、滚动）</td><td><code>type</code> / <code>press</code>；中文与 IME 待验证</td><td><span class="pill risk">待验证</span></td></tr>
+<tr><td>按下/抬起类输入</td><td>动作内按序释放</td><td>key-down 等四条命令上游明确禁用</td><td>不需要，用 <code>press</code> 与 <code>drag</code> 即可</td></tr>
+<tr><td>自绘/无无障碍信息的界面（游戏、远程桌面窗口、部分 Electron）</td><td>截图加坐标可操作</td><td>读不到树，只能退到截图加 <code>--headed</code> 坐标</td><td><span class="pill risk">损失</span></td></tr>
+<tr><td>截图延时</td><td>macOS 单帧约 115 ms 中位、p95 122 ms</td><td>每次起 CLI 子进程；macOS 有复用的 command host，其余平台待测</td><td><span class="pill risk">待测</span> 目标 p95 ≤ 300 ms</td></tr>
+<tr><td>本机输入监测与 <code>pause_on_user_input</code></td><td>执行器内置，Windows / macOS / X11 可用</td><td>上游没有</td><td><span class="pill risk">需自建</span> Host 保留一个轻量输入监测，或在 macOS 之外暂不提供</td></tr>
+<tr><td>Wayland</td><td>Portal 授权、PipeWire、EIS 输入，已有协议测试</td><td>上游称支持 X11 / Wayland 但有限制</td><td><span class="pill risk">待验证</span></td></tr>
+<tr><td>Windows 混合 DPI、副屏负坐标</td><td>PerMonitorV2 manifest + VIRTUALDESK</td><td>ref 操作不依赖像素，坐标路径待验证</td><td>ref 路径<span class="pill rec">更好</span></td></tr>
+<tr><td>系统权限身份</td><td>macOS 应用标识 <code>app.xmesh.computer</code> 已授权</td><td>需要新的辅助功能授权</td><td>用户需重新授权一次；见 5.5</td></tr>
+<tr><td>桌面代次、frame 失效</td><td>执行器生成 epoch 与布局版本</td><td>用 snapshot_id 与窗口列表变化推导</td><td>适配器实现，Go 层保留 epoch</td></tr>
+</tbody></table></div>
+<h3>5.4a 已核实：agent-desktop 的“不打扰”是什么</h3>
+<p>你看到的宣传是对的，但它说的是另一件事。我读了官网说明、<code>CONCEPTS.md</code>、macOS 技能文档和 macOS / Windows 的相关源码，结论如下。</p>
+<div class="tbl"><table>
+<thead><tr><th>路径</th><th>是否动用户鼠标 / 抢焦点</th><th>依据</th></tr></thead>
+<tbody>
+<tr><td>无头（默认）：按 ref 的无障碍操作</td><td>不动，不抢焦点。失败时“关闭式失败”，不会悄悄改用物理输入</td><td>CONCEPTS.md：无头为“仅无障碍、无光标”，并禁止隐式抢焦点、移动光标、合成键盘、使用剪贴板</td></tr>
+<tr><td>虚拟光标（<code>cursor-overlay</code>）</td><td>只是在点击穿透窗口里画一个“Agent 光标”，不移动系统指针</td><td>macOS 技能文档原话：从不移动系统指针，也不激活应用。仅用于展示</td></tr>
+<tr><td>有头：按 ref 的物理点击</td><td>会。先把目标窗口置前，再向校验过的点发真实点击</td><td>macOS 技能文档：“Headed is physical first”；<code>physical_click.rs</code> 要求策略允许移动光标，并有前台门</td></tr>
+<tr><td>有头：原始坐标 <code>--xy</code></td><td>会移动指针，但不改变焦点</td><td>CONCEPTS.md；<code>mouse_move.rs</code> 用 HID tap 发移动事件，先偏 1 个点再到目标，没有保存和恢复原位置的代码</td></tr>
+<tr><td>鼠标事件的投递方式（macOS）</td><td>全局 HID tap，无按进程投递</td><td><code>mouse/mod.rs</code>：事件源为 HIDSystemState，按下和抬起都 <code>post(CGEventTapLocation::HID)</code>；检索不到 postToPid 或 SkyLight 的鼠标路径</td></tr>
+<tr><td>键盘事件（macOS）</td><td>有按进程投递：<code>CGEventPostToPid</code>，但要求目标应用已有经验证的焦点元素，并先尝试菜单快捷键和 AXConfirm / AXCancel</td><td><code>key_dispatch.rs</code></td></tr>
+<tr><td>Windows</td><td>没有后台输入路径。需要焦点的动作都是有头动作；SendInput 受前台门限制；PostMessage 探测后被判定不是可用输入路径（无法带修饰键）。<code>type</code> 无语义无头路径，无头文本走 <code>set-value</code></td><td><code>probes/windows/FINDINGS.md</code>；CONCEPTS.md</td></tr>
+<tr><td>多个 Agent 并发</td><td>有“交互租约”，对桌面输入机器级互斥，只覆盖投递瞬间</td><td>CONCEPTS.md</td></tr>
+</tbody></table></div>
+<p><b>对比 xmesh 现有 macOS 后台输入</b>：现有实现用 SkyLight SPI 和 Chromium 点击配方按进程投递鼠标事件，系统指针和前台焦点都不变，并已通过真实 MCP 链路验收。agent-desktop 没有等价物，它的做法是“能用无障碍就用无障碍，用不了就老实用物理输入”。</p>
+<div class="note"><b>据此调整建议。</b>完整替换会让 macOS 在“无障碍信息不足”的界面（部分 Electron、自绘控件）上，从“可后台操作”退化为“必须占用用户鼠标”。更稳妥的做法是分层：<br>1. 能拿到 ref 的，一律走 agent-desktop 无头路径（比坐标更稳，Windows 和 Linux 也一并受益）。<br>2. macOS 上没有 ref 可用时，回退到现有 Swift 后台坐标输入模块，仍然不动用户鼠标。<br>3. Windows / Linux 的坐标输入本来就是前台共享，直接用 agent-desktop 的有头路径，由 <code>allow_foreground</code> 管控。<br>这样 macOS 的 Rust 采集与 Windows / Linux 的原生执行器照样可以删，只留下 macOS 的一个小模块。唯一风险是上游以后若自己补上按进程鼠标投递，可再收敛。P0 里需要用真实应用实测“ref 覆盖率”，决定回退模块的优先级。</div>
+
+<h3>5.5 分发与授权</h3>
+<ul>
+<li><b>随包分发，固定版本。</b>agent-desktop 的二进制和它旁边的 helper 一起放进 UI 安装包与六平台归档，记录版本和 SHA-256；更新时随 xmesh 一起升级，不要求用户自己 <code>npm install</code>。官方 Homebrew / Scoop 还在提交中，不依赖它们。</li>
+<li><b>macOS 授权身份。</b>辅助功能授权按发起进程记账。把 agent-desktop 放进 <code>app.xmesh.computer</code> 的应用包内并随 xmesh 签名，由 Host 启动，授权就稳定地挂在 xmesh 名下。切换引擎时用户需要重新授权一次，面板的权限引导要提前说明。</li>
+<li><b>必须由 Host 在用户图形会话里启动。</b>Windows SYSTEM 内核和无图形会话的服务都做不了 UIA / AX / AT-SPI，这一点与现有 Host 设计一致，不需要新机制。</li>
+<li><b>macOS 临时目录。</b>上游要求 <code>TMPDIR</code> 属当前用户且权限 0700，Host 启动时设置并检查。</li>
+<li><b>许可。</b>Apache-2.0，随包附 NOTICE；vendored 的 open-computer-use（MIT）在移除原生执行器后一并删除。</li>
+</ul>
+
+<h3>5.6 迁移步骤</h3>
+<ol>
+<li><b>对照验证（P0）</b>：按 5.4 的表逐项在 macOS、Windows、Linux 实测，填成对照矩阵，记入 <code>docs/validation/</code>。</li>
+<li><b>并存（P2）</b>：实现引擎接口和 agent-desktop 适配器，<code>engine</code> 默认 <code>native</code>，新工具 <code>computer.snapshot</code> / <code>ref_act</code> 仅在 <code>agent-desktop</code> 引擎下出现。</li>
+<li><b>macOS 默认切换（P3）</b>：对照矩阵里除已接受的损失外全部通过，再把默认值改成 <code>agent-desktop</code>，native 作为回退保留一个版本。</li>
+<li><b>Windows / Linux 切换并清理（P4）</b>：同样按矩阵验收后切换；一个正式版本无回退后，删除 <code>computer-native</code>、vendored 代码、native CI 工作流，并更新 <code>design/19-computer.md</code>、<code>contracts/computer.md</code> 与 schema。</li>
+</ol>
+</section>
+
+<section id="s6">
+<h2>6 安全与权限</h2>
+<p>两者的权限都接近“登录用户级别”。桌面一侧沿用 computer 的全部授权与审计规则，不因换引擎而放松。文件路径策略管不到浏览器和 GUI，所以需要单独的边界。</p>
+<div class="tbl"><table>
+<thead><tr><th>面</th><th>浏览器</th><th>桌面语义</th></tr></thead>
+<tbody>
+<tr><th>scope</th><td>新增 <code>browser:control:&lt;device&gt;</code>（如现有机制只能按后端名授权，则先以后端名为单位，再补参数级检查）</td><td>复用 <code>computer:observe|control:&lt;device&gt;</code>，新增的 snapshot / ref_act 分别归入 observe / control</td></tr>
+<tr><th>默认关闭</th><td>后端不在配置里就不存在；安装向导加“浏览器”开关</td><td>沿用 <code>agent.computer.enabled</code>，引擎由 <code>agent.computer.engine</code> 选择</td></tr>
+<tr><th>网络范围</th><td><code>AGENT_BROWSER_ALLOWED_DOMAINS</code> 必须配置才启用；同时限制子资源并关闭 WebRTC</td><td>可选的应用白名单（按 bundle id / exe），只允许快照和操作列表内应用</td></tr>
+<tr><th>提示注入</th><td>默认开启内容边界标记，把页面文本包进不可信区；<code>MAX_OUTPUT</code> 限制单次返回长度</td><td>无障碍树里的窗口文字同样不可信，响应里加不可信内容声明</td></tr>
+<tr><th>高危动作</th><td>动作策略文件默认禁 <code>eval</code> 和 <code>download</code>，或要求确认；确认由本机用户完成，不由调用方参数放行</td><td>密码输入框的值不返回；<code>set-value</code> 对密码类控件拒绝</td></tr>
+<tr><th>本机介入</th><td>有头模式沿用本机接管按钮</td><td>并入 <code>pause_on_user_input</code>，检测到本机输入就撤销租约</td></tr>
+<tr><th>审计</th><td>记工具名、会话、URL 域名（不含路径与查询）、字节数；不记页面文本、截图、表单值</td><td>记动作 ID、命令类别、ref 数量；不记快照内容和输入文本</td></tr>
+<tr><th>密钥</th><td>加密密钥、代理凭据只放后端环境变量</td><td>无</td></tr>
+<tr><th>信任边界</th><td>Ingress 会经手截图与页面内容，与 computer 相同</td><td>同左</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="s7">
+<h2>7 分期</h2>
+<div class="tbl"><table>
+<thead><tr><th>期</th><th>内容</th><th>验收</th></tr></thead>
+<tbody>
+<tr><td><b>P0</b><br>验证</td><td>在现有设备（<code>home-windows</code>、<code>ubuntu-cloud</code>、<code>ubuntu-aws</code> 与本机 macOS）上手动安装两个工具。agent-browser：mcp 实际工具列表、daemon 是否随进程组回收、离线与已装浏览器。agent-desktop：5.4 表里每一项，含中文输入、拖动、截图延时、Wayland、权限提示。另查普通后端的 scope 过滤能力</td><td>对照矩阵与验证记录写入 <code>docs/validation/</code>；矩阵决定 macOS 回退模块的优先级（现假定保留）</td></tr>
+<tr><td><b>P1</b><br>浏览器后端</td><td>配置模板与 schema 示例；安装步骤（agent-browser 与 Chrome）；安全默认值；验收脚本</td><td>经 Ingress 打开受控页面、snapshot、填写、截图并取回；两个并发调用方互不串页；断线后 Chrome 与 daemon 被回收；越界域名被拒；审计无页面正文</td></tr>
+<tr><td><b>P2</b><br>桌面引擎适配器</td><td>引擎接口；agent-desktop 适配器；<code>computer.snapshot</code> / <code>ref_act</code>；错误映射；ref 与会话、桌面代次绑定；随包分发与版本锁定；契约 v2 与 schema。macOS 先行</td><td>契约正反例和符合性检查通过；<code>go test -race</code> 通过；两种引擎可按设备切换；同一桌面第二个控制者被拒；桌面代次变化后旧 ref 失效；原生应用任务可完成</td></tr>
+<tr><td><b>P3</b><br>macOS 默认切换</td><td>替换矩阵达标后切默认；面板权限引导改版；回退开关保留</td><td>本机真实验收：任务完成、用户鼠标与前台焦点保持（无头 ref 路径）、权限撤销、锁屏、升级后恢复；截图 p95 满足目标</td></tr>
+<tr><td><b>P4</b><br>Windows / Linux 与清理</td><td>两个平台适配与验收；输入监测补齐；删除 <code>computer-native</code>、vendored 代码与 native CI；文档更新</td><td>三端 CI 通过（以 agent-desktop 引擎为准）；SYSTEM 内核经 Host 取得快照；一个版本周期内无回退</td></tr>
+<tr><td><b>P5</b><br>体验</td><td>面板的语义树视图与浏览器预览；评估 FFI 取代 CLI 子进程</td><td>面板可看到并接管</td></tr>
+</tbody></table></div>
+<p>每期沿用项目现有做法：先过 <code>go test -race</code> 与符合性检查，三端 CI 通过后再提 PR。涉及真实桌面输入的验收需要桌面用户明确同意。</p>
+</section>
+
+<section id="s7b">
+<h2>P0 实测结果（2026-11-01，PR #169）</h2>
+<p>完整对照表在仓库 <code>docs/validation/2026-11-01-agent-browser-desktop-p0.md</code>。以下是对本方案的影响。</p>
+<div class="tbl"><table>
+<thead><tr><th>项目</th><th>结果</th><th>对方案的影响</th></tr></thead>
+<tbody>
+<tr><td>agent-browser 0.41.0（Mac）</td><td>中文 fill / type、drag 通过；CLI 往返截图中位约 150 ms、最大 176 ms；<code>agent-browser mcp</code> 默认 <code>--tools core</code>，stdio 形态成立；Homebrew 已有公式</td><td>P1 按计划推进</td></tr>
+<tr><td>daemon 清理</td><td>daemon 的 PPID 为 1 且自成进程组，<code>process_cleanup: tree</code> 很可能回收不到</td><td>P1 必须加 supervisor，或显式 close 加短空闲超时，并在真实 per-caller 流程里再验证一次。第 4.2 节“daemon 比 MCP 进程活得久”从风险升为确认问题</td></tr>
+<tr><td>后端 scope</td><td><code>internal/oauth/scopes.go</code> 的 <code>Allows</code> 对普通后端只认 <code>backend:&lt;设备&gt;:&lt;后端名&gt;</code>，不按工具名过滤</td><td>第 6 节浏览器分级不是纯配置：只能靠 <code>--tools</code> profile，或新增 Go 代码。已列入 P1</td></tr>
+<tr><td>agent-desktop 1.0.2 桌面侧</td><td>Mac 上 snapshot / screenshot 返回 <code>PERM_DENIED</code>（需本机授予辅助功能与屏幕录制，远程无法完成）；Windows 辅助功能已授权，<code>list-windows</code> 可用，但记事本 snapshot 3 秒超时；Linux 设备无图形会话和 at-spi</td><td>中文输入、拖动、截图延时、ref 覆盖率四项桌面侧仍是空白。<b>P2 不能假定它们已通过</b>，需要有人在本机授权后补测</td></tr>
+<tr><td>回退模块</td><td>结果没有推翻“macOS 保留后台坐标输入模块”</td><td>维持现有结论</td></tr>
+</tbody></table></div>
+<p>下一步：P1 先做 supervisor 与 scope 两项；桌面侧需要你在 Mac 上给 xmesh agent 授予辅助功能和屏幕录制，Windows 记事本超时需单独排查，Linux 要换一台有图形会话的设备。这三件事完成前，P2 只做不依赖实测的契约与适配器骨架。</p>
+</section>
+
+<section id="s8">
+<h2>8 风险与待确认</h2>
+<div class="tbl"><table>
+<thead><tr><th>风险</th><th>影响</th><th>缓解</th></tr></thead>
+<tbody>
+<tr><td>agent-desktop 是 Labs 项目，信封版本 2.5，包管理器上架尚在进行；而且它现在要承担整个桌面控制的底层</td><td>接口变动、维护不确定，直接影响核心能力</td><td>固定版本与 SHA-256；经 CLI 隔离，契约只声明 xmesh 自己的错误码；保留回退引擎至少一个正式版本；必要时 fork 并自行维护</td></tr>
+<tr><td>坐标式后台输入在上游缺失（已核实）</td><td>无障碍信息不足的应用无法在不动用户鼠标的前提下操作</td><td>macOS 保留 Swift 后台输入模块作回退；P0 用真实应用量化 ref 覆盖率；上游若补齐再收敛</td></tr>
+<tr><td>本机输入监测缺失</td><td><code>pause_on_user_input</code> 在没有监测的平台不可用</td><td>Host 自建轻量监测，或明确声明不支持并拒绝该策略（与 Wayland 现状一致）</td></tr>
+<tr><td>CLI 子进程延时</td><td>截图和动作变慢，达不到 p95 目标</td><td>P0 先测；macOS 利用上游的复用 command host；必要时改 FFI</td></tr>
+<tr><td>授权需重做</td><td>macOS 用户切换后要再授权一次</td><td>放进 xmesh 签名的应用包；面板引导和升级说明</td></tr>
+<tr><td>已验收成果作废</td><td>C3 到 C8 的真机验收记录对新引擎不再适用</td><td>验收脚本（<code>accept_computer.py</code>、Headscale 链路、DERP 强制模式）与 Go 层测试可复用；仅执行器层重新验收</td></tr>
+<tr><td>daemon / Chrome 泄漏（浏览器）</td><td>占资源、残留登录态</td><td>process_cleanup、独立 namespace、短空闲超时</td></tr>
+<tr><td>提示注入（两者）</td><td>网页或窗口文字诱导越权</td><td>内容边界、域名白名单、动作确认、不可信内容声明；工具层无法完全消除，文档如实说明</td></tr>
+</tbody></table></div>
+
+<h3>需要你确认的三件事</h3>
+<ol>
+<li><b>macOS 是否保留现有后台坐标输入模块作为回退？</b>核实后上游确实没有不动鼠标的坐标点击，建议保留（其余原生执行器仍可删）。不保留则 macOS 在无障碍信息不足的界面上只能占用用户鼠标。</li>
+<li><b>替换是否以 P0 对照矩阵为准？</b>建议设一个闸门：矩阵里关键项（中文输入、截图延时、Windows SYSTEM 到用户桌面）有任何一项不过，就暂停 P3。</li>
+<li><b>浏览器是否需要独立 scope、是否允许连接日常浏览器？</b>建议独立 scope、默认禁止连接日常浏览器。</li>
+</ol>
+<p>以上数据来源：<a href="https://agent-browser.dev/">agent-browser.dev</a>、<a href="https://github.com/vercel-labs/agent-browser">vercel-labs/agent-browser</a>、<a href="https://github.com/vercel-labs/agent-desktop">vercel-labs/agent-desktop</a>，以及 xmesh 仓库 <code>docs/contracts/</code>、<code>docs/constraints/</code>、<code>docs/design/19-computer.md</code>。</p>
+</section>
+</div>
+</body>
+</html>
