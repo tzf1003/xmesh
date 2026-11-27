@@ -24,6 +24,7 @@ import type {
   SessionsResponse,
   ComputerState,
   DelegateState,
+  DelegateTaskCancelResponse,
 } from "../src/shared/control";
 import type { ConfigReloadResponse } from "../src/shared/ipc";
 import { isAccessEntry, isGatewayHost, isListen, listenPort, listenScope } from "../src/shared/gateway";
@@ -97,12 +98,23 @@ export class PanelData {
   }
   computer: ComputerState = { enabled: true, paused: false, info: { protocol_version: 1, available: true, state: "ready", desktop_id: "desktop", desktop_epoch: "epoch", layout_version: "layout", capabilities: ["screenshot", "pointer", "keyboard", "text"], displays: [{ id: "main", name: "Main display", x: 0, y: 0, width: 1920, height: 1080, scale: 1, rotation: 0 }] }, sessions: [] };
   sessions: SessionsResponse = fixture("SessionsResponse.busy");
-  /** The delegation view (API 2.7). Its switch follows the configuration on disk; the runners, sessions and tasks are fixed. */
+  /** The delegation view (API 2.7/2.8). Its toggles follow the configuration on disk; tasks can be cancelled via POST. */
   delegate: DelegateState = fixture("DelegateState.active");
   private delegateState(): DelegateState {
     let enabled = false;
-    try { enabled = (parse(this.diskContent) as { agent?: { delegate?: { enabled?: unknown } } } | null)?.agent?.delegate?.enabled === true; } catch { enabled = false; }
-    return { ...this.delegate, enabled };
+    let allow_write = this.delegate.allow_write;
+    let allow_sessions = this.delegate.allow_sessions;
+    try {
+      const cfg = (parse(this.diskContent) as { agent?: { delegate?: { enabled?: unknown; allow_write?: unknown; allow_sessions?: unknown } } } | null)?.agent?.delegate;
+      enabled = cfg?.enabled === true;
+      if (typeof cfg?.allow_write === "boolean") allow_write = cfg.allow_write;
+      if (typeof cfg?.allow_sessions === "boolean") allow_sessions = cfg.allow_sessions;
+    } catch {
+      enabled = false;
+    }
+    const running = this.delegate.tasks.filter((t) => t.state === "running").length;
+    const sessions = allow_sessions ? this.delegate.sessions : [];
+    return { ...this.delegate, enabled, allow_write, allow_sessions, running, sessions };
   }
   private diskContent: string;
   /** Settings the kernel has taken a change to but not yet restarted for, as config pointers. */
@@ -187,6 +199,21 @@ export class PanelData {
     const p = u.pathname;
     if (p === "/v2/computer" && method === "GET") return ok(this.computer);
     if (p === "/v2/delegate" && method === "GET") return ok(this.delegateState());
+    const delegateCancel = /^\/v2\/delegate\/tasks\/([^/]+)\/cancel$/.exec(p);
+    if (delegateCancel && method === "POST") {
+      const taskId = decodeURIComponent(delegateCancel[1]!);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(taskId)) {
+        return err(400, "invalid_args", "任务 ID 无效", { field: "task_id" });
+      }
+      const task = this.delegate.tasks.find((t) => t.task_id === taskId);
+      if (!task) return err(404, "not_found", "没有这个委托任务");
+      if (task.state === "running") {
+        task.state = "cancelled";
+        this.delegate.running = this.delegate.tasks.filter((t) => t.state === "running").length;
+      }
+      const res: DelegateTaskCancelResponse = { task_id: task.task_id, state: task.state };
+      return ok(res);
+    }
     if (p === "/v2/computer/pause" && method === "POST") {
       const req = body as { paused?: unknown };
       if (typeof req?.paused !== "boolean") return err(400, "invalid_args", "paused required", { field: "paused" });

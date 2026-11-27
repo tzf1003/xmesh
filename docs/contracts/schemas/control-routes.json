@@ -1,5 +1,5 @@
 {
-  "api_version": "2.7",
+  "api_version": "2.8",
   "routes": [
     {
       "id": "control.status.get",
@@ -857,6 +857,23 @@
       "stream": false,
       "if_match": "none",
       "errors": []
+    },
+    {
+      "id": "control.delegate.tasks.cancel",
+      "method": "POST",
+      "path": "/v2/delegate/tasks/{task_id}/cancel",
+      "capability": "delegate",
+      "since": "2.8",
+      "query": null,
+      "body": null,
+      "response": "urn:xmesh:schema:control-delegate:2#/$defs/DelegateTaskCancelResponse",
+      "success": 200,
+      "stream": false,
+      "if_match": "none",
+      "errors": [
+        "invalid_args",
+        "not_found"
+      ]
     }
   ]
 }

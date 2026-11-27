@@ -329,6 +329,10 @@ func Test_ControlConfigDiffSecurityHints(t *testing.T) {
 	}{
 		{"allow_dangerous on", `{"agent":{"policy":{"allow_dangerous":false}}}`, `{"agent":{"policy":{"allow_dangerous":true}}}`, map[string]bool{"/agent/policy/allow_dangerous": true}},
 		{"allow_dangerous off", `{"agent":{"policy":{"allow_dangerous":true}}}`, `{"agent":{"policy":{"allow_dangerous":false}}}`, map[string]bool{"/agent/policy/allow_dangerous": false}},
+		{"delegate allow_write on", `{"agent":{"delegate":{"allow_write":false}}}`, `{"agent":{"delegate":{"allow_write":true}}}`, map[string]bool{"/agent/delegate/allow_write": true}},
+		{"delegate allow_write off", `{"agent":{"delegate":{"allow_write":true}}}`, `{"agent":{"delegate":{"allow_write":false}}}`, map[string]bool{"/agent/delegate/allow_write": false}},
+		{"delegate allow_sessions on", `{"agent":{"delegate":{"allow_sessions":false}}}`, `{"agent":{"delegate":{"allow_sessions":true}}}`, map[string]bool{"/agent/delegate/allow_sessions": true}},
+		{"delegate allow_sessions off", `{"agent":{"delegate":{"allow_sessions":true}}}`, `{"agent":{"delegate":{"allow_sessions":false}}}`, map[string]bool{"/agent/delegate/allow_sessions": false}},
 		{"cwd allow grows", `{"agent":{"cwd_policy":{"allow":["a"]}}}`, `{"agent":{"cwd_policy":{"allow":["a","b"]}}}`, map[string]bool{"/agent/cwd_policy/allow/1": true}},
 		{"cwd allow shrinks", `{"agent":{"cwd_policy":{"allow":["a","b"]}}}`, `{"agent":{"cwd_policy":{"allow":["a"]}}}`, map[string]bool{"/agent/cwd_policy/allow/1": false}},
 		{"cwd deny shrinks", `{"agent":{"cwd_policy":{"deny":["a","b"]}}}`, `{"agent":{"cwd_policy":{"deny":["a"]}}}`, map[string]bool{"/agent/cwd_policy/deny/1": true}},

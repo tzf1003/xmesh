@@ -426,13 +426,21 @@ test("a capability the kernel lacks is refused locally without a request", async
   assert.equal(k.requests.slice(before).filter((x) => x.path.startsWith("/v2/config") || x.path.startsWith("/v2/pats") || x.path.startsWith("/v2/audit")).length, 0);
 });
 
-test("delegation: the view is the kernel's document", async () => {
+test("delegation: the view is the kernel's document, and cancelling a task calls the cancel route", async () => {
   const { k, service } = await setup([...ALL, "delegate"]);
   const view = await service.delegate();
   assert.ok(view.ok);
   assert.equal(view.data.max_concurrent, 2);
   assert.ok(Array.isArray(view.data.runners) && Array.isArray(view.data.sessions) && Array.isArray(view.data.tasks));
   assert.ok(last(k, "GET", "/v2/delegate"));
+
+  const cancelled = await service.cancelDelegateTask("t-5e0a7c41b9d24f6e8a13c0d7f2e4b916");
+  assert.deepEqual(cancelled, { ok: true, data: { task_id: "t-5e0a7c41b9d24f6e8a13c0d7f2e4b916", state: "cancelled" } });
+  assert.ok(last(k, "POST", "/v2/delegate/tasks/t-5e0a7c41b9d24f6e8a13c0d7f2e4b916/cancel"));
+
+  const missing = await service.cancelDelegateTask("t-missing");
+  assert.ok(!missing.ok);
+  assert.equal(missing.error.code, "not_found");
 });
 
 test("delegation: a kernel that declares no delegate capability is refused locally", async () => {
@@ -441,6 +449,9 @@ test("delegation: a kernel that declares no delegate capability is refused local
   const refused = await service.delegate();
   assert.ok(!refused.ok);
   assert.equal(refused.error.code, "not_implemented");
+  const cancelRefused = await service.cancelDelegateTask("t-5e0a7c41b9d24f6e8a13c0d7f2e4b916");
+  assert.ok(!cancelRefused.ok);
+  assert.equal(cancelRefused.error.code, "not_implemented");
   assert.equal(k.requests.slice(before).filter((r) => r.path.startsWith("/v2/delegate")).length, 0);
 });
 

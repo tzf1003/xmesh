@@ -121,6 +121,7 @@ test("panel data methods use their own fixed channels and forward only the calle
   await api.copyGateway!({ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" });
   await api.updateGateway!({ listen: ":8080", access: ["localhost"], hosts: [] });
   await api.rotateGatewayPat!();
+  await api.cancelDelegateTask!("t-1");
   assert.deepEqual(
     invoked.map((i) => i.channel),
     [
@@ -130,7 +131,7 @@ test("panel data methods use their own fixed channels and forward only the calle
       CHANNELS.setPairPassword, CHANNELS.clearPairPassword, CHANNELS.discoverPairs, CHANNELS.connectPair,
       CHANNELS.queryAudit, CHANNELS.getRecentCalls, CHANNELS.runSetup, CHANNELS.pickPath, CHANNELS.mesh,
       CHANNELS.ci,
-      CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat,
+      CHANNELS.copyGateway, CHANNELS.updateGateway, CHANNELS.rotateGatewayPat, CHANNELS.cancelDelegateTask,
     ],
   );
   assert.deepEqual(invoked[2]!.args, [cfg]);
@@ -138,8 +139,9 @@ test("panel data methods use their own fixed channels and forward only the calle
   assert.deepEqual(invoked[4]!.args, [{ name: "github", set: { GITHUB_TOKEN: "t" }, unset: [] }]);
   assert.deepEqual(invoked[5]!.args, ["github"]);
   assert.deepEqual(invoked[8]!.args, ["ci"]);
-  assert.deepEqual(invoked.at(-3)!.args, [{ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" }]);
-  assert.deepEqual(invoked.at(-1)!.args, [], "rotation takes no argument from the page");
+  assert.deepEqual(invoked.at(-4)!.args, [{ kind: "claudeCodeCommand", url: "http://127.0.0.1:8080/mcp" }]);
+  assert.deepEqual(invoked.at(-2)!.args, [], "rotation takes no argument from the page");
+  assert.deepEqual(invoked.at(-1)!.args, ["t-1"]);
 });
 
 test("onCalls hands the page the calls only and unsubscribes", () => {

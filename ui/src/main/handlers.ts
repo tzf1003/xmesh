@@ -21,6 +21,7 @@ import {
   parseClientId,
   parseConfigPatch,
   parseConfigSave,
+  parseDelegateTaskId,
   parseDenyFileCreate,
   parseDenyFileSave,
   parseCopyKind,
@@ -258,6 +259,10 @@ export function createHandlers({ kernel, onboarding, transfers, playground, cont
     return parsed === undefined ? bad("computer request") : service.computer(parsed);
   });
   handle(CHANNELS.delegate, () => service.delegate());
+  handle(CHANNELS.cancelDelegateTask, (taskId: unknown) => {
+    const v = parseDelegateTaskId(taskId);
+    return v === undefined ? bad("delegate task id") : service.cancelDelegateTask(v);
+  });
   handle(CHANNELS.preferredIp, (request: unknown) => {
     const parsed = parsePreferredIpRequest(request);
     return parsed === undefined ? bad("preferred ip request") : service.preferredIp(parsed);

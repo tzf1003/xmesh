@@ -34,7 +34,7 @@ func Test_ControlRegistersEveryContractRoute(t *testing.T) {
 		}
 	}
 	for _, r := range table {
-		path := strings.NewReplacer("{name}", "x", "{client_id}", "x").Replace(r.Path)
+		path := strings.NewReplacer("{name}", "x", "{client_id}", "x", "{task_id}", "x").Replace(r.Path)
 		if f.server.hasCapability(r.Capability) {
 			continue
 		}

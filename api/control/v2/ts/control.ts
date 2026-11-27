@@ -1089,6 +1089,10 @@ export interface DelegateState {
    */
   tasks: DelegateTask[];
 }
+export interface DelegateTaskCancelResponse {
+  task_id: string;
+  state: "running" | "done" | "failed" | "timeout" | "cancelled";
+}
 export interface DrainState {
   draining: boolean;
   /**
@@ -2276,7 +2280,7 @@ export interface IngressInfo1 {
   tool_surface?: "unified" | "compact" | "full";
 }
 
-export const CONTROL_API_VERSION = "2.7" as const;
+export const CONTROL_API_VERSION = "2.8" as const;
 export const CONTROL_VERSION_HEADER = "X-Xmesh-Control-Version" as const;
 
 /** Every capability a kernel may advertise (control.json and status.control.capabilities). */
@@ -3205,6 +3209,23 @@ export const CONTROL_ROUTES: readonly ControlRouteInfo[] = [
     "stream": false,
     "if_match": "none",
     "errors": []
+  },
+  {
+    "id": "control.delegate.tasks.cancel",
+    "method": "POST",
+    "path": "/v2/delegate/tasks/{task_id}/cancel",
+    "capability": "delegate",
+    "since": "2.8",
+    "query": null,
+    "body": null,
+    "response": "DelegateTaskCancelResponse",
+    "success": 200,
+    "stream": false,
+    "if_match": "none",
+    "errors": [
+      "invalid_args",
+      "not_found"
+    ]
   }
 ];
 
@@ -3262,4 +3283,5 @@ export interface ControlRouteTypes {
   "control.preferredip.run": { query: undefined; body: PreferredIPRunRequest; response: PreferredIPState };
   "control.preferredip.inspect": { query: undefined; body: PreferredIPInspectRequest; response: PreferredIPInspectResponse };
   "control.delegate.get": { query: undefined; body: undefined; response: DelegateState };
+  "control.delegate.tasks.cancel": { query: undefined; body: undefined; response: DelegateTaskCancelResponse };
 }

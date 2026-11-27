@@ -299,6 +299,27 @@ func (m *Manager) cancel(ctx context.Context, r Request, raw json.RawMessage) (O
 		m.mu.Unlock()
 		return nil, notFound(a.TaskID)
 	}
+	state := m.cancelLocked(ctx, t)
+	m.mu.Unlock()
+	return Object{"task_id": t.id, "state": state}, nil
+}
+
+// CancelTask terminates any caller's task by id and waits, up to cancelWait, until the process tree is gone
+// (control API 2.8). Unlike delegate.cancel it is not filtered by caller because the control channel belongs
+// to the node's own user. On a finished task it is idempotent and returns the current state.
+func (m *Manager) CancelTask(ctx context.Context, taskID string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pruneLocked(time.Now())
+	t := m.tasks[taskID]
+	if t == nil {
+		return "", false
+	}
+	return m.cancelLocked(ctx, t), true
+}
+
+// cancelLocked cancels t if it is still running and returns its resulting state. Caller holds m.mu.
+func (m *Manager) cancelLocked(ctx context.Context, t *task) string {
 	running := !t.finished
 	if running {
 		t.markCancelled()
@@ -310,9 +331,7 @@ func (m *Manager) cancel(ctx context.Context, r Request, raw json.RawMessage) (O
 		waitFor(ctx, done, cancelWait)
 	}
 	m.mu.Lock()
-	state := t.stateLocked()
-	m.mu.Unlock()
-	return Object{"task_id": t.id, "state": state}, nil
+	return t.stateLocked()
 }
 
 // notFound is the error for a task another caller created, or one that does not exist. The two are not told apart.

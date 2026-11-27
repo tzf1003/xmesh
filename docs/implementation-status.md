@@ -532,5 +532,15 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 
 - **契约**：API 2.7。新增能力 `delegate` 与 `GET /v2/delegate`（[control-delegate.schema.json](contracts/schemas/control-delegate.schema.json)），说明见 [control.md](contracts/control.md) 的「Agent 委托视图」；[delegate.md](contracts/delegate.md) 补一段本机视角的说明。
 - **实现**：`internal/delegate/overview.go` 汇总运行器、活会话与各调用方的任务，不含提示词、输出和答复；`internal/role/agent/control.go` 的 `DelegateState` 映射为控制类型；`internal/control/delegate.go` 只在节点有 Agent 角色时声明能力。桌面端「Agent 委托」页位于「运行」组，开关经 `PATCH /v2/config` 写入 `/agent/delegate/enabled`，`allow_write` 与 `allow_sessions` 只读展示。
-- **未做**：控制通道取消单个任务；桌面端修改 `allow_write` 与 `allow_sessions`。
+- **未做**：控制通道取消单个任务；桌面端修改 `allow_write` 与 `allow_sessions`（已在 #213 补齐，见下节）。
 - **验证**（2026-11-17，开发容器）：`go vet ./...` 通过；改动包的 `go test -race` 与全量 `go test ./...` 通过；`check_examples.py`、`check_control.py`、`conformance_check.py` 通过；UI 的 `check-types`、`typecheck` 通过，`npm test` 为 669 通过、7 跳过、0 失败；端到端 `panel-delegate.spec.ts` 与 `panel-computer.spec.ts` 共 7 个用例通过。
+
+## 2026-11-27 Agent 委托控制通道取消与桌面端开关（#213，API 2.8）
+
+- **契约**：API 2.8。在 [control-delegate.schema.json](contracts/schemas/control-delegate.schema.json) 与 [control-routes.json](contracts/schemas/control-routes.json) 新增 `POST /v2/delegate/tasks/{task_id}/cancel`（`DelegateTaskCancelResponse`），同步更新 [control.md](contracts/control.md)（含 `weakens_security` 对 `allow_write` / `allow_sessions` 的标记）与 [delegate.md](contracts/delegate.md)，并补充契约正反例与 TS 生成物。
+- **实现**：`internal/delegate/task.go` 新增 `Manager.CancelTask`（不按调用方过滤、对已结束任务幂等），`internal/role/agent/control.go` 新增 `Agent.CancelDelegateTask`，`internal/control/delegate.go` 与 `internal/control/server.go` 接入路由与参数/错误码处理，`internal/control/config.go` 将开启 `allow_write` 与 `allow_sessions` 纳入 `weakens_security`。UI 侧同步 IPC/preload/`PanelService`/假内核，在「Agent 委托」页（`ui/src/renderer/pages/Delegate.tsx`）新增单条运行中任务的「取消任务」操作与 `allow_write`、`allow_sessions` 开关，修改前弹出明确风险说明与确认弹窗，确认后经 `PATCH /v2/config` 持久化并即时刷新页面状态。
+- **验证**（2026-11-27，本地 Linux 环境）：
+  - 契约与生成物：`check_examples.py`、`check_control.py`（132 正例、78 反例）、`scripts/conformance_check.py`（153/153）、`scripts/gen-control-ts/generate.mjs --check` 及 strict `tsc` 通过。
+  - Go：`go vet ./...` 通过；`go test -race` 覆盖 `./api/...`、`./internal/delegate/...`、`./internal/role/agent/...`、`./internal/control/...` 均通过（`TMPDIR` 与 `GOTMPDIR` 指向 `/dev/shm` 以绕过本机 `/tmp` 的 `usrquota` 限制及避免 Unix socket 路径超过 `sun_path` 上限）。
+  - UI 与端到端：`npm --prefix ui run check-types`、`npm --prefix ui run typecheck` 通过；`npm --prefix ui test`（隔离 `HOME` 与短 `TMPDIR`）669 通过、7 跳过（Windows 专属）、0 失败；`build-web.mjs` 通过；Electron Playwright 端到端 `panel-delegate.spec.ts` 3 个用例通过。
+  - **未验证**：Windows 命名管道与 macOS 平台上的端到端运行留待 GitHub Actions CI（`ui` 矩阵及 `go.yml`）验证。

@@ -102,6 +102,7 @@ const api: PanelApi = {
   computer: (request) => invoke("xmesh:computer", request),
   preferredIp: (request) => invoke("xmesh:preferred-ip", request),
   delegate: () => invoke("xmesh:delegate"),
+  cancelDelegateTask: (taskId) => invoke("xmesh:cancel-delegate-task", taskId),
 };
 
 contextBridge.exposeInMainWorld("xmesh", Object.freeze(api));

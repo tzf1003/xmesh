@@ -44,3 +44,9 @@ type DelegateTask struct {
 	DurationMS int64  `json:"duration_ms"`
 	SessionID  string `json:"session_id,omitempty"`
 }
+
+// DelegateTaskCancelResponse is the answer of POST /v2/delegate/tasks/{task_id}/cancel (API 2.8).
+type DelegateTaskCancelResponse struct {
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+}
