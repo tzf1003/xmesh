@@ -13,9 +13,11 @@ import (
 // tasks; this view is not filtered by caller, because the control channel belongs to the node's own user.
 type Overview struct {
 	// Running is how many tasks hold a concurrency slot, across all callers.
-	Running  int
-	Runners  []RunnerRow
-	Sessions []SessionRow
+	Running int
+	// PendingReplies is how many live-session reply drafts are awaiting local preview and confirmation.
+	PendingReplies int
+	Runners        []RunnerRow
+	Sessions       []SessionRow
 	// Tasks are the running tasks and the finished ones still retained, newest first.
 	Tasks []TaskRow
 }
@@ -63,9 +65,14 @@ func (m *Manager) Overview(settings config.Delegate, resolver *cwd.Resolver) Ove
 		}
 	}
 	m.mu.Lock()
-	now := time.Now()
+	now := m.now()
 	m.pruneLocked(now)
 	out.Running = m.running
+	for _, d := range m.replies {
+		if d.state == replyStatePending {
+			out.PendingReplies++
+		}
+	}
 	for _, t := range m.tasks {
 		end := now
 		if t.finished {

@@ -2,8 +2,10 @@
   "enabled": true,
   "allow_write": true,
   "allow_sessions": true,
+  "allow_session_replies": true,
   "max_concurrent": 2,
   "running": 1,
+  "pending_replies": 1,
   "runners": [
     { "name": "claude", "available": true, "path": "/usr/local/bin/claude" },
     { "name": "codex", "available": false }

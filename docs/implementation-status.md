@@ -534,3 +534,15 @@ Windows workspace execution 已将协调导入纳入与启动、关闭共用的�
 - **实现**：`internal/delegate/overview.go` 汇总运行器、活会话与各调用方的任务，不含提示词、输出和答复；`internal/role/agent/control.go` 的 `DelegateState` 映射为控制类型；`internal/control/delegate.go` 只在节点有 Agent 角色时声明能力。桌面端「Agent 委托」页位于「运行」组，开关经 `PATCH /v2/config` 写入 `/agent/delegate/enabled`，`allow_write` 与 `allow_sessions` 只读展示。
 - **未做**：控制通道取消单个任务；桌面端修改 `allow_write` 与 `allow_sessions`。
 - **验证**（2026-11-17，开发容器）：`go vet ./...` 通过；改动包的 `go test -race` 与全量 `go test ./...` 通过；`check_examples.py`、`check_control.py`、`conformance_check.py` 通过；UI 的 `check-types`、`typecheck` 通过，`npm test` 为 669 通过、7 跳过、0 失败；端到端 `panel-delegate.spec.ts` 与 `panel-computer.spec.ts` 共 7 个用例通过。
+
+## 2026-11-26 活会话显式回信与本机预览确认（#215，API 2.8）
+
+- **契约**：在 [delegate.md](contracts/delegate.md) 新增 CTR-DLG-07，同步 [config.md](contracts/config.md)、`schemas/config.schema.json`、`schemas/control-delegate.schema.json`、`schemas/control-routes.json`（API 2.8）、[control.md](contracts/control.md)、[05-tools.md](design/05-tools.md) 与 [符合性矩阵](conformance.md)。明确禁止被动读取本地会话记录；新增 `agent.delegate.allow_session_replies`（默认 `false`）、8 KiB（8192 字节）UTF-8 正文硬上限，以及未预览禁止批准（`preview_required`）、拒绝/超时/过期/热关断立即清空草稿正文与审计脱敏边界。
+- **实现**：
+  - `internal/config/delegate.go` 新增 `allow_session_replies`（`SessionRepliesAllowed()`）。
+  - `internal/delegate/reply.go` 与 `session.go`/`task.go`/`manager.go`/`overview.go` 实现 `delegate.send` 回信任务登记、显式回信草稿提交、待确认队列（上限 64 条）、逐条预览门禁、批准释放至 `delegate.output` 长轮询、拒绝/超时/过期/取消与开关热关断立即清空正文，以及跨调用方 `not_found` 隔离。
+  - `internal/control/delegate.go`、`internal/role/agent/control.go` 与 `api/control/v2/delegate.go` 新增 `/v2/delegate/replies` 列表、提交、逐条预览、批准与拒绝端点。
+  - `cmd/xmesh/delegate.go` 与 `cmd/xmesh/control.go` 新增活会话显式回信适配器 `xmesh delegate reply` 与本机预览确认入口 `xmesh control delegate`。
+  - `ui/` 同步 TS 控制类型并在「Agent 委托」页新增待确认回信列表、逐条预览正文与批准/拒绝操作。
+- **未验证**：真实运行中的 Claude Code 会话通过 `xmesh delegate reply` 回信与 Playwright E2E / Windows / macOS 真机流程未在本机执行（待 CI 与真机验证）。
+- **验证**（2026-11-27，开发容器）：`go vet ./...`、`GOOS=windows go vet` 与 `GOOS=darwin go vet`（委托及控制通道/CLI 相关包）通过；`go test -race` 覆盖 `api/control/v2`、`internal/config`、`internal/delegate`、`internal/audit`、`internal/control`、`internal/role/agent`、`internal/role/gateway` 与 `cmd/xmesh`（共 959 项）全数通过；`check_control.py`（137 正例、79 反例）、`conformance_check.py`（154/154）、`generate.mjs --check`、`test_scripts.py`（36 项）、`test_ci_changes.py`（15 项）与 `gen-onboarding-types.py --check` 均通过；UI 的 `check-types`、`typecheck`、`build-web.mjs` 与隔离 `HOME` 下的 `npm test`（669 通过、7 跳过、0 失败）通过。

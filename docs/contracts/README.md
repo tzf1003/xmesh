@@ -22,6 +22,7 @@
 | [CTR-DLG-04](delegate.md#ctr-dlg-04) | delegate | `delegate.send` 与活会话注入 |
 | [CTR-DLG-05](delegate.md#ctr-dlg-05) | delegate | 运行器参数与输出解析 |
 | [CTR-DLG-06](delegate.md#ctr-dlg-06) | delegate | 配置、授权、下线、审计 |
+| [CTR-DLG-07](delegate.md#ctr-dlg-07) | delegate | 活会话显式回信与本机预览确认 |
 | [CTR-PTY-01](pty.md#ctr-pty-01) | pty | 状态机 |
 | [CTR-PTY-02](pty.md#ctr-pty-02) | pty | 八个工具 |
 | [CTR-FS-01](fs.md#ctr-fs-01) | fs | `fs.read` |

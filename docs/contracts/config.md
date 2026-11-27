@@ -35,7 +35,7 @@
 | `agent.backends.*.desc` | 可选字符串，最长 200 个字符。后端的一句话说明，出现在 `sys.info` 的 `backends[]` 与 Gateway `devices.list` 的 `backend_info` 中，省略时不输出 |
 | 后端名 | 不得与内置组名 `fs`、`exec`、`pty`、`sys`、`backend`、`computer`、`delegate` 同名，否则拒绝启动，见 [CTR-GW-08](gateway.md#ctr-gw-08) |
 | `agent.quota`、`gateway.quota` | 可选对象，字段 `calls_per_hour`（正整数，缺省 10000）、`max_concurrent`（正整数，缺省 64）、`max_call_duration`（Go duration，缺省 `10m`）。`agent.exec.default_timeout` 不得超过 `agent.quota.max_call_duration`，见 [CON-SEC-10](../constraints/security.md#con-sec-10) |
-| `agent.delegate` | 可选对象，Agent 委托，契约见 [CTR-DLG-06](delegate.md#ctr-dlg-06)。`enabled`（缺省 `false`）为总开关；`allow_write`（缺省 `false`）；`allow_sessions`（缺省 `false`）；`max_concurrent`（正整数，缺省 `2`）；`default_timeout`（缺省 `30m`）；`max_timeout`（缺省 `2h`，不得小于 `default_timeout`）；`retain`（缺省 `1h`，另限最多 64 个已结束任务）；`runners`（按名字覆盖内置 `claude`、`codex` 的字段或新增运行器，字段见 [CTR-DLG-05](delegate.md#ctr-dlg-05)）。`delegate` 是保留的内置组名 |
+| `agent.delegate` | 可选对象，Agent 委托，契约见 [CTR-DLG-06](delegate.md#ctr-dlg-06) 与 [CTR-DLG-07](delegate.md#ctr-dlg-07)。`enabled`（缺省 `false`）为总开关；`allow_write`（缺省 `false`）；`allow_sessions`（缺省 `false`）；`allow_session_replies`（缺省 `false`）；`max_concurrent`（正整数，缺省 `2`）；`default_timeout`（缺省 `30m`）；`max_timeout`（缺省 `2h`，不得小于 `default_timeout`）；`retain`（缺省 `1h`，另限最多 64 个已结束任务）；`runners`（按名字覆盖内置 `claude`、`codex` 的字段或新增运行器，字段见 [CTR-DLG-05](delegate.md#ctr-dlg-05)）。`delegate` 是保留的内置组名 |
 | `mesh.mode = relay` | 拒绝启动，见 [CON-NET-08](../constraints/network.md#con-net-08) |
 
 新版 `mesh` 配置热应用；变更控制面或登录参数只重启对应网络组件。局域网和 Tailnet 共享设备身份及配对信任，路径故障不会撤销设备。
@@ -61,7 +61,7 @@
 | `agent.cwd_policy`、`agent.authz` | 与 policy 一样热加载。`deny_file` 指向的文件也在每次工具调用时重读，不需要重启；该文件无法加载时保留上一份成功的列表，见字段速查 |
 | `agent.disabled_tools` | 可选的内置工具名数组，取值限定为内置工具表（见 config.schema.json）。列出的工具不出现在 `tools/list` 中，调用返回 `policy_denied`；缺省或空数组表示全部开启。与 `agent.authz` 一样热加载，无需重启 |
 | `agent.exec` 的配额数字、`agent.pty` 的上限、`agent.quota` | 热加载，`agent.quota` 对之后的调用生效。已经存在的会话不因为上限调低而被杀掉；新的 open 使用新上限 |
-| `agent.delegate` | 热加载，下一次调用生效。`enabled` 改为 `false` 后五个工具立即不再列出，运行中的任务全部终止，见 [CTR-DLG-06](delegate.md#ctr-dlg-06)。其余字段对之后的调用生效 |
+| `agent.delegate` | 热加载，下一次调用生效。`enabled` 改为 `false` 后五个工具立即不再列出，运行中的任务与待确认回信全部终止，见 [CTR-DLG-06](delegate.md#ctr-dlg-06)；`allow_sessions` 或 `allow_session_replies` 改为 `false` 时待确认回信立即取消并清空正文，见 [CTR-DLG-07](delegate.md#ctr-dlg-07)。其余字段对之后的调用生效 |
 | `agent.backends` 增删 | 下一轮后端监督循环。删除配置会关闭对应进程 |
 | `gateway.pats` | 每个 HTTP 请求读取当前凭据和 scope；scope 变更后创建新 MCP 会话 |
 | `gateway.quota` | 热加载。对之后的调用生效，已经放行的调用保留原来的截止时间 |

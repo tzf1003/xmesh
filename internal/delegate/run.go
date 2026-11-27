@@ -122,7 +122,7 @@ func (m *Manager) run(ctx context.Context, r Request, raw json.RawMessage) (Obje
 		m.mu.Unlock()
 		return nil, disabledError()
 	}
-	m.pruneLocked(time.Now())
+	m.pruneLocked(m.now())
 	if a.Key != "" {
 		if old := m.keys[r.Caller][a.Key]; old != nil {
 			same := old.fingerprint == fp

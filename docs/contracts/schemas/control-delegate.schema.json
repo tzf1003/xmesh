@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:xmesh:schema:control-delegate:2",
   "title": "ControlDelegate",
-  "description": "GET /v2/delegate 的只读视图（API 2.7），见 control.md 的「Agent 委托视图」一节。只有元数据：没有提示词、消息正文、最终答复和输出事件。开关经 PATCH /v2/config 的 /agent/delegate/enabled 修改。",
+  "description": "GET /v2/delegate 的只读视图（API 2.7）与活会话显式回信的本机预览确认接口（API 2.8），见 control.md 的「Agent 委托视图与回信确认」一节。GET /v2/delegate 与列表摘要只有元数据：没有提示词、消息正文、回信草稿正文、最终答复和输出事件。开关经 PATCH /v2/config 的 /agent/delegate/enabled 修改。",
   "$defs": {
     "DelegateRunner": {
       "type": "object",
@@ -43,16 +43,91 @@
         "session_id": { "type": "string", "minLength": 1, "description": "运行器给出会话 id 后才有。" }
       }
     },
+    "DelegateReplyState": {
+      "enum": ["pending", "approved", "rejected", "expired", "cancelled"]
+    },
+    "DelegateReplySummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply_id", "task_id", "message_id", "session_id", "caller", "state", "bytes", "previewed", "created_at", "expires_at"],
+      "properties": {
+        "reply_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "message_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "caller": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/$defs/DelegateReplyState" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "previewed": { "type": "boolean", "description": "本机是否已经预览过完整正文。" },
+        "created_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "expires_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "decided_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
+      }
+    },
+    "DelegateRepliesQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": { "$ref": "#/$defs/DelegateReplyState" }
+      }
+    },
+    "DelegateRepliesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replies"],
+      "properties": {
+        "replies": { "type": "array", "items": { "$ref": "#/$defs/DelegateReplySummary" } }
+      }
+    },
+    "DelegateReplyDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reply_id", "task_id", "message_id", "session_id", "caller", "state", "bytes", "previewed", "body_sha256", "created_at", "expires_at"],
+      "properties": {
+        "reply_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "message_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "caller": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/$defs/DelegateReplyState" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "previewed": { "type": "boolean" },
+        "body": { "type": "string", "maxLength": 8192, "description": "仅在 state 为 pending 时返回完整回信正文供本机预览；已决定或过期后清空。" },
+        "body_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "created_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "expires_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" },
+        "decided_at": { "$ref": "urn:xmesh:schema:control-common:2#/$defs/Timestamp" }
+      }
+    },
+    "DelegateReplyCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message_id", "body"],
+      "properties": {
+        "message_id": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 8192 }
+      }
+    },
+    "DelegateReplyApproveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "body_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "可选：核对预览时看到的正文 SHA-256。" }
+      }
+    },
     "DelegateState": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "allow_write", "allow_sessions", "max_concurrent", "running", "runners", "sessions", "tasks"],
+      "required": ["enabled", "allow_write", "allow_sessions", "allow_session_replies", "max_concurrent", "running", "pending_replies", "runners", "sessions", "tasks"],
       "properties": {
         "enabled": { "type": "boolean", "description": "agent.delegate.enabled。为 false 时五个委托工具不可用。" },
         "allow_write": { "type": "boolean" },
         "allow_sessions": { "type": "boolean", "description": "为 false 时 sessions 恒为空。" },
+        "allow_session_replies": { "type": "boolean", "description": "agent.delegate.allow_session_replies。为 false 时拒绝活会话提交回信草稿。" },
         "max_concurrent": { "type": "integer", "minimum": 1 },
         "running": { "type": "integer", "minimum": 0, "description": "占用并发名额的任务数，包括所有调用方。" },
+        "pending_replies": { "type": "integer", "minimum": 0, "description": "待本机预览确认的活会话回信草稿数。" },
         "runners": { "type": "array", "items": { "$ref": "#/$defs/DelegateRunner" } },
         "sessions": { "type": "array", "items": { "$ref": "#/$defs/DelegateSession" } },
         "tasks": { "type": "array", "items": { "$ref": "#/$defs/DelegateTask" }, "description": "运行中的任务与保留中的已结束任务，按开始时间从新到旧。" }

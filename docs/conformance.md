@@ -170,6 +170,7 @@ claude.ai 自定义连接器与 Codex 都完成 OAuth。模型实际看到 `win-
 | CTR-DLG-04 | 会话发现：cwd 不在允许范围或进程已退出的会话不列出、不可寻址；注入帧的框定与转义，对端文本不能闭合或伪造框；收件 socket 不存在或写失败返回 `delegate_unavailable` 并带 `reason` |
 | CTR-DLG-05 | 运行器参数拼接（续聊替代、模式追加、末尾 `-` 之前插入、提示词只经标准输入）；Claude 的会话 id 与最终答复；非 JSON 行记为 `raw`；非零退出为 `failed`；超时终止进程树为 `timeout` |
 | CTR-DLG-06 | draining 时 `delegate.run` 与 `delegate.send` 被拒（`mesh.draining`）；`enabled` 关闭或 Agent 关闭时终止全部任务；审计不含提示词与输出正文；`agent.delegate` 的缺省值与校验（`max_timeout` 不小于 `default_timeout`；后端不得叫 `delegate`） |
+| CTR-DLG-07 | 活会话显式回信：`allow_session_replies` 默认关闭且关闭时拒绝回信/批准；正文超过 8 KiB（8192 字节）或非合法 UTF-8 拒绝；未获本机预览与批准前 `delegate.output` 不可读到正文；未预览直接批准返回 `preview_required`；批准后 `delegate.output` 返回已确认正文；拒绝、确认超时过期、回信窗口超时、取消及开关热关断各自落入对应终态并清空未发送草稿；审计与 `GET /v2/delegate` 不含回信正文 |
 
 ## 模式夹具
 

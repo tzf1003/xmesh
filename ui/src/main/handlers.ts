@@ -11,6 +11,7 @@ import { parsePlayground } from "../shared/playground";
 import type { PlaygroundService } from "./playground";
 import { parseCiRequest } from "../shared/ci";
 import { parseComputerRequest } from "../shared/computer";
+import { parseDelegateReplyRequest } from "../shared/delegate";
 import { parsePreferredIpRequest } from "../shared/preferred-ip";
 import {
   CHANNELS,
@@ -258,6 +259,10 @@ export function createHandlers({ kernel, onboarding, transfers, playground, cont
     return parsed === undefined ? bad("computer request") : service.computer(parsed);
   });
   handle(CHANNELS.delegate, () => service.delegate());
+  handle(CHANNELS.delegateReply, (request: unknown) => {
+    const parsed = parseDelegateReplyRequest(request);
+    return parsed === undefined ? bad("delegate reply request") : service.delegateReply(parsed);
+  });
   handle(CHANNELS.preferredIp, (request: unknown) => {
     const parsed = parsePreferredIpRequest(request);
     return parsed === undefined ? bad("preferred ip request") : service.preferredIp(parsed);

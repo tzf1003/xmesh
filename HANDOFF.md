@@ -9,6 +9,7 @@
 | issue | 执行方 | 分支 | 状态 | 卡在哪 / 下一步 |
 | --- | --- | --- | --- | --- |
 | #219 加入 AGENTS.md 与 HANDOFF.md | claude | `claude/project-thread-tse5ie` | 进行中，PR 待评审 | 等另一个会话交叉评审和 CI 全绿后合并；看板需用户先建，见下 |
+| #215 委托：活会话回复回收 | antigravity | `antigravity/delegate-session-reply` | 待评审，已开草稿 PR | 等 CI 全绿与另一个会话交叉评审 |
 
 ## 需要用户做的事
 

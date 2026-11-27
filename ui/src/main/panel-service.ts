@@ -11,6 +11,7 @@ import { configYaml, parseDocument } from "./yaml";
 import { ControlRequestError } from "../shared/control";
 import type { CiRequest, CiResultFor } from "../shared/ci";
 import type { ComputerRequest, ComputerResult } from "../shared/computer";
+import type { DelegateReplyRequest, DelegateReplyResultFor } from "../shared/delegate";
 import type { PreferredIpRequest, PreferredIpResultFor } from "../shared/preferred-ip";
 import type {
   AuditQuery,
@@ -358,6 +359,25 @@ export class PanelService {
 
   delegate(): Promise<DataResult<DelegateState>> {
     return this.data("delegate", (c) => c.call("GET", "/v2/delegate"));
+  }
+
+  delegateReply<R extends DelegateReplyRequest>(request: R): Promise<DataResult<DelegateReplyResultFor<R>>> {
+    const run = <T>(fn: (c: ControlClient) => Promise<T>): Promise<DataResult<DelegateReplyResultFor<R>>> =>
+      this.data("delegate", fn as (c: ControlClient) => Promise<DelegateReplyResultFor<R>>);
+    switch (request.op) {
+      case "list": {
+        const qs = request.state ? `?state=${encodeURIComponent(request.state)}` : "";
+        return run((c) => c.call("GET", `/v2/delegate/replies${qs}`));
+      }
+      case "preview":
+        return run((c) => c.call("GET", `/v2/delegate/replies/${encodeURIComponent(request.reply_id)}`));
+      case "approve": {
+        const body = request.body_sha256 ? { body_sha256: request.body_sha256 } : {};
+        return run((c) => c.call("POST", `/v2/delegate/replies/${encodeURIComponent(request.reply_id)}/approve`, { body }));
+      }
+      case "reject":
+        return run((c) => c.call("POST", `/v2/delegate/replies/${encodeURIComponent(request.reply_id)}/reject`));
+    }
   }
 
   listOffers(): Promise<DataResult<OffersResponse>> {

@@ -433,6 +433,17 @@ test("delegation: the view is the kernel's document", async () => {
   assert.equal(view.data.max_concurrent, 2);
   assert.ok(Array.isArray(view.data.runners) && Array.isArray(view.data.sessions) && Array.isArray(view.data.tasks));
   assert.ok(last(k, "GET", "/v2/delegate"));
+
+  const listed = await service.delegateReply({ op: "list" });
+  assert.ok(listed.ok);
+  assert.equal(listed.data.replies.length, 1);
+  const id = listed.data.replies[0]!.reply_id;
+  const preview = await service.delegateReply({ op: "preview", reply_id: id });
+  assert.ok(preview.ok);
+  assert.ok(typeof preview.data.body === "string" && preview.data.body.length > 0);
+  const approved = await service.delegateReply({ op: "approve", reply_id: id, body_sha256: preview.data.body_sha256 });
+  assert.ok(approved.ok);
+  assert.equal(approved.data.state, "approved");
 });
 
 test("delegation: a kernel that declares no delegate capability is refused locally", async () => {

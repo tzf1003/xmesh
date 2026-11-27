@@ -39,6 +39,7 @@ import type { UpdatePrefs } from "./update";
 import { isAccessEntry, isGatewayHost, isListen } from "./gateway";
 import type { CiRequest, CiResultFor } from "./ci";
 import type { ComputerRequest, ComputerResult } from "./computer";
+import type { DelegateReplyRequest, DelegateReplyResultFor } from "./delegate";
 import type { PreferredIpRequest, PreferredIpResultFor } from "./preferred-ip";
 import type { MeshRequest, MeshResultFor } from "./mesh";
 import type { TransferRequest, TransferReply } from "./transfers";
@@ -112,6 +113,7 @@ export const CHANNELS = {
   computer: "xmesh:computer",
   preferredIp: "xmesh:preferred-ip",
   delegate: "xmesh:delegate",
+  delegateReply: "xmesh:delegate-reply",
   playground: "xmesh:playground",
   transfers: "xmesh:transfers",
 } as const;
@@ -392,8 +394,10 @@ export interface PanelApi {
   computer(request: ComputerRequest): Promise<DataResult<ComputerResult>>;
   /** Cloudflare preferred edge addresses (API 2.4，2.5 加机房）: the pool and its scores, run a scan or a refresh, check pasted text. Settings are written through patchConfig. */
   preferredIp<R extends PreferredIpRequest>(request: R): Promise<DataResult<PreferredIpResultFor<R>>>;
-  /** Agent 委托（API 2.7）：开关、本机运行器、活会话与各调用方的任务，只读。开关经 patchConfig 写入 /agent/delegate/enabled。 */
+  /** Agent 委托（API 2.7, 2.8）：开关、本机运行器、活会话与各调用方的任务，只读。开关经 patchConfig 写入 /agent/delegate/enabled。 */
   delegate(): Promise<DataResult<DelegateState>>;
+  /** 活会话回信待确认队列（API 2.8）：列表摘要、逐条预览正文、批准或拒绝发送。 */
+  delegateReply<R extends DelegateReplyRequest>(request: R): Promise<DataResult<DelegateReplyResultFor<R>>>;
 }
 
 export const PANEL_API_METHODS = [
@@ -466,6 +470,7 @@ export const PANEL_API_METHODS = [
   "computer",
   "preferredIp",
   "delegate",
+  "delegateReply",
 ] as const satisfies readonly (keyof PanelApi)[];
 
 export const PANEL_API_GLOBAL = "xmesh";
